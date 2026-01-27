@@ -127,6 +127,13 @@
                         "description": "Порог (мс) для perf-логов LSP (window/logMessage) по медленным стадиям диагностики. 0 = отключить.",
                         "minimum": 0,
                         "order": 3
+                    },
+                    "bslAnalyzer.diagnosticsDebounceMs": {
+                        "type": "number",
+                        "default": 250,
+                        "description": "Debounce (мс) для пересчёта diagnostics при печати. Чем больше значение, тем реже пересчитывается синтаксис/диагностика. 0 = отключить debounce.",
+                        "minimum": 0,
+                        "order": 4
                     }
                 }
             },

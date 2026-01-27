@@ -109,21 +109,26 @@ function copyBinary(sourcePath, targetPath, binaryName) {
 function buildRustBinaries(force = false) {
     log('\n🔨 Проверка Rust бинарников...', colors.cyan);
 
-    // Проверяем существование target/release
-    if (!fileExists(TARGET_RELEASE_DIR) || force) {
-        log('📦 Сборка Rust бинарников в release режиме...', colors.yellow);
-        try {
-            execSync('cargo build --release --bin bsl-lsp-server', {
-                cwd: PROJECT_ROOT,
-                stdio: 'inherit'
-            });
-            log('✅ Rust бинарники успешно собраны', colors.green);
-        } catch (error) {
-            log(`❌ Ошибка сборки: ${error.message}`, colors.red);
-            process.exit(1);
-        }
+    // ВАЖНО: просто наличие target/release недостаточно — бинарник может быть устаревшим после правок.
+    // Cargo сам решит, нужно ли пересобирать (по fingerprint'ам), поэтому безопасно вызывать build всегда.
+    //
+    // NOTE: бинарник `bsl-lsp-server` находится в пакете `bsl-backend`, поэтому указываем `-p bsl-backend`.
+    const buildCmd = 'cargo build -p bsl-backend --release --bin bsl-lsp-server';
+    if (force) {
+        log(`⚡ Принудительная пересборка: ${buildCmd}`, colors.yellow);
     } else {
-        log('✅ Release бинарники найдены', colors.green);
+        log(`📦 Проверка актуальности: ${buildCmd}`, colors.cyan);
+    }
+
+    try {
+        execSync(buildCmd, {
+            cwd: PROJECT_ROOT,
+            stdio: 'inherit'
+        });
+        log('✅ Rust бинарники актуальны', colors.green);
+    } catch (error) {
+        log(`❌ Ошибка сборки: ${error.message}`, colors.red);
+        process.exit(1);
     }
 }
 

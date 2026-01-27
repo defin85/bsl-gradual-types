@@ -75,7 +75,13 @@ pub struct BslLanguageServer {
     pub(crate) last_settings_id_v2: Arc<RwLock<Option<SettingsId>>>,
 }
 
-type DiagnosticsTasksV2 = HashMap<V2FileId, (i32, JoinHandle<()>)>;
+pub(crate) struct DiagnosticsTaskV2 {
+    pub requested_version: i32,
+    pub debounce: bool,
+    pub handle: JoinHandle<()>,
+}
+
+type DiagnosticsTasksV2 = HashMap<V2FileId, DiagnosticsTaskV2>;
 
 fn parse_env_duration_ms(var: &str) -> Option<Duration> {
     let raw = std::env::var(var).ok()?;

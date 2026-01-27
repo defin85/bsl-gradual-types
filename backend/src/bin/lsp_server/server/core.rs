@@ -379,8 +379,8 @@ impl BslLanguageServer {
 
     pub(crate) async fn cancel_diagnostics_v2(&self, file_id: V2FileId) {
         let mut tasks = self.diagnostics_tasks_v2.lock().await;
-        if let Some((_version, handle)) = tasks.remove(&file_id) {
-            handle.abort();
+        if let Some(task) = tasks.remove(&file_id) {
+            task.handle.abort();
         }
     }
 
@@ -391,388 +391,441 @@ impl BslLanguageServer {
         expected_version: i32,
         debounce: bool,
     ) {
-        {
-            let mut tasks = self.diagnostics_tasks_v2.lock().await;
-            if let Some((_version, handle)) = tasks.remove(&file_id) {
-                handle.abort();
-            }
+        let mut tasks = self.diagnostics_tasks_v2.lock().await;
+        if let Some(task) = tasks.get_mut(&file_id) {
+            task.requested_version = expected_version;
+            task.debounce = debounce;
+            return;
         }
 
         let server = self.clone();
         let uri_for_task = uri.clone();
         let handle = tokio::spawn(async move {
-            let show_hints = {
-                let settings = server.settings.read().await;
-                settings.diagnostics.show_hints
-            };
-
-            if debounce {
-                let delay = diagnostics_debounce_duration();
-                if delay != Duration::from_millis(0) {
-                    tokio::time::sleep(delay).await;
+            loop {
+                // If the document is already closed, stop.
+                let file_still_open = server
+                    .latest_received_file_versions_v2
+                    .read()
+                    .await
+                    .contains_key(&file_id);
+                if !file_still_open {
+                    break;
                 }
-            }
 
-            let wait_started = Instant::now();
-            let wait_ok = server
-                .analysis_v2
-                .wait_for_file_version(file_id, expected_version)
-                .await;
-            let wait_elapsed = wait_started.elapsed();
-            server
-                .coordinator
-                .record_intellisense_v2_wait_for_file_version("diagnostics", wait_elapsed);
-            if let Some(threshold) = super::intellisense_v2_slow_client_log_threshold() {
-                if wait_elapsed >= threshold {
-                    server
-                        .client
-                        .log_message(
-                            MessageType::INFO,
-                            format!(
-                                "[perf] diagnostics_v2 wait_for_file_version: wait_ms={} uri={} file_id={} expected_version={}",
-                                wait_elapsed.as_millis(),
-                                uri_for_task,
-                                file_id.0,
-                                expected_version
-                            ),
-                        )
-                        .await;
+                let (requested_version, debounce) = {
+                    let tasks = server.diagnostics_tasks_v2.lock().await;
+                    let Some(task) = tasks.get(&file_id) else {
+                        break;
+                    };
+                    (task.requested_version, task.debounce)
+                };
+
+                // Coalesce rapid edits: while user is typing, keep moving the target forward.
+                if debounce {
+                    let delay = diagnostics_debounce_duration();
+                    if delay != Duration::from_millis(0) {
+                        tokio::time::sleep(delay).await;
+                    }
+
+                    let current_requested = {
+                        let tasks = server.diagnostics_tasks_v2.lock().await;
+                        let Some(task) = tasks.get(&file_id) else {
+                            break;
+                        };
+                        task.requested_version
+                    };
+                    if current_requested != requested_version {
+                        continue;
+                    }
                 }
-            }
-            if let Some(threshold) = super::intellisense_v2_slow_wait_warn_threshold() {
-                if wait_elapsed >= threshold {
-                    warn!(
+
+                let show_hints = {
+                    let settings = server.settings.read().await;
+                    settings.diagnostics.show_hints
+                };
+
+                // If a newer version is requested, skip work for the stale one early.
+                let current_requested = {
+                    let tasks = server.diagnostics_tasks_v2.lock().await;
+                    let Some(task) = tasks.get(&file_id) else {
+                        break;
+                    };
+                    task.requested_version
+                };
+                if current_requested != requested_version {
+                    continue;
+                }
+
+                let wait_started = Instant::now();
+                let wait_ok = server
+                    .analysis_v2
+                    .wait_for_file_version(file_id, requested_version)
+                    .await;
+                let wait_elapsed = wait_started.elapsed();
+                server
+                    .coordinator
+                    .record_intellisense_v2_wait_for_file_version("diagnostics", wait_elapsed);
+                if let Some(threshold) = super::intellisense_v2_slow_client_log_threshold() {
+                    if wait_elapsed >= threshold {
+                        server
+                            .client
+                            .log_message(
+                                MessageType::INFO,
+                                format!(
+                                    "[perf] diagnostics_v2 wait_for_file_version: wait_ms={} uri={} file_id={} expected_version={}",
+                                    wait_elapsed.as_millis(),
+                                    uri_for_task,
+                                    file_id.0,
+                                    requested_version
+                                ),
+                            )
+                            .await;
+                    }
+                }
+                if let Some(threshold) = super::intellisense_v2_slow_wait_warn_threshold() {
+                    if wait_elapsed >= threshold {
+                        warn!(
+                            uri = %uri_for_task,
+                            file_id = file_id.0,
+                            expected_version = requested_version,
+                            wait_ms = wait_elapsed.as_millis(),
+                            threshold_ms = threshold.as_millis(),
+                            "diagnostics_v2: wait_for_file_version is slow"
+                        );
+                    }
+                }
+
+                if !wait_ok {
+                    debug!(
                         uri = %uri_for_task,
                         file_id = file_id.0,
-                        expected_version,
-                        wait_ms = wait_elapsed.as_millis(),
-                        threshold_ms = threshold.as_millis(),
-                        "diagnostics_v2: wait_for_file_version is slow"
+                        expected_version = requested_version,
+                        "diagnostics_v2: skip publish (wait_for_file_version failed)"
                     );
-                }
-            }
-
-            if !wait_ok {
-                debug!(
-                    uri = %uri_for_task,
-                    file_id = file_id.0,
-                    expected_version,
-                    "diagnostics_v2: skip publish (wait_for_file_version failed)"
-                );
-
-                let mut tasks = server.diagnostics_tasks_v2.lock().await;
-                if let Some((registered_version, _)) = tasks.get(&file_id) {
-                    if *registered_version == expected_version {
-                        tasks.remove(&file_id);
-                    }
-                }
-                return;
-            }
-
-            let (
-                diagnostics,
-                observed_deps_id,
-                observed_settings_id,
-                observed_index_snapshot_id,
-                was_cancelled,
-            ) = {
-                let snapshot_started = Instant::now();
-                let (analysis, index_snapshot, deps_id) =
-                    server.analysis_v2.snapshot_with_deps().await;
-                let snapshot_elapsed = snapshot_started.elapsed();
-                server
-                    .coordinator
-                    .record_intellisense_v2_snapshot_latency("diagnostics", snapshot_elapsed);
-                if let Some(threshold) = super::intellisense_v2_slow_client_log_threshold() {
-                    if snapshot_elapsed >= threshold {
-                        server
-                            .client
-                            .log_message(
-                                MessageType::INFO,
-                                format!(
-                                    "[perf] diagnostics_v2 snapshot: snapshot_ms={} uri={} file_id={} expected_version={}",
-                                    snapshot_elapsed.as_millis(),
-                                    uri_for_task,
-                                    file_id.0,
-                                    expected_version
-                                ),
-                            )
-                            .await;
-                    }
-                }
-                if let Some(threshold) = super::intellisense_v2_slow_snapshot_warn_threshold() {
-                    if snapshot_elapsed >= threshold {
-                        warn!(
-                            uri = %uri_for_task,
-                            file_id = file_id.0,
-                            expected_version,
-                            snapshot_ms = snapshot_elapsed.as_millis(),
-                            threshold_ms = threshold.as_millis(),
-                            "diagnostics_v2: snapshot acquisition is slow"
-                        );
-                    }
+                    break;
                 }
 
-                let observed_deps_id = Some(deps_id.as_str().to_string());
-                let observed_settings_id = analysis
-                    .settings_id()
-                    .ok()
-                    .map(|id| id.as_str().to_string());
-                let observed_index_snapshot_id = index_snapshot.id.as_str().to_string();
-
-                debug!(
-                    uri = %uri_for_task,
-                    file_id = file_id.0,
-                    expected_version,
-                    deps_id = observed_deps_id.as_deref().unwrap_or_default(),
-                    settings_id = observed_settings_id.as_deref().unwrap_or_default(),
-                    index_snapshot_id = observed_index_snapshot_id,
-                    "diagnostics_v2 observed snapshot"
-                );
-
-                let mut diagnostics = Vec::new();
-                let mut was_cancelled = false;
-
-                let syntax_started = Instant::now();
-                let syntax_result = analysis.syntax_diagnostics(file_id);
-                let syntax_elapsed = syntax_started.elapsed();
-                server
-                    .coordinator
-                    .record_intellisense_v2_syntax_diagnostics_query_latency(syntax_elapsed);
-                if let Some(threshold) = super::intellisense_v2_slow_client_log_threshold() {
-                    if syntax_elapsed >= threshold {
-                        server
-                            .client
-                            .log_message(
-                                MessageType::INFO,
-                                format!(
-                                    "[perf] diagnostics_v2 syntax_diagnostics: syntax_ms={} uri={} file_id={} expected_version={}",
-                                    syntax_elapsed.as_millis(),
-                                    uri_for_task,
-                                    file_id.0,
-                                    expected_version
-                                ),
-                            )
-                            .await;
-                    }
-                }
-                if let Some(threshold) = super::intellisense_v2_slow_query_warn_threshold() {
-                    if syntax_elapsed >= threshold {
-                        warn!(
-                            uri = %uri_for_task,
-                            file_id = file_id.0,
-                            expected_version,
-                            syntax_diagnostics_ms = syntax_elapsed.as_millis(),
-                            threshold_ms = threshold.as_millis(),
-                            "diagnostics_v2: syntax_diagnostics query is slow"
-                        );
-                    }
+                // If a newer version is requested, skip work for the stale one before snapshot.
+                let current_requested = {
+                    let tasks = server.diagnostics_tasks_v2.lock().await;
+                    let Some(task) = tasks.get(&file_id) else {
+                        break;
+                    };
+                    task.requested_version
+                };
+                if current_requested != requested_version {
+                    continue;
                 }
 
-                match syntax_result {
-                    Ok(Some(syntax_errors)) => {
-                        diagnostics
-                            .extend(syntax_errors_to_diagnostics(&syntax_errors, &uri_for_task));
-                    }
-                    Ok(None) => {}
-                    Err(cancelled) => {
-                        was_cancelled = true;
-                        debug!(
-                            uri = %uri_for_task,
-                            file_id = file_id.0,
-                            expected_version,
-                            error = ?cancelled,
-                            "diagnostics_v2: syntax diagnostics cancelled"
-                        );
-                    }
-                }
-
-                let semantic_started = Instant::now();
-                let semantic_result = analysis.semantic_diagnostics(file_id);
-                let semantic_elapsed = semantic_started.elapsed();
-                server
-                    .coordinator
-                    .record_intellisense_v2_semantic_diagnostics_query_latency(semantic_elapsed);
-                if let Some(threshold) = super::intellisense_v2_slow_client_log_threshold() {
-                    if semantic_elapsed >= threshold {
-                        server
-                            .client
-                            .log_message(
-                                MessageType::INFO,
-                                format!(
-                                    "[perf] diagnostics_v2 semantic_diagnostics: semantic_ms={} uri={} file_id={} expected_version={}",
-                                    semantic_elapsed.as_millis(),
-                                    uri_for_task,
-                                    file_id.0,
-                                    expected_version
-                                ),
-                            )
-                            .await;
-                    }
-                }
-                if let Some(threshold) = super::intellisense_v2_slow_query_warn_threshold() {
-                    if semantic_elapsed >= threshold {
-                        warn!(
-                            uri = %uri_for_task,
-                            file_id = file_id.0,
-                            expected_version,
-                            semantic_diagnostics_ms = semantic_elapsed.as_millis(),
-                            threshold_ms = threshold.as_millis(),
-                            "diagnostics_v2: semantic_diagnostics query is slow"
-                        );
-                    }
-                }
-
-                match semantic_result {
-                    Ok(Some(semantic_errors)) => {
-                        for error in semantic_errors.iter() {
-                            if !show_hints
-                                && matches!(
-                                    error.severity,
-                                    bsl_shared::domain::types::DiagnosticSeverity::Hint
-                                )
-                            {
-                                continue;
-                            }
-                            diagnostics.push(semantic_error_to_diagnostic(error));
-                        }
-                    }
-                    Ok(None) => {}
-                    Err(cancelled) => {
-                        was_cancelled = true;
-                        debug!(
-                            uri = %uri_for_task,
-                            file_id = file_id.0,
-                            expected_version,
-                            error = ?cancelled,
-                            "diagnostics_v2: semantic diagnostics cancelled"
-                        );
-                    }
-                }
-
-                (
+                let (
                     diagnostics,
                     observed_deps_id,
                     observed_settings_id,
                     observed_index_snapshot_id,
                     was_cancelled,
-                )
-            };
-
-            let diagnostics_len = diagnostics.len();
-
-            let (is_current, current_version, current_deps_id, current_settings_id) = {
-                let current_version = server
-                    .latest_received_file_versions_v2
-                    .read()
-                    .await
-                    .get(&file_id)
-                    .copied();
-                let current_deps_id = server
-                    .last_deps_id_v2
-                    .read()
-                    .await
-                    .as_ref()
-                    .map(|id| id.as_str().to_string());
-                let current_settings_id = server
-                    .last_settings_id_v2
-                    .read()
-                    .await
-                    .as_ref()
-                    .map(|id| id.as_str().to_string());
-                let is_current = !was_cancelled
-                    && current_version == Some(expected_version)
-                    && current_deps_id == observed_deps_id
-                    && current_settings_id == observed_settings_id;
-                (
-                    is_current,
-                    current_version,
-                    current_deps_id,
-                    current_settings_id,
-                )
-            };
-
-            if !is_current {
-                if was_cancelled {
-                    debug!(
-                        uri = %uri_for_task,
-                        file_id = file_id.0,
-                        expected_version,
-                        "diagnostics_v2: skip publish (cancelled)"
-                    );
-                } else if current_version.is_none() {
-                    debug!(
-                        uri = %uri_for_task,
-                        file_id = file_id.0,
-                        expected_version,
-                        "diagnostics_v2: skip publish (no file)"
-                    );
-                } else if current_version != Some(expected_version) {
-                    debug!(
-                        uri = %uri_for_task,
-                        file_id = file_id.0,
-                        expected_version,
-                        current_version = current_version.unwrap_or(-1),
-                        "diagnostics_v2: skip publish (stale version)"
-                    );
-                } else if current_deps_id != observed_deps_id {
-                    debug!(
-                        uri = %uri_for_task,
-                        file_id = file_id.0,
-                        expected_version,
-                        observed_deps_id = ?observed_deps_id,
-                        current_deps_id = ?current_deps_id,
-                        "diagnostics_v2: skip publish (stale deps_id)"
-                    );
-                } else {
-                    debug!(
-                        uri = %uri_for_task,
-                        file_id = file_id.0,
-                        expected_version,
-                        observed_settings_id = ?observed_settings_id,
-                        current_settings_id = ?current_settings_id,
-                        "diagnostics_v2: skip publish (stale settings_id)"
-                    );
-                }
-
-                let mut tasks = server.diagnostics_tasks_v2.lock().await;
-                if let Some((registered_version, _)) = tasks.get(&file_id) {
-                    if *registered_version == expected_version {
-                        tasks.remove(&file_id);
+                ) = {
+                    let snapshot_started = Instant::now();
+                    let (analysis, index_snapshot, deps_id) =
+                        server.analysis_v2.snapshot_with_deps().await;
+                    let snapshot_elapsed = snapshot_started.elapsed();
+                    server
+                        .coordinator
+                        .record_intellisense_v2_snapshot_latency("diagnostics", snapshot_elapsed);
+                    if let Some(threshold) = super::intellisense_v2_slow_client_log_threshold() {
+                        if snapshot_elapsed >= threshold {
+                            server
+                                .client
+                                .log_message(
+                                    MessageType::INFO,
+                                    format!(
+                                        "[perf] diagnostics_v2 snapshot: snapshot_ms={} uri={} file_id={} expected_version={}",
+                                        snapshot_elapsed.as_millis(),
+                                        uri_for_task,
+                                        file_id.0,
+                                        requested_version
+                                    ),
+                                )
+                                .await;
+                        }
                     }
+                    if let Some(threshold) = super::intellisense_v2_slow_snapshot_warn_threshold() {
+                        if snapshot_elapsed >= threshold {
+                            warn!(
+                                uri = %uri_for_task,
+                                file_id = file_id.0,
+                                expected_version = requested_version,
+                                snapshot_ms = snapshot_elapsed.as_millis(),
+                                threshold_ms = threshold.as_millis(),
+                                "diagnostics_v2: snapshot acquisition is slow"
+                            );
+                        }
+                    }
+
+                    let observed_deps_id = Some(deps_id.as_str().to_string());
+                    let observed_settings_id = analysis
+                        .settings_id()
+                        .ok()
+                        .map(|id| id.as_str().to_string());
+                    let observed_index_snapshot_id = index_snapshot.id.as_str().to_string();
+
+                    debug!(
+                        uri = %uri_for_task,
+                        file_id = file_id.0,
+                        expected_version = requested_version,
+                        deps_id = observed_deps_id.as_deref().unwrap_or_default(),
+                        settings_id = observed_settings_id.as_deref().unwrap_or_default(),
+                        index_snapshot_id = observed_index_snapshot_id,
+                        "diagnostics_v2 observed snapshot"
+                    );
+
+                    let mut diagnostics = Vec::new();
+                    let mut was_cancelled = false;
+
+                    let syntax_started = Instant::now();
+                    let syntax_result = analysis.syntax_diagnostics(file_id);
+                    let syntax_elapsed = syntax_started.elapsed();
+                    server
+                        .coordinator
+                        .record_intellisense_v2_syntax_diagnostics_query_latency(syntax_elapsed);
+                    if let Some(threshold) = super::intellisense_v2_slow_client_log_threshold() {
+                        if syntax_elapsed >= threshold {
+                            server
+                                .client
+                                .log_message(
+                                    MessageType::INFO,
+                                    format!(
+                                        "[perf] diagnostics_v2 syntax_diagnostics: syntax_ms={} uri={} file_id={} expected_version={}",
+                                        syntax_elapsed.as_millis(),
+                                        uri_for_task,
+                                        file_id.0,
+                                        requested_version
+                                    ),
+                                )
+                                .await;
+                        }
+                    }
+                    if let Some(threshold) = super::intellisense_v2_slow_query_warn_threshold() {
+                        if syntax_elapsed >= threshold {
+                            warn!(
+                                uri = %uri_for_task,
+                                file_id = file_id.0,
+                                expected_version = requested_version,
+                                syntax_diagnostics_ms = syntax_elapsed.as_millis(),
+                                threshold_ms = threshold.as_millis(),
+                                "diagnostics_v2: syntax_diagnostics query is slow"
+                            );
+                        }
+                    }
+
+                    match syntax_result {
+                        Ok(Some(syntax_errors)) => {
+                            diagnostics.extend(syntax_errors_to_diagnostics(
+                                &syntax_errors,
+                                &uri_for_task,
+                            ));
+                        }
+                        Ok(None) => {}
+                        Err(cancelled) => {
+                            was_cancelled = true;
+                            debug!(
+                                uri = %uri_for_task,
+                                file_id = file_id.0,
+                                expected_version = requested_version,
+                                error = ?cancelled,
+                                "diagnostics_v2: syntax diagnostics cancelled"
+                            );
+                        }
+                    }
+
+                    let semantic_started = Instant::now();
+                    let semantic_result = analysis.semantic_diagnostics(file_id);
+                    let semantic_elapsed = semantic_started.elapsed();
+                    server
+                        .coordinator
+                        .record_intellisense_v2_semantic_diagnostics_query_latency(semantic_elapsed);
+                    if let Some(threshold) = super::intellisense_v2_slow_client_log_threshold() {
+                        if semantic_elapsed >= threshold {
+                            server
+                                .client
+                                .log_message(
+                                    MessageType::INFO,
+                                    format!(
+                                        "[perf] diagnostics_v2 semantic_diagnostics: semantic_ms={} uri={} file_id={} expected_version={}",
+                                        semantic_elapsed.as_millis(),
+                                        uri_for_task,
+                                        file_id.0,
+                                        requested_version
+                                    ),
+                                )
+                                .await;
+                        }
+                    }
+                    if let Some(threshold) = super::intellisense_v2_slow_query_warn_threshold() {
+                        if semantic_elapsed >= threshold {
+                            warn!(
+                                uri = %uri_for_task,
+                                file_id = file_id.0,
+                                expected_version = requested_version,
+                                semantic_diagnostics_ms = semantic_elapsed.as_millis(),
+                                threshold_ms = threshold.as_millis(),
+                                "diagnostics_v2: semantic_diagnostics query is slow"
+                            );
+                        }
+                    }
+
+                    match semantic_result {
+                        Ok(Some(semantic_errors)) => {
+                            for error in semantic_errors.iter() {
+                                if !show_hints
+                                    && matches!(
+                                        error.severity,
+                                        bsl_shared::domain::types::DiagnosticSeverity::Hint
+                                    )
+                                {
+                                    continue;
+                                }
+                                diagnostics.push(semantic_error_to_diagnostic(error));
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(cancelled) => {
+                            was_cancelled = true;
+                            debug!(
+                                uri = %uri_for_task,
+                                file_id = file_id.0,
+                                expected_version = requested_version,
+                                error = ?cancelled,
+                                "diagnostics_v2: semantic diagnostics cancelled"
+                            );
+                        }
+                    }
+
+                    (
+                        diagnostics,
+                        observed_deps_id,
+                        observed_settings_id,
+                        observed_index_snapshot_id,
+                        was_cancelled,
+                    )
+                };
+
+                let diagnostics_len = diagnostics.len();
+
+                let (is_current, current_version, current_deps_id, current_settings_id) = {
+                    let current_version = server
+                        .latest_received_file_versions_v2
+                        .read()
+                        .await
+                        .get(&file_id)
+                        .copied();
+                    let current_deps_id = server
+                        .last_deps_id_v2
+                        .read()
+                        .await
+                        .as_ref()
+                        .map(|id| id.as_str().to_string());
+                    let current_settings_id = server
+                        .last_settings_id_v2
+                        .read()
+                        .await
+                        .as_ref()
+                        .map(|id| id.as_str().to_string());
+                    let is_current = !was_cancelled
+                        && current_version == Some(requested_version)
+                        && current_deps_id == observed_deps_id
+                        && current_settings_id == observed_settings_id;
+                    (
+                        is_current,
+                        current_version,
+                        current_deps_id,
+                        current_settings_id,
+                    )
+                };
+
+                if !is_current {
+                    if was_cancelled {
+                        debug!(
+                            uri = %uri_for_task,
+                            file_id = file_id.0,
+                            expected_version = requested_version,
+                            "diagnostics_v2: skip publish (cancelled)"
+                        );
+                    } else if current_version.is_none() {
+                        debug!(
+                            uri = %uri_for_task,
+                            file_id = file_id.0,
+                            expected_version = requested_version,
+                            "diagnostics_v2: skip publish (no file)"
+                        );
+                    } else if current_version != Some(requested_version) {
+                        debug!(
+                            uri = %uri_for_task,
+                            file_id = file_id.0,
+                            expected_version = requested_version,
+                            current_version = current_version.unwrap_or(-1),
+                            "diagnostics_v2: skip publish (stale version)"
+                        );
+                    } else if current_deps_id != observed_deps_id {
+                        debug!(
+                            uri = %uri_for_task,
+                            file_id = file_id.0,
+                            expected_version = requested_version,
+                            observed_deps_id = ?observed_deps_id,
+                            current_deps_id = ?current_deps_id,
+                            "diagnostics_v2: skip publish (stale deps_id)"
+                        );
+                    } else {
+                        debug!(
+                            uri = %uri_for_task,
+                            file_id = file_id.0,
+                            expected_version = requested_version,
+                            observed_settings_id = ?observed_settings_id,
+                            current_settings_id = ?current_settings_id,
+                            "diagnostics_v2: skip publish (stale settings_id)"
+                        );
+                    }
+                    continue;
                 }
-                return;
-            }
 
-            debug!(
-                uri = %uri_for_task,
-                file_id = file_id.0,
-                expected_version,
-                deps_id = observed_deps_id.as_deref().unwrap_or_default(),
-                settings_id = observed_settings_id.as_deref().unwrap_or_default(),
-                index_snapshot_id = observed_index_snapshot_id,
-                diagnostics_len,
-                "diagnostics_v2: publish diagnostics"
-            );
+                debug!(
+                    uri = %uri_for_task,
+                    file_id = file_id.0,
+                    expected_version = requested_version,
+                    deps_id = observed_deps_id.as_deref().unwrap_or_default(),
+                    settings_id = observed_settings_id.as_deref().unwrap_or_default(),
+                    index_snapshot_id = observed_index_snapshot_id,
+                    diagnostics_len,
+                    "diagnostics_v2: publish diagnostics"
+                );
 
-            server
-                .client
-                .publish_diagnostics(uri_for_task.clone(), diagnostics, Some(expected_version))
-                .await;
-            server
-                .update_diagnostics_count(&uri_for_task, diagnostics_len)
-                .await;
+                server
+                    .client
+                    .publish_diagnostics(uri_for_task.clone(), diagnostics, Some(requested_version))
+                    .await;
+                server
+                    .update_diagnostics_count(&uri_for_task, diagnostics_len)
+                    .await;
 
-            let mut tasks = server.diagnostics_tasks_v2.lock().await;
-            if let Some((registered_version, _)) = tasks.get(&file_id) {
-                if *registered_version == expected_version {
+                // If nothing newer was requested while we were working, we can stop.
+                let mut tasks = server.diagnostics_tasks_v2.lock().await;
+                let Some(task) = tasks.get(&file_id) else {
+                    break;
+                };
+                if task.requested_version == requested_version {
                     tasks.remove(&file_id);
+                    break;
                 }
             }
         });
 
-        let mut tasks = self.diagnostics_tasks_v2.lock().await;
-        tasks.insert(file_id, (expected_version, handle));
+        tasks.insert(
+            file_id,
+            super::DiagnosticsTaskV2 {
+                requested_version: expected_version,
+                debounce,
+                handle,
+            },
+        );
     }
 }
 

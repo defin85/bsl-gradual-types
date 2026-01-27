@@ -95,6 +95,9 @@ var init_configHelper = __esm({
       static get slowClientLogMs() {
         return this.getConfig().get("slowClientLogMs", 2e3);
       }
+      static get diagnosticsDebounceMs() {
+        return this.getConfig().get("diagnosticsDebounceMs", 250);
+      }
       // Настройки бинарников
       static get useBundledBinaries() {
         return this.getConfig().get("useBundledBinaries", true);
@@ -138,6 +141,7 @@ var init_configHelper = __esm({
           serverMode: this.serverMode,
           serverTcpPort: this.serverTcpPort,
           slowClientLogMs: this.slowClientLogMs,
+          diagnosticsDebounceMs: this.diagnosticsDebounceMs,
           binaryPath: this.binaryPath,
           configurationPath: this.configurationPath,
           enableRealTimeAnalysis: this.enableRealTimeAnalysis,
@@ -18076,6 +18080,7 @@ function buildServerOptions(serverPath, outputChannel8) {
     newEnv.RUST_LOG = "debug";
     newEnv.RUST_BACKTRACE = "full";
     newEnv.BSL_INTELLISENSE_V2_SLOW_CLIENT_LOG_MS = String(BslAnalyzerConfig.slowClientLogMs);
+    newEnv.BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS = String(BslAnalyzerConfig.diagnosticsDebounceMs);
     const run = {
       command: serverPath,
       options: { env: newEnv }
@@ -18083,6 +18088,9 @@ function buildServerOptions(serverPath, outputChannel8) {
     outputChannel8.appendLine(`STDIO mode: command = ${serverPath}`);
     outputChannel8.appendLine(
       `STDIO mode: BSL_INTELLISENSE_V2_SLOW_CLIENT_LOG_MS=${newEnv.BSL_INTELLISENSE_V2_SLOW_CLIENT_LOG_MS}`
+    );
+    outputChannel8.appendLine(
+      `STDIO mode: BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS=${newEnv.BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS}`
     );
     return {
       run,

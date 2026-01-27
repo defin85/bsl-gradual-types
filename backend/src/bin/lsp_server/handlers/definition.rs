@@ -12,6 +12,7 @@ use bsl_shared::ir::SemanticProgram;
 
 pub async fn handle_goto_definition_v2(
     file_path: Arc<str>,
+    file_content: Arc<str>,
     ir_program: Arc<SemanticProgram>,
     deps: Arc<bsl_analysis_v2::SemanticDeps>,
     position: Position,
@@ -22,8 +23,9 @@ pub async fn handle_goto_definition_v2(
         position.line, position.character, uri, file_path
     );
 
-    let target = type_system::goto_definition_v2(
+    let target = type_system::goto_definition_v2_with_source(
         file_path.as_ref(),
+        file_content.as_ref(),
         ir_program,
         deps,
         position.line,

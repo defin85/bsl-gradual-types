@@ -3,6 +3,7 @@
 #![allow(clippy::doc_overindented_list_items)]
 
 use super::types::UniversalMetadataObject;
+use bsl_shared::domain::types::MetadataKind;
 use bsl_shared::domain::types::{
     RawAttributeData, RawDataSource, RawTabularSectionData, RawTypeData,
 };
@@ -111,18 +112,25 @@ impl UniversalMetadataObject {
     fn build_module_paths(
         &self,
     ) -> Option<bsl_shared::domain::type_definition_location::ModulePaths> {
+        let mut object_module = self.object_module_path.clone();
+        let manager_module = self.manager_module_path.clone();
+        let recordset_module = self.record_set_module_path.clone();
+
+        // Common modules have a dedicated module file; wire it into ModulePaths so
+        // "Go to Definition" can navigate to the module file itself.
+        if self.object_type == Some(MetadataKind::CommonModule) && object_module.is_none() {
+            object_module = self.common_module_path.clone();
+        }
+
         // Если нет ни одного пути к модулю - возвращаем None
-        if self.object_module_path.is_none()
-            && self.manager_module_path.is_none()
-            && self.record_set_module_path.is_none()
-        {
+        if object_module.is_none() && manager_module.is_none() && recordset_module.is_none() {
             return None;
         }
 
         Some(bsl_shared::domain::type_definition_location::ModulePaths {
-            object_module: self.object_module_path.clone(),
-            manager_module: self.manager_module_path.clone(),
-            recordset_module: self.record_set_module_path.clone(),
+            object_module,
+            manager_module,
+            recordset_module,
         })
     }
 
@@ -261,6 +269,57 @@ impl UniversalMetadataObject {
             is_readonly: false,
         });
 
+        fn normalize_form_attr_type(raw: &str) -> String {
+            let trimmed = raw.trim();
+            match trimmed {
+                "xs:string" | "String" => "Строка".to_string(),
+                "xs:boolean" | "Boolean" => "Булево".to_string(),
+                "xs:dateTime" | "Date" => "Дата".to_string(),
+                "xs:decimal" | "xs:int" | "xs:integer" | "xs:long" | "Number" => {
+                    "Число".to_string()
+                }
+                other => other.to_string(),
+            }
+        }
+
+        fn normalize_form_attr_types(attr: &super::form_types::FormAttribute) -> Option<String> {
+            if attr.type_description.types.is_empty() {
+                return None;
+            }
+            let parts: Vec<String> = attr
+                .type_description
+                .types
+                .iter()
+                .map(|t| normalize_form_attr_type(t))
+                .filter(|t| !t.is_empty())
+                .collect();
+            if parts.is_empty() {
+                return None;
+            }
+            if parts.len() == 1 {
+                return Some(parts[0].clone());
+            }
+            Some(parts.join(" | "))
+        }
+
+        // Form attributes from Form.xml: available as identifiers in the form module.
+        for attr in &form.attributes {
+            if attr.name == "Объект" {
+                continue;
+            }
+            if properties.iter().any(|p| p.name == attr.name) {
+                continue;
+            }
+            let Some(prop_type) = normalize_form_attr_types(attr) else {
+                continue;
+            };
+            properties.push(bsl_shared::domain::types::RawPropertyData {
+                name: attr.name.clone(),
+                prop_type,
+                is_readonly: false,
+            });
+        }
+
         // Привязанные реквизиты формы по DataPath: Объект.<ТЧ> где имя элемента совпадает с именем ТЧ
         for ts in &self.tabular_sections {
             let has_binding = Self::form_has_direct_object_binding(form, &ts.name);
@@ -383,6 +442,9 @@ impl UniversalMetadataObject {
 
                 // Страницы в XML — это разновидность группировки элементов формы
                 "Pages" | "Page" => Some("ГруппаФормы"),
+
+                // UsualGroup in Form.xml should be treated as a form group.
+                "UsualGroup" => Some("ГруппаФормы"),
 
                 // TODO: расширять по мере необходимости (Button/Decoration/etc.)
                 _ => None,
@@ -597,5 +659,99 @@ mod tests {
         assert!(module_paths.object_module.is_some());
         assert!(module_paths.manager_module.is_none());
         assert!(module_paths.recordset_module.is_none());
+    }
+
+    #[test]
+    fn test_form_type_includes_form_xml_attributes() {
+        use super::super::form_types::{FormAttribute, FormMetadata, TypeDescription};
+
+        let mut obj = UniversalMetadataObject::new(
+            "Document".to_string(),
+            "Док1".to_string(),
+            "12345678-1234-1234-1234-123456789012".to_string(),
+        );
+
+        obj.forms.push(FormMetadata {
+            name: "Форма1".to_string(),
+            owner_type: "Document.Док1".to_string(),
+            attributes: vec![FormAttribute {
+                name: "СчетФактура".to_string(),
+                id: 1,
+                type_description: TypeDescription {
+                    types: vec!["cfg:DocumentRef.СчетФактураВыданный".to_string()],
+                },
+                is_main_attribute: false,
+                saved_data: false,
+            }],
+            events: Vec::new(),
+            module_path: None,
+            execution_contexts: Vec::new(),
+            elements: Vec::new(),
+        });
+
+        let raw_types = obj.to_raw_type_data_with_forms(None);
+        let form_type = raw_types
+            .iter()
+            .find(|t| t.name == "Формы.Документы.Док1.Форма1")
+            .expect("expected form type");
+
+        let attr = form_type
+            .properties
+            .iter()
+            .find(|p| p.name == "СчетФактура")
+            .expect("expected form attribute as property");
+
+        assert_eq!(attr.prop_type, "cfg:DocumentRef.СчетФактураВыданный");
+    }
+
+    #[test]
+    fn test_form_elements_container_includes_usual_group() {
+        use super::super::form_types::{
+            FormAttribute, FormElementBinding, FormMetadata, TypeDescription,
+        };
+
+        let mut obj = UniversalMetadataObject::new(
+            "Document".to_string(),
+            "Док1".to_string(),
+            "12345678-1234-1234-1234-123456789012".to_string(),
+        );
+
+        obj.forms.push(FormMetadata {
+            name: "Форма1".to_string(),
+            owner_type: "Document.Док1".to_string(),
+            attributes: vec![FormAttribute {
+                name: "Объект".to_string(),
+                id: 1,
+                type_description: TypeDescription {
+                    types: vec!["cfg:DocumentObject.Док1".to_string()],
+                },
+                is_main_attribute: true,
+                saved_data: true,
+            }],
+            events: Vec::new(),
+            module_path: None,
+            execution_contexts: Vec::new(),
+            elements: vec![FormElementBinding {
+                kind: "UsualGroup".to_string(),
+                name: Some("СчетФактураПросмотр".to_string()),
+                id: Some(10),
+                data_path: None,
+                children: Vec::new(),
+            }],
+        });
+
+        let raw_types = obj.to_raw_type_data_with_forms(None);
+        let elements_type = raw_types
+            .iter()
+            .find(|t| t.name == "ЭлементыФормы.Документы.Док1.Форма1")
+            .expect("expected elements container type");
+
+        let group = elements_type
+            .properties
+            .iter()
+            .find(|p| p.name == "СчетФактураПросмотр")
+            .expect("expected group element property");
+
+        assert_eq!(group.prop_type, "ГруппаФормы");
     }
 }

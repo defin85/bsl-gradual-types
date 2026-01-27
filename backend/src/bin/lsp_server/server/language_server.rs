@@ -31,10 +31,9 @@ use crate::commands::{
 };
 use crate::config::{BslSettings, LspConfig};
 use crate::handlers::{
-    apply_text_edit, handle_completion_resolve, handle_goto_definition_v2, handle_hover_v2,
-    handle_signature_help_v2, build_document_symbols, build_workspace_symbols,
-    format_bsl_range_to_edits, format_bsl_to_edits, handle_prepare_rename, handle_references,
-    handle_rename, RenameError,
+    apply_text_edit, build_document_symbols, build_workspace_symbols, format_bsl_range_to_edits,
+    format_bsl_to_edits, handle_completion_resolve, handle_goto_definition_v2, handle_hover_v2,
+    handle_prepare_rename, handle_references, handle_rename, handle_signature_help_v2, RenameError,
 };
 use crate::progress::log_progress_to_file;
 use crate::progress_bridge::{LspWorkDoneReporter, ProgressReporter};
@@ -104,6 +103,30 @@ impl LanguageServer for BslLanguageServer {
         *self.completion_snippet_support.write().await = snippet_support;
         info!("Client snippet support: {}", snippet_support);
 
+        let dynamic_document_formatting = params
+            .capabilities
+            .text_document
+            .as_ref()
+            .and_then(|td| td.formatting.as_ref())
+            .and_then(|cap| cap.dynamic_registration)
+            .unwrap_or(false);
+        let dynamic_range_formatting = params
+            .capabilities
+            .text_document
+            .as_ref()
+            .and_then(|td| td.range_formatting.as_ref())
+            .and_then(|cap| cap.dynamic_registration)
+            .unwrap_or(false);
+        {
+            let mut state = self.formatting_capability.write().await;
+            state.dynamic_document_formatting = dynamic_document_formatting;
+            state.dynamic_range_formatting = dynamic_range_formatting;
+        }
+        info!(
+            "Client dynamicRegistration: formatting={}, rangeFormatting={}",
+            dynamic_document_formatting, dynamic_range_formatting
+        );
+
         // Version info for LSP Protocol
         let version = env!("CARGO_PKG_VERSION");
         let build_timestamp = env!("BUILD_TIMESTAMP");
@@ -158,8 +181,10 @@ impl LanguageServer for BslLanguageServer {
                         work_done_progress: Some(false),
                     },
                 }),
-                document_formatting_provider: Some(OneOf::Left(true)),
-                document_range_formatting_provider: Some(OneOf::Left(true)),
+                // Formatting is registered dynamically based on workspace settings.
+                // This prevents VSCode formatOnSave from calling formatting when it's disabled.
+                document_formatting_provider: None,
+                document_range_formatting_provider: None,
                 document_symbol_provider: Some(OneOf::Left(true)),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 ..Default::default()
@@ -180,6 +205,8 @@ impl LanguageServer for BslLanguageServer {
         self.client
             .log_message(MessageType::INFO, "BSL Language Server initialized!")
             .await;
+
+        self.sync_formatting_capability_registration().await;
 
         // MILESTONE 2.10: Reload types with config from initializationOptions
         let config = self.config.read().await;
@@ -473,6 +500,7 @@ impl LanguageServer for BslLanguageServer {
                             new_settings.formatting.indent_size
                         );
                         *self.settings.write().await = new_settings;
+                        self.sync_formatting_capability_registration().await;
                     }
                     Err(e) => {
                         warn!("Failed to parse BslSettings: {}", e);
@@ -629,7 +657,7 @@ impl LanguageServer for BslLanguageServer {
     ) -> JsonRpcResult<Option<Vec<TextEdit>>> {
         let settings = self.settings.read().await.clone();
         if !settings.formatting.enabled {
-            return Err(tower_lsp::jsonrpc::Error::invalid_request());
+            return Ok(None);
         }
 
         self.sync_v2_globals().await;
@@ -669,7 +697,7 @@ impl LanguageServer for BslLanguageServer {
     ) -> JsonRpcResult<Option<Vec<TextEdit>>> {
         let settings = self.settings.read().await.clone();
         if !settings.formatting.enabled {
-            return Err(tower_lsp::jsonrpc::Error::invalid_request());
+            return Ok(None);
         }
 
         self.sync_v2_globals().await;
@@ -698,12 +726,9 @@ impl LanguageServer for BslLanguageServer {
             return Ok(None);
         };
 
-        let edits = format_bsl_range_to_edits(
-            &file_content,
-            settings.formatting.indent_size,
-            params.range,
-        )
-        .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+        let edits =
+            format_bsl_range_to_edits(&file_content, settings.formatting.indent_size, params.range)
+                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
         Ok(edits)
     }
 
@@ -948,7 +973,13 @@ impl LanguageServer for BslLanguageServer {
             a.name
                 .cmp(&b.name)
                 .then_with(|| a.location.uri.as_str().cmp(b.location.uri.as_str()))
-                .then_with(|| a.location.range.start.line.cmp(&b.location.range.start.line))
+                .then_with(|| {
+                    a.location
+                        .range
+                        .start
+                        .line
+                        .cmp(&b.location.range.start.line)
+                })
                 .then_with(|| {
                     a.location
                         .range
@@ -1489,7 +1520,7 @@ impl LanguageServer for BslLanguageServer {
                 return Ok(None);
             }
 
-            let (file_path, deps, ir_program) = {
+            let (file_content, file_path, deps, ir_program) = {
                 let snapshot_started = Instant::now();
                 let (analysis, index_snapshot, deps_id) =
                     self.analysis_v2.snapshot_with_deps().await;
@@ -1521,6 +1552,7 @@ impl LanguageServer for BslLanguageServer {
                     index_snapshot.id.as_str(),
                 );
 
+                let file_content = analysis.file_text(file_id).ok().flatten();
                 let file_path = analysis.file_path(file_id).ok().flatten();
                 let deps = analysis.deps_data().ok();
                 let ir_started = Instant::now();
@@ -1540,12 +1572,20 @@ impl LanguageServer for BslLanguageServer {
                     }
                 }
 
-                (file_path, deps, ir_program)
+                (file_content, file_path, deps, ir_program)
             };
 
-            let result = match (file_path, deps, ir_program) {
-                (Some(file_path), Some(deps), Some(ir_program)) => {
-                    handle_goto_definition_v2(file_path, ir_program, deps, position, &uri).await
+            let result = match (file_content, file_path, deps, ir_program) {
+                (Some(file_content), Some(file_path), Some(deps), Some(ir_program)) => {
+                    handle_goto_definition_v2(
+                        file_path,
+                        file_content,
+                        ir_program,
+                        deps,
+                        position,
+                        &uri,
+                    )
+                    .await
                 }
                 _ => None,
             };

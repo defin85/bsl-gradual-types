@@ -326,11 +326,26 @@ impl AstToIrConverter {
 
             // Вызов функции/метода
             Expression::Call { function, .. } => {
-                // Глобальная функция: если известна в SignatureIndex, НЕ считаем её "undeclared variable"
+                // Call target is a plain identifier.
+                //
+                // IMPORTANT: user-defined module functions/procedures are hoisted into SymbolTable
+                // during the first pass, so calling a local function before its declaration must
+                // not be treated as "undeclared variable", even if return type isn't inferred yet.
                 if let Expression::Identifier {
                     name: func_name, ..
                 } = function.as_ref()
                 {
+                    if self.symbol_table.find_function(func_name).is_some()
+                        || self.symbol_table.find_procedure(func_name).is_some()
+                    {
+                        let resolved = self.resolve_global_function_return_type(func_name);
+                        if resolved.is_unknown() {
+                            return TypeResolution::inferred_weak("Dynamic");
+                        }
+                        return resolved;
+                    }
+
+                    // Global function: if known in SignatureIndex, do not treat as undeclared.
                     let resolved = self.resolve_global_function_return_type(func_name);
                     if !resolved.is_unknown() {
                         return resolved;

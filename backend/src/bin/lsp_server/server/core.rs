@@ -6,6 +6,10 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{Mutex, RwLock};
+use tower_lsp::lsp_types::request::{
+    Formatting as DocumentFormattingRequest, RangeFormatting, Request as LspRequest,
+};
+use tower_lsp::lsp_types::{Registration, Unregistration};
 use tower_lsp::Client;
 use tracing::{debug, info, warn};
 
@@ -20,7 +24,7 @@ use crate::config::BslSettings;
 use crate::converters::{semantic_error_to_diagnostic, syntax_errors_to_diagnostics};
 
 use super::analysis_v2_runtime::AnalysisV2Runtime;
-use super::{BslLanguageServer, Url, V2FileKey};
+use super::{BslLanguageServer, FormattingCapabilityState, Url, V2FileKey};
 
 impl BslLanguageServer {
     pub fn new(client: Client, coordinator: Arc<SystemCoordinator>) -> Self {
@@ -81,6 +85,7 @@ impl BslLanguageServer {
             completion_snippet_support: Arc::new(RwLock::new(false)),
             auto_reindex_paused: Arc::new(RwLock::new(false)),
             coordinator,
+            formatting_capability: Arc::new(RwLock::new(FormattingCapabilityState::default())),
 
             analysis_v2,
             text_sync_v2: Arc::new(Mutex::new(())),
@@ -91,6 +96,116 @@ impl BslLanguageServer {
             last_deps_id_v2: Arc::new(RwLock::new(Some(initial_deps_id))),
             last_settings_id_v2: Arc::new(RwLock::new(Some(initial_settings_id))),
         }
+    }
+
+    pub(crate) async fn sync_formatting_capability_registration(&self) {
+        const DOC_FORMATTING_ID: &str = "bsl.formatting";
+        const RANGE_FORMATTING_ID: &str = "bsl.rangeFormatting";
+
+        let enabled = self.settings.read().await.formatting.enabled;
+
+        let (spawn_worker, dynamic_doc, dynamic_range) = {
+            let mut state = self.formatting_capability.write().await;
+            state.desired_enabled = enabled;
+
+            if !(state.dynamic_document_formatting || state.dynamic_range_formatting) {
+                return;
+            }
+
+            if state.in_flight {
+                return;
+            }
+
+            if state.registered == state.desired_enabled {
+                return;
+            }
+
+            state.in_flight = true;
+            (
+                true,
+                state.dynamic_document_formatting,
+                state.dynamic_range_formatting,
+            )
+        };
+
+        if !spawn_worker {
+            return;
+        }
+
+        let client = self.client.clone();
+        let state = self.formatting_capability.clone();
+
+        tokio::spawn(async move {
+            loop {
+                let (desired_enabled, currently_registered) = {
+                    let guard = state.read().await;
+                    (guard.desired_enabled, guard.registered)
+                };
+
+                if desired_enabled == currently_registered {
+                    let mut guard = state.write().await;
+                    guard.in_flight = false;
+                    return;
+                }
+
+                let result = if desired_enabled {
+                    let mut registrations = Vec::new();
+                    if dynamic_doc {
+                        registrations.push(Registration {
+                            id: DOC_FORMATTING_ID.to_string(),
+                            method: DocumentFormattingRequest::METHOD.to_string(),
+                            register_options: Some(serde_json::json!({ "documentSelector": null })),
+                        });
+                    }
+                    if dynamic_range {
+                        registrations.push(Registration {
+                            id: RANGE_FORMATTING_ID.to_string(),
+                            method: RangeFormatting::METHOD.to_string(),
+                            register_options: Some(serde_json::json!({ "documentSelector": null })),
+                        });
+                    }
+
+                    client.register_capability(registrations).await
+                } else {
+                    let mut unregisterations = Vec::new();
+                    if dynamic_doc {
+                        unregisterations.push(Unregistration {
+                            id: DOC_FORMATTING_ID.to_string(),
+                            method: DocumentFormattingRequest::METHOD.to_string(),
+                        });
+                    }
+                    if dynamic_range {
+                        unregisterations.push(Unregistration {
+                            id: RANGE_FORMATTING_ID.to_string(),
+                            method: RangeFormatting::METHOD.to_string(),
+                        });
+                    }
+
+                    client.unregister_capability(unregisterations).await
+                };
+
+                match result {
+                    Ok(()) => {
+                        let mut guard = state.write().await;
+                        guard.registered = desired_enabled;
+                    }
+                    Err(err) => {
+                        warn!(
+                            "Failed to {} formatting capability: {}",
+                            if desired_enabled {
+                                "register"
+                            } else {
+                                "unregister"
+                            },
+                            err
+                        );
+                        let mut guard = state.write().await;
+                        guard.in_flight = false;
+                        return;
+                    }
+                }
+            }
+        });
     }
 
     pub async fn update_diagnostics_count(&self, uri: &Url, count: usize) {
@@ -597,8 +712,8 @@ mod tests {
     use tower::ServiceExt;
     use tower_lsp::jsonrpc::Request;
     use tower_lsp::lsp_types::{
-        ClientCapabilities, CompletionParams, DidChangeTextDocumentParams,
-        DidChangeConfigurationParams, DidOpenTextDocumentParams, DocumentFormattingParams,
+        ClientCapabilities, CompletionParams, DidChangeConfigurationParams,
+        DidChangeTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams,
         DocumentRangeFormattingParams, DocumentSymbolParams, DocumentSymbolResponse,
         FormattingOptions, InitializeParams, InitializedParams, Location, PartialResultParams,
         Position, PrepareRenameResponse, Range, ReferenceContext, ReferenceParams, RenameParams,
@@ -1137,6 +1252,175 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn p9a_formatting_disabled_does_not_advertise_capability_and_returns_null() {
+        let coordinator = Arc::new(SystemCoordinator::new());
+
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            move |client| BslLanguageServer::new(client, coordinator.clone())
+        })
+        .finish();
+
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        let initialize_params = InitializeParams {
+            capabilities: ClientCapabilities::default(),
+            ..Default::default()
+        };
+        let initialize = Request::build("initialize")
+            .id(1)
+            .params(serde_json::to_value(initialize_params).expect("InitializeParams"))
+            .finish();
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialize)
+            .await
+            .expect("initialize request");
+        let response = response.expect("initialize should return a response");
+
+        let response_value =
+            serde_json::to_value(&response).expect("serialize initialize response");
+        let capabilities = response_value
+            .get("result")
+            .and_then(|v| v.get("capabilities"))
+            .expect("initialize capabilities");
+
+        match capabilities.get("documentFormattingProvider") {
+            None => {}
+            Some(v) => assert!(
+                v.is_null(),
+                "documentFormattingProvider must be absent/null"
+            ),
+        }
+        match capabilities.get("documentRangeFormattingProvider") {
+            None => {}
+            Some(v) => assert!(
+                v.is_null(),
+                "documentRangeFormattingProvider must be absent/null"
+            ),
+        }
+
+        let initialized = Request::build("initialized")
+            .params(serde_json::to_value(InitializedParams {}).expect("InitializedParams"))
+            .finish();
+        let initialized_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialized)
+            .await
+            .expect("initialized notification");
+        assert!(
+            initialized_response.is_none(),
+            "initialized is a notification"
+        );
+
+        let uri = Url::parse("file:///test_p9a_formatting_disabled.bsl").expect("test uri");
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: "Процедура Тест()\nКонецПроцедуры\n".to_string(),
+            },
+        };
+        let did_open_req = Request::build("textDocument/didOpen")
+            .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+            .finish();
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+
+        let formatting_params = DocumentFormattingParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            options: FormattingOptions::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        };
+        let formatting_req = Request::build("textDocument/formatting")
+            .id(2)
+            .params(serde_json::to_value(formatting_params).expect("DocumentFormattingParams"))
+            .finish();
+        let formatting_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(formatting_req)
+            .await
+            .expect("formatting request");
+        let formatting_response = formatting_response.expect("formatting should return a response");
+
+        let response_value =
+            serde_json::to_value(&formatting_response).expect("serialize formatting response");
+        match response_value.get("error") {
+            None => {}
+            Some(v) => assert!(v.is_null(), "formatting must not return an error"),
+        }
+        let result = response_value
+            .get("result")
+            .cloned()
+            .expect("formatting result field");
+        assert!(
+            result.is_null(),
+            "disabled formatting should return null edits"
+        );
+
+        let range_formatting_params = DocumentRangeFormattingParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            range: Range {
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: 0,
+                },
+            },
+            options: FormattingOptions::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        };
+        let range_req = Request::build("textDocument/rangeFormatting")
+            .id(3)
+            .params(
+                serde_json::to_value(range_formatting_params)
+                    .expect("DocumentRangeFormattingParams"),
+            )
+            .finish();
+        let range_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(range_req)
+            .await
+            .expect("rangeFormatting request");
+        let range_response = range_response.expect("rangeFormatting should return a response");
+
+        let range_value =
+            serde_json::to_value(&range_response).expect("serialize rangeFormatting response");
+        match range_value.get("error") {
+            None => {}
+            Some(v) => assert!(v.is_null(), "rangeFormatting must not return an error"),
+        }
+        let range_result = range_value
+            .get("result")
+            .cloned()
+            .expect("rangeFormatting result field");
+        assert!(
+            range_result.is_null(),
+            "disabled rangeFormatting should return null edits"
+        );
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
     async fn p9_formatting_reindents_and_trims_when_enabled() {
         let coordinator = Arc::new(SystemCoordinator::new());
 
@@ -1212,7 +1496,10 @@ mod tests {
             .call(settings_req)
             .await
             .expect("didChangeConfiguration notification");
-        assert!(settings_resp.is_none(), "didChangeConfiguration is a notification");
+        assert!(
+            settings_resp.is_none(),
+            "didChangeConfiguration is a notification"
+        );
 
         let uri = Url::parse("file:///test_p9_formatting.bsl").expect("test uri");
         let text = "Процедура Тест()\nЕсли Истина Тогда  \nСообщить(1);\nИначе\nСообщить(2);   \nКонецЕсли;\nКонецПроцедуры\n";
@@ -1358,7 +1645,10 @@ mod tests {
             .call(settings_req)
             .await
             .expect("didChangeConfiguration notification");
-        assert!(settings_resp.is_none(), "didChangeConfiguration is a notification");
+        assert!(
+            settings_resp.is_none(),
+            "didChangeConfiguration is a notification"
+        );
 
         let uri = Url::parse("file:///test_p10_range_formatting.bsl").expect("test uri");
         let text = concat!(
@@ -1514,7 +1804,10 @@ mod tests {
             .iter()
             .map(|edit| (edit.range.start.line, edit.new_text.clone()))
             .collect();
-        assert_eq!(projected_b, projected_a, "range formatting must be deterministic");
+        assert_eq!(
+            projected_b, projected_a,
+            "range formatting must be deterministic"
+        );
 
         drain_task.abort();
     }
@@ -1778,7 +2071,9 @@ mod tests {
         let parsed = parsed.expect("result present");
 
         assert!(
-            parsed.iter().any(|sym| sym.name == "FooOne" && sym.location.uri == uri_a),
+            parsed
+                .iter()
+                .any(|sym| sym.name == "FooOne" && sym.location.uri == uri_a),
             "expected FooOne in uri_a, got {:?}",
             parsed
                 .iter()
@@ -1786,7 +2081,9 @@ mod tests {
                 .collect::<Vec<_>>()
         );
         assert!(
-            parsed.iter().any(|sym| sym.name == "FooTwo" && sym.location.uri == uri_b),
+            parsed
+                .iter()
+                .any(|sym| sym.name == "FooTwo" && sym.location.uri == uri_b),
             "expected FooTwo in uri_b, got {:?}",
             parsed
                 .iter()
@@ -2030,42 +2327,45 @@ mod tests {
 
         assert_eq!(parsed.len(), 3, "expected declaration + 2 usages");
         assert!(
-            parsed.iter().any(|loc| loc.range == Range {
-                start: Position {
-                    line: 1,
-                    character: 10
-                },
-                end: Position {
-                    line: 1,
-                    character: 11
-                }
-            }),
+            parsed.iter().any(|loc| loc.range
+                == Range {
+                    start: Position {
+                        line: 1,
+                        character: 10
+                    },
+                    end: Position {
+                        line: 1,
+                        character: 11
+                    }
+                }),
             "expected declaration location for X"
         );
         assert!(
-            parsed.iter().any(|loc| loc.range == Range {
-                start: Position {
-                    line: 2,
-                    character: 4
-                },
-                end: Position {
-                    line: 2,
-                    character: 5
-                }
-            }),
+            parsed.iter().any(|loc| loc.range
+                == Range {
+                    start: Position {
+                        line: 2,
+                        character: 4
+                    },
+                    end: Position {
+                        line: 2,
+                        character: 5
+                    }
+                }),
             "expected assignment target usage for X"
         );
         assert!(
-            parsed.iter().any(|loc| loc.range == Range {
-                start: Position {
-                    line: 3,
-                    character: 13
-                },
-                end: Position {
-                    line: 3,
-                    character: 14
-                }
-            }),
+            parsed.iter().any(|loc| loc.range
+                == Range {
+                    start: Position {
+                        line: 3,
+                        character: 13
+                    },
+                    end: Position {
+                        line: 3,
+                        character: 14
+                    }
+                }),
             "expected call argument usage for X"
         );
 
@@ -2095,7 +2395,8 @@ mod tests {
             .call(req_no_decl)
             .await
             .expect("references request (no decl)");
-        let response_no_decl = response_no_decl.expect("references (no decl) should return a response");
+        let response_no_decl =
+            response_no_decl.expect("references (no decl) should return a response");
         let value = serde_json::to_value(&response_no_decl).expect("serialize response");
         let result_value = value.get("result").cloned().expect("result field");
         let parsed: Option<Vec<Location>> =
@@ -2500,7 +2801,11 @@ mod tests {
             edits.iter().all(|e| e.new_text == "Baz"),
             "all edits must rename to Baz"
         );
-        assert_eq!(edits.len(), 3, "expected declaration + 2 call sites for Foo");
+        assert_eq!(
+            edits.len(),
+            3,
+            "expected declaration + 2 call sites for Foo"
+        );
         assert!(
             edits.iter().all(|e| e.range.start.line != 6),
             "must not touch FooX() call"

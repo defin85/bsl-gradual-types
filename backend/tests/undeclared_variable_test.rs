@@ -66,3 +66,23 @@ fn function_parameter_is_treated_as_declared() {
         messages
     );
 }
+
+#[test]
+fn local_function_call_before_declaration_is_not_undeclared_variable() {
+    let code = r#"
+Процедура Тест()
+    Результат = ЛокальнаяФункция();
+КонецПроцедуры
+
+Функция ЛокальнаяФункция()
+    Возврат 1;
+КонецФункции
+"#;
+
+    let messages = undeclared_messages(code);
+    assert!(
+        messages.is_empty(),
+        "unexpected undeclared variable diagnostics: {:?}",
+        messages
+    );
+}

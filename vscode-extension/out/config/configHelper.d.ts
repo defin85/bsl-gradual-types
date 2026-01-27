@@ -10,6 +10,7 @@ export declare class BslAnalyzerConfig {
     static get serverMode(): string;
     static get serverTcpPort(): number;
     static get serverTrace(): string;
+    static get slowClientLogMs(): number;
     static get useBundledBinaries(): boolean;
     static get binaryPath(): string;
     static get configurationPath(): string;

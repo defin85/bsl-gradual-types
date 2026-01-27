@@ -16,11 +16,13 @@ function buildServerOptions(serverPath, outputChannel) {
         const newEnv = { ...process.env };
         newEnv.RUST_LOG = 'debug';
         newEnv.RUST_BACKTRACE = 'full';
+        newEnv.BSL_INTELLISENSE_V2_SLOW_CLIENT_LOG_MS = String(configHelper_1.BslAnalyzerConfig.slowClientLogMs);
         const run = {
             command: serverPath,
             options: { env: newEnv }
         };
         outputChannel.appendLine(`STDIO mode: command = ${serverPath}`);
+        outputChannel.appendLine(`STDIO mode: BSL_INTELLISENSE_V2_SLOW_CLIENT_LOG_MS=${newEnv.BSL_INTELLISENSE_V2_SLOW_CLIENT_LOG_MS}`);
         return {
             run,
             debug: run

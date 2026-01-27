@@ -23,6 +23,7 @@ export function buildServerOptions(
         const newEnv = { ...process.env };
         newEnv.RUST_LOG = 'debug';
         newEnv.RUST_BACKTRACE = 'full';
+        newEnv.BSL_INTELLISENSE_V2_SLOW_CLIENT_LOG_MS = String(BslAnalyzerConfig.slowClientLogMs);
 
         const run: Executable = {
             command: serverPath,
@@ -30,6 +31,9 @@ export function buildServerOptions(
         };
 
         outputChannel.appendLine(`STDIO mode: command = ${serverPath}`);
+        outputChannel.appendLine(
+            `STDIO mode: BSL_INTELLISENSE_V2_SLOW_CLIENT_LOG_MS=${newEnv.BSL_INTELLISENSE_V2_SLOW_CLIENT_LOG_MS}`
+        );
 
         return {
             run,

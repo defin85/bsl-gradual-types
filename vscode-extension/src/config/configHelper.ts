@@ -34,6 +34,10 @@ export class BslAnalyzerConfig {
     static get serverTrace(): string {
         return this.getConfig().get<string>('serverTrace', 'off');
     }
+
+    static get slowClientLogMs(): number {
+        return this.getConfig().get<number>('slowClientLogMs', 2000);
+    }
     
     // Настройки бинарников
     static get useBundledBinaries(): boolean {
@@ -89,6 +93,7 @@ export class BslAnalyzerConfig {
             enabled: this.enabled,
             serverMode: this.serverMode,
             serverTcpPort: this.serverTcpPort,
+            slowClientLogMs: this.slowClientLogMs,
             binaryPath: this.binaryPath,
             configurationPath: this.configurationPath,
             enableRealTimeAnalysis: this.enableRealTimeAnalysis,

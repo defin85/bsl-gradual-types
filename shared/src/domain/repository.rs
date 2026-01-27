@@ -284,6 +284,17 @@ pub trait TypeRepository: Send + Sync {
         method_name: &str,
     ) -> Option<TypeDefinitionLocation>;
 
+    /// Получить все locations определений методов/функций (для переноса в snapshot’ы).
+    ///
+    /// Формат:
+    /// - `(Some(owner_type), method_name, location)` для методов конфигурации
+    /// - `(None, function_name, location)` для глобальных функций
+    ///
+    /// Важно: возвращает **клон** данных.
+    fn get_method_definition_locations_clone(
+        &self,
+    ) -> Vec<(Option<String>, String, TypeDefinitionLocation)>;
+
     /// Получить все объекты метаданных указанного вида (Milestone 3.16)
     ///
     /// Возвращает имена объектов без префикса (например, "Контрагенты" вместо "Справочники.Контрагенты")
@@ -949,6 +960,31 @@ impl TypeRepository for InMemoryTypeRepository {
                 map.get(&(k.clone(), k)).cloned()
             }
         }
+    }
+
+    fn get_method_definition_locations_clone(
+        &self,
+    ) -> Vec<(Option<String>, String, TypeDefinitionLocation)> {
+        let map = self.method_definition_index.read().unwrap_or_else(|poisoned| {
+            tracing::warn!(
+                "method_definition_index RwLock poisoned in get_method_definition_locations_clone, recovering"
+            );
+            poisoned.into_inner()
+        });
+
+        map.iter()
+            .map(|((owner, name), loc)| {
+                if owner == name {
+                    (None, owner.display().to_string(), loc.clone())
+                } else {
+                    (
+                        Some(owner.display().to_string()),
+                        name.display().to_string(),
+                        loc.clone(),
+                    )
+                }
+            })
+            .collect()
     }
 
     fn get_metadata_objects_by_kind(&self, kind: MetadataKind) -> Vec<String> {

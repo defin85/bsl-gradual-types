@@ -867,8 +867,11 @@ fn resolve_owner_type_for_signature(
     common_props: &HashMap<String, CommonModuleProperties>,
 ) -> Option<String> {
     match module_type {
+        // Common modules should still be indexed even if their properties were not parsed.
+        // Missing properties only affects context filtering and "global" status,
+        // but should not block navigation / signatures for exported methods.
         ModuleType::CommonModule { name, .. } => {
-            let _ = common_props.get(name)?;
+            let _ = common_props.get(name);
             Some(format!(
                 "{}.{}",
                 MetadataKind::CommonModule.to_prefix(),

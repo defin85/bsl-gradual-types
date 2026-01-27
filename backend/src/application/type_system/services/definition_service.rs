@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use bsl_shared::domain::repository::TypeRepository;
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::type_definition_location::TypeDefinitionLocation;
 use bsl_shared::domain::types::{ConcreteType, MetadataKind, ResolutionResult, TypeResolution};
@@ -10,6 +11,23 @@ use bsl_shared::ir::{SemanticNodeKind, SemanticProgram, Span};
 pub struct DefinitionTarget {
     pub file_path: PathBuf,
     pub span: Option<Span>,
+}
+
+fn common_module_definition_target(
+    repo: &dyn TypeRepository,
+    module_name: &str,
+) -> Option<DefinitionTarget> {
+    let type_name = format!("ОбщиеМодули.{}", module_name);
+    let raw = repo.find_type(&type_name)?;
+    let paths = raw.module_paths?;
+    let target_path = paths
+        .object_module
+        .or(paths.manager_module)
+        .or(paths.recordset_module)?;
+    Some(DefinitionTarget {
+        file_path: target_path,
+        span: None,
+    })
 }
 
 pub fn goto_definition_v2(
@@ -55,6 +73,42 @@ fn goto_definition_v2_with_source_opt(
         .unwrap_or_else(|| Arc::new(TypeResolver::new(repo.clone())));
 
     if let Some(node) = ir_program.find_node_at_position(line, character) {
+        if let SemanticNodeKind::VariableAccess { name } = &node.kind {
+            // If it's not a local variable, allow treating it as a global common module.
+            if ir_program.resolve_variable(name, node.scope_id).is_none() {
+                if let Some(target) = common_module_definition_target(repo.as_ref(), name) {
+                    return Some(target);
+                }
+            }
+        }
+
+        if let SemanticNodeKind::MemberAccess {
+            object_name,
+            object_type,
+            member_name,
+            access_kind,
+            ..
+        } = &node.kind
+        {
+            if access_kind.is_method() {
+                let owner_type = object_type.type_name();
+                if let Some(loc) =
+                    repo.find_method_definition_location(Some(&owner_type), member_name)
+                {
+                    return definition_target_from_location(loc);
+                }
+
+                if let Some(obj_name) = object_name.as_deref() {
+                    let common_module_owner = format!("ОбщиеМодули.{}", obj_name);
+                    if let Some(loc) = repo
+                        .find_method_definition_location(Some(&common_module_owner), member_name)
+                    {
+                        return definition_target_from_location(loc);
+                    }
+                }
+            }
+        }
+
         if let SemanticNodeKind::FunctionCall {
             function_name,
             object_type,
@@ -67,23 +121,37 @@ fn goto_definition_v2_with_source_opt(
 
             // Support "CommonModules.<Name>" namespace navigation in calls like "Модуль.Экспорт()":
             // go-to-definition on receiver should open the module file.
-            if let (Some(token), Some(obj_name), Some(obj_type)) = (
-                token_at_position.as_deref(),
-                object_name.as_deref(),
-                object_type.as_ref(),
-            ) {
-                if token.eq_ignore_ascii_case(obj_name) && is_common_module_type(obj_type) {
-                    let type_name = obj_type.type_name();
-                    if let Some(raw) = repo.find_type(&type_name) {
-                        if let Some(paths) = raw.module_paths.clone() {
-                            let target_path = paths
-                                .object_module
-                                .or(paths.manager_module)
-                                .or(paths.recordset_module)?;
-                            return Some(DefinitionTarget {
-                                file_path: target_path,
-                                span: None,
-                            });
+            if let (Some(token), Some(obj_name)) =
+                (token_at_position.as_deref(), object_name.as_deref())
+            {
+                if token.eq_ignore_ascii_case(obj_name) {
+                    // Avoid misrouting when a local variable shadows a common module name.
+                    let is_local_var = ir_program
+                        .resolve_variable(obj_name, node.scope_id)
+                        .is_some();
+                    if !is_local_var {
+                        if let Some(target) =
+                            common_module_definition_target(repo.as_ref(), obj_name)
+                        {
+                            return Some(target);
+                        }
+                    }
+
+                    if let Some(obj_type) = object_type.as_ref() {
+                        if is_common_module_type(obj_type) {
+                            let type_name = obj_type.type_name();
+                            if let Some(raw) = repo.find_type(&type_name) {
+                                if let Some(paths) = raw.module_paths.clone() {
+                                    let target_path = paths
+                                        .object_module
+                                        .or(paths.manager_module)
+                                        .or(paths.recordset_module)?;
+                                    return Some(DefinitionTarget {
+                                        file_path: target_path,
+                                        span: None,
+                                    });
+                                }
+                            }
                         }
                     }
                 }

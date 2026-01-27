@@ -114,6 +114,7 @@ fn build_semantic_deps_snapshot(
     let raw_types = source_repo.get_all_types();
     let platform_docs_loaded = source_repo.platform_docs_loaded();
     let signature_index = source_repo.get_signature_index_clone();
+    let method_definition_locations = source_repo.get_method_definition_locations_clone();
     let platform_signatures_loaded = platform_docs_loaded;
 
     let snapshot_repo_impl = Arc::new(InMemoryTypeRepository::new());
@@ -122,6 +123,13 @@ fn build_semantic_deps_snapshot(
         .load_types(raw_types)
         .context("load_types into snapshot repository")?;
     snapshot_repo_impl.set_signature_index(signature_index.clone());
+    for (owner, name, location) in method_definition_locations {
+        if let Some(owner) = owner.as_deref() {
+            snapshot_repo_impl.add_config_method_definition_location(owner, &name, location);
+        } else {
+            snapshot_repo_impl.add_global_function_definition_location(&name, location);
+        }
+    }
 
     let repository = snapshot_repo_impl as Arc<dyn TypeRepository>;
     let resolver = Arc::new(TypeResolver::new(repository.clone()));

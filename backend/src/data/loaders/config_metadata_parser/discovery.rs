@@ -16,6 +16,8 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::warn;
 
+use bsl_shared::domain::types::MetadataKind;
+
 // Импорт структур прогресса
 use crate::data::loaders::progress::{IndexingPhase, ProgressUpdate};
 
@@ -529,7 +531,7 @@ impl ConfigurationDiscovery {
                             );
                         }
 
-                        if object_type == "CommonModule" {
+                        if metadata.object_type == Some(MetadataKind::CommonModule) {
                             metadata.common_module_path =
                                 forms_discovery.discover_common_module_path(object_name);
                         }

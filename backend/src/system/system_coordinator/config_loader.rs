@@ -1621,7 +1621,7 @@ fn config_fingerprint(config_path: &Path, strict: bool) -> Result<String> {
 
 fn config_settings_fingerprint(strict: bool) -> String {
     format!(
-        "config_parser_v2;modules_indexing_v1;strict_fingerprint={}",
+        "config_parser_v3;modules_indexing_v1;strict_fingerprint={}",
         strict
     )
 }

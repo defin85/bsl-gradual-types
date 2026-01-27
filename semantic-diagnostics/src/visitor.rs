@@ -862,7 +862,9 @@ mod tests {
         visitor.visit_node(&program.nodes[0], &mut context);
 
         let errors = visitor.into_errors();
-        assert!(errors.iter().any(|d| d.severity == DiagnosticSeverity::Error));
+        assert!(errors
+            .iter()
+            .any(|d| d.severity == DiagnosticSeverity::Error));
     }
 
     // === MILESTONE 3.16: Metadata object validation tests ===

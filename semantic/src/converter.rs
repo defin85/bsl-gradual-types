@@ -256,9 +256,11 @@ impl AstToIrConverter {
                 .symbol_table
                 .lookup_variable_in_hierarchy(scope_id, variable)
             {
-                let _ = self
-                    .symbol_table
-                    .update_variable_type(decl_scope_id, variable.clone(), rt.clone());
+                let _ = self.symbol_table.update_variable_type(
+                    decl_scope_id,
+                    variable.clone(),
+                    rt.clone(),
+                );
             } else {
                 // Неожиданная ситуация: переменная не была зарегистрирована на этапе конвертации.
                 // Регистрируем в function scope, чтобы hover/type_at_position не теряли тип.
@@ -280,7 +282,11 @@ impl AstToIrConverter {
 
             match &node.kind {
                 SemanticNodeKind::Return { value_type } => {
-                    out.push(value_type.clone().unwrap_or_else(|| TypeResolution::explicit("Неопределено")));
+                    out.push(
+                        value_type
+                            .clone()
+                            .unwrap_or_else(|| TypeResolution::explicit("Неопределено")),
+                    );
                 }
                 SemanticNodeKind::IfStatement {
                     then_branch,
@@ -311,11 +317,11 @@ impl AstToIrConverter {
     }
 
     fn merge_return_types(&self, return_types: Vec<TypeResolution>) -> TypeResolution {
+        use bsl_shared::domain::types::WeightedType;
         use bsl_shared::domain::types::{
             Certainty, ConcreteType, PlatformType, ResolutionMetadata, ResolutionResult,
             ResolutionSource,
         };
-        use bsl_shared::domain::types::WeightedType;
 
         if return_types.is_empty() {
             return TypeResolution::inferred("Неопределено");

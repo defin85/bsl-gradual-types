@@ -9,17 +9,16 @@ use crate::jobs::JobManager;
 use crate::session::SessionManager;
 use crate::types::{
     BslAgentError, BuildInfoResponse, JobStartResponse, McpHelpResponse, UiUrlResponse,
- };
+};
 
 pub mod types;
 
 use types::{
     BslDefinitionParams, BslDiagnosticsParams, BslMembersParams, BslReferencesParams,
-    BslSymbolSearchParams, BslTypeAtPositionParams, ContextExpandParams, ContextPackParams,
-    BuildInfoParams, JobCancelParams, JobResultParams, JobStatusParams, JobWaitParams, McpHelpParams,
-    UiUrlParams,
-    WorkspaceCloseParams, WorkspaceListParams, WorkspaceOpenParams, WorkspaceResumeParams,
-    WorkspaceStatusParams,
+    BslSymbolSearchParams, BslTypeAtPositionParams, BuildInfoParams, ContextExpandParams,
+    ContextPackParams, JobCancelParams, JobResultParams, JobStatusParams, JobWaitParams,
+    McpHelpParams, UiUrlParams, WorkspaceCloseParams, WorkspaceListParams, WorkspaceOpenParams,
+    WorkspaceResumeParams, WorkspaceStatusParams,
 };
 use types::{WorkspaceDocumentsClearParams, WorkspaceDocumentsSetParams};
 
@@ -162,7 +161,10 @@ impl BslAgentHandler {
                 }
             }
         } else {
-            quickstart.insert(0, "mcp_help(tool_name?) for examples (read-only)".to_string());
+            quickstart.insert(
+                0,
+                "mcp_help(tool_name?) for examples (read-only)".to_string(),
+            );
             notes.push("Pass tool_name to get examples: workspace_open, workspace_documents_set, workspace_documents_clear, bsl_diagnostics_start, job_wait.".to_string());
         }
 
@@ -205,13 +207,13 @@ impl BslAgentHandler {
             .to_string();
 
         let git_sha = option_env!("BSL_AGENT_GIT_SHA")
-            .and_then(|value| (!value.trim().is_empty() && value != "unknown").then(|| value))
+            .and_then(|value| (!value.trim().is_empty() && value != "unknown").then_some(value))
             .map(str::to_string);
         let git_describe = option_env!("BSL_AGENT_GIT_DESCRIBE")
-            .and_then(|value| (!value.trim().is_empty()).then(|| value))
+            .and_then(|value| (!value.trim().is_empty()).then_some(value))
             .map(str::to_string);
-        let build_unix_secs = option_env!("BSL_AGENT_BUILD_UNIX_SECS")
-            .and_then(|value| value.parse::<u64>().ok());
+        let build_unix_secs =
+            option_env!("BSL_AGENT_BUILD_UNIX_SECS").and_then(|value| value.parse::<u64>().ok());
 
         Content::json(BuildInfoResponse {
             package,
@@ -225,7 +227,9 @@ impl BslAgentHandler {
         })
     }
 
-    #[tool(description = "Open workspace session (single-session). Supports multi-root; config may infer platform_version. See mcp_help.")]
+    #[tool(
+        description = "Open workspace session (single-session). Supports multi-root; config may infer platform_version. See mcp_help."
+    )]
     async fn workspace_open(
         &self,
         Parameters(params): Parameters<WorkspaceOpenParams>,
@@ -237,7 +241,9 @@ impl BslAgentHandler {
         Content::json(response)
     }
 
-    #[tool(description = "Get workspace status/progress. ready=true means startup finished. See mcp_help.")]
+    #[tool(
+        description = "Get workspace status/progress. ready=true means startup finished. See mcp_help."
+    )]
     async fn workspace_status(
         &self,
         Parameters(params): Parameters<WorkspaceStatusParams>,
@@ -246,7 +252,9 @@ impl BslAgentHandler {
         Content::json(response)
     }
 
-    #[tool(description = "Close workspace session (releases resources). Required to switch params. See mcp_help.")]
+    #[tool(
+        description = "Close workspace session (releases resources). Required to switch params. See mcp_help."
+    )]
     async fn workspace_close(
         &self,
         Parameters(params): Parameters<WorkspaceCloseParams>,
@@ -255,7 +263,9 @@ impl BslAgentHandler {
         Content::json(serde_json::json!({ "ok": true }))
     }
 
-    #[tool(description = "Resume a persisted session by session_id (single-session rules apply). See mcp_help.")]
+    #[tool(
+        description = "Resume a persisted session by session_id (single-session rules apply). See mcp_help."
+    )]
     async fn workspace_resume(
         &self,
         Parameters(params): Parameters<WorkspaceResumeParams>,
@@ -276,7 +286,9 @@ impl BslAgentHandler {
         Content::json(response)
     }
 
-    #[tool(description = "Set overlays and/or mark docs hot. files accept absolute paths; version required with text. See mcp_help.")]
+    #[tool(
+        description = "Set overlays and/or mark docs hot. files accept absolute paths; version required with text. See mcp_help."
+    )]
     async fn workspace_documents_set(
         &self,
         Parameters(params): Parameters<WorkspaceDocumentsSetParams>,
@@ -288,7 +300,9 @@ impl BslAgentHandler {
         Content::json(response)
     }
 
-    #[tool(description = "Clear overlays and/or remove docs from hot set. documents accept absolute paths. See mcp_help.")]
+    #[tool(
+        description = "Clear overlays and/or remove docs from hot set. documents accept absolute paths. See mcp_help."
+    )]
     async fn workspace_documents_clear(
         &self,
         Parameters(params): Parameters<WorkspaceDocumentsClearParams>,
@@ -300,7 +314,9 @@ impl BslAgentHandler {
         Content::json(response)
     }
 
-    #[tool(description = "Start diagnostics job. scope: \"project\"|\"hot\" or {kind:\"file\",document:...}. Use job_wait/job_result. See mcp_help.")]
+    #[tool(
+        description = "Start diagnostics job. scope: \"project\"|\"hot\" or {kind:\"file\",document:...}. Use job_wait/job_result. See mcp_help."
+    )]
     async fn bsl_diagnostics_start(
         &self,
         Parameters(params): Parameters<BslDiagnosticsParams>,
@@ -340,7 +356,9 @@ impl BslAgentHandler {
         })
     }
 
-    #[tool(description = "Start symbol search job (deterministic). Use job_wait/job_result. See mcp_help.")]
+    #[tool(
+        description = "Start symbol search job (deterministic). Use job_wait/job_result. See mcp_help."
+    )]
     async fn bsl_symbol_search_start(
         &self,
         Parameters(params): Parameters<BslSymbolSearchParams>,
@@ -363,7 +381,9 @@ impl BslAgentHandler {
         })
     }
 
-    #[tool(description = "Start type-at-position job. position is 0-based (LSP); file accepts absolute path. See mcp_help.")]
+    #[tool(
+        description = "Start type-at-position job. position is 0-based (LSP); file accepts absolute path. See mcp_help."
+    )]
     async fn bsl_type_at_position_start(
         &self,
         Parameters(params): Parameters<BslTypeAtPositionParams>,
@@ -386,7 +406,9 @@ impl BslAgentHandler {
         })
     }
 
-    #[tool(description = "Start members job at position (completion-like). position is 0-based (LSP). See mcp_help.")]
+    #[tool(
+        description = "Start members job at position (completion-like). position is 0-based (LSP). See mcp_help."
+    )]
     async fn bsl_members_start(
         &self,
         Parameters(params): Parameters<BslMembersParams>,
@@ -409,7 +431,9 @@ impl BslAgentHandler {
         })
     }
 
-    #[tool(description = "Start definition job (symbol_id or file+position). Use job_wait/job_result. See mcp_help.")]
+    #[tool(
+        description = "Start definition job (symbol_id or file+position). Use job_wait/job_result. See mcp_help."
+    )]
     async fn bsl_definition_start(
         &self,
         Parameters(params): Parameters<BslDefinitionParams>,
@@ -432,7 +456,9 @@ impl BslAgentHandler {
         })
     }
 
-    #[tool(description = "Start references job for symbol_id. Use job_wait/job_result. See mcp_help.")]
+    #[tool(
+        description = "Start references job for symbol_id. Use job_wait/job_result. See mcp_help."
+    )]
     async fn bsl_references_start(
         &self,
         Parameters(params): Parameters<BslReferencesParams>,
@@ -455,7 +481,9 @@ impl BslAgentHandler {
         })
     }
 
-    #[tool(description = "Start context_pack job (hard budget). Use job_wait/job_result. See mcp_help.")]
+    #[tool(
+        description = "Start context_pack job (hard budget). Use job_wait/job_result. See mcp_help."
+    )]
     async fn context_pack_start(
         &self,
         Parameters(params): Parameters<ContextPackParams>,
@@ -478,7 +506,9 @@ impl BslAgentHandler {
         })
     }
 
-    #[tool(description = "Start context_expand job for a context_pack item. Use job_wait/job_result. See mcp_help.")]
+    #[tool(
+        description = "Start context_expand job for a context_pack item. Use job_wait/job_result. See mcp_help."
+    )]
     async fn context_expand_start(
         &self,
         Parameters(params): Parameters<ContextExpandParams>,
@@ -501,7 +531,9 @@ impl BslAgentHandler {
         })
     }
 
-    #[tool(description = "Get job status/progress. progress=100 only for terminal state. See mcp_help.")]
+    #[tool(
+        description = "Get job status/progress. progress=100 only for terminal state. See mcp_help."
+    )]
     async fn job_status(
         &self,
         Parameters(params): Parameters<JobStatusParams>,
@@ -510,7 +542,9 @@ impl BslAgentHandler {
         Content::json(response)
     }
 
-    #[tool(description = "Long-poll job status up to timeout_ms (no result). Use job_result after succeeded. See mcp_help.")]
+    #[tool(
+        description = "Long-poll job status up to timeout_ms (no result). Use job_result after succeeded. See mcp_help."
+    )]
     async fn job_wait(
         &self,
         Parameters(params): Parameters<JobWaitParams>,
@@ -522,7 +556,9 @@ impl BslAgentHandler {
         Content::json(response)
     }
 
-    #[tool(description = "Get job result (succeeded only). Use job_status/job_wait first. See mcp_help.")]
+    #[tool(
+        description = "Get job result (succeeded only). Use job_status/job_wait first. See mcp_help."
+    )]
     async fn job_result(
         &self,
         Parameters(params): Parameters<JobResultParams>,

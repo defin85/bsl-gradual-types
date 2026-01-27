@@ -40,25 +40,13 @@ pub(crate) enum V2FileKey {
     Url(String),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct FormattingCapabilityState {
     pub dynamic_document_formatting: bool,
     pub dynamic_range_formatting: bool,
     pub registered: bool,
     pub in_flight: bool,
     pub desired_enabled: bool,
-}
-
-impl Default for FormattingCapabilityState {
-    fn default() -> Self {
-        Self {
-            dynamic_document_formatting: false,
-            dynamic_range_formatting: false,
-            registered: false,
-            in_flight: false,
-            desired_enabled: false,
-        }
-    }
 }
 
 /// BSL Language Server backend - CLEAN ARCHITECTURE

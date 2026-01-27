@@ -145,13 +145,9 @@ where
             // Last-resort: ignore central directory entirely and extract by scanning local file
             // headers. This is needed for some real-world 1C HBK/ZIP variants where EOCD/CD is
             // present but points to an invalid/partial central directory.
-            let extracted = unpack_zip_scan_local_headers(
-                &data,
-                zip_path,
-                target_dir,
-                progress_callback,
-            )
-            .context("Не удалось распаковать ZIP через сканирование local headers")?;
+            let extracted =
+                unpack_zip_scan_local_headers(&data, zip_path, target_dir, progress_callback)
+                    .context("Не удалось распаковать ZIP через сканирование local headers")?;
             if extracted == 0 {
                 return Err(anyhow!(
                     "Не удалось распаковать ZIP: fallback и scan extracted 0 files"
@@ -400,7 +396,9 @@ where
         if (flags & 0x08) != 0 {
             // Data descriptor mode would require parsing post-data descriptors to find the next
             // header reliably. We don't currently need it for 1C docs fixtures.
-            return Err(anyhow!("ZIP data descriptor is not supported in scan fallback"));
+            return Err(anyhow!(
+                "ZIP data descriptor is not supported in scan fallback"
+            ));
         }
 
         let compression = read_u16_le(data, pos + 8);
@@ -454,9 +452,7 @@ where
                 0 => output.extend_from_slice(&data[data_start..data_end]),
                 8 => {
                     let mut decoder = DeflateDecoder::new(&data[data_start..data_end]);
-                    decoder
-                        .read_to_end(&mut output)
-                        .context("deflate decode")?;
+                    decoder.read_to_end(&mut output).context("deflate decode")?;
                 }
                 _ => return Ok(()), // skip unsupported compression
             }
@@ -485,7 +481,10 @@ where
         pos = data_end;
     }
 
-    info!("✅ ZIP распакован через scan fallback: {} файлов", extracted);
+    info!(
+        "✅ ZIP распакован через scan fallback: {} файлов",
+        extracted
+    );
     Ok(extracted)
 }
 

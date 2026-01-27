@@ -172,8 +172,8 @@ fn routine_from_span(
         character: span.end_column,
     };
     let range = Range { start, end };
-    let selection_range = selection_range_for_name(source, line_index, span.start_line, name)
-        .unwrap_or(range);
+    let selection_range =
+        selection_range_for_name(source, line_index, span.start_line, name).unwrap_or(range);
     RoutineSymbol {
         name: name.to_string(),
         detail: if is_export {
@@ -298,7 +298,8 @@ fn collect_regions(source: &str) -> Result<Vec<RegionSymbol>, SymbolsError> {
     while let Some(node) = stack.pop() {
         match node.kind() {
             "PREPROC_REGION_KEYWORD" => {
-                let name = extract_region_name(&node, source).unwrap_or_else(|| "region".to_string());
+                let name =
+                    extract_region_name(&node, source).unwrap_or_else(|| "region".to_string());
                 let start = range_from_node(&line_index, source, &node);
                 events.push((start.start, RegionEvent::Start { name, start }));
             }

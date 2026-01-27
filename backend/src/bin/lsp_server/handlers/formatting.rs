@@ -13,8 +13,8 @@ pub fn format_bsl_to_edits(
     indent_size: usize,
 ) -> Result<Option<Vec<TextEdit>>, FormattingError> {
     let options = FormatOptions { indent_size };
-    let formatted = format_document(source, &options)
-        .map_err(|e| FormattingError::Formatter(e.to_string()))?;
+    let formatted =
+        format_document(source, &options).map_err(|e| FormattingError::Formatter(e.to_string()))?;
 
     if formatted == source {
         return Ok(Some(vec![]));
@@ -30,8 +30,8 @@ pub fn format_bsl_range_to_edits(
     range: Range,
 ) -> Result<Option<Vec<TextEdit>>, FormattingError> {
     let options = FormatOptions { indent_size };
-    let formatted = format_document(source, &options)
-        .map_err(|e| FormattingError::Formatter(e.to_string()))?;
+    let formatted =
+        format_document(source, &options).map_err(|e| FormattingError::Formatter(e.to_string()))?;
 
     if formatted == source {
         return Ok(Some(vec![]));

@@ -68,22 +68,21 @@ pub fn handle_prepare_rename(
 
     let (range, placeholder) = match target {
         SymbolTarget::LocalVar { ref name, .. } => {
-            let range = find_local_var_occurrence_range(
-                source,
-                &line_index,
-                parse_result,
-                position,
-                name,
-            )
-            .or_else(|| {
-                let SymbolTarget::LocalVar { decl_range, .. } = target else {
-                    return None;
-                };
-                Some(decl_range)
-            })?;
+            let range =
+                find_local_var_occurrence_range(source, &line_index, parse_result, position, name)
+                    .or_else(|| {
+                        let SymbolTarget::LocalVar { decl_range, .. } = target else {
+                            return None;
+                        };
+                        Some(decl_range)
+                    })?;
             (range, name.clone())
         }
-        SymbolTarget::Routine { ref name, decl_range, .. } => (decl_range, name.clone()),
+        SymbolTarget::Routine {
+            ref name,
+            decl_range,
+            ..
+        } => (decl_range, name.clone()),
     };
 
     Some(PrepareRenameResponse::RangeWithPlaceholder { range, placeholder })
@@ -103,9 +102,8 @@ pub fn handle_rename(
 
     let line_index = LineIndex::new(source);
     let position = params.text_document_position.position;
-    let target =
-        resolve_target_at_position(source, &line_index, parse_result, position)
-            .ok_or(RenameError::Unsupported)?;
+    let target = resolve_target_at_position(source, &line_index, parse_result, position)
+        .ok_or(RenameError::Unsupported)?;
 
     let target_name = match &target {
         SymbolTarget::LocalVar { name, .. } => name.as_str(),
@@ -186,8 +184,12 @@ fn resolve_target_at_position(
         }
 
         // Cursor on routine name itself => routine target.
-        let routine_decl_range =
-            selection_range_for_name_in_span_line(source, line_index, &routine_span, &routine_name)?;
+        let routine_decl_range = selection_range_for_name_in_span_line(
+            source,
+            line_index,
+            &routine_span,
+            &routine_name,
+        )?;
         if range_contains_position(routine_decl_range, position) {
             return Some(SymbolTarget::Routine {
                 name: routine_name,
@@ -200,8 +202,12 @@ fn resolve_target_at_position(
     // 2) Routine by declaration at top-level.
     for stmt in &parse_result.program.statements {
         let (kind, name, span) = match stmt {
-            Statement::FunctionDecl { name, span, .. } => (RoutineKind::Function, name.clone(), *span),
-            Statement::ProcedureDecl { name, span, .. } => (RoutineKind::Procedure, name.clone(), *span),
+            Statement::FunctionDecl { name, span, .. } => {
+                (RoutineKind::Function, name.clone(), *span)
+            }
+            Statement::ProcedureDecl { name, span, .. } => {
+                (RoutineKind::Procedure, name.clone(), *span)
+            }
             _ => continue,
         };
         let decl_range = selection_range_for_name_in_span_line(source, line_index, &span, &name)?;
@@ -218,8 +224,16 @@ fn resolve_target_at_position(
     if let Some(name) = find_called_identifier_at_position(parse_result, position) {
         for stmt in &parse_result.program.statements {
             match stmt {
-                Statement::FunctionDecl { name: decl_name, span, .. }
-                | Statement::ProcedureDecl { name: decl_name, span, .. } => {
+                Statement::FunctionDecl {
+                    name: decl_name,
+                    span,
+                    ..
+                }
+                | Statement::ProcedureDecl {
+                    name: decl_name,
+                    span,
+                    ..
+                } => {
                     if decl_name != &name {
                         continue;
                     }
@@ -267,7 +281,9 @@ fn collect_target_ranges(
             }
             collect_identifier_ranges_in_statements(&body, name, &mut ranges);
         }
-        SymbolTarget::Routine { name, decl_range, .. } => {
+        SymbolTarget::Routine {
+            name, decl_range, ..
+        } => {
             if include_declaration {
                 ranges.push(*decl_range);
             }
@@ -298,7 +314,11 @@ fn is_ambiguous_local_name(local_decls: &[LocalDecl], name: &str) -> bool {
     local_decls.iter().filter(|d| d.name == name).count() > 1
 }
 
-fn collect_local_var_decls(source: &str, line_index: &LineIndex, body: &[Statement]) -> Vec<LocalDecl> {
+fn collect_local_var_decls(
+    source: &str,
+    line_index: &LineIndex,
+    body: &[Statement],
+) -> Vec<LocalDecl> {
     let mut out = Vec::new();
     for stmt in body {
         match stmt {
@@ -349,12 +369,16 @@ fn find_enclosing_routine(
 ) -> Option<(RoutineKind, String, bsl_shared::ir::Span, Vec<Statement>)> {
     for stmt in &parse_result.program.statements {
         match stmt {
-            Statement::FunctionDecl { name, body, span, .. } => {
+            Statement::FunctionDecl {
+                name, body, span, ..
+            } => {
                 if span_contains_position(*span, position) {
                     return Some((RoutineKind::Function, name.clone(), *span, body.clone()));
                 }
             }
-            Statement::ProcedureDecl { name, body, span, .. } => {
+            Statement::ProcedureDecl {
+                name, body, span, ..
+            } => {
                 if span_contains_position(*span, position) {
                     return Some((RoutineKind::Procedure, name.clone(), *span, body.clone()));
                 }
@@ -376,7 +400,10 @@ fn find_local_var_occurrence_range(
     find_identifier_range_at_position_in_statements(&body, position, name)
 }
 
-fn find_identifier_at_position_in_statements(stmts: &[Statement], position: Position) -> Option<String> {
+fn find_identifier_at_position_in_statements(
+    stmts: &[Statement],
+    position: Position,
+) -> Option<String> {
     for stmt in stmts {
         if let Some(name) = find_identifier_at_position_in_statement(stmt, position) {
             return Some(name);
@@ -385,7 +412,10 @@ fn find_identifier_at_position_in_statements(stmts: &[Statement], position: Posi
     None
 }
 
-fn find_identifier_at_position_in_statement(stmt: &Statement, position: Position) -> Option<String> {
+fn find_identifier_at_position_in_statement(
+    stmt: &Statement,
+    position: Position,
+) -> Option<String> {
     match stmt {
         Statement::Assignment { target, value, .. } => {
             find_identifier_at_position_in_expression(target, position)
@@ -403,19 +433,19 @@ fn find_identifier_at_position_in_statement(stmt: &Statement, position: Position
                     .and_then(|b| find_identifier_at_position_in_statements(b, position))
             })
         }),
-        Statement::For { start, end, body, .. } => {
-            find_identifier_at_position_in_expression(start, position)
-                .or_else(|| find_identifier_at_position_in_expression(end, position))
-                .or_else(|| find_identifier_at_position_in_statements(body, position))
-        }
-        Statement::ForEach { collection, body, .. } => {
-            find_identifier_at_position_in_expression(collection, position)
-                .or_else(|| find_identifier_at_position_in_statements(body, position))
-        }
-        Statement::While { condition, body, .. } => {
-            find_identifier_at_position_in_expression(condition, position)
-                .or_else(|| find_identifier_at_position_in_statements(body, position))
-        }
+        Statement::For {
+            start, end, body, ..
+        } => find_identifier_at_position_in_expression(start, position)
+            .or_else(|| find_identifier_at_position_in_expression(end, position))
+            .or_else(|| find_identifier_at_position_in_statements(body, position)),
+        Statement::ForEach {
+            collection, body, ..
+        } => find_identifier_at_position_in_expression(collection, position)
+            .or_else(|| find_identifier_at_position_in_statements(body, position)),
+        Statement::While {
+            condition, body, ..
+        } => find_identifier_at_position_in_expression(condition, position)
+            .or_else(|| find_identifier_at_position_in_statements(body, position)),
         Statement::Return { value, .. } => value
             .as_ref()
             .and_then(|e| find_identifier_at_position_in_expression(e, position)),
@@ -425,8 +455,12 @@ fn find_identifier_at_position_in_statement(stmt: &Statement, position: Position
             ..
         } => find_identifier_at_position_in_statements(try_body, position)
             .or_else(|| find_identifier_at_position_in_statements(except_body, position)),
-        Statement::Call { expression, .. } => find_identifier_at_position_in_expression(expression, position),
-        Statement::Execute { code, .. } => find_identifier_at_position_in_expression(code, position),
+        Statement::Call { expression, .. } => {
+            find_identifier_at_position_in_expression(expression, position)
+        }
+        Statement::Execute { code, .. } => {
+            find_identifier_at_position_in_expression(code, position)
+        }
         Statement::RaiseError { message, .. } => message
             .as_ref()
             .and_then(|e| find_identifier_at_position_in_expression(e, position)),
@@ -438,7 +472,9 @@ fn find_identifier_at_position_in_statement(stmt: &Statement, position: Position
             find_identifier_at_position_in_expression(event, position)
                 .or_else(|| find_identifier_at_position_in_expression(handler, position))
         }
-        Statement::Await { expression, .. } => find_identifier_at_position_in_expression(expression, position),
+        Statement::Await { expression, .. } => {
+            find_identifier_at_position_in_expression(expression, position)
+        }
         Statement::FunctionDecl { .. }
         | Statement::ProcedureDecl { .. }
         | Statement::VarDeclaration { .. }
@@ -449,7 +485,10 @@ fn find_identifier_at_position_in_statement(stmt: &Statement, position: Position
     }
 }
 
-fn find_identifier_at_position_in_expression(expr: &Expression, position: Position) -> Option<String> {
+fn find_identifier_at_position_in_expression(
+    expr: &Expression,
+    position: Position,
+) -> Option<String> {
     match expr {
         Expression::Identifier { name, span } => {
             if span_contains_position(*span, position) {
@@ -458,11 +497,19 @@ fn find_identifier_at_position_in_expression(expr: &Expression, position: Positi
                 None
             }
         }
-        Expression::Call { function, args, .. } => find_identifier_at_position_in_expression(function, position)
-            .or_else(|| args.iter().find_map(|a| find_identifier_at_position_in_expression(a, position))),
-        Expression::Binary { left, right, .. } => find_identifier_at_position_in_expression(left, position)
-            .or_else(|| find_identifier_at_position_in_expression(right, position)),
-        Expression::Unary { operand, .. } => find_identifier_at_position_in_expression(operand, position),
+        Expression::Call { function, args, .. } => {
+            find_identifier_at_position_in_expression(function, position).or_else(|| {
+                args.iter()
+                    .find_map(|a| find_identifier_at_position_in_expression(a, position))
+            })
+        }
+        Expression::Binary { left, right, .. } => {
+            find_identifier_at_position_in_expression(left, position)
+                .or_else(|| find_identifier_at_position_in_expression(right, position))
+        }
+        Expression::Unary { operand, .. } => {
+            find_identifier_at_position_in_expression(operand, position)
+        }
         Expression::Ternary {
             condition,
             then_expr,
@@ -471,11 +518,19 @@ fn find_identifier_at_position_in_expression(expr: &Expression, position: Positi
         } => find_identifier_at_position_in_expression(condition, position)
             .or_else(|| find_identifier_at_position_in_expression(then_expr, position))
             .or_else(|| find_identifier_at_position_in_expression(else_expr, position)),
-        Expression::New { args, .. } => args.iter().find_map(|a| find_identifier_at_position_in_expression(a, position)),
-        Expression::PropertyAccess { object, .. } => find_identifier_at_position_in_expression(object, position),
-        Expression::IndexAccess { object, index, .. } => find_identifier_at_position_in_expression(object, position)
-            .or_else(|| find_identifier_at_position_in_expression(index, position)),
-        Expression::Await { expression, .. } => find_identifier_at_position_in_expression(expression, position),
+        Expression::New { args, .. } => args
+            .iter()
+            .find_map(|a| find_identifier_at_position_in_expression(a, position)),
+        Expression::PropertyAccess { object, .. } => {
+            find_identifier_at_position_in_expression(object, position)
+        }
+        Expression::IndexAccess { object, index, .. } => {
+            find_identifier_at_position_in_expression(object, position)
+                .or_else(|| find_identifier_at_position_in_expression(index, position))
+        }
+        Expression::Await { expression, .. } => {
+            find_identifier_at_position_in_expression(expression, position)
+        }
         Expression::String { .. }
         | Expression::Number { .. }
         | Expression::Boolean { .. }
@@ -502,26 +557,38 @@ fn find_identifier_range_at_position_in_statement(
     name: &str,
 ) -> Option<Range> {
     match stmt {
-        Statement::Assignment { target, value, .. } => find_identifier_range_at_position_in_expression(target, position, name)
-            .or_else(|| find_identifier_range_at_position_in_expression(value, position, name)),
+        Statement::Assignment { target, value, .. } => {
+            find_identifier_range_at_position_in_expression(target, position, name)
+                .or_else(|| find_identifier_range_at_position_in_expression(value, position, name))
+        }
         Statement::If {
             condition,
             then_body,
             else_body,
             ..
-        } => find_identifier_range_at_position_in_expression(condition, position, name).or_else(|| {
-            find_identifier_range_at_position_in_statements(then_body, position, name).or_else(|| {
-                else_body
-                    .as_ref()
-                    .and_then(|b| find_identifier_range_at_position_in_statements(b, position, name))
-            })
-        }),
-        Statement::For { start, end, body, .. } => find_identifier_range_at_position_in_expression(start, position, name)
+        } => find_identifier_range_at_position_in_expression(condition, position, name).or_else(
+            || {
+                find_identifier_range_at_position_in_statements(then_body, position, name).or_else(
+                    || {
+                        else_body.as_ref().and_then(|b| {
+                            find_identifier_range_at_position_in_statements(b, position, name)
+                        })
+                    },
+                )
+            },
+        ),
+        Statement::For {
+            start, end, body, ..
+        } => find_identifier_range_at_position_in_expression(start, position, name)
             .or_else(|| find_identifier_range_at_position_in_expression(end, position, name))
             .or_else(|| find_identifier_range_at_position_in_statements(body, position, name)),
-        Statement::ForEach { collection, body, .. } => find_identifier_range_at_position_in_expression(collection, position, name)
+        Statement::ForEach {
+            collection, body, ..
+        } => find_identifier_range_at_position_in_expression(collection, position, name)
             .or_else(|| find_identifier_range_at_position_in_statements(body, position, name)),
-        Statement::While { condition, body, .. } => find_identifier_range_at_position_in_expression(condition, position, name)
+        Statement::While {
+            condition, body, ..
+        } => find_identifier_range_at_position_in_expression(condition, position, name)
             .or_else(|| find_identifier_range_at_position_in_statements(body, position, name)),
         Statement::Return { value, .. } => value
             .as_ref()
@@ -530,18 +597,31 @@ fn find_identifier_range_at_position_in_statement(
             try_body,
             except_body,
             ..
-        } => find_identifier_range_at_position_in_statements(try_body, position, name)
-            .or_else(|| find_identifier_range_at_position_in_statements(except_body, position, name)),
-        Statement::Call { expression, .. } => find_identifier_range_at_position_in_expression(expression, position, name),
-        Statement::Execute { code, .. } => find_identifier_range_at_position_in_expression(code, position, name),
+        } => find_identifier_range_at_position_in_statements(try_body, position, name).or_else(
+            || find_identifier_range_at_position_in_statements(except_body, position, name),
+        ),
+        Statement::Call { expression, .. } => {
+            find_identifier_range_at_position_in_expression(expression, position, name)
+        }
+        Statement::Execute { code, .. } => {
+            find_identifier_range_at_position_in_expression(code, position, name)
+        }
         Statement::RaiseError { message, .. } => message
             .as_ref()
             .and_then(|e| find_identifier_range_at_position_in_expression(e, position, name)),
-        Statement::AddHandler { event, handler, .. } => find_identifier_range_at_position_in_expression(event, position, name)
-            .or_else(|| find_identifier_range_at_position_in_expression(handler, position, name)),
-        Statement::RemoveHandler { event, handler, .. } => find_identifier_range_at_position_in_expression(event, position, name)
-            .or_else(|| find_identifier_range_at_position_in_expression(handler, position, name)),
-        Statement::Await { expression, .. } => find_identifier_range_at_position_in_expression(expression, position, name),
+        Statement::AddHandler { event, handler, .. } => {
+            find_identifier_range_at_position_in_expression(event, position, name).or_else(|| {
+                find_identifier_range_at_position_in_expression(handler, position, name)
+            })
+        }
+        Statement::RemoveHandler { event, handler, .. } => {
+            find_identifier_range_at_position_in_expression(event, position, name).or_else(|| {
+                find_identifier_range_at_position_in_expression(handler, position, name)
+            })
+        }
+        Statement::Await { expression, .. } => {
+            find_identifier_range_at_position_in_expression(expression, position, name)
+        }
         Statement::FunctionDecl { .. }
         | Statement::ProcedureDecl { .. }
         | Statement::VarDeclaration { .. }
@@ -565,11 +645,20 @@ fn find_identifier_range_at_position_in_expression(
                 None
             }
         }
-        Expression::Call { function, args, .. } => find_identifier_range_at_position_in_expression(function, position, name)
-            .or_else(|| args.iter().find_map(|a| find_identifier_range_at_position_in_expression(a, position, name))),
-        Expression::Binary { left, right, .. } => find_identifier_range_at_position_in_expression(left, position, name)
-            .or_else(|| find_identifier_range_at_position_in_expression(right, position, name)),
-        Expression::Unary { operand, .. } => find_identifier_range_at_position_in_expression(operand, position, name),
+        Expression::Call { function, args, .. } => find_identifier_range_at_position_in_expression(
+            function, position, name,
+        )
+        .or_else(|| {
+            args.iter()
+                .find_map(|a| find_identifier_range_at_position_in_expression(a, position, name))
+        }),
+        Expression::Binary { left, right, .. } => {
+            find_identifier_range_at_position_in_expression(left, position, name)
+                .or_else(|| find_identifier_range_at_position_in_expression(right, position, name))
+        }
+        Expression::Unary { operand, .. } => {
+            find_identifier_range_at_position_in_expression(operand, position, name)
+        }
         Expression::Ternary {
             condition,
             then_expr,
@@ -578,11 +667,19 @@ fn find_identifier_range_at_position_in_expression(
         } => find_identifier_range_at_position_in_expression(condition, position, name)
             .or_else(|| find_identifier_range_at_position_in_expression(then_expr, position, name))
             .or_else(|| find_identifier_range_at_position_in_expression(else_expr, position, name)),
-        Expression::New { args, .. } => args.iter().find_map(|a| find_identifier_range_at_position_in_expression(a, position, name)),
-        Expression::PropertyAccess { object, .. } => find_identifier_range_at_position_in_expression(object, position, name),
-        Expression::IndexAccess { object, index, .. } => find_identifier_range_at_position_in_expression(object, position, name)
-            .or_else(|| find_identifier_range_at_position_in_expression(index, position, name)),
-        Expression::Await { expression, .. } => find_identifier_range_at_position_in_expression(expression, position, name),
+        Expression::New { args, .. } => args
+            .iter()
+            .find_map(|a| find_identifier_range_at_position_in_expression(a, position, name)),
+        Expression::PropertyAccess { object, .. } => {
+            find_identifier_range_at_position_in_expression(object, position, name)
+        }
+        Expression::IndexAccess { object, index, .. } => {
+            find_identifier_range_at_position_in_expression(object, position, name)
+                .or_else(|| find_identifier_range_at_position_in_expression(index, position, name))
+        }
+        Expression::Await { expression, .. } => {
+            find_identifier_range_at_position_in_expression(expression, position, name)
+        }
         Expression::String { .. }
         | Expression::Number { .. }
         | Expression::Boolean { .. }
@@ -614,16 +711,22 @@ fn collect_identifier_ranges_in_statement(stmt: &Statement, name: &str, out: &mu
                 collect_identifier_ranges_in_statements(else_body, name, out);
             }
         }
-        Statement::For { start, end, body, .. } => {
+        Statement::For {
+            start, end, body, ..
+        } => {
             collect_identifier_ranges_in_expression(start, name, out);
             collect_identifier_ranges_in_expression(end, name, out);
             collect_identifier_ranges_in_statements(body, name, out);
         }
-        Statement::ForEach { collection, body, .. } => {
+        Statement::ForEach {
+            collection, body, ..
+        } => {
             collect_identifier_ranges_in_expression(collection, name, out);
             collect_identifier_ranges_in_statements(body, name, out);
         }
-        Statement::While { condition, body, .. } => {
+        Statement::While {
+            condition, body, ..
+        } => {
             collect_identifier_ranges_in_expression(condition, name, out);
             collect_identifier_ranges_in_statements(body, name, out);
         }
@@ -640,18 +743,23 @@ fn collect_identifier_ranges_in_statement(stmt: &Statement, name: &str, out: &mu
             collect_identifier_ranges_in_statements(try_body, name, out);
             collect_identifier_ranges_in_statements(except_body, name, out);
         }
-        Statement::Call { expression, .. } => collect_identifier_ranges_in_expression(expression, name, out),
+        Statement::Call { expression, .. } => {
+            collect_identifier_ranges_in_expression(expression, name, out)
+        }
         Statement::Execute { code, .. } => collect_identifier_ranges_in_expression(code, name, out),
         Statement::RaiseError { message, .. } => {
             if let Some(message) = message {
                 collect_identifier_ranges_in_expression(message, name, out);
             }
         }
-        Statement::AddHandler { event, handler, .. } | Statement::RemoveHandler { event, handler, .. } => {
+        Statement::AddHandler { event, handler, .. }
+        | Statement::RemoveHandler { event, handler, .. } => {
             collect_identifier_ranges_in_expression(event, name, out);
             collect_identifier_ranges_in_expression(handler, name, out);
         }
-        Statement::Await { expression, .. } => collect_identifier_ranges_in_expression(expression, name, out),
+        Statement::Await { expression, .. } => {
+            collect_identifier_ranges_in_expression(expression, name, out)
+        }
         Statement::FunctionDecl { .. }
         | Statement::ProcedureDecl { .. }
         | Statement::VarDeclaration { .. }
@@ -679,7 +787,9 @@ fn collect_identifier_ranges_in_expression(expr: &Expression, name: &str, out: &
             collect_identifier_ranges_in_expression(left, name, out);
             collect_identifier_ranges_in_expression(right, name, out);
         }
-        Expression::Unary { operand, .. } => collect_identifier_ranges_in_expression(operand, name, out),
+        Expression::Unary { operand, .. } => {
+            collect_identifier_ranges_in_expression(operand, name, out)
+        }
         Expression::Ternary {
             condition,
             then_expr,
@@ -695,12 +805,16 @@ fn collect_identifier_ranges_in_expression(expr: &Expression, name: &str, out: &
                 collect_identifier_ranges_in_expression(arg, name, out);
             }
         }
-        Expression::PropertyAccess { object, .. } => collect_identifier_ranges_in_expression(object, name, out),
+        Expression::PropertyAccess { object, .. } => {
+            collect_identifier_ranges_in_expression(object, name, out)
+        }
         Expression::IndexAccess { object, index, .. } => {
             collect_identifier_ranges_in_expression(object, name, out);
             collect_identifier_ranges_in_expression(index, name, out);
         }
-        Expression::Await { expression, .. } => collect_identifier_ranges_in_expression(expression, name, out),
+        Expression::Await { expression, .. } => {
+            collect_identifier_ranges_in_expression(expression, name, out)
+        }
         Expression::String { .. }
         | Expression::Number { .. }
         | Expression::Boolean { .. }
@@ -708,7 +822,11 @@ fn collect_identifier_ranges_in_expression(expr: &Expression, name: &str, out: &
     }
 }
 
-fn collect_routine_call_ranges_in_program(parse_result: &ParseResult, routine_name: &str, out: &mut Vec<Range>) {
+fn collect_routine_call_ranges_in_program(
+    parse_result: &ParseResult,
+    routine_name: &str,
+    out: &mut Vec<Range>,
+) {
     for stmt in &parse_result.program.statements {
         match stmt {
             Statement::FunctionDecl { body, .. } | Statement::ProcedureDecl { body, .. } => {
@@ -719,13 +837,21 @@ fn collect_routine_call_ranges_in_program(parse_result: &ParseResult, routine_na
     }
 }
 
-fn collect_routine_call_ranges_in_statements(stmts: &[Statement], routine_name: &str, out: &mut Vec<Range>) {
+fn collect_routine_call_ranges_in_statements(
+    stmts: &[Statement],
+    routine_name: &str,
+    out: &mut Vec<Range>,
+) {
     for stmt in stmts {
         collect_routine_call_ranges_in_statement(stmt, routine_name, out);
     }
 }
 
-fn collect_routine_call_ranges_in_statement(stmt: &Statement, routine_name: &str, out: &mut Vec<Range>) {
+fn collect_routine_call_ranges_in_statement(
+    stmt: &Statement,
+    routine_name: &str,
+    out: &mut Vec<Range>,
+) {
     match stmt {
         Statement::Assignment { target, value, .. } => {
             collect_routine_call_ranges_in_expression(target, routine_name, out);
@@ -743,16 +869,22 @@ fn collect_routine_call_ranges_in_statement(stmt: &Statement, routine_name: &str
                 collect_routine_call_ranges_in_statements(else_body, routine_name, out);
             }
         }
-        Statement::For { start, end, body, .. } => {
+        Statement::For {
+            start, end, body, ..
+        } => {
             collect_routine_call_ranges_in_expression(start, routine_name, out);
             collect_routine_call_ranges_in_expression(end, routine_name, out);
             collect_routine_call_ranges_in_statements(body, routine_name, out);
         }
-        Statement::ForEach { collection, body, .. } => {
+        Statement::ForEach {
+            collection, body, ..
+        } => {
             collect_routine_call_ranges_in_expression(collection, routine_name, out);
             collect_routine_call_ranges_in_statements(body, routine_name, out);
         }
-        Statement::While { condition, body, .. } => {
+        Statement::While {
+            condition, body, ..
+        } => {
             collect_routine_call_ranges_in_expression(condition, routine_name, out);
             collect_routine_call_ranges_in_statements(body, routine_name, out);
         }
@@ -769,18 +901,25 @@ fn collect_routine_call_ranges_in_statement(stmt: &Statement, routine_name: &str
             collect_routine_call_ranges_in_statements(try_body, routine_name, out);
             collect_routine_call_ranges_in_statements(except_body, routine_name, out);
         }
-        Statement::Call { expression, .. } => collect_routine_call_ranges_in_expression(expression, routine_name, out),
-        Statement::Execute { code, .. } => collect_routine_call_ranges_in_expression(code, routine_name, out),
+        Statement::Call { expression, .. } => {
+            collect_routine_call_ranges_in_expression(expression, routine_name, out)
+        }
+        Statement::Execute { code, .. } => {
+            collect_routine_call_ranges_in_expression(code, routine_name, out)
+        }
         Statement::RaiseError { message, .. } => {
             if let Some(message) = message {
                 collect_routine_call_ranges_in_expression(message, routine_name, out);
             }
         }
-        Statement::AddHandler { event, handler, .. } | Statement::RemoveHandler { event, handler, .. } => {
+        Statement::AddHandler { event, handler, .. }
+        | Statement::RemoveHandler { event, handler, .. } => {
             collect_routine_call_ranges_in_expression(event, routine_name, out);
             collect_routine_call_ranges_in_expression(handler, routine_name, out);
         }
-        Statement::Await { expression, .. } => collect_routine_call_ranges_in_expression(expression, routine_name, out),
+        Statement::Await { expression, .. } => {
+            collect_routine_call_ranges_in_expression(expression, routine_name, out)
+        }
         Statement::FunctionDecl { .. }
         | Statement::ProcedureDecl { .. }
         | Statement::VarDeclaration { .. }
@@ -791,7 +930,11 @@ fn collect_routine_call_ranges_in_statement(stmt: &Statement, routine_name: &str
     }
 }
 
-fn collect_routine_call_ranges_in_expression(expr: &Expression, routine_name: &str, out: &mut Vec<Range>) {
+fn collect_routine_call_ranges_in_expression(
+    expr: &Expression,
+    routine_name: &str,
+    out: &mut Vec<Range>,
+) {
     match expr {
         Expression::Call { function, args, .. } => {
             if let Expression::Identifier { name, span } = function.as_ref() {
@@ -808,7 +951,9 @@ fn collect_routine_call_ranges_in_expression(expr: &Expression, routine_name: &s
             collect_routine_call_ranges_in_expression(left, routine_name, out);
             collect_routine_call_ranges_in_expression(right, routine_name, out);
         }
-        Expression::Unary { operand, .. } => collect_routine_call_ranges_in_expression(operand, routine_name, out),
+        Expression::Unary { operand, .. } => {
+            collect_routine_call_ranges_in_expression(operand, routine_name, out)
+        }
         Expression::Ternary {
             condition,
             then_expr,
@@ -824,12 +969,16 @@ fn collect_routine_call_ranges_in_expression(expr: &Expression, routine_name: &s
                 collect_routine_call_ranges_in_expression(arg, routine_name, out);
             }
         }
-        Expression::PropertyAccess { object, .. } => collect_routine_call_ranges_in_expression(object, routine_name, out),
+        Expression::PropertyAccess { object, .. } => {
+            collect_routine_call_ranges_in_expression(object, routine_name, out)
+        }
         Expression::IndexAccess { object, index, .. } => {
             collect_routine_call_ranges_in_expression(object, routine_name, out);
             collect_routine_call_ranges_in_expression(index, routine_name, out);
         }
-        Expression::Await { expression, .. } => collect_routine_call_ranges_in_expression(expression, routine_name, out),
+        Expression::Await { expression, .. } => {
+            collect_routine_call_ranges_in_expression(expression, routine_name, out)
+        }
         Expression::Identifier { .. }
         | Expression::String { .. }
         | Expression::Number { .. }
@@ -838,11 +987,15 @@ fn collect_routine_call_ranges_in_expression(expr: &Expression, routine_name: &s
     }
 }
 
-fn find_called_identifier_at_position(parse_result: &ParseResult, position: Position) -> Option<String> {
+fn find_called_identifier_at_position(
+    parse_result: &ParseResult,
+    position: Position,
+) -> Option<String> {
     for stmt in &parse_result.program.statements {
         match stmt {
             Statement::FunctionDecl { body, .. } | Statement::ProcedureDecl { body, .. } => {
-                if let Some(name) = find_called_identifier_at_position_in_statements(body, position) {
+                if let Some(name) = find_called_identifier_at_position_in_statements(body, position)
+                {
                     return Some(name);
                 }
             }
@@ -852,7 +1005,10 @@ fn find_called_identifier_at_position(parse_result: &ParseResult, position: Posi
     None
 }
 
-fn find_called_identifier_at_position_in_statements(stmts: &[Statement], position: Position) -> Option<String> {
+fn find_called_identifier_at_position_in_statements(
+    stmts: &[Statement],
+    position: Position,
+) -> Option<String> {
     for stmt in stmts {
         if let Some(name) = find_called_identifier_at_position_in_statement(stmt, position) {
             return Some(name);
@@ -861,10 +1017,15 @@ fn find_called_identifier_at_position_in_statements(stmts: &[Statement], positio
     None
 }
 
-fn find_called_identifier_at_position_in_statement(stmt: &Statement, position: Position) -> Option<String> {
+fn find_called_identifier_at_position_in_statement(
+    stmt: &Statement,
+    position: Position,
+) -> Option<String> {
     match stmt {
-        Statement::Assignment { target, value, .. } => find_called_identifier_at_position_in_expression(target, position)
-            .or_else(|| find_called_identifier_at_position_in_expression(value, position)),
+        Statement::Assignment { target, value, .. } => {
+            find_called_identifier_at_position_in_expression(target, position)
+                .or_else(|| find_called_identifier_at_position_in_expression(value, position))
+        }
         Statement::If {
             condition,
             then_body,
@@ -877,12 +1038,18 @@ fn find_called_identifier_at_position_in_statement(stmt: &Statement, position: P
                     .and_then(|b| find_called_identifier_at_position_in_statements(b, position))
             })
         }),
-        Statement::For { start, end, body, .. } => find_called_identifier_at_position_in_expression(start, position)
+        Statement::For {
+            start, end, body, ..
+        } => find_called_identifier_at_position_in_expression(start, position)
             .or_else(|| find_called_identifier_at_position_in_expression(end, position))
             .or_else(|| find_called_identifier_at_position_in_statements(body, position)),
-        Statement::ForEach { collection, body, .. } => find_called_identifier_at_position_in_expression(collection, position)
+        Statement::ForEach {
+            collection, body, ..
+        } => find_called_identifier_at_position_in_expression(collection, position)
             .or_else(|| find_called_identifier_at_position_in_statements(body, position)),
-        Statement::While { condition, body, .. } => find_called_identifier_at_position_in_expression(condition, position)
+        Statement::While {
+            condition, body, ..
+        } => find_called_identifier_at_position_in_expression(condition, position)
             .or_else(|| find_called_identifier_at_position_in_statements(body, position)),
         Statement::Return { value, .. } => value
             .as_ref()
@@ -893,16 +1060,23 @@ fn find_called_identifier_at_position_in_statement(stmt: &Statement, position: P
             ..
         } => find_called_identifier_at_position_in_statements(try_body, position)
             .or_else(|| find_called_identifier_at_position_in_statements(except_body, position)),
-        Statement::Call { expression, .. } => find_called_identifier_at_position_in_expression(expression, position),
-        Statement::Execute { code, .. } => find_called_identifier_at_position_in_expression(code, position),
+        Statement::Call { expression, .. } => {
+            find_called_identifier_at_position_in_expression(expression, position)
+        }
+        Statement::Execute { code, .. } => {
+            find_called_identifier_at_position_in_expression(code, position)
+        }
         Statement::RaiseError { message, .. } => message
             .as_ref()
             .and_then(|e| find_called_identifier_at_position_in_expression(e, position)),
-        Statement::AddHandler { event, handler, .. } | Statement::RemoveHandler { event, handler, .. } => {
+        Statement::AddHandler { event, handler, .. }
+        | Statement::RemoveHandler { event, handler, .. } => {
             find_called_identifier_at_position_in_expression(event, position)
                 .or_else(|| find_called_identifier_at_position_in_expression(handler, position))
         }
-        Statement::Await { expression, .. } => find_called_identifier_at_position_in_expression(expression, position),
+        Statement::Await { expression, .. } => {
+            find_called_identifier_at_position_in_expression(expression, position)
+        }
         Statement::FunctionDecl { .. }
         | Statement::ProcedureDecl { .. }
         | Statement::VarDeclaration { .. }
@@ -913,7 +1087,10 @@ fn find_called_identifier_at_position_in_statement(stmt: &Statement, position: P
     }
 }
 
-fn find_called_identifier_at_position_in_expression(expr: &Expression, position: Position) -> Option<String> {
+fn find_called_identifier_at_position_in_expression(
+    expr: &Expression,
+    position: Position,
+) -> Option<String> {
     match expr {
         Expression::Call { function, args, .. } => {
             if let Expression::Identifier { name, span } = function.as_ref() {
@@ -921,12 +1098,18 @@ fn find_called_identifier_at_position_in_expression(expr: &Expression, position:
                     return Some(name.clone());
                 }
             }
-            find_called_identifier_at_position_in_expression(function, position)
-                .or_else(|| args.iter().find_map(|a| find_called_identifier_at_position_in_expression(a, position)))
+            find_called_identifier_at_position_in_expression(function, position).or_else(|| {
+                args.iter()
+                    .find_map(|a| find_called_identifier_at_position_in_expression(a, position))
+            })
         }
-        Expression::Binary { left, right, .. } => find_called_identifier_at_position_in_expression(left, position)
-            .or_else(|| find_called_identifier_at_position_in_expression(right, position)),
-        Expression::Unary { operand, .. } => find_called_identifier_at_position_in_expression(operand, position),
+        Expression::Binary { left, right, .. } => {
+            find_called_identifier_at_position_in_expression(left, position)
+                .or_else(|| find_called_identifier_at_position_in_expression(right, position))
+        }
+        Expression::Unary { operand, .. } => {
+            find_called_identifier_at_position_in_expression(operand, position)
+        }
         Expression::Ternary {
             condition,
             then_expr,
@@ -935,11 +1118,19 @@ fn find_called_identifier_at_position_in_expression(expr: &Expression, position:
         } => find_called_identifier_at_position_in_expression(condition, position)
             .or_else(|| find_called_identifier_at_position_in_expression(then_expr, position))
             .or_else(|| find_called_identifier_at_position_in_expression(else_expr, position)),
-        Expression::New { args, .. } => args.iter().find_map(|a| find_called_identifier_at_position_in_expression(a, position)),
-        Expression::PropertyAccess { object, .. } => find_called_identifier_at_position_in_expression(object, position),
-        Expression::IndexAccess { object, index, .. } => find_called_identifier_at_position_in_expression(object, position)
-            .or_else(|| find_called_identifier_at_position_in_expression(index, position)),
-        Expression::Await { expression, .. } => find_called_identifier_at_position_in_expression(expression, position),
+        Expression::New { args, .. } => args
+            .iter()
+            .find_map(|a| find_called_identifier_at_position_in_expression(a, position)),
+        Expression::PropertyAccess { object, .. } => {
+            find_called_identifier_at_position_in_expression(object, position)
+        }
+        Expression::IndexAccess { object, index, .. } => {
+            find_called_identifier_at_position_in_expression(object, position)
+                .or_else(|| find_called_identifier_at_position_in_expression(index, position))
+        }
+        Expression::Await { expression, .. } => {
+            find_called_identifier_at_position_in_expression(expression, position)
+        }
         Expression::Identifier { .. }
         | Expression::String { .. }
         | Expression::Number { .. }

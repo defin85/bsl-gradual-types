@@ -454,21 +454,28 @@ impl UniversalMetadataObject {
         fn collect_props(
             props: &mut Vec<bsl_shared::domain::types::RawPropertyData>,
             nodes: &[super::form_types::FormElementBinding],
+            seen: &mut std::collections::HashSet<String>,
         ) {
             for n in nodes {
                 if let (Some(ref name), Some(ui_type)) = (&n.name, ui_type_from_kind(&n.kind)) {
-                    props.push(bsl_shared::domain::types::RawPropertyData {
-                        name: name.clone(),
-                        prop_type: ui_type.to_string(),
-                        is_readonly: false,
-                    });
+                    // NOTE: Names in 1C are case-insensitive; prefer first occurrence for
+                    // deterministic, stable output.
+                    let key = name.to_lowercase();
+                    if seen.insert(key) {
+                        props.push(bsl_shared::domain::types::RawPropertyData {
+                            name: name.clone(),
+                            prop_type: ui_type.to_string(),
+                            is_readonly: false,
+                        });
+                    }
                 }
-                collect_props(props, &n.children);
+                collect_props(props, &n.children, seen);
             }
         }
 
         let mut properties: Vec<bsl_shared::domain::types::RawPropertyData> = Vec::new();
-        collect_props(&mut properties, &form.elements);
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        collect_props(&mut properties, &form.elements, &mut seen);
 
         RawTypeData {
             name: type_name.to_string(),

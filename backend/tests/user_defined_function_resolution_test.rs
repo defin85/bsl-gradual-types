@@ -53,16 +53,17 @@ async fn test_undefined_global_function_call_is_reported() {
 КонецПроцедуры
 "#;
 
-    let diagnostics = support::semantic_diagnostics_for_code(deps_bundle.as_ref(), "inline.bsl", code);
+    let diagnostics =
+        support::semantic_diagnostics_for_code(deps_bundle.as_ref(), "inline.bsl", code);
 
     assert!(
         diagnostics.iter().any(|d| {
             d.severity == DiagnosticSeverity::Error
                 && d.message.contains("Неопределенная процедура или функция")
-                && d.message.contains("НеобъявленнаяФункцияКотораяВозвращаетСтроку")
+                && d.message
+                    .contains("НеобъявленнаяФункцияКотораяВозвращаетСтроку")
         }),
         "ожидается diagnostic для неопределенной функции. Actual: {:?}",
         diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
 }
-

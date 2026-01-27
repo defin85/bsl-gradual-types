@@ -102,8 +102,9 @@ pub fn App() -> impl IntoView {
                 metrics.set(None);
 
                 if ready_sessions.is_empty() {
-                    parity_blocked
-                        .set(Some("Нет ready-сессии. Дождитесь завершения startup.".to_string()));
+                    parity_blocked.set(Some(
+                        "Нет ready-сессии. Дождитесь завершения startup.".to_string(),
+                    ));
                 } else {
                     parity_blocked.set(Some(
                         "Должна быть ровно одна ready-сессия для parity UI.".to_string(),

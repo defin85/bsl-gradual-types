@@ -57,7 +57,10 @@ mod tests {
         });
 
         let cfg: LspConfig = serde_json::from_value(raw).expect("LspConfig");
-        assert_eq!(cfg.platform_docs_archive.as_deref(), Some("/tmp/syntax_helper"));
+        assert_eq!(
+            cfg.platform_docs_archive.as_deref(),
+            Some("/tmp/syntax_helper")
+        );
         assert_eq!(
             cfg.configuration_path.as_deref(),
             Some("/tmp/conf/Configuration.xml")

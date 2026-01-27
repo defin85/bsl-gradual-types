@@ -28,7 +28,10 @@ fn main() {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    println!("cargo:rustc-env=BSL_AGENT_BUILD_UNIX_SECS={}", build_unix_secs);
+    println!(
+        "cargo:rustc-env=BSL_AGENT_BUILD_UNIX_SECS={}",
+        build_unix_secs
+    );
 
     if let Ok(profile) = std::env::var("PROFILE") {
         if !profile.trim().is_empty() {
@@ -51,10 +54,7 @@ fn main() {
     let git_dir = repo_root.join(".git");
     // Rebuild when git metadata changes (best-effort; may be absent in some environments).
     println!("cargo:rerun-if-changed={}", git_dir.join("HEAD").display());
-    println!(
-        "cargo:rerun-if-changed={}",
-        git_dir.join("refs").display()
-    );
+    println!("cargo:rerun-if-changed={}", git_dir.join("refs").display());
     println!(
         "cargo:rerun-if-changed={}",
         git_dir.join("packed-refs").display()

@@ -208,10 +208,7 @@ fn normalize_syntax_helper_root_best_effort(path: PathBuf) -> PathBuf {
     // For best UX, if a file is provided, we treat its parent directory as the root.
     match std::fs::metadata(&path) {
         Ok(meta) if meta.is_file() => match path.extension().and_then(|e| e.to_str()) {
-            Some("hbk") | Some("zip") => path
-                .parent()
-                .map(PathBuf::from)
-                .unwrap_or(path),
+            Some("hbk") | Some("zip") => path.parent().map(PathBuf::from).unwrap_or(path),
             _ => path,
         },
         _ => path,

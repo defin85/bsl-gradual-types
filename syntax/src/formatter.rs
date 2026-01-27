@@ -68,10 +68,12 @@ fn split_lines_with_endings(source: &str) -> Vec<(String, String)> {
         }
         let end = idx + 1;
         let raw = &source[start..end];
-        if raw.ends_with("\r\n") {
-            out.push((raw[..raw.len() - 2].to_string(), "\r\n".to_string()));
+        if let Some(stripped) = raw.strip_suffix("\r\n") {
+            out.push((stripped.to_string(), "\r\n".to_string()));
+        } else if let Some(stripped) = raw.strip_suffix("\n") {
+            out.push((stripped.to_string(), "\n".to_string()));
         } else {
-            out.push((raw[..raw.len() - 1].to_string(), "\n".to_string()));
+            out.push((raw.to_string(), String::new()));
         }
         start = end;
     }
@@ -97,10 +99,7 @@ fn format_line(line: &str, indent_level: i32, indent_size: usize) -> String {
     format!("{indent}{rest}")
 }
 
-fn collect_indent_events(
-    tree: &tree_sitter::Tree,
-    line_count: usize,
-) -> (Vec<i32>, Vec<i32>) {
+fn collect_indent_events(tree: &tree_sitter::Tree, line_count: usize) -> (Vec<i32>, Vec<i32>) {
     let mut before_dedent = vec![0i32; line_count];
     let mut after_indent = vec![0i32; line_count];
 
@@ -108,7 +107,7 @@ fn collect_indent_events(
     while let Some(node) = stack.pop() {
         let kind = node.kind();
         if let Some((dedent_before, indent_after)) = keyword_effect(kind) {
-            let row = node.start_position().row as usize;
+            let row = node.start_position().row;
             if row < line_count {
                 before_dedent[row] += dedent_before;
                 after_indent[row] += indent_after;
@@ -127,18 +126,31 @@ fn collect_indent_events(
 fn keyword_effect(kind: &str) -> Option<(i32, i32)> {
     match kind {
         // Block openers.
-        "THEN_KEYWORD" | "DO_KEYWORD" | "ЦИКЛ_KEYWORD" | "PROCEDURE_KEYWORD"
-        | "FUNCTION_KEYWORD" | "TRY_KEYWORD" | "ПОПЫТКА_KEYWORD" | "PREPROC_REGION_KEYWORD" => {
-            Some((0, 1))
-        }
+        "THEN_KEYWORD"
+        | "DO_KEYWORD"
+        | "ЦИКЛ_KEYWORD"
+        | "PROCEDURE_KEYWORD"
+        | "FUNCTION_KEYWORD"
+        | "TRY_KEYWORD"
+        | "ПОПЫТКА_KEYWORD"
+        | "PREPROC_REGION_KEYWORD" => Some((0, 1)),
 
         // Block closers.
-        "ENDIF_KEYWORD" | "ENDDO_KEYWORD" | "КОНЕЦЦИКЛА_KEYWORD" | "ENDTRY_KEYWORD"
-        | "КОНЕЦПОПЫТКИ_KEYWORD" | "ENDFUNCTION_KEYWORD" | "ENDPROCEDURE_KEYWORD"
-        | "PREPROC_ENDIF_KEYWORD" | "PREPROC_ENDREGION_KEYWORD" => Some((1, 0)),
+        "ENDIF_KEYWORD"
+        | "ENDDO_KEYWORD"
+        | "КОНЕЦЦИКЛА_KEYWORD"
+        | "ENDTRY_KEYWORD"
+        | "КОНЕЦПОПЫТКИ_KEYWORD"
+        | "ENDFUNCTION_KEYWORD"
+        | "ENDPROCEDURE_KEYWORD"
+        | "PREPROC_ENDIF_KEYWORD"
+        | "PREPROC_ENDREGION_KEYWORD" => Some((1, 0)),
 
         // Mid-block keywords: dedent for the keyword line, then indent for the body.
-        "ELSE_KEYWORD" | "ELSIF_KEYWORD" | "EXCEPT_KEYWORD" | "ИСКЛЮЧЕНИЕ_KEYWORD"
+        "ELSE_KEYWORD"
+        | "ELSIF_KEYWORD"
+        | "EXCEPT_KEYWORD"
+        | "ИСКЛЮЧЕНИЕ_KEYWORD"
         | "PREPROC_ELSE_KEYWORD" => Some((1, 1)),
 
         // Preprocessor elseif: has THEN on the same line (handled above), but still needs dedent.
@@ -164,7 +176,8 @@ mod tests {
     fn format_handles_preprocessor_blocks() {
         let src = "#Если Истина Тогда\nСообщить(1);\n#Иначе\nСообщить(2);\n#КонецЕсли";
         let out = format_document(src, &FormatOptions::default()).expect("format");
-        let expected = "#Если Истина Тогда\n    Сообщить(1);\n#Иначе\n    Сообщить(2);\n#КонецЕсли\n";
+        let expected =
+            "#Если Истина Тогда\n    Сообщить(1);\n#Иначе\n    Сообщить(2);\n#КонецЕсли\n";
         assert_eq!(out, expected);
     }
 }

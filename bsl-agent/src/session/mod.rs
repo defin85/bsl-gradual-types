@@ -5,8 +5,8 @@ use std::sync::Arc;
 use bsl_analysis_v2::{AnalysisHostV2, Change, FileId};
 use bsl_backend::application::type_system::web_api_service;
 use bsl_backend::application::TypeInferenceService;
-use bsl_backend::data::loaders::ConfigurationDiscovery;
 use bsl_backend::data::loaders::progress::ProgressUpdate;
+use bsl_backend::data::loaders::ConfigurationDiscovery;
 use bsl_shared::api::dtos::{
     AnalysisResultDto, McpRootDto, McpSessionDto, MetricsDto, SnapshotInputsDto, SnapshotMetaDto,
 };
@@ -25,8 +25,8 @@ use crate::semantic::ids;
 use crate::semantic::sort;
 use crate::server::types::{
     BslDefinitionParams, BslDiagnosticsParams, BslMembersParams, BslReferencesParams,
-    BslSymbolSearchParams, BslTypeAtPositionParams, ContextExpandParams, ContextFocus,
-    CanonicalDocumentRef, ContextPackParams, DocumentRef, FileRef, WorkspaceDocumentsSetFile,
+    BslSymbolSearchParams, BslTypeAtPositionParams, CanonicalDocumentRef, ContextExpandParams,
+    ContextFocus, ContextPackParams, DocumentRef, FileRef, WorkspaceDocumentsSetFile,
     WorkspaceOpenParams, WorkspaceScope, WorkspaceScopeTagged,
 };
 use crate::types::{
@@ -149,8 +149,14 @@ impl SessionManager {
             return false;
         }
 
-        let mut left: Vec<(&str, &Path)> = a.iter().map(|r| (r.root_id.as_str(), r.path.as_path())).collect();
-        let mut right: Vec<(&str, &Path)> = b.iter().map(|r| (r.root_id.as_str(), r.path.as_path())).collect();
+        let mut left: Vec<(&str, &Path)> = a
+            .iter()
+            .map(|r| (r.root_id.as_str(), r.path.as_path()))
+            .collect();
+        let mut right: Vec<(&str, &Path)> = b
+            .iter()
+            .map(|r| (r.root_id.as_str(), r.path.as_path()))
+            .collect();
 
         left.sort_by(|(id_a, path_a), (id_b, path_b)| {
             id_a.cmp(id_b)
@@ -164,7 +170,10 @@ impl SessionManager {
         left == right
     }
 
-    fn open_response_from_session(session_id: Uuid, session: &WorkspaceSession) -> WorkspaceOpenResponse {
+    fn open_response_from_session(
+        session_id: Uuid,
+        session: &WorkspaceSession,
+    ) -> WorkspaceOpenResponse {
         WorkspaceOpenResponse {
             session_id: session_id.to_string(),
             roots: session
@@ -183,14 +192,20 @@ impl SessionManager {
         }
     }
 
-    fn normalize_optional_path(raw: Option<String>, field: &str) -> Result<Option<PathBuf>, rmcp::ErrorData> {
+    fn normalize_optional_path(
+        raw: Option<String>,
+        field: &str,
+    ) -> Result<Option<PathBuf>, rmcp::ErrorData> {
         let Some(raw) = raw else {
             return Ok(None);
         };
         let path = PathBuf::from(&raw);
         let canonical = std::fs::canonicalize(&path).map_err(|_| {
             rmcp::ErrorData::invalid_params(
-                format!("{field} does not exist or is not accessible: {}", path.display()),
+                format!(
+                    "{field} does not exist or is not accessible: {}",
+                    path.display()
+                ),
                 None,
             )
         })?;
@@ -2317,9 +2332,7 @@ fn workspace_missing_inputs(settings: &WorkspaceSettings) -> Vec<String> {
 }
 
 fn normalize_mode(mode: Option<String>) -> Option<String> {
-    let Some(mode) = mode else {
-        return None;
-    };
+    let mode = mode?;
     let trimmed = mode.trim();
     if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("default") {
         return None;
@@ -2327,7 +2340,9 @@ fn normalize_mode(mode: Option<String>) -> Option<String> {
     Some(trimmed.to_string())
 }
 
-fn normalize_workspace_scope(scope: WorkspaceScope) -> Result<WorkspaceScopeTagged, rmcp::ErrorData> {
+fn normalize_workspace_scope(
+    scope: WorkspaceScope,
+) -> Result<WorkspaceScopeTagged, rmcp::ErrorData> {
     match scope {
         WorkspaceScope::Tagged(value) => Ok(value),
         WorkspaceScope::Simple(value) => {
@@ -2821,7 +2836,10 @@ fn document_key_from_ref(
                 for root in roots {
                     if abs.starts_with(&root.path) {
                         let depth = root.path.components().count();
-                        if best.map(|(_, best_depth)| depth > best_depth).unwrap_or(true) {
+                        if best
+                            .map(|(_, best_depth)| depth > best_depth)
+                            .unwrap_or(true)
+                        {
                             best = Some((root, depth));
                         }
                     }
@@ -2829,9 +2847,9 @@ fn document_key_from_ref(
                 let (root, _) = best.ok_or_else(|| {
                     rmcp::ErrorData::invalid_params("path is outside roots", None)
                 })?;
-                let rel = abs.strip_prefix(&root.path).map_err(|_| {
-                    rmcp::ErrorData::invalid_params("path is outside roots", None)
-                })?;
+                let rel = abs
+                    .strip_prefix(&root.path)
+                    .map_err(|_| rmcp::ErrorData::invalid_params("path is outside roots", None))?;
                 Ok(DocumentKey {
                     root_id: root.root_id.clone(),
                     path: relative_path_to_slash(rel)?,
@@ -3465,7 +3483,8 @@ mod tests {
     }
 
     #[test]
-    fn infer_platform_version_from_config_dump_missing_compatibility_mode_mentions_platform_version() {
+    fn infer_platform_version_from_config_dump_missing_compatibility_mode_mentions_platform_version(
+    ) {
         let temp = tempfile::TempDir::new().expect("tempdir");
 
         std::fs::write(

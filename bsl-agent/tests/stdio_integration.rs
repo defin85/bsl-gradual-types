@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use bsl_agent::types::{
     BslDiagnosticsResponse, BslSymbolSearchResponse, BuildInfoResponse, ContextExpandResponse,
     ContextPackResponse, JobStartResponse, JobStateDto, JobStatusResponse, UiUrlResponse,
-    WorkspaceDocumentsSetResponse, WorkspaceListResponse, WorkspaceOpenResponse, WorkspaceStatusResponse,
+    WorkspaceDocumentsSetResponse, WorkspaceListResponse, WorkspaceOpenResponse,
+    WorkspaceStatusResponse,
 };
 use bsl_shared::api::dtos::{AnalysisResultDto, MetricsDto, SnapshotMetaDto};
 use rmcp::model::CallToolRequestParam;
@@ -275,9 +276,7 @@ async fn stdio_bsl_diagnostics_tagged_file_scope_and_string_file_hint() {
     let service = spawn_agent(&[]).await;
 
     let temp_root = tempfile::TempDir::new().expect("tempdir");
-    let file_path = temp_root
-        .path()
-        .join("src/CommonModules/Foo/Module.bsl");
+    let file_path = temp_root.path().join("src/CommonModules/Foo/Module.bsl");
     std::fs::create_dir_all(file_path.parent().expect("parent")).expect("mkdir");
     std::fs::write(&file_path, "Procedure P()\nEndProcedure\n").expect("write Module.bsl");
     let file_abs = file_path.to_string_lossy().to_string();
@@ -302,12 +301,8 @@ async fn stdio_bsl_diagnostics_tagged_file_scope_and_string_file_hint() {
     )
     .await;
     wait_job_succeeded(&service, &start.job_id).await;
-    let result: BslDiagnosticsResponse = call_tool(
-        &service,
-        "job_result",
-        json!({ "job_id": &start.job_id }),
-    )
-    .await;
+    let result: BslDiagnosticsResponse =
+        call_tool(&service, "job_result", json!({ "job_id": &start.job_id })).await;
     assert_eq!(result.analysis_revision, 0);
 
     call_tool_expect_invalid_params(
@@ -318,8 +313,12 @@ async fn stdio_bsl_diagnostics_tagged_file_scope_and_string_file_hint() {
     )
     .await;
 
-    let _close: serde_json::Value =
-        call_tool(&service, "workspace_close", json!({ "session_id": &session_id })).await;
+    let _close: serde_json::Value = call_tool(
+        &service,
+        "workspace_close",
+        json!({ "session_id": &session_id }),
+    )
+    .await;
     let _ = service.cancel().await;
 }
 

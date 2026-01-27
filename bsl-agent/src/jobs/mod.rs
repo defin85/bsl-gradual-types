@@ -572,7 +572,10 @@ mod tests {
 
         let _ = reported_rx.await;
         let status = manager.status(&job_id).await.expect("job_status");
-        assert!(matches!(status.state, JobStateDto::Queued | JobStateDto::Running));
+        assert!(matches!(
+            status.state,
+            JobStateDto::Queued | JobStateDto::Running
+        ));
         assert_eq!(status.progress.percent, 99);
 
         let _ = allow_finish_tx.send(());

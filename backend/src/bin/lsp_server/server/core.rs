@@ -5,11 +5,13 @@ use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
+use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
 use tower_lsp::lsp_types::request::{
     Formatting as DocumentFormattingRequest, RangeFormatting, Request as LspRequest,
 };
 use tower_lsp::lsp_types::{Registration, Unregistration};
+use tower_lsp::lsp_types::MessageType;
 use tower_lsp::Client;
 use tracing::{debug, info, warn};
 
@@ -25,6 +27,19 @@ use crate::converters::{semantic_error_to_diagnostic, syntax_errors_to_diagnosti
 
 use super::analysis_v2_runtime::AnalysisV2Runtime;
 use super::{BslLanguageServer, FormattingCapabilityState, Url, V2FileKey};
+
+fn diagnostics_debounce_duration() -> Duration {
+    // Diagnostics are triggered on every `textDocument/didChange`. Computing full diagnostics is
+    // CPU-bound and not preemptible (abort only works at await points). Without debouncing, rapid
+    // typing can build up a backlog and make completion/hover feel "frozen".
+    //
+    // Default: 250ms. Can be overridden via env for experiments.
+    let raw = std::env::var("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(250);
+    Duration::from_millis(raw)
+}
 
 impl BslLanguageServer {
     pub fn new(client: Client, coordinator: Arc<SystemCoordinator>) -> Self {
@@ -374,6 +389,7 @@ impl BslLanguageServer {
         uri: Url,
         file_id: V2FileId,
         expected_version: i32,
+        debounce: bool,
     ) {
         {
             let mut tasks = self.diagnostics_tasks_v2.lock().await;
@@ -390,6 +406,13 @@ impl BslLanguageServer {
                 settings.diagnostics.show_hints
             };
 
+            if debounce {
+                let delay = diagnostics_debounce_duration();
+                if delay != Duration::from_millis(0) {
+                    tokio::time::sleep(delay).await;
+                }
+            }
+
             let wait_started = Instant::now();
             let wait_ok = server
                 .analysis_v2
@@ -399,6 +422,23 @@ impl BslLanguageServer {
             server
                 .coordinator
                 .record_intellisense_v2_wait_for_file_version("diagnostics", wait_elapsed);
+            if let Some(threshold) = super::intellisense_v2_slow_client_log_threshold() {
+                if wait_elapsed >= threshold {
+                    server
+                        .client
+                        .log_message(
+                            MessageType::INFO,
+                            format!(
+                                "[perf] diagnostics_v2 wait_for_file_version: wait_ms={} uri={} file_id={} expected_version={}",
+                                wait_elapsed.as_millis(),
+                                uri_for_task,
+                                file_id.0,
+                                expected_version
+                            ),
+                        )
+                        .await;
+                }
+            }
             if let Some(threshold) = super::intellisense_v2_slow_wait_warn_threshold() {
                 if wait_elapsed >= threshold {
                     warn!(
@@ -443,6 +483,23 @@ impl BslLanguageServer {
                 server
                     .coordinator
                     .record_intellisense_v2_snapshot_latency("diagnostics", snapshot_elapsed);
+                if let Some(threshold) = super::intellisense_v2_slow_client_log_threshold() {
+                    if snapshot_elapsed >= threshold {
+                        server
+                            .client
+                            .log_message(
+                                MessageType::INFO,
+                                format!(
+                                    "[perf] diagnostics_v2 snapshot: snapshot_ms={} uri={} file_id={} expected_version={}",
+                                    snapshot_elapsed.as_millis(),
+                                    uri_for_task,
+                                    file_id.0,
+                                    expected_version
+                                ),
+                            )
+                            .await;
+                    }
+                }
                 if let Some(threshold) = super::intellisense_v2_slow_snapshot_warn_threshold() {
                     if snapshot_elapsed >= threshold {
                         warn!(
@@ -482,6 +539,23 @@ impl BslLanguageServer {
                 server
                     .coordinator
                     .record_intellisense_v2_syntax_diagnostics_query_latency(syntax_elapsed);
+                if let Some(threshold) = super::intellisense_v2_slow_client_log_threshold() {
+                    if syntax_elapsed >= threshold {
+                        server
+                            .client
+                            .log_message(
+                                MessageType::INFO,
+                                format!(
+                                    "[perf] diagnostics_v2 syntax_diagnostics: syntax_ms={} uri={} file_id={} expected_version={}",
+                                    syntax_elapsed.as_millis(),
+                                    uri_for_task,
+                                    file_id.0,
+                                    expected_version
+                                ),
+                            )
+                            .await;
+                    }
+                }
                 if let Some(threshold) = super::intellisense_v2_slow_query_warn_threshold() {
                     if syntax_elapsed >= threshold {
                         warn!(
@@ -519,6 +593,23 @@ impl BslLanguageServer {
                 server
                     .coordinator
                     .record_intellisense_v2_semantic_diagnostics_query_latency(semantic_elapsed);
+                if let Some(threshold) = super::intellisense_v2_slow_client_log_threshold() {
+                    if semantic_elapsed >= threshold {
+                        server
+                            .client
+                            .log_message(
+                                MessageType::INFO,
+                                format!(
+                                    "[perf] diagnostics_v2 semantic_diagnostics: semantic_ms={} uri={} file_id={} expected_version={}",
+                                    semantic_elapsed.as_millis(),
+                                    uri_for_task,
+                                    file_id.0,
+                                    expected_version
+                                ),
+                            )
+                            .await;
+                    }
+                }
                 if let Some(threshold) = super::intellisense_v2_slow_query_warn_threshold() {
                     if semantic_elapsed >= threshold {
                         warn!(

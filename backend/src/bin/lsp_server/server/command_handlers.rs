@@ -15,7 +15,7 @@ use crate::handlers::{find_containing_function_in_dto, CurrentContextResponse};
 use crate::types::{
     AutoReindexCommandParams, AutoReindexStateResponse, BuildIndexParams, BuildIndexResponse,
     GetCurrentContextParams, IncrementalUpdateParams, IncrementalUpdateResponse,
-    WorkspaceStatsResponse,
+    ObservabilityMetricsResponse, WorkspaceStatsResponse,
 };
 use bsl_backend::system::fs_utils::read_bsl_file;
 
@@ -268,6 +268,15 @@ impl BslLanguageServer {
         Ok(WorkspaceStatsResponse {
             bsl_files,
             diagnostics,
+        })
+    }
+
+    /// Custom request: bsl/getObservabilityMetrics
+    pub(crate) async fn handle_get_observability_metrics(
+        &self,
+    ) -> JsonRpcResult<ObservabilityMetricsResponse> {
+        Ok(ObservabilityMetricsResponse {
+            metrics: self.coordinator.observability_metrics(),
         })
     }
 }

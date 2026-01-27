@@ -390,6 +390,14 @@ export interface WorkspaceStatsResponse {
 }
 
 /**
+ * Снимок метрик наблюдаемости (counters/gauges/histograms)
+ * Формат соответствует `SimpleMetrics.export_metrics()` на стороне Rust.
+ */
+export interface ObservabilityMetricsResponse {
+    metrics: any;
+}
+
+/**
  * Параметры запроса всех типов
  */
 export interface GetAllTypesRequest {
@@ -521,6 +529,48 @@ export async function getWorkspaceStats(): Promise<WorkspaceStatsResponse | null
             return null;
         }
         logger.error('Failed to get workspace stats', error);
+        return null;
+    }
+}
+
+/**
+ * Получить снимок метрик observability из LSP сервера (для диагностики "затыков").
+ */
+let observabilityMetricsUnsupported = false;
+let observabilityMetricsUnsupportedNotified = false;
+
+export async function getObservabilityMetrics(): Promise<ObservabilityMetricsResponse | null> {
+    if (observabilityMetricsUnsupported) {
+        return null;
+    }
+
+    const client = (await import('./client')).getLanguageClient();
+    if (!client) {
+        logger.warn('[Observability] LSP client not available');
+        return null;
+    }
+
+    try {
+        const result = await client.sendRequest('workspace/executeCommand', {
+            command: 'bsl.getObservabilityMetrics',
+            arguments: [{}]
+        });
+        return result as ObservabilityMetricsResponse || null;
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes('Method not found')) {
+            observabilityMetricsUnsupported = true;
+            if (!observabilityMetricsUnsupportedNotified) {
+                observabilityMetricsUnsupportedNotified = true;
+                logger.warn('[Observability] LSP server does not support getObservabilityMetrics yet');
+                const vscode = await import('vscode');
+                vscode.window.showWarningMessage(
+                    'BSL Analyzer: LSP server does not support observability metrics yet. Please обновите бинарник.'
+                );
+            }
+            return null;
+        }
+        logger.error('Failed to get observability metrics', error);
         return null;
     }
 }

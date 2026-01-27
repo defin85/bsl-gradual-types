@@ -23,7 +23,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.registerCacheCommands = exports.registerDebugCommands = exports.registerConfigurationCommands = exports.registerIndexCommands = exports.registerSearchCommands = exports.registerAnalysisCommands = exports.registerParseConfigurationCommand = exports.registerSemanticVisualization = exports.registerCommands = exports.initializeCommands = void 0;
+exports.registerObservabilityCommands = exports.registerCacheCommands = exports.registerDebugCommands = exports.registerConfigurationCommands = exports.registerIndexCommands = exports.registerSearchCommands = exports.registerAnalysisCommands = exports.registerParseConfigurationCommand = exports.registerSemanticVisualization = exports.registerCommands = exports.initializeCommands = void 0;
 const vscode = __importStar(require("vscode"));
 const lsp_1 = require("../lsp");
 const parseConfiguration_1 = require("./parseConfiguration");
@@ -33,6 +33,7 @@ const index_commands_1 = require("./index-commands");
 const configuration_1 = require("./configuration");
 const debug_1 = require("./debug");
 const cache_1 = require("./cache");
+const observability_1 = require("./observability");
 let outputChannel;
 let commandsRegistered = false;
 function initializeCommands(channel) {
@@ -76,6 +77,7 @@ async function registerCommands(context) {
     (0, configuration_1.registerConfigurationCommands)(context, boundSafeRegister, outputChannel);
     (0, debug_1.registerDebugCommands)(context, boundSafeRegister, outputChannel);
     (0, cache_1.registerCacheCommands)(context, boundSafeRegister, outputChannel);
+    (0, observability_1.registerObservabilityCommands)(context, boundSafeRegister, outputChannel);
     // Parse Configuration (MILESTONE 2.17)
     // Регистрация через отдельный модуль для лучшей организации кода
     const client = (0, lsp_1.getLanguageClient)();
@@ -110,4 +112,6 @@ var debug_2 = require("./debug");
 Object.defineProperty(exports, "registerDebugCommands", { enumerable: true, get: function () { return debug_2.registerDebugCommands; } });
 var cache_2 = require("./cache");
 Object.defineProperty(exports, "registerCacheCommands", { enumerable: true, get: function () { return cache_2.registerCacheCommands; } });
+var observability_2 = require("./observability");
+Object.defineProperty(exports, "registerObservabilityCommands", { enumerable: true, get: function () { return observability_2.registerObservabilityCommands; } });
 //# sourceMappingURL=index.js.map

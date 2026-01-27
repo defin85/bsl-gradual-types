@@ -9,4 +9,5 @@ export { registerIndexCommands } from './index-commands';
 export { registerConfigurationCommands } from './configuration';
 export { registerDebugCommands } from './debug';
 export { registerCacheCommands } from './cache';
+export { registerObservabilityCommands } from './observability';
 //# sourceMappingURL=index.d.ts.map

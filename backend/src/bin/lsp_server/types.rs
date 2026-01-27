@@ -68,6 +68,13 @@ pub struct WorkspaceStatsResponse {
     pub diagnostics: usize,
 }
 
+/// Custom request: bsl/getObservabilityMetrics - observability metrics snapshot
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObservabilityMetricsResponse {
+    pub metrics: serde_json::Value,
+}
+
 /// Custom request: bsl/validateMethod - method call validation
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]

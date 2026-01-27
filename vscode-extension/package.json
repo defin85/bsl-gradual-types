@@ -484,6 +484,12 @@
                 "icon": "$(debug-start)"
             },
             {
+                "command": "bslAnalyzer.dumpLspMetrics",
+                "title": "Dump LSP Metrics",
+                "category": "BSL Debug",
+                "icon": "$(pulse)"
+            },
+            {
                 "command": "bslAnalyzer.reindexNow",
                 "title": "Reindex Now",
                 "category": "BSL Index",

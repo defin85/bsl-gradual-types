@@ -28,7 +28,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getAllTypes = exports.getCacheStats = exports.getWorkspaceStats = exports.getTypeRepositoryStats = exports.searchTypes = exports.extractPlatformDocs = exports.resumeAutoReindex = exports.pauseAutoReindex = exports.incrementalUpdate = exports.analyzeFile = exports.checkTypeCompatibility = exports.validateMethod = exports.buildIndex = exports.queryType = void 0;
+exports.getAllTypes = exports.getCacheStats = exports.getObservabilityMetrics = exports.getWorkspaceStats = exports.getTypeRepositoryStats = exports.searchTypes = exports.extractPlatformDocs = exports.resumeAutoReindex = exports.pauseAutoReindex = exports.incrementalUpdate = exports.analyzeFile = exports.checkTypeCompatibility = exports.validateMethod = exports.buildIndex = exports.queryType = void 0;
 const logger_1 = require("./logger");
 // ============================================================================
 // Helper Functions - прямые вызовы LSP custom requests
@@ -238,6 +238,44 @@ async function getWorkspaceStats() {
     }
 }
 exports.getWorkspaceStats = getWorkspaceStats;
+/**
+ * Получить снимок метрик observability из LSP сервера (для диагностики "затыков").
+ */
+let observabilityMetricsUnsupported = false;
+let observabilityMetricsUnsupportedNotified = false;
+async function getObservabilityMetrics() {
+    if (observabilityMetricsUnsupported) {
+        return null;
+    }
+    const client = (await Promise.resolve().then(() => __importStar(require('./client')))).getLanguageClient();
+    if (!client) {
+        logger_1.logger.warn('[Observability] LSP client not available');
+        return null;
+    }
+    try {
+        const result = await client.sendRequest('workspace/executeCommand', {
+            command: 'bsl.getObservabilityMetrics',
+            arguments: [{}]
+        });
+        return result || null;
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes('Method not found')) {
+            observabilityMetricsUnsupported = true;
+            if (!observabilityMetricsUnsupportedNotified) {
+                observabilityMetricsUnsupportedNotified = true;
+                logger_1.logger.warn('[Observability] LSP server does not support getObservabilityMetrics yet');
+                const vscode = await Promise.resolve().then(() => __importStar(require('vscode')));
+                vscode.window.showWarningMessage('BSL Analyzer: LSP server does not support observability metrics yet. Please обновите бинарник.');
+            }
+            return null;
+        }
+        logger_1.logger.error('Failed to get observability metrics', error);
+        return null;
+    }
+}
+exports.getObservabilityMetrics = getObservabilityMetrics;
 async function getCacheStats(configurationPath) {
     const client = (await Promise.resolve().then(() => __importStar(require('./client')))).getLanguageClient();
     if (!client) {

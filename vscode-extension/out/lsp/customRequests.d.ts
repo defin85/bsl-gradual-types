@@ -217,6 +217,13 @@ export interface WorkspaceStatsResponse {
     diagnostics: number;
 }
 /**
+ * Снимок метрик наблюдаемости (counters/gauges/histograms)
+ * Формат соответствует `SimpleMetrics.export_metrics()` на стороне Rust.
+ */
+export interface ObservabilityMetricsResponse {
+    metrics: any;
+}
+/**
  * Параметры запроса всех типов
  */
 export interface GetAllTypesRequest {
@@ -286,6 +293,7 @@ export interface GetAllTypesResponse {
  */
 export declare function getTypeRepositoryStats(): Promise<TypeRepositoryStats | null>;
 export declare function getWorkspaceStats(): Promise<WorkspaceStatsResponse | null>;
+export declare function getObservabilityMetrics(): Promise<ObservabilityMetricsResponse | null>;
 export declare function getCacheStats(configurationPath: string): Promise<CacheStatsResponse | null>;
 /**
  * Получить все типы из TypeRepository через LSP Server

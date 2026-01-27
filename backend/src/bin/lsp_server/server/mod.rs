@@ -86,6 +86,17 @@ fn parse_env_duration_ms(var: &str) -> Option<Duration> {
     Some(Duration::from_millis(parsed))
 }
 
+fn parse_env_duration_ms_with_default(var: &str, default_ms: u64) -> Option<Duration> {
+    match std::env::var(var) {
+        Ok(raw) => match raw.parse::<u64>() {
+            Ok(0) => None,
+            Ok(ms) => Some(Duration::from_millis(ms)),
+            Err(_) => Some(Duration::from_millis(default_ms)),
+        },
+        Err(_) => Some(Duration::from_millis(default_ms)),
+    }
+}
+
 static INTELLISENSE_V2_SLOW_WAIT_WARN_THRESHOLD: LazyLock<Option<Duration>> =
     LazyLock::new(|| parse_env_duration_ms("BSL_INTELLISENSE_V2_SLOW_WAIT_WARN_MS"));
 
@@ -94,6 +105,10 @@ static INTELLISENSE_V2_SLOW_SNAPSHOT_WARN_THRESHOLD: LazyLock<Option<Duration>> 
 
 static INTELLISENSE_V2_SLOW_QUERY_WARN_THRESHOLD: LazyLock<Option<Duration>> =
     LazyLock::new(|| parse_env_duration_ms("BSL_INTELLISENSE_V2_SLOW_QUERY_WARN_MS"));
+
+static INTELLISENSE_V2_SLOW_CLIENT_LOG_THRESHOLD: LazyLock<Option<Duration>> = LazyLock::new(|| {
+    parse_env_duration_ms_with_default("BSL_INTELLISENSE_V2_SLOW_CLIENT_LOG_MS", 2000)
+});
 
 pub(crate) fn intellisense_v2_slow_wait_warn_threshold() -> Option<Duration> {
     *INTELLISENSE_V2_SLOW_WAIT_WARN_THRESHOLD
@@ -105,4 +120,8 @@ pub(crate) fn intellisense_v2_slow_snapshot_warn_threshold() -> Option<Duration>
 
 pub(crate) fn intellisense_v2_slow_query_warn_threshold() -> Option<Duration> {
     *INTELLISENSE_V2_SLOW_QUERY_WARN_THRESHOLD
+}
+
+pub(crate) fn intellisense_v2_slow_client_log_threshold() -> Option<Duration> {
+    *INTELLISENSE_V2_SLOW_CLIENT_LOG_THRESHOLD
 }

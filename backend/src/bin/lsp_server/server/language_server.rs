@@ -167,6 +167,7 @@ impl LanguageServer for BslLanguageServer {
                         "bsl.getCurrentContext".to_string(),
                         "bsl.getTypeRepositoryStats".to_string(),
                         "bsl.getWorkspaceStats".to_string(),
+                        "bsl.getObservabilityMetrics".to_string(),
                         "bsl.parseConfiguration".to_string(),
                         "bsl.cache.getStats".to_string(),
                         "bsl.cache.clear".to_string(),
@@ -359,7 +360,7 @@ impl LanguageServer for BslLanguageServer {
 
                                 if let Some(uri) = uri {
                                     self_clone
-                                        .schedule_diagnostics_v2(uri, file_id, version)
+                                        .schedule_diagnostics_v2(uri, file_id, version, true)
                                         .await;
                                 }
                             }
@@ -543,7 +544,7 @@ impl LanguageServer for BslLanguageServer {
                 path: Arc::from(path),
             }]);
 
-        self.schedule_diagnostics_v2(uri.clone(), file_id, version)
+        self.schedule_diagnostics_v2(uri.clone(), file_id, version, false)
             .await;
 
         self.client
@@ -617,7 +618,7 @@ impl LanguageServer for BslLanguageServer {
                 path: Arc::from(path),
             }]);
 
-        self.schedule_diagnostics_v2(uri.clone(), file_id, version)
+        self.schedule_diagnostics_v2(uri.clone(), file_id, version, true)
             .await;
     }
 
@@ -2016,6 +2017,12 @@ impl LanguageServer for BslLanguageServer {
             }
             "bsl.getWorkspaceStats" => {
                 let result = self.handle_get_workspace_stats().await?;
+                Ok(Some(serde_json::to_value(result).map_err(|_| {
+                    tower_lsp::jsonrpc::Error::internal_error()
+                })?))
+            }
+            "bsl.getObservabilityMetrics" => {
+                let result = self.handle_get_observability_metrics().await?;
                 Ok(Some(serde_json::to_value(result).map_err(|_| {
                     tower_lsp::jsonrpc::Error::internal_error()
                 })?))

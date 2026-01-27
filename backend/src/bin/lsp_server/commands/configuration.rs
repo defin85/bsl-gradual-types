@@ -204,7 +204,7 @@ pub async fn handle_parse_configuration(
     let _ = discovery_task.await;
 
     let metadata = match discovery_result {
-        Ok(data) => data,
+        Ok(data) => Arc::new(data),
         Err(error_msg) => {
             error!("Failed to discover metadata: {}", error_msg);
 
@@ -309,15 +309,30 @@ pub async fn handle_parse_configuration(
     });
 
     // Индексация экспортных методов из модулей конфигурации (*.bsl)
+    //
+    // Важно: индексация CPU-bound (rayon + парсинг) и может занимать секунды.
+    // Если выполнять её на tokio worker thread, LSP "замирает" (completion/hover не отвечают).
+    // Поэтому уводим работу в spawn_blocking.
+    let canonical_path_for_index = canonical_path.clone();
+    let metadata_for_index = metadata.clone();
     let modules_tx_clone = modules_tx.clone();
-    match index_configuration_bsl_modules_with_progress_parallel(
-        &canonical_path,
-        &metadata,
-        Some(move |p| {
-            let _ = modules_tx_clone.send(p);
-        }),
-    ) {
-        Ok(indexed) => {
+    let indexed = tokio::task::spawn_blocking(move || {
+        index_configuration_bsl_modules_with_progress_parallel(
+            &canonical_path_for_index,
+            metadata_for_index.as_slice(),
+            Some(move |p| {
+                let _ = modules_tx_clone.send(p);
+            }),
+        )
+    })
+    .await;
+
+    // Завершаем consumer для modules progress.
+    drop(modules_tx);
+    let _ = modules_task.await;
+
+    match indexed {
+        Ok(Ok(indexed)) => {
             module_signatures = indexed.module_signatures.clone();
             let config_methods_count = indexed.config_methods.len();
             let global_functions_count = indexed.global_functions.len();
@@ -336,9 +351,6 @@ pub async fn handle_parse_configuration(
             }
             info!("Configuration module methods indexed successfully");
 
-            drop(modules_tx);
-            let _ = modules_task.await;
-
             reporter
                 .lock()
                 .await
@@ -351,12 +363,8 @@ pub async fn handle_parse_configuration(
                 )
                 .await;
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             warn!("Failed to index configuration module methods: {}", e);
-
-            drop(modules_tx);
-            let _ = modules_task.await;
-
             reporter
                 .lock()
                 .await
@@ -366,10 +374,21 @@ pub async fn handle_parse_configuration(
                 )
                 .await;
         }
+        Err(e) => {
+            warn!("Failed to index configuration module methods (join): {}", e);
+            reporter
+                .lock()
+                .await
+                .report(
+                    index_modules_range.end,
+                    Some(format!("Indexing skipped (join error): {}", e)),
+                )
+                .await;
+        }
     }
 
     if let Some(coordinator) = coordinator {
-        let cache = build_config_index_cache(&canonical_path, &metadata, &module_signatures);
+        let cache = build_config_index_cache(&canonical_path, metadata.as_slice(), &module_signatures);
         let cache_lock = coordinator.config_index_cache();
         let mut guard = cache_lock.write().unwrap_or_else(|poisoned| {
             warn!("Config index cache RwLock poisoned (write), recovering");
@@ -743,14 +762,20 @@ pub async fn handle_incremental_update(
     if !modules_for_indexing.is_empty() {
         let metadata_vec: Vec<UniversalMetadataObject> =
             cache.metadata_by_key.values().cloned().collect();
-        let results = index_configuration_bsl_modules_by_paths(
-            &modules_for_indexing,
-            &metadata_vec,
-            None::<fn(ModuleIndexProgress)>,
-        );
+
+        // CPU-bound: парсинг и извлечение сигнатур. Выполняем в spawn_blocking, чтобы не подвешивать LSP.
+        let modules_for_indexing = modules_for_indexing;
+        let results = tokio::task::spawn_blocking(move || {
+            index_configuration_bsl_modules_by_paths(
+                &modules_for_indexing,
+                &metadata_vec,
+                None::<fn(ModuleIndexProgress)>,
+            )
+        })
+        .await;
 
         match results {
-            Ok(results) => {
+            Ok(Ok(results)) => {
                 let results_total = results.len().max(1);
                 for result in results {
                     module_processed += 1;
@@ -772,8 +797,11 @@ pub async fn handle_incremental_update(
                     reindexed_modules += 1;
                 }
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 warn!("Failed to reindex modules: {}", e);
+            }
+            Err(e) => {
+                warn!("Failed to reindex modules (join): {}", e);
             }
         }
     }

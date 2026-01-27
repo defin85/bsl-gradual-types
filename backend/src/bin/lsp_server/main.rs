@@ -45,7 +45,10 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("bsl_gradual_types=debug".parse()?)
+                // Default filters: include the LSP binary crate + backend library.
+                // `bsl_gradual_types` was an old crate name and would drop most logs.
+                .add_directive("bsl_lsp_server=debug".parse()?)
+                .add_directive("bsl_backend=info".parse()?)
                 .add_directive("tower_lsp=info".parse()?)
                 .add_directive("html5ever=warn".parse()?)
                 .add_directive("selectors=warn".parse()?)

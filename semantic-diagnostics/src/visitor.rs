@@ -14,6 +14,7 @@ use bsl_shared::ir::{
 };
 
 use crate::helpers::{collection_name_to_metadata_kind, is_metadata_collection_name};
+use crate::type_hints::SemanticTypeHints;
 use crate::validators::{
     validate_global_function_call_context, validate_method_call_context,
     validation_result_v2_to_diagnostic,
@@ -33,6 +34,7 @@ pub struct SemanticValidationVisitor<'a> {
     detail_level: DetailLevel,
     current_execution_context: RuntimeExecutionContext,
     platform_signatures_loaded: bool,
+    type_hints: Option<&'a SemanticTypeHints>,
 }
 
 impl<'a> SemanticValidationVisitor<'a> {
@@ -52,6 +54,7 @@ impl<'a> SemanticValidationVisitor<'a> {
             detail_level: DetailLevel::Full, // Default for backward compatibility
             current_execution_context: RuntimeExecutionContext::new(),
             platform_signatures_loaded: false,
+            type_hints: None,
         }
     }
 
@@ -72,11 +75,16 @@ impl<'a> SemanticValidationVisitor<'a> {
             detail_level,
             current_execution_context: RuntimeExecutionContext::new(),
             platform_signatures_loaded: false,
+            type_hints: None,
         }
     }
 
     pub fn set_platform_signatures_loaded(&mut self, loaded: bool) {
         self.platform_signatures_loaded = loaded;
+    }
+
+    pub fn set_type_hints(&mut self, hints: Option<&'a SemanticTypeHints>) {
+        self.type_hints = hints;
     }
 
     /// Consumes the visitor and returns collected errors
@@ -258,6 +266,10 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                 value_type,
                 ..
             } => {
+                let value_type = self
+                    .type_hints
+                    .and_then(|hints| hints.assignment_value_type(node.span))
+                    .unwrap_or(value_type);
                 // Если тип значения помечен как Unknown с конкретной причиной (например, TypeNotFound),
                 // генерируем диагностическую ошибку на месте присваивания.
                 if let Some(mut kind) = self.validator.validate_from_resolution(value_type) {
@@ -280,6 +292,14 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                 arg_types,
                 ..
             } => {
+                let obj_type = self
+                    .type_hints
+                    .and_then(|hints| hints.call_receiver_type(node.span))
+                    .unwrap_or(obj_type);
+                let arg_types = self
+                    .type_hints
+                    .and_then(|hints| hints.call_arg_types(node.span))
+                    .unwrap_or(arg_types);
                 // NEW: Check undeclared variables in arguments
                 for (idx, arg_type) in arg_types.iter().enumerate() {
                     if let Some(var_name) = arg_type.is_undeclared_variable() {
@@ -433,6 +453,10 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                 arg_types,
                 ..
             } => {
+                let arg_types = self
+                    .type_hints
+                    .and_then(|hints| hints.call_arg_types(node.span))
+                    .unwrap_or(arg_types);
                 // Check undeclared variables in arguments
                 for (idx, arg_type) in arg_types.iter().enumerate() {
                     if let Some(var_name) = arg_type.is_undeclared_variable() {
@@ -489,6 +513,10 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                 access_kind: MemberAccessKind::Property,
                 ..
             } => {
+                let object_type = self
+                    .type_hints
+                    .and_then(|hints| hints.member_access_object_type(node.span))
+                    .unwrap_or(object_type);
                 // MILESTONE 5.5 Fix: Extract collection name considering object_node
                 let collection_name =
                     self.extract_collection_name_for_metadata(object_name, *object_node);
@@ -1042,5 +1070,95 @@ mod tests {
             errors.is_empty() || !errors[0].message.contains("не найден в конфигурации"),
             "Should not have 'not found in configuration' error when config is not loaded"
         );
+    }
+
+    #[test]
+    fn test_visitor_hints_override_ir_types_for_method_call() {
+        use bsl_shared::domain::types::TypeResolution;
+        use std::sync::Arc;
+
+        let repository = Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
+        let metadata = TypeMetadataLookup::new(repository.clone());
+        let validator = TypeValidator::new(&metadata);
+        let resolver = TypeResolver::new(repository);
+        let signature_index = SignatureIndex::new();
+        let mut program = SemanticProgram::new();
+
+        let call_span = Span::new(5, 10, 5, 40);
+        program.nodes.push(SemanticNode {
+            kind: SemanticNodeKind::FunctionCall {
+                function_name: "НесуществующийМетод".to_string(),
+                object_name: Some("МассивДанных".to_string()),
+                object_type: Some(TypeResolution::unknown()),
+                arg_types: vec![],
+                object_node: None,
+                result_type: TypeResolution::unknown(),
+            },
+            span: call_span,
+            scope_id: program.symbols.root_scope,
+        });
+
+        let mut hints = crate::SemanticTypeHints::default();
+        hints
+            .call_receiver_type_by_span
+            .insert(call_span, TypeResolution::explicit("Массив"));
+
+        let mut visitor =
+            SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
+        visitor.set_type_hints(Some(&hints));
+        let mut context = FlowContext::new(program.symbols.root_scope);
+        visitor.visit_node(&program.nodes[0], &mut context);
+
+        let errors = visitor.into_errors();
+        assert!(
+            !errors.is_empty(),
+            "Should have error for non-existent method via hinted receiver type"
+        );
+        assert!(errors[0].message.contains("НесуществующийМетод"));
+    }
+
+    #[test]
+    fn test_visitor_hints_override_ir_types_for_member_access() {
+        use bsl_shared::domain::types::TypeResolution;
+        use std::sync::Arc;
+
+        let repository = Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
+        let metadata = TypeMetadataLookup::new(repository.clone());
+        let validator = TypeValidator::new(&metadata);
+        let resolver = TypeResolver::new(repository);
+        let signature_index = SignatureIndex::new();
+        let mut program = SemanticProgram::new();
+
+        let access_span = Span::new(3, 5, 3, 35);
+        program.nodes.push(SemanticNode {
+            kind: SemanticNodeKind::MemberAccess {
+                object_node: None,
+                object_name: Some("МассивДанных".to_string()),
+                object_type: TypeResolution::unknown(),
+                member_name: "НесуществующееСвойство".to_string(),
+                access_kind: MemberAccessKind::Property,
+                result_type: TypeResolution::unknown(),
+            },
+            span: access_span,
+            scope_id: program.symbols.root_scope,
+        });
+
+        let mut hints = crate::SemanticTypeHints::default();
+        hints
+            .member_access_object_type_by_span
+            .insert(access_span, TypeResolution::explicit("Массив"));
+
+        let mut visitor =
+            SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
+        visitor.set_type_hints(Some(&hints));
+        let mut context = FlowContext::new(program.symbols.root_scope);
+        visitor.visit_node(&program.nodes[0], &mut context);
+
+        let errors = visitor.into_errors();
+        assert!(
+            !errors.is_empty(),
+            "Should have error for non-existent property via hinted object type"
+        );
+        assert!(errors[0].message.contains("НесуществующееСвойство"));
     }
 }

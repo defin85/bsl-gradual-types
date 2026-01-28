@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Позиция в исходном коде
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Span {
     pub start_line: u32,
     pub start_column: u32,

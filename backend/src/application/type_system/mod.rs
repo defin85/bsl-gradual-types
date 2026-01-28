@@ -35,5 +35,7 @@ pub use services::definition_service::{
     goto_definition_v2, goto_definition_v2_with_source, DefinitionTarget,
 };
 pub use services::hover_service::get_hover_info_with_semantic_program;
-pub use services::signature_help_service::{get_signature_help_v2, SignatureHelpData};
+pub use services::signature_help_service::{
+    get_signature_help_v2, signature_help_query, SignatureHelpData, SignatureHelpQuery,
+};
 pub use services::web_api_service;

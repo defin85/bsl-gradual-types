@@ -1729,7 +1729,7 @@ impl LanguageServer for BslLanguageServer {
                 return Ok(None);
             }
 
-            let (file_content, deps) = {
+            let (file_content, deps, receiver_type_hint) = {
                 let snapshot_started = Instant::now();
                 let (analysis, index_snapshot, deps_id) =
                     self.analysis_v2.snapshot_with_deps().await;
@@ -1781,13 +1781,27 @@ impl LanguageServer for BslLanguageServer {
                 let file_content = analysis.file_text(file_id).ok().flatten();
                 let deps = analysis.deps_data().ok();
 
-                (file_content, deps)
+                let receiver_type_hint = file_content.as_ref().and_then(|text| {
+                    let query = bsl_backend::application::type_system::signature_help_query(
+                        text.as_ref(),
+                        position.line,
+                        position.character,
+                    )?;
+                    let receiver_end_character = query.receiver_end_character?;
+                    analysis
+                        .type_at_position(file_id, query.call_start_line, receiver_end_character)
+                        .ok()
+                        .flatten()
+                });
+
+                (file_content, deps, receiver_type_hint)
             };
 
             let started = Instant::now();
             let result = match (file_content, deps) {
                 (Some(file_content), Some(deps)) => {
-                    handle_signature_help_v2(file_content, position, deps).await
+                    handle_signature_help_v2(file_content, position, receiver_type_hint, deps)
+                        .await
                 }
                 _ => None,
             };

@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use bsl_shared::domain::repository::TypeRepository;
-use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::{ConstructorSignature, MethodSignature};
+use bsl_shared::domain::types::TypeResolution;
 
 use crate::system::LineIndex;
 
@@ -13,13 +13,14 @@ pub struct SignatureHelpData {
     pub active_parameter: u32,
 }
 
-#[derive(Debug)]
-struct CallContext {
-    function_name: String,
-    receiver_type: Option<String>,
-    is_constructor: bool,
-    call_start_line: u32,
-    call_start_character: u32,
+#[derive(Debug, Clone)]
+pub struct SignatureHelpQuery {
+    pub function_name: String,
+    pub is_constructor: bool,
+    pub call_start_line: u32,
+    pub call_start_character: u32,
+    pub receiver_end_character: Option<u32>,
+    pub receiver_text: Option<String>,
 }
 
 pub fn get_signature_help_v2(
@@ -27,20 +28,16 @@ pub fn get_signature_help_v2(
     line: u32,
     character: u32,
     deps: Arc<bsl_analysis_v2::SemanticDeps>,
+    receiver_type_hint: Option<TypeResolution>,
 ) -> Option<SignatureHelpData> {
-    let call_context = find_call_context(file_content, line, character)?;
-
-    let resolver = deps
-        .resolver
-        .clone()
-        .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())));
+    let call_context = signature_help_query(file_content, line, character)?;
 
     let signature_info = get_signature_for_function_with_repository(
         &call_context.function_name,
-        call_context.receiver_type.as_deref(),
+        receiver_type_hint.as_ref(),
+        call_context.receiver_text.as_deref(),
         call_context.is_constructor,
         &deps.repository,
-        Some(resolver.as_ref()),
     )?;
 
     let active_param = calculate_active_parameter(file_content, &call_context, line, character);
@@ -64,7 +61,7 @@ pub fn get_signature_help_v2(
     })
 }
 
-fn find_call_context(content: &str, line: u32, character: u32) -> Option<CallContext> {
+pub fn signature_help_query(content: &str, line: u32, character: u32) -> Option<SignatureHelpQuery> {
     let index = LineIndex::new(content);
     let lines: Vec<&str> = content.lines().collect();
     let max_line = lines.len().saturating_sub(1);
@@ -144,23 +141,30 @@ fn find_call_context(content: &str, line: u32, character: u32) -> Option<CallCon
     let (line_idx, char_idx) = stack.pop()?;
     let line_text = lines.get(line_idx)?;
     let before_paren: String = line_text.chars().take(char_idx).collect();
-    let (function_name, receiver_type, is_constructor) = extract_function_name(&before_paren)?;
+    let (function_name, receiver_end_char_idx, receiver_text, is_constructor) =
+        extract_function_name(&before_paren)?;
 
     let byte_column = char_index_to_byte_column(line_text, char_idx);
     let call_start_character = index.byte_column_to_utf16(content, line_idx, byte_column);
 
-    Some(CallContext {
+    let receiver_end_character = receiver_end_char_idx.map(|char_idx| {
+        let byte_column = char_index_to_byte_column(line_text, char_idx);
+        index.byte_column_to_utf16(content, line_idx, byte_column)
+    });
+
+    Some(SignatureHelpQuery {
         function_name,
-        receiver_type,
         is_constructor,
         call_start_line: line_idx as u32,
         call_start_character,
+        receiver_end_character,
+        receiver_text,
     })
 }
 
 fn calculate_active_parameter(
     content: &str,
-    context: &CallContext,
+    context: &SignatureHelpQuery,
     line: u32,
     character: u32,
 ) -> u32 {
@@ -273,11 +277,11 @@ fn char_index_to_byte_column(line: &str, char_idx: usize) -> usize {
     }
 }
 
-fn extract_function_name(text: &str) -> Option<(String, Option<String>, bool)> {
+fn extract_function_name(text: &str) -> Option<(String, Option<usize>, Option<String>, bool)> {
     let trimmed = text.trim_end();
 
     if let Some(constructor_name) = extract_constructor_name(trimmed) {
-        return Some((constructor_name, None, true));
+        return Some((constructor_name, None, None, true));
     }
 
     if let Some(dot_byte_pos) = trimmed.rfind('.') {
@@ -290,14 +294,19 @@ fn extract_function_name(text: &str) -> Option<(String, Option<String>, bool)> {
 
         if !method_name.is_empty() {
             let receiver = trimmed[..dot_byte_pos].trim_end();
+            let receiver_end_char_idx = if receiver.is_empty() {
+                None
+            } else {
+                Some(receiver.chars().count().saturating_sub(1))
+            };
             let receiver_compact: String =
                 receiver.chars().filter(|c| !c.is_whitespace()).collect();
-            let receiver_type = if is_simple_receiver(&receiver_compact) {
+            let receiver_text = if is_simple_receiver(&receiver_compact) {
                 Some(receiver_compact)
             } else {
                 None
             };
-            return Some((method_name, receiver_type, false));
+            return Some((method_name, receiver_end_char_idx, receiver_text, false));
         }
     }
 
@@ -314,7 +323,7 @@ fn extract_function_name(text: &str) -> Option<(String, Option<String>, bool)> {
         if is_control_keyword(&function_name) {
             return None;
         }
-        Some((function_name, None, false))
+        Some((function_name, None, None, false))
     } else {
         None
     }
@@ -378,10 +387,10 @@ fn is_identifier_char(c: char) -> bool {
 
 fn get_signature_for_function_with_repository(
     function_name: &str,
-    receiver_type: Option<&str>,
+    receiver_type_hint: Option<&TypeResolution>,
+    receiver_text: Option<&str>,
     is_constructor: bool,
     repository: &Arc<dyn TypeRepository>,
-    resolver: Option<&TypeResolver>,
 ) -> Option<SignatureTarget> {
     if is_constructor {
         return repository
@@ -389,25 +398,39 @@ fn get_signature_for_function_with_repository(
             .map(SignatureTarget::Constructor);
     }
 
-    let owner_type = receiver_type.and_then(|expr| resolve_receiver_type(expr, resolver));
+    let owner_type = receiver_type_hint
+        .and_then(signature_owner_type_name)
+        .or_else(|| receiver_text.and_then(|value| signature_owner_type_from_text(value, repository)));
     repository
         .find_method_signature(owner_type.as_deref(), function_name)
         .map(SignatureTarget::Method)
 }
 
-fn resolve_receiver_type(expr: &str, resolver: Option<&TypeResolver>) -> Option<String> {
-    let trimmed = expr.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    let resolver = resolver?;
-    let resolution = resolver.resolve_expression_sync(trimmed);
+fn signature_owner_type_name(resolution: &TypeResolution) -> Option<String> {
     if resolution.is_unknown() || resolution.is_dynamic() {
         return None;
     }
 
-    Some(resolution.type_name())
+    let type_name = resolution.type_name();
+    let without_generic = type_name.split('<').next().unwrap_or(&type_name);
+    let without_union = without_generic.split('|').next().unwrap_or(without_generic);
+    let normalized = without_union.trim();
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized.to_string())
+    }
+}
+
+fn signature_owner_type_from_text(value: &str, repository: &Arc<dyn TypeRepository>) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if repository.find_type(trimmed).is_some() {
+        return Some(trimmed.to_string());
+    }
+    None
 }
 
 enum SignatureTarget {

@@ -8,10 +8,12 @@ use tower_lsp::lsp_types::*;
 use tracing::debug;
 
 use bsl_backend::application::type_system;
+use bsl_shared::domain::types::TypeResolution;
 
 pub async fn handle_signature_help_v2(
     file_content: Arc<str>,
     position: Position,
+    receiver_type_hint: Option<TypeResolution>,
     deps: Arc<bsl_analysis_v2::SemanticDeps>,
 ) -> Option<SignatureHelp> {
     debug!(
@@ -24,6 +26,7 @@ pub async fn handle_signature_help_v2(
         position.line,
         position.character,
         deps,
+        receiver_type_hint,
     )?;
 
     let parameters = data
@@ -54,12 +57,14 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
+    use bsl_analysis_v2::{AnalysisHostV2, Change, DepsSnapshotId, FileId as V2FileId, SettingsId};
     use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
     use bsl_shared::domain::resolver::TypeResolver;
     use bsl_shared::domain::signature_index::{
         ConstructorSignature, MethodSignature, SignatureIndex, SignatureSource,
     };
     use bsl_shared::domain::types::{ParameterInfo, RawDataSource, RawTypeData};
+    use bsl_shared::formatting::DetailLevel;
 
     fn fixture_path(name: &str) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -171,6 +176,39 @@ mod tests {
         })
     }
 
+    fn compute_receiver_type_hint(
+        content: &str,
+        position: Position,
+        deps: Arc<bsl_analysis_v2::SemanticDeps>,
+    ) -> Option<TypeResolution> {
+        let query = type_system::signature_help_query(content, position.line, position.character)?;
+        let receiver_end_character = query.receiver_end_character?;
+
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(Change::SetDepsSnapshot {
+            deps_id: DepsSnapshotId::from_hash("test"),
+            deps,
+        });
+        host.apply_change(Change::SetSettingsSnapshot {
+            settings_id: SettingsId::from_hash("test"),
+            diagnostics_detail_level: DetailLevel::Full,
+        });
+
+        let file_id = V2FileId(1);
+        host.apply_change(Change::SetFile {
+            file_id,
+            text: Arc::from(content.to_string()),
+            version: 0,
+            path: Arc::from("test.bsl"),
+        });
+
+        let analysis = host.snapshot();
+        analysis
+            .type_at_position(file_id, query.call_start_line, receiver_end_character)
+            .ok()
+            .flatten()
+    }
+
     #[tokio::test]
     async fn m5_signature_help_snapshot() {
         let content = read_fixture("m5_signature_help.bsl");
@@ -180,13 +218,20 @@ mod tests {
         let constructor_v2 = handle_signature_help_v2(
             Arc::from(content.clone()),
             constructor_pos,
+            None,
             deps.clone(),
         )
         .await
         .expect("constructor signature help (v2)");
 
         let method_pos = find_position(&content, "Массив.Добавить(1, ");
-        let method_v2 = handle_signature_help_v2(Arc::from(content), method_pos, deps)
+        let receiver_type_hint = compute_receiver_type_hint(&content, method_pos, deps.clone());
+        let method_v2 = handle_signature_help_v2(
+            Arc::from(content),
+            method_pos,
+            receiver_type_hint,
+            deps,
+        )
             .await
             .expect("method signature help (v2)");
 
@@ -204,4 +249,3 @@ mod tests {
         assert_snapshot("m5_signature_help.json", &snapshot);
     }
 }
-

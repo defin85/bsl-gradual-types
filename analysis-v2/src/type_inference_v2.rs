@@ -192,10 +192,16 @@ impl TypeInferencer {
             Statement::Await { expression, .. } => {
                 let _ = self.infer_expr(expression, env, index);
             }
-            Statement::FunctionDecl { body, .. } | Statement::ProcedureDecl { body, .. } => {
+            Statement::FunctionDecl { params, body, .. }
+            | Statement::ProcedureDecl { params, body, .. } => {
                 // TODO(v2): полноценное вычисление типов внутри функций на основе call graph.
                 // Пока строим индекс внутри тела с чистым окружением параметров.
                 let mut fn_env = TypeEnv::default();
+                for param in params {
+                    fn_env
+                        .variables
+                        .insert(param.clone(), TypeResolution::unknown());
+                }
                 for stmt in body {
                     self.visit_statement(stmt, &mut fn_env, index);
                 }

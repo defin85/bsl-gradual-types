@@ -4,6 +4,8 @@
 
 pub mod helpers;
 mod validators;
+mod type_hints;
 mod visitor;
 
+pub use type_hints::SemanticTypeHints;
 pub use visitor::SemanticValidationVisitor;

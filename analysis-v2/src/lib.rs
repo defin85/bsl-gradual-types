@@ -8,11 +8,14 @@ pub use bsl_line_index::{byte_offset_to_utf16, utf16_to_byte_offset, LineIndex};
 pub mod ast_to_ir;
 pub use ast_to_ir::AstToIrConverter;
 
+mod type_inference_v2;
+
 use bsl_diagnostics::SemanticValidationVisitor;
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::SignatureIndex;
 use bsl_shared::domain::types::{DiagnosticSeverity, ParseError, TypeDiagnostic};
+use bsl_shared::domain::types::TypeResolution;
 use bsl_shared::domain::validators::TypeValidator;
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::formatting::DetailLevel;
@@ -241,6 +244,25 @@ unsafe impl salsa::Update for SemanticDiagnosticsSnapshot {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct TypeIndexSnapshot(Arc<type_inference_v2::TypeIndex>);
+
+impl PartialEq for TypeIndexSnapshot {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for TypeIndexSnapshot {}
+
+unsafe impl salsa::Update for TypeIndexSnapshot {
+    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
+        let old_value: &mut Self = unsafe { &mut *old_pointer };
+        *old_value = new_value;
+        true
+    }
+}
+
 #[salsa::tracked]
 pub fn file_text_len(db: &dyn salsa::Database, file: SourceFile) -> usize {
     file.text(db).len()
@@ -384,6 +406,23 @@ pub fn semantic_diagnostics(
     });
 
     SemanticDiagnosticsSnapshot(Arc::new(diagnostics))
+}
+
+#[salsa::tracked]
+pub fn type_index(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    deps: DepsSnapshot,
+    settings: SettingsSnapshot,
+) -> TypeIndexSnapshot {
+    let _deps_id = deps.id(db);
+    let _settings_id = settings.id(db);
+    let deps_data = deps.data(db).0.clone();
+    let parsed = parse_result(db, file, settings).0;
+    TypeIndexSnapshot(Arc::new(type_inference_v2::build_type_index(
+        &parsed.program,
+        deps_data,
+    )))
 }
 
 fn syntax_errors_only_in_directives(code: &str, errors: &[ParseError]) -> bool {
@@ -636,6 +675,19 @@ impl AnalysisV2 {
 
     pub fn signature_help(&self, _file_id: FileId, _line: u32, _character: u32) -> Cancellable<()> {
         Ok(())
+    }
+
+    pub fn type_at_position(
+        &self,
+        file_id: FileId,
+        line: u32,
+        character: u32,
+    ) -> Cancellable<Option<TypeResolution>> {
+        let Some(&file) = self.files.get(&file_id) else {
+            return Ok(None);
+        };
+        cancellable(|| type_index(&self.db, file, self.deps, self.settings).0.clone())
+            .map(|index| index.type_at_position(line, character))
     }
 }
 

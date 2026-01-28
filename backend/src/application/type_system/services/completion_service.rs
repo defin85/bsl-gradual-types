@@ -93,6 +93,7 @@ pub(crate) struct CompletionAnalysisContext<'a> {
     pub resolver: &'a TypeResolver,
     pub file_path: &'a str,
     pub parse_result: Option<Arc<bsl_syntax::ast::ParseResult>>,
+    pub member_access_owner_type_hint: Option<TypeResolution>,
 }
 
 /// LSP operations - get completion at position
@@ -137,12 +138,14 @@ pub async fn get_completion_with_semantic_program(
     file_path: &str,
     resolver: &TypeResolver,
     ir_program: Arc<SemanticProgram>,
+    member_access_owner_type_hint: Option<TypeResolution>,
 ) -> Result<CompletionResult> {
     let analysis = CompletionAnalysisContext {
         ir_program: Some(ir_program),
         resolver,
         file_path,
         parse_result: None,
+        member_access_owner_type_hint,
     };
 
     get_completion_with_analysis(
@@ -168,12 +171,14 @@ pub async fn get_completion_with_semantic_program_snapshot(
     file_path: &str,
     resolver: &TypeResolver,
     ir_program: Arc<SemanticProgram>,
+    member_access_owner_type_hint: Option<TypeResolution>,
 ) -> Result<CompletionResult> {
     let analysis = CompletionAnalysisContext {
         ir_program: Some(ir_program),
         resolver,
         file_path,
         parse_result: None,
+        member_access_owner_type_hint,
     };
 
     get_completion_with_analysis(
@@ -200,12 +205,14 @@ pub async fn get_completion_with_semantic_program_snapshot_v2(
     resolver: &TypeResolver,
     ir_program: Arc<SemanticProgram>,
     parse_result: Arc<bsl_syntax::ast::ParseResult>,
+    member_access_owner_type_hint: Option<TypeResolution>,
 ) -> Result<CompletionResult> {
     let analysis = CompletionAnalysisContext {
         ir_program: Some(ir_program),
         resolver,
         file_path,
         parse_result: Some(parse_result),
+        member_access_owner_type_hint,
     };
 
     get_completion_with_analysis(
@@ -958,6 +965,12 @@ fn resolve_member_owner_type_sync(
 ) -> Option<TypeResolution> {
     let ctx = analysis?;
     let ir_program = ctx.ir_program.clone()?;
+
+    if let Some(hint) = ctx.member_access_owner_type_hint.as_ref() {
+        if !hint.is_unknown() && !hint.is_dynamic() {
+            return Some(hint.clone());
+        }
+    }
 
     let scope_id = resolve_scope_for_member(&ir_program, line, column);
 
@@ -1978,6 +1991,7 @@ mod tests {
             resolver: resolver.as_ref(),
             file_path: "completion_test.bsl",
             parse_result: None,
+            member_access_owner_type_hint: None,
         };
 
         let resolved = resolve_member_owner_type(Some(&ctx), content, line, column, "ТаблЗнач")
@@ -2082,6 +2096,7 @@ mod tests {
             resolver: resolver.as_ref(),
             file_path: "completion_nested_chain_test.bsl",
             parse_result: None,
+            member_access_owner_type_hint: None,
         };
 
         let result = get_completion_with_analysis(
@@ -2191,6 +2206,7 @@ mod tests {
             resolver: resolver.as_ref(),
             file_path: "completion_call_chain_test.bsl",
             parse_result: Some(parse_result),
+            member_access_owner_type_hint: None,
         };
 
         let result = get_completion_with_analysis(
@@ -2283,6 +2299,7 @@ mod tests {
             resolver: resolver.as_ref(),
             file_path: "completion_index_access_test.bsl",
             parse_result: Some(parse_result),
+            member_access_owner_type_hint: None,
         };
 
         let result = get_completion_with_analysis(
@@ -2375,6 +2392,7 @@ mod tests {
             resolver: resolver.as_ref(),
             file_path: "completion_map_index_access_test.bsl",
             parse_result: Some(parse_result),
+            member_access_owner_type_hint: None,
         };
 
         let result = get_completion_with_analysis(
@@ -2469,6 +2487,7 @@ mod tests {
             resolver: resolver.as_ref(),
             file_path: "completion_ternary_test.bsl",
             parse_result: Some(parse_result),
+            member_access_owner_type_hint: None,
         };
 
         let result = get_completion_with_analysis(
@@ -2575,6 +2594,7 @@ mod tests {
             resolver: resolver.as_ref(),
             file_path: "completion_choice_test.bsl",
             parse_result: Some(parse_result),
+            member_access_owner_type_hint: None,
         };
 
         let result = get_completion_with_analysis(
@@ -2684,6 +2704,7 @@ mod tests {
             resolver: resolver.as_ref(),
             file_path: "completion_facet_substitution_test.bsl",
             parse_result: Some(parse_result),
+            member_access_owner_type_hint: None,
         };
 
         let result = get_completion_with_analysis(

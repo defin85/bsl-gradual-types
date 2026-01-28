@@ -167,6 +167,7 @@ async fn test_v2_completion_and_hover_smoke() {
         "inline.bsl",
         resolver.as_ref(),
         ir_program,
+        None,
     )
     .await
     .expect("completion");

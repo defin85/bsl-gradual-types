@@ -155,6 +155,7 @@ fn completion_benchmark(c: &mut Criterion) {
                         case.file_uri.as_str(),
                         resolver.as_ref(),
                         ir_program,
+                        None,
                     )
                     .await;
                     black_box(result).ok();

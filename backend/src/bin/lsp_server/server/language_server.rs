@@ -1083,7 +1083,15 @@ impl LanguageServer for BslLanguageServer {
             if !ready {
                 empty()
             } else {
-                let (file_content, file_path, parse_result, deps, ir_program, index_snapshot) = {
+                let (
+                    file_content,
+                    file_path,
+                    parse_result,
+                    member_access_owner_type_hint,
+                    deps,
+                    ir_program,
+                    index_snapshot,
+                ) = {
                     let snapshot_started = Instant::now();
                     let (analysis, index_snapshot, deps_id) =
                         self.analysis_v2.snapshot_with_deps().await;
@@ -1199,10 +1207,30 @@ impl LanguageServer for BslLanguageServer {
                         }
                     }
 
+                    let member_access_owner_type_hint = file_content.as_deref().and_then(|text| {
+                        let line_text = text.lines().nth(position.line as usize)?;
+                        let cursor_byte =
+                            bsl_backend::system::positioning::utf16_to_byte_offset(line_text, position.character);
+                        let line_prefix = line_text.get(..cursor_byte)?;
+                        let dot_in_line = line_prefix.rfind('.')?;
+                        let receiver = line_prefix.get(..dot_in_line)?.trim_end();
+                        let (probe_byte, _) = receiver
+                            .char_indices()
+                            .rev()
+                            .find(|(_, ch)| !ch.is_whitespace())?;
+                        let probe_utf16 =
+                            bsl_backend::system::positioning::byte_offset_to_utf16(line_text, probe_byte);
+                        analysis
+                            .type_at_position(file_id, position.line, probe_utf16)
+                            .ok()
+                            .flatten()
+                    });
+
                     (
                         file_content,
                         file_path,
                         parse_result,
+                        member_access_owner_type_hint,
                         deps,
                         ir_program,
                         index_snapshot,
@@ -1216,6 +1244,7 @@ impl LanguageServer for BslLanguageServer {
                             file_path,
                             ir_program,
                             parse_result,
+                            member_access_owner_type_hint,
                             deps,
                             position,
                             &uri,

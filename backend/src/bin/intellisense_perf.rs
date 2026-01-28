@@ -449,6 +449,7 @@ async fn run_iterations(
                 case.file_uri.as_str(),
                 resolver,
                 ir_program,
+                None,
             )
             .await;
             let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;

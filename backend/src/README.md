@@ -86,7 +86,7 @@ Backend реализует многослойную архитектуру с ч
 
 **Точки входа:**
 - `application::get_hover_info_with_semantic_program()` - hover по IR + type_at_position (v2)
-- `application::get_completion_with_semantic_program_snapshot()` - completion по IR + index snapshot
+- `application::get_completion_with_semantic_program_snapshot()` - completion по IR + index snapshot + type hint (v2)
 - `bsl_analysis_v2::AnalysisV2::{syntax_diagnostics, semantic_diagnostics}` - диагностики (salsa queries)
 
 ### `domain/` - Domain Layer (backend-specific)

@@ -1458,6 +1458,7 @@ impl SessionManager {
             resolver.as_ref(),
             program,
             parse_result,
+            None,
         )
         .await
         .map_err(|err| rmcp::ErrorData::internal_error(err.to_string(), None))?;

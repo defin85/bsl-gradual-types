@@ -47,7 +47,7 @@ application/
 
 **Основные функции:**
 - `get_hover_info_with_semantic_program(analysis, file_id, ...) -> Option<String>`
-- `get_completion_with_semantic_program_snapshot(...) -> Result<CompletionResult>`
+- `get_completion_with_semantic_program_snapshot(..., member_access_owner_type_hint) -> Result<CompletionResult>`
 - `web_api_service::*` — helpers для Web API (DTO/semantic tree/etc.)
 
 **Структура:**
@@ -160,7 +160,7 @@ LSP textDocument/completion
       ↓
 bin/lsp_server/handlers/completion.rs
       ↓
-analysis_v2_runtime.snapshot() + ir(file_id)
+analysis_v2_runtime.snapshot() + {ir(file_id), type_at_position(file_id)}
       ↓
 application::get_completion_with_semantic_program_snapshot()
 ```

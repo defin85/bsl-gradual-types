@@ -231,6 +231,7 @@ async fn m8_completion_matrix_golden_v2() {
             resolver.as_ref(),
             ir_program,
             parse_result,
+            None,
         )
         .await
         .expect("completion ok");

@@ -77,6 +77,7 @@ pub async fn handle_completion_v2(
     file_path: Arc<str>,
     ir_program: Arc<SemanticProgram>,
     parse_result: Option<Arc<bsl_syntax::ast::ParseResult>>,
+    member_access_owner_type_hint: Option<TypeResolution>,
     deps: Arc<bsl_analysis_v2::SemanticDeps>,
     position: Position,
     file_uri: &Url,
@@ -102,6 +103,7 @@ pub async fn handle_completion_v2(
                 resolver.as_ref(),
                 ir_program,
                 parse_result,
+                member_access_owner_type_hint,
             )
             .await
         }
@@ -116,6 +118,7 @@ pub async fn handle_completion_v2(
                 file_path.as_ref(),
                 resolver.as_ref(),
                 ir_program,
+                member_access_owner_type_hint,
             )
             .await
         }
@@ -1020,6 +1023,7 @@ mod tests {
             file_path.clone(),
             ir_program.clone(),
             None,
+            None,
             deps.clone(),
             position,
             &uri,
@@ -1041,6 +1045,7 @@ mod tests {
             file_content,
             file_path,
             ir_program,
+            None,
             None,
             deps,
             position,
@@ -1069,6 +1074,7 @@ mod tests {
             file_content,
             file_path,
             ir_program,
+            None,
             None,
             deps.clone(),
             position,

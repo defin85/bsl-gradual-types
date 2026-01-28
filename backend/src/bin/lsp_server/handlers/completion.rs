@@ -175,24 +175,11 @@ pub async fn handle_completion_resolve(
 
     let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
 
-    let resolved = if let Some(candidate_id) = parse_candidate_id(&item) {
-        resolve_by_candidate_id(
-            &candidate_id,
-            deps.as_ref(),
-            &metadata_lookup,
-            snippet_support,
-        )
-    } else {
-        let (kind, owner_type) = parse_completion_data(&item);
-        resolve_legacy(
-            &item,
-            deps.as_ref(),
-            &metadata_lookup,
-            snippet_support,
-            kind.as_deref(),
-            owner_type.as_deref(),
-        )
+    let Some(candidate_id) = parse_candidate_id(&item) else {
+        return item;
     };
+    let resolved =
+        resolve_by_candidate_id(&candidate_id, deps.as_ref(), &metadata_lookup, snippet_support);
 
     if let Some((detail, documentation, insert_text)) = resolved {
         item.detail = detail;
@@ -535,74 +522,6 @@ fn resolve_metadata_by_candidate_id(
     ))
 }
 
-fn resolve_legacy(
-    item: &CompletionItem,
-    deps: &bsl_analysis_v2::SemanticDeps,
-    metadata_lookup: &TypeMetadataLookup,
-    snippet_support: bool,
-    kind: Option<&str>,
-    owner_type: Option<&str>,
-) -> Option<(Option<String>, Option<String>, Option<String>)> {
-    match (kind, owner_type) {
-        (Some("method"), Some(owner)) => {
-            if let Some(signature) = deps
-                .repository
-                .find_method_signature(Some(owner), &item.label)
-            {
-                let detail = signature
-                    .return_type
-                    .clone()
-                    .filter(|value| !value.is_empty());
-                let documentation = signature.description.clone();
-                let params: Vec<(String, bool)> = signature
-                    .params
-                    .iter()
-                    .map(|param| (param.name.clone(), param.is_optional))
-                    .collect();
-                let insert_text = if snippet_support {
-                    build_call_snippet(&signature.name, &params)
-                } else {
-                    None
-                };
-
-                Some((detail, documentation, insert_text))
-            } else {
-                resolve_method_completion(owner, &item.label, metadata_lookup, snippet_support)
-                    .map(|details| (details.detail, details.documentation, details.insert_text))
-            }
-        }
-        (Some("property"), Some(owner)) => {
-            resolve_property_by_candidate_id(owner, &item.label, metadata_lookup)
-        }
-        (Some("function"), _) => deps
-            .repository
-            .find_method_signature(None, &item.label)
-            .map(|signature| {
-                let detail = signature
-                    .return_type
-                    .clone()
-                    .filter(|value| !value.is_empty());
-                let documentation = signature.description.clone();
-                let params: Vec<(String, bool)> = signature
-                    .params
-                    .iter()
-                    .map(|param| (param.name.clone(), param.is_optional))
-                    .collect();
-                let insert_text = if snippet_support {
-                    build_call_snippet(&signature.name, &params)
-                } else {
-                    None
-                };
-
-                (detail, documentation, insert_text)
-            }),
-        (Some("type"), _) => resolve_type_details(&item.label, metadata_lookup)
-            .map(|(detail, documentation)| (detail, documentation, None)),
-        _ => resolve_type_details(&item.label, metadata_lookup)
-            .map(|(detail, documentation)| (detail, documentation, None)),
-    }
-}
-
 fn completion_kind_tag(item: &bsl_shared::domain::CompletionItem) -> &'static str {
     use bsl_shared::domain::CompletionKind::*;
 
@@ -724,24 +643,6 @@ fn map_completion_kind(kind: bsl_shared::domain::CompletionKind) -> Option<Compl
         Subsystem => CompletionItemKind::FOLDER,
         Language => CompletionItemKind::KEYWORD,
     })
-}
-
-fn parse_completion_data(item: &CompletionItem) -> (Option<String>, Option<String>) {
-    let data = match item.data.as_ref() {
-        Some(value) => value,
-        None => return (None, None),
-    };
-
-    let kind = data
-        .get("kind")
-        .and_then(|value| value.as_str())
-        .map(|value| value.to_string());
-    let owner_type = data
-        .get("owner_type")
-        .and_then(|value| value.as_str())
-        .map(|value| value.to_string());
-
-    (kind, owner_type)
 }
 
 #[cfg(test)]
@@ -1343,10 +1244,6 @@ mod tests {
         }
 
         let resolved = handle_completion_resolve(legacy, Some(deps), false).await;
-        assert_eq!(
-            resolved.detail.as_deref(),
-            Some("Булево"),
-            "legacy resolve should still work via kind/owner_type"
-        );
+        assert_eq!(resolved.detail, None);
     }
 }

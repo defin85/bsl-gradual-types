@@ -13,10 +13,14 @@
 const { execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const { ensureDir, readJsonIfExists, writeJson, summarizePaths, getMaxMtimeInDir } = require('./build-cache-utils');
 
 const FRONTEND_DIR = path.resolve(__dirname, '../../frontend');
 const WEBVIEW_DIST = path.resolve(__dirname, '../media/webview');
 const TEMP_DIR = path.resolve(__dirname, '../.tmp-wasm-build');
+const PROJECT_ROOT = path.resolve(__dirname, '../..');
+const CACHE_DIR = path.resolve(__dirname, '..', '.cache');
+const CACHE_PATH = path.join(CACHE_DIR, 'wasm-build.json');
 const trunkEnv = (() => {
     const env = { ...process.env };
     if (env.NO_COLOR === '1') {
@@ -37,9 +41,125 @@ const trunkEnv = (() => {
 // Parse arguments
 const args = process.argv.slice(2);
 const isRelease = args.includes('--release');
+const isForce = args.includes('--force') || process.env.BSL_FORCE_WASM_BUILD === 'true';
 
 console.log('🚀 Building ALL WASM webview bundles...');
 console.log(`   Build mode: ${isRelease ? 'RELEASE' : 'DEBUG'}\n`);
+
+function shouldIncludeFrontendFile(relPath) {
+    // Keep it simple and stable: track sources that affect Trunk builds.
+    // We intentionally do NOT include frontend/target or frontend/dist (generated).
+    const normalized = relPath.replace(/\\/g, '/');
+    if (normalized.includes('/target/')) {
+        return false;
+    }
+    if (normalized.includes('/dist/')) {
+        return false;
+    }
+    if (normalized.includes('/node_modules/')) {
+        return false;
+    }
+
+    // Most relevant extensions for trunk/leptos/tailwind.
+    if (normalized.endsWith('.rs')) return true;
+    if (normalized.endsWith('.toml')) return true;
+    if (normalized.endsWith('.lock')) return true;
+    if (normalized.endsWith('.html')) return true;
+    if (normalized.endsWith('.css')) return true;
+    if (normalized.endsWith('.js')) return true;
+    if (normalized.endsWith('.ts')) return true;
+    if (normalized.endsWith('.json')) return true;
+    if (normalized.endsWith('.svg')) return true;
+    if (normalized.endsWith('.png')) return true;
+
+    // Also track these build-related files when present.
+    const base = path.posix.basename(normalized);
+    if (base === 'Trunk.toml') return true;
+    if (base === 'tailwind.config.js') return true;
+
+    return false;
+}
+
+function getInputsSummary() {
+    const excludeDirNames = new Set(['target', 'dist', 'node_modules', '.git']);
+    return summarizePaths(
+        [
+            FRONTEND_DIR,
+            path.join(PROJECT_ROOT, 'Cargo.toml'),
+            path.join(PROJECT_ROOT, 'Cargo.lock'),
+        ],
+        {
+            projectRoot: PROJECT_ROOT,
+            excludeDirNames,
+            includeFile: shouldIncludeFrontendFile,
+        }
+    );
+}
+
+function hasWebviewOutputs() {
+    if (!fs.existsSync(WEBVIEW_DIST)) {
+        return false;
+    }
+    try {
+        const files = fs.readdirSync(WEBVIEW_DIST);
+        return files.some(f => f.endsWith('.wasm')) && files.some(f => f.endsWith('.js'));
+    } catch {
+        return false;
+    }
+}
+
+function isUpToDate(inputsSummary, cache) {
+    if (!hasWebviewOutputs()) {
+        return false;
+    }
+
+    const outputsMaxMtimeMs = getMaxMtimeInDir(WEBVIEW_DIST);
+    if (outputsMaxMtimeMs <= 0) {
+        return false;
+    }
+
+    // If outputs are older than inputs, it's definitely stale.
+    if (outputsMaxMtimeMs < inputsSummary.maxMtimeMs) {
+        return false;
+    }
+
+    // Strictness:
+    // - For release builds we require that the previous build mode was RELEASE (same dir is reused).
+    // - For debug builds it's OK to reuse RELEASE outputs (they are compatible for running the extension).
+    if (isRelease) {
+        if (!cache || cache.mode !== 'release') {
+            return false;
+        }
+    }
+
+    // Fingerprint gives a strong signal; if cache missing but outputs are newer, still accept and write cache.
+    if (!cache) {
+        return true;
+    }
+    return cache.fingerprint === inputsSummary.fingerprint;
+}
+
+ensureDir(CACHE_DIR);
+const inputsSummary = getInputsSummary();
+const cache = readJsonIfExists(CACHE_PATH);
+
+if (!isForce && isUpToDate(inputsSummary, cache)) {
+    console.log('✅ WASM webview bundles are up-to-date, skipping.\n');
+    const resolvedMode = (() => {
+        if (isRelease) return 'release';
+        if (cache && cache.mode) return cache.mode;
+        return 'unknown';
+    })();
+    writeJson(CACHE_PATH, {
+        mode: resolvedMode,
+        fingerprint: inputsSummary.fingerprint,
+        fileCount: inputsSummary.fileCount,
+        inputsMaxMtimeMs: inputsSummary.maxMtimeMs,
+        outputsMaxMtimeMs: getMaxMtimeInDir(WEBVIEW_DIST),
+        updatedAt: new Date().toISOString(),
+    });
+    process.exit(0);
+}
 
 // Clean dist and temp directories
 console.log('🧹 Cleaning directories...');
@@ -132,3 +252,12 @@ files.forEach(file => {
 });
 
 console.log('\n✅ All WASM bundles built successfully!');
+
+writeJson(CACHE_PATH, {
+    mode: isRelease ? 'release' : 'debug',
+    fingerprint: inputsSummary.fingerprint,
+    fileCount: inputsSummary.fileCount,
+    inputsMaxMtimeMs: inputsSummary.maxMtimeMs,
+    outputsMaxMtimeMs: getMaxMtimeInDir(WEBVIEW_DIST),
+    builtAt: new Date().toISOString(),
+});

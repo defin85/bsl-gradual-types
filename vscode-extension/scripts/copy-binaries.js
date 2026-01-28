@@ -7,6 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { ensureDir, readJsonIfExists, writeJson, summarizePaths } = require('./build-cache-utils');
 
 // Цвета для консольного вывода
 const colors = {
@@ -29,6 +30,8 @@ const EXE_EXT = isWindows ? '.exe' : '';
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
 const EXTENSION_BIN_DIR = path.join(__dirname, '..', 'bin');
 const TARGET_RELEASE_DIR = path.join(PROJECT_ROOT, 'target', 'release');
+const CACHE_DIR = path.resolve(__dirname, '..', '.cache');
+const CACHE_PATH = path.join(CACHE_DIR, 'rust-binaries.json');
 
 // Конфигурация бинарников (расширение добавляется динамически)
 const BINARIES = [
@@ -109,11 +112,90 @@ function copyBinary(sourcePath, targetPath, binaryName) {
 function buildRustBinaries(force = false) {
     log('\n🔨 Проверка Rust бинарников...', colors.cyan);
 
+    ensureDir(CACHE_DIR);
+
     // ВАЖНО: просто наличие target/release недостаточно — бинарник может быть устаревшим после правок.
     // Cargo сам решит, нужно ли пересобирать (по fingerprint'ам), поэтому безопасно вызывать build всегда.
     //
     // NOTE: бинарник `bsl-lsp-server` находится в пакете `bsl-backend`, поэтому указываем `-p bsl-backend`.
     const buildCmd = 'cargo build -p bsl-backend --release --bin bsl-lsp-server';
+
+    const sourceBinaryPath = path.join(TARGET_RELEASE_DIR, `bsl-lsp-server${EXE_EXT}`);
+
+    function shouldIncludeRustInput(relPath) {
+        const normalized = relPath.replace(/\\/g, '/');
+
+        if (normalized.includes('/target/')) return false;
+        if (normalized.includes('/node_modules/')) return false;
+        if (normalized.includes('/dist/')) return false;
+        if (normalized.includes('/.git/')) return false;
+        if (normalized.includes('/.bsl_cache/')) return false;
+
+        // Tests/benches don't affect release bin (and change often).
+        if (normalized.includes('/tests/')) return false;
+        if (normalized.includes('/benches/')) return false;
+
+        const base = path.posix.basename(normalized);
+        if (base === 'Cargo.toml') return true;
+        if (base === 'Cargo.lock') return true;
+        if (base === 'build.rs') return true;
+
+        if (normalized.endsWith('.rs')) return true;
+        if (normalized.endsWith('.c')) return true;
+        if (normalized.endsWith('.h')) return true;
+
+        return false;
+    }
+
+    function getInputsSummary() {
+        const excludeDirNames = new Set(['target', 'node_modules', 'dist', '.git', '.bsl_cache']);
+        return summarizePaths(
+            [
+                path.join(PROJECT_ROOT, 'Cargo.toml'),
+                path.join(PROJECT_ROOT, 'Cargo.lock'),
+                path.join(PROJECT_ROOT, 'build.rs'),
+                path.join(PROJECT_ROOT, 'backend'),
+                path.join(PROJECT_ROOT, 'shared'),
+                path.join(PROJECT_ROOT, 'line-index'),
+                path.join(PROJECT_ROOT, 'syntax'),
+                path.join(PROJECT_ROOT, 'semantic'),
+                path.join(PROJECT_ROOT, 'semantic-diagnostics'),
+                path.join(PROJECT_ROOT, 'analysis-v2'),
+                path.join(PROJECT_ROOT, 'type-visualization'),
+                path.join(PROJECT_ROOT, 'third_party', 'tree-sitter-bsl'),
+            ],
+            {
+                projectRoot: PROJECT_ROOT,
+                excludeDirNames,
+                includeFile: shouldIncludeRustInput,
+            }
+        );
+    }
+
+    const inputsSummary = getInputsSummary();
+    const cache = readJsonIfExists(CACHE_PATH);
+
+    if (!force && fileExists(sourceBinaryPath)) {
+        const sourceTime = getModTime(sourceBinaryPath);
+        const outputsNewerThanInputs = sourceTime >= inputsSummary.maxMtimeMs;
+
+        const fingerprintMatches = cache && cache.fingerprint === inputsSummary.fingerprint;
+        const canSkipBuild = outputsNewerThanInputs && (fingerprintMatches || !cache);
+
+        if (canSkipBuild) {
+            log('✅ Rust бинарник актуален, сборка пропущена', colors.green);
+            writeJson(CACHE_PATH, {
+                fingerprint: inputsSummary.fingerprint,
+                fileCount: inputsSummary.fileCount,
+                inputsMaxMtimeMs: inputsSummary.maxMtimeMs,
+                sourceBinaryMtimeMs: sourceTime,
+                buildCmd,
+                updatedAt: new Date().toISOString(),
+            });
+            return;
+        }
+    }
+
     if (force) {
         log(`⚡ Принудительная пересборка: ${buildCmd}`, colors.yellow);
     } else {
@@ -126,6 +208,17 @@ function buildRustBinaries(force = false) {
             stdio: 'inherit'
         });
         log('✅ Rust бинарники актуальны', colors.green);
+
+        if (fileExists(sourceBinaryPath)) {
+            writeJson(CACHE_PATH, {
+                fingerprint: inputsSummary.fingerprint,
+                fileCount: inputsSummary.fileCount,
+                inputsMaxMtimeMs: inputsSummary.maxMtimeMs,
+                sourceBinaryMtimeMs: getModTime(sourceBinaryPath),
+                buildCmd,
+                builtAt: new Date().toISOString(),
+            });
+        }
     } catch (error) {
         log(`❌ Ошибка сборки: ${error.message}`, colors.red);
         process.exit(1);

@@ -16,6 +16,10 @@
 - Преобразование byte offsets → LSP UTF‑16 `Position` MUST выполняться через v2 positioning/line-index слой (единый для всего pipeline).
 - IR MUST быть привязан к конкретной версии содержимого файла (через v2 snapshot/revision).
 
+**Уточнение контракта для реализации:**
+- В IR запрещены line/column координаты (даже как кэш/удобство).
+- На границе (LSP/web) допускается использование line/column, но только как “view” поверх byte offsets.
+
 #### 2) Области видимости и символы
 IR MUST явно моделировать:
 - `ScopeId` и иерархию scope’ов (parent/children).
@@ -71,6 +75,8 @@ IR SHOULD иметь минимальную модель statement’ов (ил�
 - IR MAY хранить “явные аннотации” (например, текст type hint), но MUST NOT преобразовывать их в `TypeResolution` и MUST NOT выбирать facets.
 - Любые `TypeResolution`/certainties/metadata lookups вычисляются только как часть v2 inference поверх IR.
 
+**Следствие для текущего кода:** любые поля `TypeResolution` в IR структурах считаются legacy и подлежат удалению в рамках этого change.
+
 ### Что MUST уметь минимальный IR (MVP для IDE‑фич)
 - **Scope/binding модель**: объявления переменных/параметров/процедур/функций и их области видимости.
 - **Стабильные идентификаторы узлов** в рамках одного snapshot (для `completionItem/resolve`, hover, переходов).
@@ -120,6 +126,10 @@ IR SHOULD иметь минимальную модель statement’ов (ил�
 Удаляем кодовые пути, которые:
 - делают вывод типов вне v2 pipeline;
 - содержат альтернативные кэши/IR‑построение, не синхронизированные с v2 snapshot.
+
+**Явно в scope:**
+- удалить legacy completionItem/resolve fallback (без `candidate_id`) и любые другие “best effort” обходы v2,
+- удалить `parse_to_ir`/`parse_and_analyze` пути, которые строят IR вне salsa snapshot.
 
 ## Архитектурный критерий «без костылей»
 - Запрещаем альтернативные pipeline для inference (нет «если v2 недоступен — используем эвристику»).

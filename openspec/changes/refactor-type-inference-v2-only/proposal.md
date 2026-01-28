@@ -15,6 +15,8 @@
 1) **`bsl-analysis-v2` является единственной реализацией вывода типов** для IDE‑фич (completion/hover/signatureHelp/definition/diagnostics).
 2) **Legacy пути удалены** (не поддерживаются и не используются).
 3) **`bsl-semantic` удалён** из workspace и кода; AST→IR (если требуется как отдельный шаг) становится частью v2 pipeline или переносится в новый минимальный crate без собственных правил inference (решение фиксируется в `design.md`).
+4) **IR использует byte offsets** (а не line/column), а преобразование в LSP UTF‑16 позиции выполняется на границе (v2 positioning/line-index).
+5) **IR не содержит типовой информации** (`TypeResolution` и эвристики вывода типов), типы вычисляются поверх IR в v2 pipeline (queries).
 
 ## Что меняется
 - Удаляем/переносим `bsl-semantic`:
@@ -24,6 +26,9 @@
   - IDE‑слой и application слой backend перестают напрямую использовать «старые» компоненты и не обходят v2 pipeline.
 - Стандартизируем единый вход в inference для IDE‑фич:
   - явный сервис/фасад в backend application, который читает данные только из v2 snapshot (без дополнительной «магии»).
+- Рефакторим IR контракт:
+  - IR хранит ranges только как byte offsets,
+  - IR не хранит `TypeResolution`/certainties/metadata lookups.
 
 ## Не цели
 - Добавление новых правил вывода типов или расширение поддержки языка.
@@ -39,3 +44,4 @@
 - В workspace отсутствует crate `bsl-semantic`, и сборка проходит без него.
 - Нет кода, который использует `bsl_semantic::*` или зависит от `bsl-semantic`.
 - Все IDE‑фичи используют данные из v2 pipeline (через v2 runtime/snapshot) и не имеют альтернативного inference пути.
+- IR не содержит line/column координат и типовой информации; позиции в IR представлены byte offsets.

@@ -9,8 +9,7 @@ pub mod domain;
 pub mod engine;
 pub mod formatting; // Milestone 3.6 Phase 1: DetailLevel enum для hover
 pub mod ir; // Milestone 2.8: Intermediate Representation (IR)
-pub mod parsing;
-pub mod types; // Milestone 2.8: Parser trait для инверсии зависимостей
+pub mod types;
 pub mod utils; // Утилиты (hash, и т.д.)
                // УДАЛЕНО Phase 1: loaders переехали в backend/src/data/
                // pub mod loaders;

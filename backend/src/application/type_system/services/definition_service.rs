@@ -2,7 +2,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use bsl_shared::domain::repository::TypeRepository;
-use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::type_definition_location::TypeDefinitionLocation;
 use bsl_shared::domain::types::{ConcreteType, MetadataKind, ResolutionResult, TypeResolution};
 use bsl_shared::ir::{SemanticNodeKind, SemanticProgram, Span};
@@ -36,8 +35,19 @@ pub fn goto_definition_v2(
     deps: Arc<bsl_analysis_v2::SemanticDeps>,
     line: u32,
     character: u32,
+    type_at_position_hint: Option<TypeResolution>,
+    receiver_type_hint: Option<TypeResolution>,
 ) -> Option<DefinitionTarget> {
-    goto_definition_v2_with_source_opt(current_file_path, None, ir_program, deps, line, character)
+    goto_definition_v2_with_source_opt(
+        current_file_path,
+        None,
+        ir_program,
+        deps,
+        line,
+        character,
+        type_at_position_hint,
+        receiver_type_hint,
+    )
 }
 
 pub fn goto_definition_v2_with_source(
@@ -47,6 +57,8 @@ pub fn goto_definition_v2_with_source(
     deps: Arc<bsl_analysis_v2::SemanticDeps>,
     line: u32,
     character: u32,
+    type_at_position_hint: Option<TypeResolution>,
+    receiver_type_hint: Option<TypeResolution>,
 ) -> Option<DefinitionTarget> {
     goto_definition_v2_with_source_opt(
         current_file_path,
@@ -55,6 +67,8 @@ pub fn goto_definition_v2_with_source(
         deps,
         line,
         character,
+        type_at_position_hint,
+        receiver_type_hint,
     )
 }
 
@@ -65,12 +79,10 @@ fn goto_definition_v2_with_source_opt(
     deps: Arc<bsl_analysis_v2::SemanticDeps>,
     line: u32,
     character: u32,
+    type_at_position_hint: Option<TypeResolution>,
+    receiver_type_hint: Option<TypeResolution>,
 ) -> Option<DefinitionTarget> {
     let repo = deps.repository.clone();
-    let resolver = deps
-        .resolver
-        .clone()
-        .unwrap_or_else(|| Arc::new(TypeResolver::new(repo.clone())));
 
     if let Some(node) = ir_program.find_node_at_position(line, character) {
         if let SemanticNodeKind::VariableAccess { name } = &node.kind {
@@ -84,18 +96,19 @@ fn goto_definition_v2_with_source_opt(
 
         if let SemanticNodeKind::MemberAccess {
             object_name,
-            object_type,
             member_name,
             access_kind,
             ..
         } = &node.kind
         {
             if access_kind.is_method() {
-                let owner_type = object_type.type_name();
-                if let Some(loc) =
-                    repo.find_method_definition_location(Some(&owner_type), member_name)
+                if let Some(owner_type) = receiver_type_hint.as_ref().map(TypeResolution::type_name)
                 {
-                    return definition_target_from_location(loc);
+                    if let Some(loc) =
+                        repo.find_method_definition_location(Some(&owner_type), member_name)
+                    {
+                        return definition_target_from_location(loc);
+                    }
                 }
 
                 if let Some(obj_name) = object_name.as_deref() {
@@ -111,7 +124,6 @@ fn goto_definition_v2_with_source_opt(
 
         if let SemanticNodeKind::FunctionCall {
             function_name,
-            object_type,
             object_name,
             ..
         } = &node.kind
@@ -137,7 +149,7 @@ fn goto_definition_v2_with_source_opt(
                         }
                     }
 
-                    if let Some(obj_type) = object_type.as_ref() {
+                    if let Some(obj_type) = receiver_type_hint.as_ref() {
                         if is_common_module_type(obj_type) {
                             let type_name = obj_type.type_name();
                             if let Some(raw) = repo.find_type(&type_name) {
@@ -157,7 +169,7 @@ fn goto_definition_v2_with_source_opt(
                 }
             }
 
-            let owner_type = object_type.as_ref().map(|value| value.type_name());
+            let owner_type = receiver_type_hint.as_ref().map(|value| value.type_name());
 
             if let Some(loc) =
                 repo.find_method_definition_location(owner_type.as_deref(), function_name)
@@ -189,12 +201,7 @@ fn goto_definition_v2_with_source_opt(
         }
     }
 
-    let type_resolution = get_type_at_position_with_semantic_program(
-        ir_program.as_ref(),
-        resolver.as_ref(),
-        line,
-        character,
-    )?;
+    let type_resolution = type_at_position_hint?;
 
     let module_paths = if let ResolutionResult::Concrete(ConcreteType::Configuration(cfg)) =
         &type_resolution.result
@@ -325,45 +332,6 @@ fn find_local_method_declaration_span(
     }
 
     None
-}
-
-fn get_type_at_position_with_semantic_program(
-    ir_program: &SemanticProgram,
-    resolver: &TypeResolver,
-    line: u32,
-    column: u32,
-) -> Option<TypeResolution> {
-    if let Some((var_name, _type_hint, scope_id)) =
-        ir_program.find_variable_with_scope(line, column)
-    {
-        return Some(resolver.resolve_variable_with_context(
-            &var_name,
-            &ir_program.symbols,
-            scope_id,
-        ));
-    }
-
-    if let Some(node) = ir_program.find_node_at_position(line, column) {
-        match &node.kind {
-            SemanticNodeKind::VariableDeclaration {
-                type_hint: Some(resolution),
-                ..
-            } => Some(resolver.resolve_expression_sync(&resolution.type_name())),
-            SemanticNodeKind::FunctionCall {
-                object_type: Some(type_resolution),
-                ..
-            } => Some(resolver.resolve_expression_sync(&type_resolution.type_name())),
-            SemanticNodeKind::MemberAccess { object_type, .. } => {
-                Some(resolver.resolve_expression_sync(&object_type.type_name()))
-            }
-            SemanticNodeKind::NewExpression { type_name, .. } => {
-                Some(resolver.resolve_expression_sync(type_name))
-            }
-            _ => None,
-        }
-    } else {
-        None
-    }
 }
 
 fn definition_target_from_location(

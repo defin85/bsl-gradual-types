@@ -115,6 +115,8 @@ fn goto_definition_resolves_common_module_namespace_and_method() {
         deps.clone(),
         1,
         module_col,
+        None,
+        None,
     )
     .expect("module definition target");
 
@@ -137,7 +139,7 @@ fn goto_definition_resolves_common_module_namespace_and_method() {
     assert_eq!(actual_module, expected_module);
 
     let target_method =
-        type_system::goto_definition_v2_with_source("inline.bsl", source, ir, deps, 1, method_col)
+        type_system::goto_definition_v2_with_source("inline.bsl", source, ir, deps, 1, method_col, None, None)
             .expect("method definition target");
     assert!(
         target_method.span.is_some(),
@@ -249,12 +251,14 @@ fn goto_definition_resolves_common_module_method_with_deps_bundle_v2_snapshot() 
         deps.clone(),
         1,
         module_col,
+        None,
+        None,
     )
     .expect("module definition target");
     assert!(target_module.span.is_none());
 
     let target_method =
-        type_system::goto_definition_v2_with_source("inline.bsl", source, ir, deps, 1, method_col)
+        type_system::goto_definition_v2_with_source("inline.bsl", source, ir, deps, 1, method_col, None, None)
             .expect("method definition target");
     assert!(target_method.span.is_some());
 }

@@ -1551,7 +1551,7 @@ impl LanguageServer for BslLanguageServer {
                 return Ok(None);
             }
 
-            let (file_content, file_path, deps, ir_program) = {
+            let (file_content, file_path, type_at_position_hint, receiver_type_hint, deps, ir_program) = {
                 let snapshot_started = Instant::now();
                 let (analysis, index_snapshot, deps_id) =
                     self.analysis_v2.snapshot_with_deps().await;
@@ -1603,7 +1603,36 @@ impl LanguageServer for BslLanguageServer {
                     }
                 }
 
-                (file_content, file_path, deps, ir_program)
+                let type_at_position_hint = analysis
+                    .type_at_position(file_id, position.line, position.character)
+                    .ok()
+                    .flatten();
+                let receiver_type_hint = ir_program.as_ref().and_then(|program| {
+                    let node = program
+                        .find_node_at_position(position.line, position.character)
+                        .or_else(|| {
+                            position.character.checked_sub(1).and_then(|col| {
+                                program.find_node_at_position(position.line, col)
+                            })
+                        })?;
+
+                    let object_span = match &node.kind {
+                        bsl_shared::ir::SemanticNodeKind::MemberAccess { object_node, .. } => {
+                            object_node.and_then(|idx| program.nodes.get(idx).map(|n| n.span))
+                        }
+                        bsl_shared::ir::SemanticNodeKind::FunctionCall { object_node, .. } => {
+                            object_node.and_then(|idx| program.nodes.get(idx).map(|n| n.span))
+                        }
+                        _ => None,
+                    }?;
+
+                    analysis
+                        .type_at_position(file_id, object_span.start_line, object_span.start_column)
+                        .ok()
+                        .flatten()
+                });
+
+                (file_content, file_path, type_at_position_hint, receiver_type_hint, deps, ir_program)
             };
 
             let result = match (file_content, file_path, deps, ir_program) {
@@ -1612,6 +1641,8 @@ impl LanguageServer for BslLanguageServer {
                         file_path,
                         file_content,
                         ir_program,
+                        type_at_position_hint,
+                        receiver_type_hint,
                         deps,
                         position,
                         &uri,

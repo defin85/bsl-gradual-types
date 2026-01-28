@@ -14,7 +14,6 @@ members = [
     "shared",
     "line-index",
     "syntax",
-    "semantic",
     "semantic-diagnostics",
     "analysis-v2",
     "backend",
@@ -101,8 +100,7 @@ insta = "1.34"
 bsl-shared = { path = "shared", default-features = true }
 bsl-line-index = { path = "line-index" }
 bsl-syntax = { path = "syntax" }
-bsl-semantic = { path = "semantic" }
-bsl-semantic-diagnostics = { path = "semantic-diagnostics" }
+bsl-diagnostics = { path = "semantic-diagnostics" }
 bsl-analysis-v2 = { path = "analysis-v2" }
 bsl-backend = { path = "backend" }
 bsl-frontend = { path = "frontend" }

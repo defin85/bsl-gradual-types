@@ -83,7 +83,7 @@ pub fn semantic_error_to_diagnostic(error: &TypeDiagnostic) -> Diagnostic {
         range: Range::new(start_pos, end_pos),
         severity,
         message: error.message.clone(),
-        source: Some("bsl-semantic".to_string()), // Different from "bsl-syntax"
+        source: Some("bsl-analysis-v2".to_string()), // Different from "bsl-syntax"
         ..Default::default()
     }
 }
@@ -169,6 +169,6 @@ mod tests {
 
         assert_eq!(diagnostic.message, "Type mismatch");
         assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::ERROR));
-        assert_eq!(diagnostic.source, Some("bsl-semantic".to_string()));
+        assert_eq!(diagnostic.source, Some("bsl-analysis-v2".to_string()));
     }
 }

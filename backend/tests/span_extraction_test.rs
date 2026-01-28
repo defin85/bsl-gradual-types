@@ -4,7 +4,7 @@
 /// - TreeSitter парсер извлекает span корректно
 /// - AST → IR конверсия передаёт span для всех Statement типов
 /// - find_node_at_position() находит узлы по координатам
-use bsl_backend::application::ast_to_ir::AstToIrConverter;
+use bsl_analysis_v2::AstToIrConverter;
 use bsl_backend::system::parser_coordinator::ParserCoordinator;
 use bsl_shared::domain::repository::InMemoryTypeRepository;
 use bsl_shared::domain::signature_index::SignatureIndex;

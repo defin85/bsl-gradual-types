@@ -483,7 +483,7 @@ impl ParserCoordinator {
         content: &str,
         file_path: &str,
     ) -> Result<bsl_shared::ir::SemanticProgram, String> {
-        use crate::application::ast_to_ir::AstToIrConverter;
+        use bsl_analysis_v2::AstToIrConverter;
 
         // 1. Парсинг в AST (tree-sitter) с поддержкой ParseResult
         let parse_result = self.parse_with_cache_for_file(content, file_path)?;

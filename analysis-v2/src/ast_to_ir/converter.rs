@@ -87,7 +87,7 @@ impl AstToIrConverter {
     /// # Примеры
     ///
     /// ```no_run
-    /// use bsl_semantic::AstToIrConverter;
+    /// use bsl_analysis_v2::AstToIrConverter;
     /// use bsl_syntax::ast::Program;
     /// use bsl_shared::domain::repository::InMemoryTypeRepository;
     /// use bsl_shared::domain::signature_index::SignatureIndex;

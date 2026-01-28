@@ -1,4 +1,4 @@
-//! Semantic layer: AST (bsl-syntax) -> SemanticProgram (bsl-shared).
+//! AST -> IR conversion used by the IntelliSense v2 analysis pipeline.
 
 mod converter;
 mod expression_converter;

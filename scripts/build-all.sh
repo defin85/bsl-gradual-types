@@ -569,8 +569,7 @@ run_tests() {
             "-p" "bsl-line-index"
             "-p" "bsl-shared"
             "-p" "bsl-syntax"
-            "-p" "bsl-semantic"
-            "-p" "bsl-semantic-diagnostics"
+            "-p" "bsl-diagnostics"
             "-p" "bsl-analysis-v2"
         )
 

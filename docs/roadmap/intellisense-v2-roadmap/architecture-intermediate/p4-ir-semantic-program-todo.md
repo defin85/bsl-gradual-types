@@ -51,9 +51,9 @@
 
 Варианты:
 
-- **A (рекомендация):** новый workspace-crate `bsl-semantic` (или `bsl-ir`), который содержит AST→IR конвертер.
+- **A (текущее решение):** AST→IR живёт внутри `bsl-analysis-v2` (модуль `ast_to_ir`).
   - Зависимости: `bsl-syntax` (AST), `bsl-shared` (IR + domain types).
-  - `bsl-backend` и `bsl-analysis-v2` зависят от `bsl-semantic`.
+  - `bsl-backend` использует тот же конвертер через зависимость от `bsl-analysis-v2`.
 - **B:** перенести AST→IR в `bsl-shared`.
   - Меньше крейтов, но смешиваем “shared domain” и “semantic engine” в одном слое.
 - **C:** оставить AST→IR в backend, а в v2 прокидывать “строитель IR” через trait-object внутри deps snapshot.
@@ -114,15 +114,14 @@ AST→IR может вернуть ошибку (например, несовм�
 
 ## TODO (шаги)
 
-### 1) Выделить AST→IR в отдельный crate (`bsl-semantic`) — рекомендованный путь
+### 1) Разместить AST→IR на уровне v2 (внутри `bsl-analysis-v2`)
 
-- [x] Добавить новый workspace member (например, `semantic/`), package: `bsl-semantic`, lib: `bsl_semantic`.
-- [x] Перенести `backend/src/application/ast_to_ir/*` в новый crate:
+- [x] Вынести AST→IR из backend в `bsl-analysis-v2::ast_to_ir`.
+- [x] Удалить отдельный semantic workspace-crate, чтобы избежать двух «истин» и лишних зависимостей.
   - [x] заменить импорты AST: `crate::parsing::bsl::ast::*` → `bsl_syntax::ast::*` (или `bsl_syntax::ast::{Program, Statement, Expression}`).
   - [x] сохранить публичный API `AstToIrConverter::convert_with_resolver(...)`.
-- [x] Оставить переходный слой в backend (re-export), чтобы минимизировать дифф:
-  - [x] `backend/src/application/ast_to_ir/mod.rs` может стать thin-wrapper `pub use bsl_semantic::*;`.
-- [x] Перенести/адаптировать тесты конвертера в новый crate.
+- [x] Обновить импорты в backend/тестах на `bsl_analysis_v2::AstToIrConverter`.
+- [x] Перенести/адаптировать тесты конвертера на использование v2 API.
 
 ### 2) Расширить v2 inputs: deps snapshot + file context
 
@@ -141,7 +140,7 @@ AST→IR может вернуть ошибку (например, несовм�
 
 ### 3) Добавить `ir` salsa query в `bsl-analysis-v2`
 
-- [x] Добавить зависимость `bsl-shared` (для `SemanticProgram`) и `bsl-semantic` (для конвертера).
+- [x] Добавить зависимость `bsl-shared` (для `SemanticProgram`) и модуль AST→IR внутри `bsl-analysis-v2`.
 - [x] Добавить newtype `SemanticProgramSnapshot(Arc<SemanticProgram>)` + `Update`.
 - [x] Добавить tracked query `ir(db, file: SourceFile, deps: DepsSnapshot, settings: SettingsSnapshot) -> SemanticProgramSnapshot`:
   - [x] зависит от `parse_result(file)` и `deps.id(db)` (и при необходимости `settings.id(db)`),
@@ -158,7 +157,7 @@ AST→IR может вернуть ошибку (например, несовм�
 
 ### 5) Тесты (обязательная часть P4)
 
-- [x] Юнит-тесты в `bsl-semantic` (smoke):
+- [x] Юнит-тесты AST→IR (smoke):
   - [x] простая программа → `SemanticProgram` строится (узлы/символы непустые или ожидаемые по фикстуре).
 - [x] Интеграционные тесты в `bsl-analysis-v2`:
   - [x] изменение `file_text` инвалидирует `ir` (включая переход valid → syntax error без panic/`None`).
@@ -169,7 +168,7 @@ AST→IR может вернуть ошибку (например, несовм�
 
 ### 6) Роль legacy IR cache
 
-- [x] Зафиксировать правило: v2 queries (`bsl-analysis-v2`/`bsl-semantic`) **не используют** `backend/src/system/ir_cache.rs` (legacy-only).
+- [x] Зафиксировать правило: v2 queries (`bsl-analysis-v2`) **не используют** `backend/src/system/ir_cache.rs` (legacy-only).
 - [x] Решение: legacy IR cache остаётся в legacy/CLI/Web путях до полной миграции LSP hot path на v2 (P5+); v2 получает IR через salsa query `ir`.
 
 ## DoD (P4 считается закрытым, если)
@@ -183,9 +182,8 @@ AST→IR может вернуть ошибку (например, несовм�
 
 ## Реализация (где смотреть в коде)
 
-- `semantic/src/lib.rs`: публичный API `bsl-semantic` (AST→IR).
-- `semantic/src/converter.rs`: `AstToIrConverter::convert_with_resolver(...)`.
-- `backend/src/application/ast_to_ir/mod.rs`: thin-wrapper re-export для совместимости backend.
+- `analysis-v2/src/ast_to_ir/mod.rs`: AST→IR модуль (публичный API `AstToIrConverter`).
+- `analysis-v2/src/ast_to_ir/converter.rs`: `AstToIrConverter::convert_with_resolver(...)`.
 - `analysis-v2/src/lib.rs`: `SemanticDeps`, `DepsDataSnapshot`, `SemanticProgramSnapshot`, tracked query `ir`, `AnalysisV2::ir`.
 - `backend/src/bin/lsp_server/server/core.rs`: сборка deps snapshot для v2 + `Change::SetDepsSnapshot`.
 - `backend/src/bin/lsp_server/server/language_server.rs`: smoke-лог под `BSL_INTELLISENSE_V2_P4_SMOKE`.

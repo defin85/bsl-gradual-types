@@ -1,6 +1,6 @@
 //! Тест для проверки Документы.ЗаказКлиента IR
 
-use bsl_backend::application::ast_to_ir::AstToIrConverter;
+use bsl_analysis_v2::AstToIrConverter;
 use bsl_backend::system::tree_sitter_adapter::TreeSitterAdapter;
 use bsl_shared::domain::signature_index::SignatureIndex;
 use std::sync::Arc;

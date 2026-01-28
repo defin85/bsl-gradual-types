@@ -1,6 +1,5 @@
 //! Application layer.
 
-pub mod ast_to_ir;
 pub mod semantic_validation_visitor; // Milestone 3.7: Semantic Diagnostics MVP
 pub mod type_inference_service;
 

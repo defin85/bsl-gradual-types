@@ -5,7 +5,7 @@
 //! # Подход
 //! Используем ParserCoordinator + AstToIrConverter для реального сквозного тестирования.
 
-use bsl_backend::application::ast_to_ir::AstToIrConverter;
+use bsl_analysis_v2::AstToIrConverter;
 use bsl_backend::system::parser_coordinator::ParserCoordinator;
 use bsl_shared::domain::repository::InMemoryTypeRepository;
 use bsl_shared::domain::signature_index::SignatureIndex;

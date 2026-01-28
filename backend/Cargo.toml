@@ -28,8 +28,7 @@ bsl-shared = { workspace = true }
 bsl-analysis-v2 = { workspace = true }
 bsl-line-index = { workspace = true }
 bsl-syntax = { workspace = true }
-bsl-semantic = { workspace = true }
-bsl-semantic-diagnostics = { workspace = true }
+bsl-diagnostics = { workspace = true }
 bsl-type-visualization = { path = "../type-visualization" }
 
 # Core dependencies

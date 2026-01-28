@@ -1,5 +1,5 @@
 [package]
-name = "bsl-semantic-diagnostics"
+name = "bsl-diagnostics"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -7,10 +7,9 @@ license.workspace = true
 description = "Semantic diagnostics (validation visitor) extracted from backend"
 
 [lib]
-name = "bsl_semantic_diagnostics"
+name = "bsl_diagnostics"
 path = "src/lib.rs"
 
 [dependencies]
 bsl-shared = { workspace = true }
 tracing = { workspace = true }
-

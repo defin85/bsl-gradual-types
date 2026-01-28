@@ -4,7 +4,7 @@ use bsl_analysis_v2::SemanticDeps;
 use bsl_backend::application::type_system;
 use bsl_backend::system::build_deps_bundle_v2;
 use bsl_backend::system::SystemCoordinator;
-use bsl_semantic::AstToIrConverter;
+use bsl_analysis_v2::AstToIrConverter;
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_syntax::{parse, ParseOptions};
 use std::path::Path;

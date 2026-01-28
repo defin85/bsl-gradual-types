@@ -4,7 +4,7 @@
 //! 1. Конфигурация загружена
 //! 2. Объект метаданных НЕ найден в конфигурации
 
-use bsl_backend::application::ast_to_ir::AstToIrConverter;
+use bsl_analysis_v2::AstToIrConverter;
 use bsl_backend::application::semantic_validation_visitor::SemanticValidationVisitor;
 use bsl_backend::system::tree_sitter_adapter::TreeSitterAdapter;
 use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;

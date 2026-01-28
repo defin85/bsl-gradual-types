@@ -4,8 +4,11 @@ use std::sync::Arc;
 use salsa::Setter;
 
 pub use bsl_line_index::{byte_offset_to_utf16, utf16_to_byte_offset, LineIndex};
-use bsl_semantic::AstToIrConverter;
-use bsl_semantic_diagnostics::SemanticValidationVisitor;
+
+pub mod ast_to_ir;
+pub use ast_to_ir::AstToIrConverter;
+
+use bsl_diagnostics::SemanticValidationVisitor;
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::SignatureIndex;

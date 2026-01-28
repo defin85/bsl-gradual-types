@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use bsl_backend::application::ast_to_ir::AstToIrConverter;
+use bsl_analysis_v2::AstToIrConverter;
 use bsl_backend::data::loaders::config_metadata_parser::ConfigurationDiscovery;
 use bsl_backend::parsing::bsl::ast::{Expression, Program, Span as AstSpan, Statement};
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};

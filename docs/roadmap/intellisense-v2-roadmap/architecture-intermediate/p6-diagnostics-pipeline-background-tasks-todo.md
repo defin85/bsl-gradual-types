@@ -106,7 +106,7 @@
 
 `analysis-v2` не должен зависеть от `bsl-backend`, поэтому для `semantic_diagnostics` нужно вынести логику из backend.
 
-- [x] Выделить новую workspace-crate: `bsl-semantic-diagnostics`:
+- [x] Выделить новую workspace-crate: `bsl-diagnostics`:
   - [x] перенести `backend/src/application/semantic_validation_visitor/*` (и минимальные зависимости),
   - [x] API: `pub use SemanticValidationVisitor` (domain-level),
   - [x] никаких ссылок на LSP типы/клиент, только domain (`bsl_shared`).

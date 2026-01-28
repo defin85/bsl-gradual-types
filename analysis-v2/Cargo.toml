@@ -14,9 +14,10 @@ path = "src/lib.rs"
 salsa = { workspace = true }
 bsl-line-index = { workspace = true }
 bsl-syntax = { workspace = true }
-bsl-semantic = { workspace = true }
-bsl-semantic-diagnostics = { workspace = true }
+bsl-diagnostics = { workspace = true }
 bsl-shared = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

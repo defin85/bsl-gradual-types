@@ -405,6 +405,8 @@ pub async fn get_hover(
         );
 
         Ok(get_hover_info_with_semantic_program(
+            &analysis,
+            V2FileId(1),
             file_content.as_ref(),
             line,
             column,
@@ -754,6 +756,8 @@ pub async fn get_enhanced_hover(
         };
 
         Ok(get_hover_info_with_semantic_program(
+            &analysis,
+            V2FileId(1),
             file_content.as_ref(),
             line,
             column,

@@ -36,11 +36,11 @@ fn deps_bundle_v2_with_syntax_helper() -> Arc<DepsBundleV2> {
     BUNDLE.clone()
 }
 
-fn ir_program_for_code(
+fn analysis_and_ir_program_for_code(
     deps_bundle: &DepsBundleV2,
     file_path: &str,
     code: &str,
-) -> Arc<SemanticProgram> {
+) -> (bsl_analysis_v2::AnalysisV2, Arc<SemanticProgram>) {
     let mut host = AnalysisHostV2::default();
     host.apply_change(ChangeV2::SetDepsSnapshot {
         deps_id: deps_bundle.deps_id.clone(),
@@ -58,10 +58,12 @@ fn ir_program_for_code(
     });
 
     let analysis = host.analysis();
-    analysis
+    let ir_program = analysis
         .ir(V2FileId(1))
         .expect("ir query cancelled")
-        .expect("ir unavailable")
+        .expect("ir unavailable");
+
+    (analysis, ir_program)
 }
 
 #[tokio::test]
@@ -128,7 +130,8 @@ async fn test_v2_completion_and_hover_smoke() {
 КонецПроцедуры
 "#;
 
-    let ir_program = ir_program_for_code(deps_bundle.as_ref(), "inline.bsl", code);
+    let (analysis, ir_program) =
+        analysis_and_ir_program_for_code(deps_bundle.as_ref(), "inline.bsl", code);
 
     let deps = deps_bundle.semantic_deps.clone();
     let resolver = deps
@@ -141,6 +144,8 @@ async fn test_v2_completion_and_hover_smoke() {
         HoverFormatter::new(HoverFormatConfig::default(), metadata_lookup.clone());
 
     let hover = get_hover_info_with_semantic_program(
+        &analysis,
+        V2FileId(1),
         code,
         3,
         5,

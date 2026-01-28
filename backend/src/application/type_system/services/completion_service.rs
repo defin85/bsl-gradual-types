@@ -24,7 +24,6 @@ use super::super::extractors::symbol_extractor::{
 };
 use super::completion_ranking::{rank_candidates_with_trace, RankingCandidate};
 use super::completion_target::extract_completion_target_for_member_access;
-use super::hover_service::find_variable_type_at_position;
 use crate::system::keyword_index::DEFAULT_KEYWORDS;
 use crate::system::{IndexItemKind, IndexSnapshot, IntellisenseIndexStore, SymbolScope, TypeKind};
 
@@ -961,10 +960,6 @@ fn resolve_member_owner_type_sync(
     let ir_program = ctx.ir_program.clone()?;
 
     let scope_id = resolve_scope_for_member(&ir_program, line, column);
-    if let Some(flow_type) = find_variable_type_at_position(&ir_program, base_name, scope_id, line)
-    {
-        return Some(flow_type);
-    }
 
     let mut resolved =
         ctx.resolver

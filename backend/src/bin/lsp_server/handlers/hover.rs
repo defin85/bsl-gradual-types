@@ -16,7 +16,9 @@ use bsl_shared::ir::SemanticProgram;
 
 use crate::config::HoverSettings;
 
-pub async fn handle_hover_v2(
+pub fn handle_hover_v2(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
     file_content: Arc<str>,
     file_path: Arc<str>,
     ir_program: Arc<SemanticProgram>,
@@ -69,6 +71,8 @@ pub async fn handle_hover_v2(
     let hover_formatter = HoverFormatter::new(hover_config, metadata_lookup.clone());
 
     let hover_info = get_hover_info_with_semantic_program(
+        analysis,
+        file_id,
         file_content.as_ref(),
         position.line,
         position.character,
@@ -193,7 +197,13 @@ mod tests {
         content: &str,
         uri: &Url,
         deps: Arc<bsl_analysis_v2::SemanticDeps>,
-    ) -> (Arc<str>, Arc<str>, Arc<SemanticProgram>) {
+    ) -> (
+        bsl_analysis_v2::AnalysisV2,
+        bsl_analysis_v2::FileId,
+        Arc<str>,
+        Arc<str>,
+        Arc<SemanticProgram>,
+    ) {
         let mut host = bsl_analysis_v2::AnalysisHostV2::default();
         host.apply_change(bsl_analysis_v2::Change::SetDepsSnapshot {
             deps_id: bsl_analysis_v2::DepsSnapshotId::from_hash("test"),
@@ -226,7 +236,7 @@ mod tests {
             .expect("file_path");
         let ir_program = analysis.ir(file_id).ok().flatten().expect("ir");
 
-        (file_content, file_path, ir_program)
+        (analysis, file_id, file_content, file_path, ir_program)
     }
 
     fn hover_text(hover: Hover) -> String {
@@ -260,8 +270,11 @@ mod tests {
             show_certainty: false,
         };
 
-        let (file_content, file_path, ir_program) = build_v2_ir(&content, &uri, env.deps.clone());
+        let (analysis, file_id, file_content, file_path, ir_program) =
+            build_v2_ir(&content, &uri, env.deps.clone());
         let v2 = handle_hover_v2(
+            &analysis,
+            file_id,
             file_content.clone(),
             file_path.clone(),
             ir_program.clone(),
@@ -270,7 +283,6 @@ mod tests {
             &uri,
             &settings,
         )
-        .await
         .expect("hover v2");
         let v2_text = hover_text(v2);
         assert!(
@@ -284,6 +296,8 @@ mod tests {
 
         // Determinism smoke: same input -> same output twice.
         let v2_second = handle_hover_v2(
+            &analysis,
+            file_id,
             file_content,
             file_path,
             ir_program,
@@ -292,7 +306,6 @@ mod tests {
             &uri,
             &settings,
         )
-        .await
         .expect("hover v2 (second)");
         let v2_second_text = hover_text(v2_second);
         assert_eq!(v2_text, v2_second_text);

@@ -161,7 +161,29 @@ pub fn hover_for_code_with_config(
     column: u32,
     hover_config: Option<HoverFormatConfig>,
 ) -> Option<String> {
-    let ir_program = ir_program_for_code(deps_bundle, file_path, code);
+    let file_id = V2FileId(1);
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(ChangeV2::SetDepsSnapshot {
+        deps_id: deps_bundle.deps_id.clone(),
+        deps: deps_bundle.semantic_deps.clone(),
+    });
+    host.apply_change(ChangeV2::SetSettingsSnapshot {
+        settings_id: SettingsId::from_hash("tests"),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+    host.apply_change(ChangeV2::SetFile {
+        file_id,
+        text: Arc::from(code),
+        version: 0,
+        path: Arc::from(file_path.to_string()),
+    });
+
+    let analysis = host.analysis();
+    let ir_program = analysis
+        .ir(file_id)
+        .map_err(|_| anyhow::anyhow!("ir query cancelled"))
+        .and_then(|value| value.ok_or_else(|| anyhow::anyhow!("ir unavailable")))
+        .expect("ir");
 
     let deps = deps_bundle.semantic_deps.clone();
     let resolver = deps
@@ -173,6 +195,8 @@ pub fn hover_for_code_with_config(
         HoverFormatter::new(HoverFormatConfig::default(), metadata_lookup.clone());
 
     get_hover_info_with_semantic_program(
+        &analysis,
+        file_id,
         code,
         line,
         column,

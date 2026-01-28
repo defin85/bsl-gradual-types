@@ -1356,7 +1356,7 @@ impl LanguageServer for BslLanguageServer {
                 return Ok(None);
             }
 
-            let (file_content, file_path, deps, ir_program) = {
+            let (analysis, file_content, file_path, deps, ir_program) = {
                 let snapshot_started = Instant::now();
                 let (analysis, index_snapshot, deps_id) =
                     self.analysis_v2.snapshot_with_deps().await;
@@ -1425,13 +1425,15 @@ impl LanguageServer for BslLanguageServer {
                     }
                 }
 
-                (file_content, file_path, deps, ir_program)
+                (analysis, file_content, file_path, deps, ir_program)
             };
 
             let settings = self.settings.read().await;
             let result = match (file_content, file_path, deps, ir_program) {
                 (Some(file_content), Some(file_path), Some(deps), Some(ir_program)) => {
                     handle_hover_v2(
+                        &analysis,
+                        file_id,
                         file_content,
                         file_path,
                         ir_program,
@@ -1440,7 +1442,6 @@ impl LanguageServer for BslLanguageServer {
                         &uri,
                         &settings.hover,
                     )
-                    .await
                 }
                 _ => None,
             };

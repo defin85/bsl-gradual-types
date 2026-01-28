@@ -85,7 +85,7 @@ Backend реализует многослойную архитектуру с ч
 - `type_inference_service.rs` - вывод типов выражений
 
 **Точки входа:**
-- `application::get_hover_info_with_semantic_program()` - hover по IR снапшоту
+- `application::get_hover_info_with_semantic_program()` - hover по IR + type_at_position (v2)
 - `application::get_completion_with_semantic_program_snapshot()` - completion по IR + index snapshot
 - `bsl_analysis_v2::AnalysisV2::{syntax_diagnostics, semantic_diagnostics}` - диагностики (salsa queries)
 
@@ -187,7 +187,7 @@ API endpoints и адаптеры для клиентов.
    - `SemanticProgram` (IR) из снапшота
            ↓
 5. `application::get_hover_info_with_semantic_program()`
-   - IR + deps snapshot + metadata lookup
+   - IR + deps snapshot + metadata lookup + `type_at_position` (v2)
            ↓
 6. `TypeRepository` (из deps snapshot)
    - метаданные типов платформы/конфигурации

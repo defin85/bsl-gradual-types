@@ -4,10 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::types::TypeResolution;
-
 use super::cfg::ControlFlowGraph;
-use super::span::{SourceInfo, Span};
+use super::span::SourceInfo;
 use super::symbol_table::{ScopeId, SymbolTable};
 use super::types::{SemanticNode, SemanticNodeKind};
 
@@ -170,17 +168,13 @@ impl SemanticProgram {
     /// Получить переменную в scope (с поиском в родительских scope)
     ///
     /// Поиск идёт от текущего scope вверх по иерархии до root
-    pub fn resolve_variable(
-        &self,
-        name: &str,
-        scope_id: ScopeId,
-    ) -> Option<(TypeResolution, Span)> {
+    pub fn resolve_variable(&self, name: &str, scope_id: ScopeId) -> Option<&super::types::VariableState> {
         let mut current_scope_id = Some(scope_id);
 
         while let Some(sid) = current_scope_id {
             if let Some(scope) = self.get_scope(sid) {
                 if let Some(var_state) = scope.variables.get(name) {
-                    return Some((var_state.resolution.clone(), var_state.declaration_span));
+                    return Some(var_state);
                 }
                 current_scope_id = scope.parent;
             } else {
@@ -244,26 +238,20 @@ impl SemanticProgram {
     /// 2. Получить scope_id узла
     /// 3. Извлечь имя переменной из узла (Assignment, MemberAccess, VariableDeclaration)
     /// 4. Вызвать resolve_variable() для поиска в scope hierarchy
-    /// 5. Вернуть (имя_переменной, TypeResolution)
+    /// 5. Вернуть (имя_переменной, VariableState)
     ///
     /// # Примеры
     ///
     /// ```no_run
     /// use bsl_shared::ir::SemanticProgram;
-    /// use bsl_shared::domain::types::TypeResolution;
-    ///
     /// let program = SemanticProgram::new();
     /// // Предположим, в программе есть: МассивДанных = Новый Массив;
-    /// if let Some((var_name, resolution)) = program.find_variable_at_position(5, 10) {
+    /// if let Some((var_name, state)) = program.find_variable_at_position(5, 10) {
     ///     assert_eq!(var_name, "МассивДанных");
-    ///     assert_eq!(resolution.type_name(), "Массив");
+    ///     assert!(state.initialized);
     /// }
     /// ```
-    pub fn find_variable_at_position(
-        &self,
-        line: u32,
-        column: u32,
-    ) -> Option<(String, TypeResolution)> {
+    pub fn find_variable_at_position(&self, line: u32, column: u32) -> Option<(String, super::types::VariableState)> {
         // 1. Находим узел в позиции
         let node = self.find_node_at_position(line, column)?;
 
@@ -274,32 +262,15 @@ impl SemanticProgram {
         let var_name = Self::extract_variable_name(node)?;
 
         // 4. Ищем переменную в scope (с поиском в родительских scope)
-        let (resolution, _span) = self.resolve_variable(&var_name, scope_id)?;
+        let state = self.resolve_variable(&var_name, scope_id)?;
 
         // 5. Возвращаем результат
-        Some((var_name, resolution))
+        Some((var_name, state.clone()))
     }
 
-    /// Найти переменную по позиции с возвратом scope_id для резолюции через TypeResolver
+    /// Найти переменную по позиции с возвратом scope_id
     ///
-    /// Расширенная версия `find_variable_at_position()`, возвращает scope_id для использования
-    /// в `TypeResolver::resolve_variable_with_context()`.
-    ///
-    /// # Direction 2: Generic Collections Inference
-    ///
-    /// Используется для hover с Generic типами:
-    /// ```bsl
-    /// МассивСтрок = Новый Массив();
-    /// МассивСтрок.Добавить("текст");  // ← cursor здесь
-    /// // find_variable_with_scope(3, 12) → ("МассивСтрок", TypeResolution::generic(...), scope_id)
-    /// // → TypeResolver::resolve_variable_with_context("МассивСтрок", symbols, scope_id)
-    /// // → TypeResolution::Generic(Массив<Строка>) с методами
-    /// ```
-    pub fn find_variable_with_scope(
-        &self,
-        line: u32,
-        column: u32,
-    ) -> Option<(String, TypeResolution, ScopeId)> {
+    pub fn find_variable_with_scope(&self, line: u32, column: u32) -> Option<(String, super::types::VariableState, ScopeId)> {
         // 1. Находим узел в позиции
         let node = self.find_node_at_position(line, column)?;
 
@@ -310,10 +281,10 @@ impl SemanticProgram {
         let var_name = Self::extract_variable_name(node)?;
 
         // 4. Ищем переменную в scope (с поиском в родительских scope)
-        let (resolution, _span) = self.resolve_variable(&var_name, scope_id)?;
+        let state = self.resolve_variable(&var_name, scope_id)?;
 
         // 5. Возвращаем результат с scope_id
-        Some((var_name, resolution, scope_id))
+        Some((var_name, state.clone(), scope_id))
     }
 }
 

@@ -8,14 +8,12 @@
 //! - `narrowing` - Type narrowing (сужение типов)
 //! - `validation` - Валидация вызовов функций/методов
 //! - `constructor` - Резолюция конструкторов
-//! - `context_resolution` - Резолюция переменных с контекстом SymbolTable
 //! - `result_types` - Типы результатов резолюции и валидации
 //! - `strategies` - Стратегии резолюции составных типов (Union, Intersection, Generic, Nullable)
 //! - `member_resolution` - Резолюция доступа к членам типов
 //! - `helpers` - Вспомогательные функции форматирования и сравнения
 
 mod constructor;
-mod context_resolution;
 mod helpers;
 mod member_resolution;
 mod narrowing;
@@ -70,6 +68,4 @@ mod resolver_tabular_tests;
 #[cfg(test)]
 mod resolver_constructor_tests;
 
-// R6: Type Inference Flow integration tests
-#[cfg(test)]
-mod resolver_inference_flow_tests;
+// R6: Type Inference Flow integration tests (legacy; removed in v2-only refactor)

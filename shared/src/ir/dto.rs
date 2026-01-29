@@ -5,7 +5,6 @@
 use std::collections::HashMap;
 
 use crate::api::semantic_dtos::*;
-use crate::domain::types::{Certainty, ResolutionResult, TypeResolution};
 
 use super::program::SemanticProgram;
 use super::types::{SemanticNode, SemanticNodeKind};
@@ -142,9 +141,8 @@ impl SemanticProgram {
                 is_export,
                 ..
             } => {
-                // Phase 3: type_hint теперь Option<TypeResolution>
                 if let Some(hint) = type_hint {
-                    attributes.insert("type".to_string(), hint.type_name());
+                    attributes.insert("type".to_string(), hint.clone());
                 }
                 attributes.insert("is_export".to_string(), is_export.to_string());
                 ("Variable".to_string(), Some(name.clone()), attributes)
@@ -156,14 +154,9 @@ impl SemanticProgram {
             SemanticNodeKind::FunctionDeclaration {
                 name,
                 params,
-                return_type,
                 ..
             } => {
                 attributes.insert("parameter_count".to_string(), params.len().to_string());
-                // Phase 3: return_type теперь Option<TypeResolution>
-                if let Some(ret) = return_type {
-                    attributes.insert("return_type".to_string(), ret.type_name());
-                }
                 ("Function".to_string(), Some(name.clone()), attributes)
             }
             SemanticNodeKind::ProcedureDeclaration { name, params, .. } => {
@@ -172,19 +165,16 @@ impl SemanticProgram {
             }
             SemanticNodeKind::Assignment {
                 variable,
-                value_type,
                 value_node,
             } => {
                 attributes.insert("variable".to_string(), variable.clone());
-                // Phase 3: value_type теперь TypeResolution, используем type_name()
-                attributes.insert("value_type".to_string(), value_type.type_name());
                 if let Some(vn) = value_node {
                     attributes.insert("value_node".to_string(), vn.to_string());
                 }
                 // Показываем имя переменной в UI
                 (
                     "Assignment".to_string(),
-                    Some(format!("{} = {}", variable, value_type.type_name())),
+                    Some(format!("{} =", variable)),
                     attributes,
                 )
             }
@@ -194,11 +184,9 @@ impl SemanticProgram {
             SemanticNodeKind::FunctionCall {
                 function_name,
                 object_name,
-                arg_types,
                 ..
             } => {
                 attributes.insert("function_name".to_string(), function_name.clone());
-                attributes.insert("arg_count".to_string(), arg_types.len().to_string());
 
                 // MILESTONE 3.5: Показываем полное имя вызова (объект.метод)
                 let display_name = if let Some(obj_name) = object_name {
@@ -214,23 +202,15 @@ impl SemanticProgram {
             SemanticNodeKind::TryExcept { .. } => ("TryExcept".to_string(), None, attributes),
             SemanticNodeKind::Break => ("Break".to_string(), None, attributes),
             SemanticNodeKind::Continue => ("Continue".to_string(), None, attributes),
-            SemanticNodeKind::ForEachLoop {
-                variable,
-                collection_type,
-                ..
-            } => {
+            SemanticNodeKind::ForEachLoop { variable, .. } => {
                 attributes.insert("variable".to_string(), variable.clone());
-                // Phase 3: collection_type теперь TypeResolution
-                attributes.insert("collection_type".to_string(), collection_type.type_name());
                 ("ForEachLoop".to_string(), None, attributes)
             }
             SemanticNodeKind::MemberAccess {
                 object_node,
                 object_name,
-                object_type,
                 member_name,
                 access_kind,
-                result_type,
             } => {
                 // object_node — индекс узла-объекта
                 if let Some(node_idx) = object_node {
@@ -240,12 +220,8 @@ impl SemanticProgram {
                 if let Some(name) = object_name {
                     attributes.insert("object_name".to_string(), name.clone());
                 }
-                // Phase 3: object_type теперь TypeResolution
-                attributes.insert("object_type".to_string(), object_type.type_name());
                 attributes.insert("member_name".to_string(), member_name.clone());
                 attributes.insert("access_kind".to_string(), format!("{:?}", access_kind));
-                // НОВОЕ: result_type — тип результата доступа
-                attributes.insert("result_type".to_string(), result_type.type_name());
 
                 let description = object_name
                     .as_ref()
@@ -255,9 +231,8 @@ impl SemanticProgram {
                 ("MemberAccess".to_string(), Some(description), attributes)
             }
             SemanticNodeKind::BlockScope { .. } => ("BlockScope".to_string(), None, attributes),
-            SemanticNodeKind::GlobalPropertyAccess { name, result_type } => {
+            SemanticNodeKind::GlobalPropertyAccess { name } => {
                 attributes.insert("name".to_string(), name.clone());
-                attributes.insert("result_type".to_string(), result_type.type_name());
                 (
                     "GlobalPropertyAccess".to_string(),
                     Some(name.clone()),
@@ -266,16 +241,11 @@ impl SemanticProgram {
             }
             SemanticNodeKind::NewExpression {
                 type_name,
-                arg_types,
                 is_dynamic,
-                result_type,
                 generic_params,
             } => {
                 attributes.insert("type_name".to_string(), type_name.clone());
-                attributes.insert("arg_count".to_string(), arg_types.len().to_string());
                 attributes.insert("is_dynamic".to_string(), is_dynamic.to_string());
-                // Phase 3: result_type теперь TypeResolution
-                attributes.insert("result_type".to_string(), result_type.type_name());
 
                 if let Some(params) = generic_params {
                     attributes.insert("generic_params".to_string(), params.join(", "));
@@ -284,10 +254,8 @@ impl SemanticProgram {
                 // Форматируем имя для отображения в UI
                 let display_name = if *is_dynamic {
                     format!("Новый(\"{}\")", type_name)
-                } else if arg_types.is_empty() {
-                    format!("Новый {}", type_name)
                 } else {
-                    format!("Новый {}({} args)", type_name, arg_types.len())
+                    format!("Новый {}", type_name)
                 };
 
                 ("NewExpression".to_string(), Some(display_name), attributes)
@@ -332,6 +300,11 @@ impl SemanticProgram {
             }
             BlockScope { statements, .. } => statements.clone(),
 
+            VariableDeclaration {
+                initial_value_node,
+                ..
+            } => initial_value_node.iter().copied().collect(),
+
             // MILESTONE 3.5: Assignment может содержать вложенный FunctionCall
             Assignment { value_node, .. } => value_node.iter().copied().collect(),
 
@@ -342,6 +315,8 @@ impl SemanticProgram {
             // MILESTONE 5.4: MemberAccess может содержать вложенный узел (цепочки доступа)
             // Например: Справочники.Контрагенты (GlobalPropertyAccess → MemberAccess)
             MemberAccess { object_node, .. } => object_node.iter().copied().collect(),
+
+            Return { value_node } => value_node.iter().copied().collect(),
 
             // Листовые узлы (нет детей): GlobalPropertyAccess, VariableDeclaration, Return, Break, Continue и др.
             _ => Vec::new(),
@@ -365,7 +340,7 @@ impl SemanticProgram {
                 let symbol = SymbolInfoDto {
                     name: var_name.clone(),
                     kind: "Variable".to_string(),
-                    resolved_type: self.type_resolution_to_dto(&var_state.resolution),
+                    resolved_type: None,
                     scope: "Local".to_string(), // TODO: различать Global/Local
                     declaration_location: SourceLocationDto {
                         line: var_state.declaration_span.start_line,
@@ -373,7 +348,11 @@ impl SemanticProgram {
                     },
                     // TODO: flow-sensitive analysis (пока не реализовано)
                     flow_variants: Vec::new(),
-                    metadata: HashMap::new(),
+                    metadata: {
+                        let mut meta = HashMap::new();
+                        meta.insert("initialized".to_string(), var_state.initialized.to_string());
+                        meta
+                    },
                 };
 
                 result.insert(var_name.clone(), symbol);
@@ -381,26 +360,11 @@ impl SemanticProgram {
         }
 
         // Добавляем функции используя публичное API
-        // Phase 3: return_type теперь Option<TypeResolution>
         for (fn_name, sig) in self.symbols.iter_functions() {
             let symbol = SymbolInfoDto {
                 name: fn_name.clone(),
-                kind: if sig.return_type.is_some() {
-                    "Function".to_string()
-                } else {
-                    "Procedure".to_string()
-                },
-                resolved_type: sig.return_type.as_ref().map(|rt| TypeResolutionDto {
-                    name: rt.type_name(), // Phase 3: используем type_name()
-                    category: "Unknown".to_string(),
-                    certainty: "Inferred".to_string(),
-                    certainty_percent: 50,
-                    active_facet: None,
-                    methods: Vec::new(),
-                    properties: Vec::new(),
-                    is_union: None,
-                    union_components: Vec::new(),
-                }),
+                kind: "Function".to_string(),
+                resolved_type: None,
                 scope: "Global".to_string(),
                 declaration_location: SourceLocationDto { line: 0, column: 0 }, // TODO: store location
                 flow_variants: Vec::new(),
@@ -415,51 +379,26 @@ impl SemanticProgram {
             result.insert(fn_name.clone(), symbol);
         }
 
-        result
-    }
+        for (proc_name, sig) in self.symbols.iter_procedures() {
+            let symbol = SymbolInfoDto {
+                name: proc_name.clone(),
+                kind: "Procedure".to_string(),
+                resolved_type: None,
+                scope: "Global".to_string(),
+                declaration_location: SourceLocationDto { line: 0, column: 0 }, // TODO: store location
+                flow_variants: Vec::new(),
+                metadata: {
+                    let mut meta = HashMap::new();
+                    meta.insert("is_export".to_string(), sig.is_export.to_string());
+                    meta.insert("parameter_count".to_string(), sig.params.len().to_string());
+                    meta
+                },
+            };
 
-    /// Конвертировать TypeResolution в TypeResolutionDto
-    fn type_resolution_to_dto(&self, resolution: &TypeResolution) -> Option<TypeResolutionDto> {
-        if matches!(resolution.certainty, Certainty::Unknown) {
-            return None;
+            result.insert(proc_name.clone(), symbol);
         }
 
-        let type_name = resolution.type_name();
-
-        let (category, certainty_str, certainty_percent) = match &resolution.certainty {
-            Certainty::Known => ("Platform".to_string(), "Known".to_string(), 100u8),
-            Certainty::Inferred => (
-                if matches!(resolution.result, ResolutionResult::Generic(_)) {
-                    "Generic".to_string()
-                } else {
-                    "Inferred".to_string()
-                },
-                "Inferred".to_string(),
-                80u8,
-            ),
-            Certainty::InferredWeak => (
-                if matches!(resolution.result, ResolutionResult::Generic(_)) {
-                    "Generic".to_string()
-                } else {
-                    "Inferred".to_string()
-                },
-                "InferredWeak".to_string(),
-                50u8,
-            ),
-            Certainty::Unknown => return None,
-        };
-
-        Some(TypeResolutionDto {
-            name: type_name,
-            category,
-            certainty: certainty_str,
-            certainty_percent,
-            active_facet: None,
-            methods: Vec::new(),
-            properties: Vec::new(),
-            is_union: None,
-            union_components: Vec::new(),
-        })
+        result
     }
 
     /// Извлечь граф вызовов функций
@@ -474,49 +413,34 @@ impl SemanticProgram {
         let mut procedure_count = 0;
         let mut function_count = 0;
         let mut variable_count = 0;
-        let mut known_types = 0;
-        let mut inferred_types = 0;
-        let mut unknown_types = 0;
+        let mut parameter_count = 0;
 
         // Подсчёт procedures и functions
         for node in &self.nodes {
             match &node.kind {
-                SemanticNodeKind::ProcedureDeclaration { .. } => procedure_count += 1,
-                SemanticNodeKind::FunctionDeclaration { .. } => function_count += 1,
+                SemanticNodeKind::ProcedureDeclaration { params, .. } => {
+                    procedure_count += 1;
+                    parameter_count += params.len();
+                }
+                SemanticNodeKind::FunctionDeclaration { params, .. } => {
+                    function_count += 1;
+                    parameter_count += params.len();
+                }
                 SemanticNodeKind::VariableDeclaration { .. } => variable_count += 1,
                 _ => {}
             }
         }
 
-        // Подсчёт типов
-        for scope in self.symbols.scopes.values() {
-            for var_state in scope.variables.values() {
-                match &var_state.resolution.certainty {
-                    Certainty::Known => known_types += 1,
-                    Certainty::Inferred => known_types += 1,
-                    Certainty::InferredWeak => inferred_types += 1,
-                    Certainty::Unknown => unknown_types += 1,
-                }
-            }
-        }
-
-        let total_types = known_types + inferred_types + unknown_types;
-        let average_certainty = if total_types > 0 {
-            // InferredWeak = 50%, поэтому коэффициент 0.5
-            (known_types as f32 + inferred_types as f32 * 0.5) / total_types as f32
-        } else {
-            0.0
-        };
-
         SemanticMetricsDto {
             procedure_count,
             function_count,
             variable_count,
-            parameter_count: 0, // TODO: calculate
-            known_types,
-            inferred_types,
-            unknown_types,
-            average_certainty,
+            parameter_count,
+            // TypeResolution удалён из IR; метрики уверенности типизации больше не вычисляются здесь.
+            known_types: 0,
+            inferred_types: 0,
+            unknown_types: 0,
+            average_certainty: 0.0,
             analysis_time_ms: 0, // Will be set by caller
             node_count: self.nodes.len(),
             tree_depth: self.calculate_tree_depth(),

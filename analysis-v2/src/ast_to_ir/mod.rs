@@ -3,9 +3,7 @@
 mod converter;
 mod expression_converter;
 mod global_collections;
-mod metadata_helpers;
 mod statement_converter;
-mod type_inference;
 
 #[cfg(test)]
 mod tests;

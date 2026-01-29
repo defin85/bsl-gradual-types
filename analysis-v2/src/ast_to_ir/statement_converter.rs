@@ -5,7 +5,6 @@
 
 use anyhow::Result;
 use bsl_shared::domain::code_location::CompilerDirective;
-use bsl_shared::domain::types::TypeResolution;
 use bsl_shared::ir::Span;
 use bsl_shared::ir::{Parameter, ScopeKind, SemanticNode, SemanticNodeKind};
 
@@ -27,15 +26,12 @@ impl AstToIrConverter {
             } => {
                 let span = self.ast_span_to_ir_span(ast_span);
 
-                // Phase 3: type_hint теперь TypeResolution
-                let type_hint_resolution = type_hint.as_ref().map(|t| TypeResolution::explicit(t));
-
                 let node = SemanticNode {
                     kind: SemanticNodeKind::VariableDeclaration {
                         name: name.clone(),
-                        type_hint: type_hint_resolution.clone(),
+                        type_hint,
                         is_export: false,
-                        initial_value_type: None,
+                        initial_value_node: None,
                     },
                     span,
                     scope_id: self.current_scope,
@@ -44,12 +40,10 @@ impl AstToIrConverter {
                 // Регистрируем переменную в function scope БЕЗ инициализации
                 // VarDeclaration - это "Перем X;" без присваивания значения
                 // В BSL переменные видны во всём теле функции, не только в текущем блоке
-                let resolution = type_hint_resolution.unwrap_or_else(TypeResolution::unknown);
                 self.symbol_table
                     .register_variable_declared_in_function_scope(
                         self.current_scope,
                         name,
-                        resolution,
                         span,
                     );
 
@@ -95,16 +89,15 @@ impl AstToIrConverter {
                 value,
                 span: ast_span,
             } => {
-                if let Some(ref expr) = value {
-                    self.convert_expression_for_hover(expr)?;
-                }
-
-                // Phase 3: Используем infer_type_resolution для возвращаемого значения
-                let value_type = value.as_ref().map(|v| self.infer_type_resolution(v));
+                let value_node = if let Some(ref expr) = value {
+                    self.convert_expression_for_hover(expr)?
+                } else {
+                    None
+                };
                 let span = self.ast_span_to_ir_span(ast_span);
 
                 let node = SemanticNode {
-                    kind: SemanticNodeKind::Return { value_type },
+                    kind: SemanticNodeKind::Return { value_node },
                     span,
                     scope_id: self.current_scope,
                 };
@@ -193,95 +186,25 @@ impl AstToIrConverter {
 
             let span = self.ast_span_to_ir_span(ast_span);
 
-            // FIX: Используем infer_type_resolution для получения полного TypeResolution
-            // Это обеспечивает согласованность между Symbol Table и SemanticNode
-            let value_type_resolution = self.infer_type_resolution(&value);
-
-            // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Определяем тип для переменной
-            // Phase 3: Используем ref для избежания partial move
-            let type_resolution = if let Expression::New { ref type_name, .. } = value {
-                // ОЧИСТКА: Убираем скобки если tree-sitter включил их в type_name
-                let clean_type_name = type_name.trim().trim_end_matches("()").trim();
-
-                // Для Generic коллекций (Массив, Соответствие, Список)
-                use bsl_shared::domain::types::Certainty;
-                match clean_type_name {
-                    "Массив" => {
-                        TypeResolution::generic("Массив", &["?"], Certainty::InferredWeak)
-                    }
-                    "Соответствие" => TypeResolution::generic(
-                        "Соответствие",
-                        &["?", "?"],
-                        Certainty::InferredWeak,
-                    ),
-                    "Список" => {
-                        TypeResolution::generic("Список", &["?"], Certainty::InferredWeak)
-                    }
-                    _ => {
-                        // Для остальных типов: если тип реально загружен — explicit (Known),
-                        // иначе помечаем как Unknown с причиной (не ломаем hover/diagnostics).
-                        if self.repository.find_type(clean_type_name).is_some() {
-                            TypeResolution::explicit(clean_type_name)
-                        } else {
-                            use bsl_shared::domain::types::UncertaintyReason;
-                            let mut res = TypeResolution::primitive(clean_type_name);
-                            res.certainty = Certainty::Unknown;
-                            res.metadata.uncertainty_reason =
-                                Some(UncertaintyReason::TypeNotFound {
-                                    name: clean_type_name.to_string(),
-                                });
-                            res
-                        }
-                    }
-                }
-            } else {
-                // FIX: Используем уже вычисленный value_type_resolution
-                value_type_resolution.clone()
-            };
-
-            // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Проверяем, существует ли переменная
-            let variable_exists = self
+            // Помечаем переменную как инициализированную. Если переменной ещё нет — регистрируем.
+            if let Some((decl_scope_id, _)) = self
                 .symbol_table
-                .get_variable_type(self.current_scope, &var_name)
-                .is_some();
-
-            if !variable_exists {
-                // Переменная не объявлена через VarDeclaration -> регистрируем её
-                // В BSL переменные видны во всём теле функции (function scope)
-                use tracing::debug;
-                debug!(
-                    "Assignment declares new variable: {} with type {:?}",
-                    var_name, type_resolution
-                );
+                .lookup_variable_in_hierarchy(self.current_scope, &var_name)
+            {
+                let _ = self
+                    .symbol_table
+                    .mark_variable_initialized(decl_scope_id, &var_name);
+            } else {
                 self.symbol_table.register_variable_in_function_scope(
                     self.current_scope,
                     var_name.clone(),
-                    type_resolution,
                     span,
                 );
-            } else {
-                // Переменная уже существует -> обновляем тип (flow-sensitive)
-                // Используем публичный API вместо прямого доступа к scopes
-                if !self.symbol_table.update_variable_type(
-                    self.current_scope,
-                    var_name.clone(),
-                    type_resolution,
-                ) {
-                    tracing::warn!(
-                        "Failed to update variable type for '{}' in scope {:?}",
-                        var_name,
-                        self.current_scope
-                    );
-                }
             }
 
-            // Phase 3: value_type теперь TypeResolution
-            // FIX: Используем уже вычисленный value_type_resolution
             let node = SemanticNode {
                 kind: SemanticNodeKind::Assignment {
                     variable: var_name.clone(),
-                    // Phase 3: value_type теперь TypeResolution
-                    value_type: value_type_resolution,
                     value_node: value_node_idx, // MILESTONE 3.5: сохраняем индекс узла value
                 },
                 span,
@@ -304,8 +227,6 @@ impl AstToIrConverter {
     ) -> Result<Option<usize>> {
         self.convert_expression_for_hover(&condition)?;
 
-        // Phase 3: Используем infer_type_resolution для условия
-        let condition_type = self.infer_type_resolution(&condition);
         let span = self.ast_span_to_ir_span(ast_span);
 
         // Создаём scope для then ветки
@@ -344,7 +265,6 @@ impl AstToIrConverter {
 
         let node = SemanticNode {
             kind: SemanticNodeKind::IfStatement {
-                condition_type,
                 then_branch: then_indices,
                 else_branch: else_indices,
             },
@@ -365,8 +285,6 @@ impl AstToIrConverter {
     ) -> Result<Option<usize>> {
         self.convert_expression_for_hover(&condition)?;
 
-        // Phase 3: Используем infer_type_resolution для условия
-        let condition_type = self.infer_type_resolution(&condition);
         let span = self.ast_span_to_ir_span(ast_span);
 
         let body_scope = self.symbol_table.create_scope(self.current_scope);
@@ -384,10 +302,7 @@ impl AstToIrConverter {
         self.current_scope = old_scope;
 
         let node = SemanticNode {
-            kind: SemanticNodeKind::WhileLoop {
-                condition_type,
-                body: body_indices,
-            },
+            kind: SemanticNodeKind::WhileLoop { body: body_indices },
             span,
             scope_id: self.current_scope,
         };
@@ -408,13 +323,7 @@ impl AstToIrConverter {
         self.convert_expression_for_hover(&start)?;
         self.convert_expression_for_hover(&end)?;
 
-        // Phase 3: For loop range всегда числовой
-        let range_type = TypeResolution::primitive("Число");
         let span = self.ast_span_to_ir_span(ast_span);
-
-        // Debug info о start/end типах (для будущей валидации)
-        let _start_type = self.infer_expression_type(&start);
-        let _end_type = self.infer_expression_type(&end);
 
         let body_scope = self.symbol_table.create_scope(self.current_scope);
         let old_scope = self.current_scope;
@@ -422,9 +331,8 @@ impl AstToIrConverter {
 
         // Регистрируем переменную цикла
         self.symbol_table.register_variable(
-            self.current_scope,
+            body_scope,
             variable.clone(),
-            TypeResolution::primitive("Число"),
             span,
         );
 
@@ -439,11 +347,7 @@ impl AstToIrConverter {
         self.current_scope = old_scope;
 
         let node = SemanticNode {
-            kind: SemanticNodeKind::ForLoop {
-                variable,
-                range_type,
-                body: body_indices,
-            },
+            kind: SemanticNodeKind::ForLoop { variable, body: body_indices },
             span,
             scope_id: self.current_scope,
         };
@@ -462,13 +366,15 @@ impl AstToIrConverter {
     ) -> Result<Option<usize>> {
         self.convert_expression_for_hover(&collection)?;
 
-        // Phase 3: Используем infer_type_resolution для коллекции
-        let collection_type = self.infer_type_resolution(&collection);
         let span = self.ast_span_to_ir_span(ast_span);
 
         let body_scope = self.symbol_table.create_scope(self.current_scope);
         let old_scope = self.current_scope;
         self.current_scope = body_scope;
+
+        // Переменная цикла существует внутри тела.
+        self.symbol_table
+            .register_variable(body_scope, variable.clone(), span);
 
         // Собираем только прямые дочерние индексы
         let mut body_indices = Vec::new();
@@ -481,11 +387,7 @@ impl AstToIrConverter {
         self.current_scope = old_scope;
 
         let node = SemanticNode {
-            kind: SemanticNodeKind::ForEachLoop {
-                variable,
-                collection_type,
-                body: body_indices,
-            },
+            kind: SemanticNodeKind::ForEachLoop { variable, body: body_indices },
             span,
             scope_id: self.current_scope,
         };
@@ -565,7 +467,7 @@ impl AstToIrConverter {
             .iter()
             .map(|p| Parameter {
                 name: p.clone(),
-                type_hint: None, // Phase 3: TypeResolution
+                type_hint: None,
                 default_value: None,
                 is_val: false,
             })
@@ -579,7 +481,6 @@ impl AstToIrConverter {
             self.symbol_table.register_variable(
                 body_scope,
                 param.name.clone(),
-                TypeResolution::unknown(), // Градуальный тип (пока Unknown)
                 span,
             );
         }
@@ -600,7 +501,6 @@ impl AstToIrConverter {
             kind: SemanticNodeKind::FunctionDeclaration {
                 name,
                 params: params_vec,
-                return_type: None, // Phase 3: TypeResolution, будет выведен из return
                 body_scope,
                 body: body_indices,
                 compiler_directive, // Context-Aware валидация
@@ -633,7 +533,7 @@ impl AstToIrConverter {
             .iter()
             .map(|p| Parameter {
                 name: p.clone(),
-                type_hint: None, // Phase 3: TypeResolution
+                type_hint: None,
                 default_value: None,
                 is_val: false,
             })
@@ -647,7 +547,6 @@ impl AstToIrConverter {
             self.symbol_table.register_variable(
                 body_scope,
                 param.name.clone(),
-                TypeResolution::unknown(), // Градуальный тип (пока Unknown)
                 span,
             );
         }

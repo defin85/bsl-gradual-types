@@ -69,6 +69,33 @@ fn conf_big_form_module_attributes_and_elements_are_typed() {
     let raw_types = doc.to_raw_type_data_with_forms(None);
     let repo: Arc<dyn TypeRepository> = Arc::new(InMemoryTypeRepository::new());
     repo.load_types(raw_types).expect("load synthetic types");
+    let form_type_name = "Формы.Документы.РеализацияТоваровУслуг.ФормаДокументаОбщая";
+    let form_type = repo
+        .find_type(form_type_name)
+        .expect("expected synthetic Формы.* type to be present");
+    let sf_prop = form_type
+        .properties
+        .iter()
+        .find(|p| p.name == "СчетФактура")
+        .expect("expected form attribute СчетФактура to be present");
+    assert!(
+        sf_prop.prop_type.contains("cfg:DocumentRef."),
+        "expected СчетФактура prop type to be cfg:DocumentRef.*, got {:?}",
+        sf_prop.prop_type
+    );
+    let elements_type_name =
+        "ЭлементыФормы.Документы.РеализацияТоваровУслуг.ФормаДокументаОбщая";
+    let elements_type = repo
+        .find_type(elements_type_name)
+        .expect("expected synthetic ЭлементыФормы.* type to be present");
+    assert!(
+        elements_type
+            .properties
+            .iter()
+            .any(|p| p.name == "СчетФактураПросмотр"),
+        "expected element `СчетФактураПросмотр` to be present in {} properties",
+        elements_type_name
+    );
 
     // Минимальный код: используем реквизит формы и элемент формы.
     let file_path =
@@ -108,6 +135,39 @@ fn conf_big_form_module_attributes_and_elements_are_typed() {
 
     let analysis = host.analysis();
 
+    let parsed = analysis
+        .parse_result(V2FileId(1))
+        .expect("parse_result query")
+        .expect("parse_result present");
+    let (x_property, y_ident) = parsed
+        .program
+        .statements
+        .iter()
+        .find_map(|stmt| match stmt {
+            bsl_syntax::ast::Statement::ProcedureDecl { body, .. } => {
+                let mut x_property: Option<&str> = None;
+                let mut y_ident: Option<&str> = None;
+                for s in body {
+                    if let bsl_syntax::ast::Statement::Assignment { value, .. } = s {
+                        match value {
+                            bsl_syntax::ast::Expression::PropertyAccess { property, .. } => {
+                                x_property = Some(property.as_str());
+                            }
+                            bsl_syntax::ast::Expression::Identifier { name, .. } => {
+                                y_ident = Some(name.as_str());
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Some((x_property?, y_ident?))
+            }
+            _ => None,
+        })
+        .expect("Expected x/y assignments to be parsed");
+    assert_eq!(x_property, "СчетФактураПросмотр");
+    assert_eq!(y_ident, "СчетФактура");
+
     let diags = analysis
         .semantic_diagnostics(V2FileId(1))
         .ok()
@@ -123,28 +183,25 @@ fn conf_big_form_module_attributes_and_elements_are_typed() {
         "unexpected diagnostics mentioning form element 'СчетФактураПросмотр': {:?}",
         diags.iter().map(|d| d.message.clone()).collect::<Vec<_>>()
     );
+    let got_x = analysis
+        .type_at_position(V2FileId(1), 1, 17)
+        .expect("type_at_position query for x")
+        .map(|ty| ty.type_name());
+    let got_x_receiver = analysis
+        .type_at_position(V2FileId(1), 1, 8)
+        .expect("type_at_position query for x receiver")
+        .map(|ty| ty.type_name());
+    let got_y = analysis
+        .type_at_position(V2FileId(1), 2, 8)
+        .expect("type_at_position query for y")
+        .map(|ty| ty.type_name());
 
-    let ir = analysis
-        .ir(V2FileId(1))
-        .expect("ir query")
-        .expect("ir present");
-
-    let mut got_x = None;
-    let mut got_y = None;
-    for node in &ir.nodes {
-        if let bsl_shared::ir::SemanticNodeKind::Assignment {
-            variable,
-            value_type,
-            ..
-        } = &node.kind
-        {
-            match variable.as_str() {
-                "x" => got_x = Some(value_type.type_name().to_string()),
-                "y" => got_y = Some(value_type.type_name().to_string()),
-                _ => {}
-            }
-        }
-    }
+    assert_eq!(
+        got_x_receiver.as_deref(),
+        Some(elements_type_name),
+        "Expected `Элементы` receiver to be seeded as `{}`",
+        elements_type_name
+    );
 
     assert_eq!(
         got_x.as_deref(),
@@ -152,10 +209,7 @@ fn conf_big_form_module_attributes_and_elements_are_typed() {
         "Expected `Элементы.СчетФактураПросмотр` to resolve as `ГруппаФормы`"
     );
     assert!(
-        got_y
-            .as_deref()
-            .unwrap_or_default()
-            .contains("cfg:DocumentRef."),
+        got_y.as_deref().unwrap_or_default().contains("cfg:DocumentRef."),
         "Expected `СчетФактура` to resolve as cfg:DocumentRef.*, got {:?}",
         got_y
     );

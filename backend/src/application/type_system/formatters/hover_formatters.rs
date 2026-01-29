@@ -25,45 +25,47 @@ use super::type_formatters::format_resolution_result;
 pub fn format_semantic_node_info(
     node: &SemanticNode,
     _file_content: &str,
-    metadata_lookup: &TypeMetadataLookup,
+    _metadata_lookup: &TypeMetadataLookup,
 ) -> String {
     match &node.kind {
         SemanticNodeKind::VariableDeclaration {
             name,
             type_hint,
-            initial_value_type,
+            initial_value_node,
             ..
         } => {
-            // Phase 3: type_hint and initial_value_type are now Option<TypeResolution>
             let type_info = type_hint
-                .as_ref()
-                .or(initial_value_type.as_ref())
-                .map(|resolution| format!("*Тип:* {}", resolution.type_name()))
+                .as_deref()
+                .map(|t| format!("*Тип:* {}", t))
                 .unwrap_or_else(|| "*Тип:* Неопределено".to_string());
+            let init_info = if initial_value_node.is_some() {
+                "\n*Инициализация:* есть"
+            } else {
+                ""
+            };
 
             format!(
-                "**Переменная:** `{}`\n\n{}\n\n📍 Позиция: {}:{}-{}:{}",
+                "**Переменная:** `{}`\n\n{}{}\n\n📍 Позиция: {}:{}-{}:{}",
                 name,
                 type_info,
+                init_info,
                 node.span.start_line,
                 node.span.start_column,
                 node.span.end_line,
                 node.span.end_column
             )
         }
-        SemanticNodeKind::Assignment {
+        SemanticNodeKind::Assignment { variable, .. } => format!(
+            "**Присваивание:** `{} = ...`\n\n📍 Позиция: {}:{}-{}:{}",
             variable,
-            value_type,
-            ..
-        } => format_assignment_hover(node, variable, value_type, metadata_lookup),
+            node.span.start_line,
+            node.span.start_column,
+            node.span.end_line,
+            node.span.end_column
+        ),
         SemanticNodeKind::FunctionDeclaration {
-            name,
-            params,
-            return_type,
-            body,
-            ..
+            name, params, body, ..
         } => {
-            // Phase 3: type_hint is now Option<TypeResolution>
             let params_str = params
                 .iter()
                 .map(|p| {
@@ -72,17 +74,12 @@ pub fn format_semantic_node_info(
                         p.name,
                         p.type_hint
                             .as_ref()
-                            .map(|t| t.type_name())
+                            .cloned()
                             .unwrap_or_else(|| "Неопределено".to_string())
                     )
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
-            // Phase 3: return_type is now Option<TypeResolution>
-            let return_str = return_type
-                .as_ref()
-                .map(|t| format!("*Возвращает:* {}", t.type_name()))
-                .unwrap_or_else(|| "*Возвращает:* Неопределено".to_string());
 
             let body_info = if body.is_empty() {
                 "Тело пустое".to_string()
@@ -91,10 +88,9 @@ pub fn format_semantic_node_info(
             };
 
             format!(
-                "**Функция:** `{}({})`\n\n{}\n\n📦 {}\n\n📍 Позиция: {}:{}-{}:{}",
+                "**Функция:** `{}({})`\n\n📦 {}\n\n📍 Позиция: {}:{}-{}:{}",
                 name,
                 params_str,
-                return_str,
                 body_info,
                 node.span.start_line,
                 node.span.start_column,
@@ -114,7 +110,7 @@ pub fn format_semantic_node_info(
                         p.name,
                         p.type_hint
                             .as_ref()
-                            .map(|t| t.type_name())
+                            .cloned()
                             .unwrap_or_else(|| "Неопределено".to_string())
                     )
                 })
@@ -138,54 +134,38 @@ pub fn format_semantic_node_info(
                 node.span.end_column
             )
         }
-        SemanticNodeKind::IfStatement { condition_type, .. } => {
-            // Phase 3: condition_type is now TypeResolution
+        SemanticNodeKind::IfStatement { .. } => {
             format!(
-                "**Условие:** `Если ... Тогда`\n\n{}\n\n📍 Позиция: {}:{}-{}:{}",
-                format_condition_hover(condition_type),
+                "**Условие:** `Если ... Тогда`\n\n📍 Позиция: {}:{}-{}:{}",
                 node.span.start_line,
                 node.span.start_column,
                 node.span.end_line,
                 node.span.end_column
             )
         }
-        SemanticNodeKind::WhileLoop { condition_type, .. } => {
-            // Phase 3: condition_type is now TypeResolution
+        SemanticNodeKind::WhileLoop { .. } => {
             format!(
-                "**Цикл:** `Пока ... Цикл`\n\n{}\n\n📍 Позиция: {}:{}-{}:{}",
-                format_condition_hover(condition_type),
+                "**Цикл:** `Пока ... Цикл`\n\n📍 Позиция: {}:{}-{}:{}",
                 node.span.start_line,
                 node.span.start_column,
                 node.span.end_line,
                 node.span.end_column
             )
         }
-        SemanticNodeKind::ForLoop {
-            variable,
-            range_type,
-            ..
-        } => {
-            // Phase 3: range_type is now TypeResolution
+        SemanticNodeKind::ForLoop { variable, .. } => {
             format!(
-                "**Цикл:** `Для {} = ... По ... Цикл`\n\n{}\n\n📍 Позиция: {}:{}-{}:{}",
+                "**Цикл:** `Для {} = ... По ... Цикл`\n\n📍 Позиция: {}:{}-{}:{}",
                 variable,
-                format_expected_type_hover("Число", range_type),
                 node.span.start_line,
                 node.span.start_column,
                 node.span.end_line,
                 node.span.end_column
             )
         }
-        SemanticNodeKind::ForEachLoop {
-            variable,
-            collection_type,
-            ..
-        } => {
-            // Phase 3: collection_type is now TypeResolution
+        SemanticNodeKind::ForEachLoop { variable, .. } => {
             format!(
-                "**Цикл:** `Для Каждого {} Из ... Цикл`\n\n{}\n\n📍 Позиция: {}:{}-{}:{}",
+                "**Цикл:** `Для Каждого {} Из ... Цикл`\n\n📍 Позиция: {}:{}-{}:{}",
                 variable,
-                format_expected_type_hover("Коллекция", collection_type),
                 node.span.start_line,
                 node.span.start_column,
                 node.span.end_line,
@@ -365,7 +345,6 @@ mod tests {
     use super::*;
     use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
     use bsl_shared::domain::repository::InMemoryTypeRepository;
-    use bsl_shared::domain::types::TypeResolution;
     use bsl_shared::ir::{ScopeId, SemanticNode, SemanticNodeKind, Span};
     use std::sync::Arc;
 
@@ -374,10 +353,8 @@ mod tests {
         let repo = Arc::new(InMemoryTypeRepository::new());
         let metadata_lookup = TypeMetadataLookup::new(repo);
 
-        let condition_type = TypeResolution::unknown();
         let node = SemanticNode {
             kind: SemanticNodeKind::IfStatement {
-                condition_type,
                 then_branch: Vec::new(),
                 else_branch: None,
             },
@@ -388,9 +365,6 @@ mod tests {
         let result = format_semantic_node_info(&node, "", &metadata_lookup);
 
         assert!(result.contains("Если ... Тогда"));
-        assert!(result.contains("*Ожидаемый тип:* Булево"));
-        assert!(result.contains("*Фактический тип:* Dynamic"));
-        assert!(result.contains("*Уверенность:* Unknown"));
     }
 
     #[test]
@@ -398,10 +372,8 @@ mod tests {
         let repo = Arc::new(InMemoryTypeRepository::new());
         let metadata_lookup = TypeMetadataLookup::new(repo);
 
-        let condition_type = TypeResolution::undeclared_variable("Флаг");
         let node = SemanticNode {
             kind: SemanticNodeKind::WhileLoop {
-                condition_type,
                 body: Vec::new(),
             },
             span: Span::stub(),
@@ -411,7 +383,6 @@ mod tests {
         let result = format_semantic_node_info(&node, "", &metadata_lookup);
 
         assert!(result.contains("Пока ... Цикл"));
-        assert!(result.contains("Переменная \"Флаг\" не объявлена"));
     }
 }
 

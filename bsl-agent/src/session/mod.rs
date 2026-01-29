@@ -1340,13 +1340,11 @@ impl SessionManager {
             });
         };
 
-        let resolver = deps
-            .resolver
-            .clone()
-            .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())));
-
         let pos = params.position;
-        let type_info = get_type_at_position(&program, resolver.as_ref(), pos.line, pos.character)
+        let type_info = analysis
+            .type_at_position(FileId(1), pos.line, pos.character)
+            .ok()
+            .flatten()
             .map(|resolution| TypeInfoDto {
                 name: resolution.type_name(),
                 certainty: format!("{:?}", resolution.certainty).to_lowercase(),
@@ -1586,12 +1584,19 @@ impl SessionManager {
             });
         };
 
+        let type_at_position_hint = analysis
+            .type_at_position(FileId(1), position.line, position.character)
+            .ok()
+            .flatten();
+        let receiver_type_hint = None;
         let target = bsl_backend::application::type_system::goto_definition_v2(
             abs_path.to_string_lossy().as_ref(),
             program,
             deps,
             position.line,
             position.character,
+            type_at_position_hint,
+            receiver_type_hint,
         );
 
         let Some(target) = target else {
@@ -1696,13 +1701,14 @@ impl SessionManager {
             for node in program.nodes.iter() {
                 let bsl_shared::ir::SemanticNodeKind::FunctionCall {
                     function_name,
-                    object_type,
+                    object_name,
+                    object_node,
                     ..
                 } = &node.kind
                 else {
                     continue;
                 };
-                if object_type.is_some() {
+                if object_name.is_some() || object_node.is_some() {
                     continue;
                 }
                 if !function_name.eq_ignore_ascii_case(&symbol.name) {
@@ -1888,15 +1894,12 @@ impl SessionManager {
                     let analysis = host.analysis();
                     let program = analysis.ir(FileId(1)).ok().flatten();
                     if let Some(program) = program {
-                        let resolver = deps.resolver.clone().unwrap_or_else(|| {
-                            Arc::new(TypeResolver::new(deps.repository.clone()))
-                        });
-                        if let Some(type_info) = get_type_at_position(
-                            &program,
-                            resolver.as_ref(),
-                            position.line,
-                            position.character,
-                        ) {
+                        let _ = program;
+                        if let Some(type_info) = analysis
+                            .type_at_position(FileId(1), position.line, position.character)
+                            .ok()
+                            .flatten()
+                        {
                             text.push_line(&format!("type_at_position: {}", type_info.type_name()));
                             text.push_line("");
                         }
@@ -2932,42 +2935,6 @@ fn select_effective_version(
         .get(key)
         .map(|overlay| overlay_version_i32(overlay.version))
         .unwrap_or(0)
-}
-
-fn get_type_at_position(
-    ir_program: &bsl_shared::ir::SemanticProgram,
-    resolver: &TypeResolver,
-    line: u32,
-    column: u32,
-) -> Option<bsl_shared::domain::types::TypeResolution> {
-    if let Some((var_name, _type_hint, scope_id)) =
-        ir_program.find_variable_with_scope(line, column)
-    {
-        return Some(resolver.resolve_variable_with_context(
-            &var_name,
-            &ir_program.symbols,
-            scope_id,
-        ));
-    }
-
-    let node = ir_program.find_node_at_position(line, column)?;
-    match &node.kind {
-        bsl_shared::ir::SemanticNodeKind::VariableDeclaration {
-            type_hint: Some(resolution),
-            ..
-        } => Some(resolver.resolve_expression_sync(&resolution.type_name())),
-        bsl_shared::ir::SemanticNodeKind::FunctionCall {
-            object_type: Some(type_resolution),
-            ..
-        } => Some(resolver.resolve_expression_sync(&type_resolution.type_name())),
-        bsl_shared::ir::SemanticNodeKind::MemberAccess { object_type, .. } => {
-            Some(resolver.resolve_expression_sync(&object_type.type_name()))
-        }
-        bsl_shared::ir::SemanticNodeKind::NewExpression { type_name, .. } => {
-            Some(resolver.resolve_expression_sync(type_name))
-        }
-        _ => None,
-    }
 }
 
 fn span_to_range(span: bsl_shared::ir::Span) -> RangeDto {

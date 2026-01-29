@@ -1,7 +1,6 @@
 //! Методы регистрации переменных в SymbolTable
 
 use super::{ScopeId, SymbolTable};
-use crate::domain::types::TypeResolution;
 use crate::ir::span::Span;
 use crate::ir::types::VariableState;
 
@@ -32,11 +31,10 @@ impl SymbolTable {
         &mut self,
         current_scope: ScopeId,
         name: String,
-        resolution: TypeResolution,
         span: Span,
     ) {
         let function_scope = self.find_enclosing_function_scope(current_scope);
-        self.register_variable(function_scope, name, resolution, span);
+        self.register_variable(function_scope, name, span);
     }
 
     /// Зарегистрировать переменную без инициализации в function scope (Перем X;)
@@ -46,11 +44,10 @@ impl SymbolTable {
         &mut self,
         current_scope: ScopeId,
         name: String,
-        resolution: TypeResolution,
         span: Span,
     ) {
         let function_scope = self.find_enclosing_function_scope(current_scope);
-        self.register_variable_declared(function_scope, name, resolution, span);
+        self.register_variable_declared(function_scope, name, span);
     }
 
     /// Зарегистрировать переменную в scope
@@ -61,13 +58,10 @@ impl SymbolTable {
         &mut self,
         scope_id: ScopeId,
         name: String,
-        resolution: TypeResolution,
         span: Span,
     ) {
         if let Some(scope) = self.scopes.get_mut(&scope_id) {
-            scope
-                .variables
-                .insert(name, VariableState::initialized(resolution, span));
+            scope.variables.insert(name, VariableState::initialized(span));
         }
     }
 
@@ -78,13 +72,10 @@ impl SymbolTable {
         &mut self,
         scope_id: ScopeId,
         name: String,
-        resolution: TypeResolution,
         span: Span,
     ) {
         if let Some(scope) = self.scopes.get_mut(&scope_id) {
-            scope
-                .variables
-                .insert(name, VariableState::declared(resolution, span));
+            scope.variables.insert(name, VariableState::declared(span));
         }
     }
 }

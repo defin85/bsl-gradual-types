@@ -1,6 +1,5 @@
 //! Тесты для SemanticProgram
 
-use crate::domain::types::TypeResolution;
 use crate::ir::{SemanticNode, SemanticNodeKind, SemanticProgram, Span};
 
 #[test]
@@ -12,7 +11,6 @@ fn test_variable_resolution() {
     program.symbols.register_variable(
         program.symbols.root_scope,
         "globalVar".to_string(),
-        TypeResolution::explicit("Число"),
         Span::stub(),
     );
 
@@ -20,7 +18,6 @@ fn test_variable_resolution() {
     program.symbols.register_variable(
         child_scope,
         "localVar".to_string(),
-        TypeResolution::explicit("Строка"),
         Span::stub(),
     );
 
@@ -41,13 +38,12 @@ fn test_variable_resolution() {
 fn test_find_node_at_position() {
     let mut program = SemanticProgram::new();
 
-    // Phase 3: type_hint теперь Option<TypeResolution>
     program.nodes.push(SemanticNode {
         kind: SemanticNodeKind::VariableDeclaration {
             name: "x".to_string(),
-            type_hint: Some(TypeResolution::explicit("Число")),
+            type_hint: Some("Число".to_string()),
             is_export: false,
-            initial_value_type: None,
+            initial_value_node: None,
         },
         span: Span::new(1, 0, 1, 15),
         scope_id: program.symbols.root_scope,
@@ -56,8 +52,6 @@ fn test_find_node_at_position() {
     program.nodes.push(SemanticNode {
         kind: SemanticNodeKind::Assignment {
             variable: "x".to_string(),
-            // Phase 3: value_type теперь TypeResolution
-            value_type: TypeResolution::explicit("Число"),
             value_node: None,
         },
         span: Span::new(2, 0, 2, 10),

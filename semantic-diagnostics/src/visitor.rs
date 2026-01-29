@@ -170,7 +170,7 @@ impl<'a> SemanticValidationVisitor<'a> {
             if !context.is_initialized(var_name) {
                 // Check if the variable exists in context (declared)
                 // If variable doesn't exist - it's UndeclaredVariable, not Uninitialized
-                if context.get_variable_type(var_name).is_some() {
+                if context.is_declared(var_name) {
                     return Some(TypeErrorKind::UninitializedVariableUsage {
                         variable_name: var_name.clone(),
                     });
@@ -199,7 +199,7 @@ impl<'a> SemanticValidationVisitor<'a> {
         // New path (MILESTONE 5.5): extract from GlobalPropertyAccess
         if let Some(idx) = object_node {
             if let Some(node) = self.program.nodes.get(idx) {
-                if let SemanticNodeKind::GlobalPropertyAccess { name, .. } = &node.kind {
+                if let SemanticNodeKind::GlobalPropertyAccess { name } = &node.kind {
                     return Some(name.clone());
                 }
             }
@@ -263,13 +263,14 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
             }
             SemanticNodeKind::Assignment {
                 variable,
-                value_type,
                 ..
             } => {
-                let value_type = self
+                let Some(value_type) = self
                     .type_hints
                     .and_then(|hints| hints.assignment_value_type(node.span))
-                    .unwrap_or(value_type);
+                else {
+                    return;
+                };
                 // Если тип значения помечен как Unknown с конкретной причиной (например, TypeNotFound),
                 // генерируем диагностическую ошибку на месте присваивания.
                 if let Some(mut kind) = self.validator.validate_from_resolution(value_type) {
@@ -287,19 +288,14 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
             SemanticNodeKind::FunctionCall {
                 function_name,
                 object_name,
-                // Phase 3: object_type is now TypeResolution
-                object_type: Some(obj_type),
-                arg_types,
+                object_node,
                 ..
             } => {
-                let obj_type = self
-                    .type_hints
-                    .and_then(|hints| hints.call_receiver_type(node.span))
-                    .unwrap_or(obj_type);
-                let arg_types = self
+                let arg_types: &[bsl_shared::domain::types::TypeResolution] = self
                     .type_hints
                     .and_then(|hints| hints.call_arg_types(node.span))
-                    .unwrap_or(arg_types);
+                    .unwrap_or(&[]);
+
                 // NEW: Check undeclared variables in arguments
                 for (idx, arg_type) in arg_types.iter().enumerate() {
                     if let Some(var_name) = arg_type.is_undeclared_variable() {
@@ -314,33 +310,31 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                     }
                 }
 
-                // Phase 4: Check undeclared variable in object_type
-                // For call chains: `undeclared.Method1().Method2()`
-                if let Some(var_name) = obj_type.is_undeclared_variable() {
-                    let error_kind = TypeErrorKind::UndeclaredVariable {
-                        variable_name: var_name.to_string(),
-                        method_name: Some(function_name.clone()),
-                        param_index: None,
+                let is_method_call = object_name.is_some() || object_node.is_some();
+
+                if is_method_call {
+                    // Check uninitialized variables (Warning, not Error)
+                    if let Some(error_kind) =
+                        self.check_uninitialized_variable(object_name, context)
+                    {
+                        let diagnostic = error_kind.to_diagnostic_with_severity(
+                            node.span,
+                            self.detail_level,
+                            DiagnosticSeverity::Warning,
+                        );
+                        self.errors.push(diagnostic);
+                        // DO NOT return - continue validation (Unknown type will be handled below)
+                    }
+
+                    let Some(obj_type) = self
+                        .type_hints
+                        .and_then(|hints| hints.call_receiver_type(node.span))
+                    else {
+                        // Без type hints (v2) мы не можем валидировать методы/параметры.
+                        return;
                     };
-                    let diagnostic =
-                        error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
-                    self.errors.push(diagnostic);
-                    return; // No point continuing validation
-                }
 
-                // Check uninitialized variables (Warning, not Error)
-                if let Some(error_kind) = self.check_uninitialized_variable(object_name, context) {
-                    let diagnostic = error_kind.to_diagnostic_with_severity(
-                        node.span,
-                        self.detail_level,
-                        DiagnosticSeverity::Warning,
-                    );
-                    self.errors.push(diagnostic);
-                    // DO NOT return - continue validation (Unknown type will be handled below)
-                }
-
-                // MILESTONE 5.1: Generate error for Unknown types
-                if obj_type.is_unknown() {
+                    // For call chains: `undeclared.Method1().Method2()`
                     if let Some(var_name) = obj_type.is_undeclared_variable() {
                         let error_kind = TypeErrorKind::UndeclaredVariable {
                             variable_name: var_name.to_string(),
@@ -352,181 +346,153 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                         self.errors.push(diagnostic);
                         return;
                     }
-                    if matches!(
-                        obj_type.metadata.uncertainty_reason,
-                        Some(UncertaintyReason::ConfigurationNotLoaded)
-                    ) {
-                        return;
-                    }
-                    if let Some(mut kind) = self.validator.validate_from_resolution(obj_type) {
-                        if let TypeErrorKind::UnknownType {
-                            ref mut variable_name,
-                            ..
-                        } = kind
-                        {
-                            *variable_name = object_name.clone();
+
+                    // MILESTONE 5.1: Generate error for Unknown types
+                    if obj_type.is_unknown() {
+                        if matches!(
+                            obj_type.metadata.uncertainty_reason,
+                            Some(UncertaintyReason::ConfigurationNotLoaded)
+                        ) {
+                            return;
                         }
-                        let diagnostic =
-                            kind.to_diagnostic_with_detail(node.span, self.detail_level);
+                        if let Some(mut kind) = self.validator.validate_from_resolution(obj_type) {
+                            if let TypeErrorKind::UnknownType {
+                                ref mut variable_name,
+                                ..
+                            } = kind
+                            {
+                                *variable_name = object_name.clone();
+                            }
+                            let diagnostic =
+                                kind.to_diagnostic_with_detail(node.span, self.detail_level);
+                            self.errors.push(diagnostic);
+                            return;
+                        }
+                        let error_kind = TypeErrorKind::UnknownTypeAccess {
+                            variable_name: object_name.clone(),
+                            member_name: function_name.clone(),
+                        };
+                        let diagnostic = error_kind.to_diagnostic_with_severity(
+                            node.span,
+                            self.detail_level,
+                            DiagnosticSeverity::Warning,
+                        );
                         self.errors.push(diagnostic);
                         return;
                     }
-                    let error_kind = TypeErrorKind::UnknownTypeAccess {
-                        variable_name: object_name.clone(),
-                        member_name: function_name.clone(),
-                    };
-                    let diagnostic = error_kind.to_diagnostic_with_severity(
-                        node.span,
-                        self.detail_level,
-                        DiagnosticSeverity::Warning,
-                    );
-                    self.errors.push(diagnostic);
-                    return;
-                }
 
-                // MILESTONE 5.3: Skip validation for Dynamic types
-                // Dynamic means the previous method was not found and returned Dynamic.
-                // Showing error "method doesn't exist for type Dynamic" is uninformative -
-                // the real error was already shown earlier in the chain.
-                if obj_type.is_dynamic() {
-                    return;
-                }
+                    // Skip validation for Dynamic-like types (Dynamic / Dynamic.*).
+                    if obj_type.is_dynamic() {
+                        return;
+                    }
 
-                // Phase 4: obj_type is already TypeResolution - use directly
-                // metadata_lookup.get_methods() already handles Generic and facets correctly
-
-                // 1. MILESTONE 3.6 Phase 3: Check method existence with variable_name
-                if let Some(error_kind) = self.validator.validate_method_exists_with_variable(
-                    obj_type, // Phase 4: Direct use of TypeResolution
-                    function_name,
-                    object_name.clone(), // Pass variable name
-                ) {
-                    let diagnostic =
-                        error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
-                    self.errors.push(diagnostic);
-                    return; // No point checking parameters if method doesn't exist
-                }
-
-                // 1.5. MILESTONE 3.11 Phase 3: Check method availability in current context
-                // Phase 3: Pass type_name() instead of String
-                if let Some(error_kind) = validate_method_call_context(
-                    &self.current_execution_context,
-                    self.signature_index,
-                    &obj_type.type_name(),
-                    function_name,
-                    object_name.clone(),
-                    node.span,
-                ) {
-                    // Context warnings use WARNING severity, not Error
-                    let diagnostic = error_kind.to_diagnostic_with_severity(
-                        node.span,
-                        self.detail_level,
-                        DiagnosticSeverity::Warning,
-                    );
-                    self.errors.push(diagnostic);
-                    // DO NOT return - continue parameter checking
-                }
-
-                // 2. MILESTONE 3.13: Check parameter types with object comparison (v2)
-                // Phase 3: Convert Vec<TypeResolution> -> Vec<String> for validate_call_v2
-                let arg_types_str: Vec<String> =
-                    arg_types.iter().map(|tr| tr.type_name()).collect();
-
-                let validation_result = self.resolver.validate_call_v2(
-                    Some(&obj_type.type_name()),
-                    function_name,
-                    &arg_types_str,
-                    self.signature_index,
-                );
-
-                // Convert ValidationResultV2 to TypeDiagnostic
-                if let Some(diagnostic) =
-                    validation_result_v2_to_diagnostic(&validation_result, node.span)
-                {
-                    self.errors.push(diagnostic);
-                }
-            }
-            SemanticNodeKind::FunctionCall {
-                function_name,
-                object_name: None,
-                object_type: None,
-                arg_types,
-                ..
-            } => {
-                let arg_types = self
-                    .type_hints
-                    .and_then(|hints| hints.call_arg_types(node.span))
-                    .unwrap_or(arg_types);
-                // Check undeclared variables in arguments
-                for (idx, arg_type) in arg_types.iter().enumerate() {
-                    if let Some(var_name) = arg_type.is_undeclared_variable() {
-                        let error_kind = TypeErrorKind::UndeclaredVariable {
-                            variable_name: var_name.to_string(),
-                            method_name: Some(function_name.clone()),
-                            param_index: Some(idx + 1),
-                        };
+                    // 1. Check method existence with variable_name
+                    if let Some(error_kind) = self.validator.validate_method_exists_with_variable(
+                        obj_type,
+                        function_name,
+                        object_name.clone(),
+                    ) {
                         let diagnostic =
                             error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
                         self.errors.push(diagnostic);
+                        return;
                     }
-                }
 
-                // Неопределенная функция/процедура (глобальный вызов).
-                // Важно: не хотим спамить такими ошибками, если платформенные сигнатуры не загружены.
-                // Решение: используем явный флаг из deps snapshot.
-                if self.platform_signatures_loaded {
-                    let is_known = self
-                        .signature_index
-                        .find_global_function(function_name)
-                        .is_some()
-                        || self.program.symbols.find_function(function_name).is_some()
-                        || self.program.symbols.find_procedure(function_name).is_some();
-
-                    if !is_known {
-                        let error_kind = TypeErrorKind::UndefinedFunctionOrProcedure {
-                            name: function_name.clone(),
-                        };
-                        let diagnostic =
-                            error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
+                    // 1.5. Check method availability in current context
+                    if let Some(error_kind) = validate_method_call_context(
+                        &self.current_execution_context,
+                        self.signature_index,
+                        &obj_type.type_name(),
+                        function_name,
+                        object_name.clone(),
+                        node.span,
+                    ) {
+                        let diagnostic = error_kind.to_diagnostic_with_severity(
+                            node.span,
+                            self.detail_level,
+                            DiagnosticSeverity::Warning,
+                        );
                         self.errors.push(diagnostic);
                     }
-                }
 
-                if let Some(error_kind) = validate_global_function_call_context(
-                    &self.current_execution_context,
-                    self.signature_index,
-                    function_name,
-                ) {
-                    let diagnostic = error_kind.to_diagnostic_with_severity(
-                        node.span,
-                        self.detail_level,
-                        DiagnosticSeverity::Warning,
+                    // 2. Check parameter types with object comparison (v2)
+                    let arg_types_str: Vec<String> =
+                        arg_types.iter().map(|tr| tr.type_name()).collect();
+
+                    let validation_result = self.resolver.validate_call_v2(
+                        Some(&obj_type.type_name()),
+                        function_name,
+                        &arg_types_str,
+                        self.signature_index,
                     );
-                    self.errors.push(diagnostic);
+
+                    if let Some(diagnostic) =
+                        validation_result_v2_to_diagnostic(&validation_result, node.span)
+                    {
+                        self.errors.push(diagnostic);
+                    }
+                } else {
+                    // Глобальный вызов.
+                    if self.platform_signatures_loaded {
+                        let is_known = self
+                            .signature_index
+                            .find_global_function(function_name)
+                            .is_some()
+                            || self.program.symbols.find_function(function_name).is_some()
+                            || self.program.symbols.find_procedure(function_name).is_some();
+
+                        if !is_known {
+                            let error_kind = TypeErrorKind::UndefinedFunctionOrProcedure {
+                                name: function_name.clone(),
+                            };
+                            let diagnostic =
+                                error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
+                            self.errors.push(diagnostic);
+                        }
+                    }
+
+                    if let Some(error_kind) = validate_global_function_call_context(
+                        &self.current_execution_context,
+                        self.signature_index,
+                        function_name,
+                    ) {
+                        let diagnostic = error_kind.to_diagnostic_with_severity(
+                            node.span,
+                            self.detail_level,
+                            DiagnosticSeverity::Warning,
+                        );
+                        self.errors.push(diagnostic);
+                    }
                 }
             }
             SemanticNodeKind::MemberAccess {
                 object_node, // MILESTONE 5.5: added for extracting name from GlobalPropertyAccess
                 object_name,
-                object_type,
                 member_name,
                 access_kind: MemberAccessKind::Property,
                 ..
             } => {
-                let object_type = self
+                let object_type_opt = self
                     .type_hints
-                    .and_then(|hints| hints.member_access_object_type(node.span))
-                    .unwrap_or(object_type);
+                    .and_then(|hints| hints.member_access_object_type(node.span));
                 // MILESTONE 5.5 Fix: Extract collection name considering object_node
                 let collection_name =
                     self.extract_collection_name_for_metadata(object_name, *object_node);
 
-                tracing::debug!(
-                    "MemberAccess: collection_name={:?}, object_type={}, member_name={}",
-                    collection_name,
-                    object_type.type_name(),
-                    member_name
-                );
+                if let Some(object_type) = object_type_opt {
+                    tracing::debug!(
+                        "MemberAccess: collection_name={:?}, object_type={}, member_name={}",
+                        collection_name,
+                        object_type.type_name(),
+                        member_name
+                    );
+                } else {
+                    tracing::debug!(
+                        "MemberAccess: collection_name={:?}, object_type=<none>, member_name={}",
+                        collection_name,
+                        member_name
+                    );
+                }
 
                 if let Some(ref name) = collection_name {
                     tracing::debug!(
@@ -551,9 +517,6 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                     }
                 }
 
-                // Phase 4: object_type is already TypeResolution - use directly
-                // metadata_lookup.get_properties() already handles Generic and facets correctly
-
                 // Check uninitialized variables (Warning, not Error)
                 if let Some(error_kind) = self.check_uninitialized_variable(object_name, context) {
                     let diagnostic = error_kind.to_diagnostic_with_severity(
@@ -564,6 +527,10 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                     self.errors.push(diagnostic);
                     // DO NOT return - continue validation (Unknown type will be handled below)
                 }
+
+                let Some(object_type) = object_type_opt else {
+                    return;
+                };
 
                 // MILESTONE 5.1: Generate error for Unknown types
                 if object_type.is_unknown() {
@@ -634,6 +601,7 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::type_hints::SemanticTypeHints;
     use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
     use bsl_shared::domain::repository::TypeRepository; // MILESTONE 3.16: Import trait for load_types
     use bsl_shared::domain::types::FacetKind; // Phase 4: Moved from main imports (used only in tests)
@@ -650,23 +618,24 @@ mod tests {
         let signature_index = SignatureIndex::new();
         let mut program = SemanticProgram::new();
 
+        let call_span = Span::new(5, 10, 5, 40);
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::FunctionCall {
                 function_name: "НесуществующийМетод".to_string(),
                 object_name: Some("МассивДанных".to_string()),
-                // Phase 3: object_type is now TypeResolution
-                object_type: Some(TypeResolution::explicit("Массив")),
-                // Phase 3: arg_types is now Vec<TypeResolution>
-                arg_types: vec![],
                 object_node: None,
-                result_type: TypeResolution::unknown(),
             },
-            span: Span::new(5, 10, 5, 40),
+            span: call_span,
             scope_id: program.symbols.root_scope,
         });
 
         let mut visitor =
             SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
+        let mut hints = SemanticTypeHints::default();
+        hints
+            .call_receiver_type_by_span
+            .insert(call_span, TypeResolution::explicit("Массив"));
+        visitor.set_type_hints(Some(&hints));
         let mut context = FlowContext::new(program.symbols.root_scope);
         visitor.visit_node(&program.nodes[0], &mut context);
 
@@ -689,22 +658,25 @@ mod tests {
         let signature_index = SignatureIndex::new();
         let mut program = SemanticProgram::new();
 
+        let access_span = Span::new(3, 5, 3, 35);
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::MemberAccess {
                 object_node: None,
                 object_name: Some("МассивДанных".to_string()),
-                // Phase 3: object_type is now TypeResolution
-                object_type: TypeResolution::explicit("Массив"),
                 member_name: "НесуществующееСвойство".to_string(),
                 access_kind: MemberAccessKind::Property,
-                result_type: TypeResolution::unknown(),
             },
-            span: Span::new(3, 5, 3, 35),
+            span: access_span,
             scope_id: program.symbols.root_scope,
         });
 
         let mut visitor =
             SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
+        let mut hints = SemanticTypeHints::default();
+        hints
+            .member_access_object_type_by_span
+            .insert(access_span, TypeResolution::explicit("Массив"));
+        visitor.set_type_hints(Some(&hints));
         let mut context = FlowContext::new(program.symbols.root_scope);
         visitor.visit_node(&program.nodes[0], &mut context);
 
@@ -727,21 +699,24 @@ mod tests {
         let signature_index = SignatureIndex::new();
         let mut program = SemanticProgram::new();
 
+        let call_span = Span::new(5, 10, 5, 40);
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::FunctionCall {
                 function_name: "НесуществующийМетод".to_string(),
                 object_name: Some("Объект".to_string()),
-                object_type: Some(TypeResolution::explicit("Dynamic.Объект")),
-                arg_types: vec![],
                 object_node: None,
-                result_type: TypeResolution::unknown(),
             },
-            span: Span::new(5, 10, 5, 40),
+            span: call_span,
             scope_id: program.symbols.root_scope,
         });
 
         let mut visitor =
             SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
+        let mut hints = SemanticTypeHints::default();
+        hints
+            .call_receiver_type_by_span
+            .insert(call_span, TypeResolution::explicit("Dynamic.Объект"));
+        visitor.set_type_hints(Some(&hints));
         let mut context = FlowContext::new(program.symbols.root_scope);
         visitor.visit_node(&program.nodes[0], &mut context);
 
@@ -760,21 +735,25 @@ mod tests {
         let signature_index = SignatureIndex::new();
         let mut program = SemanticProgram::new();
 
+        let access_span = Span::new(3, 5, 3, 35);
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::MemberAccess {
                 object_node: None,
                 object_name: Some("Объект".to_string()),
-                object_type: TypeResolution::explicit("Dynamic.Объект"),
                 member_name: "НесуществующееСвойство".to_string(),
                 access_kind: MemberAccessKind::Property,
-                result_type: TypeResolution::unknown(),
             },
-            span: Span::new(3, 5, 3, 35),
+            span: access_span,
             scope_id: program.symbols.root_scope,
         });
 
         let mut visitor =
             SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
+        let mut hints = SemanticTypeHints::default();
+        hints
+            .member_access_object_type_by_span
+            .insert(access_span, TypeResolution::explicit("Dynamic.Объект"));
+        visitor.set_type_hints(Some(&hints));
         let mut context = FlowContext::new(program.symbols.root_scope);
         visitor.visit_node(&program.nodes[0], &mut context);
 
@@ -793,21 +772,24 @@ mod tests {
         let signature_index = SignatureIndex::new();
         let mut program = SemanticProgram::new();
 
+        let call_span = Span::new(5, 10, 5, 40);
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::FunctionCall {
                 function_name: "Метод".to_string(),
                 object_name: Some("Объект".to_string()),
-                object_type: Some(TypeResolution::unknown()),
-                arg_types: vec![],
                 object_node: None,
-                result_type: TypeResolution::unknown(),
             },
-            span: Span::new(5, 10, 5, 40),
+            span: call_span,
             scope_id: program.symbols.root_scope,
         });
 
         let mut visitor =
             SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
+        let mut hints = SemanticTypeHints::default();
+        hints
+            .call_receiver_type_by_span
+            .insert(call_span, TypeResolution::unknown());
+        visitor.set_type_hints(Some(&hints));
         let mut context = FlowContext::new(program.symbols.root_scope);
         visitor.visit_node(&program.nodes[0], &mut context);
 
@@ -833,21 +815,25 @@ mod tests {
         let mut unknown = TypeResolution::unknown();
         unknown.metadata.uncertainty_reason = Some(UncertaintyReason::ConfigurationNotLoaded);
 
+        let access_span = Span::new(3, 5, 3, 35);
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::MemberAccess {
                 object_node: None,
                 object_name: None,
-                object_type: unknown,
                 member_name: "Свойство".to_string(),
                 access_kind: MemberAccessKind::Property,
-                result_type: TypeResolution::unknown(),
             },
-            span: Span::new(3, 5, 3, 35),
+            span: access_span,
             scope_id: program.symbols.root_scope,
         });
 
         let mut visitor =
             SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
+        let mut hints = SemanticTypeHints::default();
+        hints
+            .member_access_object_type_by_span
+            .insert(access_span, unknown);
+        visitor.set_type_hints(Some(&hints));
         let mut context = FlowContext::new(program.symbols.root_scope);
         visitor.visit_node(&program.nodes[0], &mut context);
 
@@ -871,21 +857,24 @@ mod tests {
             name: "Foo".to_string(),
         });
 
+        let call_span = Span::new(5, 10, 5, 40);
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::FunctionCall {
                 function_name: "Метод".to_string(),
                 object_name: Some("Объект".to_string()),
-                object_type: Some(unknown),
-                arg_types: vec![],
                 object_node: None,
-                result_type: TypeResolution::unknown(),
             },
-            span: Span::new(5, 10, 5, 40),
+            span: call_span,
             scope_id: program.symbols.root_scope,
         });
 
         let mut visitor =
             SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
+        let mut hints = SemanticTypeHints::default();
+        hints
+            .call_receiver_type_by_span
+            .insert(call_span, unknown);
+        visitor.set_type_hints(Some(&hints));
         let mut context = FlowContext::new(program.symbols.root_scope);
         visitor.visit_node(&program.nodes[0], &mut context);
 
@@ -900,7 +889,7 @@ mod tests {
     #[test]
     fn test_visitor_validates_metadata_object_when_config_loaded() {
         use bsl_shared::domain::repository::InMemoryTypeRepository;
-        use bsl_shared::domain::types::{MetadataKind, RawDataSource, RawTypeData, TypeResolution};
+        use bsl_shared::domain::types::{MetadataKind, RawDataSource, RawTypeData};
         use std::sync::Arc;
 
         // Create repository with configuration types
@@ -939,11 +928,8 @@ mod tests {
             kind: SemanticNodeKind::MemberAccess {
                 object_node: None,
                 object_name: Some("Справочники".to_string()),
-                // Phase 3: object_type is now TypeResolution
-                object_type: TypeResolution::explicit("СправочникМенеджер"),
                 member_name: "НесуществующийСправочник".to_string(),
                 access_kind: MemberAccessKind::Property,
-                result_type: TypeResolution::unknown(),
             },
             span: Span::new(1, 0, 1, 35),
             scope_id: program.symbols.root_scope,
@@ -966,7 +952,7 @@ mod tests {
     #[test]
     fn test_visitor_no_error_for_existing_metadata_object() {
         use bsl_shared::domain::repository::InMemoryTypeRepository;
-        use bsl_shared::domain::types::{MetadataKind, RawDataSource, RawTypeData, TypeResolution};
+        use bsl_shared::domain::types::{MetadataKind, RawDataSource, RawTypeData};
         use std::sync::Arc;
 
         let repository = Arc::new(InMemoryTypeRepository::new());
@@ -1004,11 +990,8 @@ mod tests {
             kind: SemanticNodeKind::MemberAccess {
                 object_node: None,
                 object_name: Some("Справочники".to_string()),
-                // Phase 3: object_type is now TypeResolution
-                object_type: TypeResolution::explicit("СправочникМенеджер"),
                 member_name: "Контрагенты".to_string(),
                 access_kind: MemberAccessKind::Property,
-                result_type: TypeResolution::unknown(),
             },
             span: Span::new(1, 0, 1, 25),
             scope_id: program.symbols.root_scope,
@@ -1029,7 +1012,6 @@ mod tests {
     #[test]
     fn test_visitor_no_error_when_config_not_loaded() {
         use bsl_shared::domain::repository::InMemoryTypeRepository;
-        use bsl_shared::domain::types::TypeResolution;
         use std::sync::Arc;
 
         // Repository WITHOUT configuration types
@@ -1047,11 +1029,8 @@ mod tests {
             kind: SemanticNodeKind::MemberAccess {
                 object_node: None,
                 object_name: Some("Справочники".to_string()),
-                // Phase 3: object_type is now TypeResolution
-                object_type: TypeResolution::explicit("СправочникМенеджер"),
                 member_name: "НесуществующийСправочник".to_string(),
                 access_kind: MemberAccessKind::Property,
-                result_type: TypeResolution::unknown(),
             },
             span: Span::new(1, 0, 1, 35),
             scope_id: program.symbols.root_scope,
@@ -1089,10 +1068,7 @@ mod tests {
             kind: SemanticNodeKind::FunctionCall {
                 function_name: "НесуществующийМетод".to_string(),
                 object_name: Some("МассивДанных".to_string()),
-                object_type: Some(TypeResolution::unknown()),
-                arg_types: vec![],
                 object_node: None,
-                result_type: TypeResolution::unknown(),
             },
             span: call_span,
             scope_id: program.symbols.root_scope,
@@ -1134,10 +1110,8 @@ mod tests {
             kind: SemanticNodeKind::MemberAccess {
                 object_node: None,
                 object_name: Some("МассивДанных".to_string()),
-                object_type: TypeResolution::unknown(),
                 member_name: "НесуществующееСвойство".to_string(),
                 access_kind: MemberAccessKind::Property,
-                result_type: TypeResolution::unknown(),
             },
             span: access_span,
             scope_id: program.symbols.root_scope,

@@ -55,9 +55,8 @@ fn test_variable_declaration_conversion() {
     } = &ir.nodes[0].kind
     {
         assert_eq!(name, "x");
-        // Phase 3: type_hint теперь Option<TypeResolution>
         assert!(type_hint.is_some());
-        assert_eq!(type_hint.as_ref().unwrap().type_name(), "Число");
+        assert_eq!(type_hint.as_deref(), Some("Число"));
     } else {
         panic!("Expected VariableDeclaration");
     }
@@ -128,14 +127,14 @@ fn test_function_call_with_args() {
     assert_eq!(ir.nodes.len(), 1);
     if let SemanticNodeKind::FunctionCall {
         function_name,
-        arg_types,
+        object_name,
+        object_node,
         ..
     } = &ir.nodes[0].kind
     {
         assert_eq!(function_name, "Сообщить");
-        assert_eq!(arg_types.len(), 1);
-        // Phase 3: arg_types теперь Vec<TypeResolution>
-        assert_eq!(arg_types[0].type_name(), "Строка");
+        assert!(object_name.is_none());
+        assert_eq!(*object_node, None);
     } else {
         panic!("Expected FunctionCall");
     }
@@ -345,9 +344,8 @@ fn test_global_property_access_for_справочники() {
     assert_eq!(ir.nodes.len(), 3);
 
     // Проверяем GlobalPropertyAccess
-    if let SemanticNodeKind::GlobalPropertyAccess { name, result_type } = &ir.nodes[0].kind {
+    if let SemanticNodeKind::GlobalPropertyAccess { name } = &ir.nodes[0].kind {
         assert_eq!(name, "Справочники");
-        assert_eq!(result_type.type_name(), "СправочникиМенеджер");
     } else {
         panic!(
             "Expected GlobalPropertyAccess at nodes[0], got: {:?}",
@@ -358,16 +356,14 @@ fn test_global_property_access_for_справочники() {
     // Проверяем MemberAccess
     if let SemanticNodeKind::MemberAccess {
         object_node,
+        object_name,
         member_name,
-        object_type,
-        result_type,
         ..
     } = &ir.nodes[1].kind
     {
         assert_eq!(*object_node, Some(0)); // Ссылка на GlobalPropertyAccess
+        assert!(object_name.is_none());
         assert_eq!(member_name, "Контрагенты");
-        assert_eq!(object_type.type_name(), "СправочникиМенеджер");
-        assert_eq!(result_type.type_name(), "СправочникМенеджер.Контрагенты");
     } else {
         panic!(
             "Expected MemberAccess at nodes[1], got: {:?}",
@@ -423,16 +419,23 @@ fn test_global_property_access_for_documents() {
     .unwrap();
 
     // Проверяем GlobalPropertyAccess
-    if let SemanticNodeKind::GlobalPropertyAccess { name, result_type } = &ir.nodes[0].kind {
+    if let SemanticNodeKind::GlobalPropertyAccess { name } = &ir.nodes[0].kind {
         assert_eq!(name, "Documents");
-        assert_eq!(result_type.type_name(), "ДокументыМенеджер");
     } else {
         panic!("Expected GlobalPropertyAccess at nodes[0]");
     }
 
-    // Проверяем MemberAccess result_type
-    if let SemanticNodeKind::MemberAccess { result_type, .. } = &ir.nodes[1].kind {
-        assert_eq!(result_type.type_name(), "ДокументМенеджер.Order");
+    // Проверяем MemberAccess
+    if let SemanticNodeKind::MemberAccess {
+        object_node,
+        object_name,
+        member_name,
+        ..
+    } = &ir.nodes[1].kind
+    {
+        assert_eq!(*object_node, Some(0));
+        assert!(object_name.is_none());
+        assert_eq!(member_name, "Order");
     } else {
         panic!("Expected MemberAccess at nodes[1]");
     }
@@ -525,12 +528,8 @@ fn test_global_property_access_for_accounting_registers() {
     assert_eq!(ir.nodes.len(), 3);
 
     // Проверяем GlobalPropertyAccess
-    if let SemanticNodeKind::GlobalPropertyAccess { name, result_type } = &ir.nodes[0].kind {
+    if let SemanticNodeKind::GlobalPropertyAccess { name } = &ir.nodes[0].kind {
         assert_eq!(name, "РегистрыБухгалтерии");
-        assert_eq!(
-            result_type.type_name(),
-            "РегистрБухгалтерииМенеджерКоллекция"
-        );
     } else {
         panic!(
             "Expected GlobalPropertyAccess at nodes[0], got: {:?}",
@@ -538,18 +537,17 @@ fn test_global_property_access_for_accounting_registers() {
         );
     }
 
-    // Проверяем MemberAccess result_type
+    // Проверяем MemberAccess
     if let SemanticNodeKind::MemberAccess {
-        result_type,
+        object_node,
+        object_name,
         member_name,
         ..
     } = &ir.nodes[1].kind
     {
+        assert_eq!(*object_node, Some(0));
+        assert!(object_name.is_none());
         assert_eq!(member_name, "Хозрасчетный");
-        assert_eq!(
-            result_type.type_name(),
-            "РегистрБухгалтерииМенеджер.Хозрасчетный"
-        );
     } else {
         panic!(
             "Expected MemberAccess at nodes[1], got: {:?}",
@@ -591,9 +589,8 @@ fn test_global_property_access_for_calculation_registers() {
     assert_eq!(ir.nodes.len(), 3);
 
     // Проверяем GlobalPropertyAccess
-    if let SemanticNodeKind::GlobalPropertyAccess { name, result_type } = &ir.nodes[0].kind {
+    if let SemanticNodeKind::GlobalPropertyAccess { name } = &ir.nodes[0].kind {
         assert_eq!(name, "РегистрыРасчета");
-        assert_eq!(result_type.type_name(), "РегистрРасчетаМенеджерКоллекция");
     } else {
         panic!(
             "Expected GlobalPropertyAccess at nodes[0], got: {:?}",
@@ -601,18 +598,17 @@ fn test_global_property_access_for_calculation_registers() {
         );
     }
 
-    // Проверяем MemberAccess result_type
+    // Проверяем MemberAccess
     if let SemanticNodeKind::MemberAccess {
-        result_type,
+        object_node,
+        object_name,
         member_name,
         ..
     } = &ir.nodes[1].kind
     {
+        assert_eq!(*object_node, Some(0));
+        assert!(object_name.is_none());
         assert_eq!(member_name, "ОсновныеНачисления");
-        assert_eq!(
-            result_type.type_name(),
-            "РегистрРасчетаМенеджер.ОсновныеНачисления"
-        );
     } else {
         panic!(
             "Expected MemberAccess at nodes[1], got: {:?}",

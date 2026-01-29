@@ -89,23 +89,8 @@ fn compute_hover_info_from_ir(
                     let owner_span = object_node
                         .and_then(|idx| ir_program.nodes.get(idx).map(|n| n.span))
                         .unwrap_or(node.span);
-                    let mut owner_resolution =
-                        type_at_span_start(analysis, file_id, owner_span).unwrap_or_else(|| {
-                            // Если inference не дал результат, пробуем доменный резолвер по имени.
-                            TypeResolution::unknown()
-                        });
-                    if owner_resolution.is_unknown() || owner_resolution.is_dynamic() {
-                        if let Some(object_ident) = object_name.as_deref() {
-                            let resolved = resolver.resolve_variable_with_context(
-                                object_ident,
-                                &ir_program.symbols,
-                                node.scope_id,
-                            );
-                            if !resolved.is_unknown() && !resolved.is_dynamic() {
-                                owner_resolution = resolved;
-                            }
-                        }
-                    }
+                    let owner_resolution = type_at_span_start(analysis, file_id, owner_span)
+                        .unwrap_or_else(TypeResolution::unknown);
 
                     let (prop_type, is_readonly) = metadata_lookup
                         .get_properties(&owner_resolution)
@@ -117,21 +102,6 @@ fn compute_hover_info_from_ir(
                     let property_resolution = if !prop_type.trim().is_empty() {
                         resolver.resolve_expression_sync(&prop_type)
                     } else {
-                        // Фоллбек: иногда owner (например, `Объект` в модуле формы) не выводится
-                        // через v2 type_at_position, но резолвится через доменный TypeResolver.
-                        if let Some(object_ident) = object_name.as_deref() {
-                            let expr = format!("{}.{}", object_ident, member_name);
-                            let resolved = resolver.resolve_expression_sync(&expr);
-                            if !resolved.is_unknown() {
-                                return Some(formatter.format_property(
-                                    Some(object_ident),
-                                    &owner_resolution,
-                                    member_name,
-                                    &resolved,
-                                    is_readonly,
-                                ));
-                            }
-                        }
                         type_at_cursor.clone().unwrap_or_else(TypeResolution::unknown)
                     };
 

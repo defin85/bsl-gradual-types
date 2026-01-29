@@ -675,8 +675,9 @@ pub fn type_index(
     let _settings_id = settings.id(db);
     let deps_data = deps.data(db).0.clone();
     let parsed = parse_result(db, file, settings).0;
-    TypeIndexSnapshot(Arc::new(type_inference_v2::build_type_index(
+    TypeIndexSnapshot(Arc::new(type_inference_v2::build_type_index_with_path(
         &parsed.program,
+        file.path(db).as_ref(),
         deps_data,
     )))
 }

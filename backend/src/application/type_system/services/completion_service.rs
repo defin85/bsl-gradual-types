@@ -964,28 +964,13 @@ fn resolve_member_owner_type_sync(
     base_name: &str,
 ) -> Option<TypeResolution> {
     let ctx = analysis?;
-    let ir_program = ctx.ir_program.clone()?;
-
     if let Some(hint) = ctx.member_access_owner_type_hint.as_ref() {
         if !hint.is_unknown() && !hint.is_dynamic() {
             return Some(hint.clone());
         }
     }
-
-    let scope_id = resolve_scope_for_member(&ir_program, line, column);
-
-    let mut resolved =
-        ctx.resolver
-            .resolve_variable_with_context(base_name, &ir_program.symbols, scope_id);
-    if resolved.is_unknown() {
-        if let Some(best_effort) =
-            find_variable_resolution_best_effort(&ir_program.symbols, base_name, line)
-        {
-            resolved = best_effort;
-        }
-    }
-
-    Some(resolved)
+    let _ = (line, column, base_name, ctx);
+    None
 }
 
 fn resolve_receiver_types_from_expression(
@@ -1444,35 +1429,6 @@ fn find_scope_before_position(
         })
         .max_by_key(|node| (node.span.end_line, node.span.end_column))
         .map(|node| node.scope_id)
-}
-
-fn find_variable_resolution_best_effort(
-    symbols: &bsl_shared::ir::SymbolTable,
-    name: &str,
-    line: u32,
-) -> Option<TypeResolution> {
-    let target = name.to_lowercase();
-    let mut best: Option<(u32, TypeResolution)> = None;
-
-    for scope in symbols.scopes.values() {
-        for (var_name, state) in &scope.variables {
-            if var_name.to_lowercase() != target {
-                continue;
-            }
-            if state.declaration_span.start_line > line {
-                continue;
-            }
-            let candidate_line = state.declaration_span.start_line;
-            match &best {
-                Some((best_line, _)) if *best_line > candidate_line => continue,
-                _ => {
-                    best = Some((candidate_line, state.resolution.clone()));
-                }
-            }
-        }
-    }
-
-    best.map(|(_, resolution)| resolution)
 }
 
 fn add_symbols(

@@ -1,7 +1,10 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
+use bsl_shared::domain::{CodeLocation, ModuleType};
 use bsl_shared::domain::is_configuration_type_pattern;
+use bsl_shared::domain::types::MetadataKind;
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::SignatureIndex;
 use bsl_shared::domain::types::{Certainty, TypeResolution, UncertaintyReason};
@@ -68,13 +71,93 @@ impl TypeInferencer {
         }
     }
 
-    fn build_index(&self, program: &Program) -> TypeIndex {
+    fn build_index(&self, program: &Program, file_path: &str) -> TypeIndex {
         let mut env = TypeEnv::default();
         let mut index = TypeIndex::default();
+        self.seed_module_context(file_path, &mut env);
         for stmt in &program.statements {
             self.visit_statement(stmt, &mut env, &mut index);
         }
         index
+    }
+
+    fn seed_module_context(&self, file_path: &str, env: &mut TypeEnv) {
+        let path = Path::new(file_path);
+        let Ok(location) = CodeLocation::determine_from_path(path) else {
+            return;
+        };
+
+        let ModuleType::FormModule {
+            form_name,
+            owner_type,
+        } = location.module_type
+        else {
+            return;
+        };
+
+        let Some((xml_kind, object_name)) = owner_type.split_once('.') else {
+            return;
+        };
+
+        let Some(kind) = MetadataKind::from_xml_tag(xml_kind) else {
+            return;
+        };
+
+        let collection = kind.display_name();
+        let form_type_name = format!("Формы.{}.{}.{}", collection, object_name, form_name);
+
+        if self.deps.repository.find_type(&form_type_name).is_none() {
+            return;
+        }
+
+        let form_elements_type_name =
+            format!("ЭлементыФормы.{}.{}.{}", collection, object_name, form_name);
+        if self.deps.repository.find_type(&form_elements_type_name).is_some() {
+            env.variables.insert(
+                "Элементы".to_lowercase(),
+                TypeResolution::explicit(&form_elements_type_name),
+            );
+        }
+
+        env.variables.insert(
+            "ЭтаФорма".to_lowercase(),
+            TypeResolution::explicit(&form_type_name),
+        );
+
+        let Some(form_type) = self.deps.repository.find_type(&form_type_name) else {
+            return;
+        };
+
+        for prop in form_type.properties {
+            if prop.name.to_lowercase() == "элементы" {
+                continue;
+            }
+            if prop.prop_type.is_empty() {
+                continue;
+            }
+            if prop.prop_type.contains("cfg:") {
+                env.variables
+                    .insert(prop.name.to_lowercase(), TypeResolution::inferred(&prop.prop_type));
+                continue;
+            }
+            if is_configuration_type_pattern(&prop.prop_type) {
+                let resolved = self.resolver.resolve_expression_sync(&prop.prop_type);
+                let resolved = if resolved.is_unknown() {
+                    TypeResolution::inferred(&prop.prop_type)
+                } else {
+                    resolved
+                };
+                env.variables.insert(prop.name.to_lowercase(), resolved);
+                continue;
+            }
+            let resolved = if self.deps.repository.find_type(&prop.prop_type).is_some() {
+                TypeResolution::explicit(&prop.prop_type)
+            } else {
+                self.try_resolve_configuration_type(&prop.prop_type)
+                    .unwrap_or_else(|| self.resolver.resolve_expression_sync(&prop.prop_type))
+            };
+            env.variables.insert(prop.name.to_lowercase(), resolved);
+        }
     }
 
     fn visit_statement(&self, stmt: &Statement, env: &mut TypeEnv, index: &mut TypeIndex) {
@@ -86,15 +169,16 @@ impl TypeInferencer {
                     .as_deref()
                     .map(TypeResolution::explicit)
                     .unwrap_or_else(TypeResolution::unknown);
-                env.variables.insert(name.clone(), resolution);
+                env.variables.insert(name.to_lowercase(), resolution);
             }
             Statement::Assignment { target, value, .. } => {
                 let value_type = self.infer_expr(value, env, index);
                 if let Expression::Identifier { name, .. } = target {
-                    env.variables.insert(name.clone(), value_type);
+                    let key = name.to_lowercase();
+                    env.variables.insert(key.clone(), value_type);
                     // Hover/type-at-position на имени переменной после присваивания
                     // должен видеть новый тип.
-                    self.record(expr_span(target), env.variables[name].clone(), index);
+                    self.record(expr_span(target), env.variables[&key].clone(), index);
                 }
             }
             Statement::If {
@@ -134,7 +218,7 @@ impl TypeInferencer {
                 let mut body_env = env.clone();
                 body_env
                     .variables
-                    .insert(variable.clone(), TypeResolution::primitive("Число"));
+                    .insert(variable.to_lowercase(), TypeResolution::primitive("Число"));
                 for stmt in body {
                     self.visit_statement(stmt, &mut body_env, index);
                 }
@@ -149,7 +233,7 @@ impl TypeInferencer {
                 let mut body_env = env.clone();
                 body_env
                     .variables
-                    .insert(variable.clone(), TypeResolution::unknown());
+                    .insert(variable.to_lowercase(), TypeResolution::unknown());
                 for stmt in body {
                     self.visit_statement(stmt, &mut body_env, index);
                 }
@@ -195,12 +279,13 @@ impl TypeInferencer {
             Statement::FunctionDecl { params, body, .. }
             | Statement::ProcedureDecl { params, body, .. } => {
                 // TODO(v2): полноценное вычисление типов внутри функций на основе call graph.
-                // Пока строим индекс внутри тела с чистым окружением параметров.
-                let mut fn_env = TypeEnv::default();
+                // Пока строим индекс внутри тела, наследуя module-level окружение
+                // (например, implicit переменные модуля формы) и добавляя параметры.
+                let mut fn_env = env.clone();
                 for param in params {
                     fn_env
                         .variables
-                        .insert(param.clone(), TypeResolution::unknown());
+                        .insert(param.to_lowercase(), TypeResolution::unknown());
                 }
                 for stmt in body {
                     self.visit_statement(stmt, &mut fn_env, index);
@@ -303,7 +388,7 @@ impl TypeInferencer {
             return TypeResolution::inferred(name);
         }
 
-        if let Some(value) = env.variables.get(name) {
+        if let Some(value) = env.variables.get(&name_lower) {
             return value.clone();
         }
 
@@ -346,15 +431,30 @@ impl TypeInferencer {
             return self.resolver.resolve_expression_sync(&manager);
         }
 
+        let property_key = property.to_lowercase();
         let properties = self.metadata_lookup.get_properties(object_type);
+        let properties = if properties.is_empty() {
+            self.deps
+                .repository
+                .find_type(&object_type.type_name())
+                .map(|t| t.properties)
+                .unwrap_or_default()
+        } else {
+            properties
+        };
         if let Some(prop) = properties
             .into_iter()
-            .find(|p| p.name.eq_ignore_ascii_case(property))
+            .find(|p| p.name.to_lowercase() == property_key)
         {
             if let Some(resolved) = self.try_resolve_configuration_type(&prop.prop_type) {
                 return resolved;
             }
-            return self.resolver.resolve_expression_sync(&prop.prop_type);
+            if self.deps.repository.find_type(&prop.prop_type).is_some() {
+                return self.resolver.resolve_expression_sync(&prop.prop_type);
+            }
+            // Типы свойств из metadata (в т.ч. синтетические UI-типы форм вроде "ГруппаФормы")
+            // должны возвращаться даже если их документация не загружена в repository.
+            return TypeResolution::inferred(&prop.prop_type);
         }
 
         TypeResolution::unknown()
@@ -402,9 +502,10 @@ impl TypeInferencer {
         }
 
         let methods = self.metadata_lookup.get_methods(receiver);
+        let method_key = method.to_lowercase();
         if let Some(m) = methods
             .into_iter()
-            .find(|m| m.name.eq_ignore_ascii_case(method))
+            .find(|m| m.name.to_lowercase() == method_key)
         {
             if let Some(return_type) = (!m.return_type.is_empty()).then_some(m.return_type) {
                 if let Some(resolved) = self.try_resolve_configuration_type(&return_type) {
@@ -475,8 +576,12 @@ fn signature_lookup_type_name(resolution: &TypeResolution) -> String {
         .to_string()
 }
 
-pub(crate) fn build_type_index(program: &Program, deps: Arc<SemanticDeps>) -> TypeIndex {
-    TypeInferencer::new(deps).build_index(program)
+pub(crate) fn build_type_index_with_path(
+    program: &Program,
+    file_path: &str,
+    deps: Arc<SemanticDeps>,
+) -> TypeIndex {
+    TypeInferencer::new(deps).build_index(program, file_path)
 }
 
 #[cfg(test)]
@@ -485,7 +590,7 @@ mod tests {
     use bsl_shared::domain::repository::InMemoryTypeRepository;
     use bsl_shared::domain::signature_index::{MethodSignature, SignatureSource};
     use bsl_shared::domain::type_id::TypeId;
-    use bsl_shared::domain::types::{RawDataSource, RawTypeData};
+    use bsl_shared::domain::types::{RawDataSource, RawPropertyData, RawTypeData};
     use bsl_syntax::ParseOptions;
     use bsl_shared::TypeRepository;
 
@@ -542,7 +647,7 @@ mod tests {
 "#,
         );
         let deps = deps_with_array_method();
-        let index = build_type_index(&program, deps);
+        let index = build_type_index_with_path(&program, "test.bsl", deps);
 
         let array_ident = index
             .type_at_position(1, 0)
@@ -553,5 +658,87 @@ mod tests {
             .type_at_position(2, 6)
             .expect("type at method call");
         assert_eq!(method_call.type_name(), "Число");
+    }
+
+    #[test]
+    fn seeds_form_module_context_for_elements_property_access() {
+        let repository_impl = Arc::new(InMemoryTypeRepository::new());
+        repository_impl
+            .load_types(vec![
+                RawTypeData {
+                    name: "Формы.Документы.Док1.Форма1".to_string(),
+                    source: RawDataSource::Configuration,
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "ЭлементыФормы.Документы.Док1.Форма1".to_string(),
+                    source: RawDataSource::Configuration,
+                    properties: vec![RawPropertyData {
+                        name: "СчетФактураПросмотр".to_string(),
+                        prop_type: "ГруппаФормы".to_string(),
+                        is_readonly: false,
+                    }],
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "ГруппаФормы".to_string(),
+                    source: RawDataSource::Platform,
+                    ..Default::default()
+                },
+            ])
+            .expect("load types");
+
+        let repository =
+            repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+        let resolver = Arc::new(TypeResolver::new(repository.clone()));
+
+        let deps = Arc::new(SemanticDeps {
+            repository,
+            signature_index: SignatureIndex::new(),
+            resolver: Some(resolver),
+            platform_signatures_loaded: true,
+        });
+
+        let program = parse(
+            r#"Процедура Тест()
+    x = Элементы.СчетФактураПросмотр;
+КонецПроцедуры
+"#,
+        );
+        let file_path = "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl";
+        let loc = CodeLocation::determine_from_path(Path::new(file_path)).expect("code location");
+        assert!(
+            matches!(loc.module_type, ModuleType::FormModule { .. }),
+            "expected FormModule for seed path, got {:?}",
+            loc.module_type
+        );
+        assert!(
+            repository_impl
+                .find_type("Формы.Документы.Док1.Форма1")
+                .is_some(),
+            "expected synthetic form type to be present"
+        );
+        assert!(
+            repository_impl
+                .find_type("ЭлементыФормы.Документы.Док1.Форма1")
+                .is_some(),
+            "expected synthetic form elements type to be present"
+        );
+
+        let index = build_type_index_with_path(&program, file_path, deps);
+
+        let receiver = index
+            .type_at_position(1, 8)
+            .expect("type at Элементы");
+        assert_eq!(
+            receiver.type_name(),
+            "ЭлементыФормы.Документы.Док1.Форма1",
+            "receiver should be seeded from form module context"
+        );
+
+        let member = index
+            .type_at_position(1, 17)
+            .expect("type at member access");
+        assert_eq!(member.type_name(), "ГруппаФормы");
     }
 }

@@ -1,13 +1,10 @@
 //! SymbolTable - таблица символов с иерархией scope-ов
 
-mod generics;
 mod lookup;
 mod registration;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-
-use crate::domain::types::TypeResolution;
 
 use super::types::{FunctionSignature, VariableState};
 
@@ -214,14 +211,11 @@ impl SymbolTable {
     /// # Примеры
     ///
     /// ```
-    /// # use bsl_shared::ir::{SymbolTable, FunctionSignature, Parameter};
-    /// # use bsl_shared::domain::types::TypeResolution;
+    /// # use bsl_shared::ir::{SymbolTable, FunctionSignature};
     /// let mut table = SymbolTable::new();
-    /// // Phase 3: return_type теперь Option<TypeResolution>
     /// table.register_function(FunctionSignature {
     ///     name: "МояФункция".to_string(),
     ///     params: vec![],
-    ///     return_type: Some(TypeResolution::explicit("Число")),
     ///     is_export: false,
     /// });
     ///
@@ -229,17 +223,6 @@ impl SymbolTable {
     /// ```
     pub fn find_function(&self, name: &str) -> Option<&FunctionSignature> {
         self.global_functions.get(name)
-    }
-
-    /// Обновить return type глобальной функции (после вывода типа по телу)
-    ///
-    /// Возвращает `true`, если функция найдена и обновлена.
-    pub fn set_function_return_type(&mut self, name: &str, return_type: TypeResolution) -> bool {
-        if let Some(sig) = self.global_functions.get_mut(name) {
-            sig.return_type = Some(return_type);
-            return true;
-        }
-        false
     }
 
     /// Поиск процедуры по имени
@@ -273,18 +256,13 @@ impl SymbolTable {
 
     /// Итератор по всем переменным в scope
     ///
-    /// Возвращает итератор по парам (имя переменной, TypeResolution) для указанного scope.
+    /// Возвращает итератор по парам (имя переменной, VariableState) для указанного scope.
     /// Не включает переменные из родительских scope.
     pub fn variables_in_scope(
         &self,
         scope_id: ScopeId,
-    ) -> Option<impl Iterator<Item = (&String, &TypeResolution)>> {
-        self.scopes.get(&scope_id).map(|scope| {
-            scope
-                .variables
-                .iter()
-                .map(|(name, var_state)| (name, &var_state.resolution))
-        })
+    ) -> Option<impl Iterator<Item = (&String, &VariableState)>> {
+        self.scopes.get(&scope_id).map(|scope| scope.variables.iter())
     }
 
     /// Итератор по всем scopes в таблице символов

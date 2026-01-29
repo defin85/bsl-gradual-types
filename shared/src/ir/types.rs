@@ -5,8 +5,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::types::TypeResolution;
-
 use super::span::Span;
 use super::symbol_table::ScopeId;
 
@@ -59,45 +57,25 @@ impl MemberAccessKind {
 pub enum SemanticNodeKind {
     // === Базовые объявления ===
     /// Объявление переменной: `Перем x: Число;`
-    ///
-    /// # Phase 3: TypeResolution для type_hint и initial_value_type
-    ///
-    /// - `type_hint` - явная аннотация типа из исходного кода (Explicit source)
-    /// - `initial_value_type` - выведенный тип из инициализирующего значения (Inferred source)
     VariableDeclaration {
         name: String,
-        /// Phase 3: TypeResolution вместо String для явной аннотации типа
-        type_hint: Option<TypeResolution>,
+        /// Явная аннотация типа из исходного кода (без резолюции в TypeResolution).
+        type_hint: Option<String>,
         is_export: bool,
-        /// Phase 3: TypeResolution вместо String для типа начального значения
-        initial_value_type: Option<TypeResolution>,
+        /// Индекс узла инициализирующего выражения (если есть).
+        initial_value_node: Option<usize>,
     },
 
     /// Доступ к переменной в выражении: `x`
     VariableAccess { name: String },
 
     /// Присваивание: `x = 42;`
-    ///
-    /// # Phase 3: TypeResolution для value_type
-    ///
-    /// `value_type` теперь содержит полную информацию о выведенном типе:
-    /// - Certainty (уверенность в типе)
-    /// - ResolutionSource (откуда пришёл тип)
-    /// - Metadata (дополнительная информация)
     Assignment {
         variable: String,
-        /// Phase 3: TypeResolution вместо String для полной информации о типе
-        value_type: TypeResolution,
         value_node: Option<usize>, // MILESTONE 3.5: индекс узла value expression (для hover)
     },
 
     /// Объявление функции
-    ///
-    /// # Phase 3: TypeResolution для return_type
-    ///
-    /// `return_type` теперь содержит полную информацию о возвращаемом типе:
-    /// - Explicit если явно указан в коде
-    /// - Inferred если выведен из return statements
     ///
     /// # Context-Aware Validation
     ///
@@ -106,8 +84,6 @@ pub enum SemanticNodeKind {
     FunctionDeclaration {
         name: String,
         params: Vec<Parameter>,
-        /// Phase 3: TypeResolution вместо String для возвращаемого типа
-        return_type: Option<TypeResolution>,
         body_scope: ScopeId,
         body: Vec<usize>, // индексы узлов тела функции
         /// Директива компилятора для context-aware валидации
@@ -132,39 +108,30 @@ pub enum SemanticNodeKind {
     // === Control Flow (КРИТИЧНО для Milestone 2.3 flow-sensitive) ===
     /// Условный оператор: `Если условие Тогда ... Иначе ... КонецЕсли`
     IfStatement {
-        /// Phase 3: TypeResolution для условия (обычно Булево)
-        condition_type: TypeResolution,
         then_branch: Vec<usize>, // Индексы SemanticNode в then ветке
         else_branch: Option<Vec<usize>>,
     },
 
     /// Цикл While: `Пока условие Цикл ... КонецЦикла`
     WhileLoop {
-        /// Phase 3: TypeResolution для условия (обычно Булево)
-        condition_type: TypeResolution,
         body: Vec<usize>,
     },
 
     /// Цикл For: `Для i = 1 По 10 Цикл ... КонецЦикла`
     ForLoop {
         variable: String,
-        /// Phase 3: TypeResolution для диапазона (всегда Число для For loop)
-        range_type: TypeResolution,
         body: Vec<usize>,
     },
 
     /// Цикл ForEach: `Для Каждого элемент Из коллекция Цикл ... КонецЦикла`
     ForEachLoop {
         variable: String,
-        /// Phase 3: TypeResolution для коллекции (массив, соответствие и т.д.)
-        collection_type: TypeResolution,
         body: Vec<usize>,
     },
 
     /// Возврат из функции: `Возврат значение;`
     Return {
-        /// Phase 3: TypeResolution для возвращаемого значения
-        value_type: Option<TypeResolution>,
+        value_node: Option<usize>,
     },
 
     /// Прерывание цикла: `Прервать;`
@@ -197,8 +164,6 @@ pub enum SemanticNodeKind {
     GlobalPropertyAccess {
         /// Имя глобального свойства: "Справочники", "Документы", "РегистрыСведений"
         name: String,
-        /// Тип результата: СправочникиМенеджер, ДокументыМенеджер, etc.
-        result_type: TypeResolution,
     },
 
     // === Member Access (КРИТИЧНО для LSP hover) ===
@@ -234,13 +199,9 @@ pub enum SemanticNodeKind {
         object_node: Option<usize>,
         /// Имя переменной (для простых переменных, deprecated для цепочек)
         object_name: Option<String>,
-        /// Phase 3: TypeResolution для типа объекта СЛЕВА от точки
-        object_type: TypeResolution,
         member_name: String,
         /// Тип доступа к члену: метод, свойство или индексатор
         access_kind: MemberAccessKind,
-        /// НОВОЕ: Тип РЕЗУЛЬТАТА доступа (тип значения справа от точки)
-        result_type: TypeResolution,
     },
 
     /// Вызов функции или метода: `Функция()` или `объект.Метод(args)`
@@ -272,21 +233,10 @@ pub enum SemanticNodeKind {
     FunctionCall {
         function_name: String,
         object_name: Option<String>,
-        /// Phase 3: TypeResolution вместо String для полной информации о типе объекта
-        object_type: Option<TypeResolution>,
-        /// Phase 3: TypeResolution вместо String для полной информации о типах аргументов
-        arg_types: Vec<TypeResolution>,
         /// Индекс вложенного узла (для цепочек методов)
         /// Например: Справочники.Контрагенты.НайтиПоКоду().ПолучитьОбъект()
         /// ПолучитьОбъект будет иметь object_node указывающий на НайтиПоКоду
         object_node: Option<usize>,
-        /// НОВОЕ: Тип возвращаемого значения функции/метода
-        ///
-        /// # Примеры
-        /// - `Справочники.Контрагенты.НайтиПоКоду("001")` → result_type: СправочникСсылка.Контрагенты
-        /// - `Массив.Добавить("x")` → result_type: Неопределено (процедура)
-        /// - `Строка(123)` → result_type: Строка
-        result_type: TypeResolution,
     },
 
     // === Scope tracking ===
@@ -322,77 +272,35 @@ pub enum SemanticNodeKind {
     NewExpression {
         /// Имя типа для создания ("Массив", "ТаблицаЗначений", "СправочникСсылка.Номенклатура")
         type_name: String,
-
-        /// Phase 3: TypeResolution для результирующего типа конструктора
-        ///
-        /// Обычно равен `type_name`, но для Generic коллекций может включать параметры:
-        /// - `Массив` → TypeResolution::generic("Массив", ["?"])
-        /// - `Массив<Число>` → TypeResolution::generic("Массив", ["Число"])
-        result_type: TypeResolution,
-
-        /// Phase 3: TypeResolution для типов аргументов конструктора
-        ///
-        /// # Примеры
-        /// - `Новый Массив(10)` → `vec![TypeResolution::primitive("Число")]`
-        /// - `Новый ТаблицаЗначений` → `vec![]` (без аргументов)
-        arg_types: Vec<TypeResolution>,
-
-        /// Generic параметры для коллекций (None если тип не Generic)
-        ///
-        /// # Примеры
-        /// - `Массив` → None (inference будет выполнен позже из использования)
-        /// - `Массив<Число>` → Some(vec!["Число"]) (явный параметр)
-        /// - `Соответствие<Строка, Число>` → Some(vec!["Строка", "Число"])
+        /// Параметры generic типов для коллекций (явно указанные в коде, без резолюции).
         generic_params: Option<Vec<String>>,
-
-        /// Динамический конструктор через строку
-        ///
-        /// `true` для выражений вида `Новый("СправочникСсылка.Номенклатура")`
+        /// Динамический конструктор через строку: `Новый("Тип")`.
         is_dynamic: bool,
     },
 }
 
 /// Параметр функции/процедуры
-///
-/// # Phase 3: TypeResolution для type_hint
-///
-/// `type_hint` теперь содержит полную информацию о типе параметра:
-/// - Explicit если явно указан в коде (`Параметр: Строка`)
-/// - None если тип не указан (динамический параметр)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Parameter {
     pub name: String,
-    /// Phase 3: TypeResolution вместо String для типа параметра
-    pub type_hint: Option<TypeResolution>,
+    pub type_hint: Option<String>,
     pub default_value: Option<String>,
     pub is_val: bool, // ByVal параметр
 }
 
 /// Сигнатура функции/процедуры
-///
-/// # Phase 3: TypeResolution для return_type
-///
-/// `return_type` теперь содержит полную информацию о возвращаемом типе:
-/// - Explicit если явно указан в коде
-/// - Inferred если выведен из анализа тела функции
-/// - None для процедур (не возвращают значение)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionSignature {
     pub name: String,
     pub params: Vec<Parameter>,
-    /// Phase 3: TypeResolution вместо String для возвращаемого типа
-    pub return_type: Option<TypeResolution>,
     pub is_export: bool,
 }
 
 /// Состояние переменной в таблице символов
 ///
-/// Содержит полную информацию о переменной: тип, позицию и флаг инициализации.
-/// Используется для отслеживания flow-sensitive состояния переменных.
+/// Содержит позицию объявления и флаг инициализации.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VariableState {
-    /// Тип переменной (TypeResolution с certainty и metadata)
-    pub resolution: TypeResolution,
     /// Инициализирована ли переменная (присвоено значение)
     pub initialized: bool,
     /// Позиция объявления в исходном коде
@@ -401,22 +309,21 @@ pub struct VariableState {
 
 impl VariableState {
     /// Создать состояние переменной
-    pub fn new(resolution: TypeResolution, span: Span, initialized: bool) -> Self {
+    pub fn new(span: Span, initialized: bool) -> Self {
         Self {
-            resolution,
             initialized,
             declaration_span: span,
         }
     }
 
     /// Создать для объявления без инициализации (Перем X;)
-    pub fn declared(resolution: TypeResolution, span: Span) -> Self {
-        Self::new(resolution, span, false)
+    pub fn declared(span: Span) -> Self {
+        Self::new(span, false)
     }
 
     /// Создать для объявления с инициализацией (X = 5; или параметр функции)
-    pub fn initialized(resolution: TypeResolution, span: Span) -> Self {
-        Self::new(resolution, span, true)
+    pub fn initialized(span: Span) -> Self {
+        Self::new(span, true)
     }
 
     /// Пометить как инициализированную

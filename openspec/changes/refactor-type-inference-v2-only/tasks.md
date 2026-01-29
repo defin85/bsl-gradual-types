@@ -5,7 +5,7 @@
 
 ## 2. Перенос AST→IR и выравнивание зависимостей
 - [x] 2.1 Перенести код AST→IR из `bsl-semantic` в `bsl-analysis-v2` (новый модуль `ast_to_ir` или эквивалент).
-- [ ] 2.2 Сделать AST→IR **минимальным**: удалить inference/эвристики и любые поля `TypeResolution` в IR; типы вычисляются поверх IR в v2 queries.
+- [x] 2.2 Сделать AST→IR **минимальным**: удалить inference/эвристики и любые поля `TypeResolution` в IR; типы вычисляются поверх IR в v2 queries.
 - [x] 2.3 Обновить `bsl-analysis-v2` и `bsl-backend` зависимости: больше не зависят от `bsl-semantic`.
 
 ## 3. IR byte offsets (позиционирование)
@@ -14,9 +14,9 @@
 - [x] 3.3 Добавить/обновить тесты на корректность byte offset ↔ UTF‑16 конвертаций на реальных кейсах (кириллица, emoji, смешанные строки).
 
 ## 4. v2 type inference поверх минимального IR
-- [ ] 4.1 Добавить v2 queries для вычисления типов (например: тип выражения/receiver chain, тип символа в scope) поверх минимального IR (без чтения I/O, только deps snapshot).
-- [ ] 4.2 Перевести completion/hover/signatureHelp/definition/diagnostics на новый v2 inference API (без использования типовой информации из IR).
-- [ ] 4.3 Зафиксировать контракт snapshot-safety: completion/hover/resolve используют один snapshot и стабильные идентификаторы (CandidateId вместо ExprId).
+- [x] 4.1 Добавить v2 queries для вычисления типов (например: тип выражения/receiver chain, тип символа в scope) поверх минимального IR (без чтения I/O, только deps snapshot).
+- [x] 4.2 Перевести completion/hover/signatureHelp/definition/diagnostics на новый v2 inference API (без использования типовой информации из IR).
+- [x] 4.3 Зафиксировать контракт snapshot-safety: completion/hover/resolve используют один snapshot и стабильные идентификаторы (CandidateId вместо ExprId).
 
 ## 5. Удаление `bsl-semantic` из workspace
 - [x] 5.1 Удалить crate `semantic/` из `[workspace.members]` и `[workspace.dependencies]`, обновить импорты.
@@ -28,9 +28,9 @@
 - [x] 6.3 Обновить/починить тесты и golden snapshots, которые зависят от старых IR spans (line/column) или от `TypeResolution` внутри IR.
 
 ## 7. Удаление legacy путей (полностью)
-- [ ] 7.1 Удалить `ParserCoordinator::parse_to_ir` и любые пути, которые строят IR вне v2 snapshot (включая `AnalysisEngine::parse_and_analyze`, если применимо).
-- [ ] 7.2 Удалить legacy `completionItem/resolve` fallback (резолвинг без `candidate_id`).
-- [ ] 7.3 Удалить legacy signatureHelp путь (и/или тестовый legacy handler), оставив только v2 API.
+- [x] 7.1 Удалить `ParserCoordinator::parse_to_ir` и любые пути, которые строят IR вне v2 snapshot (включая `AnalysisEngine::parse_and_analyze`, если применимо).
+- [x] 7.2 Удалить legacy `completionItem/resolve` fallback (резолвинг без `candidate_id`).
+- [x] 7.3 Удалить legacy signatureHelp путь (и/или тестовый legacy handler), оставив только v2 API.
 - [ ] 7.4 Убедиться, что LSP/web/CLI не имеют альтернативных inference путей (нет “best effort” обходов v2).
 
 ## 8. Валидация

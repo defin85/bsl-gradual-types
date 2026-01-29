@@ -37,9 +37,7 @@ async fn test_value_table_columns_property_type_is_resolved() {
     });
 
     let analysis = host.analysis();
-    let columns_offset = code
-        .rfind("Колонки")
-        .expect("expected Колонки in code");
+    let columns_offset = code.rfind("Колонки").expect("expected Колонки in code");
     let resolved = analysis
         .type_at_byte_offset(file_id, columns_offset as u32)
         .ok()

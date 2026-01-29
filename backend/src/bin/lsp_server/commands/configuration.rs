@@ -386,7 +386,8 @@ pub async fn handle_parse_configuration(
     }
 
     if let Some(coordinator) = coordinator {
-        let cache = build_config_index_cache(&canonical_path, metadata.as_slice(), &module_signatures);
+        let cache =
+            build_config_index_cache(&canonical_path, metadata.as_slice(), &module_signatures);
         let cache_lock = coordinator.config_index_cache();
         let mut guard = cache_lock.write().unwrap_or_else(|poisoned| {
             warn!("Config index cache RwLock poisoned (write), recovering");

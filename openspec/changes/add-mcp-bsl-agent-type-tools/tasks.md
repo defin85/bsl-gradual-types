@@ -1,30 +1,30 @@
 # Tasks: add-mcp-bsl-agent-type-tools
 
 ## 1. Спецификация
-- [ ] Добавить delta к `openspec/changes/add-mcp-bsl-agent-type-tools/specs/mcp-bsl-agent/spec.md` (новые MCP tools и сценарии).
-- [ ] `openspec validate add-mcp-bsl-agent-type-tools --strict --no-interactive`
+- [x] Добавить delta к `openspec/changes/add-mcp-bsl-agent-type-tools/specs/mcp-bsl-agent/spec.md` (новые MCP tools и сценарии).
+- [x] `openspec validate add-mcp-bsl-agent-type-tools --strict --no-interactive`
 
 ## 2. MCP tools (stdio) для типов
-- [ ] Добавить params-структуры в `bsl-agent/src/server/types.rs`:
+- [x] Добавить params-структуры в `bsl-agent/src/server/types.rs`:
   - `BslTypesListParams`, `BslTypesSearchParams`, `BslTypeGetParams` (включая `source` и `view`).
-- [ ] Реализовать tools в `bsl-agent/src/server/mod.rs`:
+- [x] Реализовать tools в `bsl-agent/src/server/mod.rs`:
   - `bsl_types_list_start`,
   - `bsl_types_search_start`,
   - `bsl_type_get_start`.
-- [ ] Провести вызовы через `SessionManager` (с проверкой `ready=true`) и вернуть DTO в json.
-- [ ] Обновить `mcp_help` (примеры вызовов новых tools).
+- [x] Провести вызовы через `SessionManager` (с проверкой `ready=true`) и вернуть DTO в json.
+- [x] Обновить `mcp_help` (примеры вызовов новых tools).
 
 ## 3. Тесты
-- [ ] Добавить тесты `bsl-agent` на контракты:
+- [x] Добавить тесты `bsl-agent` на контракты:
   - invalid params (невалидные лимиты/режимы),
   - неготовая сессия (ожидаемая ошибка),
   - детерминированность порядка (на фиксированном snapshot/fixture).
-- [ ] Добавить минимальный e2e/интеграционный тест на “детали типа содержат реквизиты/табличные части” на fixture конфигурации (если уже есть).
+- [x] Добавить минимальный e2e/интеграционный тест на “детали типа содержат реквизиты/табличные части” на fixture конфигурации (если уже есть).
 
 ## 4. Документация
-- [ ] Обновить `bsl-agent/README.md` (раздел MCP: примеры получения списка типов и реквизитов документа).
+- [x] Обновить `bsl-agent/README.md` (раздел MCP: примеры получения списка типов и реквизитов документа).
 
 ## 5. Quality gates (apply-стадия)
-- [ ] `cargo fmt`
-- [ ] `cargo clippy -- -D warnings`
-- [ ] `cargo test`
+- [x] `cargo fmt`
+- [x] `cargo clippy -- -D warnings`
+- [x] `cargo test`

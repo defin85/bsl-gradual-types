@@ -79,11 +79,7 @@ fn test_new_expression_with_generics() {
         scope_id: program.symbols.root_scope,
     });
 
-    if let SemanticNodeKind::NewExpression {
-        generic_params,
-        ..
-    } = &program.nodes[0].kind
-    {
+    if let SemanticNodeKind::NewExpression { generic_params, .. } = &program.nodes[0].kind {
         assert!(generic_params.is_some());
         let params = generic_params.as_ref().unwrap();
         assert_eq!(params.len(), 1);

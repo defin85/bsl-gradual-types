@@ -24,10 +24,7 @@ impl Span {
 
     /// Создать stub span (для тестов и временного использования)
     pub fn stub() -> Self {
-        Self {
-            start: 0,
-            end: 0,
-        }
+        Self { start: 0, end: 0 }
     }
 
     /// Создать span из byte offsets.

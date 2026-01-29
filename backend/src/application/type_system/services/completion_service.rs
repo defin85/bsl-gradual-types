@@ -1019,7 +1019,9 @@ fn resolve_member_owner_type_sync(
                 })
         };
 
-        from_node.or_else(from_enclosing_decl).or_else(from_prev_node)?
+        from_node
+            .or_else(from_enclosing_decl)
+            .or_else(from_prev_node)?
     };
 
     let mut visible_scopes = Vec::new();

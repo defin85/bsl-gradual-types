@@ -199,9 +199,18 @@ async fn test_span_contains_correct_position() {
     assert!(span.contains(15), "середина должна входить в span");
 
     // `end` - exclusive
-    assert!(!span.contains(20), "end (exclusive) не должен входить в span");
+    assert!(
+        !span.contains(20),
+        "end (exclusive) не должен входить в span"
+    );
 
     // Позиции снаружи span должны вернуть false
-    assert!(!span.contains(9), "позиция перед началом не должна входить в span");
-    assert!(!span.contains(21), "позиция после конца не должна входить в span");
+    assert!(
+        !span.contains(9),
+        "позиция перед началом не должна входить в span"
+    );
+    assert!(
+        !span.contains(21),
+        "позиция после конца не должна входить в span"
+    );
 }

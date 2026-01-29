@@ -4,15 +4,15 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Instant;
 use std::time::Duration;
+use std::time::Instant;
 use tokio::sync::{Mutex, RwLock};
 use tower_lsp::lsp_types::request::{
     CodeActionRequest, Formatting as DocumentFormattingRequest, InlayHintRequest, RangeFormatting,
     Request as LspRequest,
 };
-use tower_lsp::lsp_types::{Registration, Unregistration};
 use tower_lsp::lsp_types::MessageType;
+use tower_lsp::lsp_types::{Registration, Unregistration};
 use tower_lsp::Client;
 use tracing::{debug, info, warn};
 
@@ -823,7 +823,9 @@ impl BslLanguageServer {
 
                     match syntax_result {
                         Ok(Some(syntax_errors)) => {
-                            if let (Some(text), Some(index)) = (file_text.as_deref(), line_index.as_deref()) {
+                            if let (Some(text), Some(index)) =
+                                (file_text.as_deref(), line_index.as_deref())
+                            {
                                 diagnostics.extend(syntax_errors_to_diagnostics(
                                     &syntax_errors,
                                     &uri_for_task,
@@ -850,7 +852,9 @@ impl BslLanguageServer {
                     let semantic_elapsed = semantic_started.elapsed();
                     server
                         .coordinator
-                        .record_intellisense_v2_semantic_diagnostics_query_latency(semantic_elapsed);
+                        .record_intellisense_v2_semantic_diagnostics_query_latency(
+                            semantic_elapsed,
+                        );
                     if let Some(threshold) = super::intellisense_v2_slow_client_log_threshold() {
                         if semantic_elapsed >= threshold {
                             server
@@ -895,9 +899,8 @@ impl BslLanguageServer {
                                 if let (Some(text), Some(index)) =
                                     (file_text.as_deref(), line_index.as_deref())
                                 {
-                                    diagnostics.push(semantic_error_to_diagnostic(
-                                        error, text, index,
-                                    ));
+                                    diagnostics
+                                        .push(semantic_error_to_diagnostic(error, text, index));
                                 }
                             }
                         }
@@ -1076,10 +1079,10 @@ mod tests {
         DocumentSymbolParams, DocumentSymbolResponse, FormattingOptions, InitializeParams,
         InitializedParams, InlayHint, InlayHintLabel, InlayHintParams, Location,
         PartialResultParams, Position, PrepareRenameResponse, Range, ReferenceContext,
-        ReferenceParams, RenameParams, SymbolInformation, SymbolKind, TextDocumentContentChangeEvent,
-        TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams,
-        VersionedTextDocumentIdentifier, WorkDoneProgressParams, WorkspaceEdit,
-        WorkspaceSymbolParams,
+        ReferenceParams, RenameParams, SymbolInformation, SymbolKind,
+        TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
+        TextDocumentPositionParams, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
+        WorkspaceEdit, WorkspaceSymbolParams,
     };
     use tower_lsp::LanguageServer;
     use tower_lsp::LspService;
@@ -3271,7 +3274,10 @@ mod tests {
             .call(initialized)
             .await
             .expect("initialized notification");
-        assert!(initialized_response.is_none(), "initialized is a notification");
+        assert!(
+            initialized_response.is_none(),
+            "initialized is a notification"
+        );
 
         let settings = DidChangeConfigurationParams {
             settings: serde_json::json!({
@@ -3313,7 +3319,10 @@ mod tests {
             .call(settings_req)
             .await
             .expect("didChangeConfiguration notification");
-        assert!(settings_resp.is_none(), "didChangeConfiguration is a notification");
+        assert!(
+            settings_resp.is_none(),
+            "didChangeConfiguration is a notification"
+        );
 
         let uri = Url::parse("file:///test_p19_inlay_hints.bsl").expect("test uri");
         let text = "Процедура Тест()\nПерем X;\nX = 1;\nКонецПроцедуры\n";
@@ -3357,7 +3366,8 @@ mod tests {
 
         let value = serde_json::to_value(&resp).expect("serialize response");
         let result_value = value.get("result").cloned().expect("result field");
-        let hints: Option<Vec<InlayHint>> = serde_json::from_value(result_value).expect("parse hints");
+        let hints: Option<Vec<InlayHint>> =
+            serde_json::from_value(result_value).expect("parse hints");
         let hints = hints.expect("hints present");
 
         assert!(!hints.is_empty(), "expected at least one hint");
@@ -3412,7 +3422,10 @@ mod tests {
             .call(initialized)
             .await
             .expect("initialized notification");
-        assert!(initialized_response.is_none(), "initialized is a notification");
+        assert!(
+            initialized_response.is_none(),
+            "initialized is a notification"
+        );
 
         let settings = DidChangeConfigurationParams {
             settings: serde_json::json!({
@@ -3454,7 +3467,10 @@ mod tests {
             .call(settings_req)
             .await
             .expect("didChangeConfiguration notification");
-        assert!(settings_resp.is_none(), "didChangeConfiguration is a notification");
+        assert!(
+            settings_resp.is_none(),
+            "didChangeConfiguration is a notification"
+        );
 
         let uri = Url::parse("file:///test_p20_code_actions.bsl").expect("test uri");
         let text = "Процедура Тест()\nПерем X;\nX = 1;\nКонецПроцедуры\n";
@@ -3559,7 +3575,10 @@ mod tests {
             .call(initialized)
             .await
             .expect("initialized notification");
-        assert!(initialized_response.is_none(), "initialized is a notification");
+        assert!(
+            initialized_response.is_none(),
+            "initialized is a notification"
+        );
 
         let settings = DidChangeConfigurationParams {
             settings: serde_json::json!({
@@ -3601,7 +3620,10 @@ mod tests {
             .call(settings_req)
             .await
             .expect("didChangeConfiguration notification");
-        assert!(settings_resp.is_none(), "didChangeConfiguration is a notification");
+        assert!(
+            settings_resp.is_none(),
+            "didChangeConfiguration is a notification"
+        );
 
         let uri = Url::parse("file:///test_p21_code_actions.bsl").expect("test uri");
         let text = "Процедура Тест()\nПерем X;\nX = 1;\nКонецПроцедуры\n";

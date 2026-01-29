@@ -454,8 +454,7 @@ fn test_method_validator_with_variable_contextual() {
         variable_name: None,
     };
 
-    let diag_with =
-        error_with_var.to_diagnostic_with_detail(Span::new(10, 20), DetailLevel::Full);
+    let diag_with = error_with_var.to_diagnostic_with_detail(Span::new(10, 20), DetailLevel::Full);
     let diag_without =
         error_without_var.to_diagnostic_with_detail(Span::new(10, 20), DetailLevel::Full);
 

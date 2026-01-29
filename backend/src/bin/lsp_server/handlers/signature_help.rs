@@ -230,14 +230,10 @@ mod tests {
 
         let method_pos = find_position(&content, "Массив.Добавить(1, ");
         let receiver_type_hint = compute_receiver_type_hint(&content, method_pos, deps.clone());
-        let method_v2 = handle_signature_help_v2(
-            Arc::from(content),
-            method_pos,
-            receiver_type_hint,
-            deps,
-        )
-            .await
-            .expect("method signature help (v2)");
+        let method_v2 =
+            handle_signature_help_v2(Arc::from(content), method_pos, receiver_type_hint, deps)
+                .await
+                .expect("method signature help (v2)");
 
         let snapshot = serde_json::json!({
             "constructor": {

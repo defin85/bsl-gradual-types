@@ -54,26 +54,18 @@ impl SymbolTable {
     ///
     /// По умолчанию переменная считается инициализированной (например, присваивание X = 5;).
     /// Для объявления без инициализации (Перем X;) используйте `register_variable_declared`.
-    pub fn register_variable(
-        &mut self,
-        scope_id: ScopeId,
-        name: String,
-        span: Span,
-    ) {
+    pub fn register_variable(&mut self, scope_id: ScopeId, name: String, span: Span) {
         if let Some(scope) = self.scopes.get_mut(&scope_id) {
-            scope.variables.insert(name, VariableState::initialized(span));
+            scope
+                .variables
+                .insert(name, VariableState::initialized(span));
         }
     }
 
     /// Зарегистрировать переменную без инициализации (Перем X;)
     ///
     /// Используется для объявлений переменных без начального значения.
-    pub fn register_variable_declared(
-        &mut self,
-        scope_id: ScopeId,
-        name: String,
-        span: Span,
-    ) {
+    pub fn register_variable_declared(&mut self, scope_id: ScopeId, name: String, span: Span) {
         if let Some(scope) = self.scopes.get_mut(&scope_id) {
             scope.variables.insert(name, VariableState::declared(span));
         }

@@ -122,26 +122,16 @@ pub enum SemanticNodeKind {
     },
 
     /// Цикл While: `Пока условие Цикл ... КонецЦикла`
-    WhileLoop {
-        body: Vec<usize>,
-    },
+    WhileLoop { body: Vec<usize> },
 
     /// Цикл For: `Для i = 1 По 10 Цикл ... КонецЦикла`
-    ForLoop {
-        variable: String,
-        body: Vec<usize>,
-    },
+    ForLoop { variable: String, body: Vec<usize> },
 
     /// Цикл ForEach: `Для Каждого элемент Из коллекция Цикл ... КонецЦикла`
-    ForEachLoop {
-        variable: String,
-        body: Vec<usize>,
-    },
+    ForEachLoop { variable: String, body: Vec<usize> },
 
     /// Возврат из функции: `Возврат значение;`
-    Return {
-        value_node: Option<usize>,
-    },
+    Return { value_node: Option<usize> },
 
     /// Прерывание цикла: `Прервать;`
     Break,

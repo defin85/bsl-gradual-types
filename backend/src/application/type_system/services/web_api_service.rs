@@ -168,6 +168,26 @@ pub async fn get_type_details(
     Ok(platform_globals.get(type_name).cloned())
 }
 
+/// Get type details as TypeDto by exact name.
+///
+/// Intended for MCP/Web parity use-cases where a caller needs a single type payload
+/// without enumerating full lists.
+pub fn get_type_details_as_dto(
+    deps: &SemanticDeps,
+    metadata_lookup: &TypeMetadataLookup,
+    type_name: &str,
+    include_methods: bool,
+) -> Option<TypeDto> {
+    let platform_globals = get_all_platform_globals(deps);
+    let res = platform_globals.get(type_name)?;
+    let mut dto =
+        type_resolution_to_dto(type_name, res, metadata_lookup, generate_type_description);
+    if !include_methods {
+        dto.methods.clear();
+    }
+    Some(dto)
+}
+
 /// Get type completions for an expression
 ///
 /// # Arguments
@@ -221,7 +241,7 @@ pub fn get_all_types_as_dto(
         .collect();
 
     // 3. Apply filters
-    let filtered_types: Vec<TypeDto> = all_type_dtos
+    let mut filtered_types: Vec<TypeDto> = all_type_dtos
         .into_iter()
         .filter(|t| {
             // Filter by category
@@ -251,6 +271,17 @@ pub fn get_all_types_as_dto(
             true
         })
         .collect();
+
+    // Deterministic ordering before pagination.
+    // Without this, HashMap iteration order can affect page boundaries.
+    filtered_types.sort_by(|a, b| {
+        let a_name = a.name.to_lowercase();
+        let b_name = b.name.to_lowercase();
+        a.category
+            .cmp(&b.category)
+            .then_with(|| a_name.cmp(&b_name))
+            .then_with(|| a.name.cmp(&b.name))
+    });
 
     // 4. Apply pagination
     let type_dtos: Vec<TypeDto> = filtered_types
@@ -387,9 +418,11 @@ pub fn get_all_platform_globals(
 
     for raw_type in raw_types {
         let concrete_type = match raw_type.source {
-            RawDataSource::Platform => ConcreteType::Platform(bsl_shared::domain::types::PlatformType {
-                name: raw_type.name.clone(),
-            }),
+            RawDataSource::Platform => {
+                ConcreteType::Platform(bsl_shared::domain::types::PlatformType {
+                    name: raw_type.name.clone(),
+                })
+            }
             RawDataSource::Configuration => {
                 // Конвертируем атрибуты и табличные части
                 let attributes = convert_raw_attributes(&raw_type.attributes);
@@ -432,9 +465,11 @@ fn completions_from_deps(deps: &SemanticDeps, query: &str) -> Vec<CompletionItem
         }
 
         let concrete_type = match raw_type.source {
-            RawDataSource::Platform => ConcreteType::Platform(bsl_shared::domain::types::PlatformType {
-                name: raw_type.name.clone(),
-            }),
+            RawDataSource::Platform => {
+                ConcreteType::Platform(bsl_shared::domain::types::PlatformType {
+                    name: raw_type.name.clone(),
+                })
+            }
             RawDataSource::Configuration => {
                 let attributes = convert_raw_attributes(&raw_type.attributes);
                 let tabular_sections = convert_raw_tabular_sections(&raw_type.tabular_sections);
@@ -447,9 +482,11 @@ fn completions_from_deps(deps: &SemanticDeps, query: &str) -> Vec<CompletionItem
                     tabular_sections,
                 })
             }
-            RawDataSource::UserDefined => ConcreteType::Platform(bsl_shared::domain::types::PlatformType {
-                name: raw_type.name.clone(),
-            }),
+            RawDataSource::UserDefined => {
+                ConcreteType::Platform(bsl_shared::domain::types::PlatformType {
+                    name: raw_type.name.clone(),
+                })
+            }
         };
 
         let resolution = TypeResolution::known(concrete_type);
@@ -552,10 +589,7 @@ fn determine_category_and_source(res: &TypeResolution) -> (String, String) {
     }
 }
 
-fn search_global_functions_as_dto(
-    deps: &SemanticDeps,
-    query: &str,
-) -> Vec<TypeDto> {
+fn search_global_functions_as_dto(deps: &SemanticDeps, query: &str) -> Vec<TypeDto> {
     search_global_functions_from_deps(deps, query)
         .into_iter()
         .map(|(name, sig)| global_function_signature_to_dto(&name, &sig))

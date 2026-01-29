@@ -39,7 +39,9 @@ fn test_lookup_variable_found() {
 
     table.register_variable(table.root_scope, "x".to_string(), span);
 
-    let state = table.lookup_variable(table.root_scope, "x").expect("x exists");
+    let state = table
+        .lookup_variable(table.root_scope, "x")
+        .expect("x exists");
     assert!(state.initialized);
     assert_eq!(state.declaration_span, span);
 }
@@ -47,7 +49,9 @@ fn test_lookup_variable_found() {
 #[test]
 fn test_lookup_variable_not_found() {
     let table = SymbolTable::new();
-    assert!(table.lookup_variable(table.root_scope, "nonexistent").is_none());
+    assert!(table
+        .lookup_variable(table.root_scope, "nonexistent")
+        .is_none());
 }
 
 #[test]
@@ -108,7 +112,9 @@ fn test_lookup_variable_in_hierarchy_deeply_nested() {
 fn test_lookup_variable_in_hierarchy_not_found() {
     let mut table = SymbolTable::new();
     let child = table.create_scope(table.root_scope);
-    assert!(table.lookup_variable_in_hierarchy(child, "nonexistent").is_none());
+    assert!(table
+        .lookup_variable_in_hierarchy(child, "nonexistent")
+        .is_none());
 }
 
 #[test]
@@ -117,19 +123,23 @@ fn test_mark_variable_initialized_checked_success() {
     let span = Span::stub();
 
     table.register_variable_declared(table.root_scope, "x".to_string(), span);
-    assert!(!table
-        .lookup_variable(table.root_scope, "x")
-        .expect("x exists")
-        .initialized);
+    assert!(
+        !table
+            .lookup_variable(table.root_scope, "x")
+            .expect("x exists")
+            .initialized
+    );
 
     table
         .mark_variable_initialized_checked(table.root_scope, "x")
         .expect("mark ok");
 
-    assert!(table
-        .lookup_variable(table.root_scope, "x")
-        .expect("x exists")
-        .initialized);
+    assert!(
+        table
+            .lookup_variable(table.root_scope, "x")
+            .expect("x exists")
+            .initialized
+    );
 }
 
 #[test]
@@ -240,7 +250,9 @@ fn test_get_parent_scope_invalid() {
 #[test]
 fn test_variables_in_scope_empty() {
     let table = SymbolTable::new();
-    let vars = table.variables_in_scope(table.root_scope).expect("scope exists");
+    let vars = table
+        .variables_in_scope(table.root_scope)
+        .expect("scope exists");
     assert_eq!(vars.count(), 0);
 }
 
@@ -249,7 +261,9 @@ fn test_variables_in_scope_single() {
     let mut table = SymbolTable::new();
     table.register_variable(table.root_scope, "x".to_string(), Span::stub());
 
-    let vars = table.variables_in_scope(table.root_scope).expect("scope exists");
+    let vars = table
+        .variables_in_scope(table.root_scope)
+        .expect("scope exists");
     let collected: Vec<_> = vars.collect();
     assert_eq!(collected.len(), 1);
     assert_eq!(collected[0].0, "x");

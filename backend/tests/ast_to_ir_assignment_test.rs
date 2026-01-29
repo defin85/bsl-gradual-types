@@ -75,4 +75,3 @@ fn test_assignment_declares_and_initializes_variable_in_symbol_table() {
         "При присваивании переменная должна считаться инициализированной"
     );
 }
-

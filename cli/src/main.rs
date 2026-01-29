@@ -317,15 +317,7 @@ async fn analyze_ir_command(
                 let params = sig
                     .params
                     .iter()
-                    .map(|p| {
-                        format!(
-                            "{}: {}",
-                            p.name,
-                            p.type_hint
-                                .as_deref()
-                                .unwrap_or("?")
-                        )
-                    })
+                    .map(|p| format!("{}: {}", p.name, p.type_hint.as_deref().unwrap_or("?")))
                     .collect::<Vec<_>>()
                     .join(", ");
                 println!("     - Функция {}({})", name.cyan(), params);
@@ -335,15 +327,7 @@ async fn analyze_ir_command(
                 let params = sig
                     .params
                     .iter()
-                    .map(|p| {
-                        format!(
-                            "{}: {}",
-                            p.name,
-                            p.type_hint
-                                .as_deref()
-                                .unwrap_or("?")
-                        )
-                    })
+                    .map(|p| format!("{}: {}", p.name, p.type_hint.as_deref().unwrap_or("?")))
                     .collect::<Vec<_>>()
                     .join(", ");
                 println!("     - Процедура {}({})", name.cyan(), params);
@@ -477,7 +461,9 @@ async fn analyze_file_v2(
     let mut vars: HashMap<String, TypeResolution> = HashMap::new();
     for node in &ir.nodes {
         match &node.kind {
-            SemanticNodeKind::VariableDeclaration { name, type_hint, .. } => {
+            SemanticNodeKind::VariableDeclaration {
+                name, type_hint, ..
+            } => {
                 let resolution = type_hint
                     .as_deref()
                     .map(TypeResolution::explicit)

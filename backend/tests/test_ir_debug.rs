@@ -44,10 +44,7 @@ fn test_ir_outside_function() {
     for (i, node) in ir.nodes.iter().enumerate() {
         println!(
             "  [{}] {:?} at [bytes {}..{}]",
-            i,
-            node.kind,
-            node.span.start,
-            node.span.end
+            i, node.kind, node.span.start, node.span.end
         );
     }
 
@@ -101,10 +98,7 @@ fn test_ir_inside_function() {
     for (i, node) in ir.nodes.iter().enumerate() {
         println!(
             "  [{}] {:?} at [bytes {}..{}]",
-            i,
-            node.kind,
-            node.span.start,
-            node.span.end
+            i, node.kind, node.span.start, node.span.end
         );
     }
 

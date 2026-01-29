@@ -130,9 +130,10 @@ static INTELLISENSE_V2_SLOW_SNAPSHOT_WARN_THRESHOLD: LazyLock<Option<Duration>> 
 static INTELLISENSE_V2_SLOW_QUERY_WARN_THRESHOLD: LazyLock<Option<Duration>> =
     LazyLock::new(|| parse_env_duration_ms("BSL_INTELLISENSE_V2_SLOW_QUERY_WARN_MS"));
 
-static INTELLISENSE_V2_SLOW_CLIENT_LOG_THRESHOLD: LazyLock<Option<Duration>> = LazyLock::new(|| {
-    parse_env_duration_ms_with_default("BSL_INTELLISENSE_V2_SLOW_CLIENT_LOG_MS", 2000)
-});
+static INTELLISENSE_V2_SLOW_CLIENT_LOG_THRESHOLD: LazyLock<Option<Duration>> =
+    LazyLock::new(|| {
+        parse_env_duration_ms_with_default("BSL_INTELLISENSE_V2_SLOW_CLIENT_LOG_MS", 2000)
+    });
 
 pub(crate) fn intellisense_v2_slow_wait_warn_threshold() -> Option<Duration> {
     *INTELLISENSE_V2_SLOW_WAIT_WARN_THRESHOLD

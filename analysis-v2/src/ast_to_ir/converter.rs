@@ -186,21 +186,12 @@ impl AstToIrConverter {
         let root = self.symbol_table.root_scope;
 
         // Базовые implicit символы модуля формы (только биндинги имён, без TypeResolution)
-        self.symbol_table.register_variable(
-            root,
-            "Объект".to_string(),
-            span,
-        );
-        self.symbol_table.register_variable(
-            root,
-            "Элементы".to_string(),
-            span,
-        );
-        self.symbol_table.register_variable(
-            root,
-            "ЭтаФорма".to_string(),
-            span,
-        );
+        self.symbol_table
+            .register_variable(root, "Объект".to_string(), span);
+        self.symbol_table
+            .register_variable(root, "Элементы".to_string(), span);
+        self.symbol_table
+            .register_variable(root, "ЭтаФорма".to_string(), span);
 
         // Реквизиты формы (из синтетического типа `Формы.*`) — тоже только имена.
         if let Some(form_type) = self.repository.find_type(&form_type_name) {
@@ -209,11 +200,7 @@ impl AstToIrConverter {
                 {
                     continue;
                 }
-                self.symbol_table.register_variable(
-                    root,
-                    prop.name,
-                    span,
-                );
+                self.symbol_table.register_variable(root, prop.name, span);
             }
         }
     }
@@ -292,7 +279,10 @@ impl AstToIrConverter {
         use tracing::debug;
 
         // Milestone 2.11 Task B1: DEBUG логи для AST -> IR конвертации
-        debug!("AST -> IR Span conversion: {}..{}", ast_span.start, ast_span.end);
+        debug!(
+            "AST -> IR Span conversion: {}..{}",
+            ast_span.start, ast_span.end
+        );
 
         ast_span
     }

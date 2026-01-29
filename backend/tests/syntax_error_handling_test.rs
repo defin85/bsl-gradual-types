@@ -82,10 +82,7 @@ fn test_invalid_expression() {
                 for error in &parse_result.syntax_errors {
                     let (line, column) =
                         index.byte_offset_to_utf16_position(code, error.span.start as usize);
-                    println!(
-                        "  - [{}:{}] {}",
-                        line, column, error.message
-                    );
+                    println!("  - [{}:{}] {}", line, column, error.message);
                 }
             }
         }
@@ -164,11 +161,7 @@ fn test_error_span_accuracy() {
                     index.byte_offset_to_utf16_position(code, error.span.end as usize);
                 println!(
                     "Ошибка на [{}:{} - {}:{}]: {}",
-                    start_line,
-                    start_column,
-                    end_line,
-                    end_column,
-                    error.message
+                    start_line, start_column, end_line, end_column, error.message
                 );
 
                 // Span должен быть разумным

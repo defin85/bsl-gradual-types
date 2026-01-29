@@ -7,8 +7,8 @@
 //! 2. Координаты ошибок корректны (UTF-16)
 //! 3. Типы ошибок правильно классифицированы
 
-use bsl_backend::system::ParserCoordinator;
 use bsl_backend::system::LineIndex;
+use bsl_backend::system::ParserCoordinator;
 use bsl_shared::domain::types::ErrorType;
 
 fn utf16_position(index: &LineIndex, source: &str, byte_offset: u32) -> (u32, u32) {
@@ -82,10 +82,7 @@ fn test_missing_endif_detected() {
             error.span,
             source.len()
         );
-        assert!(
-            end_line >= start_line,
-            "end_line >= start_line"
-        );
+        assert!(end_line >= start_line, "end_line >= start_line");
     }
 
     assert!(related_checked, "MissingToken для ENDIF_KEYWORD не найден");
@@ -115,10 +112,7 @@ fn test_missing_enddo_detected() {
 
     for error in &parse_result.syntax_errors {
         let (line, column) = utf16_position(&index, source, error.span.start);
-        println!(
-            "- {} [{}:{}]",
-            error.message, line, column
-        );
+        println!("- {} [{}:{}]", error.message, line, column);
     }
 
     println!("=====================================\n");
@@ -179,13 +173,7 @@ fn test_multiple_syntax_errors() {
 
     for (idx, error) in parse_result.syntax_errors.iter().enumerate() {
         let (line, column) = utf16_position(&index, source, error.span.start);
-        println!(
-            "{}. {} [{}:{}]",
-            idx + 1,
-            error.message,
-            line,
-            column
-        );
+        println!("{}. {} [{}:{}]", idx + 1, error.message, line, column);
     }
 
     assert!(
@@ -275,16 +263,10 @@ fn test_error_utf16_coordinates_with_cyrillic() {
                 "start_column не должен быть огромным (это признак byte offset вместо UTF-16)"
             );
 
-            assert!(
-                end_column < 100,
-                "end_column не должен быть огромным"
-            );
+            assert!(end_column < 100, "end_column не должен быть огромным");
 
             // Координаты должны быть последовательными
-            assert!(
-                end_line >= start_line,
-                "end_line должен быть >= start_line"
-            );
+            assert!(end_line >= start_line, "end_line должен быть >= start_line");
 
             if start_line == end_line {
                 assert!(

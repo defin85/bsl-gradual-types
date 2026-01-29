@@ -28,4 +28,3 @@ impl SemanticTypeHints {
         self.member_access_object_type_by_span.get(&span)
     }
 }
-

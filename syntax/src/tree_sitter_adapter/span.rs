@@ -3,10 +3,10 @@
 //! В v2 позиции в IR/AST храним **только в byte offsets** (UTF-8).
 //! Конвертация byte offsets -> UTF-16 (LSP) выполняется на границе (через `bsl-line-index`).
 
+pub use bsl_line_index::{byte_offset_to_utf16, LineIndex};
 use bsl_shared::ir::Span;
 use tracing::debug;
 use tree_sitter::Node;
-pub use bsl_line_index::{byte_offset_to_utf16, LineIndex};
 
 /// Извлечь Span из tree-sitter Node.
 ///

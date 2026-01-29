@@ -516,8 +516,8 @@ pub async fn get_diagnostics(
                 .map(|d| {
                     let (line, column) = line_index
                         .byte_offset_to_utf16_position(code_arc.as_ref(), d.span.start as usize);
-                    let (end_line, end_column) =
-                        line_index.byte_offset_to_utf16_position(code_arc.as_ref(), d.span.end as usize);
+                    let (end_line, end_column) = line_index
+                        .byte_offset_to_utf16_position(code_arc.as_ref(), d.span.end as usize);
                     SemanticErrorDto {
                         message: d.message.clone(),
                         line,
@@ -668,8 +668,8 @@ pub async fn get_diagnostics_debug(
                 .map(|d| {
                     let (line, column) = line_index
                         .byte_offset_to_utf16_position(code_arc.as_ref(), d.span.start as usize);
-                    let (end_line, end_column) =
-                        line_index.byte_offset_to_utf16_position(code_arc.as_ref(), d.span.end as usize);
+                    let (end_line, end_column) = line_index
+                        .byte_offset_to_utf16_position(code_arc.as_ref(), d.span.end as usize);
                     SemanticErrorDto {
                         message: d.message.clone(),
                         line,

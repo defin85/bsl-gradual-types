@@ -3,8 +3,8 @@
 //! Проверяет, что tree-sitter парсер корректно обнаруживает синтаксические ошибки,
 //! такие как незакрытые конструкции.
 
-use bsl_backend::system::ParserCoordinator;
 use bsl_backend::system::LineIndex;
+use bsl_backend::system::ParserCoordinator;
 
 fn utf16_position(index: &LineIndex, source: &str, byte_offset: u32) -> (u32, u32) {
     let point = index.byte_offset_to_point(source, byte_offset as usize);
@@ -159,13 +159,7 @@ fn test_multiple_syntax_errors() {
 
     for (idx, error) in parse_result.syntax_errors.iter().enumerate() {
         let (line, column) = utf16_position(&index, source, error.span.start);
-        println!(
-            "{}. {} [{}:{}]",
-            idx + 1,
-            error.message,
-            line,
-            column
-        );
+        println!("{}. {} [{}:{}]", idx + 1, error.message, line, column);
     }
 
     assert!(

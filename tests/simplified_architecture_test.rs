@@ -82,8 +82,8 @@ async fn test_system_coordinator_startup() {
     coordinator.start().await.expect("Coordinator should start");
 
     assert!(
-        coordinator.analysis_engine().is_some(),
-        "AnalysisEngine должен быть инициализирован после старта"
+        coordinator.domain_bundle().is_some(),
+        "DomainBundle должен быть инициализирован после старта"
     );
 }
 

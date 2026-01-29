@@ -15,10 +15,11 @@ pub mod types;
 
 use types::{
     BslDefinitionParams, BslDiagnosticsParams, BslMembersParams, BslReferencesParams,
-    BslSymbolSearchParams, BslTypeAtPositionParams, BuildInfoParams, ContextExpandParams,
-    ContextPackParams, JobCancelParams, JobResultParams, JobStatusParams, JobWaitParams,
-    McpHelpParams, UiUrlParams, WorkspaceCloseParams, WorkspaceListParams, WorkspaceOpenParams,
-    WorkspaceResumeParams, WorkspaceStatusParams,
+    BslSymbolSearchParams, BslTypeAtPositionParams, BslTypeGetParams, BslTypesListParams,
+    BslTypesSearchParams, BuildInfoParams, ContextExpandParams, ContextPackParams, JobCancelParams,
+    JobResultParams, JobStatusParams, JobWaitParams, McpHelpParams, UiUrlParams,
+    WorkspaceCloseParams, WorkspaceListParams, WorkspaceOpenParams, WorkspaceResumeParams,
+    WorkspaceStatusParams,
 };
 use types::{WorkspaceDocumentsClearParams, WorkspaceDocumentsSetParams};
 
@@ -73,6 +74,7 @@ impl BslAgentHandler {
             "workspace_status(session_id) poll until ready=true".to_string(),
             "workspace_documents_set(session_id, files[], mark_hot=true)".to_string(),
             "bsl_diagnostics_start(...) / bsl_symbol_search_start(...) / context_pack_start(...)".to_string(),
+            "bsl_types_list_start(...) / bsl_types_search_start(...) / bsl_type_get_start(...)".to_string(),
             "job_wait(job_id, timeout_ms) until state=succeeded".to_string(),
             "job_result(job_id)".to_string(),
         ];
@@ -153,6 +155,33 @@ impl BslAgentHandler {
                         "arguments": { "job_id": "<job_id>", "timeout_ms": 5000 }
                     }));
                 }
+                "bsl_types_list_start" => {
+                    examples.push(serde_json::json!({
+                        "name": "bsl_types_list_start",
+                        "arguments": { "session_id": "<session_id>", "page": 1, "limit": 50, "view": "names_only" }
+                    }));
+                    examples.push(serde_json::json!({
+                        "name": "bsl_types_list_start",
+                        "arguments": { "session_id": "<session_id>", "page": 1, "limit": 50, "source": "configuration", "view": "summary" }
+                    }));
+                }
+                "bsl_types_search_start" => {
+                    examples.push(serde_json::json!({
+                        "name": "bsl_types_search_start",
+                        "arguments": { "session_id": "<session_id>", "query": "Документ", "limit": 200, "view": "summary" }
+                    }));
+                    examples.push(serde_json::json!({
+                        "name": "bsl_types_search_start",
+                        "arguments": { "session_id": "<session_id>", "query": "Документы.", "limit": 200, "source": "configuration", "view": "names_only" }
+                    }));
+                }
+                "bsl_type_get_start" => {
+                    examples.push(serde_json::json!({
+                        "name": "bsl_type_get_start",
+                        "arguments": { "session_id": "<session_id>", "type_name": "Документы.ЗаказНаряд", "source": "configuration", "include_methods": false }
+                    }));
+                    notes.push("bsl_type_get_start returns a TypeDto with properties[] and tabularSections[] for configuration objects.".to_string());
+                }
                 other => {
                     return Err(rmcp::ErrorData::invalid_params(
                         format!("unknown tool_name: {other}"),
@@ -165,7 +194,7 @@ impl BslAgentHandler {
                 0,
                 "mcp_help(tool_name?) for examples (read-only)".to_string(),
             );
-            notes.push("Pass tool_name to get examples: workspace_open, workspace_documents_set, workspace_documents_clear, bsl_diagnostics_start, job_wait.".to_string());
+            notes.push("Pass tool_name to get examples: workspace_open, workspace_documents_set, workspace_documents_clear, bsl_diagnostics_start, bsl_types_list_start, bsl_types_search_start, bsl_type_get_start, job_wait.".to_string());
         }
 
         Content::json(McpHelpResponse {
@@ -373,6 +402,143 @@ impl BslAgentHandler {
                     .await
                     .map_err(|err| anyhow::anyhow!(err.to_string()))?;
                 serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
+            })
+            .await;
+        Content::json(JobStartResponse {
+            job_id,
+            recommended_poll_ms: Some(200),
+        })
+    }
+
+    #[tool(
+        description = "Start types list job (platform/config). Use job_wait/job_result. See mcp_help."
+    )]
+    async fn bsl_types_list_start(
+        &self,
+        Parameters(params): Parameters<BslTypesListParams>,
+    ) -> Result<Content, rmcp::ErrorData> {
+        let status = self.session_manager.status(&params.session_id).await?;
+        if !status.ready {
+            return Err(rmcp::ErrorData::invalid_params(
+                "workspace not ready (startup in progress)",
+                None,
+            ));
+        }
+        if params.page < 1 {
+            return Err(rmcp::ErrorData::invalid_params("page must be >= 1", None));
+        }
+        if params.limit < 1 || params.limit > 1000 {
+            return Err(rmcp::ErrorData::invalid_params(
+                "limit must be in 1..=1000",
+                None,
+            ));
+        }
+        if params
+            .certainty_level
+            .is_some_and(|certainty_level| certainty_level > 100)
+        {
+            return Err(rmcp::ErrorData::invalid_params(
+                "certainty_level must be in 0..=100",
+                None,
+            ));
+        }
+
+        let session_manager = Arc::clone(&self.session_manager);
+        let job_id = self
+            .job_manager
+            .spawn("bsl_types_list", move |ctx| async move {
+                ctx.set_progress("bsl_types_list/running", 0).await;
+                let response = session_manager
+                    .bsl_types_list(params)
+                    .await
+                    .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+                Ok(response)
+            })
+            .await;
+        Content::json(JobStartResponse {
+            job_id,
+            recommended_poll_ms: Some(200),
+        })
+    }
+
+    #[tool(
+        description = "Start types search job (deterministic). Use job_wait/job_result. See mcp_help."
+    )]
+    async fn bsl_types_search_start(
+        &self,
+        Parameters(params): Parameters<BslTypesSearchParams>,
+    ) -> Result<Content, rmcp::ErrorData> {
+        let status = self.session_manager.status(&params.session_id).await?;
+        if !status.ready {
+            return Err(rmcp::ErrorData::invalid_params(
+                "workspace not ready (startup in progress)",
+                None,
+            ));
+        }
+        let query = params.query.trim();
+        if query.is_empty() {
+            return Err(rmcp::ErrorData::invalid_params(
+                "query must be non-empty",
+                None,
+            ));
+        }
+        if params.limit < 1 || params.limit > 1000 {
+            return Err(rmcp::ErrorData::invalid_params(
+                "limit must be in 1..=1000",
+                None,
+            ));
+        }
+
+        let session_manager = Arc::clone(&self.session_manager);
+        let job_id = self
+            .job_manager
+            .spawn("bsl_types_search", move |ctx| async move {
+                ctx.set_progress("bsl_types_search/running", 0).await;
+                let response = session_manager
+                    .bsl_types_search(params)
+                    .await
+                    .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+                Ok(response)
+            })
+            .await;
+        Content::json(JobStartResponse {
+            job_id,
+            recommended_poll_ms: Some(200),
+        })
+    }
+
+    #[tool(
+        description = "Start type details job by exact name. Use job_wait/job_result. See mcp_help."
+    )]
+    async fn bsl_type_get_start(
+        &self,
+        Parameters(params): Parameters<BslTypeGetParams>,
+    ) -> Result<Content, rmcp::ErrorData> {
+        let status = self.session_manager.status(&params.session_id).await?;
+        if !status.ready {
+            return Err(rmcp::ErrorData::invalid_params(
+                "workspace not ready (startup in progress)",
+                None,
+            ));
+        }
+        let type_name = params.type_name.trim();
+        if type_name.is_empty() {
+            return Err(rmcp::ErrorData::invalid_params(
+                "type_name must be non-empty",
+                None,
+            ));
+        }
+
+        let session_manager = Arc::clone(&self.session_manager);
+        let job_id = self
+            .job_manager
+            .spawn("bsl_type_get", move |ctx| async move {
+                ctx.set_progress("bsl_type_get/running", 0).await;
+                let response = session_manager
+                    .bsl_type_get(params)
+                    .await
+                    .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+                Ok(response)
             })
             .await;
         Content::json(JobStartResponse {

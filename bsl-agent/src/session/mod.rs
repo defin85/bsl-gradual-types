@@ -25,9 +25,10 @@ use crate::semantic::ids;
 use crate::semantic::sort;
 use crate::server::types::{
     BslDefinitionParams, BslDiagnosticsParams, BslMembersParams, BslReferencesParams,
-    BslSymbolSearchParams, BslTypeAtPositionParams, CanonicalDocumentRef, ContextExpandParams,
-    ContextFocus, ContextPackParams, DocumentRef, FileRef, WorkspaceDocumentsSetFile,
-    WorkspaceOpenParams, WorkspaceScope, WorkspaceScopeTagged,
+    BslSymbolSearchParams, BslTypeAtPositionParams, BslTypeGetParams, BslTypeSource,
+    BslTypesListParams, BslTypesSearchParams, BslTypesView, CanonicalDocumentRef,
+    ContextExpandParams, ContextFocus, ContextPackParams, DocumentRef, FileRef,
+    WorkspaceDocumentsSetFile, WorkspaceOpenParams, WorkspaceScope, WorkspaceScopeTagged,
 };
 use crate::types::{
     BslDefinitionResponse, BslDiagnosticsResponse, BslMembersResponse, BslReferencesResponse,
@@ -535,6 +536,192 @@ impl SessionManager {
         web_api_service::search_types_as_dto(deps.as_ref(), &metadata_lookup, query)
             .await
             .map_err(|err| rmcp::ErrorData::internal_error(err.to_string(), None))
+    }
+
+    pub async fn bsl_types_list(
+        &self,
+        params: BslTypesListParams,
+    ) -> Result<serde_json::Value, rmcp::ErrorData> {
+        if params.page < 1 {
+            return Err(rmcp::ErrorData::invalid_params("page must be >= 1", None));
+        }
+        if params.limit < 1 || params.limit > 1000 {
+            return Err(rmcp::ErrorData::invalid_params(
+                "limit must be in 1..=1000",
+                None,
+            ));
+        }
+        if params
+            .certainty_level
+            .is_some_and(|certainty_level| certainty_level > 100)
+        {
+            return Err(rmcp::ErrorData::invalid_params(
+                "certainty_level must be in 0..=100",
+                None,
+            ));
+        }
+
+        let offset = (params.page as usize)
+            .checked_sub(1)
+            .and_then(|page| page.checked_mul(params.limit as usize))
+            .ok_or_else(|| rmcp::ErrorData::invalid_params("page/limit overflow", None))?;
+
+        let startup = self
+            .ready_startup_for_http(Some(&params.session_id))
+            .await?;
+        let deps = startup.deps_bundle_v2.semantic_deps.clone();
+        let metadata_lookup = Self::build_metadata_lookup_v2(&deps);
+
+        let category_filter = params
+            .category
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| vec![value.to_string()])
+            .unwrap_or_else(|| match params.source {
+                Some(BslTypeSource::Platform) => vec!["Platform".to_string()],
+                Some(BslTypeSource::Configuration) => vec!["Configuration".to_string()],
+                None => Vec::new(),
+            });
+
+        let certainty_filter = match params.certainty_level {
+            Some(level) if level >= 80 => vec!["high".to_string()],
+            Some(level) if level >= 30 => vec!["high".to_string(), "medium".to_string()],
+            _ => Vec::new(),
+        };
+
+        let mut dto = web_api_service::get_all_types_as_dto(
+            deps.as_ref(),
+            &metadata_lookup,
+            params.limit as usize,
+            offset,
+            category_filter,
+            certainty_filter,
+            params.flow_sensitive_only,
+        );
+
+        match params.view {
+            BslTypesView::NamesOnly => {
+                let names: Vec<String> = dto.types.into_iter().map(|t| t.name).collect();
+                Ok(serde_json::to_value(names)
+                    .map_err(|err| rmcp::ErrorData::internal_error(err.to_string(), None))?)
+            }
+            BslTypesView::Summary => {
+                for type_ in &mut dto.types {
+                    type_.methods.clear();
+                    type_.tabular_sections.clear();
+                }
+                Ok(serde_json::to_value(dto)
+                    .map_err(|err| rmcp::ErrorData::internal_error(err.to_string(), None))?)
+            }
+            BslTypesView::Full => Ok(serde_json::to_value(dto)
+                .map_err(|err| rmcp::ErrorData::internal_error(err.to_string(), None))?),
+        }
+    }
+
+    pub async fn bsl_types_search(
+        &self,
+        params: BslTypesSearchParams,
+    ) -> Result<serde_json::Value, rmcp::ErrorData> {
+        let query = params.query.trim();
+        if query.is_empty() {
+            return Err(rmcp::ErrorData::invalid_params(
+                "query must be non-empty",
+                None,
+            ));
+        }
+        if params.limit < 1 || params.limit > 1000 {
+            return Err(rmcp::ErrorData::invalid_params(
+                "limit must be in 1..=1000",
+                None,
+            ));
+        }
+
+        let startup = self
+            .ready_startup_for_http(Some(&params.session_id))
+            .await?;
+        let deps = startup.deps_bundle_v2.semantic_deps.clone();
+        let metadata_lookup = Self::build_metadata_lookup_v2(&deps);
+
+        let mut dto = web_api_service::search_types_as_dto(deps.as_ref(), &metadata_lookup, query)
+            .await
+            .map_err(|err| rmcp::ErrorData::internal_error(err.to_string(), None))?;
+
+        if let Some(source) = params.source {
+            let expected_category = match source {
+                BslTypeSource::Platform => "Platform",
+                BslTypeSource::Configuration => "Configuration",
+            };
+            dto.types
+                .retain(|type_| type_.category == expected_category);
+        }
+
+        if dto.types.len() > params.limit as usize {
+            dto.types.truncate(params.limit as usize);
+        }
+
+        match params.view {
+            BslTypesView::NamesOnly => {
+                let names: Vec<String> = dto.types.into_iter().map(|t| t.name).collect();
+                Ok(serde_json::to_value(names)
+                    .map_err(|err| rmcp::ErrorData::internal_error(err.to_string(), None))?)
+            }
+            BslTypesView::Summary => {
+                for type_ in &mut dto.types {
+                    type_.methods.clear();
+                    type_.tabular_sections.clear();
+                }
+                Ok(serde_json::to_value(dto)
+                    .map_err(|err| rmcp::ErrorData::internal_error(err.to_string(), None))?)
+            }
+            BslTypesView::Full => Ok(serde_json::to_value(dto)
+                .map_err(|err| rmcp::ErrorData::internal_error(err.to_string(), None))?),
+        }
+    }
+
+    pub async fn bsl_type_get(
+        &self,
+        params: BslTypeGetParams,
+    ) -> Result<serde_json::Value, rmcp::ErrorData> {
+        let type_name = params.type_name.trim();
+        if type_name.is_empty() {
+            return Err(rmcp::ErrorData::invalid_params(
+                "type_name must be non-empty",
+                None,
+            ));
+        }
+
+        let startup = self
+            .ready_startup_for_http(Some(&params.session_id))
+            .await?;
+        let deps = startup.deps_bundle_v2.semantic_deps.clone();
+        let metadata_lookup = Self::build_metadata_lookup_v2(&deps);
+
+        let mut dto = web_api_service::get_type_details_as_dto(
+            deps.as_ref(),
+            &metadata_lookup,
+            type_name,
+            params.include_methods,
+        )
+        .ok_or_else(|| rmcp::ErrorData::invalid_params("type not found", None))?;
+
+        if let Some(source) = params.source {
+            let expected_source = match source {
+                BslTypeSource::Platform => "Platform",
+                BslTypeSource::Configuration => "Configuration",
+            };
+            if dto.source != expected_source {
+                return Err(rmcp::ErrorData::invalid_params("type not found", None));
+            }
+        }
+
+        if !params.include_methods {
+            dto.methods.clear();
+        }
+
+        Ok(serde_json::to_value(dto).map_err(|err| {
+            rmcp::ErrorData::internal_error(format!("serialize type dto: {err}"), None)
+        })?)
     }
 
     fn is_flow_sensitive(res: &bsl_shared::domain::types::TypeResolution) -> bool {
@@ -1045,10 +1232,17 @@ impl SessionManager {
             });
 
             let analysis = host.analysis();
-            let Some(code) = analysis.file_text(bsl_analysis_v2::FileId(1)).ok().flatten() else {
+            let Some(code) = analysis
+                .file_text(bsl_analysis_v2::FileId(1))
+                .ok()
+                .flatten()
+            else {
                 continue;
             };
-            let Some(line_index) = analysis.line_index(bsl_analysis_v2::FileId(1)).ok().flatten()
+            let Some(line_index) = analysis
+                .line_index(bsl_analysis_v2::FileId(1))
+                .ok()
+                .flatten()
             else {
                 continue;
             };
@@ -1066,14 +1260,10 @@ impl SessionManager {
                     break;
                 }
 
-                let (start_line, start_character) = line_index.byte_offset_to_utf16_position(
-                    code.as_ref(),
-                    diag.span.start as usize,
-                );
-                let (end_line, end_character) = line_index.byte_offset_to_utf16_position(
-                    code.as_ref(),
-                    diag.span.end as usize,
-                );
+                let (start_line, start_character) = line_index
+                    .byte_offset_to_utf16_position(code.as_ref(), diag.span.start as usize);
+                let (end_line, end_character) =
+                    line_index.byte_offset_to_utf16_position(code.as_ref(), diag.span.end as usize);
                 let range = RangeDto {
                     start: PositionDto {
                         line: start_line,
@@ -1344,15 +1534,16 @@ impl SessionManager {
         };
 
         let pos = params.position;
-        let type_info = type_at_utf16_position(&analysis, FileId(1), pos.line, pos.character)
-            .map(|resolution| TypeInfoDto {
+        let type_info = type_at_utf16_position(&analysis, FileId(1), pos.line, pos.character).map(
+            |resolution| TypeInfoDto {
                 name: resolution.type_name(),
                 certainty: format!("{:?}", resolution.certainty).to_lowercase(),
                 active_facet: resolution
                     .active_facet
                     .as_ref()
                     .map(|facet| format!("{:?}", facet)),
-            });
+            },
+        );
 
         let node = node_at_utf16_position(
             &analysis,
@@ -1361,10 +1552,10 @@ impl SessionManager {
             pos.line,
             pos.character,
         )
-            .map(|node| NodeInfoDto {
-                kind: format!("{:?}", node.kind),
-                range: span_to_range_with_analysis(&analysis, FileId(1), node.span),
-            });
+        .map(|node| NodeInfoDto {
+            kind: format!("{:?}", node.kind),
+            range: span_to_range_with_analysis(&analysis, FileId(1), node.span),
+        });
 
         let _ = index_snapshot.id.as_str();
 
@@ -1614,9 +1805,11 @@ impl SessionManager {
         let location = match map_path_to_root(&roots, &target.file_path) {
             Some((root_id, rel_path)) => {
                 let range = match target.span {
-                    Some(span) if target.file_path == abs_path => {
-                        span_to_range_with_index(code.as_ref(), &bsl_analysis_v2::LineIndex::new(code.as_ref()), span)
-                    }
+                    Some(span) if target.file_path == abs_path => span_to_range_with_index(
+                        code.as_ref(),
+                        &bsl_analysis_v2::LineIndex::new(code.as_ref()),
+                        span,
+                    ),
                     _ => RangeDto::default(),
                 };
                 Some(LocationDto {
@@ -1917,8 +2110,7 @@ impl SessionManager {
                             FileId(1),
                             position.line,
                             position.character,
-                        )
-                        {
+                        ) {
                             text.push_line(&format!("type_at_position: {}", type_info.type_name()));
                             text.push_line("");
                         }
@@ -3015,7 +3207,10 @@ fn type_at_utf16_position(
         .ok()
         .flatten()? as u32;
 
-    analysis.type_at_byte_offset(file_id, byte_offset).ok().flatten()
+    analysis
+        .type_at_byte_offset(file_id, byte_offset)
+        .ok()
+        .flatten()
 }
 
 fn node_at_utf16_position<'a>(

@@ -374,7 +374,9 @@ mod tests {
         });
 
         program.nodes.push(SemanticNode {
-            kind: SemanticNodeKind::VariableAccess { name: "x".to_string() },
+            kind: SemanticNodeKind::VariableAccess {
+                name: "x".to_string(),
+            },
             span: Span::stub(),
             scope_id: program.symbols.root_scope,
         });
@@ -389,7 +391,9 @@ mod tests {
         });
 
         program.nodes.push(SemanticNode {
-            kind: SemanticNodeKind::VariableAccess { name: "x".to_string() },
+            kind: SemanticNodeKind::VariableAccess {
+                name: "x".to_string(),
+            },
             span: Span::stub(),
             scope_id: program.symbols.root_scope,
         });

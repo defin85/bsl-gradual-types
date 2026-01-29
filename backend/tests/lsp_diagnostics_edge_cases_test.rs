@@ -11,8 +11,8 @@
 //! 6. Ошибка на первой строке
 //! 7. Ошибка на последней строке
 
-use bsl_backend::system::ParserCoordinator;
 use bsl_backend::system::LineIndex;
+use bsl_backend::system::ParserCoordinator;
 
 fn utf16_position(index: &LineIndex, source: &str, byte_offset: u32) -> (u32, u32) {
     let point = index.byte_offset_to_point(source, byte_offset as usize);
@@ -130,13 +130,7 @@ fn test_multiple_errors_in_file() {
 
     for (idx, error) in parse_result.syntax_errors.iter().enumerate() {
         let (line, column) = utf16_position(&index, source, error.span.start);
-        println!(
-            "{}. {} [{}:{}]",
-            idx + 1,
-            error.message,
-            line,
-            column
-        );
+        println!("{}. {} [{}:{}]", idx + 1, error.message, line, column);
 
         // Каждая ошибка должна иметь валидные координаты
         assert!(line > 0, "start_line должен быть > 0");
@@ -368,14 +362,8 @@ fn test_very_long_line_coordinates() {
             );
 
             // Координаты должны быть разумными даже для очень длинной строки
-            assert!(
-                start_column < 10000,
-                "start_column не должен быть огромным"
-            );
-            assert!(
-                end_column < 10000,
-                "end_column не должен быть огромным"
-            );
+            assert!(start_column < 10000, "start_column не должен быть огромным");
+            assert!(end_column < 10000, "end_column не должен быть огромным");
             assert!(end_line >= start_line);
         }
         println!("✅ Координаты для длинной строки корректны");
@@ -403,10 +391,7 @@ fn test_mixed_line_endings() {
             let (start_line, _) = utf16_position(&index, source, error.span.start);
             let (end_line, _) = utf16_position(&index, source, error.span.end);
             // Координаты должны быть валидными
-            assert!(
-                end_line >= start_line,
-                "end_line >= start_line"
-            );
+            assert!(end_line >= start_line, "end_line >= start_line");
         }
         println!("✅ Смешанные line endings обработаны корректно");
     } else {
@@ -497,10 +482,7 @@ fn test_unicode_normalization_coordinates() {
         for error in &parse_result.syntax_errors {
             let (_, start_column) = utf16_position(&index, source, error.span.start);
             // Координаты должны быть валидными даже с Unicode нормализацией
-            assert!(
-                start_column < 200,
-                "start_column не должен быть огромным"
-            );
+            assert!(start_column < 200, "start_column не должен быть огромным");
         }
         println!("✅ Unicode нормализация обработана корректно");
     } else {

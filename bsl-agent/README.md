@@ -122,3 +122,29 @@ env = {
 - `workspace_documents_set.files[]` also accepts plain absolute paths (strings) to mark documents as hot (no overlay).
 - `bsl_diagnostics_start.scope` accepts `"project"` / `"hot"` as strings; for a single file use `{ "kind": "file", "document": <DocumentRef> }` (string `"file"` is invalid).
 - `job_status.progress.percent=100` is reserved for terminal states; running jobs report `0..99`.
+
+## MCP type discovery tools (stdio)
+
+Read-only, async tools for navigating platform/configuration types. All follow the `*_start` pattern and return a `job_id`.
+
+### List types
+
+```json
+{ "name": "bsl_types_list_start", "arguments": { "session_id": "<session_id>", "page": 1, "limit": 50, "source": "configuration", "view": "names_only" } }
+```
+
+### Search types
+
+```json
+{ "name": "bsl_types_search_start", "arguments": { "session_id": "<session_id>", "query": "Document", "limit": 200, "view": "summary" } }
+```
+
+### Get type details (properties + tabular sections)
+
+```json
+{ "name": "bsl_type_get_start", "arguments": { "session_id": "<session_id>", "type_name": "DocumentObject.<DocName>", "source": "configuration", "include_methods": false } }
+```
+
+Then use:
+- `job_wait(job_id, timeout_ms)` until `state="succeeded"`
+- `job_result(job_id)` to fetch the JSON payload

@@ -99,7 +99,8 @@ impl BslLanguageServer {
             return Ok(CurrentContextResponse::empty());
         };
 
-        let semantic_tree_dto = ir_program.to_dto(true, true, file_text.as_ref(), line_index.as_ref());
+        let semantic_tree_dto =
+            ir_program.to_dto(true, true, file_text.as_ref(), line_index.as_ref());
         match find_containing_function_in_dto(&semantic_tree_dto, params.line, params.character) {
             Some((name, kind, params_list, return_type)) => Ok(CurrentContextResponse {
                 function_name: Some(name),

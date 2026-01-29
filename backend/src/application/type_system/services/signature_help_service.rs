@@ -61,7 +61,11 @@ pub fn get_signature_help_v2(
     })
 }
 
-pub fn signature_help_query(content: &str, line: u32, character: u32) -> Option<SignatureHelpQuery> {
+pub fn signature_help_query(
+    content: &str,
+    line: u32,
+    character: u32,
+) -> Option<SignatureHelpQuery> {
     let index = LineIndex::new(content);
     let lines: Vec<&str> = content.lines().collect();
     let max_line = lines.len().saturating_sub(1);
@@ -400,7 +404,9 @@ fn get_signature_for_function_with_repository(
 
     let owner_type = receiver_type_hint
         .and_then(signature_owner_type_name)
-        .or_else(|| receiver_text.and_then(|value| signature_owner_type_from_text(value, repository)));
+        .or_else(|| {
+            receiver_text.and_then(|value| signature_owner_type_from_text(value, repository))
+        });
     repository
         .find_method_signature(owner_type.as_deref(), function_name)
         .map(SignatureTarget::Method)
@@ -422,7 +428,10 @@ fn signature_owner_type_name(resolution: &TypeResolution) -> Option<String> {
     }
 }
 
-fn signature_owner_type_from_text(value: &str, repository: &Arc<dyn TypeRepository>) -> Option<String> {
+fn signature_owner_type_from_text(
+    value: &str,
+    repository: &Arc<dyn TypeRepository>,
+) -> Option<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return None;

@@ -46,18 +46,12 @@ pub fn format_semantic_node_info(
 
             format!(
                 "**Переменная:** `{}`\n\n{}{}\n\n📍 Span: {}..{}",
-                name,
-                type_info,
-                init_info,
-                node.span.start,
-                node.span.end
+                name, type_info, init_info, node.span.start, node.span.end
             )
         }
         SemanticNodeKind::Assignment { variable, .. } => format!(
             "**Присваивание:** `{} = ...`\n\n📍 Span: {}..{}",
-            variable,
-            node.span.start,
-            node.span.end
+            variable, node.span.start, node.span.end
         ),
         SemanticNodeKind::FunctionDeclaration {
             name, params, body, ..
@@ -85,11 +79,7 @@ pub fn format_semantic_node_info(
 
             format!(
                 "**Функция:** `{}({})`\n\n📦 {}\n\n📍 Span: {}..{}",
-                name,
-                params_str,
-                body_info,
-                node.span.start,
-                node.span.end
+                name, params_str, body_info, node.span.start, node.span.end
             )
         }
         SemanticNodeKind::ProcedureDeclaration {
@@ -119,49 +109,37 @@ pub fn format_semantic_node_info(
 
             format!(
                 "**Процедура:** `{}({})`\n\n📦 {}\n\n📍 Span: {}..{}",
-                name,
-                params_str,
-                body_info,
-                node.span.start,
-                node.span.end
+                name, params_str, body_info, node.span.start, node.span.end
             )
         }
         SemanticNodeKind::IfStatement { .. } => {
             format!(
                 "**Условие:** `Если ... Тогда`\n\n📍 Span: {}..{}",
-                node.span.start,
-                node.span.end
+                node.span.start, node.span.end
             )
         }
         SemanticNodeKind::WhileLoop { .. } => {
             format!(
                 "**Цикл:** `Пока ... Цикл`\n\n📍 Span: {}..{}",
-                node.span.start,
-                node.span.end
+                node.span.start, node.span.end
             )
         }
         SemanticNodeKind::ForLoop { variable, .. } => {
             format!(
                 "**Цикл:** `Для {} = ... По ... Цикл`\n\n📍 Span: {}..{}",
-                variable,
-                node.span.start,
-                node.span.end
+                variable, node.span.start, node.span.end
             )
         }
         SemanticNodeKind::ForEachLoop { variable, .. } => {
             format!(
                 "**Цикл:** `Для Каждого {} Из ... Цикл`\n\n📍 Span: {}..{}",
-                variable,
-                node.span.start,
-                node.span.end
+                variable, node.span.start, node.span.end
             )
         }
         _ => {
             format!(
                 "**Узел IR:** {:?}\n\n📍 Span: {}..{}",
-                node.kind,
-                node.span.start,
-                node.span.end
+                node.kind, node.span.start, node.span.end
             )
         }
     }
@@ -172,7 +150,10 @@ pub(crate) fn format_condition_hover(condition_type: &TypeResolution) -> String 
     format_expected_type_hover("Булево", condition_type)
 }
 
-pub(crate) fn format_expected_type_hover(expected_type: &str, actual_type: &TypeResolution) -> String {
+pub(crate) fn format_expected_type_hover(
+    expected_type: &str,
+    actual_type: &TypeResolution,
+) -> String {
     let mut lines = vec![
         format!("*Ожидаемый тип:* {}", expected_type),
         format!("*Фактический тип:* {}", actual_type.type_name()),
@@ -356,9 +337,7 @@ mod tests {
         let metadata_lookup = TypeMetadataLookup::new(repo);
 
         let node = SemanticNode {
-            kind: SemanticNodeKind::WhileLoop {
-                body: Vec::new(),
-            },
+            kind: SemanticNodeKind::WhileLoop { body: Vec::new() },
             span: Span::stub(),
             scope_id: ScopeId(0),
         };

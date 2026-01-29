@@ -110,7 +110,11 @@ fn find_identifier_end_byte_in_range(
     found.and_then(|abs| u32::try_from(abs).ok())
 }
 
-fn find_assignment_lhs_identifier_end_byte(source: &str, span: Span, identifier: &str) -> Option<u32> {
+fn find_assignment_lhs_identifier_end_byte(
+    source: &str,
+    span: Span,
+    identifier: &str,
+) -> Option<u32> {
     let start = span.start as usize;
     let end = span.end as usize;
     if start >= source.len() || end > source.len() || start >= end {
@@ -256,7 +260,11 @@ mod tests {
             path: Arc::from("test.bsl"),
         });
         let analysis = host.analysis();
-        let file_content = analysis.file_text(file_id).ok().flatten().expect("file_text");
+        let file_content = analysis
+            .file_text(file_id)
+            .ok()
+            .flatten()
+            .expect("file_text");
         let ir_program = analysis.ir(file_id).ok().flatten().expect("ir");
         (analysis, file_id, file_content, ir_program)
     }
@@ -283,7 +291,14 @@ mod tests {
             range,
             &settings,
         );
-        let b = handle_inlay_hints_v2(&analysis, file_id, file_content, ir_program, range, &settings);
+        let b = handle_inlay_hints_v2(
+            &analysis,
+            file_id,
+            file_content,
+            ir_program,
+            range,
+            &settings,
+        );
 
         assert!(!a.is_empty(), "expected at least one inlay hint");
         let norm = |hints: Vec<InlayHint>| {
@@ -302,7 +317,11 @@ mod tests {
                 })
                 .collect::<Vec<_>>()
         };
-        assert_eq!(norm(a.clone()), norm(b), "inlay hints must be deterministic");
+        assert_eq!(
+            norm(a.clone()),
+            norm(b),
+            "inlay hints must be deterministic"
+        );
 
         let has_number = a.iter().any(|hint| match &hint.label {
             InlayHintLabel::String(text) => text.contains(": Число"),

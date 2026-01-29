@@ -2,13 +2,13 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use bsl_shared::domain::{CodeLocation, ModuleType};
 use bsl_shared::domain::is_configuration_type_pattern;
-use bsl_shared::domain::types::MetadataKind;
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::SignatureIndex;
+use bsl_shared::domain::types::MetadataKind;
 use bsl_shared::domain::types::{Certainty, TypeResolution, UncertaintyReason};
 use bsl_shared::domain::TypeMetadataLookup;
+use bsl_shared::domain::{CodeLocation, ModuleType};
 use bsl_syntax::ast::{Expression, Program, Statement};
 
 use crate::ast_to_ir::{is_global_collection, lookup_global_collection};
@@ -117,7 +117,12 @@ impl TypeInferencer {
 
         let form_elements_type_name =
             format!("ЭлементыФормы.{}.{}.{}", collection, object_name, form_name);
-        if self.deps.repository.find_type(&form_elements_type_name).is_some() {
+        if self
+            .deps
+            .repository
+            .find_type(&form_elements_type_name)
+            .is_some()
+        {
             env.variables.insert(
                 "Элементы".to_lowercase(),
                 TypeResolution::explicit(&form_elements_type_name),
@@ -141,8 +146,10 @@ impl TypeInferencer {
                 continue;
             }
             if prop.prop_type.contains("cfg:") {
-                env.variables
-                    .insert(prop.name.to_lowercase(), TypeResolution::inferred(&prop.prop_type));
+                env.variables.insert(
+                    prop.name.to_lowercase(),
+                    TypeResolution::inferred(&prop.prop_type),
+                );
                 continue;
             }
             if is_configuration_type_pattern(&prop.prop_type) {
@@ -204,7 +211,9 @@ impl TypeInferencer {
                     }
                 }
             }
-            Statement::While { condition, body, .. } => {
+            Statement::While {
+                condition, body, ..
+            } => {
                 let _ = self.infer_expr(condition, env, index);
                 let mut body_env = env.clone();
                 for stmt in body {
@@ -243,11 +252,12 @@ impl TypeInferencer {
                     self.visit_statement(stmt, &mut body_env, index);
                 }
             }
-            Statement::Return { value, .. } => {
-                if let Some(value) = value {
-                    let _ = self.infer_expr(value, env, index);
-                }
+            Statement::Return {
+                value: Some(value), ..
+            } => {
+                let _ = self.infer_expr(value, env, index);
             }
+            Statement::Return { value: None, .. } => {}
             Statement::Try {
                 try_body,
                 except_body,
@@ -268,11 +278,13 @@ impl TypeInferencer {
             Statement::Execute { code, .. } => {
                 let _ = self.infer_expr(code, env, index);
             }
-            Statement::RaiseError { message, .. } => {
-                if let Some(message) = message {
-                    let _ = self.infer_expr(message, env, index);
-                }
+            Statement::RaiseError {
+                message: Some(message),
+                ..
+            } => {
+                let _ = self.infer_expr(message, env, index);
             }
+            Statement::RaiseError { message: None, .. } => {}
             Statement::AddHandler { event, handler, .. }
             | Statement::RemoveHandler { event, handler, .. } => {
                 let _ = self.infer_expr(event, env, index);
@@ -300,7 +312,12 @@ impl TypeInferencer {
         }
     }
 
-    fn record(&self, span: bsl_shared::ir::Span, resolution: TypeResolution, index: &mut TypeIndex) {
+    fn record(
+        &self,
+        span: bsl_shared::ir::Span,
+        resolution: TypeResolution,
+        index: &mut TypeIndex,
+    ) {
         index.entries.push(TypeIndexEntry { span, resolution });
     }
 
@@ -316,7 +333,9 @@ impl TypeInferencer {
             Expression::Boolean { .. } => TypeResolution::primitive("Булево"),
             Expression::Date { .. } => TypeResolution::primitive("Дата"),
             Expression::Identifier { name, .. } => self.infer_identifier(name, env),
-            Expression::New { type_name, args, .. } => {
+            Expression::New {
+                type_name, args, ..
+            } => {
                 for arg in args {
                     let _ = self.infer_expr(arg, env, index);
                 }
@@ -355,7 +374,10 @@ impl TypeInferencer {
                 let then_type = self.infer_expr(then_expr, env, index);
                 let else_type = self.infer_expr(else_expr, env, index);
                 // TODO(v2): union типов.
-                if then_type.type_name().eq_ignore_ascii_case(&else_type.type_name()) {
+                if then_type
+                    .type_name()
+                    .eq_ignore_ascii_case(&else_type.type_name())
+                {
                     then_type
                 } else {
                     TypeResolution::unknown()
@@ -398,7 +420,12 @@ impl TypeInferencer {
         }
 
         let common_module_type = format!("ОбщиеМодули.{}", name);
-        if self.deps.repository.find_type(&common_module_type).is_some() {
+        if self
+            .deps
+            .repository
+            .find_type(&common_module_type)
+            .is_some()
+        {
             return self.resolver.resolve_expression_sync(&common_module_type);
         }
 
@@ -428,7 +455,11 @@ impl TypeInferencer {
         }
     }
 
-    fn infer_property_access(&self, object_type: &TypeResolution, property: &str) -> TypeResolution {
+    fn infer_property_access(
+        &self,
+        object_type: &TypeResolution,
+        property: &str,
+    ) -> TypeResolution {
         let base_type = object_type.type_name();
         if let Some(info) = lookup_global_collection(&base_type) {
             // Справочники.Контрагенты -> СправочникМенеджер.Контрагенты
@@ -608,8 +639,8 @@ mod tests {
     use bsl_shared::domain::signature_index::{MethodSignature, SignatureSource};
     use bsl_shared::domain::type_id::TypeId;
     use bsl_shared::domain::types::{RawDataSource, RawPropertyData, RawTypeData};
-    use bsl_syntax::ParseOptions;
     use bsl_shared::TypeRepository;
+    use bsl_syntax::ParseOptions;
 
     fn parse(code: &str) -> Program {
         let parsed = bsl_syntax::parse(code, &ParseOptions::default()).expect("parse ok");
@@ -757,9 +788,7 @@ mod tests {
             "receiver should be seeded from form module context"
         );
 
-        let member_offset = source
-            .find("СчетФактураПросмотр")
-            .expect("member") as u32;
+        let member_offset = source.find("СчетФактураПросмотр").expect("member") as u32;
         let member = index
             .type_at_byte_offset(member_offset)
             .expect("type at member access");

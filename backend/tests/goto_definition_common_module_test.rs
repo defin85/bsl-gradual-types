@@ -1,10 +1,10 @@
 //! Go to Definition regression test: configuration CommonModules.
 
+use bsl_analysis_v2::AstToIrConverter;
 use bsl_analysis_v2::SemanticDeps;
 use bsl_backend::application::type_system;
 use bsl_backend::system::build_deps_bundle_v2;
 use bsl_backend::system::SystemCoordinator;
-use bsl_analysis_v2::AstToIrConverter;
 use bsl_syntax::{parse, ParseOptions};
 use std::path::Path;
 use std::sync::Arc;
@@ -136,9 +136,17 @@ fn goto_definition_resolves_common_module_namespace_and_method() {
         .expect("canonicalize actual module");
     assert_eq!(actual_module, expected_module);
 
-    let target_method =
-        type_system::goto_definition_v2_with_source("inline.bsl", source, ir, deps, 1, method_col, None, None)
-            .expect("method definition target");
+    let target_method = type_system::goto_definition_v2_with_source(
+        "inline.bsl",
+        source,
+        ir,
+        deps,
+        1,
+        method_col,
+        None,
+        None,
+    )
+    .expect("method definition target");
     assert!(
         target_method.span.is_some(),
         "method definition should include span"
@@ -255,8 +263,16 @@ fn goto_definition_resolves_common_module_method_with_deps_bundle_v2_snapshot() 
     .expect("module definition target");
     assert!(target_module.span.is_none());
 
-    let target_method =
-        type_system::goto_definition_v2_with_source("inline.bsl", source, ir, deps, 1, method_col, None, None)
-            .expect("method definition target");
+    let target_method = type_system::goto_definition_v2_with_source(
+        "inline.bsl",
+        source,
+        ir,
+        deps,
+        1,
+        method_col,
+        None,
+        None,
+    )
+    .expect("method definition target");
     assert!(target_method.span.is_some());
 }

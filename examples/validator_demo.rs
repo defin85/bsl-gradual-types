@@ -85,19 +85,13 @@ fn demonstrate_method_validation(validator: &TypeValidator) {
         None => println!("  ✅ Метод существует\n"),
         Some(err) => {
             use bsl_shared::ir::Span;
-            let span = Span {
-                start_line: 10,
-                start_column: 5,
-                end_line: 10,
-                end_column: 20,
-            };
+            // Span теперь хранит UTF-8 byte offsets (абсолютные оффсеты в документе).
+            // В демо-коде используем stub.
+            let span = Span::new(0, 1);
             let diagnostic = err.to_diagnostic(span);
             println!("  ❌ ОШИБКА ВАЛИДАЦИИ:");
             println!("     {}", diagnostic.message);
-            println!(
-                "     Строка: {}, Колонка: {}\n",
-                diagnostic.line, diagnostic.column
-            );
+            println!("     Span (byte offsets): {}\n", diagnostic.span);
         }
     }
 
@@ -137,19 +131,13 @@ fn demonstrate_property_validation(validator: &TypeValidator) {
         None => println!("  ✅ Свойство существует\n"),
         Some(err) => {
             use bsl_shared::ir::Span;
-            let span = Span {
-                start_line: 15,
-                start_column: 10,
-                end_line: 15,
-                end_column: 25,
-            };
+            // Span теперь хранит UTF-8 byte offsets (абсолютные оффсеты в документе).
+            // В демо-коде используем stub.
+            let span = Span::new(0, 1);
             let diagnostic = err.to_diagnostic(span);
             println!("  ❌ ОШИБКА ВАЛИДАЦИИ:");
             println!("     {}", diagnostic.message);
-            println!(
-                "     Строка: {}, Колонка: {}\n",
-                diagnostic.line, diagnostic.column
-            );
+            println!("     Span (byte offsets): {}\n", diagnostic.span);
         }
     }
 

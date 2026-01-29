@@ -12,8 +12,8 @@
 //! Примечание: в текущей архитектуре tree-sitter spans сохраняются как UTF-8 byte offsets,
 //! а конвертация в UTF-16 (LSP `Position.character`) делается на границе (через `LineIndex`).
 
-use bsl_backend::system::ParserCoordinator;
 use bsl_backend::system::LineIndex;
+use bsl_backend::system::ParserCoordinator;
 
 fn utf16_position(index: &LineIndex, source: &str, byte_offset: u32) -> (u32, u32) {
     let point = index.byte_offset_to_point(source, byte_offset as usize);
@@ -281,10 +281,7 @@ fn test_deeply_nested_cyrillic_coordinates() {
                 ret_start_line, ret_start_column, ret_end_line, ret_end_column
             );
 
-            assert_eq!(
-                ret_start_line, 10,
-                "Return должен быть на строке 10"
-            );
+            assert_eq!(ret_start_line, 10, "Return должен быть на строке 10");
             assert_eq!(
                 ret_start_column, 4,
                 "Return должен начинаться с колонки 4 (UTF-16)"

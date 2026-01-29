@@ -19,7 +19,12 @@ pub fn semantic_tree_from_ir(
         "Building semantic tree from IR (call_graph={}, flow_sensitive={})",
         include_call_graph, include_flow_sensitive
     );
-    ir_program.to_dto(include_call_graph, include_flow_sensitive, source, line_index)
+    ir_program.to_dto(
+        include_call_graph,
+        include_flow_sensitive,
+        source,
+        line_index,
+    )
 }
 
 pub fn semantic_html_from_tree(

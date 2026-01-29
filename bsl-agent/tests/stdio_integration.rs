@@ -6,6 +6,7 @@ use bsl_agent::types::{
     WorkspaceDocumentsSetResponse, WorkspaceListResponse, WorkspaceOpenResponse,
     WorkspaceStatusResponse,
 };
+use bsl_shared::api::dtos::TypeDto;
 use bsl_shared::api::dtos::{AnalysisResultDto, MetricsDto, SnapshotMetaDto};
 use rmcp::model::CallToolRequestParam;
 use rmcp::service::RunningService;
@@ -224,6 +225,9 @@ async fn stdio_tools_list_and_lifecycle_smoke() {
         "job_cancel",
         "bsl_diagnostics_start",
         "bsl_symbol_search_start",
+        "bsl_types_list_start",
+        "bsl_types_search_start",
+        "bsl_type_get_start",
         "bsl_type_at_position_start",
         "bsl_members_start",
         "bsl_definition_start",
@@ -259,6 +263,239 @@ async fn stdio_tools_list_and_lifecycle_smoke() {
     )
     .await;
 
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_type_tools_reject_invalid_params() {
+    let service = spawn_agent(&[]).await;
+
+    let temp_root = tempfile::TempDir::new().expect("tempdir");
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [temp_root.path().to_string_lossy()],
+        }),
+    )
+    .await;
+    let session_id = open.session_id.clone();
+    let _status = wait_workspace_ready(&service, &open).await;
+
+    call_tool_expect_invalid_params(
+        &service,
+        "bsl_types_list_start",
+        json!({ "session_id": &session_id, "page": 1, "limit": 0 }),
+        "limit must be in 1..=1000",
+    )
+    .await;
+
+    call_tool_expect_invalid_params(
+        &service,
+        "bsl_types_search_start",
+        json!({ "session_id": &session_id, "query": "Документ", "limit": 0 }),
+        "limit must be in 1..=1000",
+    )
+    .await;
+
+    call_tool_expect_invalid_params(
+        &service,
+        "bsl_types_search_start",
+        json!({ "session_id": &session_id, "query": "   " }),
+        "query must be non-empty",
+    )
+    .await;
+
+    call_tool_expect_invalid_params(
+        &service,
+        "bsl_type_get_start",
+        json!({ "session_id": &session_id, "type_name": "   " }),
+        "type_name must be non-empty",
+    )
+    .await;
+
+    let _close: serde_json::Value = call_tool(
+        &service,
+        "workspace_close",
+        json!({ "session_id": &session_id }),
+    )
+    .await;
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_type_tools_require_ready_session() {
+    let service = spawn_agent(&[]).await;
+
+    let temp_root = tempfile::TempDir::new().expect("tempdir");
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [temp_root.path().to_string_lossy()],
+        }),
+    )
+    .await;
+    let session_id = open.session_id.clone();
+
+    call_tool_expect_invalid_params(
+        &service,
+        "bsl_types_list_start",
+        json!({ "session_id": &session_id, "page": 1, "limit": 50 }),
+        "workspace not ready",
+    )
+    .await;
+
+    let _close: serde_json::Value = call_tool(
+        &service,
+        "workspace_close",
+        json!({ "session_id": &session_id }),
+    )
+    .await;
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_types_list_is_deterministic_on_basic_workspace() {
+    let service = spawn_agent(&[]).await;
+
+    let temp_root = tempfile::TempDir::new().expect("tempdir");
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [temp_root.path().to_string_lossy()],
+        }),
+    )
+    .await;
+    let session_id = open.session_id.clone();
+    let _status = wait_workspace_ready(&service, &open).await;
+
+    let start: JobStartResponse = call_tool(
+        &service,
+        "bsl_types_list_start",
+        json!({ "session_id": &session_id, "page": 1, "limit": 50, "view": "names_only" }),
+    )
+    .await;
+    wait_job_succeeded(&service, &start.job_id).await;
+    let a: Vec<String> =
+        call_tool(&service, "job_result", json!({ "job_id": &start.job_id })).await;
+
+    let start: JobStartResponse = call_tool(
+        &service,
+        "bsl_types_list_start",
+        json!({ "session_id": &session_id, "page": 1, "limit": 50, "view": "names_only" }),
+    )
+    .await;
+    wait_job_succeeded(&service, &start.job_id).await;
+    let b: Vec<String> =
+        call_tool(&service, "job_result", json!({ "job_id": &start.job_id })).await;
+
+    assert_eq!(a, b, "expected deterministic ordering and paging");
+
+    let mut sorted = a.clone();
+    sorted.sort_by(|x, y| {
+        x.to_lowercase()
+            .cmp(&y.to_lowercase())
+            .then_with(|| x.cmp(y))
+    });
+    assert_eq!(a, sorted, "expected names_only list to be sorted");
+
+    let _close: serde_json::Value = call_tool(
+        &service,
+        "workspace_close",
+        json!({ "session_id": &session_id }),
+    )
+    .await;
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_type_get_returns_properties_and_tabular_sections_for_conf_type() {
+    let service = spawn_agent(&[]).await;
+
+    let repo = repo_root();
+    let config_root = repo.join("examples/conf/conf_test");
+
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [config_root.to_string_lossy()],
+            "configuration_path": config_root.to_string_lossy(),
+        }),
+    )
+    .await;
+    let session_id = open.session_id.clone();
+    let _status = wait_workspace_ready(&service, &open).await;
+
+    let start: JobStartResponse = call_tool(
+        &service,
+        "bsl_types_search_start",
+        json!({
+            "session_id": &session_id,
+            "query": "ЗаказНаряды",
+            "limit": 1000,
+            "source": "configuration",
+            "view": "names_only"
+        }),
+    )
+    .await;
+    wait_job_succeeded(&service, &start.job_id).await;
+    let names: Vec<String> =
+        call_tool(&service, "job_result", json!({ "job_id": &start.job_id })).await;
+    assert!(
+        !names.is_empty(),
+        "expected at least one configuration type for query 'ЗаказНаряды'"
+    );
+    let type_name = names
+        .iter()
+        .find(|name| name.contains("DocumentObject") && name.contains("ЗаказНаряды"))
+        .or_else(|| {
+            names
+                .iter()
+                .find(|name| name.contains("ДокументОбъект") && name.contains("ЗаказНаряды"))
+        })
+        .or_else(|| names.iter().find(|name| name.contains("ЗаказНаряды")))
+        .expect("type name from search");
+
+    let start: JobStartResponse = call_tool(
+        &service,
+        "bsl_type_get_start",
+        json!({
+            "session_id": &session_id,
+            "type_name": type_name,
+            "source": "configuration",
+            "include_methods": false
+        }),
+    )
+    .await;
+    wait_job_succeeded(&service, &start.job_id).await;
+    let dto: TypeDto = call_tool(&service, "job_result", json!({ "job_id": &start.job_id })).await;
+
+    assert!(
+        !dto.properties.is_empty(),
+        "expected properties to be present for DocumentObject.ЗаказНаряды"
+    );
+    assert!(
+        !dto.tabular_sections.is_empty(),
+        "expected tabularSections to be present for DocumentObject.ЗаказНаряды"
+    );
+    assert!(
+        dto.methods.is_empty(),
+        "expected methods to be omitted when include_methods=false"
+    );
+    assert!(
+        dto.methods_count.is_some(),
+        "expected methodsCount to be present when include_methods=false"
+    );
+
+    let _close: serde_json::Value = call_tool(
+        &service,
+        "workspace_close",
+        json!({ "session_id": &session_id }),
+    )
+    .await;
     let _ = service.cancel().await;
 }
 

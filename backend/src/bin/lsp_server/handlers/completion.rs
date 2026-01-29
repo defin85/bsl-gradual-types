@@ -181,8 +181,12 @@ pub async fn handle_completion_resolve(
     let Some(candidate_id) = parse_candidate_id(&item) else {
         return item;
     };
-    let resolved =
-        resolve_by_candidate_id(&candidate_id, deps.as_ref(), &metadata_lookup, snippet_support);
+    let resolved = resolve_by_candidate_id(
+        &candidate_id,
+        deps.as_ref(),
+        &metadata_lookup,
+        snippet_support,
+    );
 
     if let Some((detail, documentation, insert_text)) = resolved {
         item.detail = detail;

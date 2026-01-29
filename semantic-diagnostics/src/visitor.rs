@@ -261,10 +261,7 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                 // Validate variable declaration positions
                 self.validate_var_declaration_position(body, name);
             }
-            SemanticNodeKind::Assignment {
-                variable,
-                ..
-            } => {
+            SemanticNodeKind::Assignment { variable, .. } => {
                 let Some(value_type) = self
                     .type_hints
                     .and_then(|hints| hints.assignment_value_type(node.span))
@@ -871,9 +868,7 @@ mod tests {
         let mut visitor =
             SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
         let mut hints = SemanticTypeHints::default();
-        hints
-            .call_receiver_type_by_span
-            .insert(call_span, unknown);
+        hints.call_receiver_type_by_span.insert(call_span, unknown);
         visitor.set_type_hints(Some(&hints));
         let mut context = FlowContext::new(program.symbols.root_scope);
         visitor.visit_node(&program.nodes[0], &mut context);

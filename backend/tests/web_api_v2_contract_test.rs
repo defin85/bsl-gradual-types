@@ -52,4 +52,3 @@ fn get_all_types_as_dto_includes_pagination() {
     let value = serde_json::to_value(&result).expect("serialize AnalysisResultDto");
     assert!(value.get("pagination").is_some());
 }
-

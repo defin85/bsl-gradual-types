@@ -41,11 +41,7 @@ impl AstToIrConverter {
                 // VarDeclaration - это "Перем X;" без присваивания значения
                 // В BSL переменные видны во всём теле функции, не только в текущем блоке
                 self.symbol_table
-                    .register_variable_declared_in_function_scope(
-                        self.current_scope,
-                        name,
-                        span,
-                    );
+                    .register_variable_declared_in_function_scope(self.current_scope, name, span);
 
                 self.nodes.push(node);
                 Ok(Some(self.nodes.len() - 1))
@@ -330,11 +326,8 @@ impl AstToIrConverter {
         self.current_scope = body_scope;
 
         // Регистрируем переменную цикла
-        self.symbol_table.register_variable(
-            body_scope,
-            variable.clone(),
-            span,
-        );
+        self.symbol_table
+            .register_variable(body_scope, variable.clone(), span);
 
         // Собираем только прямые дочерние индексы
         let mut body_indices = Vec::new();
@@ -347,7 +340,10 @@ impl AstToIrConverter {
         self.current_scope = old_scope;
 
         let node = SemanticNode {
-            kind: SemanticNodeKind::ForLoop { variable, body: body_indices },
+            kind: SemanticNodeKind::ForLoop {
+                variable,
+                body: body_indices,
+            },
             span,
             scope_id: self.current_scope,
         };
@@ -387,7 +383,10 @@ impl AstToIrConverter {
         self.current_scope = old_scope;
 
         let node = SemanticNode {
-            kind: SemanticNodeKind::ForEachLoop { variable, body: body_indices },
+            kind: SemanticNodeKind::ForEachLoop {
+                variable,
+                body: body_indices,
+            },
             span,
             scope_id: self.current_scope,
         };
@@ -478,11 +477,8 @@ impl AstToIrConverter {
 
         // Регистрируем параметры функции в body_scope
         for param in &params_vec {
-            self.symbol_table.register_variable(
-                body_scope,
-                param.name.clone(),
-                span,
-            );
+            self.symbol_table
+                .register_variable(body_scope, param.name.clone(), span);
         }
 
         // Собираем только прямые дочерние индексы
@@ -544,11 +540,8 @@ impl AstToIrConverter {
 
         // Регистрируем параметры процедуры в body_scope
         for param in &params_vec {
-            self.symbol_table.register_variable(
-                body_scope,
-                param.name.clone(),
-                span,
-            );
+            self.symbol_table
+                .register_variable(body_scope, param.name.clone(), span);
         }
 
         // Собираем только прямые дочерние индексы

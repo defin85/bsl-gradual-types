@@ -164,11 +164,7 @@ impl SemanticProgram {
                 attributes.insert("name".to_string(), name.clone());
                 ("VariableAccess".to_string(), Some(name.clone()), attributes)
             }
-            SemanticNodeKind::FunctionDeclaration {
-                name,
-                params,
-                ..
-            } => {
+            SemanticNodeKind::FunctionDeclaration { name, params, .. } => {
                 attributes.insert("parameter_count".to_string(), params.len().to_string());
                 ("Function".to_string(), Some(name.clone()), attributes)
             }
@@ -328,8 +324,7 @@ impl SemanticProgram {
             BlockScope { statements, .. } => statements.clone(),
 
             VariableDeclaration {
-                initial_value_node,
-                ..
+                initial_value_node, ..
             } => initial_value_node.iter().copied().collect(),
 
             // MILESTONE 3.5: Assignment может содержать вложенный FunctionCall

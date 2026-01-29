@@ -13,8 +13,8 @@ use crate::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter};
 use crate::system::LineIndex;
 
 use super::super::extractors::symbol_extractor::extract_word_at_position;
-use super::super::formatters::hover_formatters::format_expected_type_hover;
 use super::super::formatters::format_semantic_node_info;
+use super::super::formatters::hover_formatters::format_expected_type_hover;
 
 /// Hover по уже готовому `SemanticProgram` (без legacy парсинга/IR build).
 ///
@@ -68,10 +68,11 @@ fn compute_hover_info_from_ir(
         .flatten()
         .map(|offset| offset.min(u32::MAX as usize) as u32);
 
-    let node_at_position = byte_offset.and_then(|offset| ir_program.find_node_at_byte_offset(offset));
+    let node_at_position =
+        byte_offset.and_then(|offset| ir_program.find_node_at_byte_offset(offset));
     let word_under_cursor = extract_word_at_position(file_content, line, column);
-    let type_at_cursor = byte_offset
-        .and_then(|offset| analysis.type_at_byte_offset(file_id, offset).ok().flatten());
+    let type_at_cursor =
+        byte_offset.and_then(|offset| analysis.type_at_byte_offset(file_id, offset).ok().flatten());
 
     let formatter = if let Some(config) = hover_config.clone() {
         HoverFormatter::new(config, metadata_lookup.clone())
@@ -111,7 +112,9 @@ fn compute_hover_info_from_ir(
                     let property_resolution = if !prop_type.trim().is_empty() {
                         resolver.resolve_expression_sync(&prop_type)
                     } else {
-                        type_at_cursor.clone().unwrap_or_else(TypeResolution::unknown)
+                        type_at_cursor
+                            .clone()
+                            .unwrap_or_else(TypeResolution::unknown)
                     };
 
                     return Some(formatter.format_property(
@@ -140,7 +143,13 @@ fn compute_hover_info_from_ir(
                         column,
                         node,
                     )
-                    .or_else(|| Some(format_semantic_node_info(node, file_content, metadata_lookup)));
+                    .or_else(|| {
+                        Some(format_semantic_node_info(
+                            node,
+                            file_content,
+                            metadata_lookup,
+                        ))
+                    });
                 }
             }
         }
@@ -150,7 +159,11 @@ fn compute_hover_info_from_ir(
     if let (Some(node), Some(word)) = (node_at_position, word_under_cursor.as_deref()) {
         if let SemanticNodeKind::FunctionCall { function_name, .. } = &node.kind {
             if word.eq_ignore_ascii_case(function_name) {
-                return Some(format_semantic_node_info(node, file_content, metadata_lookup));
+                return Some(format_semantic_node_info(
+                    node,
+                    file_content,
+                    metadata_lookup,
+                ));
             }
         }
     }
@@ -165,10 +178,7 @@ fn compute_hover_info_from_ir(
     }
 
     // Milestone 2.11 Task B1: Logs when symbol not found
-    debug!(
-        "Hover v2: no type at position {}:{}",
-        line, column
-    );
+    debug!("Hover v2: no type at position {}:{}", line, column);
 
     // Fallback: old logic by variable name (without AST, since IR cache is used now)
     if let Some(symbol_info) =
@@ -187,7 +197,10 @@ fn type_at_span_start(
     file_id: bsl_analysis_v2::FileId,
     span: Span,
 ) -> Option<TypeResolution> {
-    analysis.type_at_byte_offset(file_id, span.start).ok().flatten()
+    analysis
+        .type_at_byte_offset(file_id, span.start)
+        .ok()
+        .flatten()
 }
 
 fn control_node_at_position(
@@ -289,9 +302,7 @@ fn format_control_flow_hover(
         SemanticNodeKind::ForLoop { variable, .. } => {
             let lower = line_text.to_lowercase();
             let eq_idx = line_text.find('=')?;
-            let po_idx = lower[eq_idx + 1..]
-                .find("по")
-                .map(|idx| eq_idx + 1 + idx)?;
+            let po_idx = lower[eq_idx + 1..].find("по").map(|idx| eq_idx + 1 + idx)?;
             let range_start = &line_text[eq_idx + 1..po_idx];
             let rel = first_non_ws_byte_index(range_start)?;
             (
@@ -323,7 +334,10 @@ fn format_control_flow_hover(
     out.push_str(&title);
     out.push_str("\n\n");
     out.push_str(&format_expected_type_hover(expected_type, &actual_type));
-    out.push_str(&format!("\n\n📍 Span: {}..{}", node.span.start, node.span.end));
+    out.push_str(&format!(
+        "\n\n📍 Span: {}..{}",
+        node.span.start, node.span.end
+    ));
     Some(out)
 }
 

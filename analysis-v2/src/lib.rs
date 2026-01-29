@@ -14,8 +14,8 @@ use bsl_diagnostics::{SemanticTypeHints, SemanticValidationVisitor};
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::SignatureIndex;
-use bsl_shared::domain::types::{DiagnosticSeverity, ParseError, TypeDiagnostic};
 use bsl_shared::domain::types::TypeResolution;
+use bsl_shared::domain::types::{DiagnosticSeverity, ParseError, TypeDiagnostic};
 use bsl_shared::domain::validators::TypeValidator;
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::formatting::DetailLevel;
@@ -393,12 +393,18 @@ pub fn semantic_diagnostics(
             DiagnosticSeverity::Info => 2_u8,
             DiagnosticSeverity::Hint => 3_u8,
         };
-        (a.span.start, a.span.end, severity_key(a.severity), &a.message).cmp(&(
-            b.span.start,
-            b.span.end,
-            severity_key(b.severity),
-            &b.message,
-        ))
+        (
+            a.span.start,
+            a.span.end,
+            severity_key(a.severity),
+            &a.message,
+        )
+            .cmp(&(
+                b.span.start,
+                b.span.end,
+                severity_key(b.severity),
+                &b.message,
+            ))
     });
 
     SemanticDiagnosticsSnapshot(Arc::new(diagnostics))
@@ -422,7 +428,8 @@ fn populate_assignment_value_hints(
             continue;
         };
         if let Some(resolution) = type_index_resolution_for_span(type_index, value_node.span) {
-            out.assignment_value_type_by_span.insert(node.span, resolution);
+            out.assignment_value_type_by_span
+                .insert(node.span, resolution);
         }
     }
 }
@@ -461,7 +468,9 @@ fn populate_call_and_member_hints(
                     }
                 }
             }
-            Statement::While { condition, body, .. } => {
+            Statement::While {
+                condition, body, ..
+            } => {
                 visit_expression(condition, type_index, out);
                 for stmt in body {
                     visit_statement(stmt, type_index, out);
@@ -484,11 +493,12 @@ fn populate_call_and_member_hints(
                     visit_statement(stmt, type_index, out);
                 }
             }
-            Statement::Return { value, .. } => {
-                if let Some(value) = value {
-                    visit_expression(value, type_index, out);
-                }
+            Statement::Return {
+                value: Some(value), ..
+            } => {
+                visit_expression(value, type_index, out);
             }
+            Statement::Return { value: None, .. } => {}
             Statement::Try {
                 try_body,
                 except_body,
@@ -507,11 +517,13 @@ fn populate_call_and_member_hints(
             Statement::Execute { code, .. } => {
                 visit_expression(code, type_index, out);
             }
-            Statement::RaiseError { message, .. } => {
-                if let Some(message) = message {
-                    visit_expression(message, type_index, out);
-                }
+            Statement::RaiseError {
+                message: Some(message),
+                ..
+            } => {
+                visit_expression(message, type_index, out);
             }
+            Statement::RaiseError { message: None, .. } => {}
             Statement::AddHandler { event, handler, .. }
             | Statement::RemoveHandler { event, handler, .. } => {
                 visit_expression(event, type_index, out);
@@ -554,7 +566,8 @@ fn populate_call_and_member_hints(
                     if let Some(receiver_type) =
                         type_index_resolution_for_span(type_index, expression_span(object))
                     {
-                        out.call_receiver_type_by_span.insert(key_span, receiver_type);
+                        out.call_receiver_type_by_span
+                            .insert(key_span, receiver_type);
                     }
                 }
 
@@ -935,8 +948,12 @@ impl AnalysisV2 {
         let Some(&file) = self.files.get(&file_id) else {
             return Ok(None);
         };
-        cancellable(|| type_index(&self.db, file, self.deps, self.settings).0.clone())
-            .map(|index| index.type_at_byte_offset(byte_offset))
+        cancellable(|| {
+            type_index(&self.db, file, self.deps, self.settings)
+                .0
+                .clone()
+        })
+        .map(|index| index.type_at_byte_offset(byte_offset))
     }
 }
 

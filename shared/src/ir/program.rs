@@ -70,13 +70,19 @@ impl SemanticProgram {
                 .filter(|node| node.span.contains(offset))
                 .collect();
 
-            debug!("Found {} candidates for offset {}", candidates.len(), offset);
+            debug!(
+                "Found {} candidates for offset {}",
+                candidates.len(),
+                offset
+            );
             for (i, node) in candidates.iter().enumerate() {
                 let type_name = match &node.kind {
                     SemanticNodeKind::Assignment { variable, .. } => {
                         format!("Assignment({})", variable)
                     }
-                    SemanticNodeKind::VariableAccess { name } => format!("VariableAccess({})", name),
+                    SemanticNodeKind::VariableAccess { name } => {
+                        format!("VariableAccess({})", name)
+                    }
                     SemanticNodeKind::FunctionCall {
                         function_name,
                         object_name,
@@ -95,7 +101,9 @@ impl SemanticProgram {
                         object_name.as_deref().unwrap_or("?"),
                         member_name
                     ),
-                    SemanticNodeKind::VariableDeclaration { name, .. } => format!("VarDecl({})", name),
+                    SemanticNodeKind::VariableDeclaration { name, .. } => {
+                        format!("VarDecl({})", name)
+                    }
                     _ => format!("{:?}", node.kind),
                 };
                 debug!("  [{}] {} span={:?}", i, type_name, node.span);
@@ -125,7 +133,9 @@ impl SemanticProgram {
                     SemanticNodeKind::Assignment { variable, .. } => {
                         format!("Assignment({})", variable)
                     }
-                    SemanticNodeKind::VariableAccess { name } => format!("VariableAccess({})", name),
+                    SemanticNodeKind::VariableAccess { name } => {
+                        format!("VariableAccess({})", name)
+                    }
                     SemanticNodeKind::FunctionCall {
                         function_name,
                         object_name,
@@ -158,7 +168,11 @@ impl SemanticProgram {
     /// Получить переменную в scope (с поиском в родительских scope)
     ///
     /// Поиск идёт от текущего scope вверх по иерархии до root
-    pub fn resolve_variable(&self, name: &str, scope_id: ScopeId) -> Option<&super::types::VariableState> {
+    pub fn resolve_variable(
+        &self,
+        name: &str,
+        scope_id: ScopeId,
+    ) -> Option<&super::types::VariableState> {
         let mut current_scope_id = Some(scope_id);
 
         while let Some(sid) = current_scope_id {

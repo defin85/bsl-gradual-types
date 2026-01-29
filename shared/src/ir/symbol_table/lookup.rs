@@ -33,11 +33,12 @@ impl SymbolTable {
     /// let state = table.lookup_variable(table.root_scope, "x");
     /// assert!(state.is_some());
     /// ```
-    pub fn lookup_variable(&self, scope_id: ScopeId, name: &str) -> Option<&crate::ir::types::VariableState> {
-        self.scopes
-            .get(&scope_id)?
-            .variables
-            .get(name)
+    pub fn lookup_variable(
+        &self,
+        scope_id: ScopeId,
+        name: &str,
+    ) -> Option<&crate::ir::types::VariableState> {
+        self.scopes.get(&scope_id)?.variables.get(name)
     }
 
     /// Поиск переменной с подъёмом по цепочке родительских scope
@@ -88,7 +89,11 @@ impl SymbolTable {
     /// Возвращает ошибку, если:
     /// - Scope с указанным ID не существует
     /// - Переменная с указанным именем не найдена в scope
-    pub fn mark_variable_initialized_checked(&mut self, scope_id: ScopeId, name: &str) -> Result<(), String> {
+    pub fn mark_variable_initialized_checked(
+        &mut self,
+        scope_id: ScopeId,
+        name: &str,
+    ) -> Result<(), String> {
         let scope = self
             .scopes
             .get_mut(&scope_id)

@@ -83,8 +83,7 @@ fn conf_big_form_module_attributes_and_elements_are_typed() {
         "expected СчетФактура prop type to be cfg:DocumentRef.*, got {:?}",
         sf_prop.prop_type
     );
-    let elements_type_name =
-        "ЭлементыФормы.Документы.РеализацияТоваровУслуг.ФормаДокументаОбщая";
+    let elements_type_name = "ЭлементыФормы.Документы.РеализацияТоваровУслуг.ФормаДокументаОбщая";
     let elements_type = repo
         .find_type(elements_type_name)
         .expect("expected synthetic ЭлементыФормы.* type to be present");
@@ -223,7 +222,10 @@ fn conf_big_form_module_attributes_and_elements_are_typed() {
         "Expected `Элементы.СчетФактураПросмотр` to resolve as `ГруппаФормы`"
     );
     assert!(
-        got_y.as_deref().unwrap_or_default().contains("cfg:DocumentRef."),
+        got_y
+            .as_deref()
+            .unwrap_or_default()
+            .contains("cfg:DocumentRef."),
         "Expected `СчетФактура` to resolve as cfg:DocumentRef.*, got {:?}",
         got_y
     );

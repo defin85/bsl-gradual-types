@@ -108,7 +108,11 @@ fn find_identifier_end_byte_in_range(
     found.and_then(|abs| u32::try_from(abs).ok())
 }
 
-fn find_assignment_lhs_identifier_end_byte(source: &str, span: Span, identifier: &str) -> Option<u32> {
+fn find_assignment_lhs_identifier_end_byte(
+    source: &str,
+    span: Span,
+    identifier: &str,
+) -> Option<u32> {
     let start = span.start as usize;
     let end = span.end as usize;
     if start >= source.len() || end > source.len() || start >= end {
@@ -229,7 +233,8 @@ pub fn handle_code_actions_v2(
             continue;
         };
 
-        let Some(decl_var_end) = find_identifier_end_byte_in_span(file_content.as_ref(), decl_node.span, variable)
+        let Some(decl_var_end) =
+            find_identifier_end_byte_in_span(file_content.as_ref(), decl_node.span, variable)
         else {
             continue;
         };
@@ -309,7 +314,10 @@ pub fn handle_code_actions_v2(
     }
 
     actions.sort_by(|a, b| a.title.cmp(&b.title));
-    actions.into_iter().map(CodeActionOrCommand::CodeAction).collect()
+    actions
+        .into_iter()
+        .map(CodeActionOrCommand::CodeAction)
+        .collect()
 }
 
 #[cfg(test)]
@@ -334,7 +342,11 @@ mod tests {
             path: Arc::from("test.bsl"),
         });
         let analysis = host.analysis();
-        let file_content = analysis.file_text(file_id).ok().flatten().expect("file_text");
+        let file_content = analysis
+            .file_text(file_id)
+            .ok()
+            .flatten()
+            .expect("file_text");
         let ir_program = analysis.ir(file_id).ok().flatten().expect("ir");
         let uri = Url::parse("file:///test.bsl").expect("uri");
         (analysis, file_id, file_content, ir_program, uri)
@@ -367,7 +379,9 @@ mod tests {
         );
 
         let has_quickfix = actions.iter().any(|action| match action {
-            CodeActionOrCommand::CodeAction(action) => action.kind == Some(CodeActionKind::QUICKFIX),
+            CodeActionOrCommand::CodeAction(action) => {
+                action.kind == Some(CodeActionKind::QUICKFIX)
+            }
             _ => false,
         });
         assert!(has_quickfix, "expected a quick fix code action");

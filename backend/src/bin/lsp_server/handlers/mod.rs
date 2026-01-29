@@ -2,8 +2,8 @@
 //!
 //! This module contains all LSP request and notification handlers.
 
-pub mod completion;
 pub mod code_actions;
+pub mod completion;
 pub mod context;
 pub mod definition;
 pub mod formatting;
@@ -15,8 +15,8 @@ pub mod symbols;
 pub mod text_document;
 
 // Re-export commonly used types
-pub use completion::*;
 pub use code_actions::*;
+pub use completion::*;
 pub use context::*;
 pub use definition::*;
 pub use formatting::*;

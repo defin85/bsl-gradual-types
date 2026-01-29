@@ -33,9 +33,9 @@ use crate::commands::{
 use crate::config::{BslSettings, LspConfig};
 use crate::handlers::{
     apply_text_edit, build_document_symbols, build_workspace_symbols, format_bsl_range_to_edits,
-    format_bsl_to_edits, handle_completion_resolve, handle_goto_definition_v2, handle_hover_v2,
-    handle_code_actions_v2, handle_inlay_hints_v2, handle_prepare_rename, handle_references,
-    handle_rename, handle_signature_help_v2, RenameError,
+    format_bsl_to_edits, handle_code_actions_v2, handle_completion_resolve,
+    handle_goto_definition_v2, handle_hover_v2, handle_inlay_hints_v2, handle_prepare_rename,
+    handle_references, handle_rename, handle_signature_help_v2, RenameError,
 };
 use crate::progress::log_progress_to_file;
 use crate::progress_bridge::{LspWorkDoneReporter, ProgressReporter};
@@ -1289,8 +1289,10 @@ impl LanguageServer for BslLanguageServer {
 
                     let member_access_owner_type_hint = file_content.as_deref().and_then(|text| {
                         let line_text = text.lines().nth(position.line as usize)?;
-                        let cursor_byte =
-                            bsl_backend::system::positioning::utf16_to_byte_offset(line_text, position.character);
+                        let cursor_byte = bsl_backend::system::positioning::utf16_to_byte_offset(
+                            line_text,
+                            position.character,
+                        );
                         let line_prefix = line_text.get(..cursor_byte)?;
                         let dot_in_line = line_prefix.rfind('.')?;
                         let receiver = line_prefix.get(..dot_in_line)?.trim_end();
@@ -1298,8 +1300,9 @@ impl LanguageServer for BslLanguageServer {
                             .char_indices()
                             .rev()
                             .find(|(_, ch)| !ch.is_whitespace())?;
-                        let probe_utf16 =
-                            bsl_backend::system::positioning::byte_offset_to_utf16(line_text, probe_byte);
+                        let probe_utf16 = bsl_backend::system::positioning::byte_offset_to_utf16(
+                            line_text, probe_byte,
+                        );
                         let offset = analysis
                             .utf16_position_to_byte_offset(file_id, position.line, probe_utf16)
                             .ok()
@@ -1614,19 +1617,16 @@ impl LanguageServer for BslLanguageServer {
         };
 
         let range = params.range;
-        let computed = timeout(
-            std::time::Duration::from_millis(80),
-            async move {
-                handle_inlay_hints_v2(
-                    &analysis,
-                    file_id,
-                    file_content,
-                    ir_program,
-                    range,
-                    &settings,
-                )
-            },
-        )
+        let computed = timeout(std::time::Duration::from_millis(80), async move {
+            handle_inlay_hints_v2(
+                &analysis,
+                file_id,
+                file_content,
+                ir_program,
+                range,
+                &settings,
+            )
+        })
         .await;
 
         match computed {
@@ -1697,21 +1697,18 @@ impl LanguageServer for BslLanguageServer {
 
         let range = params.range;
         let uri_for_action = uri.clone();
-        let computed = timeout(
-            std::time::Duration::from_millis(120),
-            async move {
-                handle_code_actions_v2(
-                    &analysis,
-                    file_id,
-                    file_content,
-                    ir_program,
-                    &uri_for_action,
-                    range,
-                    &code_actions_settings,
-                    &type_hints_settings,
-                )
-            },
-        )
+        let computed = timeout(std::time::Duration::from_millis(120), async move {
+            handle_code_actions_v2(
+                &analysis,
+                file_id,
+                file_content,
+                ir_program,
+                &uri_for_action,
+                range,
+                &code_actions_settings,
+                &type_hints_settings,
+            )
+        })
         .await;
 
         match computed {
@@ -1795,7 +1792,14 @@ impl LanguageServer for BslLanguageServer {
                 return Ok(None);
             }
 
-            let (file_content, file_path, type_at_position_hint, receiver_type_hint, deps, ir_program) = {
+            let (
+                file_content,
+                file_path,
+                type_at_position_hint,
+                receiver_type_hint,
+                deps,
+                ir_program,
+            ) = {
                 let snapshot_started = Instant::now();
                 let (analysis, index_snapshot, deps_id) =
                     self.analysis_v2.snapshot_with_deps().await;
@@ -1884,7 +1888,14 @@ impl LanguageServer for BslLanguageServer {
                         .flatten()
                 });
 
-                (file_content, file_path, type_at_position_hint, receiver_type_hint, deps, ir_program)
+                (
+                    file_content,
+                    file_path,
+                    type_at_position_hint,
+                    receiver_type_hint,
+                    deps,
+                    ir_program,
+                )
             };
 
             let result = match (file_content, file_path, deps, ir_program) {
@@ -2060,8 +2071,7 @@ impl LanguageServer for BslLanguageServer {
             let started = Instant::now();
             let result = match (file_content, deps) {
                 (Some(file_content), Some(deps)) => {
-                    handle_signature_help_v2(file_content, position, receiver_type_hint, deps)
-                        .await
+                    handle_signature_help_v2(file_content, position, receiver_type_hint, deps).await
                 }
                 _ => None,
             };
@@ -2175,8 +2185,13 @@ impl LanguageServer for BslLanguageServer {
                     .flatten()
                     .ok_or_else(tower_lsp::jsonrpc::Error::internal_error)?;
 
-                let semantic_tree =
-                    semantic_tree_from_ir(ir_program.as_ref(), true, true, file_text.as_ref(), line_index.as_ref());
+                let semantic_tree = semantic_tree_from_ir(
+                    ir_program.as_ref(),
+                    true,
+                    true,
+                    file_text.as_ref(),
+                    line_index.as_ref(),
+                );
                 let result = semantic_html_from_tree(
                     &semantic_tree,
                     request.theme.as_deref(),

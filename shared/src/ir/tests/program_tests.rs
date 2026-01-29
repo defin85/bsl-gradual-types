@@ -15,11 +15,9 @@ fn test_variable_resolution() {
     );
 
     // Регистрируем переменную в child scope
-    program.symbols.register_variable(
-        child_scope,
-        "localVar".to_string(),
-        Span::stub(),
-    );
+    program
+        .symbols
+        .register_variable(child_scope, "localVar".to_string(), Span::stub());
 
     // Поиск в child scope должен найти обе переменные
     assert!(program.resolve_variable("localVar", child_scope).is_some());

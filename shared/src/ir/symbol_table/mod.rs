@@ -262,7 +262,9 @@ impl SymbolTable {
         &self,
         scope_id: ScopeId,
     ) -> Option<impl Iterator<Item = (&String, &VariableState)>> {
-        self.scopes.get(&scope_id).map(|scope| scope.variables.iter())
+        self.scopes
+            .get(&scope_id)
+            .map(|scope| scope.variables.iter())
     }
 
     /// Итератор по всем scopes в таблице символов

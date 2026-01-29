@@ -9,6 +9,14 @@ fn default_limit_200() -> u32 {
     200
 }
 
+fn default_limit_50() -> u32 {
+    50
+}
+
+fn default_page_1() -> u32 {
+    1
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkspaceOpenParams {
     pub roots: Vec<String>,
@@ -187,6 +195,68 @@ pub struct BslReferencesParams {
     pub limit: u32,
     #[serde(default)]
     pub include_snippets: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BslTypeSource {
+    Platform,
+    Configuration,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BslTypesView {
+    NamesOnly,
+    Summary,
+    Full,
+}
+
+impl Default for BslTypesView {
+    fn default() -> Self {
+        Self::Summary
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct BslTypesListParams {
+    pub session_id: String,
+    #[serde(default = "default_page_1")]
+    pub page: u32,
+    #[serde(default = "default_limit_50")]
+    pub limit: u32,
+    #[serde(default)]
+    pub source: Option<BslTypeSource>,
+    #[serde(default)]
+    pub category: Option<String>,
+    #[serde(default)]
+    pub certainty_level: Option<u8>,
+    #[serde(default)]
+    pub flow_sensitive_only: bool,
+    #[serde(default)]
+    pub view: BslTypesView,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct BslTypesSearchParams {
+    pub session_id: String,
+    pub query: String,
+    #[serde(default = "default_limit_200")]
+    pub limit: u32,
+    #[serde(default)]
+    pub source: Option<BslTypeSource>,
+    #[serde(default)]
+    pub view: BslTypesView,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct BslTypeGetParams {
+    pub session_id: String,
+    pub type_name: String,
+    #[serde(default)]
+    pub source: Option<BslTypeSource>,
+    #[serde(default)]
+    pub include_methods: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

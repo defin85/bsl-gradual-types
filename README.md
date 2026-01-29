@@ -47,7 +47,7 @@ cargo run -p cli --bin bsl-type-check -- test.bsl --verbose
 ```bash
 cd vscode-extension
 npm install && npm run compile && vsce package
-code --install-extension bsl-gradual-types-1.0.0.vsix
+code --install-extension bsl-gradual-types-*.vsix
 ```
 
 ## ⚙️ Конфигурация
@@ -164,7 +164,7 @@ npm install -g vsce
 vsce package
 
 # Установка в VSCode
-code --install-extension bsl-gradual-types-1.0.0.vsix
+code --install-extension bsl-gradual-types-*.vsix
 ```
 
 ### Возможности extension

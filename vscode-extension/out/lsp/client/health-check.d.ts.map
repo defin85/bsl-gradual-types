@@ -1,1 +1,0 @@
-{"version":3,"file":"health-check.d.ts","sourceRoot":"","sources":["../../../src/lsp/client/health-check.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,MAAM,MAAM,QAAQ,CAAC;AACjC,OAAO,EAAE,cAAc,EAAE,MAAM,4BAA4B,CAAC;AAM5D;;;;GAIG;AACH,wBAAgB,gBAAgB,CAC5B,MAAM,EAAE,cAAc,EACtB,aAAa,EAAE,MAAM,CAAC,aAAa,GACpC,IAAI,CA2BN;AAED;;GAEG;AACH,wBAAgB,eAAe,IAAI,IAAI,CAKtC"}

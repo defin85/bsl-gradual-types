@@ -2,7 +2,7 @@
 
 ## 📦 Готовое расширение
 
-Расширение упаковано в файл: `bsl-gradual-types-1.0.0.vsix` (29.15 MB)
+`.vsix` не хранится в git: это генерируемый артефакт. Собери и упакуй расширение локально.
 
 ## 🚀 Установка
 
@@ -12,14 +12,14 @@
 2. Открой панель Extensions (Ctrl+Shift+X)
 3. Кликни на иконку ... (меню) в правом верхнем углу панели
 4. Выбери "Install from VSIX..."
-5. Найди файл bsl-gradual-types-1.0.0.vsix
+5. Найди `.vsix`, созданный командой `vsce package`
 6. Подтверди установку
 
 ### Способ 2: Установка через командную строку
 
 ```bash
 cd vscode-extension
-code --install-extension bsl-gradual-types-1.0.0.vsix
+code --install-extension bsl-gradual-types-*.vsix
 ```
 
 ## 🧪 Тестирование
@@ -125,7 +125,7 @@ npm run package
 vsce package
 
 # 3. Переустановить в VS Code
-code --install-extension bsl-gradual-types-1.0.0.vsix --force
+code --install-extension bsl-gradual-types-*.vsix --force
 ```
 
 **Примечание:** `--force` флаг переустанавливает расширение даже если оно уже установлено.

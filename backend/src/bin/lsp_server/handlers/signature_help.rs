@@ -203,8 +203,12 @@ mod tests {
         });
 
         let analysis = host.snapshot();
+        let offset = analysis
+            .utf16_position_to_byte_offset(file_id, query.call_start_line, receiver_end_character)
+            .ok()
+            .flatten()?;
         analysis
-            .type_at_position(file_id, query.call_start_line, receiver_end_character)
+            .type_at_byte_offset(file_id, offset.min(u32::MAX as usize) as u32)
             .ok()
             .flatten()
     }

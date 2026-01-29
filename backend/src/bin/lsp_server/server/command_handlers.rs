@@ -92,7 +92,14 @@ impl BslLanguageServer {
             None => return Ok(CurrentContextResponse::empty()),
         };
 
-        let semantic_tree_dto = ir_program.to_dto(true, true);
+        let (Some(file_text), Some(line_index)) = (
+            analysis.file_text(file_id).ok().flatten(),
+            analysis.line_index(file_id).ok().flatten(),
+        ) else {
+            return Ok(CurrentContextResponse::empty());
+        };
+
+        let semantic_tree_dto = ir_program.to_dto(true, true, file_text.as_ref(), line_index.as_ref());
         match find_containing_function_in_dto(&semantic_tree_dto, params.line, params.character) {
             Some((name, kind, params_list, return_type)) => Ok(CurrentContextResponse {
                 function_name: Some(name),

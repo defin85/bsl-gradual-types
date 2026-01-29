@@ -21,10 +21,7 @@ impl TypeErrorKind {
         TypeDiagnostic {
             severity: DiagnosticSeverity::Error,
             message,
-            line: span.start_line,
-            column: span.start_column,
-            end_line: span.end_line,
-            end_column: span.end_column,
+            span,
         }
     }
 
@@ -43,10 +40,7 @@ impl TypeErrorKind {
         TypeDiagnostic {
             severity: DiagnosticSeverity::Error,
             message,
-            line: span.start_line,
-            column: span.start_column,
-            end_line: span.end_line,
-            end_column: span.end_column,
+            span,
         }
     }
 
@@ -67,10 +61,7 @@ impl TypeErrorKind {
         TypeDiagnostic {
             severity,
             message,
-            line: span.start_line,
-            column: span.start_column,
-            end_line: span.end_line,
-            end_column: span.end_column,
+            span,
         }
     }
 

@@ -45,23 +45,19 @@ pub fn format_semantic_node_info(
             };
 
             format!(
-                "**Переменная:** `{}`\n\n{}{}\n\n📍 Позиция: {}:{}-{}:{}",
+                "**Переменная:** `{}`\n\n{}{}\n\n📍 Span: {}..{}",
                 name,
                 type_info,
                 init_info,
-                node.span.start_line,
-                node.span.start_column,
-                node.span.end_line,
-                node.span.end_column
+                node.span.start,
+                node.span.end
             )
         }
         SemanticNodeKind::Assignment { variable, .. } => format!(
-            "**Присваивание:** `{} = ...`\n\n📍 Позиция: {}:{}-{}:{}",
+            "**Присваивание:** `{} = ...`\n\n📍 Span: {}..{}",
             variable,
-            node.span.start_line,
-            node.span.start_column,
-            node.span.end_line,
-            node.span.end_column
+            node.span.start,
+            node.span.end
         ),
         SemanticNodeKind::FunctionDeclaration {
             name, params, body, ..
@@ -88,14 +84,12 @@ pub fn format_semantic_node_info(
             };
 
             format!(
-                "**Функция:** `{}({})`\n\n📦 {}\n\n📍 Позиция: {}:{}-{}:{}",
+                "**Функция:** `{}({})`\n\n📦 {}\n\n📍 Span: {}..{}",
                 name,
                 params_str,
                 body_info,
-                node.span.start_line,
-                node.span.start_column,
-                node.span.end_line,
-                node.span.end_column
+                node.span.start,
+                node.span.end
             )
         }
         SemanticNodeKind::ProcedureDeclaration {
@@ -124,72 +118,61 @@ pub fn format_semantic_node_info(
             };
 
             format!(
-                "**Процедура:** `{}({})`\n\n📦 {}\n\n📍 Позиция: {}:{}-{}:{}",
+                "**Процедура:** `{}({})`\n\n📦 {}\n\n📍 Span: {}..{}",
                 name,
                 params_str,
                 body_info,
-                node.span.start_line,
-                node.span.start_column,
-                node.span.end_line,
-                node.span.end_column
+                node.span.start,
+                node.span.end
             )
         }
         SemanticNodeKind::IfStatement { .. } => {
             format!(
-                "**Условие:** `Если ... Тогда`\n\n📍 Позиция: {}:{}-{}:{}",
-                node.span.start_line,
-                node.span.start_column,
-                node.span.end_line,
-                node.span.end_column
+                "**Условие:** `Если ... Тогда`\n\n📍 Span: {}..{}",
+                node.span.start,
+                node.span.end
             )
         }
         SemanticNodeKind::WhileLoop { .. } => {
             format!(
-                "**Цикл:** `Пока ... Цикл`\n\n📍 Позиция: {}:{}-{}:{}",
-                node.span.start_line,
-                node.span.start_column,
-                node.span.end_line,
-                node.span.end_column
+                "**Цикл:** `Пока ... Цикл`\n\n📍 Span: {}..{}",
+                node.span.start,
+                node.span.end
             )
         }
         SemanticNodeKind::ForLoop { variable, .. } => {
             format!(
-                "**Цикл:** `Для {} = ... По ... Цикл`\n\n📍 Позиция: {}:{}-{}:{}",
+                "**Цикл:** `Для {} = ... По ... Цикл`\n\n📍 Span: {}..{}",
                 variable,
-                node.span.start_line,
-                node.span.start_column,
-                node.span.end_line,
-                node.span.end_column
+                node.span.start,
+                node.span.end
             )
         }
         SemanticNodeKind::ForEachLoop { variable, .. } => {
             format!(
-                "**Цикл:** `Для Каждого {} Из ... Цикл`\n\n📍 Позиция: {}:{}-{}:{}",
+                "**Цикл:** `Для Каждого {} Из ... Цикл`\n\n📍 Span: {}..{}",
                 variable,
-                node.span.start_line,
-                node.span.start_column,
-                node.span.end_line,
-                node.span.end_column
+                node.span.start,
+                node.span.end
             )
         }
         _ => {
             format!(
-                "**Узел IR:** {:?}\n\n📍 Позиция: {}:{}-{}:{}",
+                "**Узел IR:** {:?}\n\n📍 Span: {}..{}",
                 node.kind,
-                node.span.start_line,
-                node.span.start_column,
-                node.span.end_line,
-                node.span.end_column
+                node.span.start,
+                node.span.end
             )
         }
     }
 }
 
-fn format_condition_hover(condition_type: &TypeResolution) -> String {
+#[allow(dead_code)]
+pub(crate) fn format_condition_hover(condition_type: &TypeResolution) -> String {
     format_expected_type_hover("Булево", condition_type)
 }
 
-fn format_expected_type_hover(expected_type: &str, actual_type: &TypeResolution) -> String {
+pub(crate) fn format_expected_type_hover(expected_type: &str, actual_type: &TypeResolution) -> String {
     let mut lines = vec![
         format!("*Ожидаемый тип:* {}", expected_type),
         format!("*Фактический тип:* {}", actual_type.type_name()),
@@ -265,8 +248,8 @@ fn format_assignment_hover(
     if raw_type.is_none() {
         output.push_str("⚠️ **Детали типа недоступны**\n\n");
         output.push_str(&format!(
-            "📍 Позиция: {}:{}-{}:{}\n",
-            node.span.start_line, node.span.start_column, node.span.end_line, node.span.end_column
+            "📍 Span (bytes): {}..{}\n",
+            node.span.start, node.span.end
         ));
         return output;
     }
@@ -275,8 +258,8 @@ fn format_assignment_hover(
     if matches!(resolution.certainty, Certainty::Unknown) {
         output.push_str("⚠️ **Тип не распознан системой**\n\n");
         output.push_str(&format!(
-            "📍 Позиция: {}:{}-{}:{}\n",
-            node.span.start_line, node.span.start_column, node.span.end_line, node.span.end_column
+            "📍 Span (bytes): {}..{}\n",
+            node.span.start, node.span.end
         ));
         return output;
     }
@@ -333,8 +316,8 @@ fn format_assignment_hover(
     }
 
     output.push_str(&format!(
-        "📍 Позиция: {}:{}-{}:{}\n",
-        node.span.start_line, node.span.start_column, node.span.end_line, node.span.end_column
+        "📍 Span (bytes): {}..{}\n",
+        node.span.start, node.span.end
     ));
 
     output

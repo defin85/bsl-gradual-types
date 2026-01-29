@@ -26,20 +26,25 @@ pub(crate) struct TypeIndex {
 }
 
 impl TypeIndex {
-    pub(crate) fn type_at_position(&self, line: u32, column: u32) -> Option<TypeResolution> {
+    pub(crate) fn type_for_exact_span(&self, span: bsl_shared::ir::Span) -> Option<TypeResolution> {
         self.entries
             .iter()
-            .filter(|entry| entry.span.contains(line, column))
-            .min_by_key(|entry| {
-                let lines = entry.span.end_line.saturating_sub(entry.span.start_line);
-                let cols = if lines == 0 {
-                    entry.span.end_column.saturating_sub(entry.span.start_column)
-                } else {
-                    lines * 1000
-                };
-                lines * 1000 + cols
-            })
+            .find(|entry| entry.span == span)
             .map(|entry| entry.resolution.clone())
+    }
+
+    pub(crate) fn type_at_byte_offset(&self, byte_offset: u32) -> Option<TypeResolution> {
+        let find = |offset: u32| {
+            self.entries
+                .iter()
+                .filter(|entry| entry.span.contains(offset))
+                .min_by_key(|entry| entry.span.len())
+                .map(|entry| entry.resolution.clone())
+        };
+
+        // Аналогично IR `find_node_at_byte_offset`: если курсор на границе `end`,
+        // пробуем сместиться на 1 байт влево.
+        find(byte_offset).or_else(|| byte_offset.checked_sub(1).and_then(find))
     }
 }
 
@@ -526,13 +531,25 @@ impl TypeInferencer {
     ) -> TypeResolution {
         match operator {
             "+" => {
-                if left_type.type_name().eq_ignore_ascii_case("Строка")
-                    || right_type.type_name().eq_ignore_ascii_case("Строка")
-                {
-                    TypeResolution::primitive("Строка")
-                } else {
-                    TypeResolution::primitive("Число")
+                let left_is_string = left_type.type_name().eq_ignore_ascii_case("Строка");
+                let right_is_string = right_type.type_name().eq_ignore_ascii_case("Строка");
+
+                if left_is_string && right_is_string {
+                    return TypeResolution::primitive("Строка");
                 }
+
+                if left_is_string || right_is_string {
+                    let mut res = TypeResolution::primitive("Строка");
+                    res.certainty = Certainty::Unknown;
+                    res.metadata.uncertainty_reason =
+                        Some(UncertaintyReason::InvalidStringConcatenation {
+                            left_type: left_type.type_name().to_string(),
+                            right_type: right_type.type_name().to_string(),
+                        });
+                    return res;
+                }
+
+                TypeResolution::primitive("Число")
             }
             "-" | "*" | "/" => TypeResolution::primitive("Число"),
             "=" | "<>" | ">" | "<" | ">=" | "<=" => TypeResolution::primitive("Булево"),
@@ -640,22 +657,26 @@ mod tests {
 
     #[test]
     fn builds_type_index_for_simple_assignment_and_method_call() {
-        let program = parse(
-            r#"Перем М;
+        let source = r#"Перем М;
 М = Новый Массив();
 Р = М.Количество();
-"#,
-        );
+"#;
+        let program = parse(source);
         let deps = deps_with_array_method();
         let index = build_type_index_with_path(&program, "test.bsl", deps);
 
+        let array_ident_offset = source
+            .find("\nМ =")
+            .map(|idx| idx + 1)
+            .expect("assignment line start") as u32;
         let array_ident = index
-            .type_at_position(1, 0)
-            .expect("type at line 1 col 0");
+            .type_at_byte_offset(array_ident_offset)
+            .expect("type at assignment");
         assert_eq!(array_ident.type_name(), "Массив<Неопределено>");
 
+        let method_call_offset = source.find("Количество").expect("method name") as u32;
         let method_call = index
-            .type_at_position(2, 6)
+            .type_at_byte_offset(method_call_offset)
             .expect("type at method call");
         assert_eq!(method_call.type_name(), "Число");
     }
@@ -699,12 +720,11 @@ mod tests {
             platform_signatures_loaded: true,
         });
 
-        let program = parse(
-            r#"Процедура Тест()
+        let source = r#"Процедура Тест()
     x = Элементы.СчетФактураПросмотр;
 КонецПроцедуры
-"#,
-        );
+"#;
+        let program = parse(source);
         let file_path = "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl";
         let loc = CodeLocation::determine_from_path(Path::new(file_path)).expect("code location");
         assert!(
@@ -727,8 +747,9 @@ mod tests {
 
         let index = build_type_index_with_path(&program, file_path, deps);
 
+        let receiver_offset = source.find("Элементы").expect("Элементы") as u32;
         let receiver = index
-            .type_at_position(1, 8)
+            .type_at_byte_offset(receiver_offset)
             .expect("type at Элементы");
         assert_eq!(
             receiver.type_name(),
@@ -736,8 +757,11 @@ mod tests {
             "receiver should be seeded from form module context"
         );
 
+        let member_offset = source
+            .find("СчетФактураПросмотр")
+            .expect("member") as u32;
         let member = index
-            .type_at_position(1, 17)
+            .type_at_byte_offset(member_offset)
             .expect("type at member access");
         assert_eq!(member.type_name(), "ГруппаФормы");
     }

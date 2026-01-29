@@ -880,7 +880,7 @@ mod symbol_index_tests {
 
     #[test]
     fn collect_symbol_items_from_program() {
-        let span = Span::new(1, 1, 1, 2);
+        let span = Span::new(1, 2);
         let expr = Expression::Number { value: 1.0, span };
         let program = Program {
             statements: vec![

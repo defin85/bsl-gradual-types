@@ -4,6 +4,7 @@
 
 use tracing::info;
 
+use bsl_line_index::LineIndex;
 use bsl_shared::api::semantic_dtos::{RenderedHtmlDto, SemanticNodeDto, SemanticTreeDto};
 use bsl_type_visualization::{HtmlRenderer, RenderOptions, ThemeMode};
 
@@ -11,12 +12,14 @@ pub fn semantic_tree_from_ir(
     ir_program: &bsl_shared::ir::SemanticProgram,
     include_call_graph: bool,
     include_flow_sensitive: bool,
+    source: &str,
+    line_index: &LineIndex,
 ) -> SemanticTreeDto {
     info!(
         "Building semantic tree from IR (call_graph={}, flow_sensitive={})",
         include_call_graph, include_flow_sensitive
     );
-    ir_program.to_dto(include_call_graph, include_flow_sensitive)
+    ir_program.to_dto(include_call_graph, include_flow_sensitive, source, line_index)
 }
 
 pub fn semantic_html_from_tree(

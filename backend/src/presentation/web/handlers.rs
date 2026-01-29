@@ -8,6 +8,7 @@ use axum::{
     response::{IntoResponse, Json},
 };
 use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, FileId as V2FileId, SettingsId};
+use bsl_line_index::LineIndex;
 use serde::Deserialize;
 use serde_json::json;
 use std::path::PathBuf;
@@ -93,21 +94,29 @@ fn validation_error_type(message: &str) -> &'static str {
 
 fn type_diagnostics_to_validation_errors(
     diagnostics: &[TypeDiagnostic],
+    source: &str,
+    line_index: &LineIndex,
 ) -> Vec<ValidationErrorDto> {
     diagnostics
         .iter()
-        .map(|d| ValidationErrorDto {
-            message: d.message.clone(),
-            severity: match d.severity {
-                DiagnosticSeverity::Error => "error".to_string(),
-                DiagnosticSeverity::Warning => "warning".to_string(),
-                DiagnosticSeverity::Info | DiagnosticSeverity::Hint => "info".to_string(),
-            },
-            line: d.line,
-            column: d.column,
-            end_line: d.end_line,
-            end_column: d.end_column,
-            error_type: validation_error_type(&d.message).to_string(),
+        .map(|d| {
+            let (line, column) =
+                line_index.byte_offset_to_utf16_position(source, d.span.start as usize);
+            let (end_line, end_column) =
+                line_index.byte_offset_to_utf16_position(source, d.span.end as usize);
+            ValidationErrorDto {
+                message: d.message.clone(),
+                severity: match d.severity {
+                    DiagnosticSeverity::Error => "error".to_string(),
+                    DiagnosticSeverity::Warning => "warning".to_string(),
+                    DiagnosticSeverity::Info | DiagnosticSeverity::Hint => "info".to_string(),
+                },
+                line,
+                column,
+                end_line,
+                end_column,
+                error_type: validation_error_type(&d.message).to_string(),
+            }
         })
         .collect()
 }
@@ -311,9 +320,11 @@ pub async fn validate_code(
                 settings_id: compute_settings_id_v2(diagnostics_detail_level),
                 diagnostics_detail_level,
             });
+            let code_arc: Arc<str> = Arc::from(code);
+            let line_index = LineIndex::new(code_arc.as_ref());
             host.apply_change(ChangeV2::SetFile {
                 file_id: V2FileId(1),
-                text: Arc::from(code),
+                text: code_arc.clone(),
                 version: 0,
                 path: Arc::from("<semantic_validation>"),
             });
@@ -324,7 +335,11 @@ pub async fn validate_code(
                 .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
                 .unwrap_or_else(|| Arc::new(Vec::new()));
 
-            Ok(type_diagnostics_to_validation_errors(diagnostics.as_ref()))
+            Ok(type_diagnostics_to_validation_errors(
+                diagnostics.as_ref(),
+                code_arc.as_ref(),
+                &line_index,
+            ))
         })
         .await;
 
@@ -461,9 +476,11 @@ pub async fn get_diagnostics(
                 settings_id: compute_settings_id_v2(diagnostics_detail_level),
                 diagnostics_detail_level,
             });
+            let code_arc: Arc<str> = Arc::from(code);
+            let line_index = LineIndex::new(code_arc.as_ref());
             host.apply_change(ChangeV2::SetFile {
                 file_id: V2FileId(1),
-                text: Arc::from(code),
+                text: code_arc.clone(),
                 version: 0,
                 path: Arc::from("<semantic_validation>"),
             });
@@ -476,10 +493,14 @@ pub async fn get_diagnostics(
 
             let syntax_errors: Vec<SyntaxErrorDto> = syntax
                 .iter()
-                .map(|e| SyntaxErrorDto {
-                    message: e.message.clone(),
-                    line: e.span.start_line,
-                    column: e.span.start_column,
+                .map(|e| {
+                    let (line, column) = line_index
+                        .byte_offset_to_utf16_position(code_arc.as_ref(), e.span.start as usize);
+                    SyntaxErrorDto {
+                        message: e.message.clone(),
+                        line,
+                        column,
+                    }
                 })
                 .collect();
 
@@ -494,13 +515,19 @@ pub async fn get_diagnostics(
 
             let semantic_errors: Vec<SemanticErrorDto> = diagnostics
                 .iter()
-                .map(|d| SemanticErrorDto {
-                    message: d.message.clone(),
-                    line: d.line,
-                    column: d.column,
-                    end_line: d.end_line,
-                    end_column: d.end_column,
-                    severity: format!("{:?}", d.severity).to_lowercase(),
+                .map(|d| {
+                    let (line, column) = line_index
+                        .byte_offset_to_utf16_position(code_arc.as_ref(), d.span.start as usize);
+                    let (end_line, end_column) =
+                        line_index.byte_offset_to_utf16_position(code_arc.as_ref(), d.span.end as usize);
+                    SemanticErrorDto {
+                        message: d.message.clone(),
+                        line,
+                        column,
+                        end_line,
+                        end_column,
+                        severity: format!("{:?}", d.severity).to_lowercase(),
+                    }
                 })
                 .collect();
 
@@ -553,9 +580,11 @@ pub async fn get_diagnostics_debug(
                 settings_id: compute_settings_id_v2(diagnostics_detail_level),
                 diagnostics_detail_level,
             });
+            let code_arc: Arc<str> = Arc::from(code);
+            let line_index = LineIndex::new(code_arc.as_ref());
             host.apply_change(ChangeV2::SetFile {
                 file_id: V2FileId(1),
-                text: Arc::from(code),
+                text: code_arc.clone(),
                 version: 0,
                 path: Arc::from("<debug_validation>"),
             });
@@ -577,10 +606,14 @@ pub async fn get_diagnostics_debug(
 
             let syntax_errors: Vec<SyntaxErrorDto> = syntax
                 .iter()
-                .map(|e| SyntaxErrorDto {
-                    message: e.message.clone(),
-                    line: e.span.start_line,
-                    column: e.span.start_column,
+                .map(|e| {
+                    let (line, column) = line_index
+                        .byte_offset_to_utf16_position(code_arc.as_ref(), e.span.start as usize);
+                    SyntaxErrorDto {
+                        message: e.message.clone(),
+                        line,
+                        column,
+                    }
                 })
                 .collect();
 
@@ -634,13 +667,19 @@ pub async fn get_diagnostics_debug(
 
             let semantic_errors: Vec<SemanticErrorDto> = errors
                 .iter()
-                .map(|d| SemanticErrorDto {
-                    message: d.message.clone(),
-                    line: d.line,
-                    column: d.column,
-                    end_line: d.end_line,
-                    end_column: d.end_column,
-                    severity: format!("{:?}", d.severity).to_lowercase(),
+                .map(|d| {
+                    let (line, column) = line_index
+                        .byte_offset_to_utf16_position(code_arc.as_ref(), d.span.start as usize);
+                    let (end_line, end_column) =
+                        line_index.byte_offset_to_utf16_position(code_arc.as_ref(), d.span.end as usize);
+                    SemanticErrorDto {
+                        message: d.message.clone(),
+                        line,
+                        column,
+                        end_line,
+                        end_column,
+                        severity: format!("{:?}", d.severity).to_lowercase(),
+                    }
                 })
                 .collect();
 
@@ -847,9 +886,11 @@ pub async fn get_semantic_tree(
                 settings_id: compute_settings_id_v2(diagnostics_detail_level),
                 diagnostics_detail_level,
             });
+            let code_arc: Arc<str> = Arc::from(code);
+            let line_index = LineIndex::new(code_arc.as_ref());
             host.apply_change(ChangeV2::SetFile {
                 file_id: V2FileId(1),
-                text: Arc::from(code),
+                text: code_arc.clone(),
                 version: 0,
                 path: Arc::from(file_path.clone()),
             });
@@ -861,9 +902,14 @@ pub async fn get_semantic_tree(
                 .ok_or_else(|| anyhow::anyhow!("ir unavailable"))?;
 
             let dto = if compact {
-                ir_program.to_compact_dto()
+                ir_program.to_compact_dto(code_arc.as_ref(), &line_index)
             } else {
-                ir_program.to_dto(include_call_graph, include_flow_sensitive)
+                ir_program.to_dto(
+                    include_call_graph,
+                    include_flow_sensitive,
+                    code_arc.as_ref(),
+                    &line_index,
+                )
             };
 
             Ok(dto)

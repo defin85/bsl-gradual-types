@@ -3,6 +3,7 @@
 //! Functions for LSP completion requests and contextual auto-completion.
 
 use anyhow::Result;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -16,7 +17,7 @@ use bsl_shared::domain::types::{
     ConcreteType, FacetKind, MetadataKind, ResolutionResult, SpecialType,
 };
 use bsl_shared::domain::{CompletionItem, CompletionKind, TypeMetadataLookup, TypeResolution};
-use bsl_shared::ir::{ScopeId, SemanticProgram};
+use bsl_shared::ir::{ScopeId, SemanticNodeKind, SemanticProgram};
 use bsl_syntax::ast::Expression;
 
 use super::super::extractors::symbol_extractor::{
@@ -25,7 +26,9 @@ use super::super::extractors::symbol_extractor::{
 use super::completion_ranking::{rank_candidates_with_trace, RankingCandidate};
 use super::completion_target::extract_completion_target_for_member_access;
 use crate::system::keyword_index::DEFAULT_KEYWORDS;
-use crate::system::{IndexItemKind, IndexSnapshot, IntellisenseIndexStore, SymbolScope, TypeKind};
+use crate::system::{
+    IndexItemKind, IndexSnapshot, IntellisenseIndexStore, LineIndex, SymbolScope, TypeKind,
+};
 
 pub trait IndexSnapshotSource: Sync {
     fn snapshot(&self) -> IndexSnapshot;
@@ -948,17 +951,17 @@ fn add_properties_from_resolution(
 
 async fn resolve_member_owner_type(
     analysis: Option<&CompletionAnalysisContext<'_>>,
-    _file_content: &str,
+    file_content: &str,
     line: u32,
     column: u32,
     base_name: &str,
 ) -> Option<TypeResolution> {
-    resolve_member_owner_type_sync(analysis, _file_content, line, column, base_name)
+    resolve_member_owner_type_sync(analysis, file_content, line, column, base_name)
 }
 
 fn resolve_member_owner_type_sync(
     analysis: Option<&CompletionAnalysisContext<'_>>,
-    _file_content: &str,
+    file_content: &str,
     line: u32,
     column: u32,
     base_name: &str,
@@ -969,8 +972,195 @@ fn resolve_member_owner_type_sync(
             return Some(hint.clone());
         }
     }
-    let _ = (line, column, base_name, ctx);
-    None
+
+    let ir_program = ctx.ir_program.as_deref()?;
+    let index = LineIndex::new(file_content);
+    let byte_offset = index.utf16_position_to_byte_offset(file_content, line, column);
+    let byte_offset: u32 = byte_offset.try_into().ok()?;
+
+    let scope_id = {
+        let from_node = (0u32..=32)
+            .filter_map(|delta| byte_offset.checked_sub(delta))
+            .find_map(|offset| ir_program.find_node_at_byte_offset(offset))
+            .map(|node| match &node.kind {
+                SemanticNodeKind::FunctionDeclaration { body_scope, .. }
+                | SemanticNodeKind::ProcedureDeclaration { body_scope, .. } => *body_scope,
+                SemanticNodeKind::BlockScope { scope_id, .. } => *scope_id,
+                _ => node.scope_id,
+            });
+
+        let from_enclosing_decl = || {
+            ir_program
+                .nodes
+                .iter()
+                .filter(|node| node.span.contains(byte_offset))
+                .filter_map(|node| match &node.kind {
+                    SemanticNodeKind::FunctionDeclaration { body_scope, .. }
+                    | SemanticNodeKind::ProcedureDeclaration { body_scope, .. } => {
+                        Some((node.span.len(), *body_scope))
+                    }
+                    _ => None,
+                })
+                .min_by_key(|(len, _)| *len)
+                .map(|(_, scope_id)| scope_id)
+        };
+
+        let from_prev_node = || {
+            ir_program
+                .nodes
+                .iter()
+                .filter(|node| node.span.start < byte_offset)
+                .max_by_key(|node| node.span.start)
+                .map(|node| match &node.kind {
+                    SemanticNodeKind::FunctionDeclaration { body_scope, .. }
+                    | SemanticNodeKind::ProcedureDeclaration { body_scope, .. } => *body_scope,
+                    SemanticNodeKind::BlockScope { scope_id, .. } => *scope_id,
+                    _ => node.scope_id,
+                })
+        };
+
+        from_node.or_else(from_enclosing_decl).or_else(from_prev_node)?
+    };
+
+    let mut visible_scopes = Vec::new();
+    let mut current_scope_id = Some(scope_id);
+    while let Some(sid) = current_scope_id {
+        visible_scopes.push(sid);
+        current_scope_id = ir_program.get_scope(sid).and_then(|scope| scope.parent);
+    }
+
+    let scope_rank: HashMap<ScopeId, usize> = visible_scopes
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(idx, sid)| (sid, idx))
+        .collect();
+
+    #[derive(Debug)]
+    struct BestInit {
+        span_start: u32,
+        scope_rank: usize,
+        type_hint: Option<String>,
+        initializer_node: Option<usize>,
+    }
+
+    let base_lower = base_name.to_lowercase();
+    let mut best: Option<BestInit> = None;
+
+    for node in ir_program.nodes.iter() {
+        if node.span.start >= byte_offset {
+            continue;
+        }
+
+        let Some(&rank) = scope_rank.get(&node.scope_id) else {
+            continue;
+        };
+
+        let (type_hint, initializer_node) = match &node.kind {
+            SemanticNodeKind::VariableDeclaration {
+                name,
+                type_hint,
+                initial_value_node,
+                ..
+            } if name.to_lowercase() == base_lower => {
+                let hint = type_hint
+                    .as_ref()
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string);
+                (hint, *initial_value_node)
+            }
+            SemanticNodeKind::Assignment {
+                variable,
+                value_node,
+            } if variable.to_lowercase() == base_lower => (None, *value_node),
+            _ => continue,
+        };
+
+        let candidate = BestInit {
+            span_start: node.span.start,
+            scope_rank: rank,
+            type_hint,
+            initializer_node,
+        };
+
+        let replace = match &best {
+            None => true,
+            Some(best) => {
+                candidate.span_start > best.span_start
+                    || (candidate.span_start == best.span_start
+                        && candidate.scope_rank < best.scope_rank)
+            }
+        };
+
+        if replace {
+            best = Some(candidate);
+        }
+    }
+
+    let best = best?;
+    if let Some(type_hint) = best.type_hint {
+        let resolved = resolve_type_from_string(Some(ctx.resolver), &type_hint);
+        return (!resolved.is_unknown()).then_some(resolved);
+    }
+
+    let init_index = best.initializer_node?;
+    let init_node = ir_program.nodes.get(init_index)?;
+
+    fn build_ir_expr(program: &SemanticProgram, node_index: usize, depth: u8) -> Option<String> {
+        if depth == 0 {
+            return None;
+        }
+        let node = program.nodes.get(node_index)?;
+        match &node.kind {
+            SemanticNodeKind::GlobalPropertyAccess { name } => Some(name.clone()),
+            SemanticNodeKind::MemberAccess {
+                object_node,
+                object_name,
+                member_name,
+                ..
+            } => {
+                let base = if let Some(obj_node) = object_node {
+                    build_ir_expr(program, *obj_node, depth - 1)?
+                } else {
+                    object_name.clone()?
+                };
+                Some(format!("{}.{}", base, member_name))
+            }
+            SemanticNodeKind::FunctionCall {
+                function_name,
+                object_name,
+                object_node,
+            } => {
+                let base = if let Some(obj_node) = object_node {
+                    Some(build_ir_expr(program, *obj_node, depth - 1)?)
+                } else {
+                    object_name.clone()
+                };
+
+                match base {
+                    Some(base) => Some(format!("{}.{}()", base, function_name)),
+                    None => Some(format!("{}()", function_name)),
+                }
+            }
+            _ => None,
+        }
+    }
+
+    match &init_node.kind {
+        SemanticNodeKind::NewExpression { type_name, .. } => {
+            let resolved = resolve_type_from_string(Some(ctx.resolver), type_name);
+            (!resolved.is_unknown()).then_some(resolved)
+        }
+        SemanticNodeKind::MemberAccess { .. }
+        | SemanticNodeKind::FunctionCall { .. }
+        | SemanticNodeKind::GlobalPropertyAccess { .. } => {
+            let expr = build_ir_expr(ir_program, init_index, 16)?;
+            let resolved = ctx.resolver.resolve_expression_sync(&expr);
+            (!resolved.is_unknown()).then_some(resolved)
+        }
+        _ => None,
+    }
 }
 
 fn resolve_receiver_types_from_expression(
@@ -1384,51 +1574,6 @@ fn dedup_resolutions(resolutions: Vec<TypeResolution>) -> Vec<TypeResolution> {
         }
     }
     out
-}
-
-fn resolve_scope_for_member(ir_program: &SemanticProgram, line: u32, column: u32) -> ScopeId {
-    ir_program
-        .find_node_at_position(line, column)
-        .map(|node| node.scope_id)
-        .or_else(|| {
-            column.checked_sub(1).and_then(|col| {
-                ir_program
-                    .find_node_at_position(line, col)
-                    .map(|node| node.scope_id)
-            })
-        })
-        .or_else(|| find_scope_by_line(ir_program, line))
-        .or_else(|| find_scope_before_position(ir_program, line, column))
-        .unwrap_or(ir_program.symbols.root_scope)
-}
-
-fn find_scope_by_line(ir_program: &SemanticProgram, line: u32) -> Option<ScopeId> {
-    ir_program
-        .nodes
-        .iter()
-        .filter(|node| node.span.start_line <= line && line <= node.span.end_line)
-        .min_by_key(|node| {
-            let lines = node.span.end_line.saturating_sub(node.span.start_line);
-            let cols = node.span.end_column.saturating_sub(node.span.start_column);
-            (lines, cols)
-        })
-        .map(|node| node.scope_id)
-}
-
-fn find_scope_before_position(
-    ir_program: &SemanticProgram,
-    line: u32,
-    column: u32,
-) -> Option<ScopeId> {
-    ir_program
-        .nodes
-        .iter()
-        .filter(|node| {
-            node.span.end_line < line
-                || (node.span.end_line == line && node.span.end_column <= column)
-        })
-        .max_by_key(|node| (node.span.end_line, node.span.end_column))
-        .map(|node| node.scope_id)
 }
 
 fn add_symbols(

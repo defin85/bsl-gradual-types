@@ -61,7 +61,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_reports_utf16_spans_for_incomplete_new_with_emoji_prefix() {
+    fn parse_reports_byte_spans_for_incomplete_new_with_emoji_prefix() {
         let source = "Процедура Тест()\n😀 = Новый\nКонецПроцедуры";
         let result = parse(source, &ParseOptions::default()).unwrap();
 
@@ -71,13 +71,12 @@ mod tests {
             .find(|e| e.message.contains("Отсутствует тип после 'Новый'"))
             .expect("expected incomplete 'Новый' diagnostic");
 
-        let trimmed = "😀 = Новый";
-        let expected_col_utf16: u32 = trimmed.chars().map(|c| c.len_utf16() as u32).sum();
+        let line = "😀 = Новый";
+        let start_of_line = source.find(line).expect("line offset");
+        let expected_offset = (start_of_line + line.len()) as u32;
 
-        assert_eq!(err.span.start_line, 1);
-        assert_eq!(err.span.end_line, 1);
-        assert_eq!(err.span.start_column, expected_col_utf16);
-        assert_eq!(err.span.end_column, expected_col_utf16);
+        assert_eq!(err.span.start, expected_offset);
+        assert_eq!(err.span.end, expected_offset);
     }
 
     #[test]

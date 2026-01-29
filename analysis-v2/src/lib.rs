@@ -393,22 +393,12 @@ pub fn semantic_diagnostics(
             DiagnosticSeverity::Info => 2_u8,
             DiagnosticSeverity::Hint => 3_u8,
         };
-        (
-            a.line,
-            a.column,
-            a.end_line,
-            a.end_column,
-            severity_key(a.severity),
-            &a.message,
-        )
-            .cmp(&(
-                b.line,
-                b.column,
-                b.end_line,
-                b.end_column,
-                severity_key(b.severity),
-                &b.message,
-            ))
+        (a.span.start, a.span.end, severity_key(a.severity), &a.message).cmp(&(
+            b.span.start,
+            b.span.end,
+            severity_key(b.severity),
+            &b.message,
+        ))
     });
 
     SemanticDiagnosticsSnapshot(Arc::new(diagnostics))
@@ -618,12 +608,9 @@ fn populate_call_and_member_hints(
     fn call_ir_span(function: &Expression, span: bsl_shared::ir::Span) -> bsl_shared::ir::Span {
         match function {
             Expression::PropertyAccess { object, .. } => match object.as_ref() {
-                Expression::Identifier { span: obj_span, .. } => bsl_shared::ir::Span {
-                    start_line: obj_span.start_line,
-                    start_column: obj_span.start_column,
-                    end_line: span.end_line,
-                    end_column: span.end_column,
-                },
+                Expression::Identifier { span: obj_span, .. } => {
+                    bsl_shared::ir::Span::new(obj_span.start, span.end)
+                }
                 _ => span,
             },
             _ => span,
@@ -657,11 +644,16 @@ fn type_index_resolution_for_span(
     type_index: &type_inference_v2::TypeIndex,
     span: bsl_shared::ir::Span,
 ) -> Option<TypeResolution> {
-    let end_col_candidate = span.end_column.saturating_sub(1);
+    if let Some(exact) = type_index.type_for_exact_span(span) {
+        return Some(exact);
+    }
+    if span.start == span.end {
+        return type_index.type_at_byte_offset(span.start);
+    }
+    let end_inclusive = span.end.saturating_sub(1);
     type_index
-        .type_at_position(span.end_line, end_col_candidate)
-        .or_else(|| type_index.type_at_position(span.end_line, span.end_column))
-        .or_else(|| type_index.type_at_position(span.start_line, span.start_column))
+        .type_at_byte_offset(end_inclusive)
+        .or_else(|| type_index.type_at_byte_offset(span.start))
 }
 
 #[salsa::tracked]
@@ -683,9 +675,10 @@ pub fn type_index(
 }
 
 fn syntax_errors_only_in_directives(code: &str, errors: &[ParseError]) -> bool {
-    let lines: Vec<&str> = code.lines().collect();
+    let index = LineIndex::new(code);
     errors.iter().all(|err| {
-        let line = lines.get(err.span.start_line as usize).unwrap_or(&"");
+        let (line_no, _) = index.byte_offset_to_utf16_position(code, err.span.start as usize);
+        let line = index.line_text(code, line_no as usize);
         line.trim_start().starts_with('&')
     })
 }
@@ -934,17 +927,16 @@ impl AnalysisV2 {
         Ok(())
     }
 
-    pub fn type_at_position(
+    pub fn type_at_byte_offset(
         &self,
         file_id: FileId,
-        line: u32,
-        character: u32,
+        byte_offset: u32,
     ) -> Cancellable<Option<TypeResolution>> {
         let Some(&file) = self.files.get(&file_id) else {
             return Ok(None);
         };
         cancellable(|| type_index(&self.db, file, self.deps, self.settings).0.clone())
-            .map(|index| index.type_at_position(line, character))
+            .map(|index| index.type_at_byte_offset(byte_offset))
     }
 }
 

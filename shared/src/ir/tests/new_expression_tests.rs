@@ -1,19 +1,21 @@
 //! Тесты для NewExpression
 
 use crate::ir::{SemanticNode, SemanticNodeKind, SemanticProgram, Span};
+use bsl_line_index::LineIndex;
 
 #[test]
 fn test_new_expression_simple() {
     let mut program = SemanticProgram::new();
 
     // Простой конструктор: Новый Массив
+    let source = "Новый Массив";
     program.nodes.push(SemanticNode {
         kind: SemanticNodeKind::NewExpression {
             type_name: "Массив".to_string(),
             generic_params: None,
             is_dynamic: false,
         },
-        span: Span::new(1, 0, 1, 12),
+        span: Span::new(0, source.len() as u32),
         scope_id: program.symbols.root_scope,
     });
 
@@ -37,13 +39,14 @@ fn test_new_expression_dynamic() {
     let mut program = SemanticProgram::new();
 
     // Динамический конструктор: Новый("СправочникСсылка.Номенклатура")
+    let source = "Новый(\"СправочникСсылка.Номенклатура\")";
     program.nodes.push(SemanticNode {
         kind: SemanticNodeKind::NewExpression {
             type_name: "СправочникСсылка.Номенклатура".to_string(),
             generic_params: None,
             is_dynamic: true,
         },
-        span: Span::new(1, 0, 1, 40),
+        span: Span::new(0, source.len() as u32),
         scope_id: program.symbols.root_scope,
     });
 
@@ -65,13 +68,14 @@ fn test_new_expression_with_generics() {
     let mut program = SemanticProgram::new();
 
     // Generic конструктор: Новый Массив<Число>
+    let source = "Новый Массив<Число>";
     program.nodes.push(SemanticNode {
         kind: SemanticNodeKind::NewExpression {
             type_name: "Массив".to_string(),
             generic_params: Some(vec!["Число".to_string()]),
             is_dynamic: false,
         },
-        span: Span::new(1, 0, 1, 20),
+        span: Span::new(0, source.len() as u32),
         scope_id: program.symbols.root_scope,
     });
 
@@ -94,18 +98,20 @@ fn test_new_expression_to_dto() {
     let mut program = SemanticProgram::new();
 
     // Добавляем NewExpression узел
+    let source = "Новый Массив<Число>";
     program.nodes.push(SemanticNode {
         kind: SemanticNodeKind::NewExpression {
             type_name: "Массив".to_string(),
             generic_params: Some(vec!["Число".to_string()]),
             is_dynamic: false,
         },
-        span: Span::new(1, 0, 1, 16),
+        span: Span::new(0, source.len() as u32),
         scope_id: program.symbols.root_scope,
     });
 
     // Конвертируем в DTO
-    let dto = program.to_dto(false, false);
+    let line_index = LineIndex::new(source);
+    let dto = program.to_dto(false, false, source, &line_index);
 
     assert_eq!(dto.root_nodes.len(), 1);
 

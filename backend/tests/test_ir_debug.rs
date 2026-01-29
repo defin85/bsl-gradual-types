@@ -43,13 +43,11 @@ fn test_ir_outside_function() {
     println!("\nIR nodes: {}", ir.nodes.len());
     for (i, node) in ir.nodes.iter().enumerate() {
         println!(
-            "  [{}] {:?} at [{},{}..{},{}]",
+            "  [{}] {:?} at [bytes {}..{}]",
             i,
             node.kind,
-            node.span.start_line,
-            node.span.start_column,
-            node.span.end_line,
-            node.span.end_column
+            node.span.start,
+            node.span.end
         );
     }
 
@@ -102,13 +100,11 @@ fn test_ir_inside_function() {
     println!("\nIR nodes: {}", ir.nodes.len());
     for (i, node) in ir.nodes.iter().enumerate() {
         println!(
-            "  [{}] {:?} at [{},{}..{},{}]",
+            "  [{}] {:?} at [bytes {}..{}]",
             i,
             node.kind,
-            node.span.start_line,
-            node.span.start_column,
-            node.span.end_line,
-            node.span.end_column
+            node.span.start,
+            node.span.end
         );
     }
 

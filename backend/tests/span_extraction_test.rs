@@ -3,9 +3,10 @@
 /// Проверяет:
 /// - TreeSitter парсер извлекает span корректно
 /// - AST → IR конверсия передаёт span для всех Statement типов
-/// - find_node_at_position() находит узлы по координатам
+/// - find_node_at_byte_offset() находит узлы по byte offset
 use bsl_analysis_v2::AstToIrConverter;
 use bsl_backend::system::parser_coordinator::ParserCoordinator;
+use bsl_backend::system::LineIndex;
 use bsl_shared::domain::repository::InMemoryTypeRepository;
 use bsl_shared::domain::signature_index::SignatureIndex;
 use std::sync::Arc;
@@ -24,7 +25,7 @@ fn test_span_extraction_from_tree_sitter() {
     // Act: Парсинг через TreeSitter
     let parse_result = parser.parse(code).expect("Парсинг должен пройти успешно");
 
-    // Assert: Проверяем, что span НЕ равен (0,0,0,0)
+    // Assert: Проверяем, что span не пустой
     assert!(
         !parse_result.program.statements.is_empty(),
         "Должна быть хотя бы одна функция"
@@ -37,13 +38,10 @@ fn test_span_extraction_from_tree_sitter() {
             _ => panic!("Первый statement должен быть FunctionDecl"),
         };
 
-        // Проверяем, что span НЕ stub (0,0,0,0)
+        // Для первого узла start может быть 0 (начало файла), поэтому проверяем непустой диапазон.
         assert!(
-            span.start_line != 0
-                || span.start_column != 0
-                || span.end_line != 0
-                || span.end_column != 0,
-            "Span не должен быть stub (0,0,0,0), получен: {:?}",
+            span.end > span.start,
+            "Span должен быть непустым (end > start), получен: {:?}",
             span
         );
 
@@ -81,12 +79,7 @@ fn test_span_propagation_ast_to_ir() {
     let nodes_with_real_spans: Vec<_> = ir_program
         .nodes
         .iter()
-        .filter(|node| {
-            node.span.start_line != 0
-                || node.span.start_column != 0
-                || node.span.end_line != 0
-                || node.span.end_column != 0
-        })
+        .filter(|node| node.span.end > node.span.start)
         .collect();
 
     println!(
@@ -114,13 +107,15 @@ fn test_span_propagation_ast_to_ir() {
 }
 
 #[test]
-fn test_find_node_at_position() {
+fn test_find_node_at_byte_offset() {
     // Arrange: BSL код с известными позициями
     let code = r#"Функция Тест()
     Перем СправочникКонтрагенты;
     СправочникКонтрагенты = Справочники.Контрагенты;
     Возврат СправочникКонтрагенты;
 КонецФункции"#;
+
+    let index = LineIndex::new(code);
 
     let parser = ParserCoordinator::with_fallback();
     let parse_result = parser.parse(code).expect("Парсинг должен пройти успешно");
@@ -137,8 +132,9 @@ fn test_find_node_at_position() {
     .expect("Конверсия AST → IR должна пройти успешно");
 
     // Act: Поиск узла по позиции в строке 2 (Перем СправочникКонтрагенты)
-    // Строки в LSP 0-based, tree-sitter тоже 0-based
-    let node_at_line_1 = ir_program.find_node_at_position(1, 10); // "Перем" на строке 1
+    // Линии/колонки в LSP 0-based и `Position.character` измеряется в UTF-16 code units.
+    let byte_offset_1 = index.utf16_position_to_byte_offset(code, 1, 10) as u32;
+    let node_at_line_1 = ir_program.find_node_at_byte_offset(byte_offset_1); // "Перем" на строке 1
 
     // Assert: Должен найти узел
     assert!(
@@ -147,19 +143,21 @@ fn test_find_node_at_position() {
     );
 
     if let Some(node) = node_at_line_1 {
-        println!("✅ find_node_at_position(1, 10) нашёл узел:");
+        println!("✅ find_node_at_byte_offset(...) нашёл узел:");
         println!("   Span: {:?}", node.span);
         println!("   Scope ID: {}", node.scope_id.0);
 
         // Проверяем, что span действительно содержит позицию (1, 10)
         assert!(
-            node.span.contains(1, 10),
-            "Span должен содержать позицию (1, 10)"
+            node.span.contains(byte_offset_1),
+            "Span должен содержать byte offset {}",
+            byte_offset_1
         );
     }
 
     // Act: Поиск узла в строке 2 (присваивание)
-    let node_at_line_2 = ir_program.find_node_at_position(2, 10);
+    let byte_offset_2 = index.utf16_position_to_byte_offset(code, 2, 10) as u32;
+    let node_at_line_2 = ir_program.find_node_at_byte_offset(byte_offset_2);
 
     // Assert: Должен найти узел присваивания
     assert!(
@@ -168,14 +166,15 @@ fn test_find_node_at_position() {
     );
 
     if let Some(node) = node_at_line_2 {
-        println!("✅ find_node_at_position(2, 10) нашёл узел:");
+        println!("✅ find_node_at_byte_offset(...) нашёл узел:");
         println!("   Span: {:?}", node.span);
         println!("   Scope ID: {}", node.scope_id.0);
 
         // Проверяем, что span действительно содержит позицию (2, 10)
         assert!(
-            node.span.contains(2, 10),
-            "Span должен содержать позицию (2, 10)"
+            node.span.contains(byte_offset_2),
+            "Span должен содержать byte offset {}",
+            byte_offset_2
         );
     }
 }
@@ -220,12 +219,7 @@ fn test_span_for_all_statement_types() {
     let nodes_with_real_spans: Vec<_> = ir_program
         .nodes
         .iter()
-        .filter(|node| {
-            node.span.start_line != 0
-                || node.span.start_column != 0
-                || node.span.end_line != 0
-                || node.span.end_column != 0
-        })
+        .filter(|node| node.span.end > node.span.start)
         .collect();
 
     println!("✅ Проверка span для разных типов Statement:");

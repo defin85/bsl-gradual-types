@@ -618,7 +618,7 @@ mod tests {
         let signature_index = SignatureIndex::new();
         let mut program = SemanticProgram::new();
 
-        let call_span = Span::new(5, 10, 5, 40);
+        let call_span = Span::new(10, 40);
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::FunctionCall {
                 function_name: "НесуществующийМетод".to_string(),
@@ -658,7 +658,7 @@ mod tests {
         let signature_index = SignatureIndex::new();
         let mut program = SemanticProgram::new();
 
-        let access_span = Span::new(3, 5, 3, 35);
+        let access_span = Span::new(5, 35);
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::MemberAccess {
                 object_node: None,
@@ -699,7 +699,7 @@ mod tests {
         let signature_index = SignatureIndex::new();
         let mut program = SemanticProgram::new();
 
-        let call_span = Span::new(5, 10, 5, 40);
+        let call_span = Span::new(10, 40);
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::FunctionCall {
                 function_name: "НесуществующийМетод".to_string(),
@@ -735,7 +735,7 @@ mod tests {
         let signature_index = SignatureIndex::new();
         let mut program = SemanticProgram::new();
 
-        let access_span = Span::new(3, 5, 3, 35);
+        let access_span = Span::new(5, 35);
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::MemberAccess {
                 object_node: None,
@@ -772,7 +772,7 @@ mod tests {
         let signature_index = SignatureIndex::new();
         let mut program = SemanticProgram::new();
 
-        let call_span = Span::new(5, 10, 5, 40);
+        let call_span = Span::new(10, 40);
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::FunctionCall {
                 function_name: "Метод".to_string(),
@@ -815,7 +815,7 @@ mod tests {
         let mut unknown = TypeResolution::unknown();
         unknown.metadata.uncertainty_reason = Some(UncertaintyReason::ConfigurationNotLoaded);
 
-        let access_span = Span::new(3, 5, 3, 35);
+        let access_span = Span::new(5, 35);
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::MemberAccess {
                 object_node: None,
@@ -857,7 +857,7 @@ mod tests {
             name: "Foo".to_string(),
         });
 
-        let call_span = Span::new(5, 10, 5, 40);
+        let call_span = Span::new(10, 40);
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::FunctionCall {
                 function_name: "Метод".to_string(),
@@ -931,7 +931,7 @@ mod tests {
                 member_name: "НесуществующийСправочник".to_string(),
                 access_kind: MemberAccessKind::Property,
             },
-            span: Span::new(1, 0, 1, 35),
+            span: Span::new(0, 35),
             scope_id: program.symbols.root_scope,
         });
 
@@ -993,7 +993,7 @@ mod tests {
                 member_name: "Контрагенты".to_string(),
                 access_kind: MemberAccessKind::Property,
             },
-            span: Span::new(1, 0, 1, 25),
+            span: Span::new(0, 25),
             scope_id: program.symbols.root_scope,
         });
 
@@ -1032,7 +1032,7 @@ mod tests {
                 member_name: "НесуществующийСправочник".to_string(),
                 access_kind: MemberAccessKind::Property,
             },
-            span: Span::new(1, 0, 1, 35),
+            span: Span::new(0, 35),
             scope_id: program.symbols.root_scope,
         });
 
@@ -1063,7 +1063,7 @@ mod tests {
         let signature_index = SignatureIndex::new();
         let mut program = SemanticProgram::new();
 
-        let call_span = Span::new(5, 10, 5, 40);
+        let call_span = Span::new(10, 40);
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::FunctionCall {
                 function_name: "НесуществующийМетод".to_string(),
@@ -1105,7 +1105,7 @@ mod tests {
         let signature_index = SignatureIndex::new();
         let mut program = SemanticProgram::new();
 
-        let access_span = Span::new(3, 5, 3, 35);
+        let access_span = Span::new(5, 35);
         program.nodes.push(SemanticNode {
             kind: SemanticNodeKind::MemberAccess {
                 object_node: None,

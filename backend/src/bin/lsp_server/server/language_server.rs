@@ -1220,8 +1220,12 @@ impl LanguageServer for BslLanguageServer {
                             .find(|(_, ch)| !ch.is_whitespace())?;
                         let probe_utf16 =
                             bsl_backend::system::positioning::byte_offset_to_utf16(line_text, probe_byte);
+                        let offset = analysis
+                            .utf16_position_to_byte_offset(file_id, position.line, probe_utf16)
+                            .ok()
+                            .flatten()?;
                         analysis
-                            .type_at_position(file_id, position.line, probe_utf16)
+                            .type_at_byte_offset(file_id, offset.min(u32::MAX as usize) as u32)
                             .ok()
                             .flatten()
                     });
@@ -1603,18 +1607,26 @@ impl LanguageServer for BslLanguageServer {
                     }
                 }
 
-                let type_at_position_hint = analysis
-                    .type_at_position(file_id, position.line, position.character)
-                    .ok()
-                    .flatten();
+                let type_at_position_hint = {
+                    let offset = analysis
+                        .utf16_position_to_byte_offset(file_id, position.line, position.character)
+                        .ok()
+                        .flatten();
+                    offset.and_then(|offset| {
+                        analysis
+                            .type_at_byte_offset(file_id, offset.min(u32::MAX as usize) as u32)
+                            .ok()
+                            .flatten()
+                    })
+                };
                 let receiver_type_hint = ir_program.as_ref().and_then(|program| {
-                    let node = program
-                        .find_node_at_position(position.line, position.character)
-                        .or_else(|| {
-                            position.character.checked_sub(1).and_then(|col| {
-                                program.find_node_at_position(position.line, col)
-                            })
-                        })?;
+                    let offset = analysis
+                        .utf16_position_to_byte_offset(file_id, position.line, position.character)
+                        .ok()
+                        .flatten()
+                        .map(|offset| offset.min(u32::MAX as usize) as u32)?;
+
+                    let node = program.find_node_at_byte_offset(offset)?;
 
                     let object_span = match &node.kind {
                         bsl_shared::ir::SemanticNodeKind::MemberAccess { object_node, .. } => {
@@ -1627,7 +1639,7 @@ impl LanguageServer for BslLanguageServer {
                     }?;
 
                     analysis
-                        .type_at_position(file_id, object_span.start_line, object_span.start_column)
+                        .type_at_byte_offset(file_id, object_span.start)
                         .ok()
                         .flatten()
                 });
@@ -1788,8 +1800,16 @@ impl LanguageServer for BslLanguageServer {
                         position.character,
                     )?;
                     let receiver_end_character = query.receiver_end_character?;
+                    let offset = analysis
+                        .utf16_position_to_byte_offset(
+                            file_id,
+                            query.call_start_line,
+                            receiver_end_character,
+                        )
+                        .ok()
+                        .flatten()?;
                     analysis
-                        .type_at_position(file_id, query.call_start_line, receiver_end_character)
+                        .type_at_byte_offset(file_id, offset.min(u32::MAX as usize) as u32)
                         .ok()
                         .flatten()
                 });
@@ -1899,13 +1919,24 @@ impl LanguageServer for BslLanguageServer {
                 }
 
                 let analysis = self.analysis_v2.snapshot().await;
+                let file_text = analysis
+                    .file_text(file_id)
+                    .ok()
+                    .flatten()
+                    .ok_or_else(tower_lsp::jsonrpc::Error::internal_error)?;
+                let line_index = analysis
+                    .line_index(file_id)
+                    .ok()
+                    .flatten()
+                    .ok_or_else(tower_lsp::jsonrpc::Error::internal_error)?;
                 let ir_program = analysis
                     .ir(file_id)
                     .ok()
                     .flatten()
                     .ok_or_else(tower_lsp::jsonrpc::Error::internal_error)?;
 
-                let semantic_tree = semantic_tree_from_ir(ir_program.as_ref(), true, true);
+                let semantic_tree =
+                    semantic_tree_from_ir(ir_program.as_ref(), true, true, file_text.as_ref(), line_index.as_ref());
                 let result = semantic_html_from_tree(
                     &semantic_tree,
                     request.theme.as_deref(),
@@ -1986,6 +2017,16 @@ impl LanguageServer for BslLanguageServer {
                 }
 
                 let analysis = self.analysis_v2.snapshot().await;
+                let file_text = analysis
+                    .file_text(file_id)
+                    .ok()
+                    .flatten()
+                    .ok_or_else(tower_lsp::jsonrpc::Error::internal_error)?;
+                let line_index = analysis
+                    .line_index(file_id)
+                    .ok()
+                    .flatten()
+                    .ok_or_else(tower_lsp::jsonrpc::Error::internal_error)?;
                 let ir_program = analysis
                     .ir(file_id)
                     .ok()
@@ -1996,6 +2037,8 @@ impl LanguageServer for BslLanguageServer {
                     ir_program.as_ref(),
                     request.include_call_graph,
                     request.include_flow_sensitive,
+                    file_text.as_ref(),
+                    line_index.as_ref(),
                 );
 
                 Ok(Some(serde_json::to_value(result).map_err(|_| {

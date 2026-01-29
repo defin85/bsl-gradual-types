@@ -75,6 +75,15 @@ pub enum SemanticNodeKind {
         value_node: Option<usize>, // MILESTONE 3.5: индекс узла value expression (для hover)
     },
 
+    /// Бинарное выражение (для hover/diagnostics): `"a" + 1`, `1 < 2`
+    ///
+    /// Используется как "якорь" для связи IR ↔ type_index (AST spans),
+    /// чтобы semantic diagnostics могли получать тип выражения по span.
+    BinaryExpression {
+        /// Оператор (например, "+", "<", "=")
+        operator: String,
+    },
+
     /// Объявление функции
     ///
     /// # Context-Aware Validation

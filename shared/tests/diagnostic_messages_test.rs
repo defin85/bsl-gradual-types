@@ -25,7 +25,7 @@ fn test_nonexistent_method_compact_format_no_variable_name() {
         variable_name: None,
     };
 
-    let span = Span::new(1, 0, 1, 10);
+    let span = Span::new(10, 20);
     let diagnostic = error.to_diagnostic_with_detail(span, DetailLevel::Compact);
 
     println!("Message: {}", diagnostic.message);
@@ -51,7 +51,7 @@ fn test_nonexistent_method_compact_format_with_variable_name() {
         variable_name: Some("списокИмен".to_string()),
     };
 
-    let diagnostic = error.to_diagnostic_with_detail(Span::new(1, 0, 1, 10), DetailLevel::Compact);
+    let diagnostic = error.to_diagnostic_with_detail(Span::new(10, 20), DetailLevel::Compact);
 
     println!("Message: {}", diagnostic.message);
 
@@ -78,7 +78,7 @@ fn test_parameter_type_mismatch_compact_format() {
         param_variable_name: Some("индекс".to_string()),
     };
 
-    let diagnostic = error.to_diagnostic_with_detail(Span::new(1, 0, 1, 10), DetailLevel::Compact);
+    let diagnostic = error.to_diagnostic_with_detail(Span::new(10, 20), DetailLevel::Compact);
 
     println!("Message: {}", diagnostic.message);
 
@@ -104,7 +104,7 @@ fn test_nonexistent_method_standard_format_with_variable_name() {
         variable_name: Some("списокИмен".to_string()),
     };
 
-    let diagnostic = error.to_diagnostic_with_detail(Span::new(1, 0, 1, 10), DetailLevel::Full);
+    let diagnostic = error.to_diagnostic_with_detail(Span::new(10, 20), DetailLevel::Full);
 
     println!("Message: {}", diagnostic.message);
 
@@ -130,7 +130,7 @@ fn test_nonexistent_method_standard_format_without_variable_name() {
         variable_name: None,
     };
 
-    let diagnostic = error.to_diagnostic_with_detail(Span::new(1, 0, 1, 10), DetailLevel::Full);
+    let diagnostic = error.to_diagnostic_with_detail(Span::new(10, 20), DetailLevel::Full);
 
     println!("Message: {}", diagnostic.message);
 
@@ -156,7 +156,7 @@ fn test_parameter_type_mismatch_standard_format() {
         param_variable_name: Some("индекс".to_string()),
     };
 
-    let diagnostic = error.to_diagnostic_with_detail(Span::new(1, 0, 1, 10), DetailLevel::Full);
+    let diagnostic = error.to_diagnostic_with_detail(Span::new(10, 20), DetailLevel::Full);
 
     println!("Message: {}", diagnostic.message);
 
@@ -181,7 +181,7 @@ fn test_nonexistent_method_detailed_format_with_hint() {
         variable_name: Some("списокИмен".to_string()),
     };
 
-    let diagnostic = error.to_diagnostic_with_detail(Span::new(1, 0, 1, 10), DetailLevel::Detailed);
+    let diagnostic = error.to_diagnostic_with_detail(Span::new(10, 20), DetailLevel::Detailed);
 
     println!("Message:\n{}", diagnostic.message);
 
@@ -207,7 +207,7 @@ fn test_parameter_type_mismatch_detailed_format_with_hint() {
         param_variable_name: Some("индекс".to_string()),
     };
 
-    let diagnostic = error.to_diagnostic_with_detail(Span::new(1, 0, 1, 10), DetailLevel::Detailed);
+    let diagnostic = error.to_diagnostic_with_detail(Span::new(10, 20), DetailLevel::Detailed);
 
     println!("Message:\n{}", diagnostic.message);
 
@@ -230,7 +230,7 @@ fn test_nonexistent_property_detailed_format_with_hint() {
         variable_name: Some("таблица".to_string()),
     };
 
-    let diagnostic = error.to_diagnostic_with_detail(Span::new(1, 0, 1, 10), DetailLevel::Detailed);
+    let diagnostic = error.to_diagnostic_with_detail(Span::new(10, 20), DetailLevel::Detailed);
 
     println!("Message:\n{}", diagnostic.message);
 
@@ -252,7 +252,7 @@ fn test_simple_type_as_collection_detailed_format_with_hint() {
         variable_name: Some("числовое_значение".to_string()),
     };
 
-    let diagnostic = error.to_diagnostic_with_detail(Span::new(1, 0, 1, 10), DetailLevel::Detailed);
+    let diagnostic = error.to_diagnostic_with_detail(Span::new(10, 20), DetailLevel::Detailed);
 
     println!("Message:\n{}", diagnostic.message);
 
@@ -278,7 +278,7 @@ fn test_property_without_variable_name_fallback_to_brief() {
         variable_name: None,
     };
 
-    let diagnostic = error.to_diagnostic_with_detail(Span::new(1, 0, 1, 10), DetailLevel::Full);
+    let diagnostic = error.to_diagnostic_with_detail(Span::new(10, 20), DetailLevel::Full);
 
     println!("Message: {}", diagnostic.message);
 
@@ -301,7 +301,7 @@ fn test_collection_operation_without_variable_name_fallback() {
         variable_name: None,
     };
 
-    let diagnostic = error.to_diagnostic_with_detail(Span::new(1, 0, 1, 10), DetailLevel::Full);
+    let diagnostic = error.to_diagnostic_with_detail(Span::new(10, 20), DetailLevel::Full);
 
     println!("Message: {}", diagnostic.message);
 
@@ -325,7 +325,7 @@ fn test_old_to_diagnostic_method_still_works() {
     };
 
     // Старый метод to_diagnostic(span) должен работать
-    let diagnostic = error.to_diagnostic(Span::new(1, 0, 1, 10));
+    let diagnostic = error.to_diagnostic(Span::new(10, 20));
 
     println!("Message: {}", diagnostic.message);
 
@@ -349,13 +349,10 @@ fn test_diagnostic_has_correct_span_information() {
         variable_name: None,
     };
 
-    let span = Span::new(5, 10, 5, 20);
+    let span = Span::new(50, 60);
     let diagnostic = error.to_diagnostic_with_detail(span, DetailLevel::Full);
 
-    assert_eq!(diagnostic.line, 5);
-    assert_eq!(diagnostic.column, 10);
-    assert_eq!(diagnostic.end_line, 5);
-    assert_eq!(diagnostic.end_column, 20);
+    assert_eq!(diagnostic.span, span);
     assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
 
     println!("✅ PASS: Span информация сохранена");
@@ -375,7 +372,7 @@ fn test_parameter_mismatch_param_index_reflected() {
         param_variable_name: None,
     };
 
-    let diagnostic = error.to_diagnostic(Span::new(1, 0, 1, 10));
+    let diagnostic = error.to_diagnostic(Span::new(10, 20));
 
     println!("Message: {}", diagnostic.message);
 
@@ -398,7 +395,7 @@ fn test_messages_are_russian_and_readable() {
         variable_name: Some("переменная".to_string()),
     };
 
-    let diagnostic = error.to_diagnostic_with_detail(Span::new(1, 0, 1, 10), DetailLevel::Detailed);
+    let diagnostic = error.to_diagnostic_with_detail(Span::new(10, 20), DetailLevel::Detailed);
 
     println!("Message:\n{}\n", diagnostic.message);
 
@@ -430,7 +427,7 @@ fn test_detailed_hints_start_with_emoji() {
         variable_name: Some("x".to_string()),
     };
 
-    let diagnostic = error.to_diagnostic_with_detail(Span::new(1, 0, 1, 10), DetailLevel::Detailed);
+    let diagnostic = error.to_diagnostic_with_detail(Span::new(10, 20), DetailLevel::Detailed);
 
     println!("Message:\n{}\n", diagnostic.message);
 
@@ -458,9 +455,9 @@ fn test_method_validator_with_variable_contextual() {
     };
 
     let diag_with =
-        error_with_var.to_diagnostic_with_detail(Span::new(1, 0, 1, 10), DetailLevel::Full);
+        error_with_var.to_diagnostic_with_detail(Span::new(10, 20), DetailLevel::Full);
     let diag_without =
-        error_without_var.to_diagnostic_with_detail(Span::new(1, 0, 1, 10), DetailLevel::Full);
+        error_without_var.to_diagnostic_with_detail(Span::new(10, 20), DetailLevel::Full);
 
     println!("With variable: {}", diag_with.message);
     println!("Without variable: {}", diag_without.message);
@@ -505,7 +502,7 @@ fn test_all_error_kinds_have_brief_format() {
         },
     ];
 
-    let span = Span::new(1, 0, 1, 10);
+    let span = Span::new(10, 20);
 
     for error in &errors {
         let compact = error.to_diagnostic_with_detail(span, DetailLevel::Compact);

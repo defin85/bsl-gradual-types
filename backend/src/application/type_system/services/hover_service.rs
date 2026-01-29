@@ -10,8 +10,10 @@ use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::ir::{SemanticNode, SemanticNodeKind, SemanticProgram, Span};
 
 use crate::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter};
+use crate::system::LineIndex;
 
 use super::super::extractors::symbol_extractor::extract_word_at_position;
+use super::super::formatters::hover_formatters::format_expected_type_hover;
 use super::super::formatters::format_semantic_node_info;
 
 /// Hover по уже готовому `SemanticProgram` (без legacy парсинга/IR build).
@@ -60,9 +62,16 @@ fn compute_hover_info_from_ir(
     // Milestone 2.11 Task B1: DEBUG logs for node search
     debug!("Looking for node at position {}:{}", line, column);
 
-    let node_at_position = ir_program.find_node_at_position(line, column);
+    let byte_offset = analysis
+        .utf16_position_to_byte_offset(file_id, line, column)
+        .ok()
+        .flatten()
+        .map(|offset| offset.min(u32::MAX as usize) as u32);
+
+    let node_at_position = byte_offset.and_then(|offset| ir_program.find_node_at_byte_offset(offset));
     let word_under_cursor = extract_word_at_position(file_content, line, column);
-    let type_at_cursor = analysis.type_at_position(file_id, line, column).ok().flatten();
+    let type_at_cursor = byte_offset
+        .and_then(|offset| analysis.type_at_byte_offset(file_id, offset).ok().flatten());
 
     let formatter = if let Some(config) = hover_config.clone() {
         HoverFormatter::new(config, metadata_lookup.clone())
@@ -120,9 +129,19 @@ fn compute_hover_info_from_ir(
     // IR-level hover для управляющих конструкций (если/пока/для), чтобы сохранять поведение
     // существующих тестов и UI (и избежать legacy flow-sensitive логики).
     if let Some(word) = word_under_cursor.as_deref() {
-        if let Some(node) = control_node_at_position(ir_program, line, column) {
-            if control_hover_requested(node, word) {
-                return Some(format_semantic_node_info(node, file_content, metadata_lookup));
+        if let Some(offset) = byte_offset {
+            if let Some(node) = control_node_at_position(ir_program, offset) {
+                if control_hover_requested(node, word) {
+                    return format_control_flow_hover(
+                        analysis,
+                        file_id,
+                        file_content,
+                        line,
+                        column,
+                        node,
+                    )
+                    .or_else(|| Some(format_semantic_node_info(node, file_content, metadata_lookup)));
+                }
             }
         }
     }
@@ -138,9 +157,8 @@ fn compute_hover_info_from_ir(
 
     if let (Some(word), Some(resolution)) = (&word_under_cursor, &type_at_cursor) {
         info!(
-            "Hover v2 type_at_position({}, {}): {}",
-            line,
-            column,
+            "Hover v2 type_at_byte_offset({}): {}",
+            byte_offset.unwrap_or_default(),
             resolution.type_name()
         );
         return Some(formatter.format_variable(word, resolution));
@@ -169,16 +187,12 @@ fn type_at_span_start(
     file_id: bsl_analysis_v2::FileId,
     span: Span,
 ) -> Option<TypeResolution> {
-    analysis
-        .type_at_position(file_id, span.start_line, span.start_column)
-        .ok()
-        .flatten()
+    analysis.type_at_byte_offset(file_id, span.start).ok().flatten()
 }
 
 fn control_node_at_position(
     ir_program: &SemanticProgram,
-    line: u32,
-    column: u32,
+    byte_offset: u32,
 ) -> Option<&SemanticNode> {
     ir_program
         .nodes
@@ -190,13 +204,8 @@ fn control_node_at_position(
             | SemanticNodeKind::ForEachLoop { .. } => true,
             _ => false,
         })
-        .filter(|node| span_contains_position(node.span, line, column))
-        .min_by_key(|node| {
-            (
-                node.span.end_line.saturating_sub(node.span.start_line),
-                node.span.end_column.saturating_sub(node.span.start_column),
-            )
-        })
+        .filter(|node| node.span.contains(byte_offset))
+        .min_by_key(|node| node.span.len())
 }
 
 fn control_hover_requested(node: &SemanticNode, word: &str) -> bool {
@@ -215,24 +224,107 @@ fn control_hover_requested(node: &SemanticNode, word: &str) -> bool {
     }
 }
 
-fn span_contains_position(span: Span, line: u32, column: u32) -> bool {
-    if line < span.start_line || line > span.end_line {
-        return false;
+fn span_contains_position(span: Span, byte_offset: u32) -> bool {
+    span.contains(byte_offset)
+}
+
+fn format_control_flow_hover(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    file_content: &str,
+    line: u32,
+    column: u32,
+    node: &SemanticNode,
+) -> Option<String> {
+    let _ = column;
+
+    let index = LineIndex::new(file_content);
+    let line_text = index.line_text(file_content, line as usize);
+    let line_start = index.utf16_position_to_byte_offset(file_content, line, 0);
+    let line_start: u32 = line_start.try_into().ok()?;
+
+    fn first_non_ws_byte_index(s: &str) -> Option<usize> {
+        s.char_indices()
+            .find(|(_, ch)| !ch.is_whitespace())
+            .map(|(idx, _)| idx)
     }
 
-    if span.start_line == span.end_line {
-        return column >= span.start_column && column <= span.end_column;
+    fn slice_range_after_keyword<'a>(
+        line: &'a str,
+        keyword_lower: &str,
+        terminator_lower: Option<&str>,
+    ) -> Option<(usize, &'a str)> {
+        let lower = line.to_lowercase();
+        let start = lower.find(keyword_lower)?;
+        let after = start + keyword_lower.len();
+        let end = if let Some(term) = terminator_lower {
+            lower[after..].find(term).map(|idx| after + idx)?
+        } else {
+            line.len()
+        };
+        Some((after, &line[after..end]))
     }
 
-    if line == span.start_line {
-        return column >= span.start_column;
-    }
+    let (title, expected_type, probe_in_line) = match &node.kind {
+        SemanticNodeKind::IfStatement { .. } => {
+            let (after, cond) = slice_range_after_keyword(line_text, "если", Some("тогда"))?;
+            let rel = cond
+                .find(|ch: char| matches!(ch, '<' | '>' | '='))
+                .or_else(|| first_non_ws_byte_index(cond))?;
+            (
+                "**Условие:** `Если ... Тогда`".to_string(),
+                "Булево",
+                after + rel,
+            )
+        }
+        SemanticNodeKind::WhileLoop { .. } => {
+            let (after, cond) = slice_range_after_keyword(line_text, "пока", Some("цикл"))?;
+            let rel = first_non_ws_byte_index(cond)?;
+            (
+                "**Цикл:** `Пока ... Цикл`".to_string(),
+                "Булево",
+                after + rel,
+            )
+        }
+        SemanticNodeKind::ForLoop { variable, .. } => {
+            let lower = line_text.to_lowercase();
+            let eq_idx = line_text.find('=')?;
+            let po_idx = lower[eq_idx + 1..]
+                .find("по")
+                .map(|idx| eq_idx + 1 + idx)?;
+            let range_start = &line_text[eq_idx + 1..po_idx];
+            let rel = first_non_ws_byte_index(range_start)?;
+            (
+                format!("**Цикл:** `Для {} = ... По ... Цикл`", variable),
+                "Число",
+                (eq_idx + 1) + rel,
+            )
+        }
+        SemanticNodeKind::ForEachLoop { variable, .. } => {
+            let (after, expr) = slice_range_after_keyword(line_text, "из", Some("цикл"))?;
+            let rel = first_non_ws_byte_index(expr)?;
+            (
+                format!("**Цикл:** `Для Каждого {} Из ... Цикл`", variable),
+                "Коллекция",
+                after + rel,
+            )
+        }
+        _ => return None,
+    };
 
-    if line == span.end_line {
-        return column <= span.end_column;
-    }
+    let probe_abs = line_start.checked_add(probe_in_line.try_into().ok()?)?;
+    let actual_type = analysis
+        .type_at_byte_offset(file_id, probe_abs)
+        .ok()
+        .flatten()
+        .unwrap_or_else(TypeResolution::unknown);
 
-    true
+    let mut out = String::new();
+    out.push_str(&title);
+    out.push_str("\n\n");
+    out.push_str(&format_expected_type_hover(expected_type, &actual_type));
+    out.push_str(&format!("\n\n📍 Span: {}..{}", node.span.start, node.span.end));
+    Some(out)
 }
 
 /// Extract symbol information at specified position from AST

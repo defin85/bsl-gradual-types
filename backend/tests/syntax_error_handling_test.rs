@@ -4,6 +4,7 @@
 //! и возвращает ParseResult с syntax_errors
 
 use bsl_backend::system::tree_sitter_adapter::TreeSitterAdapter;
+use bsl_line_index::LineIndex;
 use bsl_shared::domain::types::ErrorType;
 use tree_sitter::Parser;
 
@@ -39,6 +40,7 @@ fn test_incomplete_function() {
     // Незакрытая функция — tree-sitter создаст ERROR узлы
     let code = "Функция Тест()\n    А = 1;\n// Нет КонецФункции";
     let result = parse_bsl_with_errors(code).expect("Парсинг с ошибками должен вернуть результат");
+    let index = LineIndex::new(code);
 
     // Должны быть обнаружены синтаксические ошибки
     assert!(
@@ -52,7 +54,8 @@ fn test_incomplete_function() {
 
     // Проверяем, что ошибки имеют корректные span
     for error in &result.syntax_errors {
-        assert!(error.span.start_line < 100, "Span должен быть валидным");
+        let (start_line, _) = index.byte_offset_to_utf16_position(code, error.span.start as usize);
+        assert!(start_line < 100, "Span должен быть валидным");
         assert!(
             !error.message.is_empty(),
             "Сообщение об ошибке не должно быть пустым"
@@ -71,14 +74,17 @@ fn test_invalid_expression() {
             // Tree-sitter может распарсить с ERROR узлами или вернуть ошибку
             // Проверяем что если распарсилось, то есть ошибки
             if parse_result.has_errors() {
+                let index = LineIndex::new(code);
                 println!(
                     "✅ Обнаружены синтаксические ошибки: {}",
                     parse_result.syntax_errors.len()
                 );
                 for error in &parse_result.syntax_errors {
+                    let (line, column) =
+                        index.byte_offset_to_utf16_position(code, error.span.start as usize);
                     println!(
                         "  - [{}:{}] {}",
-                        error.span.start_line, error.span.start_column, error.message
+                        line, column, error.message
                     );
                 }
             }
@@ -147,27 +153,33 @@ fn test_error_span_accuracy() {
     // Проверяем точность span в ошибках
     let code = "А = 10\nБ = = 20;"; // Ошибка на второй строке
     let result = parse_bsl_with_errors(code);
+    let index = LineIndex::new(code);
 
     if let Ok(parse_result) = result {
         if parse_result.has_errors() {
             for error in &parse_result.syntax_errors {
+                let (start_line, start_column) =
+                    index.byte_offset_to_utf16_position(code, error.span.start as usize);
+                let (end_line, end_column) =
+                    index.byte_offset_to_utf16_position(code, error.span.end as usize);
                 println!(
                     "Ошибка на [{}:{} - {}:{}]: {}",
-                    error.span.start_line,
-                    error.span.start_column,
-                    error.span.end_line,
-                    error.span.end_column,
+                    start_line,
+                    start_column,
+                    end_line,
+                    end_column,
                     error.message
                 );
 
                 // Span должен быть разумным
                 assert!(
-                    error.span.end_line >= error.span.start_line,
-                    "end_line должен быть >= start_line"
+                    error.span.end >= error.span.start,
+                    "end должен быть >= start"
                 );
-                if error.span.start_line == error.span.end_line {
+                assert!(end_line >= start_line, "end_line должен быть >= start_line");
+                if start_line == end_line {
                     assert!(
-                        error.span.end_column >= error.span.start_column,
+                        end_column >= start_column,
                         "end_column должен быть >= start_column"
                     );
                 }

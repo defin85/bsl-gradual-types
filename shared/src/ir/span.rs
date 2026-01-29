@@ -2,68 +2,54 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Позиция в исходном коде
+/// Диапазон в исходном коде в **UTF-8 byte offsets** (абсолютные оффсеты в документе).
+///
+/// Invariants:
+/// - `start <= end`
+/// - `start` и `end` считаются в байтах относительно начала текста файла
+/// - `end` — правая граница диапазона (exclusive), как в `start..end`
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Span {
-    pub start_line: u32,
-    pub start_column: u32,
-    pub end_line: u32,
-    pub end_column: u32,
+    pub start: u32,
+    pub end: u32,
 }
 
 impl Span {
-    /// Проверить, содержит ли span указанную позицию
-    pub fn contains(&self, line: u32, column: u32) -> bool {
-        if line < self.start_line || line > self.end_line {
-            return false;
-        }
-        if line == self.start_line && column < self.start_column {
-            return false;
-        }
-        if line == self.end_line && column > self.end_column {
-            return false;
-        }
-        true
+    /// Проверить, содержит ли span указанный byte offset.
+    ///
+    /// Обратите внимание: для пустого диапазона (`start == end`) всегда возвращает `false`.
+    pub fn contains(&self, byte_offset: u32) -> bool {
+        self.start <= byte_offset && byte_offset < self.end
     }
 
     /// Создать stub span (для тестов и временного использования)
     pub fn stub() -> Self {
         Self {
-            start_line: 0,
-            start_column: 0,
-            end_line: 0,
-            end_column: 0,
+            start: 0,
+            end: 0,
         }
     }
 
-    /// Создать span из координат
-    pub fn new(start_line: u32, start_column: u32, end_line: u32, end_column: u32) -> Self {
+    /// Создать span из byte offsets.
+    pub fn new(start: u32, end: u32) -> Self {
         Self {
-            start_line,
-            start_column,
-            end_line,
-            end_column,
+            start,
+            end: end.max(start),
         }
     }
 
-    /// Создать span из tree-sitter позиций (для совместимости с backend)
-    pub fn from_positions(start: (u32, u32), end: (u32, u32)) -> Self {
-        Self {
-            start_line: start.0,
-            start_column: start.1,
-            end_line: end.0,
-            end_column: end.1,
-        }
+    pub fn is_empty(&self) -> bool {
+        self.start == self.end
+    }
+
+    pub fn len(&self) -> u32 {
+        self.end.saturating_sub(self.start)
     }
 }
 
 impl std::fmt::Display for Span {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}:{}-{}:{}",
-            self.start_line, self.start_column, self.end_line, self.end_column
-        )
+        write!(f, "{}..{}", self.start, self.end)
     }
 }
 

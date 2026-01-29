@@ -581,6 +581,9 @@ impl BslLanguageServer {
                     let mut diagnostics = Vec::new();
                     let mut was_cancelled = false;
 
+                    let file_text = analysis.file_text(file_id).ok().flatten();
+                    let line_index = analysis.line_index(file_id).ok().flatten();
+
                     let syntax_started = Instant::now();
                     let syntax_result = analysis.syntax_diagnostics(file_id);
                     let syntax_elapsed = syntax_started.elapsed();
@@ -619,10 +622,14 @@ impl BslLanguageServer {
 
                     match syntax_result {
                         Ok(Some(syntax_errors)) => {
-                            diagnostics.extend(syntax_errors_to_diagnostics(
-                                &syntax_errors,
-                                &uri_for_task,
-                            ));
+                            if let (Some(text), Some(index)) = (file_text.as_deref(), line_index.as_deref()) {
+                                diagnostics.extend(syntax_errors_to_diagnostics(
+                                    &syntax_errors,
+                                    &uri_for_task,
+                                    text,
+                                    index,
+                                ));
+                            }
                         }
                         Ok(None) => {}
                         Err(cancelled) => {
@@ -684,7 +691,13 @@ impl BslLanguageServer {
                                 {
                                     continue;
                                 }
-                                diagnostics.push(semantic_error_to_diagnostic(error));
+                                if let (Some(text), Some(index)) =
+                                    (file_text.as_deref(), line_index.as_deref())
+                                {
+                                    diagnostics.push(semantic_error_to_diagnostic(
+                                        error, text, index,
+                                    ));
+                                }
                             }
                         }
                         Ok(None) => {}

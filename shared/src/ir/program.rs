@@ -42,18 +42,18 @@ impl SemanticProgram {
         }
     }
 
-    /// Найти семантический узел по позиции в исходном коде
+    /// Найти семантический узел по byte offset в исходном коде
     ///
     /// # Примеры
     ///
     /// ```
     /// # use bsl_shared::ir::{SemanticProgram, Span};
     /// # let program = SemanticProgram::new();
-    /// if let Some(node) = program.find_node_at_position(10, 5) {
-    ///     println!("Нашли узел на строке 10, колонке 5");
+    /// if let Some(node) = program.find_node_at_byte_offset(10) {
+    ///     println!("Нашли узел по byte offset 10");
     /// }
     /// ```
-    pub fn find_node_at_position(&self, line: u32, column: u32) -> Option<&SemanticNode> {
+    pub fn find_node_at_byte_offset(&self, byte_offset: u32) -> Option<&SemanticNode> {
         use tracing::debug;
 
         // Возвращаем САМЫЙ МАЛЕНЬКИЙ узел, содержащий позицию
@@ -61,103 +61,93 @@ impl SemanticProgram {
         // Это важно для hover: если есть Assignment и вложенный FunctionCall,
         // курсор на вызове метода должен показывать FunctionCall, а не Assignment
 
-        debug!("find_node_at_position: line={}, col={}", line, column);
+        debug!("find_node_at_byte_offset: offset={}", byte_offset);
 
-        let candidates: Vec<_> = self
-            .nodes
-            .iter()
-            .filter(|node| node.span.contains(line, column))
-            .collect();
+        let find = |offset: u32| -> Option<&SemanticNode> {
+            let candidates: Vec<_> = self
+                .nodes
+                .iter()
+                .filter(|node| node.span.contains(offset))
+                .collect();
 
-        debug!(
-            "Found {} candidates for position {}:{}",
-            candidates.len(),
-            line,
-            column
-        );
-        for (i, node) in candidates.iter().enumerate() {
-            let type_name = match &node.kind {
-                SemanticNodeKind::Assignment { variable, .. } => {
-                    format!("Assignment({})", variable)
-                }
-                SemanticNodeKind::VariableAccess { name } => format!("VariableAccess({})", name),
-                SemanticNodeKind::FunctionCall {
-                    function_name,
-                    object_name,
-                    ..
-                } => format!(
-                    "FunctionCall({}.{})",
-                    object_name.as_deref().unwrap_or("?"),
-                    function_name
-                ),
-                SemanticNodeKind::MemberAccess {
-                    object_name,
-                    member_name,
-                    ..
-                } => format!(
-                    "MemberAccess({}.{})",
-                    object_name.as_deref().unwrap_or("?"),
-                    member_name
-                ),
-                SemanticNodeKind::VariableDeclaration { name, .. } => format!("VarDecl({})", name),
-                _ => format!("{:?}", node.kind),
-            };
-            debug!("  [{}] {} span={:?}", i, type_name, node.span);
-        }
-
-        let result = self
-            .nodes
-            .iter()
-            .filter(|node| node.span.contains(line, column))
-            .min_by_key(|node| {
-                // Сортируем по размеру span (площадь покрытия)
-                let lines = node.span.end_line.saturating_sub(node.span.start_line);
-                let cols = if lines == 0 {
-                    node.span.end_column.saturating_sub(node.span.start_column)
-                } else {
-                    // Для многострочных span используем количество строк
-                    lines * 1000
+            debug!("Found {} candidates for offset {}", candidates.len(), offset);
+            for (i, node) in candidates.iter().enumerate() {
+                let type_name = match &node.kind {
+                    SemanticNodeKind::Assignment { variable, .. } => {
+                        format!("Assignment({})", variable)
+                    }
+                    SemanticNodeKind::VariableAccess { name } => format!("VariableAccess({})", name),
+                    SemanticNodeKind::FunctionCall {
+                        function_name,
+                        object_name,
+                        ..
+                    } => format!(
+                        "FunctionCall({}.{})",
+                        object_name.as_deref().unwrap_or("?"),
+                        function_name
+                    ),
+                    SemanticNodeKind::MemberAccess {
+                        object_name,
+                        member_name,
+                        ..
+                    } => format!(
+                        "MemberAccess({}.{})",
+                        object_name.as_deref().unwrap_or("?"),
+                        member_name
+                    ),
+                    SemanticNodeKind::VariableDeclaration { name, .. } => format!("VarDecl({})", name),
+                    _ => format!("{:?}", node.kind),
                 };
+                debug!("  [{}] {} span={:?}", i, type_name, node.span);
+            }
 
-                // MILESTONE 2.11: Приоритизация по типу узла
-                // Когда несколько узлов имеют одинаковый размер span,
-                // выбираем более специфичный тип (меньшее число = выше приоритет)
-                let type_priority = match &node.kind {
-                    SemanticNodeKind::FunctionCall { .. } => 0, // Высший приоритет
-                    SemanticNodeKind::MemberAccess { .. } => 1, // Высокий приоритет
-                    SemanticNodeKind::VariableAccess { .. } => 2, // Высокий приоритет
-                    SemanticNodeKind::VariableDeclaration { .. } => 3, // Средний приоритет
-                    SemanticNodeKind::Assignment { .. } => 10,  // Низкий приоритет
-                    _ => 5,                                     // Остальные - средний приоритет
+            let result = self
+                .nodes
+                .iter()
+                .filter(|node| node.span.contains(offset))
+                .min_by_key(|node| {
+                    let len = node.span.len();
+
+                    let type_priority = match &node.kind {
+                        SemanticNodeKind::FunctionCall { .. } => 0,
+                        SemanticNodeKind::MemberAccess { .. } => 1,
+                        SemanticNodeKind::VariableAccess { .. } => 2,
+                        SemanticNodeKind::VariableDeclaration { .. } => 3,
+                        SemanticNodeKind::Assignment { .. } => 10,
+                        _ => 5,
+                    };
+
+                    (len, type_priority)
+                });
+
+            if let Some(node) = result {
+                let type_name = match &node.kind {
+                    SemanticNodeKind::Assignment { variable, .. } => {
+                        format!("Assignment({})", variable)
+                    }
+                    SemanticNodeKind::VariableAccess { name } => format!("VariableAccess({})", name),
+                    SemanticNodeKind::FunctionCall {
+                        function_name,
+                        object_name,
+                        ..
+                    } => format!(
+                        "FunctionCall({}.{})",
+                        object_name.as_deref().unwrap_or("?"),
+                        function_name
+                    ),
+                    _ => format!("{:?}", node.kind),
                 };
+                debug!("Selected node: {} span={:?}", type_name, node.span);
+            } else {
+                debug!("No node found for offset {}", offset);
+            }
 
-                // Сортировка: сначала по размеру span, затем по приоритету типа
-                (lines * 1000 + cols, type_priority)
-            });
+            result
+        };
 
-        if let Some(node) = result {
-            let type_name = match &node.kind {
-                SemanticNodeKind::Assignment { variable, .. } => {
-                    format!("Assignment({})", variable)
-                }
-                SemanticNodeKind::VariableAccess { name } => format!("VariableAccess({})", name),
-                SemanticNodeKind::FunctionCall {
-                    function_name,
-                    object_name,
-                    ..
-                } => format!(
-                    "FunctionCall({}.{})",
-                    object_name.as_deref().unwrap_or("?"),
-                    function_name
-                ),
-                _ => format!("{:?}", node.kind),
-            };
-            debug!("Selected node: {} span={:?}", type_name, node.span);
-        } else {
-            debug!("No node found for position {}:{}", line, column);
-        }
-
-        result
+        // Для UX hover/completion: если курсор стоит прямо на границе `end`,
+        // пробуем сместиться на 1 байт влево.
+        find(byte_offset).or_else(|| byte_offset.checked_sub(1).and_then(find))
     }
 
     /// Получить scope по ID
@@ -192,7 +182,7 @@ impl SemanticProgram {
     /// - `None` если узел не содержит переменную или это сложное выражение
     ///
     /// # Phase 4: DRY refactoring
-    /// Устраняет дублирование между find_variable_at_position() и find_variable_with_scope()
+    /// Устраняет дублирование между find_variable_at_byte_offset() и find_variable_with_scope_by_offset()
     fn extract_variable_name(node: &SemanticNode) -> Option<String> {
         match &node.kind {
             // Присваивание: МассивДанных = Новый Массив
@@ -227,7 +217,7 @@ impl SemanticProgram {
         }
     }
 
-    /// Найти переменную в позиции (line, column) для Inline Scope Analysis
+    /// Найти переменную в позиции (byte offset) для Inline Scope Analysis
     ///
     /// Используется для LSP hover: находит переменную в scope в указанной позиции
     /// и возвращает её имя и тип.
@@ -246,14 +236,17 @@ impl SemanticProgram {
     /// use bsl_shared::ir::SemanticProgram;
     /// let program = SemanticProgram::new();
     /// // Предположим, в программе есть: МассивДанных = Новый Массив;
-    /// if let Some((var_name, state)) = program.find_variable_at_position(5, 10) {
+    /// if let Some((var_name, state)) = program.find_variable_at_byte_offset(5) {
     ///     assert_eq!(var_name, "МассивДанных");
     ///     assert!(state.initialized);
     /// }
     /// ```
-    pub fn find_variable_at_position(&self, line: u32, column: u32) -> Option<(String, super::types::VariableState)> {
+    pub fn find_variable_at_byte_offset(
+        &self,
+        byte_offset: u32,
+    ) -> Option<(String, super::types::VariableState)> {
         // 1. Находим узел в позиции
-        let node = self.find_node_at_position(line, column)?;
+        let node = self.find_node_at_byte_offset(byte_offset)?;
 
         // 2. Получаем scope узла
         let scope_id = node.scope_id;
@@ -270,9 +263,12 @@ impl SemanticProgram {
 
     /// Найти переменную по позиции с возвратом scope_id
     ///
-    pub fn find_variable_with_scope(&self, line: u32, column: u32) -> Option<(String, super::types::VariableState, ScopeId)> {
+    pub fn find_variable_with_scope_by_offset(
+        &self,
+        byte_offset: u32,
+    ) -> Option<(String, super::types::VariableState, ScopeId)> {
         // 1. Находим узел в позиции
-        let node = self.find_node_at_position(line, column)?;
+        let node = self.find_node_at_byte_offset(byte_offset)?;
 
         // 2. Получаем scope узла
         let scope_id = node.scope_id;
@@ -296,4 +292,4 @@ impl Default for SemanticProgram {
 
 // NOTE: extract_runtime_types() удалена в Milestone 2.9
 // Используем Inline Scope Analysis вместо загрузки runtime типов в TypeRepository
-// См. SemanticProgram::find_variable_at_position() для нового подхода
+// См. SemanticProgram::find_variable_at_byte_offset() для нового подхода

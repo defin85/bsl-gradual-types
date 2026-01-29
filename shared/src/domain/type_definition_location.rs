@@ -28,11 +28,9 @@ pub enum TypeDefinitionLocation {
     /// Пользовательский тип — определён в BSL коде
     UserDefined {
         file_path: PathBuf,
-        /// Позиция определения
-        start_line: u32,
-        start_column: u32,
-        end_line: u32,
-        end_column: u32,
+        /// Позиция определения (byte offsets)
+        start: u32,
+        end: u32,
     },
 
     /// Примитивный тип — встроен в язык, нет определения
@@ -84,19 +82,11 @@ impl TypeDefinitionLocation {
     }
 
     /// Создать location для пользовательского типа
-    pub fn user_defined(
-        file_path: PathBuf,
-        start_line: u32,
-        start_column: u32,
-        end_line: u32,
-        end_column: u32,
-    ) -> Self {
+    pub fn user_defined(file_path: PathBuf, start: u32, end: u32) -> Self {
         Self::UserDefined {
             file_path,
-            start_line,
-            start_column,
-            end_line,
-            end_column,
+            start,
+            end: end.max(start),
         }
     }
 
@@ -216,7 +206,7 @@ mod tests {
     #[test]
     fn test_user_defined_location() {
         let file_path = PathBuf::from("src/module.bsl");
-        let loc = TypeDefinitionLocation::user_defined(file_path.clone(), 10, 5, 10, 20);
+        let loc = TypeDefinitionLocation::user_defined(file_path.clone(), 10, 20);
 
         assert_eq!(loc.primary_path(), Some(&file_path));
         assert!(loc.is_navigable());
@@ -273,21 +263,17 @@ mod tests {
 
     #[test]
     fn test_user_defined_position() {
-        let loc = TypeDefinitionLocation::user_defined(PathBuf::from("test.bsl"), 10, 5, 15, 20);
+        let loc = TypeDefinitionLocation::user_defined(PathBuf::from("test.bsl"), 10, 20);
 
         if let TypeDefinitionLocation::UserDefined {
             file_path,
-            start_line,
-            start_column,
-            end_line,
-            end_column,
+            start,
+            end,
         } = loc
         {
             assert_eq!(file_path, PathBuf::from("test.bsl"));
-            assert_eq!(start_line, 10);
-            assert_eq!(start_column, 5);
-            assert_eq!(end_line, 15);
-            assert_eq!(end_column, 20);
+            assert_eq!(start, 10);
+            assert_eq!(end, 20);
         } else {
             panic!("Expected UserDefined location");
         }

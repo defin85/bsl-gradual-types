@@ -183,17 +183,31 @@ fn conf_big_form_module_attributes_and_elements_are_typed() {
         "unexpected diagnostics mentioning form element 'СчетФактураПросмотр': {:?}",
         diags.iter().map(|d| d.message.clone()).collect::<Vec<_>>()
     );
+    let x_offset = analysis
+        .utf16_position_to_byte_offset(V2FileId(1), 1, 17)
+        .expect("utf16_position_to_byte_offset query for x")
+        .expect("x offset present") as u32;
     let got_x = analysis
-        .type_at_position(V2FileId(1), 1, 17)
-        .expect("type_at_position query for x")
+        .type_at_byte_offset(V2FileId(1), x_offset)
+        .expect("type_at_byte_offset query for x")
         .map(|ty| ty.type_name());
+
+    let x_receiver_offset = analysis
+        .utf16_position_to_byte_offset(V2FileId(1), 1, 8)
+        .expect("utf16_position_to_byte_offset query for x receiver")
+        .expect("x receiver offset present") as u32;
     let got_x_receiver = analysis
-        .type_at_position(V2FileId(1), 1, 8)
-        .expect("type_at_position query for x receiver")
+        .type_at_byte_offset(V2FileId(1), x_receiver_offset)
+        .expect("type_at_byte_offset query for x receiver")
         .map(|ty| ty.type_name());
+
+    let y_offset = analysis
+        .utf16_position_to_byte_offset(V2FileId(1), 2, 8)
+        .expect("utf16_position_to_byte_offset query for y")
+        .expect("y offset present") as u32;
     let got_y = analysis
-        .type_at_position(V2FileId(1), 2, 8)
-        .expect("type_at_position query for y")
+        .type_at_byte_offset(V2FileId(1), y_offset)
+        .expect("type_at_byte_offset query for y")
         .map(|ty| ty.type_name());
 
     assert_eq!(

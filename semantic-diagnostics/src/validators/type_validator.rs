@@ -26,10 +26,7 @@ pub fn validation_result_v2_to_diagnostic(
                 param_name,
                 param_index + 1
             ),
-            line: span.start_line,
-            column: span.start_column,
-            end_line: span.end_line,
-            end_column: span.end_column,
+            span,
         }),
         ValidationResultV2::TooManyArgs { expected, actual } => Some(TypeDiagnostic {
             severity: DiagnosticSeverity::Error,
@@ -37,10 +34,7 @@ pub fn validation_result_v2_to_diagnostic(
                 "Слишком много аргументов: ожидается {}, передано {}",
                 expected, actual
             ),
-            line: span.start_line,
-            column: span.start_column,
-            end_line: span.end_line,
-            end_column: span.end_column,
+            span,
         }),
         ValidationResultV2::TypeMismatch {
             param_name,
@@ -70,10 +64,7 @@ pub fn validation_result_v2_to_diagnostic(
             Some(TypeDiagnostic {
                 severity: DiagnosticSeverity::Error,
                 message: msg,
-                line: span.start_line,
-                column: span.start_column,
-                end_line: span.end_line,
-                end_column: span.end_column,
+                span,
             })
         }
     }

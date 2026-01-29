@@ -4,6 +4,8 @@
 
 use std::collections::HashMap;
 
+use bsl_line_index::LineIndex;
+
 use crate::api::semantic_dtos::*;
 
 use super::program::SemanticProgram;
@@ -20,6 +22,8 @@ impl SemanticProgram {
         &self,
         include_call_graph: bool,
         include_flow_sensitive: bool,
+        source: &str,
+        line_index: &LineIndex,
     ) -> SemanticTreeDto {
         let start_time = std::time::Instant::now();
 
@@ -32,11 +36,11 @@ impl SemanticProgram {
                 // Показываем только узлы, которые находятся в root scope
                 node.scope_id == self.symbols.root_scope
             })
-            .map(|node| self.node_to_dto(node, 0))
+            .map(|node| self.node_to_dto(node, 0, source, line_index))
             .collect();
 
         // Конвертируем таблицу символов
-        let symbol_table = self.symbols_to_dto(include_flow_sensitive);
+        let symbol_table = self.symbols_to_dto(include_flow_sensitive, source, line_index);
 
         // Собираем граф вызовов (если requested)
         let call_graph = if include_call_graph {
@@ -66,7 +70,7 @@ impl SemanticProgram {
     /// Compact версия DTO без symbol_table и call_graph для уменьшения размера ответа
     ///
     /// Используется для быстрого просмотра структуры кода без детальной информации о символах.
-    pub fn to_compact_dto(&self) -> SemanticTreeDto {
+    pub fn to_compact_dto(&self, source: &str, line_index: &LineIndex) -> SemanticTreeDto {
         let start_time = std::time::Instant::now();
 
         // Конвертируем root-level узлы (только узлы в root scope!)
@@ -74,7 +78,7 @@ impl SemanticProgram {
             .nodes
             .iter()
             .filter(|node| node.scope_id == self.symbols.root_scope)
-            .map(|node| self.node_to_dto(node, 0))
+            .map(|node| self.node_to_dto(node, 0, source, line_index))
             .collect();
 
         // Вычисляем метрики
@@ -95,31 +99,40 @@ impl SemanticProgram {
     }
 
     /// Конвертировать узел в DTO
-    fn node_to_dto(&self, node: &SemanticNode, depth: usize) -> SemanticNodeDto {
+    fn node_to_dto(
+        &self,
+        node: &SemanticNode,
+        depth: usize,
+        source: &str,
+        line_index: &LineIndex,
+    ) -> SemanticNodeDto {
         let (kind, name, attributes) = self.extract_node_info(&node.kind);
 
         // Рекурсивно конвертируем children (с ограничением глубины)
         let children = if depth < 10 {
-            self.get_node_children(node, depth + 1)
+            self.get_node_children(node, depth + 1, source, line_index)
         } else {
             Vec::new()
         };
+
+        let start = line_index.byte_offset_to_utf16_position(source, node.span.start as usize);
+        let end = line_index.byte_offset_to_utf16_position(source, node.span.end as usize);
 
         SemanticNodeDto {
             kind,
             name,
             location: SourceLocationDto {
-                line: node.span.start_line,
-                column: node.span.start_column,
+                line: start.0,
+                column: start.1,
             },
             range: Some(SourceRangeDto {
                 start: SourceLocationDto {
-                    line: node.span.start_line,
-                    column: node.span.start_column,
+                    line: start.0,
+                    column: start.1,
                 },
                 end: SourceLocationDto {
-                    line: node.span.end_line,
-                    column: node.span.end_column,
+                    line: end.0,
+                    column: end.1,
                 },
             }),
             children,
@@ -175,6 +188,14 @@ impl SemanticProgram {
                 (
                     "Assignment".to_string(),
                     Some(format!("{} =", variable)),
+                    attributes,
+                )
+            }
+            SemanticNodeKind::BinaryExpression { operator } => {
+                attributes.insert("operator".to_string(), operator.clone());
+                (
+                    "BinaryExpression".to_string(),
+                    Some(format!("<expr> {} <expr>", operator)),
                     attributes,
                 )
             }
@@ -264,7 +285,13 @@ impl SemanticProgram {
     }
 
     /// Получить дочерние узлы (для построения иерархии)
-    fn get_node_children(&self, parent: &SemanticNode, depth: usize) -> Vec<SemanticNodeDto> {
+    fn get_node_children(
+        &self,
+        parent: &SemanticNode,
+        depth: usize,
+        source: &str,
+        line_index: &LineIndex,
+    ) -> Vec<SemanticNodeDto> {
         use SemanticNodeKind::*;
 
         // Извлекаем индексы дочерних узлов в зависимости от типа родителя
@@ -326,25 +353,34 @@ impl SemanticProgram {
         child_indices
             .iter()
             .filter_map(|&idx| self.nodes.get(idx))
-            .map(|node| self.node_to_dto(node, depth))
+            .map(|node| self.node_to_dto(node, depth, source, line_index))
             .collect()
     }
 
     /// Конвертировать таблицу символов в DTO
-    fn symbols_to_dto(&self, _include_flow_sensitive: bool) -> HashMap<String, SymbolInfoDto> {
+    fn symbols_to_dto(
+        &self,
+        _include_flow_sensitive: bool,
+        source: &str,
+        line_index: &LineIndex,
+    ) -> HashMap<String, SymbolInfoDto> {
         let mut result = HashMap::new();
 
         // Обходим все scopes используя публичное API
         for (_scope_id, scope) in self.symbols.iter_all_scopes() {
             for (var_name, var_state) in &scope.variables {
+                let decl = line_index.byte_offset_to_utf16_position(
+                    source,
+                    var_state.declaration_span.start as usize,
+                );
                 let symbol = SymbolInfoDto {
                     name: var_name.clone(),
                     kind: "Variable".to_string(),
                     resolved_type: None,
                     scope: "Local".to_string(), // TODO: различать Global/Local
                     declaration_location: SourceLocationDto {
-                        line: var_state.declaration_span.start_line,
-                        column: var_state.declaration_span.start_column,
+                        line: decl.0,
+                        column: decl.1,
                     },
                     // TODO: flow-sensitive analysis (пока не реализовано)
                     flow_variants: Vec::new(),

@@ -11,6 +11,7 @@
 #![allow(clippy::assertions_on_constants)]
 
 use bsl_backend::system::ParserCoordinator;
+use bsl_line_index::LineIndex;
 use bsl_shared::domain::types::ErrorType;
 use bsl_shared::ir::Span;
 
@@ -30,21 +31,24 @@ fn test_parse_error_structure_complete() {
 
     let parser = ParserCoordinator::with_fallback();
     let parse_result = parser.parse(source).expect("Парсинг должен успеть");
+    let index = LineIndex::new(source);
 
     println!("\n=== ТЕСТ: Структура ParseError ===");
 
     if parse_result.has_errors() {
         for error in &parse_result.syntax_errors {
+            let (start_line, start_column) =
+                index.byte_offset_to_utf16_position(source, error.span.start as usize);
+            let (end_line, end_column) =
+                index.byte_offset_to_utf16_position(source, error.span.end as usize);
+
             // Проверяем обязательные поля
             println!("\nParseError:");
             println!("  error_type: {:?}", error.error_type);
             println!("  message: {}", error.message);
             println!(
                 "  span: {}:{} - {}:{}",
-                error.span.start_line,
-                error.span.start_column,
-                error.span.end_line,
-                error.span.end_column
+                start_line, start_column, end_line, end_column
             );
 
             // ✅ ПРОВЕРКА 1: ErrorType должен быть установлен
@@ -61,16 +65,18 @@ fn test_parse_error_structure_complete() {
                 "Сообщение ошибки не должно быть пустым"
             );
 
-            // ✅ ПРОВЕРКА 3: Span должен быть валидным
-            // Примечание: start_line и start_column — unsigned типы (u32), всегда >= 0
+            // ✅ ПРОВЕРКА 3: Span должен быть валидным (byte offsets)
             assert!(
-                error.span.end_line >= error.span.start_line,
-                "end_line должен быть >= start_line"
+                error.span.end >= error.span.start,
+                "end должен быть >= start: {:?}",
+                error.span
             );
 
-            if error.span.start_line == error.span.end_line {
+            // А также должен корректно конвертироваться в UTF-16 координаты.
+            assert!(end_line >= start_line, "end_line должен быть >= start_line");
+            if start_line == end_line {
                 assert!(
-                    error.span.end_column >= error.span.start_column,
+                    end_column >= start_column,
                     "На одной строке: end_column >= start_column"
                 );
             }
@@ -152,35 +158,15 @@ fn test_span_to_lsp_range_conversion() {
 
     println!("\n=== ТЕСТ: Span → LSP Range ===");
 
-    // Создаём тестовые Span
+    // Создаём тестовые Span (UTF-8 byte offsets)
     let test_spans = vec![
-        (Span::new(1, 0, 1, 10), "Однострочный span"),
-        (Span::new(2, 4, 5, 15), "Многострочный span"),
-        (Span::new(0, 0, 0, 0), "Нулевой span (edge case)"),
+        (Span::new(0, 10), "Непустой span"),
+        (Span::new(10, 10), "Нулевой span (edge case)"),
     ];
 
     for (span, description) in test_spans {
-        println!(
-            "\n{}: {}:{} - {}:{}",
-            description, span.start_line, span.start_column, span.end_line, span.end_column
-        );
-
-        // LSP Range создаётся из Span следующим образом:
-        // Range::new(
-        //     Position::new(span.start_line, span.start_column),
-        //     Position::new(span.end_line, span.end_column)
-        // )
-
-        // Проверяем, что координаты валидные для LSP
-        // Примечание: start_line и start_column — unsigned типы (u32), всегда >= 0
-        assert!(span.end_line >= span.start_line, "end_line >= start_line");
-
-        if span.start_line == span.end_line {
-            assert!(
-                span.end_column >= span.start_column,
-                "На одной строке: end_column >= start_column"
-            );
-        }
+        println!("\n{}: bytes {}..{}", description, span.start, span.end);
+        assert!(span.end >= span.start, "end должен быть >= start");
 
         println!("  ✅ Span валиден для конвертации в LSP Range");
     }
@@ -209,20 +195,22 @@ fn test_parse_error_diagnostic_conversion_via_shared() {
 
     let parser = ParserCoordinator::with_fallback();
     let parse_result = parser.parse(source).expect("Парсинг должен успеть");
+    let index = LineIndex::new(source);
 
     if parse_result.has_errors() {
         println!("Найдено ошибок: {}", parse_result.syntax_errors.len());
 
         for backend_error in &parse_result.syntax_errors {
+            let (start_line, start_column) =
+                index.byte_offset_to_utf16_position(source, backend_error.span.start as usize);
+            let (end_line, end_column) =
+                index.byte_offset_to_utf16_position(source, backend_error.span.end as usize);
             println!("\n=== Backend ParseError ===");
             println!("  Type: {:?}", backend_error.error_type);
             println!("  Message: {}", backend_error.message);
             println!(
                 "  Span: {}:{} - {}:{}",
-                backend_error.span.start_line,
-                backend_error.span.start_column,
-                backend_error.span.end_line,
-                backend_error.span.end_column
+                start_line, start_column, end_line, end_column
             );
 
             // Симулируем конвертацию backend ErrorType → shared ErrorType
@@ -239,28 +227,24 @@ fn test_parse_error_diagnostic_conversion_via_shared() {
             println!("\n=== Shared ErrorType ===");
             println!("  {:?}", shared_error_type);
 
-            // Симулируем конвертацию Span (backend::Span → shared::Span)
-            let shared_span = bsl_shared::ir::Span::new(
-                backend_error.span.start_line,
-                backend_error.span.start_column,
-                backend_error.span.end_line,
-                backend_error.span.end_column,
-            );
+            // Симулируем конвертацию Span (backend::Span → shared::Span).
+            // Сейчас это одна и та же структура (byte offsets), поэтому перенос - это копия.
+            let shared_span =
+                bsl_shared::ir::Span::new(backend_error.span.start, backend_error.span.end);
 
             println!("\n=== Shared Span ===");
+            let (shared_start_line, shared_start_column) =
+                index.byte_offset_to_utf16_position(source, shared_span.start as usize);
+            let (shared_end_line, shared_end_column) =
+                index.byte_offset_to_utf16_position(source, shared_span.end as usize);
             println!(
                 "  {}:{} - {}:{}",
-                shared_span.start_line,
-                shared_span.start_column,
-                shared_span.end_line,
-                shared_span.end_column
+                shared_start_line, shared_start_column, shared_end_line, shared_end_column
             );
 
             // Проверяем, что координаты совпадают
-            assert_eq!(shared_span.start_line, backend_error.span.start_line);
-            assert_eq!(shared_span.start_column, backend_error.span.start_column);
-            assert_eq!(shared_span.end_line, backend_error.span.end_line);
-            assert_eq!(shared_span.end_column, backend_error.span.end_column);
+            assert_eq!(shared_span.start, backend_error.span.start);
+            assert_eq!(shared_span.end, backend_error.span.end);
 
             println!("\n  ✅ Конвертация backend → shared успешна");
         }
@@ -328,16 +312,18 @@ fn test_diagnostic_utf16_coordinates() {
 
     let parser = ParserCoordinator::with_fallback();
     let parse_result = parser.parse(source).expect("Парсинг должен успеть");
+    let index = LineIndex::new(source);
 
     if parse_result.has_errors() {
         for error in &parse_result.syntax_errors {
+            let (start_line, start_column) =
+                index.byte_offset_to_utf16_position(source, error.span.start as usize);
+            let (end_line, end_column) =
+                index.byte_offset_to_utf16_position(source, error.span.end as usize);
             println!("\nОшибка: {}", error.message);
             println!(
                 "  Span: {}:{} - {}:{}",
-                error.span.start_line,
-                error.span.start_column,
-                error.span.end_line,
-                error.span.end_column
+                start_line, start_column, end_line, end_column
             );
 
             // ✅ КЛЮЧЕВАЯ ПРОВЕРКА: координаты должны быть в UTF-16
@@ -345,15 +331,15 @@ fn test_diagnostic_utf16_coordinates() {
 
             // Проверяем, что координаты не огромные (признак byte offsets)
             assert!(
-                error.span.start_column < 200,
+                start_column < 200,
                 "start_column не должен быть огромным ({}). Это признак byte offset вместо UTF-16!",
-                error.span.start_column
+                start_column
             );
 
             assert!(
-                error.span.end_column < 200,
+                end_column < 200,
                 "end_column не должен быть огромным ({}). Это признак byte offset вместо UTF-16!",
-                error.span.end_column
+                end_column
             );
 
             // LSP Position создаётся напрямую из Span:

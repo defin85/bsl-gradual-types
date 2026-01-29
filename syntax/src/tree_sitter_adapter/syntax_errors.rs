@@ -148,10 +148,7 @@ fn check_function_body_semicolons(
             let span = node_to_span_cached(stmt, source, line_index);
 
             // Позиция для диагностики - конец statement
-            let error_span = Span::from_positions(
-                (span.end_line, span.end_column),
-                (span.end_line, span.end_column),
-            );
+            let error_span = Span::new(span.end, span.end);
 
             errors.push(ParseError {
                 message: format!(
@@ -201,16 +198,17 @@ pub fn check_incomplete_new_expressions(source: &str, line_index: &LineIndex) ->
             continue;
         }
 
-        // Находим позицию в UTF-16.
+        // Находим абсолютный byte offset в исходном тексте.
         let byte_pos = trimmed
             .rfind(kw)
             .unwrap_or(trimmed.len().saturating_sub(kw_len));
         let col_utf16 = byte_offset_to_utf16(trimmed, byte_pos + kw_len);
-        let row_u32 = row as u32;
+        let absolute = line_index.utf16_position_to_byte_offset(source, row as u32, col_utf16);
+        let abs_u32 = absolute.min(u32::MAX as usize) as u32;
 
         errors.push(ParseError {
             message: "Отсутствует тип после 'Новый'".to_string(),
-            span: Span::from_positions((row_u32, col_utf16), (row_u32, col_utf16)),
+            span: Span::new(abs_u32, abs_u32),
             error_type: ErrorType::MissingToken,
             related: Vec::new(),
         });
@@ -298,12 +296,9 @@ fn find_related(
 }
 
 fn span_at_node_start(node: &Node, source: &str, line_index: &LineIndex) -> Span {
-    let start = node.start_position();
-    let start_column = line_index.byte_column_to_utf16(source, start.row, start.column);
-    Span::from_positions(
-        (start.row as u32, start_column),
-        (start.row as u32, start_column),
-    )
+    let _ = (source, line_index);
+    let start = node.start_byte() as u32;
+    Span::new(start, start)
 }
 
 /// Проверить наличие точки с запятой как дочернего узла

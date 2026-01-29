@@ -188,43 +188,20 @@ async fn test_hover_on_method_name() {
 
 #[tokio::test]
 async fn test_span_contains_correct_position() {
-    // Тестируем что Span.contains() корректно определяет вхождение позиции
+    // Тестируем что Span.contains() корректно определяет вхождение byte offset
     use bsl_shared::ir::Span;
 
-    // Span для "МойМассив" в строке 2, колонки 4-14
-    let span = Span {
-        start_line: 2,
-        start_column: 4,
-        end_line: 2,
-        end_column: 14,
-    };
+    // Диапазон [start, end) в UTF-8 byte offsets.
+    let span = Span::new(10, 20);
 
     // Позиции внутри span должны вернуть true
-    assert!(
-        span.contains(2, 4),
-        "start_line и start_column должны входить в span"
-    );
-    assert!(span.contains(2, 8), "средняя позиция должна входить в span");
-    assert!(
-        span.contains(2, 14),
-        "end_line и end_column должны входить в span"
-    );
+    assert!(span.contains(10), "start должен входить в span");
+    assert!(span.contains(15), "середина должна входить в span");
+
+    // `end` - exclusive
+    assert!(!span.contains(20), "end (exclusive) не должен входить в span");
 
     // Позиции снаружи span должны вернуть false
-    assert!(
-        !span.contains(1, 5),
-        "предыдущая строка не должна входить в span"
-    );
-    assert!(
-        !span.contains(3, 5),
-        "следующая строка не должна входить в span"
-    );
-    assert!(
-        !span.contains(2, 3),
-        "колонка перед началом не должна входить в span"
-    );
-    assert!(
-        !span.contains(2, 15),
-        "колонка после конца не должна входить в span"
-    );
+    assert!(!span.contains(9), "позиция перед началом не должна входить в span");
+    assert!(!span.contains(21), "позиция после конца не должна входить в span");
 }

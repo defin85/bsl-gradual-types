@@ -8,6 +8,7 @@ use tower_lsp::lsp_types::*;
 use tracing::info;
 
 use bsl_backend::application::type_system;
+use bsl_line_index::LineIndex;
 use bsl_shared::domain::types::TypeResolution;
 use bsl_shared::ir::SemanticProgram;
 
@@ -39,16 +40,23 @@ pub async fn handle_goto_definition_v2(
 
     let target_uri = Url::from_file_path(&target.file_path).ok()?;
     let range = match target.span {
-        Some(span) => Range {
-            start: Position {
-                line: span.start_line,
-                character: span.start_column,
-            },
-            end: Position {
-                line: span.end_line,
-                character: span.end_column,
-            },
-        },
+        Some(span) => {
+            let Ok(text) = std::fs::read_to_string(&target.file_path) else {
+                return Some(GotoDefinitionResponse::Scalar(Location {
+                    uri: target_uri,
+                    range: Range::default(),
+                }));
+            };
+            let index = LineIndex::new(&text);
+            let (start_line, start_character) =
+                index.byte_offset_to_utf16_position(&text, span.start as usize);
+            let (end_line, end_character) =
+                index.byte_offset_to_utf16_position(&text, span.end as usize);
+            Range::new(
+                Position::new(start_line, start_character),
+                Position::new(end_line, end_character),
+            )
+        }
         None => Range::default(),
     };
 

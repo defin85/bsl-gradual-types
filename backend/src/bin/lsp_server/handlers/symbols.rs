@@ -163,17 +163,21 @@ fn routine_from_span(
     source: &str,
     line_index: &LineIndex,
 ) -> RoutineSymbol {
+    let (start_line, start_character) =
+        line_index.byte_offset_to_utf16_position(source, span.start as usize);
+    let (end_line, end_character) =
+        line_index.byte_offset_to_utf16_position(source, span.end as usize);
     let start = Position {
-        line: span.start_line,
-        character: span.start_column,
+        line: start_line,
+        character: start_character,
     };
     let end = Position {
-        line: span.end_line,
-        character: span.end_column,
+        line: end_line,
+        character: end_character,
     };
     let range = Range { start, end };
     let selection_range =
-        selection_range_for_name(source, line_index, span.start_line, name).unwrap_or(range);
+        selection_range_for_name(source, line_index, start_line, name).unwrap_or(range);
     RoutineSymbol {
         name: name.to_string(),
         detail: if is_export {
@@ -184,7 +188,7 @@ fn routine_from_span(
         kind,
         range,
         selection_range,
-        start_line: span.start_line,
+        start_line,
     }
 }
 

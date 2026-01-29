@@ -62,10 +62,29 @@ impl AstToIrConverter {
                 self.nodes.push(node);
                 Ok(Some(self.nodes.len() - 1))
             }
-            Expression::Binary { left, right, .. } => {
+            Expression::Binary { .. } => {
+                let Expression::Binary {
+                    left,
+                    operator,
+                    right,
+                    span,
+                } = expr
+                else {
+                    return Ok(None);
+                };
+
                 self.convert_expression_for_hover(left)?;
                 self.convert_expression_for_hover(right)?;
-                Ok(None)
+
+                let node = SemanticNode {
+                    kind: SemanticNodeKind::BinaryExpression {
+                        operator: operator.clone(),
+                    },
+                    span: self.ast_span_to_ir_span(*span),
+                    scope_id: self.current_scope,
+                };
+                self.nodes.push(node);
+                Ok(Some(self.nodes.len() - 1))
             }
             Expression::Unary { operand, .. } => {
                 self.convert_expression_for_hover(operand)?;
@@ -82,11 +101,40 @@ impl AstToIrConverter {
                 self.convert_expression_for_hover(else_expr)?;
                 Ok(None)
             }
-            Expression::New { args, .. } => {
+            Expression::New { .. } => {
+                let Expression::New {
+                    type_name,
+                    args,
+                    span,
+                } = expr
+                else {
+                    return Ok(None);
+                };
+
+                let mut type_name = type_name.trim().to_string();
+                let is_dynamic = type_name.starts_with('"') && type_name.ends_with('"');
+                if is_dynamic && type_name.len() >= 2 {
+                    type_name = type_name[1..type_name.len() - 1].to_string();
+                }
+
+                let node = SemanticNode {
+                    kind: SemanticNodeKind::NewExpression {
+                        type_name,
+                        generic_params: None,
+                        is_dynamic,
+                    },
+                    span: self.ast_span_to_ir_span(*span),
+                    scope_id: self.current_scope,
+                };
+
+                self.nodes.push(node);
+                let node_idx = self.nodes.len() - 1;
+
                 for arg in args {
                     self.convert_expression_for_hover(arg)?;
                 }
-                Ok(None)
+
+                Ok(Some(node_idx))
             }
             Expression::IndexAccess { object, index, .. } => {
                 self.convert_expression_for_hover(object)?;
@@ -144,12 +192,7 @@ impl AstToIrConverter {
                 // Расширяем span вызова, чтобы он включал объект (для hover).
                 let expanded_span = if let Expression::Identifier { span: obj_span, .. } = &*object
                 {
-                    Span {
-                        start_line: obj_span.start_line,
-                        start_column: obj_span.start_column,
-                        end_line: span.end_line,
-                        end_column: span.end_column,
-                    }
+                    Span::new(obj_span.start, span.end)
                 } else {
                     span
                 };

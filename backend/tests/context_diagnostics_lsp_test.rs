@@ -379,10 +379,12 @@ async fn test_diagnostic_location_accuracy() {
 
     // Проверяем что diagnostic указывает на строку с вызовом метода
     let diag = context_diagnostics[0];
+    let index = bsl_line_index::LineIndex::new(code);
+    let (line, _) = index.byte_offset_to_utf16_position(code, diag.span.start as usize);
     assert!(
-        diag.line > 0,
+        line > 0,
         "Diagnostic должен иметь валидную строку: line={}",
-        diag.line
+        line
     );
 }
 

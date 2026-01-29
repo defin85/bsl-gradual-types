@@ -20,14 +20,8 @@ pub struct TypeDiagnostic {
     pub severity: DiagnosticSeverity,
     /// Diagnostic message
     pub message: String,
-    /// Start line (1-based)
-    pub line: u32,
-    /// Start column (1-based)
-    pub column: u32,
-    /// End line (1-based)
-    pub end_line: u32,
-    /// End column (1-based)
-    pub end_column: u32,
+    /// Диапазон ошибки в исходном коде (byte offsets).
+    pub span: crate::ir::Span,
 }
 
 /// Severity level for diagnostics

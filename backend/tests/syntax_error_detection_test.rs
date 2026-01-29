@@ -4,6 +4,13 @@
 //! такие как незакрытые конструкции.
 
 use bsl_backend::system::ParserCoordinator;
+use bsl_backend::system::LineIndex;
+
+fn utf16_position(index: &LineIndex, source: &str, byte_offset: u32) -> (u32, u32) {
+    let point = index.byte_offset_to_point(source, byte_offset as usize);
+    let utf16_column = index.byte_column_to_utf16(source, point.row, point.column);
+    (point.row as u32, utf16_column)
+}
 
 #[test]
 fn test_unclosed_if_statement_detected() {
@@ -24,6 +31,7 @@ fn test_unclosed_if_statement_detected() {
 
     // Парсинг
     let parse_result = parser.parse(source);
+    let index = LineIndex::new(source);
 
     println!("\n=== РЕЗУЛЬТАТ ПАРСИНГА ===");
     match &parse_result {
@@ -34,15 +42,15 @@ fn test_unclosed_if_statement_detected() {
             if result.has_errors() {
                 println!("\n📋 Список синтаксических ошибок:");
                 for (idx, error) in result.syntax_errors.iter().enumerate() {
+                    let (start_line, start_column) =
+                        utf16_position(&index, source, error.span.start);
+                    let (end_line, end_column) = utf16_position(&index, source, error.span.end);
                     println!("\n{}. Ошибка #{}", idx + 1, idx + 1);
                     println!("   Тип: {:?}", error.error_type);
                     println!("   Сообщение: {}", error.message);
                     println!(
                         "   Позиция: строка {}, колонка {} - строка {}, колонка {}",
-                        error.span.start_line,
-                        error.span.start_column,
-                        error.span.end_line,
-                        error.span.end_column
+                        start_line, start_column, end_line, end_column
                     );
                 }
             } else {
@@ -144,17 +152,19 @@ fn test_multiple_syntax_errors() {
 "#;
 
     let parse_result = parser.parse(source).expect("Парсинг должен завершиться");
+    let index = LineIndex::new(source);
 
     println!("\n=== ТЕСТ: Множественные ошибки ===");
     println!("Ошибок найдено: {}", parse_result.syntax_errors.len());
 
     for (idx, error) in parse_result.syntax_errors.iter().enumerate() {
+        let (line, column) = utf16_position(&index, source, error.span.start);
         println!(
             "{}. {} [{}:{}]",
             idx + 1,
             error.message,
-            error.span.start_line,
-            error.span.start_column
+            line,
+            column
         );
     }
 

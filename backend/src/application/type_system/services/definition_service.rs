@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use bsl_line_index::LineIndex;
 use bsl_shared::domain::repository::TypeRepository;
 use bsl_shared::domain::type_definition_location::TypeDefinitionLocation;
 use bsl_shared::domain::types::{ConcreteType, MetadataKind, ResolutionResult, TypeResolution};
@@ -84,7 +85,14 @@ fn goto_definition_v2_with_source_opt(
 ) -> Option<DefinitionTarget> {
     let repo = deps.repository.clone();
 
-    if let Some(node) = ir_program.find_node_at_position(line, character) {
+    let Some(text) = current_file_text else {
+        return None;
+    };
+
+    let index = LineIndex::new(text);
+    let offset = index.utf16_position_to_byte_offset(text, line, character) as u32;
+
+    if let Some(node) = ir_program.find_node_at_byte_offset(offset) {
         if let SemanticNodeKind::VariableAccess { name } = &node.kind {
             // If it's not a local variable, allow treating it as a global common module.
             if ir_program.resolve_variable(name, node.scope_id).is_none() {
@@ -354,18 +362,11 @@ fn definition_target_from_location(
         }
         TypeDefinitionLocation::UserDefined {
             file_path,
-            start_line,
-            start_column,
-            end_line,
-            end_column,
+            start,
+            end,
         } => Some(DefinitionTarget {
             file_path,
-            span: Some(Span {
-                start_line,
-                start_column,
-                end_line,
-                end_column,
-            }),
+            span: Some(Span::new(start, end)),
         }),
         TypeDefinitionLocation::Platform { .. } | TypeDefinitionLocation::Primitive => None,
     }

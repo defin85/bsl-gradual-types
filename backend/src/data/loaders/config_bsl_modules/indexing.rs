@@ -177,10 +177,8 @@ where
                     method_name.clone(),
                     TypeDefinitionLocation::user_defined(
                         module.module_path.clone(),
-                        decl.span.start_line,
-                        decl.span.start_column,
-                        decl.span.end_line,
-                        decl.span.end_column,
+                        decl.span.start,
+                        decl.span.end,
                     ),
                 ));
             }
@@ -190,10 +188,8 @@ where
                 method_name,
                 TypeDefinitionLocation::user_defined(
                     module.module_path.clone(),
-                    decl.span.start_line,
-                    decl.span.start_column,
-                    decl.span.end_line,
-                    decl.span.end_column,
+                    decl.span.start,
+                    decl.span.end,
                 ),
             ));
         }
@@ -581,10 +577,8 @@ where
                     method_name.clone(),
                     TypeDefinitionLocation::user_defined(
                         module.module_path.clone(),
-                        decl.span.start_line,
-                        decl.span.start_column,
-                        decl.span.end_line,
-                        decl.span.end_column,
+                        decl.span.start,
+                        decl.span.end,
                     ),
                 ));
             }
@@ -594,10 +588,8 @@ where
                 method_name,
                 TypeDefinitionLocation::user_defined(
                     module.module_path.clone(),
-                    decl.span.start_line,
-                    decl.span.start_column,
-                    decl.span.end_line,
-                    decl.span.end_column,
+                    decl.span.start,
+                    decl.span.end,
                 ),
             ));
         }
@@ -738,10 +730,8 @@ fn build_index_from_parsed_modules(
                     method_name.clone(),
                     TypeDefinitionLocation::user_defined(
                         module.module_path.clone(),
-                        decl.span.start_line,
-                        decl.span.start_column,
-                        decl.span.end_line,
-                        decl.span.end_column,
+                        decl.span.start,
+                        decl.span.end,
                     ),
                 ));
             }
@@ -751,10 +741,8 @@ fn build_index_from_parsed_modules(
                 method_name,
                 TypeDefinitionLocation::user_defined(
                     module.module_path.clone(),
-                    decl.span.start_line,
-                    decl.span.start_column,
-                    decl.span.end_line,
-                    decl.span.end_column,
+                    decl.span.start,
+                    decl.span.end,
                 ),
             ));
         }
@@ -769,22 +757,14 @@ fn build_index_from_parsed_modules(
 }
 
 fn sort_indexed_signatures(out: &mut IndexedConfigSignatures) {
-    fn location_sort_key(location: &TypeDefinitionLocation) -> (String, u32, u32, u32, u32) {
+    fn location_sort_key(location: &TypeDefinitionLocation) -> (String, u32, u32) {
         match location {
             TypeDefinitionLocation::UserDefined {
                 file_path,
-                start_line,
-                start_column,
-                end_line,
-                end_column,
-            } => (
-                file_path.to_string_lossy().to_string(),
-                *start_line,
-                *start_column,
-                *end_line,
-                *end_column,
-            ),
-            _ => (String::new(), 0, 0, 0, 0),
+                start,
+                end,
+            } => (file_path.to_string_lossy().to_string(), *start, *end),
+            _ => (String::new(), 0, 0),
         }
     }
 

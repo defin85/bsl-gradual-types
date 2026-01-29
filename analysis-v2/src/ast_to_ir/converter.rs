@@ -287,15 +287,12 @@ impl AstToIrConverter {
     /// Конвертировать AST Span в IR Span (Milestone 2.11)
     ///
     /// Передаёт реальные координаты из tree-sitter AST в семантический IR.
-    /// Это позволяет `find_node_at_position()` корректно находить узлы по позиции курсора.
+    /// Это позволяет `find_node_at_byte_offset()` корректно находить узлы по позиции курсора.
     pub(crate) fn ast_span_to_ir_span(&self, ast_span: Span) -> Span {
         use tracing::debug;
 
         // Milestone 2.11 Task B1: DEBUG логи для AST -> IR конвертации
-        debug!(
-            "AST -> IR Span conversion: {}:{} - {}:{}",
-            ast_span.start_line, ast_span.start_column, ast_span.end_line, ast_span.end_column
-        );
+        debug!("AST -> IR Span conversion: {}..{}", ast_span.start, ast_span.end);
 
         ast_span
     }

@@ -343,10 +343,21 @@ async fn lsp_signature_help_returns_method_and_constructor() {
         query
             .receiver_end_character
             .and_then(|receiver_end_character| {
-                host.snapshot()
-                    .type_at_position(V2FileId(1), query.call_start_line, receiver_end_character)
+                let analysis = host.snapshot();
+                analysis
+                    .utf16_position_to_byte_offset(
+                        V2FileId(1),
+                        query.call_start_line,
+                        receiver_end_character,
+                    )
                     .ok()
                     .flatten()
+                    .and_then(|byte_offset| {
+                        analysis
+                            .type_at_byte_offset(V2FileId(1), byte_offset as u32)
+                            .ok()
+                            .flatten()
+                    })
             })
     };
     let method = signature_help_handler::handle_signature_help_v2(

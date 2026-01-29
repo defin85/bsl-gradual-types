@@ -35,7 +35,7 @@ fn test_variable_resolution() {
 }
 
 #[test]
-fn test_find_node_at_position() {
+fn test_find_node_at_byte_offset() {
     let mut program = SemanticProgram::new();
 
     program.nodes.push(SemanticNode {
@@ -45,7 +45,7 @@ fn test_find_node_at_position() {
             is_export: false,
             initial_value_node: None,
         },
-        span: Span::new(1, 0, 1, 15),
+        span: Span::new(0, 10),
         scope_id: program.symbols.root_scope,
     });
 
@@ -54,12 +54,12 @@ fn test_find_node_at_position() {
             variable: "x".to_string(),
             value_node: None,
         },
-        span: Span::new(2, 0, 2, 10),
+        span: Span::new(20, 30),
         scope_id: program.symbols.root_scope,
     });
 
     // Поиск первого узла
-    let node = program.find_node_at_position(1, 5);
+    let node = program.find_node_at_byte_offset(5);
     assert!(node.is_some());
     assert!(matches!(
         node.unwrap().kind,
@@ -67,7 +67,7 @@ fn test_find_node_at_position() {
     ));
 
     // Поиск второго узла
-    let node = program.find_node_at_position(2, 5);
+    let node = program.find_node_at_byte_offset(25);
     assert!(node.is_some());
     assert!(matches!(
         node.unwrap().kind,
@@ -75,5 +75,5 @@ fn test_find_node_at_position() {
     ));
 
     // Поиск вне узлов
-    assert!(program.find_node_at_position(10, 5).is_none());
+    assert!(program.find_node_at_byte_offset(15).is_none());
 }

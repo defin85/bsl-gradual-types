@@ -66,11 +66,6 @@ impl Span {
 
     /// Convert to IrSpan (loses offset information)
     pub fn to_ir_span(&self) -> IrSpan {
-        IrSpan::new(
-            self.start.line as u32,
-            self.start.column as u32,
-            self.end.line as u32,
-            self.end.column as u32,
-        )
+        IrSpan::new(self.start.offset as u32, self.end.offset as u32)
     }
 }

@@ -51,7 +51,7 @@ mod diagnostic_levels_integration_tests {
             variable_name: Some("myArray".to_string()),
         };
 
-        let span = Span::new(1, 0, 1, 20);
+        let span = Span::new(0, 20);
         let diagnostic = error.to_diagnostic_with_detail(span, DetailLevel::Compact);
 
         // Compact должна быть короче с минимум информации
@@ -73,7 +73,7 @@ mod diagnostic_levels_integration_tests {
             variable_name: Some("myArray".to_string()),
         };
 
-        let span = Span::new(1, 0, 1, 20);
+        let span = Span::new(0, 20);
         let diagnostic = error.to_diagnostic_with_detail(span, DetailLevel::Full);
 
         // Full должна содержать имя переменной
@@ -93,7 +93,7 @@ mod diagnostic_levels_integration_tests {
             variable_name: Some("myArray".to_string()),
         };
 
-        let span = Span::new(1, 0, 1, 20);
+        let span = Span::new(0, 20);
         let diagnostic = error.to_diagnostic_with_detail(span, DetailLevel::Detailed);
 
         // Detailed должна содержать и переменную и подсказку
@@ -118,7 +118,7 @@ mod diagnostic_levels_integration_tests {
             param_variable_name: Some("индекс".to_string()),
         };
 
-        let span = Span::new(1, 0, 1, 20);
+        let span = Span::new(0, 20);
 
         let compact = error.to_diagnostic_with_detail(span, DetailLevel::Compact);
         let full = error.to_diagnostic_with_detail(span, DetailLevel::Full);
@@ -151,7 +151,7 @@ mod diagnostic_levels_integration_tests {
             variable_name: Some("таблица".to_string()),
         };
 
-        let span = Span::new(2, 5, 2, 15);
+        let span = Span::new(25, 45);
 
         let compact = error.to_diagnostic_with_detail(span, DetailLevel::Compact);
         let full = error.to_diagnostic_with_detail(span, DetailLevel::Full);
@@ -184,8 +184,8 @@ mod diagnostic_levels_integration_tests {
             variable_name: None,
         };
 
-        let full = error.to_diagnostic_with_detail(Span::new(1, 0, 1, 10), DetailLevel::Full);
-        let compact = error.to_diagnostic_with_detail(Span::new(1, 0, 1, 10), DetailLevel::Compact);
+        let full = error.to_diagnostic_with_detail(Span::new(0, 10), DetailLevel::Full);
+        let compact = error.to_diagnostic_with_detail(Span::new(0, 10), DetailLevel::Compact);
 
         // Full без variable_name должна fallback к Brief (как компакт)
         assert_eq!(full.message, compact.message);
@@ -203,8 +203,7 @@ mod diagnostic_levels_integration_tests {
             variable_name: None,
         };
 
-        let detailed =
-            error.to_diagnostic_with_detail(Span::new(1, 0, 1, 10), DetailLevel::Detailed);
+        let detailed = error.to_diagnostic_with_detail(Span::new(0, 10), DetailLevel::Detailed);
 
         // Detailed должна просто работать, fallback к Brief + подсказка
         assert!(detailed.message.contains("'Строка'"));
@@ -226,31 +225,20 @@ mod diagnostic_levels_integration_tests {
             variable_name: None,
         };
 
-        let span = Span::new(10, 25, 10, 35);
+        let span = Span::new(100, 120);
 
         let compact = error.to_diagnostic_with_detail(span, DetailLevel::Compact);
         let full = error.to_diagnostic_with_detail(span, DetailLevel::Full);
         let detailed = error.to_diagnostic_with_detail(span, DetailLevel::Detailed);
 
         // All should preserve span info
-        assert_eq!(compact.line, 10);
-        assert_eq!(compact.column, 25);
-        assert_eq!(compact.end_line, 10);
-        assert_eq!(compact.end_column, 35);
-
-        assert_eq!(full.line, 10);
-        assert_eq!(full.column, 25);
-        assert_eq!(full.end_line, 10);
-        assert_eq!(full.end_column, 35);
-
-        assert_eq!(detailed.line, 10);
-        assert_eq!(detailed.column, 25);
-        assert_eq!(detailed.end_line, 10);
-        assert_eq!(detailed.end_column, 35);
+        assert_eq!(compact.span, span);
+        assert_eq!(full.span, span);
+        assert_eq!(detailed.span, span);
 
         println!(
-            "✅ Span preserved: line {}, col {}-{}",
-            compact.line, compact.column, compact.end_column
+            "✅ Span preserved: bytes {}..{}",
+            compact.span.start, compact.span.end
         );
     }
 
@@ -286,7 +274,7 @@ mod diagnostic_levels_integration_tests {
             },
         ];
 
-        let span = Span::new(1, 0, 1, 10);
+        let span = Span::new(0, 10);
 
         for error in errors {
             let diagnostic = error.to_diagnostic_with_detail(span, DetailLevel::Full);
@@ -312,7 +300,7 @@ mod diagnostic_levels_integration_tests {
             variable_name: Some("переменная".to_string()),
         };
 
-        let span = Span::new(1, 0, 1, 20);
+        let span = Span::new(0, 20);
 
         let compact = error.to_diagnostic_with_detail(span, DetailLevel::Compact);
         let full = error.to_diagnostic_with_detail(span, DetailLevel::Full);
@@ -360,7 +348,7 @@ mod diagnostic_levels_integration_tests {
             },
         ];
 
-        let span = Span::new(1, 0, 1, 10);
+        let span = Span::new(0, 10);
 
         for error in errors {
             let diagnostic = error.to_diagnostic_with_detail(span, DetailLevel::Detailed);
@@ -393,7 +381,7 @@ mod diagnostic_levels_integration_tests {
 
         let errors = vec![
             (
-                Span::new(1, 0, 1, 10),
+                Span::new(0, 10),
                 TypeErrorKind::NonExistentMethod {
                     object_type: "Массив".to_string(),
                     method_name: "Метод1".to_string(),
@@ -401,7 +389,7 @@ mod diagnostic_levels_integration_tests {
                 },
             ),
             (
-                Span::new(3, 5, 3, 15),
+                Span::new(30, 40),
                 TypeErrorKind::NonExistentProperty {
                     object_type: "Объект".to_string(),
                     property_name: "Свойство".to_string(),
@@ -409,7 +397,7 @@ mod diagnostic_levels_integration_tests {
                 },
             ),
             (
-                Span::new(5, 10, 5, 20),
+                Span::new(60, 70),
                 TypeErrorKind::IncorrectParameterType {
                     method_name: "Функция".to_string(),
                     param_index: 0,
@@ -424,8 +412,7 @@ mod diagnostic_levels_integration_tests {
         for (span, error) in errors {
             let diagnostic = error.to_diagnostic_with_detail(span, DetailLevel::Full);
 
-            assert_eq!(diagnostic.line, span.start_line);
-            assert_eq!(diagnostic.column, span.start_column);
+            assert_eq!(diagnostic.span, span);
             assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
             assert!(!diagnostic.message.is_empty());
         }
@@ -446,12 +433,13 @@ mod diagnostic_levels_integration_tests {
         };
 
         // Old API without detail level
-        let diagnostic = error.to_diagnostic(Span::new(1, 0, 1, 10));
+        let span = Span::new(0, 10);
+        let diagnostic = error.to_diagnostic(span);
 
         // Should work and produce a valid diagnostic
         assert!(!diagnostic.message.is_empty());
         assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
-        assert_eq!(diagnostic.line, 1);
+        assert_eq!(diagnostic.span, span);
 
         // Should default to Brief format (no variable)
         assert!(!diagnostic.message.contains("переменная"));

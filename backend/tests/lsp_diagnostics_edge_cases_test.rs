@@ -12,6 +12,13 @@
 //! 7. Ошибка на последней строке
 
 use bsl_backend::system::ParserCoordinator;
+use bsl_backend::system::LineIndex;
+
+fn utf16_position(index: &LineIndex, source: &str, byte_offset: u32) -> (u32, u32) {
+    let point = index.byte_offset_to_point(source, byte_offset as usize);
+    let utf16_column = index.byte_column_to_utf16(source, point.row, point.column);
+    (point.row as u32, utf16_column)
+}
 
 #[test]
 fn test_empty_file() {
@@ -108,6 +115,7 @@ fn test_multiple_errors_in_file() {
 
     let parser = ParserCoordinator::with_fallback();
     let parse_result = parser.parse(source).expect("Парсинг должен успеть");
+    let index = LineIndex::new(source);
 
     println!("Ошибок найдено: {}", parse_result.syntax_errors.len());
 
@@ -121,16 +129,17 @@ fn test_multiple_errors_in_file() {
     );
 
     for (idx, error) in parse_result.syntax_errors.iter().enumerate() {
+        let (line, column) = utf16_position(&index, source, error.span.start);
         println!(
             "{}. {} [{}:{}]",
             idx + 1,
             error.message,
-            error.span.start_line,
-            error.span.start_column
+            line,
+            column
         );
 
         // Каждая ошибка должна иметь валидные координаты
-        assert!(error.span.start_line > 0, "start_line должен быть > 0");
+        assert!(line > 0, "start_line должен быть > 0");
     }
 
     println!("✅ Все ошибки обнаружены и имеют корректные координаты");
@@ -159,31 +168,35 @@ fn test_emoji_and_special_chars() {
     let parse_result = parser
         .parse(source)
         .expect("Парсинг с эмодзи должен успеть");
+    let index = LineIndex::new(source);
 
     println!("Ошибок найдено: {}", parse_result.syntax_errors.len());
 
     // Парсинг должен работать с эмодзи
     if parse_result.has_errors() {
         for error in &parse_result.syntax_errors {
+            let (start_line, start_column) = utf16_position(&index, source, error.span.start);
+            let (end_line, end_column) = utf16_position(&index, source, error.span.end);
             println!(
                 "Ошибка: {} [{}:{}]",
-                error.message, error.span.start_line, error.span.start_column
+                error.message, start_line, start_column
             );
 
             // ✅ КРИТИЧНАЯ ПРОВЕРКА: координаты должны быть в UTF-16
             // Даже при наличии эмодзи выше по тексту!
             assert!(
-                error.span.start_column < 300,
+                start_column < 300,
                 "start_column не должен быть огромным ({}). \
                 Эмодзи могут сбить конвертацию UTF-8→UTF-16!",
-                error.span.start_column
+                start_column
             );
 
             assert!(
-                error.span.end_column < 300,
+                end_column < 300,
                 "end_column не должен быть огромным ({})",
-                error.span.end_column
+                end_column
             );
+            assert!(end_line >= start_line);
         }
         println!("✅ Координаты с эмодзи корректны (UTF-16)");
     }
@@ -201,6 +214,7 @@ fn test_error_on_first_line() {
 
     let parser = ParserCoordinator::with_fallback();
     let parse_result = parser.parse(source).expect("Парсинг должен успеть");
+    let index = LineIndex::new(source);
 
     println!("Ошибок найдено: {}", parse_result.syntax_errors.len());
 
@@ -209,7 +223,7 @@ fn test_error_on_first_line() {
         let has_first_line_error = parse_result
             .syntax_errors
             .iter()
-            .any(|e| e.span.start_line == 0);
+            .any(|e| utf16_position(&index, source, e.span.start).0 == 0);
 
         if has_first_line_error {
             println!("✅ Ошибка на первой строке обнаружена");
@@ -236,6 +250,7 @@ fn test_error_on_last_line() {
 
     let parser = ParserCoordinator::with_fallback();
     let parse_result = parser.parse(source).expect("Парсинг должен успеть");
+    let index = LineIndex::new(source);
 
     println!("Ошибок найдено: {}", parse_result.syntax_errors.len());
 
@@ -243,7 +258,7 @@ fn test_error_on_last_line() {
         let max_line = parse_result
             .syntax_errors
             .iter()
-            .map(|e| e.span.end_line)
+            .map(|e| utf16_position(&index, source, e.span.end).0)
             .max()
             .unwrap_or(0);
 
@@ -252,12 +267,14 @@ fn test_error_on_last_line() {
         // Проверяем, что координаты не выходят за пределы файла
         let file_lines_count = source.lines().count() as u32;
         for error in &parse_result.syntax_errors {
+            let (start_line, _) = utf16_position(&index, source, error.span.start);
+            let (end_line, _) = utf16_position(&index, source, error.span.end);
             assert!(
-                error.span.start_line < file_lines_count + 10,
+                start_line < file_lines_count + 10,
                 "start_line не должен быть сильно больше количества строк в файле"
             );
             assert!(
-                error.span.end_line < file_lines_count + 10,
+                end_line < file_lines_count + 10,
                 "end_line не должен быть сильно больше количества строк в файле"
             );
         }
@@ -336,25 +353,30 @@ fn test_very_long_line_coordinates() {
     let parse_result = parser
         .parse(source.as_str())
         .expect("Парсинг должен успеть");
+    let index = LineIndex::new(source.as_str());
 
     println!("Ошибок найдено: {}", parse_result.syntax_errors.len());
 
     if parse_result.has_errors() {
         for error in &parse_result.syntax_errors {
+            let (start_line, start_column) =
+                utf16_position(&index, source.as_str(), error.span.start);
+            let (end_line, end_column) = utf16_position(&index, source.as_str(), error.span.end);
             println!(
                 "Ошибка: {} [{}:{}]",
-                error.message, error.span.start_line, error.span.start_column
+                error.message, start_line, start_column
             );
 
             // Координаты должны быть разумными даже для очень длинной строки
             assert!(
-                error.span.start_column < 10000,
+                start_column < 10000,
                 "start_column не должен быть огромным"
             );
             assert!(
-                error.span.end_column < 10000,
+                end_column < 10000,
                 "end_column не должен быть огромным"
             );
+            assert!(end_line >= start_line);
         }
         println!("✅ Координаты для длинной строки корректны");
     }
@@ -371,15 +393,18 @@ fn test_mixed_line_endings() {
 
     let parser = ParserCoordinator::with_fallback();
     let parse_result = parser.parse(source).expect("Парсинг должен успеть");
+    let index = LineIndex::new(source);
 
     println!("Ошибок найдено: {}", parse_result.syntax_errors.len());
 
     // Парсинг должен работать со смешанными line endings
     if parse_result.has_errors() {
         for error in &parse_result.syntax_errors {
+            let (start_line, _) = utf16_position(&index, source, error.span.start);
+            let (end_line, _) = utf16_position(&index, source, error.span.end);
             // Координаты должны быть валидными
             assert!(
-                error.span.end_line >= error.span.start_line,
+                end_line >= start_line,
                 "end_line >= start_line"
             );
         }
@@ -404,13 +429,17 @@ fn test_error_span_zero_width() {
 
     let parser = ParserCoordinator::with_fallback();
     let parse_result = parser.parse(source).expect("Парсинг должен успеть");
+    let index = LineIndex::new(source);
 
     println!("Ошибок найдено: {}", parse_result.syntax_errors.len());
 
     if parse_result.has_errors() {
         for error in &parse_result.syntax_errors {
-            let span_width: Option<u32> = if error.span.start_line == error.span.end_line {
-                Some(error.span.end_column - error.span.start_column)
+            let (start_line, start_column) = utf16_position(&index, source, error.span.start);
+            let (end_line, end_column) = utf16_position(&index, source, error.span.end);
+
+            let span_width: Option<u32> = if start_line == end_line {
+                end_column.checked_sub(start_column)
             } else {
                 None // Многострочный span
             };
@@ -431,7 +460,7 @@ fn test_error_span_zero_width() {
             }
 
             // Координаты должны быть валидными
-            assert!(error.span.end_line >= error.span.start_line);
+            assert!(end_line >= start_line);
         }
         println!("✅ Zero-width span обработан корректно");
     }
@@ -459,15 +488,17 @@ fn test_unicode_normalization_coordinates() {
 
     let parser = ParserCoordinator::with_fallback();
     let parse_result = parser.parse(source).expect("Парсинг должен успеть");
+    let index = LineIndex::new(source);
 
     println!("Ошибок найдено: {}", parse_result.syntax_errors.len());
 
     // Проверяем, что парсинг работает с Unicode
     if parse_result.has_errors() {
         for error in &parse_result.syntax_errors {
+            let (_, start_column) = utf16_position(&index, source, error.span.start);
             // Координаты должны быть валидными даже с Unicode нормализацией
             assert!(
-                error.span.start_column < 200,
+                start_column < 200,
                 "start_column не должен быть огромным"
             );
         }

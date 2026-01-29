@@ -136,10 +136,7 @@ pub fn validation_result_to_diagnostic(
                 param_index + 1,
                 param_name
             ),
-            line: span.start_line,
-            column: span.start_column,
-            end_line: span.end_line,
-            end_column: span.end_column,
+            span,
         }),
         ValidationResult::TooManyArgs { expected, actual } => Some(TypeDiagnostic {
             severity: DiagnosticSeverity::Error,
@@ -147,10 +144,7 @@ pub fn validation_result_to_diagnostic(
                 "Слишком много параметров: ожидается {}, получено {}",
                 expected, actual
             ),
-            line: span.start_line,
-            column: span.start_column,
-            end_line: span.end_line,
-            end_column: span.end_column,
+            span,
         }),
         ValidationResult::TypeMismatch {
             param_name,
@@ -162,10 +156,7 @@ pub fn validation_result_to_diagnostic(
                 "Некорректный тип параметра '{}': ожидается {}, получено {}",
                 param_name, expected, actual
             ),
-            line: span.start_line,
-            column: span.start_column,
-            end_line: span.end_line,
-            end_column: span.end_column,
+            span,
         }),
     }
 }

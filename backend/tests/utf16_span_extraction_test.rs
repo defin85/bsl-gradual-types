@@ -8,8 +8,25 @@
 //!
 //! Этот тест проверяет, что `TreeSitterAdapter::byte_offset_to_utf16()`
 //! корректно конвертирует координаты для текста с кириллицей.
+//!
+//! Примечание: в текущей архитектуре tree-sitter spans сохраняются как UTF-8 byte offsets,
+//! а конвертация в UTF-16 (LSP `Position.character`) делается на границе (через `LineIndex`).
 
 use bsl_backend::system::ParserCoordinator;
+use bsl_backend::system::LineIndex;
+
+fn utf16_position(index: &LineIndex, source: &str, byte_offset: u32) -> (u32, u32) {
+    let point = index.byte_offset_to_point(source, byte_offset as usize);
+    let utf16_column = index.byte_column_to_utf16(source, point.row, point.column);
+    (point.row as u32, utf16_column)
+}
+
+fn utf16_range(index: &LineIndex, source: &str, start: u32, end: u32) -> ((u32, u32), (u32, u32)) {
+    (
+        utf16_position(index, source, start),
+        utf16_position(index, source, end),
+    )
+}
 
 #[test]
 fn test_cyrillic_text_span_coordinates() {
@@ -24,6 +41,7 @@ fn test_cyrillic_text_span_coordinates() {
     // Парсим файл
     let parser = ParserCoordinator::with_fallback();
     let parse_result = parser.parse(source).expect("Парсинг должен успеть");
+    let index = LineIndex::new(source);
 
     // Проверяем, что парсинг успешен
     assert!(!parse_result.has_errors(), "Код должен быть корректным");
@@ -43,15 +61,17 @@ fn test_cyrillic_text_span_coordinates() {
     {
         println!("\n=== ПРОВЕРКА UTF-16 КООРДИНАТ ===");
         println!("Функция: {}", name);
+        let ((start_line, start_column), (end_line, end_column)) =
+            utf16_range(&index, source, span.start, span.end);
         println!(
             "Span функции: {}:{} - {}:{}",
-            span.start_line, span.start_column, span.end_line, span.end_column
+            start_line, start_column, end_line, end_column
         );
 
         // "Функция Тест()" начинается на строке 1, колонка 0 (UTF-16)
-        assert_eq!(span.start_line, 1, "Функция должна начинаться на строке 1");
+        assert_eq!(start_line, 1, "Функция должна начинаться на строке 1");
         assert_eq!(
-            span.start_column, 0,
+            start_column, 0,
             "Функция должна начинаться с колонки 0 (UTF-16)"
         );
 
@@ -65,15 +85,17 @@ fn test_cyrillic_text_span_coordinates() {
             ..
         } = &body[0]
         {
+            let ((var_start_line, var_start_column), (var_end_line, var_end_column)) =
+                utf16_range(&index, source, var_span.start, var_span.end);
             println!("\nПеременная: {}", var_name);
             println!(
                 "Span переменной: {}:{} - {}:{}",
-                var_span.start_line, var_span.start_column, var_span.end_line, var_span.end_column
+                var_start_line, var_start_column, var_end_line, var_end_column
             );
 
             // "    Перем Х;" на строке 2
             // 4 пробела (4 UTF-16) + "Перем" (5 символов = 5 UTF-16)
-            assert_eq!(var_span.start_line, 2, "Переменная должна быть на строке 2");
+            assert_eq!(var_start_line, 2, "Переменная должна быть на строке 2");
 
             // ✅ КЛЮЧЕВАЯ ПРОВЕРКА: координаты должны быть в UTF-16, не в UTF-8 bytes!
             // "    Перем" = 4 пробела + 5 символов кириллицы
@@ -82,9 +104,10 @@ fn test_cyrillic_text_span_coordinates() {
             //
             // Если бы мы возвращали byte offsets, start_column был бы 14
             // Но мы конвертируем в UTF-16, поэтому start_column должен быть 4
-            assert_eq!(var_span.start_column, 4,
-                "Переменная должна начинаться с колонки 4 (UTF-16), не {} (это был бы UTF-8 byte offset!)",
-                var_span.start_column);
+            assert_eq!(
+                var_start_column, 4,
+                "Переменная должна начинаться с колонки 4 (UTF-16)"
+            );
 
             println!("✅ UTF-16 координаты корректны!");
         } else {
@@ -96,18 +119,17 @@ fn test_cyrillic_text_span_coordinates() {
             span: return_span, ..
         } = &body[1]
         {
+            let ((ret_start_line, ret_start_column), (ret_end_line, ret_end_column)) =
+                utf16_range(&index, source, return_span.start, return_span.end);
             println!("\nReturn statement:");
             println!(
                 "Span: {}:{} - {}:{}",
-                return_span.start_line,
-                return_span.start_column,
-                return_span.end_line,
-                return_span.end_column
+                ret_start_line, ret_start_column, ret_end_line, ret_end_column
             );
 
-            assert_eq!(return_span.start_line, 3, "Return должен быть на строке 3");
+            assert_eq!(ret_start_line, 3, "Return должен быть на строке 3");
             assert_eq!(
-                return_span.start_column, 4,
+                ret_start_column, 4,
                 "Return должен начинаться с колонки 4 (UTF-16)"
             );
 
@@ -132,6 +154,7 @@ fn test_cyrillic_vs_ascii_span_coordinates() {
 
     let parser = ParserCoordinator::with_fallback();
     let parse_result = parser.parse(source).expect("Парсинг должен успеть");
+    let index = LineIndex::new(source);
 
     assert!(!parse_result.has_errors(), "Код должен быть корректным");
 
@@ -144,14 +167,16 @@ fn test_cyrillic_vs_ascii_span_coordinates() {
     {
         println!("\n=== ПРОВЕРКА СМЕШАННОГО ТЕКСТА (Кириллица + ASCII) ===");
         println!("Процедура: {}", name);
+        let ((start_line, start_column), (end_line, end_column)) =
+            utf16_range(&index, source, span.start, span.end);
         println!(
             "Span процедуры: {}:{} - {}:{}",
-            span.start_line, span.start_column, span.end_line, span.end_column
+            start_line, start_column, end_line, end_column
         );
 
         // "Процедура ТестProc()" - слово "Процедура" = 9 символов кириллицы
-        assert_eq!(span.start_line, 1);
-        assert_eq!(span.start_column, 0);
+        assert_eq!(start_line, 1);
+        assert_eq!(start_column, 0);
 
         // Проверяем переменную "Array" (английское название)
         if let Statement::VarDeclaration {
@@ -160,20 +185,22 @@ fn test_cyrillic_vs_ascii_span_coordinates() {
             ..
         } = &body[0]
         {
+            let ((var_start_line, var_start_column), (var_end_line, var_end_column)) =
+                utf16_range(&index, source, var_span.start, var_span.end);
             println!("\nПеременная (ASCII): {}", var_name);
             println!(
                 "Span: {}:{} - {}:{}",
-                var_span.start_line, var_span.start_column, var_span.end_line, var_span.end_column
+                var_start_line, var_start_column, var_end_line, var_end_column
             );
 
             assert_eq!(var_name, "Array");
-            assert_eq!(var_span.start_line, 2);
+            assert_eq!(var_start_line, 2);
 
             // "    Перем Array" - 4 пробела + "Перем" (5 символов кириллицы)
             // UTF-16: 4 + 5 = 9, затем пробел = 10, затем "Array" начинается с 10
             // Но нам нужна позиция начала "Перем", а не "Array"
             assert_eq!(
-                var_span.start_column, 4,
+                var_start_column, 4,
                 "Перем должен начинаться с колонки 4 (UTF-16)"
             );
 
@@ -203,13 +230,15 @@ fn test_deeply_nested_cyrillic_coordinates() {
 
     let parser = ParserCoordinator::with_fallback();
     let parse_result = parser.parse(source).expect("Парсинг должен успеть");
+    let index = LineIndex::new(source);
 
     if parse_result.has_errors() {
         println!("\n⚠️ НЕОЖИДАННЫЕ ОШИБКИ В КОДЕ:");
         for error in &parse_result.syntax_errors {
+            let (line, column) = utf16_position(&index, source, error.span.start);
             println!(
                 "  - {:?}: {} [{}:{}]",
-                error.error_type, error.message, error.span.start_line, error.span.start_column
+                error.error_type, error.message, line, column
             );
         }
     }
@@ -223,15 +252,17 @@ fn test_deeply_nested_cyrillic_coordinates() {
         // Проверяем If statement
         if let Statement::If { span: if_span, .. } = &body[1] {
             println!("\n=== ПРОВЕРКА ВЛОЖЕННЫХ СТРУКТУР ===");
+            let ((if_start_line, if_start_column), (if_end_line, if_end_column)) =
+                utf16_range(&index, source, if_span.start, if_span.end);
             println!(
                 "If statement span: {}:{} - {}:{}",
-                if_span.start_line, if_span.start_column, if_span.end_line, if_span.end_column
+                if_start_line, if_start_column, if_end_line, if_end_column
             );
 
             // "    Если" - 4 пробела
-            assert_eq!(if_span.start_line, 4, "If должен быть на строке 4");
+            assert_eq!(if_start_line, 4, "If должен быть на строке 4");
             assert_eq!(
-                if_span.start_column, 4,
+                if_start_column, 4,
                 "If должен начинаться с колонки 4 (UTF-16), не с byte offset!"
             );
 
@@ -243,20 +274,19 @@ fn test_deeply_nested_cyrillic_coordinates() {
             span: return_span, ..
         } = &body[2]
         {
+            let ((ret_start_line, ret_start_column), (ret_end_line, ret_end_column)) =
+                utf16_range(&index, source, return_span.start, return_span.end);
             println!(
                 "\nReturn statement span: {}:{} - {}:{}",
-                return_span.start_line,
-                return_span.start_column,
-                return_span.end_line,
-                return_span.end_column
+                ret_start_line, ret_start_column, ret_end_line, ret_end_column
             );
 
             assert_eq!(
-                return_span.start_line, 10,
+                ret_start_line, 10,
                 "Return должен быть на строке 10"
             );
             assert_eq!(
-                return_span.start_column, 4,
+                ret_start_column, 4,
                 "Return должен начинаться с колонки 4 (UTF-16)"
             );
 
@@ -281,6 +311,7 @@ fn test_emoji_and_special_chars_coordinates() {
 
     let parser = ParserCoordinator::with_fallback();
     let parse_result = parser.parse(source).expect("Парсинг должен успеть");
+    let index = LineIndex::new(source);
 
     // Этот тест просто проверяет, что парсинг не падает
     // и координаты имеют разумные значения
@@ -295,13 +326,15 @@ fn test_emoji_and_special_chars_coordinates() {
     if let Statement::FunctionDecl { body, .. } = &program.statements[0] {
         if let Statement::VarDeclaration { span: var_span, .. } = &body[0] {
             println!("\n=== ПРОВЕРКА СПЕЦИАЛЬНЫХ СИМВОЛОВ ===");
+            let ((var_start_line, var_start_column), (var_end_line, var_end_column)) =
+                utf16_range(&index, source, var_span.start, var_span.end);
             println!(
                 "Variable span: {}:{} - {}:{}",
-                var_span.start_line, var_span.start_column, var_span.end_line, var_span.end_column
+                var_start_line, var_start_column, var_end_line, var_end_column
             );
 
-            assert_eq!(var_span.start_line, 2);
-            assert_eq!(var_span.start_column, 4);
+            assert_eq!(var_start_line, 2);
+            assert_eq!(var_start_column, 4);
 
             println!("✅ Специальные символы: координаты стабильны!");
         }
@@ -312,48 +345,16 @@ fn test_emoji_and_special_chars_coordinates() {
 
 #[test]
 fn test_utf16_conversion_function_directly() {
-    // Прямой тест функции byte_offset_to_utf16()
-    // Это white-box тест — мы тестируем внутреннюю логику
+    // Прямой тест конвертации byte offset -> UTF-16 column на строке с кириллицей.
+    let source = "    Перем Х;\n"; // 4 пробела + кириллица
+    let index = LineIndex::new(source);
 
-    let cyrillic_line = "    Перем Х;"; // 4 пробела + кириллица
+    // "Х" начинается после "    Перем ":
+    // UTF-8: 4 (spaces) + 10 ("Перем" in UTF-8) + 1 (space) = 15 bytes
+    // UTF-16: 4 + 5 + 1 = 10 code units
+    let byte_offset_x = 15u32;
+    let (line, utf16_col) = utf16_position(&index, source, byte_offset_x);
 
-    // ASCII пробелы: 4 bytes = 4 UTF-16 code units
-    // "Перем" = 5 символов × 2 bytes each (UTF-8) = 10 bytes
-    //        = 5 символов × 1 UTF-16 code unit each = 5 UTF-16 code units
-    // Пробел после "Перем": 1 byte = 1 UTF-16 code unit
-    // "Х" = 2 bytes (UTF-8) = 1 UTF-16 code unit
-
-    // Позиция начала "Перем" (после 4 пробелов):
-    // UTF-8 byte offset: 4
-    // UTF-16 code units: 4
-    let _expected_utf16_offset_perem = 4;
-
-    // Позиция начала "Х" (после "    Перем "):
-    // UTF-8 byte offset: 4 (пробелы) + 10 (Перем) + 1 (пробел) = 15 bytes
-    // UTF-16 code units: 4 + 5 + 1 = 10
-    let _expected_utf16_offset_x = 10;
-
-    println!("\n=== ПРЯМОЙ ТЕСТ byte_offset_to_utf16() ===");
-    println!("Строка: '{}'", cyrillic_line);
-    println!(
-        "UTF-8 bytes: {:?}",
-        cyrillic_line.bytes().collect::<Vec<_>>()
-    );
-    println!(
-        "UTF-16 code units count: {}",
-        cyrillic_line.chars().map(|c| c.len_utf16()).sum::<usize>()
-    );
-
-    // ⚠️ ПРОБЛЕМА: TreeSitterAdapter::byte_offset_to_utf16() — приватная функция!
-    // Мы не можем тестировать её напрямую без изменения видимости.
-    // Альтернативы:
-    // 1. Сделать функцию pub(crate) для тестирования
-    // 2. Тестировать через публичный API (node_to_span)
-    // 3. Создать тестовый helper
-
-    // Пока оставляем косвенную проверку через span координаты выше
-
-    println!("⚠️ Прямое тестирование byte_offset_to_utf16() требует pub(crate) видимости");
-    println!("✅ Используем косвенную проверку через span координаты (см. тесты выше)");
-    println!("=========================================\n");
+    assert_eq!(line, 0);
+    assert_eq!(utf16_col, 10);
 }

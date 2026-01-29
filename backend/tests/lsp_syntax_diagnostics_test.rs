@@ -8,7 +8,14 @@
 //! 3. Типы ошибок правильно классифицированы
 
 use bsl_backend::system::ParserCoordinator;
+use bsl_backend::system::LineIndex;
 use bsl_shared::domain::types::ErrorType;
+
+fn utf16_position(index: &LineIndex, source: &str, byte_offset: u32) -> (u32, u32) {
+    let point = index.byte_offset_to_point(source, byte_offset as usize);
+    let utf16_column = index.byte_column_to_utf16(source, point.row, point.column);
+    (point.row as u32, utf16_column)
+}
 
 #[test]
 fn test_missing_endif_detected() {
@@ -23,6 +30,7 @@ fn test_missing_endif_detected() {
 
     let parser = ParserCoordinator::with_fallback();
     let parse_result = parser.parse(source).expect("Парсинг должен успеть");
+    let index = LineIndex::new(source);
 
     println!("\n=== ТЕСТ: Отсутствует КонецЕсли ===");
     println!("Найдено ошибок: {}", parse_result.syntax_errors.len());
@@ -36,14 +44,14 @@ fn test_missing_endif_detected() {
     let mut related_checked = false;
     // Проверяем детали ошибок
     for (idx, error) in parse_result.syntax_errors.iter().enumerate() {
+        let (start_line, start_column) = utf16_position(&index, source, error.span.start);
+        let (end_line, end_column) = utf16_position(&index, source, error.span.end);
+
         println!("\nОшибка #{}: {:?}", idx + 1, error.error_type);
         println!("  Сообщение: {}", error.message);
         println!(
             "  Позиция: {}:{} - {}:{}",
-            error.span.start_line,
-            error.span.start_column,
-            error.span.end_line,
-            error.span.end_column
+            start_line, start_column, end_line, end_column
         );
         if error.error_type == ErrorType::MissingToken && error.message.contains("ENDIF_KEYWORD") {
             assert!(
@@ -56,16 +64,26 @@ fn test_missing_endif_detected() {
                 "Сообщение related должно указывать на начало Если"
             );
             assert!(
-                related.span.start_line <= error.span.start_line,
-                "Related позиция должна быть на строке открытия блока"
+                related.span.start <= error.span.start,
+                "Related позиция должна указывать на начало блока"
             );
             related_checked = true;
         }
 
-        // Проверяем, что координаты валидные
-        assert!(error.span.start_line > 0, "start_line должен быть > 0");
+        // Проверяем, что span валиден (byte offsets) и не выходит за границы исходника.
         assert!(
-            error.span.end_line >= error.span.start_line,
+            error.span.end >= error.span.start,
+            "end должен быть >= start: {:?}",
+            error.span
+        );
+        assert!(
+            (error.span.end as usize) <= source.len(),
+            "end не должен выходить за пределы source: {:?}, len={}",
+            error.span,
+            source.len()
+        );
+        assert!(
+            end_line >= start_line,
             "end_line >= start_line"
         );
     }
@@ -88,6 +106,7 @@ fn test_missing_enddo_detected() {
 
     let parser = ParserCoordinator::with_fallback();
     let parse_result = parser.parse(source).expect("Парсинг должен успеть");
+    let index = LineIndex::new(source);
 
     println!("\n=== ТЕСТ: Отсутствует КонецЦикла ===");
     println!("Найдено ошибок: {}", parse_result.syntax_errors.len());
@@ -95,9 +114,10 @@ fn test_missing_enddo_detected() {
     assert!(parse_result.has_errors(), "Должны быть обнаружены ошибки");
 
     for error in &parse_result.syntax_errors {
+        let (line, column) = utf16_position(&index, source, error.span.start);
         println!(
             "- {} [{}:{}]",
-            error.message, error.span.start_line, error.span.start_column
+            error.message, line, column
         );
     }
 
@@ -152,17 +172,19 @@ fn test_multiple_syntax_errors() {
 
     let parser = ParserCoordinator::with_fallback();
     let parse_result = parser.parse(source).expect("Парсинг должен завершиться");
+    let index = LineIndex::new(source);
 
     println!("\n=== ТЕСТ: Множественные ошибки ===");
     println!("Ошибок найдено: {}", parse_result.syntax_errors.len());
 
     for (idx, error) in parse_result.syntax_errors.iter().enumerate() {
+        let (line, column) = utf16_position(&index, source, error.span.start);
         println!(
             "{}. {} [{}:{}]",
             idx + 1,
             error.message,
-            error.span.start_line,
-            error.span.start_column
+            line,
+            column
         );
     }
 
@@ -232,41 +254,41 @@ fn test_error_utf16_coordinates_with_cyrillic() {
 
     let parser = ParserCoordinator::with_fallback();
     let parse_result = parser.parse(source).expect("Парсинг должен успеть");
+    let index = LineIndex::new(source);
 
     println!("\n=== ТЕСТ: UTF-16 координаты ошибок (кириллица) ===");
 
     if parse_result.has_errors() {
         for error in &parse_result.syntax_errors {
+            let (start_line, start_column) = utf16_position(&index, source, error.span.start);
+            let (end_line, end_column) = utf16_position(&index, source, error.span.end);
+
             println!("\nОшибка: {}", error.message);
             println!(
                 "  Позиция: {}:{} - {}:{}",
-                error.span.start_line,
-                error.span.start_column,
-                error.span.end_line,
-                error.span.end_column
+                start_line, start_column, end_line, end_column
             );
 
-            // ✅ КЛЮЧЕВАЯ ПРОВЕРКА: координаты должны быть разумными для UTF-16
-            // Если бы мы использовали byte offsets, координаты были бы больше
+            // ✅ КЛЮЧЕВАЯ ПРОВЕРКА: конвертация byte offsets -> UTF-16 даёт разумные координаты.
             assert!(
-                error.span.start_column < 100,
+                start_column < 100,
                 "start_column не должен быть огромным (это признак byte offset вместо UTF-16)"
             );
 
             assert!(
-                error.span.end_column < 100,
+                end_column < 100,
                 "end_column не должен быть огромным"
             );
 
             // Координаты должны быть последовательными
             assert!(
-                error.span.end_line >= error.span.start_line,
+                end_line >= start_line,
                 "end_line должен быть >= start_line"
             );
 
-            if error.span.start_line == error.span.end_line {
+            if start_line == end_line {
                 assert!(
-                    error.span.end_column >= error.span.start_column,
+                    end_column >= start_column,
                     "На одной строке: end_column должен быть >= start_column"
                 );
             }

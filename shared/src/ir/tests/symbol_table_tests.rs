@@ -77,15 +77,15 @@ fn test_lookup_variable_in_hierarchy_finds_in_parent_scope() {
 fn test_lookup_variable_in_hierarchy_shadow_local_over_parent() {
     let mut table = SymbolTable::new();
 
-    table.register_variable(table.root_scope, "x".to_string(), Span::new(1, 0, 1, 1));
+    table.register_variable(table.root_scope, "x".to_string(), Span::new(10, 11));
     let child = table.create_scope(table.root_scope);
-    table.register_variable(child, "x".to_string(), Span::new(2, 0, 2, 1));
+    table.register_variable(child, "x".to_string(), Span::new(20, 21));
 
     let (found_scope, state) = table
         .lookup_variable_in_hierarchy(child, "x")
         .expect("x found");
     assert_eq!(found_scope, child);
-    assert_eq!(state.declaration_span.start_line, 2);
+    assert_eq!(state.declaration_span.start, 20);
 }
 
 #[test]
@@ -327,4 +327,3 @@ fn test_root_scope_has_global_kind() {
     let root = table.scopes.get(&table.root_scope).unwrap();
     assert_eq!(root.kind, ScopeKind::Global);
 }
-

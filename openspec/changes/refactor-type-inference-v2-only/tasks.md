@@ -34,7 +34,7 @@
 - [ ] 7.4 Убедиться, что LSP/web/CLI не имеют альтернативных inference путей (нет “best effort” обходов v2).
 
 ## 8. Валидация
-- [ ] 8.1 `cargo test -p bsl-analysis-v2 -p bsl-backend` проходит.
-- [ ] 8.2 `rg -n "parse_to_ir\\(|resolve_legacy\\(|handle_signature_help\\(" -S backend/ shared/` не находит legacy путей.
-- [ ] 8.3 `rg -n "bsl_semantic|bsl-semantic" -S .` не находит ссылок в коде (кроме `openspec/` и `docs/roadmap/archive/`).
-- [ ] 8.4 `openspec validate refactor-type-inference-v2-only --strict --no-interactive`.
+- [x] 8.1 `cargo test -p bsl-analysis-v2 -p bsl-backend` проходит.
+- [x] 8.2 `rg -n "parse_to_ir\\(|resolve_legacy\\(|handle_signature_help\\(" -S backend/ shared/` не находит legacy путей.
+- [x] 8.3 `rg -n "bsl_semantic|bsl-semantic" -S .` не находит ссылок в коде (кроме `openspec/` и `docs/roadmap/archive/`).
+- [x] 8.4 `openspec validate refactor-type-inference-v2-only --strict --no-interactive`.

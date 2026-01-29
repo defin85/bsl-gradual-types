@@ -1,6 +1,6 @@
 ## 1. Подготовка (аудит)
 - [x] 1.1 Инвентаризировать все места использования `bsl-semantic` (включая `backend/`, `analysis-v2/`, тесты, docs).
-- [ ] 1.2 Инвентаризировать legacy пути inference (completion resolve без candidate_id, `parse_to_ir`/`parse_and_analyze`, любые обходы v2 snapshot).
+- [x] 1.2 Инвентаризировать legacy пути inference (completion resolve без candidate_id, `parse_to_ir`/`parse_and_analyze`, любые обходы v2 snapshot). См. `legacy-audit.md`.
 - [x] 1.3 Зафиксировать реализацию AST→IR по варианту A (перенос в `bsl-analysis-v2`) и определить целевой модуль/публичный API.
 
 ## 2. Перенос AST→IR и выравнивание зависимостей

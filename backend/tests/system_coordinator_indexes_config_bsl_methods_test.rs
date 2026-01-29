@@ -69,8 +69,8 @@ fn startup_indexes_common_module_methods() {
         .start_with_paths_blocking(None, Some(Path::new(root)), Some("8.3.25"), None)
         .expect("startup");
 
-    let engine = coordinator.analysis_engine().expect("analysis_engine");
-    let repo = engine.get_repository();
+    let domain_bundle = coordinator.domain_bundle().expect("domain_bundle");
+    let repo = domain_bundle.repository.clone();
 
     let sig = repo.find_method_signature(Some("ОбщиеМодули.МойМодуль"), "ПроверитьОбъектОбработан");
     assert!(

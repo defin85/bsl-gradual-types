@@ -95,7 +95,7 @@ Content-Type: application/json
 {"code": "Array.Add()"}  → isValid: true
 
 # Insert вместо Вставить
-{"code": "ValueTable.Insert()"}  → isValid: true (если TypeInferenceService распознаёт ValueTable)
+{"code": "ValueTable.Insert()"}  → isValid: true (если система распознаёт ValueTable как алиас ТаблицаЗначений)
 ```
 
 ## Архитектура решения
@@ -161,17 +161,17 @@ TypeMetadataLookup предоставляет:
    - Не поддерживает цепочки вызовов `Obj.Method().Property`
    - Не обрабатывает параметры методов
 
-2. **TypeInferenceService** - не распознаёт английские имена типов
+2. **TypeResolver/TypeRepository** - не распознаёт английские имена типов (алиасы)
    - `"Array"` работает через распознавание платформенного типа
    - `"ValueTable"` не распознаётся как "ТаблицаЗначений"
-   - Решение: расширить TypeInferenceService для поддержки английских алиасов
+   - Решение: добавить поддержку английских алиасов в TypeResolver/Domain слой
 
 3. **Валидация свойств** - требует точного распознавания типа
-   - Работает только если TypeInferenceService знает тип объекта
+   - Работает только если TypeResolver/Domain слой знает тип объекта
 
 ## Следующие шаги
 
-1. **Расширить TypeInferenceService**
+1. **Добавить алиасы типов (Domain)**
    - Добавить маппинг английских имён типов на русские
    - Поддержка алиасов "Array" → "Массив", "ValueTable" → "ТаблицаЗначений"
 

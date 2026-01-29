@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
-use bsl_analysis_v2::{AnalysisHostV2, Change, FileId};
+use bsl_analysis_v2::{AnalysisHostV2, Change, FileId, SettingsId};
 use bsl_backend::application::type_system::web_api_service;
 use bsl_backend::data::loaders::progress::ProgressUpdate;
 use bsl_backend::data::loaders::ConfigurationDiscovery;
@@ -12,6 +12,7 @@ use bsl_shared::api::dtos::{
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::types::{Certainty, ResolutionResult};
 use bsl_shared::domain::TypeMetadataLookup;
+use bsl_shared::formatting::DetailLevel;
 use tokio::sync::mpsc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -1035,6 +1036,7 @@ impl SessionManager {
                 deps_id: deps_id.clone(),
                 deps: deps.clone(),
             });
+            apply_settings_snapshot_v2(&mut host, DetailLevel::Full);
             host.apply_change(bsl_analysis_v2::Change::SetFile {
                 file_id: bsl_analysis_v2::FileId(1),
                 text: Arc::from(snapshot.text),
@@ -1183,6 +1185,7 @@ impl SessionManager {
                 deps_id: deps_id.clone(),
                 deps: deps.clone(),
             });
+            apply_settings_snapshot_v2(&mut host, DetailLevel::Full);
             host.apply_change(Change::SetFile {
                 file_id: FileId(1),
                 text: Arc::from(text),
@@ -1321,6 +1324,7 @@ impl SessionManager {
             deps_id: deps_id.clone(),
             deps: deps.clone(),
         });
+        apply_settings_snapshot_v2(&mut host, DetailLevel::Full);
         host.apply_change(Change::SetFile {
             file_id: FileId(1),
             text: Arc::from(text),
@@ -1406,6 +1410,7 @@ impl SessionManager {
             deps_id: deps_id.clone(),
             deps: deps.clone(),
         });
+        apply_settings_snapshot_v2(&mut host, DetailLevel::Full);
         host.apply_change(Change::SetFile {
             file_id: FileId(1),
             text: Arc::from(text.clone()),
@@ -1559,6 +1564,7 @@ impl SessionManager {
             deps_id: deps_id.clone(),
             deps: deps.clone(),
         });
+        apply_settings_snapshot_v2(&mut host, DetailLevel::Full);
         host.apply_change(Change::SetFile {
             file_id: FileId(1),
             text: Arc::from(text),
@@ -1688,6 +1694,7 @@ impl SessionManager {
                 deps_id: deps_id.clone(),
                 deps: deps.clone(),
             });
+            apply_settings_snapshot_v2(&mut host, DetailLevel::Full);
             host.apply_change(Change::SetFile {
                 file_id: FileId(1),
                 text: Arc::from(text),
@@ -1893,6 +1900,7 @@ impl SessionManager {
                         deps_id: deps_id.clone(),
                         deps: deps.clone(),
                     });
+                    apply_settings_snapshot_v2(&mut host, DetailLevel::Full);
                     host.apply_change(Change::SetFile {
                         file_id: FileId(1),
                         text: Arc::from(source_text),
@@ -2946,6 +2954,17 @@ fn select_effective_version(
         .get(key)
         .map(|overlay| overlay_version_i32(overlay.version))
         .unwrap_or(0)
+}
+
+fn apply_settings_snapshot_v2(host: &mut AnalysisHostV2, diagnostics_detail_level: DetailLevel) {
+    host.apply_change(Change::SetSettingsSnapshot {
+        settings_id: SettingsId::from_hash(format!(
+            "bsl-agent;schema={};diagnostics.detail_level={:?}",
+            bsl_analysis_v2::SETTINGS_SCHEMA_VERSION,
+            diagnostics_detail_level
+        )),
+        diagnostics_detail_level,
+    });
 }
 
 fn span_to_range_with_index(

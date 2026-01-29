@@ -10,7 +10,7 @@
 
 ### Что было до изменений
 - `vscode-extension/src/providers/overviewProvider.ts` содержит хардкод: "BSL Files: Scanning...", "Last Analysis: Never", "Issues Found: 0", "UnifiedBslIndex: Loading...", "Platform: 8.3.25".
-- `bsl.getAllTypes` возвращал только платформенные типы из `TypeInferenceService.get_all_platform_globals()` → конфигурационные типы не попадали в дерево.
+- `bsl.getAllTypes` возвращал только платформенные типы (legacy путь) → конфигурационные типы не попадали в дерево.
 
 ### Что изменено
 - LSP добавляет `bsl.getWorkspaceStats` и ведёт счетчик диагностик по открытым документам.

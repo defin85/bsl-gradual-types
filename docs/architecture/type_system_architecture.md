@@ -488,7 +488,7 @@ pub struct TypeDto {
 | **TypeResolver** | Domain | Логика разрешения типов | Repository, алгоритмы вывода | Кэширование, Web API |
 | **TypeValidator** | Domain | Валидация использования типов | Правила типизации | Откуда брать methods/properties |
 | **TypeRepository** | Data | Хранение и поиск типов | RawTypeData, индексы | Логику анализа |
-| **TypeInferenceService** | Application | Оркестрация для Web/LSP | TypeResolver, Repository | Детали LSP |
+| **web_api_service** | Application | Repo-only операции для Web/CLI/agent (v2-only) | SemanticDeps, TypeRepository | IR/LSP queries |
 | **TypeSystemFacade** | Application | Высокоуровневый API + кэш | AnalysisEngine, Cache | Внутренности Domain |
 | **TypeDto** | API | Передача данных клиенту | Формат JSON, contracts | Внутренние структуры |
 

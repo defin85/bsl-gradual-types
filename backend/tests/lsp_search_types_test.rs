@@ -33,12 +33,12 @@ fn search_types_in_repository(
     coordinator: &SystemCoordinator,
     params: SearchTypesRequest,
 ) -> Vec<TypeSearchResult> {
-    let analysis_engine = match coordinator.get_analysis_engine() {
-        Some(engine) => engine,
+    let domain_bundle = match coordinator.domain_bundle() {
+        Some(bundle) => bundle,
         None => return vec![],
     };
 
-    let repo = analysis_engine.get_repository();
+    let repo = domain_bundle.repository.clone();
     let all_types = repo.get_all_types();
 
     if all_types.is_empty() {
@@ -79,15 +79,15 @@ fn search_types_in_repository(
 fn create_coordinator_with_basic_types() -> Arc<SystemCoordinator> {
     let coordinator = Arc::new(SystemCoordinator::new());
 
-    // Инициализируем coordinator (это создаёт AnalysisEngine)
+    // Инициализируем coordinator (это создаёт DomainBundle)
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime
         .block_on(async { coordinator.start_with_paths(None, None, None, None).await })
         .expect("Failed to start coordinator");
 
     // Получаем TypeRepository для добавления тестовых типов
-    let engine = coordinator.get_analysis_engine().unwrap();
-    let repo = engine.get_repository();
+    let domain_bundle = coordinator.domain_bundle().expect("domain_bundle");
+    let repo = domain_bundle.repository.clone();
 
     // Добавляем базовые типы для тестирования (которых НЕТ в fallback типах)
     let test_types = vec![

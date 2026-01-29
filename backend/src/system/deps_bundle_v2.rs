@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Context;
+use tracing::warn;
 use walkdir::WalkDir;
 
 use bsl_analysis_v2::{DepsSnapshotId, SemanticDeps};
@@ -93,6 +94,7 @@ fn build_semantic_deps_snapshot(
     bsl_shared::domain::repository::RepositoryStats,
 )> {
     let Some(bundle) = coordinator.domain_bundle() else {
+        warn!("SystemCoordinator has no DomainBundle; building empty SemanticDeps snapshot (did you forget to call start?)");
         let repository: Arc<dyn TypeRepository> = Arc::new(InMemoryTypeRepository::new());
         let resolver = Arc::new(TypeResolver::new(repository.clone()));
         let signature_index = repository.get_signature_index_clone();

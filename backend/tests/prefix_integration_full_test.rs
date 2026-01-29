@@ -100,11 +100,11 @@ async fn test_extension_types_have_prefix() {
         .load_all_configurations_metadata(config_path)
         .expect("Ошибка загрузки конфигураций");
 
-    // Получаем доступ к TypeRepository через AnalysisEngine
-    let engine = coordinator
-        .analysis_engine()
-        .expect("AnalysisEngine не инициализирован");
-    let repository = engine.get_repository();
+    // Получаем доступ к TypeRepository через DomainBundle
+    let domain_bundle = coordinator
+        .domain_bundle()
+        .expect("DomainBundle не инициализирован");
+    let repository = domain_bundle.repository.clone();
 
     // Проверяем наличие типов с префиксом "Тест_" (если расширение существует)
     let search_results = search_types_by_substring(&repository, "Тест_");
@@ -140,10 +140,10 @@ async fn test_base_types_have_no_prefix() {
         .load_all_configurations_metadata(config_path)
         .expect("Ошибка загрузки базовой конфигурации");
 
-    let engine = coordinator
-        .analysis_engine()
-        .expect("AnalysisEngine не инициализирован");
-    let repository = engine.get_repository();
+    let domain_bundle = coordinator
+        .domain_bundle()
+        .expect("DomainBundle не инициализирован");
+    let repository = domain_bundle.repository.clone();
 
     // Получаем статистику репозитория
     let stats = repository.get_stats();
@@ -189,10 +189,10 @@ async fn test_adopted_objects_stored_separately() {
         .load_all_configurations_metadata(config_path)
         .expect("Ошибка загрузки конфигураций");
 
-    let engine = coordinator
-        .analysis_engine()
-        .expect("AnalysisEngine не инициализирован");
-    let repository = engine.get_repository();
+    let domain_bundle = coordinator
+        .domain_bundle()
+        .expect("DomainBundle не инициализирован");
+    let repository = domain_bundle.repository.clone();
 
     // Получаем все типы справочников
     let catalog_types = search_types_by_substring(&repository, "Справочники.");
@@ -283,10 +283,10 @@ async fn test_multiple_extensions_with_different_prefixes() {
     println!("Загружено расширений: {}", result.extensions_count);
 
     if result.extensions_count > 1 {
-        let engine = coordinator
-            .analysis_engine()
-            .expect("AnalysisEngine не инициализирован");
-        let repository = engine.get_repository();
+        let domain_bundle = coordinator
+            .domain_bundle()
+            .expect("DomainBundle не инициализирован");
+        let repository = domain_bundle.repository.clone();
 
         // Ищем типы с разными префиксами
         let test_types = search_types_by_substring(&repository, "Тест_");
@@ -321,10 +321,10 @@ async fn test_repository_stats_after_loading() {
         .load_all_configurations_metadata(config_path)
         .expect("Ошибка загрузки конфигураций");
 
-    let engine = coordinator
-        .analysis_engine()
-        .expect("AnalysisEngine не инициализирован");
-    let repository = engine.get_repository();
+    let domain_bundle = coordinator
+        .domain_bundle()
+        .expect("DomainBundle не инициализирован");
+    let repository = domain_bundle.repository.clone();
 
     let stats = repository.get_stats();
 
@@ -351,10 +351,10 @@ async fn test_find_type_with_prefix() {
         .load_all_configurations_metadata(config_path)
         .expect("Ошибка загрузки конфигураций");
 
-    let engine = coordinator
-        .analysis_engine()
-        .expect("AnalysisEngine не инициализирован");
-    let repository = engine.get_repository();
+    let domain_bundle = coordinator
+        .domain_bundle()
+        .expect("DomainBundle не инициализирован");
+    let repository = domain_bundle.repository.clone();
 
     // Поиск типа с префиксом (если он существует)
     let search_results = search_types_by_substring(&repository, "Тест_");

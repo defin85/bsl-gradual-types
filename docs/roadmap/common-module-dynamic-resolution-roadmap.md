@@ -33,7 +33,7 @@
 
 **Подход:**
 - Ввести индекс/lookup по типам общих модулей (по имени из метаданных).
-- Хранить маппинг в памяти рядом с TypeRepository или в TypeInferenceService.
+- Хранить маппинг в памяти рядом с TypeRepository (v2 deps snapshot / SemanticDeps).
 - Добавить утилиту поиска `find_common_module_type(name)` в application layer.
 
 **Критерии успеха:**

@@ -5,7 +5,6 @@ use bsl_backend::application::type_system;
 use bsl_backend::system::build_deps_bundle_v2;
 use bsl_backend::system::SystemCoordinator;
 use bsl_analysis_v2::AstToIrConverter;
-use bsl_shared::domain::resolver::TypeResolver;
 use bsl_syntax::{parse, ParseOptions};
 use std::path::Path;
 use std::sync::Arc;
@@ -76,16 +75,15 @@ fn goto_definition_resolves_common_module_namespace_and_method() {
         .start_with_paths_blocking(None, Some(Path::new(root)), Some("8.3.25"), None)
         .expect("startup");
 
-    let engine = coordinator.analysis_engine().expect("analysis_engine");
-    let repo = engine.get_repository();
-
+    let domain_bundle = coordinator.domain_bundle().expect("domain_bundle");
+    let repo = domain_bundle.repository.clone();
     let signature_index = repo.get_signature_index_clone();
-    let resolver = Arc::new(TypeResolver::new(repo.clone()));
+    let resolver = domain_bundle.resolver.clone();
     let deps = Arc::new(SemanticDeps {
         repository: repo.clone(),
         signature_index: signature_index.clone(),
         resolver: Some(resolver.clone()),
-        platform_signatures_loaded: false,
+        platform_signatures_loaded: repo.platform_docs_loaded(),
     });
 
     let source = "Процедура Тест()\n    МойМодуль.ПриСозданииНаСервере();\nКонецПроцедуры\n";

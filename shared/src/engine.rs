@@ -76,7 +76,7 @@ impl AnalysisEngine {
         self.resolver.clone()
     }
 
-    /// Получить repository для TypeInferenceService
+    /// Получить repository для Domain потребителей
     pub fn get_repository(&self) -> Arc<dyn TypeRepository> {
         self.repository.clone()
     }

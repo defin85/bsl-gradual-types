@@ -17,6 +17,15 @@
 test -e .git/hooks/pre-commit || ln -s ../../scripts/git-hooks/pre-commit .git/hooks/pre-commit
 ```
 
+## 🔒 Политика Cargo.lock
+
+`Cargo.lock` должен быть отслеживаемым файлом в git (для воспроизводимых сборок).
+
+Проверка:
+```bash
+./scripts/check-cargo-lockfile-policy.sh
+```
+
 ## 📜 Доступные скрипты
 
 ### `add-defender-exclusions.ps1` - Настройка Windows Defender (НОВОЕ!)

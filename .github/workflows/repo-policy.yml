@@ -17,3 +17,10 @@ jobs:
       - name: Check VSCode artifacts policy (out/, *.vsix)
         run: ./scripts/check-vscode-artifacts-policy.sh
 
+  cargo_lockfile_policy:
+    name: Cargo.lock policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Cargo.lock policy
+        run: ./scripts/check-cargo-lockfile-policy.sh

@@ -41,6 +41,12 @@ cargo clippy -- -D warnings
 cargo test
 ```
 
+### Cargo.lock policy
+
+- `Cargo.lock` хранится в git и считается источником истины для сборки.
+- Не обновляй зависимости "случайно": избегай `cargo update` без явного запроса/PR.
+- Если меняешь зависимости или фичи зависимостей, коммить соответствующий diff `Cargo.lock` в том же PR.
+
 ### Commit Message Format
 ```
 type(scope): short description

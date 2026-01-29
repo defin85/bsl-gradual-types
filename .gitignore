@@ -1,8 +1,10 @@
 # Rust
 target/
-Cargo.lock
 *.rs.bk
 *.pdb
+
+# third_party crates may contain their own lockfiles; keep them out of git
+third_party/**/Cargo.lock
 
 # IDE
 .idea/

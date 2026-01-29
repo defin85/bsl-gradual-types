@@ -265,7 +265,7 @@ npm install -g @vscode/vsce
 vsce package
 
 # Установка расширения
-code --install-extension bsl-gradual-types-1.0.0.vsix
+code --install-extension bsl-gradual-types-*.vsix
 
 cd ..
 ```

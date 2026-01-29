@@ -1,0 +1,19 @@
+name: Repo policy
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+permissions: read-all
+
+jobs:
+  vscode_artifacts_policy:
+    name: VSCode artifacts policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check VSCode artifacts policy (out/, *.vsix)
+        run: ./scripts/check-vscode-artifacts-policy.sh
+

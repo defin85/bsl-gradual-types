@@ -2,6 +2,21 @@
 
 Вспомогательные скрипты для разработки и тестирования BSL Gradual Types проекта.
 
+## 🚫 Политика артефактов VSCode extension
+
+Генерируемые файлы `vscode-extension/out/**` и `vscode-extension/*.vsix` не должны попадать в git.
+
+Проверка:
+```bash
+./scripts/check-vscode-artifacts-policy.sh
+```
+
+Локальный pre-commit hook (опционально):
+```bash
+# Не перезаписывай существующий hook без проверки:
+test -e .git/hooks/pre-commit || ln -s ../../scripts/git-hooks/pre-commit .git/hooks/pre-commit
+```
+
 ## 📜 Доступные скрипты
 
 ### `add-defender-exclusions.ps1` - Настройка Windows Defender (НОВОЕ!)

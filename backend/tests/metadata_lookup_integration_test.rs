@@ -41,7 +41,7 @@ fn test_metadata_lookup_with_real_syntax_helper() {
             None => println!("  ❌ NOT found in repository!"),
         }
 
-        // Создаем TypeResolution как это делает TypeInferenceService
+        // Создаем TypeResolution для платформенного типа
         let resolution = TypeResolution {
             certainty: Certainty::Known,
             result: ResolutionResult::Concrete(ConcreteType::Platform(PlatformType {

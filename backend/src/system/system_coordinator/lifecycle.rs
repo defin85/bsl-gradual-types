@@ -12,7 +12,6 @@ use anyhow::anyhow;
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::types::{RawDataSource, RawTypeData};
-use bsl_shared::engine::AnalysisEngine;
 use serde::{Deserialize, Serialize};
 
 use crate::data::adapters::{convert_syntax_helper_global_functions, convert_syntax_helper_to_raw};
@@ -32,7 +31,7 @@ use bsl_shared::api::StartupProgressDto;
 
 use super::config_loader::ConfigCombinedCacheMeta;
 use super::coordinator::SystemCoordinator;
-use super::types::StartupError;
+use super::types::{DomainBundle, StartupError};
 
 #[derive(Debug, Clone)]
 struct PlatformCacheMeta {
@@ -128,16 +127,16 @@ impl SystemCoordinator {
         });
 
         // КРИТИЧЕСКИ ВАЖНО: Очищаем кеш при повторной инициализации
-        // Это гарантирует, что новая инициализация получит НОВЫЙ AnalysisEngine с НОВЫМ TypeRepository
+        // Это гарантирует, что новая инициализация получит новый DomainBundle с новым TypeRepository
         {
-            let mut engine_cache = self.analysis_engine_cache.write()
+            let mut engine_cache = self.domain_bundle_cache.write()
                 .unwrap_or_else(|poisoned| {
-                    warn!("Analysis engine cache RwLock poisoned (write), recovering data. This indicates a panic in another thread.");
+                    warn!("Domain bundle cache RwLock poisoned (write), recovering data. This indicates a panic in another thread.");
                     poisoned.into_inner()
                 });
 
             if engine_cache.is_some() {
-                info!("[BLOCKING THREAD] Очищаем кеш AnalysisEngine для повторной инициализации");
+                info!("[BLOCKING THREAD] Очищаем кеш DomainBundle для повторной инициализации");
                 *engine_cache = None;
             }
         }
@@ -265,17 +264,17 @@ impl SystemCoordinator {
             info!("ParserCoordinator обновлён с TypeResolver для Milestone 3.17");
         }
 
-        // 6. Создаем упрощенный AnalysisEngine (без Infrastructure зависимостей)
-        let analysis_engine = AnalysisEngine::new(resolver, repository.clone());
-
-        // Кешируем AnalysisEngine
+        // 6. Кешируем Domain layer bundle (repository + resolver)
         {
-            let mut cache = self.analysis_engine_cache.write()
+            let mut cache = self.domain_bundle_cache.write()
                 .unwrap_or_else(|poisoned| {
-                    warn!("Analysis engine cache RwLock poisoned (write), recovering data. This indicates a panic in another thread.");
+                    warn!("Domain bundle cache RwLock poisoned (write), recovering data. This indicates a panic in another thread.");
                     poisoned.into_inner()
                 });
-            *cache = Some(Arc::new(analysis_engine));
+            *cache = Some(Arc::new(DomainBundle {
+                repository: repository.clone(),
+                resolver: resolver.clone(),
+            }));
         }
 
         // 7. Загружаем метаданные конфигурации если путь указан

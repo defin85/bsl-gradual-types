@@ -16,9 +16,8 @@ use bsl_backend::data::loaders::{
     index_configuration_bsl_modules_with_progress_parallel, ModuleIndexProgress, ModuleIndexResult,
     ModuleSignatureSnapshot,
 };
-use bsl_backend::system::{ConfigIndexCache, ObjectKey, SystemCoordinator};
+use bsl_backend::system::{ConfigIndexCache, DomainBundle, ObjectKey, SystemCoordinator};
 use bsl_shared::domain::repository::TypeRepository;
-use bsl_shared::engine::AnalysisEngine;
 
 use crate::progress_bridge::{LspWorkDoneReporter, ProgressPlan, ProgressReporter};
 use crate::types::{IncrementalUpdateParams, IncrementalUpdateResponse};
@@ -43,7 +42,7 @@ pub struct ParseConfigurationResponse {
 /// Handle bsl.parseConfiguration command
 pub async fn handle_parse_configuration(
     params: ParseConfigurationParams,
-    analysis_engine: Option<Arc<AnalysisEngine>>,
+    domain_bundle: Option<Arc<DomainBundle>>,
     client: Client,
     progress_token_prefix: &str,
     progress_title: &str,
@@ -134,25 +133,24 @@ pub async fn handle_parse_configuration(
         .report(plan.validation.end, Some("Validation OK".to_string()))
         .await;
 
-    // Get AnalysisEngine
-    let engine = match analysis_engine {
-        Some(e) => e,
+    let bundle = match domain_bundle {
+        Some(bundle) => bundle,
         None => {
-            error!("AnalysisEngine not available");
+            error!("Domain bundle not available");
             reporter
                 .lock()
                 .await
-                .end(Some("Error: AnalysisEngine not available".to_string()))
+                .end(Some("Error: Domain bundle not available".to_string()))
                 .await;
             return ParseConfigurationResponse {
                 success: false,
                 loaded_types: 0,
-                message: Some("AnalysisEngine not available".to_string()),
+                message: Some("Domain bundle not available".to_string()),
             };
         }
     };
 
-    let repo = engine.get_repository();
+    let repo = bundle.repository.clone();
 
     reporter
         .lock()
@@ -465,7 +463,7 @@ pub async fn handle_incremental_update(
             ParseConfigurationParams {
                 config_path: params.config_path,
             },
-            coordinator.get_analysis_engine(),
+            coordinator.get_domain_bundle(),
             client,
             "bsl-incremental-update",
             "Incremental index update",
@@ -496,7 +494,7 @@ pub async fn handle_incremental_update(
             ParseConfigurationParams {
                 config_path: params.config_path,
             },
-            coordinator.get_analysis_engine(),
+            coordinator.get_domain_bundle(),
             client,
             "bsl-incremental-update",
             "Incremental index update",
@@ -533,22 +531,22 @@ pub async fn handle_incremental_update(
         .report(plan.validation.end, Some("Validation OK".to_string()))
         .await;
 
-    let engine = match coordinator.get_analysis_engine() {
-        Some(engine) => engine,
+    let bundle = match coordinator.get_domain_bundle() {
+        Some(bundle) => bundle,
         None => {
             reporter
                 .lock()
                 .await
-                .end(Some("Error: AnalysisEngine not available".to_string()))
+                .end(Some("Error: Domain bundle not available".to_string()))
                 .await;
             return IncrementalUpdateResponse {
                 success: false,
-                message: "AnalysisEngine not available".to_string(),
+                message: "Domain bundle not available".to_string(),
             };
         }
     };
 
-    let repository = engine.get_repository();
+    let repository = bundle.repository.clone();
     let cache_taken = {
         let mut guard = cache_lock.write().unwrap_or_else(|poisoned| {
             warn!("Config index cache RwLock poisoned (write), recovering");

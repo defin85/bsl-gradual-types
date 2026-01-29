@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use bsl_analysis_v2::{AnalysisHostV2, Change, FileId};
 use bsl_backend::application::type_system::web_api_service;
-use bsl_backend::application::TypeInferenceService;
 use bsl_backend::data::loaders::progress::ProgressUpdate;
 use bsl_backend::data::loaders::ConfigurationDiscovery;
 use bsl_shared::api::dtos::{
@@ -481,19 +480,8 @@ impl SessionManager {
         Ok(first)
     }
 
-    fn deps_resolver(deps: &Arc<bsl_analysis_v2::SemanticDeps>) -> Arc<TypeResolver> {
-        deps.resolver
-            .clone()
-            .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())))
-    }
-
-    fn build_inference_v2(
-        deps: &Arc<bsl_analysis_v2::SemanticDeps>,
-    ) -> (TypeInferenceService, TypeMetadataLookup) {
-        let resolver = Self::deps_resolver(deps);
-        let inference_service = TypeInferenceService::new(resolver, deps.repository.clone());
-        let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
-        (inference_service, metadata_lookup)
+    fn build_metadata_lookup_v2(deps: &Arc<bsl_analysis_v2::SemanticDeps>) -> TypeMetadataLookup {
+        TypeMetadataLookup::new(deps.repository.clone())
     }
 
     async fn ready_startup_for_http(
@@ -522,9 +510,9 @@ impl SessionManager {
     ) -> Result<AnalysisResultDto, rmcp::ErrorData> {
         let startup = self.ready_startup_for_http(session_id).await?;
         let deps = startup.deps_bundle_v2.semantic_deps.clone();
-        let (inference_service, metadata_lookup) = Self::build_inference_v2(&deps);
+        let metadata_lookup = Self::build_metadata_lookup_v2(&deps);
         Ok(web_api_service::get_all_types_as_dto(
-            &inference_service,
+            deps.as_ref(),
             &metadata_lookup,
             limit,
             offset,
@@ -541,9 +529,9 @@ impl SessionManager {
     ) -> Result<AnalysisResultDto, rmcp::ErrorData> {
         let startup = self.ready_startup_for_http(session_id).await?;
         let deps = startup.deps_bundle_v2.semantic_deps.clone();
-        let (inference_service, metadata_lookup) = Self::build_inference_v2(&deps);
+        let metadata_lookup = Self::build_metadata_lookup_v2(&deps);
 
-        web_api_service::search_types_as_dto(&inference_service, &metadata_lookup, query)
+        web_api_service::search_types_as_dto(deps.as_ref(), &metadata_lookup, query)
             .await
             .map_err(|err| rmcp::ErrorData::internal_error(err.to_string(), None))
     }
@@ -561,9 +549,8 @@ impl SessionManager {
     ) -> Result<MetricsDto, rmcp::ErrorData> {
         let startup = self.ready_startup_for_http(session_id).await?;
         let deps = startup.deps_bundle_v2.semantic_deps.clone();
-        let (inference_service, _metadata_lookup) = Self::build_inference_v2(&deps);
 
-        let all_types = inference_service.get_all_platform_globals();
+        let all_types = web_api_service::get_all_platform_globals(deps.as_ref());
         let mut certainty_high = 0;
         let mut certainty_medium = 0;
         let mut certainty_low = 0;
@@ -1056,6 +1043,13 @@ impl SessionManager {
             });
 
             let analysis = host.analysis();
+            let Some(code) = analysis.file_text(bsl_analysis_v2::FileId(1)).ok().flatten() else {
+                continue;
+            };
+            let Some(line_index) = analysis.line_index(bsl_analysis_v2::FileId(1)).ok().flatten()
+            else {
+                continue;
+            };
             let file_diags = analysis
                 .semantic_diagnostics(bsl_analysis_v2::FileId(1))
                 .ok()
@@ -1070,14 +1064,22 @@ impl SessionManager {
                     break;
                 }
 
+                let (start_line, start_character) = line_index.byte_offset_to_utf16_position(
+                    code.as_ref(),
+                    diag.span.start as usize,
+                );
+                let (end_line, end_character) = line_index.byte_offset_to_utf16_position(
+                    code.as_ref(),
+                    diag.span.end as usize,
+                );
                 let range = RangeDto {
                     start: PositionDto {
-                        line: diag.line,
-                        character: diag.column,
+                        line: start_line,
+                        character: start_character,
                     },
                     end: PositionDto {
-                        line: diag.end_line,
-                        character: diag.end_column,
+                        line: end_line,
+                        character: end_character,
                     },
                 };
 
@@ -1193,6 +1195,12 @@ impl SessionManager {
             let Some(program) = program else {
                 continue;
             };
+            let Some(code) = analysis.file_text(FileId(1)).ok().flatten() else {
+                continue;
+            };
+            let Some(line_index) = analysis.line_index(FileId(1)).ok().flatten() else {
+                continue;
+            };
 
             for node in program.nodes.iter() {
                 let (kind, name) = match &node.kind {
@@ -1214,16 +1222,7 @@ impl SessionManager {
                     break;
                 }
 
-                let range = RangeDto {
-                    start: PositionDto {
-                        line: node.span.start_line,
-                        character: node.span.start_column,
-                    },
-                    end: PositionDto {
-                        line: node.span.end_line,
-                        character: node.span.end_column,
-                    },
-                };
+                let range = span_to_range_with_index(code.as_ref(), line_index.as_ref(), node.span);
                 let file_ref = DocumentRefDto {
                     root_id: file.root_id.clone(),
                     path: file.rel_path.clone(),
@@ -1341,10 +1340,7 @@ impl SessionManager {
         };
 
         let pos = params.position;
-        let type_info = analysis
-            .type_at_position(FileId(1), pos.line, pos.character)
-            .ok()
-            .flatten()
+        let type_info = type_at_utf16_position(&analysis, FileId(1), pos.line, pos.character)
             .map(|resolution| TypeInfoDto {
                 name: resolution.type_name(),
                 certainty: format!("{:?}", resolution.certainty).to_lowercase(),
@@ -1354,20 +1350,16 @@ impl SessionManager {
                     .map(|facet| format!("{:?}", facet)),
             });
 
-        let node = program
-            .find_node_at_position(pos.line, pos.character)
+        let node = node_at_utf16_position(
+            &analysis,
+            program.as_ref(),
+            FileId(1),
+            pos.line,
+            pos.character,
+        )
             .map(|node| NodeInfoDto {
                 kind: format!("{:?}", node.kind),
-                range: RangeDto {
-                    start: PositionDto {
-                        line: node.span.start_line,
-                        character: node.span.start_column,
-                    },
-                    end: PositionDto {
-                        line: node.span.end_line,
-                        character: node.span.end_column,
-                    },
-                },
+                range: span_to_range_with_analysis(&analysis, FileId(1), node.span),
             });
 
         let _ = index_snapshot.id.as_str();
@@ -1584,13 +1576,19 @@ impl SessionManager {
             });
         };
 
-        let type_at_position_hint = analysis
-            .type_at_position(FileId(1), position.line, position.character)
-            .ok()
-            .flatten();
+        let Some(code) = analysis.file_text(FileId(1)).ok().flatten() else {
+            return Ok(BslDefinitionResponse {
+                analysis_revision,
+                location: None,
+                snippet: None,
+            });
+        };
+        let type_at_position_hint =
+            type_at_utf16_position(&analysis, FileId(1), position.line, position.character);
         let receiver_type_hint = None;
-        let target = bsl_backend::application::type_system::goto_definition_v2(
+        let target = bsl_backend::application::type_system::goto_definition_v2_with_source(
             abs_path.to_string_lossy().as_ref(),
+            code.as_ref(),
             program,
             deps,
             position.line,
@@ -1607,19 +1605,24 @@ impl SessionManager {
             });
         };
 
-        let location = map_path_to_root(&roots, &target.file_path).map(|(root_id, rel_path)| {
-            let range = target
-                .span
-                .map(span_to_range)
-                .unwrap_or_else(RangeDto::default);
-            LocationDto {
-                file: DocumentRefDto {
-                    root_id,
-                    path: rel_path,
-                },
-                range,
+        let location = match map_path_to_root(&roots, &target.file_path) {
+            Some((root_id, rel_path)) => {
+                let range = match target.span {
+                    Some(span) if target.file_path == abs_path => {
+                        span_to_range_with_index(code.as_ref(), &bsl_analysis_v2::LineIndex::new(code.as_ref()), span)
+                    }
+                    _ => RangeDto::default(),
+                };
+                Some(LocationDto {
+                    file: DocumentRefDto {
+                        root_id,
+                        path: rel_path,
+                    },
+                    range,
+                })
             }
-        });
+            None => None,
+        };
 
         Ok(BslDefinitionResponse {
             analysis_revision,
@@ -1697,6 +1700,12 @@ impl SessionManager {
             let Some(program) = program else {
                 continue;
             };
+            let Some(code) = analysis.file_text(FileId(1)).ok().flatten() else {
+                continue;
+            };
+            let Some(line_index) = analysis.line_index(FileId(1)).ok().flatten() else {
+                continue;
+            };
 
             for node in program.nodes.iter() {
                 let bsl_shared::ir::SemanticNodeKind::FunctionCall {
@@ -1724,7 +1733,7 @@ impl SessionManager {
                         root_id: file.root_id.clone(),
                         path: file.rel_path.clone(),
                     },
-                    range: span_to_range(node.span),
+                    range: span_to_range_with_index(code.as_ref(), line_index.as_ref(), node.span),
                 });
             }
 
@@ -1895,10 +1904,12 @@ impl SessionManager {
                     let program = analysis.ir(FileId(1)).ok().flatten();
                     if let Some(program) = program {
                         let _ = program;
-                        if let Some(type_info) = analysis
-                            .type_at_position(FileId(1), position.line, position.character)
-                            .ok()
-                            .flatten()
+                        if let Some(type_info) = type_at_utf16_position(
+                            &analysis,
+                            FileId(1),
+                            position.line,
+                            position.character,
+                        )
                         {
                             text.push_line(&format!("type_at_position: {}", type_info.type_name()));
                             text.push_line("");
@@ -2937,17 +2948,70 @@ fn select_effective_version(
         .unwrap_or(0)
 }
 
-fn span_to_range(span: bsl_shared::ir::Span) -> RangeDto {
+fn span_to_range_with_index(
+    text: &str,
+    line_index: &bsl_analysis_v2::LineIndex,
+    span: bsl_shared::ir::Span,
+) -> RangeDto {
+    let (start_line, start_character) =
+        line_index.byte_offset_to_utf16_position(text, span.start as usize);
+    let (end_line, end_character) =
+        line_index.byte_offset_to_utf16_position(text, span.end as usize);
+
     RangeDto {
         start: PositionDto {
-            line: span.start_line,
-            character: span.start_column,
+            line: start_line,
+            character: start_character,
         },
         end: PositionDto {
-            line: span.end_line,
-            character: span.end_column,
+            line: end_line,
+            character: end_character,
         },
     }
+}
+
+fn span_to_range_with_analysis(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    span: bsl_shared::ir::Span,
+) -> RangeDto {
+    let Some(text) = analysis.file_text(file_id).ok().flatten() else {
+        return RangeDto::default();
+    };
+    let Some(line_index) = analysis.line_index(file_id).ok().flatten() else {
+        return RangeDto::default();
+    };
+
+    span_to_range_with_index(text.as_ref(), line_index.as_ref(), span)
+}
+
+fn type_at_utf16_position(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    line: u32,
+    character: u32,
+) -> Option<bsl_shared::domain::types::TypeResolution> {
+    let byte_offset = analysis
+        .utf16_position_to_byte_offset(file_id, line, character)
+        .ok()
+        .flatten()? as u32;
+
+    analysis.type_at_byte_offset(file_id, byte_offset).ok().flatten()
+}
+
+fn node_at_utf16_position<'a>(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    program: &'a bsl_shared::ir::SemanticProgram,
+    file_id: bsl_analysis_v2::FileId,
+    line: u32,
+    character: u32,
+) -> Option<&'a bsl_shared::ir::SemanticNode> {
+    let byte_offset = analysis
+        .utf16_position_to_byte_offset(file_id, line, character)
+        .ok()
+        .flatten()? as u32;
+
+    program.find_node_at_byte_offset(byte_offset)
 }
 
 fn map_path_to_root(roots: &[RootEntry], target: &Path) -> Option<(String, String)> {

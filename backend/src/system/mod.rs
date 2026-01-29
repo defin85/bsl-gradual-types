@@ -41,7 +41,7 @@ pub use positioning::{byte_offset_to_utf16, utf16_to_byte_offset, LineIndex};
 pub use startup_v2::{startup_v2, EffectiveStartupInputs, StartupInputs, StartupResultV2};
 pub use system_coordinator::{
     CacheClearReport, CacheScope, CacheStatsReport, CacheToggleResult, ConfigIndexCache,
-    DiskCacheStatsReport, LoadMetadataResult, ObjectKey, StartupError, SymbolInfo,
+    DiskCacheStatsReport, DomainBundle, LoadMetadataResult, ObjectKey, StartupError, SymbolInfo,
     SystemCoordinator,
 };
 pub use tree_cache::{hash_content, TreeCache};

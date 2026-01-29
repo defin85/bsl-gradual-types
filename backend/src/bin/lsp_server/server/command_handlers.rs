@@ -142,7 +142,7 @@ impl BslLanguageServer {
 
         let resp = handle_parse_configuration(
             ParseConfigurationParams { config_path },
-            self.coordinator.get_analysis_engine(),
+            self.coordinator.get_domain_bundle(),
             self.client.clone(),
             "bsl-build-index",
             "Building BSL index",

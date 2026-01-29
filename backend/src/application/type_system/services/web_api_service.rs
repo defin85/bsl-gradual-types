@@ -6,38 +6,37 @@
 use anyhow::Result;
 use tracing::info;
 
+use bsl_analysis_v2::SemanticDeps;
 use bsl_shared::api::dtos::{
     AnalysisResultDto, CategoryDto, MetricsDto, PaginationDto, TabularSectionAttributeDto,
     TabularSectionDto, TypeDto, UnionComponentDto,
 };
 use bsl_shared::api::{MethodDto, ParamDto};
 use bsl_shared::domain::signature_index::{MethodSignature, SignatureSource};
-use bsl_shared::domain::types::{Certainty, ResolutionResult, TypeResolution};
-use bsl_shared::domain::{CompletionItem, TypeMetadataLookup};
-
-use crate::application::TypeInferenceService;
+use bsl_shared::domain::types::{
+    Attribute, Certainty, ConcreteType, ConfigurationType, MetadataKind, RawAttributeData,
+    RawDataSource, RawTabularSectionData, ResolutionResult, TabularSection, TypeResolution,
+};
+use bsl_shared::domain::{CompletionItem, CompletionKind, TypeMetadataLookup};
 
 /// Searches types by query string
 ///
 /// # Arguments
-/// * `inference_service` - TypeInferenceService for type operations
+/// * `deps` - v2 deps snapshot (`SemanticDeps`)
 /// * `query` - Search query string
 ///
 /// # Returns
 /// List of matching type names
-pub async fn search_types(
-    inference_service: &TypeInferenceService,
-    query: &str,
-) -> Result<Vec<String>> {
+pub async fn search_types(deps: &SemanticDeps, query: &str) -> Result<Vec<String>> {
     info!("🌐 Web search types: {}", query);
-    let results = inference_service.search_types(query);
+    let results = search_types_from_deps(deps, query);
     Ok(results)
 }
 
 /// Phase 5: Search types with DTO transformation (Web API)
 ///
 /// # Arguments
-/// * `inference_service` - TypeInferenceService for type operations
+/// * `deps` - v2 deps snapshot (`SemanticDeps`)
 /// * `metadata_lookup` - Lookup for type metadata
 /// * `cache` - Analysis cache for metrics
 /// * `query` - Search query string
@@ -45,14 +44,14 @@ pub async fn search_types(
 /// # Returns
 /// AnalysisResultDto with filtered types
 pub async fn search_types_as_dto(
-    inference_service: &TypeInferenceService,
+    deps: &SemanticDeps,
     metadata_lookup: &TypeMetadataLookup,
     query: &str,
 ) -> Result<AnalysisResultDto> {
     info!("🌐 Web search types with DTO: {}", query);
 
     // 1. Get all types and filter by query
-    let all_types = inference_service.get_all_platform_globals();
+    let all_types = get_all_platform_globals(deps);
     let query_lower = query.to_lowercase();
 
     let filtered_types: Vec<(&String, &TypeResolution)> = all_types
@@ -71,7 +70,7 @@ pub async fn search_types_as_dto(
         })
         .collect();
 
-    let mut global_function_dtos = search_global_functions_as_dto(inference_service, query);
+    let mut global_function_dtos = search_global_functions_as_dto(deps, query);
 
     let mut all_dtos = Vec::with_capacity(type_dtos.len() + global_function_dtos.len());
     all_dtos.append(&mut type_dtos);
@@ -155,41 +154,41 @@ pub async fn search_types_as_dto(
 /// Get type details by name
 ///
 /// # Arguments
-/// * `inference_service` - TypeInferenceService for type operations
+/// * `deps` - v2 deps snapshot (`SemanticDeps`)
 /// * `type_name` - Name of the type to retrieve
 ///
 /// # Returns
 /// TypeResolution if found
 pub async fn get_type_details(
-    inference_service: &TypeInferenceService,
+    deps: &SemanticDeps,
     type_name: &str,
 ) -> Result<Option<TypeResolution>> {
     info!("🌐 Web type details: {}", type_name);
-    let platform_globals = inference_service.get_all_platform_globals();
+    let platform_globals = get_all_platform_globals(deps);
     Ok(platform_globals.get(type_name).cloned())
 }
 
 /// Get type completions for an expression
 ///
 /// # Arguments
-/// * `inference_service` - TypeInferenceService for type operations
+/// * `deps` - v2 deps snapshot (`SemanticDeps`)
 /// * `expression` - Expression to get completions for
 ///
 /// # Returns
 /// List of completion items
 pub async fn get_type_completions(
-    inference_service: &TypeInferenceService,
+    deps: &SemanticDeps,
     expression: &str,
 ) -> Result<Vec<CompletionItem>> {
     info!("🌐 Web completions for: {}", expression);
-    let completions = inference_service.get_completions(expression);
+    let completions = completions_from_deps(deps, expression);
     Ok(completions)
 }
 
 /// Phase 5: Get all types as DTO (Web API)
 ///
 /// # Arguments
-/// * `inference_service` - TypeInferenceService for type operations
+/// * `deps` - v2 deps snapshot (`SemanticDeps`)
 /// * `metadata_lookup` - Lookup for type metadata
 /// * `cache` - Analysis cache for metrics
 /// * `limit` - Page size
@@ -202,7 +201,7 @@ pub async fn get_type_completions(
 /// AnalysisResultDto with paginated types
 #[allow(clippy::too_many_arguments)]
 pub fn get_all_types_as_dto(
-    inference_service: &TypeInferenceService,
+    deps: &SemanticDeps,
     metadata_lookup: &TypeMetadataLookup,
     limit: usize,
     offset: usize,
@@ -211,7 +210,7 @@ pub fn get_all_types_as_dto(
     flow_sensitive_only: bool,
 ) -> AnalysisResultDto {
     // 1. Get all types from Domain
-    let all_types = inference_service.get_all_platform_globals();
+    let all_types = get_all_platform_globals(deps);
 
     // 2. First transform to DTO (to know category), then filter, then paginate
     let all_type_dtos: Vec<TypeDto> = all_types
@@ -351,12 +350,12 @@ pub fn get_all_types_as_dto(
 /// Get metrics summary for Web API
 ///
 /// # Arguments
-/// * `inference_service` - TypeInferenceService for type operations
+/// * `deps` - v2 deps snapshot (`SemanticDeps`)
 ///
 /// # Returns
 /// JSON value with metrics summary
-pub fn get_metrics_summary(inference_service: &TypeInferenceService) -> serde_json::Value {
-    let all_types = inference_service.get_all_platform_globals();
+pub fn get_metrics_summary(deps: &SemanticDeps) -> serde_json::Value {
+    let all_types = get_all_platform_globals(deps);
 
     let mut known = 0;
     let mut inferred = 0;
@@ -379,6 +378,147 @@ pub fn get_metrics_summary(inference_service: &TypeInferenceService) -> serde_js
 }
 
 // === Helper functions ===
+
+pub fn get_all_platform_globals(
+    deps: &SemanticDeps,
+) -> std::collections::HashMap<String, TypeResolution> {
+    let raw_types = deps.repository.get_all_types();
+    let mut result = std::collections::HashMap::new();
+
+    for raw_type in raw_types {
+        let concrete_type = match raw_type.source {
+            RawDataSource::Platform => ConcreteType::Platform(bsl_shared::domain::types::PlatformType {
+                name: raw_type.name.clone(),
+            }),
+            RawDataSource::Configuration => {
+                // Конвертируем атрибуты и табличные части
+                let attributes = convert_raw_attributes(&raw_type.attributes);
+                let tabular_sections = convert_raw_tabular_sections(&raw_type.tabular_sections);
+
+                ConcreteType::Configuration(ConfigurationType {
+                    kind: raw_type.kind.unwrap_or(MetadataKind::Unknown),
+                    name: raw_type.name.clone(),
+                    facet: raw_type.facets.first().copied(),
+                    attributes,
+                    tabular_sections,
+                })
+            }
+            RawDataSource::UserDefined => {
+                // Пользовательские типы пока как Platform
+                ConcreteType::Platform(bsl_shared::domain::types::PlatformType {
+                    name: raw_type.name.clone(),
+                })
+            }
+        };
+
+        let mut resolution = TypeResolution::known(concrete_type);
+        // Копируем фасеты из RawTypeData
+        resolution.available_facets = raw_type.facets.clone();
+
+        result.insert(raw_type.name, resolution);
+    }
+
+    result
+}
+
+fn completions_from_deps(deps: &SemanticDeps, query: &str) -> Vec<CompletionItem> {
+    let all_types = deps.repository.get_all_types();
+    let mut completions = Vec::new();
+    let query_lower = query.to_lowercase();
+
+    for raw_type in all_types {
+        if !raw_type.name.to_lowercase().contains(&query_lower) {
+            continue;
+        }
+
+        let concrete_type = match raw_type.source {
+            RawDataSource::Platform => ConcreteType::Platform(bsl_shared::domain::types::PlatformType {
+                name: raw_type.name.clone(),
+            }),
+            RawDataSource::Configuration => {
+                let attributes = convert_raw_attributes(&raw_type.attributes);
+                let tabular_sections = convert_raw_tabular_sections(&raw_type.tabular_sections);
+
+                ConcreteType::Configuration(ConfigurationType {
+                    kind: raw_type.kind.unwrap_or(MetadataKind::Unknown),
+                    name: raw_type.name.clone(),
+                    facet: raw_type.facets.first().copied(),
+                    attributes,
+                    tabular_sections,
+                })
+            }
+            RawDataSource::UserDefined => ConcreteType::Platform(bsl_shared::domain::types::PlatformType {
+                name: raw_type.name.clone(),
+            }),
+        };
+
+        let resolution = TypeResolution::known(concrete_type);
+        let item = CompletionItem::with_details(
+            raw_type.name.clone(),
+            determine_completion_kind(&resolution),
+            Some(format!("{:?}", resolution.result)),
+            resolution.metadata.notes.first().cloned(),
+        );
+        completions.push(item);
+    }
+
+    completions
+}
+
+fn search_types_from_deps(deps: &SemanticDeps, query: &str) -> Vec<String> {
+    completions_from_deps(deps, query)
+        .into_iter()
+        .map(|c| c.label)
+        .collect()
+}
+
+fn search_global_functions_from_deps(
+    deps: &SemanticDeps,
+    query: &str,
+) -> Vec<(String, MethodSignature)> {
+    let index = &deps.signature_index;
+    let query_lower = query.to_lowercase();
+
+    index
+        .get_global_functions()
+        .iter()
+        .filter(|(name, _)| name.display().to_lowercase().contains(&query_lower))
+        .map(|(name, sig)| (name.display().to_string(), sig.clone()))
+        .collect()
+}
+
+fn convert_raw_attributes(raw_attrs: &[RawAttributeData]) -> Vec<Attribute> {
+    raw_attrs
+        .iter()
+        .map(|ra| Attribute {
+            name: ra.name.clone(),
+            type_: ra.attr_type.clone(),
+            is_composite: false,
+            types: vec![ra.attr_type.clone()],
+        })
+        .collect()
+}
+
+fn convert_raw_tabular_sections(raw_ts: &[RawTabularSectionData]) -> Vec<TabularSection> {
+    raw_ts
+        .iter()
+        .map(|rts| TabularSection {
+            name: rts.name.clone(),
+            synonym: None,
+            attributes: convert_raw_attributes(&rts.attributes),
+        })
+        .collect()
+}
+
+fn determine_completion_kind(resolution: &TypeResolution) -> CompletionKind {
+    match &resolution.result {
+        ResolutionResult::Concrete(ConcreteType::Platform(_)) => CompletionKind::Global,
+        ResolutionResult::Concrete(ConcreteType::Configuration(config)) => {
+            CompletionKind::from_metadata_kind(config.kind)
+        }
+        _ => CompletionKind::Global,
+    }
+}
 
 /// Determines category and source for a type based on TypeResolution
 fn determine_category_and_source(res: &TypeResolution) -> (String, String) {
@@ -413,11 +553,10 @@ fn determine_category_and_source(res: &TypeResolution) -> (String, String) {
 }
 
 fn search_global_functions_as_dto(
-    inference_service: &TypeInferenceService,
+    deps: &SemanticDeps,
     query: &str,
 ) -> Vec<TypeDto> {
-    inference_service
-        .search_global_functions(query)
+    search_global_functions_from_deps(deps, query)
         .into_iter()
         .map(|(name, sig)| global_function_signature_to_dto(&name, &sig))
         .collect()

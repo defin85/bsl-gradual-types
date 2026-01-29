@@ -5,11 +5,11 @@
 use std::sync::Arc;
 use tracing::info;
 
+use bsl_backend::system::DomainBundle;
 use bsl_shared::api::dtos::{
     AnalysisResultDto, CategoryDto, MethodDto, MetricsDto, PaginationDto, ParamDto, TypeDto,
 };
 use bsl_shared::domain::types::{RawDataSource, RawTypeData};
-use bsl_shared::engine::AnalysisEngine;
 
 /// Request for bsl.getAllTypes
 #[derive(Debug, serde::Deserialize)]
@@ -28,16 +28,16 @@ fn default_limit() -> usize {
 /// Handle bsl.getAllTypes command
 pub fn handle_get_all_types(
     params: GetAllTypesRequest,
-    analysis_engine: Option<Arc<AnalysisEngine>>,
+    domain: Option<Arc<DomainBundle>>,
 ) -> AnalysisResultDto {
     info!(
         "Custom command: bsl.getAllTypes - limit: {}, offset: {}, category: {:?}",
         params.limit, params.offset, params.category
     );
 
-    match analysis_engine {
-        Some(engine) => {
-            let repository = engine.get_repository();
+    match domain {
+        Some(bundle) => {
+            let repository = bundle.repository.clone();
             let all_types: Vec<RawTypeData> = repository.get_all_types();
 
             let mut dtos: Vec<TypeDto> = all_types.iter().map(raw_type_to_dto).collect();

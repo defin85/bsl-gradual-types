@@ -10,7 +10,7 @@ use tracing::warn;
 
 use super::types::{
     CacheClearReport, CacheScope, CacheStatsReport, CacheToggleResult, ConfigIndexCache,
-    DiskCacheStatsReport,
+    DiskCacheStatsReport, DomainBundle,
 };
 use crate::system::basic_observability::BasicObservability;
 use crate::system::disk_cache::DiskCache;
@@ -19,7 +19,6 @@ use crate::system::intellisense_index_store::IntellisenseIndexDiskStore;
 use crate::system::parser_coordinator::ParserCoordinator;
 use bsl_shared::api::StartupProgressDto;
 use bsl_shared::domain::repository::RepositoryStats;
-use bsl_shared::engine::AnalysisEngine;
 
 /// Упрощенный системный координатор
 ///
@@ -33,9 +32,9 @@ pub struct SystemCoordinator {
     pub(crate) disk_cache: Arc<DiskCache>,
     pub(crate) intellisense_index: Arc<IntellisenseIndexStore>,
 
-    // === ANALYSIS ENGINE CACHE ===
-    // Используем Arc<RwLock> для оптимизации read-heavy паттернов
-    pub(crate) analysis_engine_cache: Arc<RwLock<Option<Arc<AnalysisEngine>>>>,
+    // === DOMAIN LAYER CACHE ===
+    // Repository + resolver created during startup, shared across the system.
+    pub(crate) domain_bundle_cache: Arc<RwLock<Option<Arc<DomainBundle>>>>,
 
     // === STARTUP PROGRESS (WEB API) ===
     pub(crate) startup_progress: Arc<RwLock<StartupProgressDto>>,
@@ -90,7 +89,7 @@ impl SystemCoordinator {
             observability,
             disk_cache,
             intellisense_index,
-            analysis_engine_cache: Arc::new(RwLock::new(None)),
+            domain_bundle_cache: Arc::new(RwLock::new(None)),
             startup_progress: Arc::new(RwLock::new(StartupProgressDto::default())),
             config_index_cache: Arc::new(RwLock::new(None)),
             platform_version: Arc::new(RwLock::new(None)),
@@ -396,20 +395,19 @@ impl SystemCoordinator {
     }
 
     /// Получить AnalysisEngine (делегирует Domain Layer логику)
-    pub fn get_analysis_engine(&self) -> Option<Arc<AnalysisEngine>> {
-        let cache = self.analysis_engine_cache.read()
+    pub fn get_domain_bundle(&self) -> Option<Arc<DomainBundle>> {
+        let cache = self.domain_bundle_cache.read()
             .unwrap_or_else(|poisoned| {
-                warn!("Analysis engine cache RwLock poisoned (read), recovering data. This indicates a panic in another thread.");
+                warn!("Domain bundle cache RwLock poisoned (read), recovering data. This indicates a panic in another thread.");
                 poisoned.into_inner()
             });
         cache.clone()
     }
 
-    /// Получить AnalysisEngine для CLI/прямого использования
-    pub fn analysis_engine(&self) -> Option<Arc<AnalysisEngine>> {
-        let cache = self.analysis_engine_cache.read()
+    pub fn domain_bundle(&self) -> Option<Arc<DomainBundle>> {
+        let cache = self.domain_bundle_cache.read()
             .unwrap_or_else(|poisoned| {
-                warn!("Analysis engine cache RwLock poisoned (read), recovering data. This indicates a panic in another thread.");
+                warn!("Domain bundle cache RwLock poisoned (read), recovering data. This indicates a panic in another thread.");
                 poisoned.into_inner()
             });
         cache.clone()
@@ -422,12 +420,9 @@ impl SystemCoordinator {
 
     /// Получить статистику TypeRepository (Task 2.20.4)
     pub fn get_type_repository_stats(&self) -> RepositoryStats {
-        // Получаем AnalysisEngine
-        if let Some(engine) = self.analysis_engine() {
-            let repository = engine.get_repository();
-            repository.get_stats()
+        if let Some(bundle) = self.domain_bundle() {
+            bundle.repository.get_stats()
         } else {
-            // Если AnalysisEngine не инициализирован - возвращаем пустую статистику
             RepositoryStats::default()
         }
     }

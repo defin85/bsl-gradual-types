@@ -19,7 +19,7 @@ mod types;
 pub use coordinator::SystemCoordinator;
 pub use types::{
     CacheClearReport, CacheScope, CacheStatsReport, CacheToggleResult, ConfigIndexCache,
-    DiskCacheStatsReport, LoadMetadataResult, ObjectKey, StartupError, SymbolInfo,
+    DiskCacheStatsReport, DomainBundle, LoadMetadataResult, ObjectKey, StartupError, SymbolInfo,
 };
 
 #[cfg(test)]

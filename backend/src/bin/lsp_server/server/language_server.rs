@@ -2060,7 +2060,7 @@ impl LanguageServer for BslLanguageServer {
                         ))
                     })?;
 
-                let result = handle_search_types(request, self.coordinator.get_analysis_engine());
+                let result = handle_search_types(request, self.coordinator.get_domain_bundle());
                 Ok(Some(serde_json::to_value(result).map_err(|_| {
                     tower_lsp::jsonrpc::Error::internal_error()
                 })?))
@@ -2082,7 +2082,7 @@ impl LanguageServer for BslLanguageServer {
                     })?
                 };
 
-                let result = handle_get_all_types(request, self.coordinator.get_analysis_engine());
+                let result = handle_get_all_types(request, self.coordinator.get_domain_bundle());
                 Ok(Some(serde_json::to_value(result).map_err(|_| {
                     tower_lsp::jsonrpc::Error::internal_error()
                 })?))
@@ -2122,7 +2122,7 @@ impl LanguageServer for BslLanguageServer {
                         ))
                     })?;
 
-                let result = handle_query_type(request, self.coordinator.get_analysis_engine());
+                let result = handle_query_type(request, self.coordinator.get_domain_bundle());
                 Ok(Some(serde_json::to_value(result).map_err(|_| {
                     tower_lsp::jsonrpc::Error::internal_error()
                 })?))
@@ -2171,7 +2171,7 @@ impl LanguageServer for BslLanguageServer {
 
                 let result = handle_parse_configuration(
                     request,
-                    self.coordinator.get_analysis_engine(),
+                    self.coordinator.get_domain_bundle(),
                     self.client.clone(),
                     "parse-config",
                     "Parsing configuration",

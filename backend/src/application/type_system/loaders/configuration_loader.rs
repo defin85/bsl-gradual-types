@@ -5,7 +5,8 @@
 use anyhow::Result;
 use tracing::info;
 
-use bsl_shared::engine::AnalysisEngine;
+use bsl_shared::domain::repository::TypeRepository;
+use bsl_shared::domain::resolver::TypeResolver;
 
 use crate::data::loaders::config_metadata_parser::ConfigurationDiscovery;
 use crate::data::loaders::progress::ProgressUpdate;
@@ -16,7 +17,7 @@ use crate::data::loaders::progress::ProgressUpdate;
 /// (instead of LSP directly accessing TypeRepository).
 ///
 /// # Arguments
-/// * `analysis_engine` - AnalysisEngine for accessing TypeRepository
+/// * `repository` - TypeRepository to load configuration types into
 /// * `config_path` - Path to configuration folder (containing Configuration.xml)
 ///
 /// # Returns
@@ -33,7 +34,7 @@ use crate::data::loaders::progress::ProgressUpdate;
 /// - Presentation (LSP/Web/CLI) -> Application loader -> TypeRepository (Domain)
 /// - Instead of: Presentation -> TypeRepository (bypassing Application Layer)
 pub fn load_configuration_types(
-    analysis_engine: &AnalysisEngine,
+    repository: &dyn TypeRepository,
     config_path: &std::path::Path,
 ) -> Result<usize> {
     info!(
@@ -83,7 +84,7 @@ pub fn load_configuration_types(
         batch.push(raw_type);
 
         if batch.len() >= BATCH_SIZE {
-            analysis_engine.get_repository().load_types(batch.clone())?;
+            repository.load_types(batch.clone())?;
             loaded += batch.len();
             batch.clear();
         }
@@ -91,7 +92,7 @@ pub fn load_configuration_types(
 
     // Load remainder
     if !batch.is_empty() {
-        analysis_engine.get_repository().load_types(batch.clone())?;
+        repository.load_types(batch.clone())?;
         loaded += batch.len();
     }
 
@@ -109,18 +110,17 @@ pub fn load_configuration_types(
 /// Used for Go To Definition navigation to ObjectModule.bsl, ManagerModule.bsl, etc.
 ///
 /// # Arguments
-/// * `analysis_engine` - AnalysisEngine for accessing TypeRepository
+/// * `repository` - TypeRepository to read module paths from
 /// * `type_name` - Configuration type name (e.g., "Справочники.Партнеры")
 ///
 /// # Returns
 /// * `Some(ModulePaths)` - Module paths if type is configuration-based
 /// * `None` - If type is platform or not found in repository
 pub fn get_module_paths_for_type(
-    analysis_engine: &AnalysisEngine,
+    repository: &dyn TypeRepository,
     type_name: &str,
 ) -> Option<bsl_shared::domain::type_definition_location::ModulePaths> {
     // Get raw type data from repository
-    let repository = analysis_engine.get_repository();
     repository
         .find_type(type_name)
         .and_then(|raw| raw.module_paths.clone())
@@ -132,15 +132,14 @@ pub fn get_module_paths_for_type(
 /// Fills lazy cache in MethodSignature for types from common_types list.
 ///
 /// # Arguments
-/// * `analysis_engine` - AnalysisEngine for type resolution
+/// * `repository` - TypeRepository with signature index
+/// * `resolver` - TypeResolver for resolving type names in signatures
 ///
 /// # Example
 /// ```text
 /// prewarm_signature_cache(analysis_engine);
 /// ```
-pub fn prewarm_signature_cache(analysis_engine: &AnalysisEngine) {
-    let resolver = analysis_engine.get_resolver();
-    let repository = analysis_engine.get_repository();
+pub fn prewarm_signature_cache(repository: &dyn TypeRepository, resolver: &TypeResolver) {
     let signature_index = repository.get_signature_index_clone();
 
     // Commonly used types for pre-warm

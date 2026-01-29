@@ -154,13 +154,10 @@ impl SystemCoordinator {
 
         info!("Обнаружено {} объектов метаданных", metadata_objects.len());
 
-        // Получаем текущий AnalysisEngine или создаём новый
-        let engine = self.analysis_engine().ok_or_else(|| {
-            anyhow::anyhow!("AnalysisEngine не инициализирован. Вызовите start() сначала.")
+        let bundle = self.domain_bundle().ok_or_else(|| {
+            anyhow::anyhow!("Domain bundle не инициализирован. Вызовите start() сначала.")
         })?;
-
-        // Получаем TypeRepository из AnalysisEngine
-        let repository = engine.get_repository();
+        let repository = bundle.repository.clone();
 
         let mut payload = None;
         let mut metadata_for_indexing = metadata_objects.clone();
@@ -363,11 +360,10 @@ impl SystemCoordinator {
         let mut total_types = 0;
         let mut all_metadata: Vec<UniversalMetadataObject> = Vec::new();
 
-        // Получаем AnalysisEngine и TypeRepository один раз
-        let engine = self.analysis_engine().ok_or_else(|| {
-            anyhow::anyhow!("AnalysisEngine не инициализирован. Вызовите start() сначала.")
+        let bundle = self.domain_bundle().ok_or_else(|| {
+            anyhow::anyhow!("Domain bundle не инициализирован. Вызовите start() сначала.")
         })?;
-        let repository = engine.get_repository();
+        let repository = bundle.repository.clone();
 
         let config_set_id = config_set_id_from_configs(&configurations);
         let project_id = project_id_from_root(config_path);
@@ -684,11 +680,10 @@ impl SystemCoordinator {
         let mut total_types = 0;
         let all_metadata: Vec<UniversalMetadataObject> = Vec::new();
 
-        // Получаем AnalysisEngine и TypeRepository один раз
-        let engine = self.analysis_engine().ok_or_else(|| {
-            anyhow::anyhow!("AnalysisEngine не инициализирован. Вызовите start() сначала.")
+        let bundle = self.domain_bundle().ok_or_else(|| {
+            anyhow::anyhow!("Domain bundle не инициализирован. Вызовите start() сначала.")
         })?;
-        let repository = engine.get_repository();
+        let repository = bundle.repository.clone();
 
         let config_set_id = config_set_id_from_configs(&configurations);
 

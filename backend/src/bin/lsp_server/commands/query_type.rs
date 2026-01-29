@@ -5,8 +5,8 @@
 use std::sync::Arc;
 use tracing::{info, warn};
 
+use bsl_backend::system::DomainBundle;
 use bsl_shared::api::dtos::{MethodDto, ParamDto, PropertyDto};
-use bsl_shared::engine::AnalysisEngine;
 
 /// Request parameters for bsl/queryType
 #[derive(Debug, serde::Deserialize)]
@@ -62,19 +62,19 @@ impl QueryTypeResponse {
 /// Handle bsl/queryType command
 pub fn handle_query_type(
     params: QueryTypeParams,
-    analysis_engine: Option<Arc<AnalysisEngine>>,
+    domain: Option<Arc<DomainBundle>>,
 ) -> QueryTypeResponse {
     info!("Custom request: bsl/queryType - {}", params.type_name);
 
-    let engine = match analysis_engine {
-        Some(e) => e,
+    let bundle = match domain {
+        Some(bundle) => bundle,
         None => {
-            warn!("AnalysisEngine not available");
-            return QueryTypeResponse::not_found(params.type_name, "AnalysisEngine not available");
+            warn!("Domain bundle not available");
+            return QueryTypeResponse::not_found(params.type_name, "Domain bundle not available");
         }
     };
 
-    let repo = engine.get_repository();
+    let repo = bundle.repository.clone();
 
     match repo.find_type(&params.type_name) {
         Some(raw_type) => {
@@ -118,7 +118,7 @@ pub fn handle_query_type(
                 .collect();
 
             // Get constructors from SignatureIndex
-            if let Some(constructor) = engine.find_constructor(&params.type_name) {
+            if let Some(constructor) = repo.find_constructor(&params.type_name) {
                 let constructor_dto = MethodDto {
                     name: format!("New {}", constructor.type_name),
                     english_name: Some(format!("New {}", constructor.type_name)),

@@ -1,6 +1,6 @@
 //! Command-line argument definitions for BSL Type System CLI
 //!
-//! Соответствует архитектурной диаграмме: CLI Tool -> AnalysisEngine
+//! Соответствует архитектурной диаграмме: CLI Tool -> AnalysisHostV2/AnalysisV2 (v2 pipeline)
 
 use clap::{Parser, Subcommand};
 

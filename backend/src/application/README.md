@@ -113,29 +113,12 @@ let ir_program = converter.convert(&ast, source_code)?;
 let symbol_table = ir_program.symbol_table();
 ```
 
-### TypeInferenceService
+### Repo-only операции типов (v2 deps snapshot)
 
-**Файл:** `type_inference_service.rs`
+**Файл:** `type_system/services/web_api_service.rs`
 
-Вывод типов для выражений.
-
-**Возможности:**
-- Вывод типа по контексту (присваивание, вызов функции)
-- Поддержка градуальной типизации (`Certainty::Known | Inferred | Unknown`)
-- Учёт flow-sensitive анализа
-
-**Пример:**
-
-```rust
-let service = TypeInferenceService::new(type_repository);
-let expr_type = service.infer_expression_type(&expr_node, &context)?;
-
-match expr_type.certainty {
-    Certainty::Known => println!("Точно известен тип"),
-    Certainty::Inferred(confidence) => println!("Выведен с уверенностью {}", confidence),
-    Certainty::Unknown => println!("Тип неизвестен"),
-}
-```
+Для non-LSP клиентов (Web API, CLI, bsl-agent) repo-only операции (поиск типов/детали типов/поиск глобальных функций)
+делаются поверх v2 deps snapshot (`bsl-analysis-v2::SemanticDeps`) без альтернативных inference фасадов.
 
 ## Точки входа
 
@@ -367,4 +350,3 @@ async fn test_my_new_error() {
 - ✅ SemanticValidationVisitor (MVP, Milestone 3.7)
 - ✅ AstToIrConverter (реализован, Milestone 2.8)
 - ✅ LSP Services: hover, completion, diagnostics, signature help
-- 🚧 TypeInferenceService (в процессе улучшения)

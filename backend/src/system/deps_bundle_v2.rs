@@ -92,7 +92,7 @@ fn build_semantic_deps_snapshot(
     Arc<SemanticDeps>,
     bsl_shared::domain::repository::RepositoryStats,
 )> {
-    let Some(engine) = coordinator.analysis_engine() else {
+    let Some(bundle) = coordinator.domain_bundle() else {
         let repository: Arc<dyn TypeRepository> = Arc::new(InMemoryTypeRepository::new());
         let resolver = Arc::new(TypeResolver::new(repository.clone()));
         let signature_index = repository.get_signature_index_clone();
@@ -109,7 +109,7 @@ fn build_semantic_deps_snapshot(
         ));
     };
 
-    let source_repo = engine.get_repository();
+    let source_repo = bundle.repository.clone();
     let stats = source_repo.get_stats();
     let raw_types = source_repo.get_all_types();
     let platform_docs_loaded = source_repo.platform_docs_loaded();

@@ -6,7 +6,7 @@
 //! - Type hints
 //! - Position utilities
 
-// TODO Phase 2: Update enhanced.rs to use TypeInferenceService instead of TypeResolver
+// TODO Phase 2: Update enhanced.rs to use v2 deps snapshot instead of TypeResolver
 // pub mod enhanced;
 pub mod code_actions;
 pub mod position;

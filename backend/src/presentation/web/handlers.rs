@@ -18,7 +18,6 @@ use tokio::sync::RwLock;
 
 use crate::application::get_hover_info_with_semantic_program;
 use crate::application::type_system::web_api_service;
-use crate::application::TypeInferenceService;
 use crate::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter, HoverOutputFormat};
 use crate::system::{
     startup_v2, DepsBundleV2, EffectiveStartupInputs, StartupInputs, SystemCoordinator,
@@ -127,20 +126,14 @@ fn deps_resolver(deps: &Arc<bsl_analysis_v2::SemanticDeps>) -> Arc<TypeResolver>
         .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())))
 }
 
-fn build_inference_v2(
-    deps: &Arc<bsl_analysis_v2::SemanticDeps>,
-) -> (TypeInferenceService, TypeMetadataLookup) {
-    let resolver = deps_resolver(deps);
-    let inference_service = TypeInferenceService::new(resolver, deps.repository.clone());
-    let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
-    (inference_service, metadata_lookup)
+fn build_metadata_lookup_v2(deps: &Arc<bsl_analysis_v2::SemanticDeps>) -> TypeMetadataLookup {
+    TypeMetadataLookup::new(deps.repository.clone())
 }
 
 /// Get system metrics
 pub async fn get_metrics(State(state): State<AppState>) -> impl IntoResponse {
     let deps_bundle = state.deps_bundle_v2.read().await.clone();
-    let (inference_service, _metadata_lookup) = build_inference_v2(&deps_bundle.semantic_deps);
-    let types = web_api_service::get_metrics_summary(&inference_service);
+    let types = web_api_service::get_metrics_summary(deps_bundle.semantic_deps.as_ref());
     let observability = state.system_coordinator.observability_metrics();
     Json(json!({
         "types": types,
@@ -161,9 +154,9 @@ pub async fn get_types(
     let offset = (page - 1) * limit;
 
     let deps_bundle = state.deps_bundle_v2.read().await.clone();
-    let (inference_service, metadata_lookup) = build_inference_v2(&deps_bundle.semantic_deps);
+    let metadata_lookup = build_metadata_lookup_v2(&deps_bundle.semantic_deps);
     let result = web_api_service::get_all_types_as_dto(
-        &inference_service,
+        deps_bundle.semantic_deps.as_ref(),
         &metadata_lookup,
         limit,
         offset,
@@ -180,8 +173,13 @@ pub async fn search_types(
     Query(query): Query<SearchQuery>,
 ) -> impl IntoResponse {
     let deps_bundle = state.deps_bundle_v2.read().await.clone();
-    let (inference_service, metadata_lookup) = build_inference_v2(&deps_bundle.semantic_deps);
-    match web_api_service::search_types_as_dto(&inference_service, &metadata_lookup, &query.q).await
+    let metadata_lookup = build_metadata_lookup_v2(&deps_bundle.semantic_deps);
+    match web_api_service::search_types_as_dto(
+        deps_bundle.semantic_deps.as_ref(),
+        &metadata_lookup,
+        &query.q,
+    )
+    .await
     {
         Ok(result) => Json(result).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),

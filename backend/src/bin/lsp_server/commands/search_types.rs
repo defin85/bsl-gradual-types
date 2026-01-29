@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use tracing::{info, warn};
 
-use bsl_shared::engine::AnalysisEngine;
+use bsl_backend::system::DomainBundle;
 
 /// Request for bsl.searchTypes
 #[derive(Debug, serde::Deserialize)]
@@ -41,17 +41,17 @@ pub struct TypeSearchResult {
 /// Handle bsl.searchTypes command
 pub fn handle_search_types(
     params: SearchTypesRequest,
-    analysis_engine: Option<Arc<AnalysisEngine>>,
+    domain: Option<Arc<DomainBundle>>,
 ) -> SearchTypesResponse {
     info!(
         "Custom command: bsl.searchTypes - query: '{}', limit: {}",
         params.query, params.limit
     );
 
-    let engine = match analysis_engine {
-        Some(e) => e,
+    let bundle = match domain {
+        Some(bundle) => bundle,
         None => {
-            warn!("AnalysisEngine not available");
+            warn!("Domain bundle not available");
             return SearchTypesResponse {
                 types: vec![],
                 total: 0,
@@ -59,7 +59,7 @@ pub fn handle_search_types(
         }
     };
 
-    let repo = engine.get_repository();
+    let repo = bundle.repository.clone();
     let all_types = repo.get_all_types();
 
     if all_types.is_empty() {

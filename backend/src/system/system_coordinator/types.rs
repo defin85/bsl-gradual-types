@@ -2,10 +2,21 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::data::loaders::config_bsl_modules::ModuleSignatureSnapshot;
 use crate::data::loaders::config_metadata_parser::UniversalMetadataObject;
 use serde::Serialize;
+
+use bsl_shared::domain::repository::TypeRepository;
+use bsl_shared::domain::resolver::TypeResolver;
+
+/// Domain layer bundle (repository + resolver) owned by SystemCoordinator.
+#[derive(Clone)]
+pub struct DomainBundle {
+    pub repository: Arc<dyn TypeRepository>,
+    pub resolver: Arc<TypeResolver>,
+}
 
 /// Результат загрузки метаданных конфигурации
 #[derive(Debug, Clone)]

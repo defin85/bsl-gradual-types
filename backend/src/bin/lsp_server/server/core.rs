@@ -869,14 +869,16 @@ mod tests {
     use tower::ServiceExt;
     use tower_lsp::jsonrpc::Request;
     use tower_lsp::lsp_types::{
-        ClientCapabilities, CompletionParams, DidChangeConfigurationParams,
-        DidChangeTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams,
-        DocumentRangeFormattingParams, DocumentSymbolParams, DocumentSymbolResponse,
-        FormattingOptions, InitializeParams, InitializedParams, Location, PartialResultParams,
-        Position, PrepareRenameResponse, Range, ReferenceContext, ReferenceParams, RenameParams,
-        SymbolInformation, SymbolKind, TextDocumentContentChangeEvent, TextDocumentIdentifier,
-        TextDocumentItem, TextDocumentPositionParams, VersionedTextDocumentIdentifier,
-        WorkDoneProgressParams, WorkspaceEdit, WorkspaceSymbolParams,
+        ClientCapabilities, CodeActionContext, CodeActionOrCommand, CodeActionParams,
+        CompletionParams, DidChangeConfigurationParams, DidChangeTextDocumentParams,
+        DidOpenTextDocumentParams, DocumentFormattingParams, DocumentRangeFormattingParams,
+        DocumentSymbolParams, DocumentSymbolResponse, FormattingOptions, InitializeParams,
+        InitializedParams, InlayHint, InlayHintLabel, InlayHintParams, Location,
+        PartialResultParams, Position, PrepareRenameResponse, Range, ReferenceContext,
+        ReferenceParams, RenameParams, SymbolInformation, SymbolKind, TextDocumentContentChangeEvent,
+        TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams,
+        VersionedTextDocumentIdentifier, WorkDoneProgressParams, WorkspaceEdit,
+        WorkspaceSymbolParams,
     };
     use tower_lsp::LanguageServer;
     use tower_lsp::LspService;
@@ -2966,6 +2968,495 @@ mod tests {
         assert!(
             edits.iter().all(|e| e.range.start.line != 6),
             "must not touch FooX() call"
+        );
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
+    async fn p18_capabilities_gate_inlay_hints_and_code_actions() {
+        let coordinator = Arc::new(SystemCoordinator::new());
+
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            move |client| BslLanguageServer::new(client, coordinator.clone())
+        })
+        .finish();
+
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        let initialize_params = InitializeParams {
+            capabilities: ClientCapabilities::default(),
+            initialization_options: Some(serde_json::json!({
+                "enableTypeHints": true,
+                "enableCodeActions": false
+            })),
+            ..Default::default()
+        };
+        let initialize = Request::build("initialize")
+            .id(1)
+            .params(serde_json::to_value(initialize_params).expect("InitializeParams"))
+            .finish();
+
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialize)
+            .await
+            .expect("initialize request")
+            .expect("initialize response");
+
+        let response_value =
+            serde_json::to_value(&response).expect("serialize initialize response");
+        let caps = response_value
+            .get("result")
+            .and_then(|v| v.get("capabilities"))
+            .expect("initialize result.capabilities");
+
+        assert!(
+            caps.get("inlayHintProvider").is_some(),
+            "inlayHintProvider must be present when enableTypeHints=true"
+        );
+        let code_actions = caps.get("codeActionProvider");
+        assert!(
+            code_actions.is_none() || code_actions.is_some_and(|v| v.is_null()),
+            "codeActionProvider must be absent/null when enableCodeActions=false"
+        );
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
+    async fn p19_inlay_hints_returns_type_hints_when_enabled() {
+        let coordinator = Arc::new(SystemCoordinator::new());
+
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            move |client| BslLanguageServer::new(client, coordinator.clone())
+        })
+        .finish();
+
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        let initialize_params = InitializeParams {
+            capabilities: ClientCapabilities::default(),
+            initialization_options: Some(serde_json::json!({
+                "enableTypeHints": true,
+                "enableCodeActions": false
+            })),
+            ..Default::default()
+        };
+        let initialize = Request::build("initialize")
+            .id(1)
+            .params(serde_json::to_value(initialize_params).expect("InitializeParams"))
+            .finish();
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialize)
+            .await
+            .expect("initialize request");
+        assert!(response.is_some(), "initialize should return a response");
+
+        let initialized = Request::build("initialized")
+            .params(serde_json::to_value(InitializedParams {}).expect("InitializedParams"))
+            .finish();
+        let initialized_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialized)
+            .await
+            .expect("initialized notification");
+        assert!(initialized_response.is_none(), "initialized is a notification");
+
+        let settings = DidChangeConfigurationParams {
+            settings: serde_json::json!({
+                "bsl": {
+                    "hover": {
+                        "detailLevel": "full",
+                        "maxMethods": 10,
+                        "maxProperties": 5,
+                        "showCertainty": true
+                    },
+                    "diagnostics": {
+                        "detailLevel": "standard",
+                        "showHints": true
+                    },
+                    "formatting": {
+                        "enabled": false,
+                        "indentSize": 4
+                    },
+                    "typeHints": {
+                        "enabled": true,
+                        "showVariableTypes": true,
+                        "showReturnTypes": false,
+                        "showUnionDetails": true,
+                        "minCertainty": 0.7
+                    },
+                    "codeActions": {
+                        "enabled": false
+                    }
+                }
+            }),
+        };
+        let settings_req = Request::build("workspace/didChangeConfiguration")
+            .params(serde_json::to_value(settings).expect("DidChangeConfigurationParams"))
+            .finish();
+        let settings_resp = service
+            .ready()
+            .await
+            .unwrap()
+            .call(settings_req)
+            .await
+            .expect("didChangeConfiguration notification");
+        assert!(settings_resp.is_none(), "didChangeConfiguration is a notification");
+
+        let uri = Url::parse("file:///test_p19_inlay_hints.bsl").expect("test uri");
+        let text = "Процедура Тест()\nПерем X;\nX = 1;\nКонецПроцедуры\n";
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        };
+        let did_open_req = Request::build("textDocument/didOpen")
+            .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+            .finish();
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+
+        let params = InlayHintParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            range: Range::new(Position::new(0, 0), Position::new(10, 0)),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        };
+        let req = Request::build("textDocument/inlayHint")
+            .id(2)
+            .params(serde_json::to_value(params).expect("InlayHintParams"))
+            .finish();
+        let resp = service
+            .ready()
+            .await
+            .unwrap()
+            .call(req)
+            .await
+            .expect("inlayHint request")
+            .expect("inlayHint response");
+
+        let value = serde_json::to_value(&resp).expect("serialize response");
+        let result_value = value.get("result").cloned().expect("result field");
+        let hints: Option<Vec<InlayHint>> = serde_json::from_value(result_value).expect("parse hints");
+        let hints = hints.expect("hints present");
+
+        assert!(!hints.is_empty(), "expected at least one hint");
+        assert!(
+            hints.iter().any(|hint| matches!(&hint.label, InlayHintLabel::String(text) if text.contains(": Число"))),
+            "expected ': Число' hint"
+        );
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
+    async fn p20_code_actions_return_quickfix_add_type_annotation() {
+        let coordinator = Arc::new(SystemCoordinator::new());
+
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            move |client| BslLanguageServer::new(client, coordinator.clone())
+        })
+        .finish();
+
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        let initialize_params = InitializeParams {
+            capabilities: ClientCapabilities::default(),
+            initialization_options: Some(serde_json::json!({
+                "enableTypeHints": true,
+                "enableCodeActions": true
+            })),
+            ..Default::default()
+        };
+        let initialize = Request::build("initialize")
+            .id(1)
+            .params(serde_json::to_value(initialize_params).expect("InitializeParams"))
+            .finish();
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialize)
+            .await
+            .expect("initialize request");
+        assert!(response.is_some(), "initialize should return a response");
+
+        let initialized = Request::build("initialized")
+            .params(serde_json::to_value(InitializedParams {}).expect("InitializedParams"))
+            .finish();
+        let initialized_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialized)
+            .await
+            .expect("initialized notification");
+        assert!(initialized_response.is_none(), "initialized is a notification");
+
+        let settings = DidChangeConfigurationParams {
+            settings: serde_json::json!({
+                "bsl": {
+                    "hover": {
+                        "detailLevel": "full",
+                        "maxMethods": 10,
+                        "maxProperties": 5,
+                        "showCertainty": true
+                    },
+                    "diagnostics": {
+                        "detailLevel": "standard",
+                        "showHints": true
+                    },
+                    "formatting": {
+                        "enabled": false,
+                        "indentSize": 4
+                    },
+                    "typeHints": {
+                        "enabled": true,
+                        "showVariableTypes": true,
+                        "showReturnTypes": false,
+                        "showUnionDetails": true,
+                        "minCertainty": 0.7
+                    },
+                    "codeActions": {
+                        "enabled": true
+                    }
+                }
+            }),
+        };
+        let settings_req = Request::build("workspace/didChangeConfiguration")
+            .params(serde_json::to_value(settings).expect("DidChangeConfigurationParams"))
+            .finish();
+        let settings_resp = service
+            .ready()
+            .await
+            .unwrap()
+            .call(settings_req)
+            .await
+            .expect("didChangeConfiguration notification");
+        assert!(settings_resp.is_none(), "didChangeConfiguration is a notification");
+
+        let uri = Url::parse("file:///test_p20_code_actions.bsl").expect("test uri");
+        let text = "Процедура Тест()\nПерем X;\nX = 1;\nКонецПроцедуры\n";
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        };
+        let did_open_req = Request::build("textDocument/didOpen")
+            .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+            .finish();
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+
+        let params = CodeActionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            range: Range::new(Position::new(2, 0), Position::new(2, 5)),
+            context: CodeActionContext {
+                diagnostics: Vec::new(),
+                only: None,
+                trigger_kind: None,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+        let req = Request::build("textDocument/codeAction")
+            .id(2)
+            .params(serde_json::to_value(params).expect("CodeActionParams"))
+            .finish();
+        let resp = service
+            .ready()
+            .await
+            .unwrap()
+            .call(req)
+            .await
+            .expect("codeAction request")
+            .expect("codeAction response");
+
+        let value = serde_json::to_value(&resp).expect("serialize response");
+        let result_value = value.get("result").cloned().expect("result field");
+        let actions: Option<Vec<CodeActionOrCommand>> =
+            serde_json::from_value(result_value).expect("parse actions");
+        let actions = actions.expect("actions present");
+
+        assert!(
+            actions.iter().any(|action| matches!(action, CodeActionOrCommand::CodeAction(action) if action.kind.as_ref() == Some(&tower_lsp::lsp_types::CodeActionKind::QUICKFIX))),
+            "expected at least one quickfix action"
+        );
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
+    async fn p21_code_actions_return_extract_refactor_on_selection() {
+        let coordinator = Arc::new(SystemCoordinator::new());
+
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            move |client| BslLanguageServer::new(client, coordinator.clone())
+        })
+        .finish();
+
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        let initialize_params = InitializeParams {
+            capabilities: ClientCapabilities::default(),
+            initialization_options: Some(serde_json::json!({
+                "enableTypeHints": true,
+                "enableCodeActions": true
+            })),
+            ..Default::default()
+        };
+        let initialize = Request::build("initialize")
+            .id(1)
+            .params(serde_json::to_value(initialize_params).expect("InitializeParams"))
+            .finish();
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialize)
+            .await
+            .expect("initialize request");
+        assert!(response.is_some(), "initialize should return a response");
+
+        let initialized = Request::build("initialized")
+            .params(serde_json::to_value(InitializedParams {}).expect("InitializedParams"))
+            .finish();
+        let initialized_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialized)
+            .await
+            .expect("initialized notification");
+        assert!(initialized_response.is_none(), "initialized is a notification");
+
+        let settings = DidChangeConfigurationParams {
+            settings: serde_json::json!({
+                "bsl": {
+                    "hover": {
+                        "detailLevel": "full",
+                        "maxMethods": 10,
+                        "maxProperties": 5,
+                        "showCertainty": true
+                    },
+                    "diagnostics": {
+                        "detailLevel": "standard",
+                        "showHints": true
+                    },
+                    "formatting": {
+                        "enabled": false,
+                        "indentSize": 4
+                    },
+                    "typeHints": {
+                        "enabled": true,
+                        "showVariableTypes": true,
+                        "showReturnTypes": false,
+                        "showUnionDetails": true,
+                        "minCertainty": 0.7
+                    },
+                    "codeActions": {
+                        "enabled": true
+                    }
+                }
+            }),
+        };
+        let settings_req = Request::build("workspace/didChangeConfiguration")
+            .params(serde_json::to_value(settings).expect("DidChangeConfigurationParams"))
+            .finish();
+        let settings_resp = service
+            .ready()
+            .await
+            .unwrap()
+            .call(settings_req)
+            .await
+            .expect("didChangeConfiguration notification");
+        assert!(settings_resp.is_none(), "didChangeConfiguration is a notification");
+
+        let uri = Url::parse("file:///test_p21_code_actions.bsl").expect("test uri");
+        let text = "Процедура Тест()\nПерем X;\nX = 1;\nКонецПроцедуры\n";
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        };
+        let did_open_req = Request::build("textDocument/didOpen")
+            .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+            .finish();
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+
+        let params = CodeActionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            range: Range::new(Position::new(2, 4), Position::new(2, 5)),
+            context: CodeActionContext {
+                diagnostics: Vec::new(),
+                only: None,
+                trigger_kind: None,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+        let req = Request::build("textDocument/codeAction")
+            .id(2)
+            .params(serde_json::to_value(params).expect("CodeActionParams"))
+            .finish();
+        let resp = service
+            .ready()
+            .await
+            .unwrap()
+            .call(req)
+            .await
+            .expect("codeAction request")
+            .expect("codeAction response");
+
+        let value = serde_json::to_value(&resp).expect("serialize response");
+        let result_value = value.get("result").cloned().expect("result field");
+        let actions: Option<Vec<CodeActionOrCommand>> =
+            serde_json::from_value(result_value).expect("parse actions");
+        let actions = actions.expect("actions present");
+
+        assert!(
+            actions.iter().any(|action| matches!(action, CodeActionOrCommand::CodeAction(action) if action.kind.as_ref() == Some(&tower_lsp::lsp_types::CodeActionKind::REFACTOR_EXTRACT))),
+            "expected refactor.extract action"
         );
 
         drain_task.abort();

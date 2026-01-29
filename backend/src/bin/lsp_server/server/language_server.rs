@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
+use tokio::time::timeout;
 use tower_lsp::jsonrpc::Result as JsonRpcResult;
 use tower_lsp::lsp_types::*;
 use tower_lsp::LanguageServer;
@@ -33,7 +34,8 @@ use crate::config::{BslSettings, LspConfig};
 use crate::handlers::{
     apply_text_edit, build_document_symbols, build_workspace_symbols, format_bsl_range_to_edits,
     format_bsl_to_edits, handle_completion_resolve, handle_goto_definition_v2, handle_hover_v2,
-    handle_prepare_rename, handle_references, handle_rename, handle_signature_help_v2, RenameError,
+    handle_code_actions_v2, handle_inlay_hints_v2, handle_prepare_rename, handle_references,
+    handle_rename, handle_signature_help_v2, RenameError,
 };
 use crate::progress::log_progress_to_file;
 use crate::progress_bridge::{LspWorkDoneReporter, ProgressReporter};
@@ -132,6 +134,19 @@ impl LanguageServer for BslLanguageServer {
         let build_timestamp = env!("BUILD_TIMESTAMP");
         let git_hash = env!("GIT_HASH");
 
+        let (enable_type_hints, enable_code_actions) = {
+            let cfg = self.config.read().await;
+            let enable_type_hints = cfg
+                .as_ref()
+                .and_then(|cfg| cfg.enable_type_hints)
+                .unwrap_or(false);
+            let enable_code_actions = cfg
+                .as_ref()
+                .and_then(|cfg| cfg.enable_code_actions)
+                .unwrap_or(false);
+            (enable_type_hints, enable_code_actions)
+        };
+
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
@@ -186,6 +201,8 @@ impl LanguageServer for BslLanguageServer {
                 // This prevents VSCode formatOnSave from calling formatting when it's disabled.
                 document_formatting_provider: None,
                 document_range_formatting_provider: None,
+                inlay_hint_provider: enable_type_hints.then_some(OneOf::Left(true)),
+                code_action_provider: enable_code_actions.then_some(CodeActionProviderCapability::Simple(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 ..Default::default()
@@ -494,11 +511,13 @@ impl LanguageServer for BslLanguageServer {
                 match serde_json::from_value::<BslSettings>(bsl_value.clone()) {
                     Ok(new_settings) => {
                         info!(
-                            "Parsed BslSettings: hover.detailLevel={}, diagnostics.detailLevel={}, formatting.enabled={}, formatting.indentSize={}",
+                            "Parsed BslSettings: hover.detailLevel={}, diagnostics.detailLevel={}, formatting.enabled={}, formatting.indentSize={}, typeHints.enabled={}, codeActions.enabled={}",
                             new_settings.hover.detail_level,
                             new_settings.diagnostics.detail_level,
                             new_settings.formatting.enabled,
-                            new_settings.formatting.indent_size
+                            new_settings.formatting.indent_size,
+                            new_settings.type_hints.enabled,
+                            new_settings.code_actions.enabled,
                         );
                         *self.settings.write().await = new_settings;
                         self.sync_formatting_capability_registration().await;
@@ -1480,6 +1499,162 @@ impl LanguageServer for BslLanguageServer {
             };
 
             return Ok(result);
+        }
+    }
+
+    async fn inlay_hint(&self, params: InlayHintParams) -> JsonRpcResult<Option<Vec<InlayHint>>> {
+        let uri = params.text_document.uri;
+
+        let enabled = {
+            let cfg = self.config.read().await;
+            cfg.as_ref()
+                .and_then(|cfg| cfg.enable_type_hints)
+                .unwrap_or(false)
+        };
+        if !enabled {
+            return Ok(None);
+        }
+
+        let file_id = self.get_or_create_file_id_v2(&uri).await;
+        self.sync_v2_globals().await;
+
+        let expected_version = self
+            .latest_received_file_versions_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied();
+        let ok = if let Some(expected_version) = expected_version {
+            self.analysis_v2
+                .wait_for_file_version(file_id, expected_version)
+                .await
+        } else {
+            self.analysis_v2.wait_for_file_version(file_id, 0).await
+        };
+        if !ok {
+            return Ok(None);
+        }
+
+        let (analysis, file_content, ir_program) = {
+            let (analysis, _index_snapshot, _deps_id) = self.analysis_v2.snapshot_with_deps().await;
+            let file_content = analysis.file_text(file_id).ok().flatten();
+            let ir_program = analysis.ir(file_id).ok().flatten();
+            (analysis, file_content, ir_program)
+        };
+
+        let type_hints_settings = { self.settings.read().await.type_hints.clone() };
+        let Some(file_content) = file_content else {
+            return Ok(None);
+        };
+        let Some(ir_program) = ir_program else {
+            return Ok(None);
+        };
+
+        let range = params.range;
+        let computed = timeout(
+            std::time::Duration::from_millis(80),
+            async move {
+                handle_inlay_hints_v2(
+                    &analysis,
+                    file_id,
+                    file_content,
+                    ir_program,
+                    range,
+                    &type_hints_settings,
+                )
+            },
+        )
+        .await;
+
+        match computed {
+            Ok(hints) => Ok(Some(hints)),
+            Err(_) => {
+                warn!(uri = %uri, "Inlay hints: timed out");
+                Ok(Some(Vec::new()))
+            }
+        }
+    }
+
+    async fn code_action(
+        &self,
+        params: CodeActionParams,
+    ) -> JsonRpcResult<Option<CodeActionResponse>> {
+        let uri = params.text_document.uri;
+
+        let enabled = {
+            let cfg = self.config.read().await;
+            cfg.as_ref()
+                .and_then(|cfg| cfg.enable_code_actions)
+                .unwrap_or(false)
+        };
+        if !enabled {
+            return Ok(None);
+        }
+
+        let file_id = self.get_or_create_file_id_v2(&uri).await;
+        self.sync_v2_globals().await;
+
+        let expected_version = self
+            .latest_received_file_versions_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied();
+        let ok = if let Some(expected_version) = expected_version {
+            self.analysis_v2
+                .wait_for_file_version(file_id, expected_version)
+                .await
+        } else {
+            self.analysis_v2.wait_for_file_version(file_id, 0).await
+        };
+        if !ok {
+            return Ok(None);
+        }
+
+        let (analysis, file_content, ir_program) = {
+            let (analysis, _index_snapshot, _deps_id) = self.analysis_v2.snapshot_with_deps().await;
+            let file_content = analysis.file_text(file_id).ok().flatten();
+            let ir_program = analysis.ir(file_id).ok().flatten();
+            (analysis, file_content, ir_program)
+        };
+
+        let (code_actions_settings, type_hints_settings) = {
+            let settings = self.settings.read().await;
+            (settings.code_actions.clone(), settings.type_hints.clone())
+        };
+
+        let Some(file_content) = file_content else {
+            return Ok(None);
+        };
+        let Some(ir_program) = ir_program else {
+            return Ok(None);
+        };
+
+        let range = params.range;
+        let uri_for_action = uri.clone();
+        let computed = timeout(
+            std::time::Duration::from_millis(120),
+            async move {
+                handle_code_actions_v2(
+                    &analysis,
+                    file_id,
+                    file_content,
+                    ir_program,
+                    &uri_for_action,
+                    range,
+                    &code_actions_settings,
+                    &type_hints_settings,
+                )
+            },
+        )
+        .await;
+
+        match computed {
+            Ok(actions) => Ok(Some(actions)),
+            Err(_) => {
+                warn!(uri = %uri, "Code actions: timed out");
+                Ok(Some(Vec::new()))
+            }
         }
     }
 

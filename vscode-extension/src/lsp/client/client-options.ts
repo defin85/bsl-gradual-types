@@ -13,12 +13,21 @@ import { BslAnalyzerConfig } from '../../config/configHelper';
 export function buildClientOptions(
     outputChannel: vscode.OutputChannel
 ): LanguageClientOptions {
+    const typeHintsEnabled = vscode.workspace
+        .getConfiguration('bsl.typeHints')
+        .get<boolean>('enabled', false);
+    const codeActionsEnabled = vscode.workspace
+        .getConfiguration('bsl.codeActions')
+        .get<boolean>('enabled', false);
+
     // MILESTONE 2.10: Подготавливаем initializationOptions для передачи в LSP
     const initializationOptions = {
         platformDocsArchive: BslAnalyzerConfig.platformDocsArchive,
         configurationPath: BslAnalyzerConfig.configurationPath,
         platformVersion: BslAnalyzerConfig.platformVersion,
-        cacheEnabled: BslAnalyzerConfig.cacheEnabled
+        cacheEnabled: BslAnalyzerConfig.cacheEnabled,
+        enableTypeHints: typeHintsEnabled,
+        enableCodeActions: codeActionsEnabled
     };
 
     outputChannel.appendLine(`Sending initializationOptions to LSP:`);
@@ -26,6 +35,8 @@ export function buildClientOptions(
     outputChannel.appendLine(`   configurationPath: ${initializationOptions.configurationPath || 'NOT SET'}`);
     outputChannel.appendLine(`   platformVersion: ${initializationOptions.platformVersion || 'NOT SET'}`);
     outputChannel.appendLine(`   cacheEnabled: ${initializationOptions.cacheEnabled}`);
+    outputChannel.appendLine(`   enableTypeHints: ${initializationOptions.enableTypeHints}`);
+    outputChannel.appendLine(`   enableCodeActions: ${initializationOptions.enableCodeActions}`);
 
     const clientOptions: LanguageClientOptions = {
         documentSelector: [

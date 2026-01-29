@@ -41,6 +41,60 @@ pub struct LspConfig {
     pub enable_code_actions: Option<bool>,
 }
 
+/// VS Code "bsl.typeHints.*" settings (from workspace/didChangeConfiguration, section `bsl`)
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TypeHintsSettings {
+    #[serde(default)]
+    pub enabled: bool,
+
+    #[serde(default = "default_true")]
+    pub show_variable_types: bool,
+
+    #[serde(default = "default_true")]
+    pub show_return_types: bool,
+
+    #[serde(default = "default_true")]
+    pub show_union_details: bool,
+
+    #[serde(default = "default_min_certainty")]
+    pub min_certainty: f64,
+}
+
+impl Default for TypeHintsSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            show_variable_types: true,
+            show_return_types: true,
+            show_union_details: true,
+            min_certainty: default_min_certainty(),
+        }
+    }
+}
+
+/// VS Code "bsl.codeActions.*" settings (from workspace/didChangeConfiguration, section `bsl`)
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeActionsSettings {
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+impl Default for CodeActionsSettings {
+    fn default() -> Self {
+        Self { enabled: false }
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_min_certainty() -> f64 {
+    0.7
+}
+
 #[cfg(test)]
 mod tests {
     use super::LspConfig;
@@ -80,6 +134,10 @@ pub struct BslSettings {
     pub diagnostics: DiagnosticsSettings,
     #[serde(default)]
     pub formatting: FormattingSettings,
+    #[serde(default, rename = "typeHints")]
+    pub type_hints: TypeHintsSettings,
+    #[serde(default, rename = "codeActions")]
+    pub code_actions: CodeActionsSettings,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -20,7 +20,8 @@
 
 - **Determinism:** одинаковые `(text, settings)` → одинаковый `ParseResult` (включая порядок ошибок).
 - **No I/O:** внутри query нельзя читать файлы/метаданные/конфиги; всё внешнее — inputs.
-- **UTF-16 корректность:** все `Span` в `ParseError` должны быть в UTF‑16 (LSP) координатах.
+- **UTF-16 корректность:** `ParseError.span` хранится как **UTF-8 byte offsets**; на границе (LSP/web)
+  конвертируется в UTF‑16 позиции через единый `LineIndex`.
 - **Snapshot safety:** query не читает/пишет глобальные mutable кэши; никаких “скрытых” `static mut`/singleton caches.
 
 ## Внешние референсы

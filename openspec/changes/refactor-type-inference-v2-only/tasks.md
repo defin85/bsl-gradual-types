@@ -9,9 +9,9 @@
 - [x] 2.3 Обновить `bsl-analysis-v2` и `bsl-backend` зависимости: больше не зависят от `bsl-semantic`.
 
 ## 3. IR byte offsets (позиционирование)
-- [ ] 3.1 Перевести IR spans на byte offsets (вместо line/column) и обновить позиционирование через v2 line-index слой.
-- [ ] 3.2 Обновить APIs поиска узлов/символов (hover/definition/diagnostics), чтобы входом был byte offset, а не (line, column).
-- [ ] 3.3 Добавить/обновить тесты на корректность byte offset ↔ UTF‑16 конвертаций на реальных кейсах (кириллица, emoji, смешанные строки).
+- [x] 3.1 Перевести IR spans на byte offsets (вместо line/column) и обновить позиционирование через v2 line-index слой.
+- [x] 3.2 Обновить APIs поиска узлов/символов (hover/definition/diagnostics), чтобы входом был byte offset, а не (line, column).
+- [x] 3.3 Добавить/обновить тесты на корректность byte offset ↔ UTF‑16 конвертаций на реальных кейсах (кириллица, emoji, смешанные строки).
 
 ## 4. v2 type inference поверх минимального IR
 - [ ] 4.1 Добавить v2 queries для вычисления типов (например: тип выражения/receiver chain, тип символа в scope) поверх минимального IR (без чтения I/O, только deps snapshot).
@@ -25,7 +25,7 @@
 ## 6. Тесты и документация
 - [x] 6.1 Обновить/починить тесты, которые зависели от `bsl_semantic::AstToIrConverter` (перевести на v2 API).
 - [x] 6.2 Обновить документацию v2 roadmap/архитектуры, где `bsl-semantic` описан как слой (переписать на v2‑only).
-- [ ] 6.3 Обновить/починить тесты и golden snapshots, которые зависят от старых IR spans (line/column) или от `TypeResolution` внутри IR.
+- [x] 6.3 Обновить/починить тесты и golden snapshots, которые зависят от старых IR spans (line/column) или от `TypeResolution` внутри IR.
 
 ## 7. Удаление legacy путей (полностью)
 - [ ] 7.1 Удалить `ParserCoordinator::parse_to_ir` и любые пути, которые строят IR вне v2 snapshot (включая `AnalysisEngine::parse_and_analyze`, если применимо).

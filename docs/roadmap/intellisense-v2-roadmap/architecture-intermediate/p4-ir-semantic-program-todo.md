@@ -19,7 +19,7 @@
 - **No I/O:** внутри query нельзя читать файлы/метаданные/конфиги; всё внешнее — inputs/снапшоты.
 - **Deps correctness:** query **обязана** зависеть от `deps_id` и использовать зависимости только из соответствующего deps snapshot (без чтения глобального mutable state).
 - **No in-place deps mutation:** зависимости внутри deps snapshot (repo/resolver/index) считаются **замороженными**; любые изменения, влияющие на семантику, происходят только через построение нового снапшота и атомарную замену вместе с bump `deps_id` (не через “тихие” мутации существующего repo).
-- **UTF-16 корректность:** `Span` внутри IR остаётся в LSP координатах (совместимо с позиционированием v2).
+- **UTF-16 корректность:** `Span` внутри IR хранится как **UTF-8 byte offsets**; на границе (LSP/web) конвертируется в UTF‑16 позиции через единый `LineIndex`.
 - **Snapshot safety:** никаких “скрытых” глобальных кэшей/синглтонов, которые читаются/пишутся внутри query.
 - **Cancellation-friendly:** тяжёлые вычисления находятся внутри salsa-queries, чтобы отмена могла прервать пересчёт.
 
@@ -37,7 +37,7 @@
 - IR тип: `shared/src/ir/program.rs`
 - AST (syntax layer): `syntax/src/ast.rs`
 - Legacy AST→IR конвертация: `backend/src/application/ast_to_ir/*`
-- Legacy `parse_to_ir`: `backend/src/system/parser_coordinator.rs`
+- Legacy `parse_to_ir` (удалено): ранее было в `backend/src/system/parser_coordinator.rs`
 - Legacy IR cache: `backend/src/system/ir_cache.rs`
 - v2 queries: `analysis-v2/src/lib.rs` (`parse_result`, `line_index`)
 - deps_id wiring (LSP → v2 host): `backend/src/bin/lsp_server/server/core.rs`

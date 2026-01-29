@@ -316,7 +316,7 @@ pub fn get_hover_info(&self, file: &str, line: u32, column: u32)
 3. ✅ Hover показывает разную информацию для разных переменных
 4. ✅ Hover на параметре функции
 5. ✅ Hover на имени метода
-6. ✅ Корректность `Span.contains(line, column)`
+6. ✅ Корректность `Span.contains(byte_offset)` + конвертация `(line, column)` → `byte_offset` через `LineIndex`
 
 ### Отладка
 

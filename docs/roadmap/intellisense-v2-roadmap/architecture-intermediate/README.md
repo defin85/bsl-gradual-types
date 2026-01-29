@@ -11,11 +11,15 @@
 
 ## 1. Контекст и проблема
 
-Сейчас часть семантики строится "на лету" внутри LSP запросов:
-- `completion`: при необходимости строит IR из текста (`parse_to_ir`) и кладёт в legacy IR cache
-  (см. `backend/src/application/type_system/services/completion_service.rs`).
-- `hover`: аналогично при cache miss строит IR в запросе
-  (см. `backend/src/application/type_system/services/hover_service.rs`).
+Исторически (legacy/v1) часть семантики могла строиться "на лету" внутри LSP запросов:
+- `completion`: при cache miss строил IR из текста (`parse_to_ir`) и клал в legacy IR cache.
+- `hover`: аналогично мог строить IR в запросе при cache miss.
+
+В v2 пути (через `bsl-analysis-v2`) `completion/hover/signatureHelp` читают IR из снапшота
+(query `ir(file)`), без вызовов `parse_to_ir` в hot path
+(см. `backend/src/application/type_system/services/completion_service.rs`,
+`backend/src/application/type_system/services/hover_service.rs`,
+`backend/src/application/type_system/services/signature_help_service.rs`).
 
 При этом `didChange` обновляет только текст (и запускает инкрементальный парсинг отдельно),
 поэтому легко получить состояние вида:

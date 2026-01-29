@@ -31,7 +31,8 @@
 - [x] 7.1 Удалить `ParserCoordinator::parse_to_ir` и любые пути, которые строят IR вне v2 snapshot (включая `AnalysisEngine::parse_and_analyze`, если применимо).
 - [x] 7.2 Удалить legacy `completionItem/resolve` fallback (резолвинг без `candidate_id`).
 - [x] 7.3 Удалить legacy signatureHelp путь (и/или тестовый legacy handler), оставив только v2 API.
-- [ ] 7.4 Убедиться, что LSP/web/CLI не имеют альтернативных inference путей (нет “best effort” обходов v2).
+- [x] 7.4 Убедиться, что LSP путь не имеет альтернативных inference путей (нет “best effort” обходов v2).
+  (Web API + CLI + bsl-agent вынесены в отдельный change: `migrate-web-cli-agent-to-v2-only`.)
 
 ## 8. Валидация
 - [x] 8.1 `cargo test -p bsl-analysis-v2 -p bsl-backend` проходит.

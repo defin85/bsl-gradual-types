@@ -119,14 +119,43 @@ impl LanguageServer for BslLanguageServer {
             .and_then(|td| td.range_formatting.as_ref())
             .and_then(|cap| cap.dynamic_registration)
             .unwrap_or(false);
+
+        let dynamic_inlay_hints = params
+            .capabilities
+            .text_document
+            .as_ref()
+            .and_then(|td| td.inlay_hint.as_ref())
+            .and_then(|cap| cap.dynamic_registration)
+            .unwrap_or(false);
+
+        let dynamic_code_actions = params
+            .capabilities
+            .text_document
+            .as_ref()
+            .and_then(|td| td.code_action.as_ref())
+            .and_then(|cap| cap.dynamic_registration)
+            .unwrap_or(false);
+
         {
             let mut state = self.formatting_capability.write().await;
             state.dynamic_document_formatting = dynamic_document_formatting;
             state.dynamic_range_formatting = dynamic_range_formatting;
         }
+        {
+            let mut state = self.inlay_hints_capability.write().await;
+            state.dynamic_registration = dynamic_inlay_hints;
+        }
+        {
+            let mut state = self.code_actions_capability.write().await;
+            state.dynamic_registration = dynamic_code_actions;
+        }
         info!(
             "Client dynamicRegistration: formatting={}, rangeFormatting={}",
             dynamic_document_formatting, dynamic_range_formatting
+        );
+        info!(
+            "Client dynamicRegistration: inlayHints={}, codeActions={}",
+            dynamic_inlay_hints, dynamic_code_actions
         );
 
         // Version info for LSP Protocol
@@ -201,8 +230,16 @@ impl LanguageServer for BslLanguageServer {
                 // This prevents VSCode formatOnSave from calling formatting when it's disabled.
                 document_formatting_provider: None,
                 document_range_formatting_provider: None,
-                inlay_hint_provider: enable_type_hints.then_some(OneOf::Left(true)),
-                code_action_provider: enable_code_actions.then_some(CodeActionProviderCapability::Simple(true)),
+                inlay_hint_provider: if dynamic_inlay_hints {
+                    None
+                } else {
+                    enable_type_hints.then_some(OneOf::Left(true))
+                },
+                code_action_provider: if dynamic_code_actions {
+                    None
+                } else {
+                    enable_code_actions.then_some(CodeActionProviderCapability::Simple(true))
+                },
                 document_symbol_provider: Some(OneOf::Left(true)),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 ..Default::default()
@@ -225,6 +262,8 @@ impl LanguageServer for BslLanguageServer {
             .await;
 
         self.sync_formatting_capability_registration().await;
+        self.sync_inlay_hints_capability_registration().await;
+        self.sync_code_actions_capability_registration().await;
 
         // MILESTONE 2.10: Reload types with config from initializationOptions
         let config = self.config.read().await;
@@ -520,7 +559,29 @@ impl LanguageServer for BslLanguageServer {
                             new_settings.code_actions.enabled,
                         );
                         *self.settings.write().await = new_settings;
+
+                        // Keep feature gates (initializationOptions.*) aligned with runtime settings to
+                        // avoid "enabled in settings but server refuses" situations.
+                        {
+                            let mut guard = self.config.write().await;
+                            let mut merged = guard.clone().unwrap_or(LspConfig {
+                                platform_docs_archive: None,
+                                configuration_path: None,
+                                platform_version: None,
+                                cache_enabled: None,
+                                strict_fingerprint: None,
+                                enable_type_hints: None,
+                                enable_code_actions: None,
+                            });
+                            let settings = self.settings.read().await;
+                            merged.enable_type_hints = Some(settings.type_hints.enabled);
+                            merged.enable_code_actions = Some(settings.code_actions.enabled);
+                            *guard = Some(merged);
+                        }
+
                         self.sync_formatting_capability_registration().await;
+                        self.sync_inlay_hints_capability_registration().await;
+                        self.sync_code_actions_capability_registration().await;
                     }
                     Err(e) => {
                         warn!("Failed to parse BslSettings: {}", e);
@@ -1505,13 +1566,16 @@ impl LanguageServer for BslLanguageServer {
     async fn inlay_hint(&self, params: InlayHintParams) -> JsonRpcResult<Option<Vec<InlayHint>>> {
         let uri = params.text_document.uri;
 
-        let enabled = {
+        let (feature_enabled, settings) = {
             let cfg = self.config.read().await;
-            cfg.as_ref()
+            let feature_enabled = cfg
+                .as_ref()
                 .and_then(|cfg| cfg.enable_type_hints)
-                .unwrap_or(false)
+                .unwrap_or(false);
+            let settings = self.settings.read().await.type_hints.clone();
+            (feature_enabled, settings)
         };
-        if !enabled {
+        if !feature_enabled || !settings.enabled {
             return Ok(None);
         }
 
@@ -1542,7 +1606,6 @@ impl LanguageServer for BslLanguageServer {
             (analysis, file_content, ir_program)
         };
 
-        let type_hints_settings = { self.settings.read().await.type_hints.clone() };
         let Some(file_content) = file_content else {
             return Ok(None);
         };
@@ -1560,7 +1623,7 @@ impl LanguageServer for BslLanguageServer {
                     file_content,
                     ir_program,
                     range,
-                    &type_hints_settings,
+                    &settings,
                 )
             },
         )
@@ -1581,13 +1644,20 @@ impl LanguageServer for BslLanguageServer {
     ) -> JsonRpcResult<Option<CodeActionResponse>> {
         let uri = params.text_document.uri;
 
-        let enabled = {
+        let (feature_enabled, code_actions_settings, type_hints_settings) = {
             let cfg = self.config.read().await;
-            cfg.as_ref()
+            let feature_enabled = cfg
+                .as_ref()
                 .and_then(|cfg| cfg.enable_code_actions)
-                .unwrap_or(false)
+                .unwrap_or(false);
+            let settings = self.settings.read().await;
+            (
+                feature_enabled,
+                settings.code_actions.clone(),
+                settings.type_hints.clone(),
+            )
         };
-        if !enabled {
+        if !feature_enabled || !code_actions_settings.enabled {
             return Ok(None);
         }
 
@@ -1616,11 +1686,6 @@ impl LanguageServer for BslLanguageServer {
             let file_content = analysis.file_text(file_id).ok().flatten();
             let ir_program = analysis.ir(file_id).ok().flatten();
             (analysis, file_content, ir_program)
-        };
-
-        let (code_actions_settings, type_hints_settings) = {
-            let settings = self.settings.read().await;
-            (settings.code_actions.clone(), settings.type_hints.clone())
         };
 
         let Some(file_content) = file_content else {

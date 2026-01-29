@@ -2,8 +2,6 @@
 //! Protocol adapters and UI components
 
 // LSP interface components
-pub mod lsp;
-
 // Web interface components
 pub mod web;
 
@@ -15,9 +13,6 @@ pub mod semantic_html_generator;
 
 // Semantic visualization API (MILESTONE 2.16)
 pub mod semantic_routes;
-
-// Re-exports for backward compatibility
-pub use lsp::{/* enhanced, */ code_actions, position, type_hints};
 
 /// Фильтры для поиска
 #[derive(Debug, Clone)]

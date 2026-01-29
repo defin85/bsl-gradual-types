@@ -8,7 +8,8 @@ use std::time::Instant;
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
 use tower_lsp::lsp_types::request::{
-    Formatting as DocumentFormattingRequest, RangeFormatting, Request as LspRequest,
+    CodeActionRequest, Formatting as DocumentFormattingRequest, InlayHintRequest, RangeFormatting,
+    Request as LspRequest,
 };
 use tower_lsp::lsp_types::{Registration, Unregistration};
 use tower_lsp::lsp_types::MessageType;
@@ -26,7 +27,10 @@ use crate::config::BslSettings;
 use crate::converters::{semantic_error_to_diagnostic, syntax_errors_to_diagnostics};
 
 use super::analysis_v2_runtime::AnalysisV2Runtime;
-use super::{BslLanguageServer, FormattingCapabilityState, Url, V2FileKey};
+use super::{
+    BslLanguageServer, CodeActionsCapabilityState, FormattingCapabilityState,
+    InlayHintsCapabilityState, Url, V2FileKey,
+};
 
 fn diagnostics_debounce_duration() -> Duration {
     // Diagnostics are triggered on every `textDocument/didChange`. Computing full diagnostics is
@@ -101,6 +105,8 @@ impl BslLanguageServer {
             auto_reindex_paused: Arc::new(RwLock::new(false)),
             coordinator,
             formatting_capability: Arc::new(RwLock::new(FormattingCapabilityState::default())),
+            inlay_hints_capability: Arc::new(RwLock::new(InlayHintsCapabilityState::default())),
+            code_actions_capability: Arc::new(RwLock::new(CodeActionsCapabilityState::default())),
 
             analysis_v2,
             text_sync_v2: Arc::new(Mutex::new(())),
@@ -207,6 +213,201 @@ impl BslLanguageServer {
                     Err(err) => {
                         warn!(
                             "Failed to {} formatting capability: {}",
+                            if desired_enabled {
+                                "register"
+                            } else {
+                                "unregister"
+                            },
+                            err
+                        );
+                        let mut guard = state.write().await;
+                        guard.in_flight = false;
+                        return;
+                    }
+                }
+            }
+        });
+    }
+
+    pub(crate) async fn sync_inlay_hints_capability_registration(&self) {
+        const INLAY_HINTS_ID: &str = "bsl.inlayHints";
+
+        let enabled = {
+            let settings_enabled = self.settings.read().await.type_hints.enabled;
+            let gate_enabled = self
+                .config
+                .read()
+                .await
+                .as_ref()
+                .and_then(|cfg| cfg.enable_type_hints)
+                .unwrap_or(false);
+            settings_enabled && gate_enabled
+        };
+
+        let spawn_worker = {
+            let mut state = self.inlay_hints_capability.write().await;
+            state.desired_enabled = enabled;
+
+            if !state.dynamic_registration {
+                return;
+            }
+
+            if state.in_flight {
+                return;
+            }
+
+            if state.registered == state.desired_enabled {
+                return;
+            }
+
+            state.in_flight = true;
+            true
+        };
+
+        if !spawn_worker {
+            return;
+        }
+
+        let client = self.client.clone();
+        let state = self.inlay_hints_capability.clone();
+
+        tokio::spawn(async move {
+            loop {
+                let (desired_enabled, currently_registered) = {
+                    let guard = state.read().await;
+                    (guard.desired_enabled, guard.registered)
+                };
+
+                if desired_enabled == currently_registered {
+                    let mut guard = state.write().await;
+                    guard.in_flight = false;
+                    return;
+                }
+
+                let result = if desired_enabled {
+                    client
+                        .register_capability(vec![Registration {
+                            id: INLAY_HINTS_ID.to_string(),
+                            method: InlayHintRequest::METHOD.to_string(),
+                            register_options: Some(serde_json::json!({ "documentSelector": null })),
+                        }])
+                        .await
+                } else {
+                    client
+                        .unregister_capability(vec![Unregistration {
+                            id: INLAY_HINTS_ID.to_string(),
+                            method: InlayHintRequest::METHOD.to_string(),
+                        }])
+                        .await
+                };
+
+                match result {
+                    Ok(()) => {
+                        let mut guard = state.write().await;
+                        guard.registered = desired_enabled;
+                    }
+                    Err(err) => {
+                        warn!(
+                            "Failed to {} inlay hints capability: {}",
+                            if desired_enabled {
+                                "register"
+                            } else {
+                                "unregister"
+                            },
+                            err
+                        );
+                        let mut guard = state.write().await;
+                        guard.in_flight = false;
+                        return;
+                    }
+                }
+            }
+        });
+    }
+
+    pub(crate) async fn sync_code_actions_capability_registration(&self) {
+        const CODE_ACTIONS_ID: &str = "bsl.codeActions";
+
+        let enabled = {
+            let settings_enabled = self.settings.read().await.code_actions.enabled;
+            let gate_enabled = self
+                .config
+                .read()
+                .await
+                .as_ref()
+                .and_then(|cfg| cfg.enable_code_actions)
+                .unwrap_or(false);
+            settings_enabled && gate_enabled
+        };
+
+        let spawn_worker = {
+            let mut state = self.code_actions_capability.write().await;
+            state.desired_enabled = enabled;
+
+            if !state.dynamic_registration {
+                return;
+            }
+
+            if state.in_flight {
+                return;
+            }
+
+            if state.registered == state.desired_enabled {
+                return;
+            }
+
+            state.in_flight = true;
+            true
+        };
+
+        if !spawn_worker {
+            return;
+        }
+
+        let client = self.client.clone();
+        let state = self.code_actions_capability.clone();
+
+        tokio::spawn(async move {
+            loop {
+                let (desired_enabled, currently_registered) = {
+                    let guard = state.read().await;
+                    (guard.desired_enabled, guard.registered)
+                };
+
+                if desired_enabled == currently_registered {
+                    let mut guard = state.write().await;
+                    guard.in_flight = false;
+                    return;
+                }
+
+                let result = if desired_enabled {
+                    client
+                        .register_capability(vec![Registration {
+                            id: CODE_ACTIONS_ID.to_string(),
+                            method: CodeActionRequest::METHOD.to_string(),
+                            register_options: Some(serde_json::json!({
+                                "documentSelector": null,
+                                "codeActionKinds": ["quickfix", "refactor.extract"]
+                            })),
+                        }])
+                        .await
+                } else {
+                    client
+                        .unregister_capability(vec![Unregistration {
+                            id: CODE_ACTIONS_ID.to_string(),
+                            method: CodeActionRequest::METHOD.to_string(),
+                        }])
+                        .await
+                };
+
+                match result {
+                    Ok(()) => {
+                        let mut guard = state.write().await;
+                        guard.registered = desired_enabled;
+                    }
+                    Err(err) => {
+                        warn!(
+                            "Failed to {} code actions capability: {}",
                             if desired_enabled {
                                 "register"
                             } else {

@@ -49,6 +49,22 @@ pub(crate) struct FormattingCapabilityState {
     pub desired_enabled: bool,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct InlayHintsCapabilityState {
+    pub dynamic_registration: bool,
+    pub registered: bool,
+    pub in_flight: bool,
+    pub desired_enabled: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct CodeActionsCapabilityState {
+    pub dynamic_registration: bool,
+    pub registered: bool,
+    pub in_flight: bool,
+    pub desired_enabled: bool,
+}
+
 /// BSL Language Server backend - CLEAN ARCHITECTURE
 #[derive(Clone)]
 pub struct BslLanguageServer {
@@ -60,6 +76,8 @@ pub struct BslLanguageServer {
     pub(crate) auto_reindex_paused: Arc<RwLock<bool>>,
     pub(crate) coordinator: Arc<SystemCoordinator>,
     pub(crate) formatting_capability: Arc<RwLock<FormattingCapabilityState>>,
+    pub(crate) inlay_hints_capability: Arc<RwLock<InlayHintsCapabilityState>>,
+    pub(crate) code_actions_capability: Arc<RwLock<CodeActionsCapabilityState>>,
 
     pub(crate) analysis_v2: AnalysisV2Runtime,
     /// Serializes `didOpen/didChange/didClose` updates so that incremental changes are applied

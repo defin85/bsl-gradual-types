@@ -53,7 +53,64 @@ fn spans_intersect(a: Span, b: Span) -> bool {
     a.start <= b.end && b.start <= a.end
 }
 
-fn find_identifier_end_byte(source: &str, span: Span, identifier: &str) -> Option<u32> {
+fn is_identifier_char(ch: char) -> bool {
+    ch == '_' || ch.is_alphanumeric()
+}
+
+fn find_identifier_end_byte_in_range(
+    source: &str,
+    start: usize,
+    end: usize,
+    identifier: &str,
+    pick_last: bool,
+) -> Option<u32> {
+    if start >= source.len() || end > source.len() || start >= end {
+        return None;
+    }
+
+    let slice = &source[start..end];
+    let mut from = 0usize;
+    let mut found: Option<usize> = None;
+    while let Some(rel) = slice[from..].find(identifier) {
+        let match_start = from + rel;
+        let match_end = match_start + identifier.len();
+
+        if slice.is_char_boundary(match_start) && slice.is_char_boundary(match_end) {
+            let prev_ok = if match_start == 0 {
+                true
+            } else {
+                slice[..match_start]
+                    .chars()
+                    .last()
+                    .is_some_and(|ch| !is_identifier_char(ch))
+            };
+            let next_ok = if match_end == slice.len() {
+                true
+            } else {
+                slice[match_end..]
+                    .chars()
+                    .next()
+                    .is_some_and(|ch| !is_identifier_char(ch))
+            };
+
+            if prev_ok && next_ok {
+                found = Some(start + match_end);
+                if !pick_last {
+                    break;
+                }
+            }
+        }
+
+        from = match_start.saturating_add(1);
+        if from >= slice.len() {
+            break;
+        }
+    }
+
+    found.and_then(|abs| u32::try_from(abs).ok())
+}
+
+fn find_assignment_lhs_identifier_end_byte(source: &str, span: Span, identifier: &str) -> Option<u32> {
     let start = span.start as usize;
     let end = span.end as usize;
     if start >= source.len() || end > source.len() || start >= end {
@@ -61,9 +118,8 @@ fn find_identifier_end_byte(source: &str, span: Span, identifier: &str) -> Optio
     }
 
     let slice = &source[start..end];
-    let rel = slice.find(identifier)?;
-    let abs = start + rel + identifier.len();
-    u32::try_from(abs).ok()
+    let lhs_end = slice.find('=').map(|idx| start + idx).unwrap_or(end);
+    find_identifier_end_byte_in_range(source, start, lhs_end, identifier, true)
 }
 
 pub fn handle_inlay_hints_v2(
@@ -116,7 +172,8 @@ pub fn handle_inlay_hints_v2(
             continue;
         }
 
-        let Some(var_end) = find_identifier_end_byte(file_content.as_ref(), node.span, variable)
+        let Some(var_end) =
+            find_assignment_lhs_identifier_end_byte(file_content.as_ref(), node.span, variable)
         else {
             continue;
         };

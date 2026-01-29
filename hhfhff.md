@@ -34,12 +34,12 @@
 
   Если хочешь, могу расширить логику merge return-types (например, учитывать Возврат; в функции как Неопределено, более мягко обращаться с Unknown, или делать более точный union с весами).
 
-  1. update-vscode-artifacts-policy
+  1. update-vscode-artifacts-policy +
 
   - Почему рано: затрагивает массовое удаление из git индекса vscode-extension/out/** и vscode-extension/*.vsix (они реально tracked сейчас), плюс правки в README.md/vscode-extension/INSTALLATION.md.
   - Это самый “шумный” diff; лучше сделать первым, чтобы остальные PR’ы не мерджили гигантские удаления.
 
-  2. update-cargo-lockfile-policy
+  2. update-cargo-lockfile-policy +
 
   - Почему рано: правит корневой .gitignore (сейчас Cargo.lock игнорируется: .gitignore:3) и документацию про структуру/воспроизводимость.
   - Чем раньше зафиксируем lockfile-политику, тем меньше шансов словить конфликт в .gitignore и доках.

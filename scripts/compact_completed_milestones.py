@@ -18,7 +18,8 @@ COMPACT_TEMPLATES = {
 - ✅ LSP hover показывает типы через tree-sitter
 
 **Ключевые файлы:**
-- [backend/src/system/tree_sitter_adapter.rs](backend/src/system/tree_sitter_adapter.rs)
+- [syntax/src/tree_sitter_adapter/mod.rs](syntax/src/tree_sitter_adapter/mod.rs)
+- [bsl-runtime/src/system/tree_sitter_adapter/mod.rs](bsl-runtime/src/system/tree_sitter_adapter/mod.rs)
 - [backend/Cargo.toml](backend/Cargo.toml) — зависимость tree-sitter-bsl
 
 ---
@@ -30,12 +31,12 @@ COMPACT_TEMPLATES = {
 - ✅ Создан крейт `type-visualization` с trait `TypeRenderer`
 - ✅ Реализации: `HtmlRenderer`, `JsonRenderer`, `MarkdownRenderer`
 - ✅ Интеграция в LSP через custom request `bsl/renderTypeHtml`
-- ✅ Унифицированы DTOs (`shared/src/api/dtos.rs` — единственный источник)
+- ✅ Унифицированы DTOs (`bsl-api-dtos/src/dtos.rs` — канонический источник)
 - ✅ Удалено 1054 строки дубликатов из TypeScript
 
 **Ключевые файлы:**
 - [type-visualization/src/lib.rs](type-visualization/src/lib.rs)
-- [backend/src/bin/lsp_server.rs](backend/src/bin/lsp_server.rs) — LSP handler
+- [backend/src/bin/lsp_server/main.rs](backend/src/bin/lsp_server/main.rs) — LSP entrypoint
 - [vscode-extension/src/lsp/typeVisualization.ts](vscode-extension/src/lsp/typeVisualization.ts)
 
 ---
@@ -50,7 +51,7 @@ COMPACT_TEMPLATES = {
 - ✅ Интеграция с фасадом системы типов для hover
 
 **Ключевые файлы:**
-- [backend/src/system/tree_sitter_adapter.rs](backend/src/system/tree_sitter_adapter.rs)
+- [syntax/src/tree_sitter_adapter/mod.rs](syntax/src/tree_sitter_adapter/mod.rs)
 
 ---
 """,
@@ -66,7 +67,7 @@ COMPACT_TEMPLATES = {
 
 **Ключевые файлы:**
 - [shared/src/ir/mod.rs](shared/src/ir/mod.rs)
-- [backend/src/application/type_system_service.rs](backend/src/application/type_system_service.rs)
+- [analysis-v2/src/ast_to_ir/mod.rs](analysis-v2/src/ast_to_ir/mod.rs)
 
 ---
 """,
@@ -97,7 +98,7 @@ COMPACT_TEMPLATES = {
 - ✅ Tooltip объясняет: "используйте LSP hover вместо Type Index"
 
 **Ключевые файлы:**
-- [backend/src/bin/lsp_server.rs](backend/src/bin/lsp_server.rs)
+- [backend/src/bin/lsp_server/main.rs](backend/src/bin/lsp_server/main.rs)
 
 ---
 """
@@ -147,7 +148,7 @@ def compact_milestone(content: str, milestone_num: str, template: str) -> str:
     return content[:start] + template + content[end:]
 
 def main():
-    roadmap_path = Path("c:/1CProject/bsl-gradual-types/ROADMAP_2025.md")
+    roadmap_path = Path("ROADMAP_2025.md")
 
     if not roadmap_path.exists():
         print(f"ERROR: File not found: {roadmap_path}")

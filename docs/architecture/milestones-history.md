@@ -253,7 +253,7 @@ let span = Span::new(
 
 ### Ключевые компоненты
 
-#### 1. node_to_span() (backend/src/system/tree_sitter_adapter.rs)
+#### 1. node_to_span() (syntax/src/tree_sitter_adapter/span.rs)
 
 Извлекает реальные координаты из tree-sitter:
 
@@ -474,10 +474,10 @@ pub enum ErrorType {
 
 | Компонент | Файл | Статус | Функция |
 |-----------|------|--------|---------|
-| **TreeSitterAdapter** | `backend/src/system/tree_sitter_adapter.rs` | ✅ Работает | Обнаруживает ERROR узлы и missing tokens |
+| **TreeSitterAdapter** | `syntax/src/tree_sitter_adapter/syntax_errors.rs` | ✅ Работает | Обнаруживает ERROR узлы и missing tokens |
 | **ParseResult** | `backend/src/parsing/bsl/mod.rs` | ✅ Работает | Хранит синтаксические ошибки |
-| **ParserCoordinator** | `backend/src/system/parser_coordinator.rs` | ✅ Работает | Логирует ошибки в файл |
-| **LSP diagnostics** | `backend/src/bin/lsp_server.rs` | ❌ НЕ работает | `publish_diagnostics` получает пустой массив |
+| **ParserCoordinator** | `bsl-runtime/src/system/parser_coordinator.rs` | ✅ Работает | Логирует ошибки в файл |
+| **LSP diagnostics** | `backend/src/bin/lsp_server/main.rs` | ❌ НЕ работает | `publish_diagnostics` получает пустой массив |
 
 ### Тестирование
 

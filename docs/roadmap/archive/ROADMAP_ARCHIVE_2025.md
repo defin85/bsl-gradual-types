@@ -219,7 +219,7 @@ let span = Span::new(
 ```
 
 **Компоненты:**
-- `backend/src/system/tree_sitter_adapter.rs:node_to_span()` — извлечение координат
+- `syntax/src/tree_sitter_adapter/span.rs:node_to_span()` — извлечение координат
 - `backend/src/application/ast_to_ir.rs:ast_span_to_ir_span()` — передача в IR
 - `backend/src/application/type_system_service.rs:get_hover_info()` — использование Span
 
@@ -515,7 +515,7 @@ pub enum ErrorType {
 ```
 
 **Компоненты:**
-- `backend/src/system/tree_sitter_adapter.rs` — обнаружение ERROR узлов и missing tokens
+- `syntax/src/tree_sitter_adapter/syntax_errors.rs` — обнаружение ERROR узлов и missing tokens
 - `backend/src/parsing/bsl/mod.rs` — ParseError структура и ErrorType enum
 - `backend/src/bin/lsp_server.rs` — конвертация ParseError → LSP Diagnostic и publish_diagnostics
 

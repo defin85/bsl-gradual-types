@@ -26,6 +26,24 @@
 
 ---
 
+## 🔎 Как проверять актуальность ссылок на файлы
+
+Если в документации/скрипте встречается путь к файлу как часть инструкции (команда, чек‑лист, «доказательство реализации»), проверьте, что путь действительно существует в репозитории:
+
+```bash
+test -e path/to/file
+# или, если файл должен быть в git:
+git ls-files --error-unmatch path/to/file
+```
+
+Быстрый массовый поиск устаревших ссылок:
+
+```bash
+rg -n "backend/src/system/.*tree_sitter_adapter" -S --glob '!openspec/**' .
+```
+
+Если ссылка намеренно «историческая», помечайте её явно как архивную (чтобы не воспринимать как инструкцию к действию).
+
 ## 📋 Формат отчёта о выполнении
 
 ### Шаблон отчёта
@@ -101,7 +119,8 @@ grep -n "tree-sitter-bsl" Cargo.toml backend/Cargo.toml
 
 **Ожидаемый результат:**
 ```
-backend/Cargo.toml:45:tree-sitter-bsl = "0.1.0"
+Cargo.toml:...:tree-sitter-bsl = { path = "third_party/tree-sitter-bsl" }
+backend/Cargo.toml:...:tree-sitter-bsl = { workspace = true }
 ```
 
 **Оценка:** ✅ Зависимость добавлена
@@ -110,13 +129,13 @@ backend/Cargo.toml:45:tree-sitter-bsl = "0.1.0"
 
 ```bash
 # Поиск импортов и использования
-grep -rn "tree-sitter-bsl\|TreeSitterAdapter" backend/src/
+rg -n "tree_sitter_bsl::language\\(|TreeSitterAdapter" -S syntax/src bsl-runtime/src
 ```
 
 **Ожидаемый результат:**
 ```
-backend/src/system/tree_sitter_adapter.rs:1:use tree_sitter_bsl::language;
-backend/src/system/tree_sitter_adapter.rs:15:pub struct TreeSitterAdapter {
+syntax/src/tree_sitter_adapter/mod.rs:25:parser.set_language(tree_sitter_bsl::language()).unwrap();
+syntax/src/tree_sitter_adapter/mod.rs:48:pub struct TreeSitterAdapter;
 ```
 
 **Оценка:** ✅ Используется в коде
@@ -125,12 +144,12 @@ backend/src/system/tree_sitter_adapter.rs:15:pub struct TreeSitterAdapter {
 
 ```bash
 # Чтение файла адаптера
-Read backend/src/system/tree_sitter_adapter.rs
+Read syntax/src/tree_sitter_adapter/mod.rs
 ```
 
 **Проверка:**
 - ✅ Структура `TreeSitterAdapter` определена
-- ✅ Метод `parse()` реализован
+- ✅ Метод `convert_tree()` реализован (конвертация tree-sitter Tree → ParseResult)
 - ✅ Интеграция с tree-sitter-bsl
 
 **Оценка:** ✅ Реализация найдена
@@ -139,19 +158,12 @@ Read backend/src/system/tree_sitter_adapter.rs
 
 ```bash
 # Запуск тестов tree-sitter
-cargo test -p bsl-backend tree_sitter
+cargo test -p bsl-backend tree_sitter_adapter
 ```
 
 **Ожидаемый результат:**
 ```
-running 5 tests
-test tree_sitter_adapter::tests::test_parse_simple ... ok
-test tree_sitter_adapter::tests::test_parse_function ... ok
-test tree_sitter_adapter::tests::test_parse_error ... ok
-test tree_sitter_adapter::tests::test_span_extraction ... ok
-test tree_sitter_adapter::tests::test_integration ... ok
-
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured
+[есть тесты с префиксом tree_sitter_adapter*, tree_sitter_* и они проходят]
 ```
 
 **Оценка:** ✅ Все тесты проходят
@@ -162,18 +174,16 @@ test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured
 ### ✅ Task 1: Подключить tree-sitter-bsl — ВЫПОЛНЕНО (100%)
 
 **Проверка:**
-- ✅ backend/Cargo.toml:45 — зависимость tree-sitter-bsl добавлена
-- ✅ backend/src/system/tree_sitter_adapter.rs:1-120 — реализация TreeSitterAdapter
-- ✅ cargo test tree_sitter — 5/5 тестов проходят
+- ✅ Cargo.toml / backend/Cargo.toml — зависимость tree-sitter-bsl добавлена
+- ✅ syntax/src/tree_sitter_adapter/mod.rs — реализация TreeSitterAdapter
+- ✅ bsl-runtime/src/system/tree_sitter_adapter/mod.rs — re-export в system-слое
+- ✅ cargo test tree_sitter_adapter — тесты проходят
 - ✅ cargo check — компиляция успешна
 
 **Код:**
 \`\`\`rust
-// backend/src/system/tree_sitter_adapter.rs:15
-pub struct TreeSitterAdapter {
-    parser: Parser,
-    language: Language,
-}
+// syntax/src/tree_sitter_adapter/mod.rs
+pub struct TreeSitterAdapter;
 \`\`\`
 ```
 
@@ -185,12 +195,13 @@ pub struct TreeSitterAdapter {
 
 ```bash
 # Поиск файлов адаптера
-find backend/src -name "*adapter*" | grep tree
+find bsl-runtime/src syntax/src -path "*tree_sitter_adapter*" -type f
 ```
 
 **Ожидаемый результат:**
 ```
-backend/src/system/tree_sitter_adapter.rs
+syntax/src/tree_sitter_adapter/mod.rs
+bsl-runtime/src/system/tree_sitter_adapter/mod.rs
 ```
 
 **Оценка:** ✅ Файл существует
@@ -198,29 +209,28 @@ backend/src/system/tree_sitter_adapter.rs
 #### Шаг 2: Чтение реализации
 
 ```bash
-Read backend/src/system/tree_sitter_adapter.rs
+Read syntax/src/tree_sitter_adapter/mod.rs
 ```
 
 **Проверка структуры:**
 - ✅ `TreeSitterAdapter` структура определена
-- ✅ `parse()` метод реализован
+- ✅ `convert_tree()` метод реализован
 - ✅ `node_to_span()` метод для Span extraction
-- ⚠️ `convert_to_ir()` метод — заглушка (TODO)
+- ✅ Синтаксические ошибки собираются из дерева (см. `collect_syntax_errors*`)
 
-**Оценка:** ⚠️ Частично реализовано
+**Оценка:** ✅ Реализовано
 
 #### Шаг 3: Проверка интеграции
 
 ```bash
 # Поиск использования TreeSitterAdapter
-grep -rn "TreeSitterAdapter" backend/src/
+rg -n "TreeSitterAdapter" -S bsl-runtime/src
 ```
 
 **Ожидаемый результат:**
 ```
-backend/src/system/tree_sitter_adapter.rs:15:pub struct TreeSitterAdapter
-backend/src/system/parser_coordinator.rs:45:use crate::system::TreeSitterAdapter;
-backend/src/system/parser_coordinator.rs:120:let adapter = TreeSitterAdapter::new();
+bsl-runtime/src/system/parser_coordinator.rs:23:use crate::system::tree_sitter_adapter::TreeSitterAdapter;
+bsl-runtime/src/system/parser_coordinator.rs:214:let result = TreeSitterAdapter::convert_tree(&old_tree, &new_content)?;
 ```
 
 **Оценка:** ✅ Интегрирован в ParserCoordinator
@@ -228,44 +238,26 @@ backend/src/system/parser_coordinator.rs:120:let adapter = TreeSitterAdapter::ne
 #### Шаг 4: Запуск тестов
 
 ```bash
-cargo test -p bsl-backend --test tree_sitter_adapter_test
+cargo test -p bsl-backend --test tree_sitter_adapter_comprehensive_test
 ```
 
 **Результат:**
 ```
-running 3 tests
-test test_parse_simple ... ok
-test test_span_extraction ... ok
-test test_convert_to_ir ... FAILED
-
-failures:
-    test_convert_to_ir
-
-test result: FAILED. 2 passed; 1 failed
+[тест существует и проходит]
 ```
 
-**Оценка:** ⚠️ Часть тестов проваливается
+**Оценка:** ✅ Тесты проходят
 
 #### Итоговая оценка
 
 ```markdown
-### ⚠️ Task 2: TreeSitterAdapter — ЧАСТИЧНО (70%)
+### ✅ Task 2: TreeSitterAdapter — ВЫПОЛНЕНО (100%)
 
 **Что есть:**
-- ✅ backend/src/system/tree_sitter_adapter.rs:15 — структура TreeSitterAdapter
-- ✅ backend/src/system/tree_sitter_adapter.rs:45 — метод parse()
-- ✅ backend/src/system/tree_sitter_adapter.rs:120 — метод node_to_span()
-- ✅ cargo test tree_sitter — 2/3 тестов проходят
-
-**Что отсутствует:**
-- ❌ backend/src/system/tree_sitter_adapter.rs:180 — convert_to_ir() не реализован (TODO)
-- ❌ test_convert_to_ir проваливается
-- ❌ Нет интеграции с AstToIrConverter
-
-**Необходимо:**
-1. Реализовать convert_to_ir() метод
-2. Исправить провалившийся тест
-3. Добавить интеграцию с AstToIrConverter
+- ✅ syntax/src/tree_sitter_adapter/mod.rs — `TreeSitterAdapter::convert_tree(...)`
+- ✅ bsl-runtime/src/system/tree_sitter_adapter/mod.rs — re-export для system-слоя
+- ✅ bsl-runtime/src/system/parser_coordinator.rs — использование TreeSitterAdapter
+- ✅ cargo test -p bsl-backend --test tree_sitter_adapter_comprehensive_test — проходит
 ```
 
 ---

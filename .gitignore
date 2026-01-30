@@ -18,6 +18,10 @@ third_party/**/Cargo.lock
 .DS_Store
 Thumbs.db
 
+# Python
+__pycache__/
+*.pyc
+
 # Project specific
 /output/
 /cache/

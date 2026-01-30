@@ -1,39 +1,128 @@
-# Инструкции для AI-ассистента (BSL Gradual Types)
+<!-- OPENSPEC:START -->
 
-Этот `GEMINI.md` — короткий индекс. Полные правила и рабочие процессы лежат в `.claude/rules/` и `.claude/skills/`.
+# OpenSpec Instructions
 
-## TL;DR (частые команды)
+These instructions are for AI assistants working in this project.
 
-```bash
-# Сборка / тесты
-./scripts/build-all.sh --release
-# или быстрее без тестов:
-./scripts/build-all.sh --release --skip-tests
-# точечно (только Rust тесты):
-cargo test --workspace
+Always open `@/openspec/AGENTS.md` when the request:
 
-# Web API для отладки резолвинга типов: сервер запускаешь ты, я тестирую через curl
-# (я сам сервер не запускаю и не останавливаю)
-# Тебе: ./scripts/start-web-api.sh --build
-curl -s http://localhost:3002/api/health
-```
+- Mentions planning or proposals (words like proposal, spec, change, plan)
+- Introduces new capabilities, breaking changes, architecture shifts, or big performance/security work
+- Sounds ambiguous and you need the authoritative spec before coding
 
-## Обязательные правила
+Use `@/openspec/AGENTS.md` to learn:
 
-- Отвечай на русском: `.claude/rules/project-specifics.md`
-- Следуй принципам проекта (Right-Sized Architecture, Semantic IR, честная проверка): `.claude/rules/general.md`
-- Перед отчётом о выполнении Milestone/задачи — подтверждай фактами (grep/read/tests): `docs/guides/roadmap-verification.md`
+- How to create and apply change proposals
+- Spec format and conventions
+- Project structure and guidelines
 
-## Тестирование LSP через Web API
+Keep this managed block so 'openspec update' can refresh the instructions.
 
-- Не запускай/не останавливай LSP/Web серверы сам (и не делай `pkill`); тестируй через `curl`, когда сервер поднят пользователем: `.claude/rules/web-api-testing.md`
-- Полная справка по endpoints: `docs/api/web-api-reference.md`
+<!-- OPENSPEC:END -->
 
-## Навигация и архитектура
+# Unified Workflow
 
-- Быстрые ссылки на документацию/roadmap: `.claude/rules/navigation.md`
-- Архитектурная диаграмма и термины: `.claude/rules/architecture.md`
+We operate in a cycle: **OpenSpec (What) → Beads (How) → Code (Implementation)**.
 
-## Отладка
+## 1. Intent Formation
 
-- Глубокая отладка Rust через MCP Debug: `.claude/rules/mcp-debug.md`
+The user initiates with:
+`/openspec-proposal "Add 2FA authentication"`
+
+OpenSpec creates a change folder (`openspec/changes/<change-id>/`) containing:
+
+- `proposal.md`: Business value and scope.
+- `tasks.md`: High-level task list.
+- `design.md`: Technical design (optional).
+- `specs/.../spec.md`: Requirements and acceptance criteria.
+
+**Agent Goal**: Edit these files until they represent a signable contract.
+
+**DO NOT proceed to step 2 until you are explicitly told the keyword "Go!" in English.**
+
+## 2. Task Transformation
+
+Once the change is approved, execute the agent command:
+`/openspec-to-beads <change-id>`
+
+The agent must:
+
+1.  Read the change files.
+2.  Create a Beads Epic for the feature. Include a short description summarizing the intent and referencing the change folder (e.g., "See openspec/changes/<change-id>/").
+3.  Create Beads Tasks for each item in `tasks.md`. Include a brief description for each task to provide context (why this issue exists and what needs to be done).
+4.  Set dependencies (e.g., Infra blocks Backend blocks Frontend).
+
+Result: A **live task graph in `.beads/`**, not just text.
+
+## 3. Execution
+
+Work loop:
+
+- `bd ready`: Check actionable tasks
+- `bd show <task-id>`: Get task context
+- Implement code
+- `bd close <task-id>`: Complete task
+- `bd sync`: Sync state
+
+**Rule**: Only work on tasks listed in `bd ready`.
+
+## 4. Fixation
+
+When all tasks are complete, execute the agent commands:
+
+- `/openspec-apply <change-id>`: Verify code meets specs.
+- Then, when ready,
+- `/openspec-archive <change-id>`: Archive the change.
+
+---
+
+## Agent Mental Checklist
+
+1.  **Start**: Is there an active OpenSpec change?
+    - No? → Create one (`/openspec-proposal`).
+    - Yes? → Read `proposal.md` and `tasks.md`.
+2.  **Plan**: Are tasks tracked in Beads?
+    - No? → Generate graph (`/openspec-to-beads`).
+    - Yes? → Work from `bd ready`.
+3.  **Align**: Keep OpenSpec (Intent) ↔ Beads (Plan) ↔ Code (Reality) in sync.
+
+---
+
+## Landing the Plane (Session Completion)
+
+**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+
+**MANDATORY WORKFLOW:**
+
+1. **File issues for remaining work** - Create issues for anything that needs follow-up
+2. **Run quality gates** (if code changed) - Tests, linters, builds
+3. **Update issue status** - Close finished work, update in-progress items
+4. **PUSH TO REMOTE** - This is MANDATORY:
+   - `git pull --rebase`
+   - `bd sync`
+   - `git push`
+   - `git status` - MUST show "up to date with origin"
+5. **Clean up** - Clear stashes, prune remote branches
+6. **Verify** - All changes committed AND pushed
+7. **Hand off** - Provide context for next session
+
+**CRITICAL RULES:**
+
+- Work is NOT complete until `git push` succeeds
+- NEVER stop before pushing - that leaves work stranded locally
+- NEVER say "ready to push when you are" - YOU must push
+- If push fails, resolve and retry until it succeeds
+
+## Issue Tracking
+
+This project uses **bd (beads)** for issue tracking.
+Run `bd prime` for workflow context.
+
+**Quick reference:**
+
+- `bd ready` - Find unblocked work
+- `bd create "Title" --type task --priority 2 --description "..."` - Create ad-hoc issue
+- `bd close <task-id>` - Complete work
+- `bd sync` - Sync with git (run at session end)
+
+For full workflow details: `bd prime`

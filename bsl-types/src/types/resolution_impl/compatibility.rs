@@ -7,7 +7,7 @@ use super::super::concrete::ConcreteType;
 use super::super::facets::FacetKind;
 use super::super::generics::GenericType;
 use super::super::resolution::{ResolutionResult, TypeResolution};
-use crate::domain::type_id::normalize;
+use crate::type_id::normalize;
 
 impl TypeResolution {
     // ============================================================================

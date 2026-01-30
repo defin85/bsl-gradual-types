@@ -11,5 +11,9 @@ name = "bsl_repository"
 path = "src/lib.rs"
 
 [dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+tracing = { workspace = true }
 
+bsl-types = { workspace = true }

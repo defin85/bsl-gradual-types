@@ -1,6 +1,6 @@
 //! Tests for facet visibility logic
 
-use crate::domain::types::*;
+use crate::types::*;
 
 #[test]
 fn test_manager_hides_properties() {

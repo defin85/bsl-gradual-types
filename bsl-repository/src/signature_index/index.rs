@@ -6,16 +6,13 @@
 //! - Валидация сигнатур
 //! - Интеграция с MetadataPatternRegistry
 
-use super::super::metadata_patterns::{ExtractedPattern, MetadataPatternRegistry};
-use super::super::type_id::TypeId;
-use super::super::types::{FacetKind, MetadataKind};
 use super::facet_helpers;
 use super::method::MethodSignature;
 use super::types::{ConstructorSignature, SignatureMismatch, SignatureValidationResult};
+use bsl_types::metadata_patterns::{ExtractedPattern, MetadataPatternRegistry};
+use bsl_types::types::{FacetKind, MetadataKind};
+use bsl_types::{ContextRequirements, TypeId};
 use std::collections::{HashMap, HashSet};
-
-// Re-export ContextRequirements для обратной совместимости
-pub use super::super::runtime_context::ContextRequirements;
 
 /// Индекс сигнатур функций и методов
 #[derive(Debug, Clone)]
@@ -284,7 +281,7 @@ impl SignatureIndex {
     ///
     /// # Примеры
     /// ```rust,no_run
-    /// # use bsl_shared::domain::signature_index::SignatureIndex;
+    /// # use bsl_repository::signature_index::SignatureIndex;
     /// let index = SignatureIndex::new();
     ///
     /// // Точный поиск
@@ -438,7 +435,7 @@ impl SignatureIndex {
     ///
     /// # Example
     /// ```rust,no_run
-    /// # use bsl_shared::domain::signature_index::SignatureIndex;
+    /// # use bsl_repository::signature_index::SignatureIndex;
     /// let signature_index = SignatureIndex::new();
     /// let methods = signature_index.get_type_methods("Массив");
     /// for method in methods {
@@ -648,7 +645,7 @@ impl Default for SignatureIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::SignatureSource;
+    use crate::signature_index::SignatureSource;
 
     #[test]
     fn test_type_id_normalization_fallback() {

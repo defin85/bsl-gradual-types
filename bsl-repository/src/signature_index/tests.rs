@@ -5,11 +5,11 @@
 #[cfg(test)]
 #[allow(clippy::module_inception)]
 mod tests {
-    use crate::domain::signature_index::{
+    use crate::signature_index::{
         ConstructorSignature, ContextRequirements, MethodSignature, SignatureIndex, SignatureSource,
     };
-    use crate::domain::type_id::TypeId;
-    use crate::domain::types::{FacetKind, MetadataKind, ParameterInfo, TypeResolution};
+    use bsl_types::types::{FacetKind, MetadataKind, ParameterInfo, TypeResolution};
+    use bsl_types::TypeId;
 
     fn add_test_constructors(index: &mut SignatureIndex) {
         index.add_constructor(
@@ -204,9 +204,9 @@ mod tests {
 
     #[test]
     fn test_method_overloads_are_kept_and_validated() {
-        use crate::domain::signature_registry::SignatureDataSource;
-        use crate::domain::types::{RawMethodData, RawParamData, RawTypeData};
-        use crate::domain::SignatureSourceRegistry;
+        use crate::signature_registry::SignatureDataSource;
+        use crate::SignatureSourceRegistry;
+        use bsl_types::types::{RawMethodData, RawParamData, RawTypeData};
 
         struct TestSource;
         impl SignatureDataSource for TestSource {
@@ -302,7 +302,7 @@ mod tests {
         assert!(
             matches!(
                 index.validate_overloaded_signature(&overloads, &actual),
-                crate::domain::signature_index::SignatureValidationResult::Valid
+                crate::signature_index::SignatureValidationResult::Valid
             ),
             "Вызов должен пройти валидацию по одному из overload'ов"
         );
@@ -607,7 +607,7 @@ mod tests {
 
     #[test]
     fn test_resolve_metadata_kind_instance_method() {
-        use crate::domain::metadata_patterns::ExtractedPattern;
+        use bsl_types::metadata_patterns::ExtractedPattern;
 
         let mut index = SignatureIndex::new();
 
@@ -645,7 +645,7 @@ mod tests {
 
     #[test]
     fn test_update_metadata_patterns() {
-        use crate::domain::metadata_patterns::ExtractedPattern;
+        use bsl_types::metadata_patterns::ExtractedPattern;
 
         let mut index = SignatureIndex::new();
 

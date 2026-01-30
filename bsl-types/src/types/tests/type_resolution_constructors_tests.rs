@@ -1,6 +1,6 @@
 //! Tests for Milestone 3.18: TypeResolution Constructors and Utilities
 
-use crate::domain::types::*;
+use crate::types::*;
 
 // === primitive() tests ===
 

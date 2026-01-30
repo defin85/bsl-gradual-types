@@ -15,8 +15,8 @@ impl TypeResolution {
     /// - `None` for Dynamic types
     pub fn get_definition_location(
         &self,
-    ) -> Option<crate::domain::type_definition_location::TypeDefinitionLocation> {
-        use crate::domain::type_definition_location::TypeDefinitionLocation;
+    ) -> Option<crate::type_definition_location::TypeDefinitionLocation> {
+        use crate::type_definition_location::TypeDefinitionLocation;
         use std::path::PathBuf;
 
         match &self.result {
@@ -84,9 +84,9 @@ impl TypeResolution {
     /// Get definition location with module paths (Milestone 3.14)
     pub fn get_definition_location_with_modules(
         &self,
-        module_paths: Option<&crate::domain::type_definition_location::ModulePaths>,
-    ) -> Option<crate::domain::type_definition_location::TypeDefinitionLocation> {
-        use crate::domain::type_definition_location::TypeDefinitionLocation;
+        module_paths: Option<&crate::type_definition_location::ModulePaths>,
+    ) -> Option<crate::type_definition_location::TypeDefinitionLocation> {
+        use crate::type_definition_location::TypeDefinitionLocation;
         use std::path::PathBuf;
 
         match &self.result {

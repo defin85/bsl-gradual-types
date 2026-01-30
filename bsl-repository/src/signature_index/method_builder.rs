@@ -4,8 +4,8 @@
 //!
 //! # Example
 //! ```rust,no_run
-//! use bsl_shared::domain::signature_index::{MethodBuilder, SignatureIndex};
-//! use bsl_shared::domain::type_id::TypeId;
+//! use bsl_repository::signature_index::{MethodBuilder, SignatureIndex};
+//! use bsl_types::TypeId;
 //!
 //! let type_id = TypeId::new("ТабличнаяЧасть");
 //! let mut index = SignatureIndex::new();
@@ -30,12 +30,11 @@
 //!     .add_to(&mut index);
 //! ```
 
-use super::super::runtime_context::ContextRequirements;
-use super::super::type_id::TypeId;
-use super::super::types::{FacetKind, ParameterInfo};
 use super::method::MethodSignature;
 use super::types::SignatureSource;
 use super::SignatureIndex;
+use bsl_types::types::{FacetKind, ParameterInfo};
+use bsl_types::{ContextRequirements, TypeId};
 
 /// Builder для создания MethodSignature с fluent API
 ///
@@ -69,8 +68,8 @@ impl MethodBuilder {
     ///
     /// # Example
     /// ```rust,no_run
-    /// # use bsl_shared::domain::signature_index::MethodBuilder;
-    /// # use bsl_shared::domain::type_id::TypeId;
+    /// # use bsl_repository::signature_index::MethodBuilder;
+    /// # use bsl_types::TypeId;
     /// let builder = MethodBuilder::for_type(&TypeId::new("Массив"));
     /// # let _ = builder;
     /// ```
@@ -90,8 +89,8 @@ impl MethodBuilder {
     ///
     /// # Example
     /// ```rust,no_run
-    /// # use bsl_shared::domain::signature_index::MethodBuilder;
-    /// # use bsl_shared::domain::type_id::TypeId;
+    /// # use bsl_repository::signature_index::MethodBuilder;
+    /// # use bsl_types::TypeId;
     /// let builder = MethodBuilder::for_type(&TypeId::new("Массив"));
     /// builder.method("Добавить");
     /// ```
@@ -104,8 +103,8 @@ impl MethodBuilder {
     ///
     /// # Example
     /// ```rust,no_run
-    /// # use bsl_shared::domain::signature_index::MethodBuilder;
-    /// # use bsl_shared::domain::type_id::TypeId;
+    /// # use bsl_repository::signature_index::MethodBuilder;
+    /// # use bsl_types::TypeId;
     /// let builder = MethodBuilder::for_type(&TypeId::new("Массив")).method("Добавить");
     /// builder.returns("ТаблицаЗначений");
     /// ```
@@ -120,8 +119,8 @@ impl MethodBuilder {
     ///
     /// # Example
     /// ```rust,no_run
-    /// # use bsl_shared::domain::signature_index::MethodBuilder;
-    /// # use bsl_shared::domain::type_id::TypeId;
+    /// # use bsl_repository::signature_index::MethodBuilder;
+    /// # use bsl_types::TypeId;
     /// let builder = MethodBuilder::for_type(&TypeId::new("Массив")).method("Очистить");
     /// builder.void();
     /// ```
@@ -137,8 +136,8 @@ impl MethodBuilder {
     ///
     /// # Example
     /// ```rust,no_run
-    /// # use bsl_shared::domain::signature_index::MethodBuilder;
-    /// # use bsl_shared::domain::type_id::TypeId;
+    /// # use bsl_repository::signature_index::MethodBuilder;
+    /// # use bsl_types::TypeId;
     /// MethodBuilder::for_type(&TypeId::new("Массив"))
     ///     .method("Вставить")
     ///     .param("Индекс", "Число").required().desc("Индекс элемента");
@@ -163,8 +162,8 @@ impl MethodBuilder {
     ///
     /// # Example
     /// ```rust,no_run
-    /// # use bsl_shared::domain::signature_index::MethodBuilder;
-    /// # use bsl_shared::domain::type_id::TypeId;
+    /// # use bsl_repository::signature_index::MethodBuilder;
+    /// # use bsl_types::TypeId;
     /// MethodBuilder::for_type(&TypeId::new("Массив"))
     ///     .method("Добавить")
     ///     .param_any("Значение").required().desc("Любое значение");
@@ -189,9 +188,9 @@ impl MethodBuilder {
     ///
     /// # Example
     /// ```rust,no_run
-    /// # use bsl_shared::domain::signature_index::MethodBuilder;
-    /// # use bsl_shared::domain::type_id::TypeId;
-    /// # use bsl_shared::domain::types::FacetKind;
+    /// # use bsl_repository::signature_index::MethodBuilder;
+    /// # use bsl_types::TypeId;
+    /// # use bsl_types::types::FacetKind;
     /// let builder = MethodBuilder::for_type(&TypeId::new("СправочникМенеджер"))
     ///     .method("СоздатьЭлемент");
     /// builder.facet(FacetKind::Object);
@@ -205,9 +204,9 @@ impl MethodBuilder {
     ///
     /// # Example
     /// ```rust,no_run
-    /// # use bsl_shared::domain::signature_index::MethodBuilder;
-    /// # use bsl_shared::domain::runtime_context::ContextRequirements;
-    /// # use bsl_shared::domain::type_id::TypeId;
+    /// # use bsl_repository::signature_index::MethodBuilder;
+    /// # use bsl_types::ContextRequirements;
+    /// # use bsl_types::TypeId;
     /// let builder = MethodBuilder::for_type(&TypeId::new("Объект"))
     ///     .method("Метод");
     /// builder.context(ContextRequirements::ServerOnly);
@@ -223,8 +222,8 @@ impl MethodBuilder {
     ///
     /// # Example
     /// ```rust,no_run
-    /// # use bsl_shared::domain::signature_index::{MethodBuilder, SignatureSource};
-    /// # use bsl_shared::domain::type_id::TypeId;
+    /// # use bsl_repository::signature_index::{MethodBuilder, SignatureSource};
+    /// # use bsl_types::TypeId;
     /// let builder = MethodBuilder::for_type(&TypeId::new("Объект"))
     ///     .method("Метод");
     /// builder.source(SignatureSource::Configuration);
@@ -243,8 +242,8 @@ impl MethodBuilder {
     ///
     /// # Example
     /// ```rust,no_run
-    /// # use bsl_shared::domain::signature_index::{MethodBuilder, SignatureIndex};
-    /// # use bsl_shared::domain::type_id::TypeId;
+    /// # use bsl_repository::signature_index::{MethodBuilder, SignatureIndex};
+    /// # use bsl_types::TypeId;
     /// # let type_id = TypeId::new("ТабличнаяЧасть");
     /// # let mut index = SignatureIndex::new();
     /// MethodBuilder::for_type(&type_id)
@@ -306,8 +305,8 @@ impl ParamBuilder {
     ///
     /// # Example
     /// ```rust,no_run
-    /// # use bsl_shared::domain::signature_index::MethodBuilder;
-    /// # use bsl_shared::domain::type_id::TypeId;
+    /// # use bsl_repository::signature_index::MethodBuilder;
+    /// # use bsl_types::TypeId;
     /// MethodBuilder::for_type(&TypeId::new("ТаблицаЗначений"))
     ///     .method("Выгрузить")
     ///     .param("Колонки", "Строка").optional();
@@ -321,8 +320,8 @@ impl ParamBuilder {
     ///
     /// # Example
     /// ```rust,no_run
-    /// # use bsl_shared::domain::signature_index::MethodBuilder;
-    /// # use bsl_shared::domain::type_id::TypeId;
+    /// # use bsl_repository::signature_index::MethodBuilder;
+    /// # use bsl_types::TypeId;
     /// MethodBuilder::for_type(&TypeId::new("Массив"))
     ///     .method("Добавить")
     ///     .param("Значение", "Строка").required();
@@ -336,8 +335,8 @@ impl ParamBuilder {
     ///
     /// # Example
     /// ```rust,no_run
-    /// # use bsl_shared::domain::signature_index::MethodBuilder;
-    /// # use bsl_shared::domain::type_id::TypeId;
+    /// # use bsl_repository::signature_index::MethodBuilder;
+    /// # use bsl_types::TypeId;
     /// MethodBuilder::for_type(&TypeId::new("Массив"))
     ///     .method("Вставить")
     ///     .param("Индекс", "Число").desc("Индекс элемента");
@@ -351,8 +350,8 @@ impl ParamBuilder {
     ///
     /// # Example
     /// ```rust,no_run
-    /// # use bsl_shared::domain::signature_index::MethodBuilder;
-    /// # use bsl_shared::domain::type_id::TypeId;
+    /// # use bsl_repository::signature_index::MethodBuilder;
+    /// # use bsl_types::TypeId;
     /// MethodBuilder::for_type(&TypeId::new("Массив"))
     ///     .method("УстановитьРазмер")
     ///     .param("Размер", "Число").default_value("0");

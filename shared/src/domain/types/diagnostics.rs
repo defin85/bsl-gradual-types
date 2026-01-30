@@ -11,7 +11,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::resolution::TypeResolution;
+use super::TypeResolution;
 
 /// Diagnostic message with location information
 #[derive(Debug, Clone, Serialize, Deserialize)]

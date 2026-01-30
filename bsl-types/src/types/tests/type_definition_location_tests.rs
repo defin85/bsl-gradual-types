@@ -1,7 +1,7 @@
 //! Tests for Milestone 3.14: Go To Definition Location
 
-use crate::domain::type_definition_location::TypeDefinitionLocation;
-use crate::domain::types::*;
+use crate::type_definition_location::TypeDefinitionLocation;
+use crate::types::*;
 
 #[test]
 fn test_primitive_definition_location() {
@@ -266,7 +266,7 @@ fn test_configuration_location_has_metadata_key() {
 
 #[test]
 fn test_configuration_with_module_paths() {
-    use crate::domain::type_definition_location::ModulePaths;
+    use crate::type_definition_location::ModulePaths;
     use std::path::PathBuf;
 
     let catalog = TypeResolution::known(ConcreteType::Configuration(ConfigurationType {
@@ -334,7 +334,7 @@ fn test_configuration_without_module_paths_fallback() {
 
 #[test]
 fn test_platform_type_ignores_module_paths() {
-    use crate::domain::type_definition_location::ModulePaths;
+    use crate::type_definition_location::ModulePaths;
     use std::path::PathBuf;
 
     let array = TypeResolution::known(ConcreteType::Platform(PlatformType {
@@ -360,7 +360,7 @@ fn test_platform_type_ignores_module_paths() {
 
 #[test]
 fn test_tabular_row_with_module_paths() {
-    use crate::domain::type_definition_location::ModulePaths;
+    use crate::type_definition_location::ModulePaths;
     use std::path::PathBuf;
 
     let tr = TypeResolution::known(ConcreteType::TabularRow(TabularRowType {
@@ -398,7 +398,7 @@ fn test_tabular_row_with_module_paths() {
 
 #[test]
 fn test_dynamic_with_module_paths() {
-    use crate::domain::type_definition_location::ModulePaths;
+    use crate::type_definition_location::ModulePaths;
     use std::path::PathBuf;
 
     let dynamic = TypeResolution::unknown();

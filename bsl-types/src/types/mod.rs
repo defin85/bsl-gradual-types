@@ -13,14 +13,12 @@
 //! - `generics`: Generic types with parameters
 //! - `resolution`: Type resolution structures
 //! - `compatibility`: Type compatibility checking
-//! - `diagnostics`: Type-related diagnostics
 //! - `raw_data`: Raw type data from parsers
 //! - `global_functions`: Global function types
 
 mod certainty;
 mod compatibility;
 mod concrete;
-mod diagnostics;
 mod facets;
 mod generics;
 mod global_functions;
@@ -37,7 +35,6 @@ mod tests;
 pub use certainty::*;
 pub use compatibility::*;
 pub use concrete::*;
-pub use diagnostics::*;
 pub use facets::*;
 pub use generics::*;
 pub use global_functions::*;

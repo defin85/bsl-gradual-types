@@ -6,8 +6,8 @@
 //! - Определения MetadataKind из префикса
 //! - Подстановки имени объекта в return type
 
-use super::super::facet_utils;
-use super::super::types::FacetKind;
+use bsl_types::facet_utils;
+use bsl_types::types::FacetKind;
 
 /// Извлечь базовый фасетный тип из полного имени типа
 ///

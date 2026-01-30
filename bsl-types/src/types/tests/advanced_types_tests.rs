@@ -1,6 +1,6 @@
 //! Tests for Milestone 2.3: Advanced Type System
 
-use crate::domain::types::*;
+use crate::types::*;
 
 // === TypeResolution Constructor Tests (Phase 2.1) ===
 

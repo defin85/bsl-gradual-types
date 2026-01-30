@@ -31,7 +31,7 @@ pub use types::{
 };
 
 // ContextRequirements для обратной совместимости
-pub use super::runtime_context::ContextRequirements;
+pub use bsl_types::ContextRequirements;
 
 // Facet helper functions (статические методы SignatureIndex делегируют сюда)
 pub use facet_helpers::{

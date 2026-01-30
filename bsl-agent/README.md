@@ -2,6 +2,12 @@
 
 Local MCP server (stdio) that provides semantic context for BSL projects.
 
+## Crate boundaries
+
+- `bsl-agent` is an adapter (MCP stdio + optional read-only HTTP UI).
+- Core startup/deps/cache wiring and analysis helpers live in `bsl-runtime`.
+- `bsl-agent` MUST NOT depend on `bsl-backend` (HTTP/LSP adapter crate).
+
 ## MCP inputs (workspace_open)
 
 Most behavior is configured via MCP tool inputs (not env):
@@ -60,6 +66,10 @@ NO_COLOR=true trunk build --release
 ```
 
 Then build `bsl-agent` as usual.
+
+## Repo policy check
+
+CI enforces crate boundaries (no `bsl-agent` -> `bsl-backend` dependency) via `scripts/check-bsl-agent-backend-dep.sh`.
 
 ## Discovering the HTTP UI URL
 

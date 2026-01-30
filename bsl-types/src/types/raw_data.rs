@@ -95,7 +95,7 @@ pub struct RawTypeData {
     /// Module paths for configuration types (Milestone 3.14)
     /// Used for Go To Definition navigation to ObjectModule.bsl, ManagerModule.bsl, etc.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub module_paths: Option<crate::domain::type_definition_location::ModulePaths>,
+    pub module_paths: Option<crate::type_definition_location::ModulePaths>,
 }
 
 /// Raw method data from parser
@@ -120,7 +120,7 @@ pub struct RawMethodData {
     pub is_constructor: bool,
     /// MILESTONE 3.11 Phase 4: Context requirements
     #[serde(default)]
-    pub context_requirements: Option<crate::domain::runtime_context::ContextRequirements>,
+    pub context_requirements: Option<crate::ContextRequirements>,
     /// MILESTONE 3.11 Phase 4: Return type facet
     #[serde(default)]
     pub return_facet: Option<FacetKind>,

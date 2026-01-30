@@ -39,6 +39,12 @@
 3. Переключить `bsl-agent` на `bsl-runtime` и убрать `bsl-backend` из зависимостей.
 4. Переключить `bsl-backend` на использование `bsl-runtime` (через публичный API), чтобы избежать дублирования.
 
+#### Инвентаризация: что `bsl-agent` реально брал из `bsl-backend` (до миграции)
+Минимальная поверхность, которая понадобилась агенту, сводилась к runtime-слою:
+- `system`: `SystemCoordinator`, `StartupInputs`, `startup_v2`, `StartupResultV2`, `fs_utils`.
+- `data::loaders`: `ConfigurationDiscovery`, `progress::ProgressUpdate`.
+- `application::type_system`: `web_api_service` и часть сервисов (completion / goto definition / types search).
+
 ### 2) Декомпозиция `bsl-shared` (этап 1)
 1. Выделить `bsl-types` и перенести туда ключевые структуры (TypeResolution/ConcreteType/TypeId и т.п.).
 2. Выделить `bsl-repository` для репозитория/индекса сигнатур, если он используется многими крейтами и не должен зависеть от application.

@@ -2,9 +2,9 @@
 //!
 //! Milestone 3.15: Lazy Resolution with Arc<OnceLock>
 
-use super::super::runtime_context::ContextRequirements;
-use super::super::types::{FacetKind, ParameterInfo, TypeResolution};
 use super::types::SignatureSource;
+use bsl_types::types::{FacetKind, ParameterInfo, TypeResolution};
+use bsl_types::ContextRequirements;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, OnceLock};
 
@@ -30,8 +30,9 @@ fn default_resolved_params() -> Arc<OnceLock<Vec<(String, TypeResolution)>>> {
 ///
 /// # Примеры
 /// ```
-/// use bsl_shared::domain::signature_index::{MethodSignature, SignatureSource, ContextRequirements};
-/// use bsl_shared::domain::types::{ParameterInfo, FacetKind};
+/// use bsl_repository::signature_index::{MethodSignature, SignatureSource};
+/// use bsl_types::ContextRequirements;
+/// use bsl_types::types::{FacetKind, ParameterInfo};
 ///
 /// // Метод Справочник.СоздатьЭлемент() -> Object, ServerOnly
 /// let signature = MethodSignature::new(
@@ -159,8 +160,8 @@ impl MethodSignature {
     ///
     /// # Example
     /// ```rust,no_run
-    /// # use bsl_shared::domain::signature_index::MethodSignature;
-    /// # use bsl_shared::domain::types::TypeResolution;
+    /// # use bsl_repository::signature_index::MethodSignature;
+    /// # use bsl_types::types::TypeResolution;
     /// # let method: MethodSignature = todo!();
     /// let resolved = method.get_resolved_return_type(|_type_str| {
     ///     TypeResolution::unknown()
@@ -189,8 +190,8 @@ impl MethodSignature {
     ///
     /// # Example
     /// ```rust,no_run
-    /// # use bsl_shared::domain::signature_index::MethodSignature;
-    /// # use bsl_shared::domain::types::TypeResolution;
+    /// # use bsl_repository::signature_index::MethodSignature;
+    /// # use bsl_types::types::TypeResolution;
     /// # let method: MethodSignature = todo!();
     /// let params = method.get_resolved_params(|_type_str| {
     ///     TypeResolution::unknown()

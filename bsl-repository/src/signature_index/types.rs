@@ -6,7 +6,7 @@
 //! - SignatureValidationResult
 //! - SignatureMismatch
 
-use super::super::types::ParameterInfo;
+use bsl_types::types::ParameterInfo;
 use serde::{Deserialize, Serialize};
 
 /// Сигнатура конструктора

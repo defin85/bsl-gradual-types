@@ -564,7 +564,11 @@ version = "0.4.75"
 name = "bsl-repository"
 version = "0.4.75"
 dependencies = [
+ "anyhow",
+ "bsl-types",
+ "chrono",
  "serde",
+ "tracing",
 ]
 
 [[package]]

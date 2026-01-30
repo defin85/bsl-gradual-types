@@ -74,7 +74,7 @@ impl MetadataKind {
     ///
     /// # Examples
     /// ```
-    /// use bsl_shared::domain::types::MetadataKind;
+    /// use bsl_types::types::MetadataKind;
     ///
     /// assert_eq!(MetadataKind::Catalog.to_prefix(), "Справочники");
     /// assert_eq!(MetadataKind::Document.to_prefix(), "Документы");
@@ -114,7 +114,7 @@ impl MetadataKind {
     ///
     /// # Examples
     /// ```
-    /// use bsl_shared::domain::types::MetadataKind;
+    /// use bsl_types::types::MetadataKind;
     ///
     /// assert_eq!(MetadataKind::Catalog.to_russian_name(), "Справочник");
     /// assert_eq!(MetadataKind::Document.to_russian_name(), "Документ");

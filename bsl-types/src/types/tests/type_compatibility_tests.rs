@@ -1,6 +1,6 @@
 //! Tests for Milestone 3.13: Object-Based Type Comparison
 
-use crate::domain::types::*;
+use crate::types::*;
 
 #[test]
 fn test_primitive_compatibility() {

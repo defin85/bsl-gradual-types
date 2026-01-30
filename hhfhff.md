@@ -49,7 +49,7 @@
   - Почему здесь: большая функциональная фича, затрагивает backend/src/bin/lsp_server/** и тесты LSP.
   - Минимум пересечений с bsl-agent, но потенциально может подтянуть изменения в общих слоях (анализ/позиции/DTO), поэтому лучше сделать до “полировки” docs/scripts.
 
-  4. add-mcp-bsl-agent-type-tools
+  4. add-mcp-bsl-agent-type-tools +
 
   - Почему после LSP: в основном локально для bsl-agent/src/server/** и bsl-agent/src/session/**, опирается на существующие DTO (TypeDto/AnalysisResultDto).
   - Конфликтов с LSP-change почти не должно быть; пересечения возможны только если оба change полезут в shared DTO/типовую модель.

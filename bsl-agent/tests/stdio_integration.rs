@@ -324,6 +324,47 @@ async fn stdio_type_tools_reject_invalid_params() {
 }
 
 #[tokio::test]
+async fn stdio_type_tools_reject_invalid_view() {
+    let service = spawn_agent(&[]).await;
+
+    let temp_root = tempfile::TempDir::new().expect("tempdir");
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [temp_root.path().to_string_lossy()],
+        }),
+    )
+    .await;
+    let session_id = open.session_id.clone();
+    let _status = wait_workspace_ready(&service, &open).await;
+
+    call_tool_expect_invalid_params(
+        &service,
+        "bsl_types_list_start",
+        json!({ "session_id": &session_id, "page": 1, "limit": 50, "view": "nope" }),
+        "view must be one of: names_only, summary, full",
+    )
+    .await;
+
+    call_tool_expect_invalid_params(
+        &service,
+        "bsl_types_search_start",
+        json!({ "session_id": &session_id, "query": "Документ", "limit": 200, "view": "nope" }),
+        "view must be one of: names_only, summary, full",
+    )
+    .await;
+
+    let _close: serde_json::Value = call_tool(
+        &service,
+        "workspace_close",
+        json!({ "session_id": &session_id }),
+    )
+    .await;
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
 async fn stdio_type_tools_require_ready_session() {
     let service = spawn_agent(&[]).await;
 

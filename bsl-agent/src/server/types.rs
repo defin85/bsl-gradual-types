@@ -1,5 +1,6 @@
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Serialize};
+use std::fmt;
 
 fn default_true() -> bool {
     true
@@ -204,12 +205,43 @@ pub enum BslTypeSource {
     Configuration,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BslTypesView {
     NamesOnly,
     Summary,
     Full,
+}
+
+impl<'de> Deserialize<'de> for BslTypesView {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct ViewVisitor;
+
+        impl<'de> de::Visitor<'de> for ViewVisitor {
+            type Value = BslTypesView;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("one of: names_only, summary, full")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                match value {
+                    "names_only" => Ok(BslTypesView::NamesOnly),
+                    "summary" => Ok(BslTypesView::Summary),
+                    "full" => Ok(BslTypesView::Full),
+                    _ => Err(E::custom("view must be one of: names_only, summary, full")),
+                }
+            }
+        }
+
+        deserializer.deserialize_str(ViewVisitor)
+    }
 }
 
 impl Default for BslTypesView {

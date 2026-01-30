@@ -21,11 +21,11 @@ fi
 
 if command -v cargo >/dev/null; then
   if command -v rg >/dev/null; then
-    if cargo tree -p bsl-agent -e normal | rg -q "bsl-backend"; then
+    if cargo tree -p bsl-agent -e all | rg -q "bsl-backend"; then
       fail "bsl-agent must not depend on bsl-backend (directly or transitively)"
     fi
   else
-    if cargo tree -p bsl-agent -e normal | grep -q "bsl-backend"; then
+    if cargo tree -p bsl-agent -e all | grep -q "bsl-backend"; then
       fail "bsl-agent must not depend on bsl-backend (directly or transitively)"
     fi
   fi

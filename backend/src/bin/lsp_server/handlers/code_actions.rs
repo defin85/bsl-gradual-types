@@ -131,7 +131,7 @@ fn find_identifier_end_byte_in_span(source: &str, span: Span, identifier: &str) 
 }
 
 fn line_indent(line: &str) -> &str {
-    let trimmed = line.trim_start_matches(|ch: char| ch == ' ' || ch == '\t');
+    let trimmed = line.trim_start_matches([' ', '\t']);
     &line[..line.len().saturating_sub(trimmed.len())]
 }
 
@@ -148,6 +148,7 @@ fn pick_tmp_name(source: &str) -> String {
     "tmp9999".to_string()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn handle_code_actions_v2(
     analysis: &bsl_analysis_v2::AnalysisV2,
     file_id: bsl_analysis_v2::FileId,

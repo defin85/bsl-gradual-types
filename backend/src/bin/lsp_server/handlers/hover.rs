@@ -16,6 +16,7 @@ use bsl_shared::ir::SemanticProgram;
 
 use crate::config::HoverSettings;
 
+#[allow(clippy::too_many_arguments)]
 pub fn handle_hover_v2(
     analysis: &bsl_analysis_v2::AnalysisV2,
     file_id: bsl_analysis_v2::FileId,

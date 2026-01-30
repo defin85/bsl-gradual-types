@@ -5,10 +5,6 @@ mod intellisense_testkit;
 #[path = "../src/bin/lsp_server/converters/position.rs"]
 pub mod position;
 
-mod converters {
-    pub use crate::position;
-}
-
 #[path = "../src/bin/lsp_server/handlers/completion.rs"]
 mod completion_handler;
 

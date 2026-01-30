@@ -1,0 +1,15 @@
+[package]
+name = "bsl-repository"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Repository-related shared types (stats, contracts) for BSL Gradual Type System"
+
+[lib]
+name = "bsl_repository"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+

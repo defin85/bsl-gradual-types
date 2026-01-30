@@ -52,6 +52,7 @@ pub struct TypeHintsSettings {
     pub show_variable_types: bool,
 
     #[serde(default = "default_true")]
+    #[allow(dead_code)]
     pub show_return_types: bool,
 
     #[serde(default = "default_true")]
@@ -74,17 +75,11 @@ impl Default for TypeHintsSettings {
 }
 
 /// VS Code "bsl.codeActions.*" settings (from workspace/didChangeConfiguration, section `bsl`)
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct CodeActionsSettings {
     #[serde(default)]
     pub enabled: bool,
-}
-
-impl Default for CodeActionsSettings {
-    fn default() -> Self {
-        Self { enabled: false }
-    }
 }
 
 fn default_true() -> bool {

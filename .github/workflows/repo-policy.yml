@@ -24,3 +24,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check Cargo.lock policy
         run: ./scripts/check-cargo-lockfile-policy.sh
+
+  crate_boundaries_policy:
+    name: Crate boundaries policy (bsl-agent deps)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check bsl-agent does not depend on bsl-backend
+        run: ./scripts/check-bsl-agent-backend-dep.sh

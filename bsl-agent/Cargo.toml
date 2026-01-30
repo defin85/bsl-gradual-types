@@ -15,7 +15,7 @@ anyhow = { workspace = true }
 axum = { workspace = true }
 blake3 = { workspace = true }
 bsl-analysis-v2 = { workspace = true }
-bsl-backend = { workspace = true }
+bsl-runtime = { workspace = true }
 bsl-shared = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 include_dir = "0.7"
@@ -26,7 +26,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
-tower-http = { workspace = true, features = ["fs"] }
+tower-http = { workspace = true, features = ["fs", "set-header"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 uuid = { version = "1", features = ["v4"] }

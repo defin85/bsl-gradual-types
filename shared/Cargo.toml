@@ -19,6 +19,9 @@ serde_json = { workspace = true }
 indexmap = { workspace = true }
 chrono = { workspace = true }
 bsl-line-index = { workspace = true }
+bsl-api-dtos = { workspace = true }
+bsl-repository = { workspace = true }
+bsl-types = { workspace = true }
 xxhash-rust = { version = "0.8", features = ["xxh64"] }
 strsim = "0.11"  # MILESTONE 3.6 Phase 3: Fuzzy string matching for diagnostics hints
 

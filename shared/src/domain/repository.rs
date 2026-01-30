@@ -5,6 +5,7 @@ use crate::domain::type_definition_location::TypeDefinitionLocation;
 use crate::domain::type_id::TypeId;
 use crate::domain::types::{MetadataKind, RawDataSource, RawTypeData};
 use anyhow::Result;
+pub use bsl_repository::RepositoryStats;
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, HashSet};
 use std::sync::RwLock;
@@ -373,17 +374,6 @@ pub trait TypeRepository: Send + Sync {
         type_name: &str,
         generic_info: crate::domain::types::GenericInfo,
     ) -> bool;
-}
-
-/// Статистика репозитория
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RepositoryStats {
-    pub total_types: usize,
-    pub platform_types: usize,
-    pub configuration_types: usize,
-    pub user_defined_types: usize,
-    pub last_update_time: Option<String>, // ISO 8601 timestamp
 }
 
 // --- In-Memory Implementation ---

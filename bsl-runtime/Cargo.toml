@@ -1,45 +1,29 @@
 [package]
-name = "bsl-backend"
+name = "bsl-runtime"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Backend server for BSL Gradual Type System"
-
-[features]
-default = ["web-ui"]  # По умолчанию включаем веб-интерфейс
-web-ui = ["dep:axum", "dep:tower-http"]  # Feature веб-сервера зависит от этих библиотек
-lsp-only = []  # Только LSP без веб-интерфейса
+description = "Shared runtime/library layer for bsl-backend and bsl-agent (startup, deps snapshots, core services)"
 
 [lib]
-name = "bsl_backend"
+name = "bsl_runtime"
 path = "src/lib.rs"
 
-[[bin]]
-name = "bsl-web-server"
-path = "src/main.rs"
-
-[[bin]]
-name = "bsl-lsp-server"
-path = "src/bin/lsp_server/main.rs"
-
 [dependencies]
-bsl-runtime = { workspace = true }
 bsl-shared = { workspace = true }
 bsl-analysis-v2 = { workspace = true }
 bsl-line-index = { workspace = true }
 bsl-syntax = { workspace = true }
 bsl-diagnostics = { workspace = true }
-bsl-type-visualization = { path = "../type-visualization" }
+bsl-type-visualization = { workspace = true }
 
-# Core dependencies
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 clap = { workspace = true }
 
-# Data structures
 serde = { workspace = true }
 serde_json = { workspace = true }
 bincode = { workspace = true }
@@ -47,13 +31,9 @@ indexmap = { workspace = true }
 dashmap = { workspace = true }
 arc-swap = { workspace = true }
 
-# Web server (optional)
-axum = { workspace = true, optional = true }
 tokio = { workspace = true }
 tower = { workspace = true }
-tower-http = { workspace = true, optional = true, features = ["cors", "fs", "set-header"] }
 
-# Parsing
 quick-xml = { workspace = true }
 roxmltree = { workspace = true }
 encoding_rs = { workspace = true }
@@ -65,55 +45,24 @@ url = { workspace = true }
 indicatif = { workspace = true }
 sha2 = { workspace = true }
 
-# Tree-sitter support
 cc = { workspace = true }
-
-# File system
 walkdir = { workspace = true }
 notify = { workspace = true }
 globset = { workspace = true }
 
-# Cache
 lru = { workspace = true }
 fs2 = { workspace = true }
 tempfile = { workspace = true }
 blake3 = { workspace = true }
 zstd = { workspace = true }
 
-# LSP
-tower-lsp = { workspace = true }
-
-# Configuration
 toml = "0.8"
-
-# HBK Recovery (Milestone: .hbk file recovery)
 zip = "2.2"
 flate2 = "1"
-
-# Время и даты
 chrono = { workspace = true }
-
-# Параллельные вычисления
 rayon = { workspace = true }
-
-# Цветной вывод
+scraper = { workspace = true }
 colored = { workspace = true }
-
-# Tree-sitter
 tree-sitter = { workspace = true }
 tree-sitter-bsl = { workspace = true }
 
-# HTML parsing
-scraper = { workspace = true }
-
-[dev-dependencies]
-tempfile = { workspace = true }
-reqwest = { version = "0.11", features = ["json"] }
-criterion = "0.5"
-futures = "0.3"
-
-# Note: tempfile также используется в основном коде для HBK recovery,
-# но уже доступен через workspace
-
-[build-dependencies]
-chrono = { workspace = true }

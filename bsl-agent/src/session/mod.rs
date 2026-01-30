@@ -3,9 +3,9 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use bsl_analysis_v2::{AnalysisHostV2, Change, FileId, SettingsId};
-use bsl_backend::application::type_system::web_api_service;
-use bsl_backend::data::loaders::progress::ProgressUpdate;
-use bsl_backend::data::loaders::ConfigurationDiscovery;
+use bsl_runtime::application::type_system::web_api_service;
+use bsl_runtime::data::loaders::progress::ProgressUpdate;
+use bsl_runtime::data::loaders::ConfigurationDiscovery;
 use bsl_shared::api::dtos::{
     AnalysisResultDto, McpRootDto, McpSessionDto, MetricsDto, SnapshotInputsDto, SnapshotMetaDto,
 };
@@ -62,7 +62,7 @@ struct WorkspaceSession {
     documents: DocumentStore,
     analysis_revision: u64,
     settings: WorkspaceSettings,
-    startup: Option<bsl_backend::system::StartupResultV2>,
+    startup: Option<bsl_runtime::system::StartupResultV2>,
     startup_job_id: Option<String>,
     startup_phase: String,
     startup_progress: u8,
@@ -489,7 +489,7 @@ impl SessionManager {
     async fn ready_startup_for_http(
         &self,
         session_id: Option<&str>,
-    ) -> Result<bsl_backend::system::StartupResultV2, rmcp::ErrorData> {
+    ) -> Result<bsl_runtime::system::StartupResultV2, rmcp::ErrorData> {
         let sessions = self.sessions.read().await;
         let uuid = Self::select_ready_session_uuid(&sessions, session_id)?;
         let session = sessions
@@ -719,9 +719,9 @@ impl SessionManager {
             dto.methods.clear();
         }
 
-        Ok(serde_json::to_value(dto).map_err(|err| {
+        serde_json::to_value(dto).map_err(|err| {
             rmcp::ErrorData::internal_error(format!("serialize type dto: {err}"), None)
-        })?)
+        })
     }
 
     fn is_flow_sensitive(res: &bsl_shared::domain::types::TypeResolution) -> bool {
@@ -993,7 +993,7 @@ impl SessionManager {
     async fn set_startup_result(
         &self,
         session_id: Uuid,
-        startup: bsl_backend::system::StartupResultV2,
+        startup: bsl_runtime::system::StartupResultV2,
     ) -> Result<(), rmcp::ErrorData> {
         let mut sessions = self.sessions.write().await;
         let session = sessions
@@ -1633,7 +1633,7 @@ impl SessionManager {
             .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())));
         let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
 
-        let result = bsl_backend::application::type_system::get_completion_with_semantic_program_snapshot_v2(
+        let result = bsl_runtime::application::type_system::get_completion_with_semantic_program_snapshot_v2(
             text.as_str(),
             params.position.line,
             params.position.character,
@@ -1783,7 +1783,7 @@ impl SessionManager {
         let type_at_position_hint =
             type_at_utf16_position(&analysis, FileId(1), position.line, position.character);
         let receiver_type_hint = None;
-        let target = bsl_backend::application::type_system::goto_definition_v2_with_source(
+        let target = bsl_runtime::application::type_system::goto_definition_v2_with_source(
             abs_path.to_string_lossy().as_ref(),
             code.as_ref(),
             program,
@@ -2657,9 +2657,9 @@ fn workspace_warnings(settings: &WorkspaceSettings) -> Vec<String> {
 async fn start_semantic_runtime(
     settings: &WorkspaceSettings,
     progress_tx: Option<mpsc::UnboundedSender<ProgressUpdate>>,
-) -> Result<bsl_backend::system::StartupResultV2, rmcp::ErrorData> {
-    let coordinator = Arc::new(bsl_backend::system::SystemCoordinator::new());
-    let inputs = bsl_backend::system::StartupInputs::from_web_flags(
+) -> Result<bsl_runtime::system::StartupResultV2, rmcp::ErrorData> {
+    let coordinator = Arc::new(bsl_runtime::system::SystemCoordinator::new());
+    let inputs = bsl_runtime::system::StartupInputs::from_web_flags(
         settings.platform_docs_archive.clone(),
         settings.configuration_path.clone(),
         settings.platform_version.clone(),
@@ -2667,7 +2667,7 @@ async fn start_semantic_runtime(
         None,
     );
 
-    bsl_backend::system::startup_v2(coordinator, inputs, progress_tx)
+    bsl_runtime::system::startup_v2(coordinator, inputs, progress_tx)
         .await
         .map_err(|err| rmcp::ErrorData::internal_error(err.to_string(), None))
 }
@@ -2851,7 +2851,7 @@ fn collect_project_files(roots: &[RootEntry]) -> Result<Vec<WorkspaceFile>, rmcp
             if !path.is_file() {
                 continue;
             }
-            if !bsl_backend::system::fs_utils::is_bsl_file(path) {
+            if !bsl_runtime::system::fs_utils::is_bsl_file(path) {
                 continue;
             }
             let rel_path = match path.strip_prefix(&root.path) {
@@ -2943,7 +2943,7 @@ fn load_disk_text_with_limits(
             None,
         ));
     }
-    bsl_backend::system::fs_utils::read_bsl_file(&canonical)
+    bsl_runtime::system::fs_utils::read_bsl_file(&canonical)
         .map(Some)
         .map_err(|err| rmcp::ErrorData::internal_error(err.to_string(), None))
 }

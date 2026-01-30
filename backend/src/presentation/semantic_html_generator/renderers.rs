@@ -150,7 +150,7 @@ pub(crate) fn render_symbol_table(symbols: &bsl_shared::ir::SymbolTable) -> Stri
     let mut table_rows = String::new();
 
     // Add functions using public API
-    for (name, sig) in symbols.iter_functions() {
+    for (name, _sig) in symbols.iter_functions() {
         table_rows.push_str(&format!(
             r#"<tr>
     <td><code>{}</code></td>

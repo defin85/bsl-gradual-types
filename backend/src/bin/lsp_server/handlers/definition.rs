@@ -12,6 +12,7 @@ use bsl_line_index::LineIndex;
 use bsl_shared::domain::types::TypeResolution;
 use bsl_shared::ir::SemanticProgram;
 
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_goto_definition_v2(
     file_path: Arc<str>,
     file_content: Arc<str>,

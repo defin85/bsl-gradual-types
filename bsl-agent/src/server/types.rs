@@ -205,10 +205,11 @@ pub enum BslTypeSource {
     Configuration,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, Serialize, JsonSchema, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum BslTypesView {
     NamesOnly,
+    #[default]
     Summary,
     Full,
 }
@@ -241,12 +242,6 @@ impl<'de> Deserialize<'de> for BslTypesView {
         }
 
         deserializer.deserialize_str(ViewVisitor)
-    }
-}
-
-impl Default for BslTypesView {
-    fn default() -> Self {
-        Self::Summary
     }
 }
 

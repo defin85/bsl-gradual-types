@@ -54,13 +54,13 @@
   - Почему после LSP: в основном локально для bsl-agent/src/server/** и bsl-agent/src/session/**, опирается на существующие DTO (TypeDto/AnalysisResultDto).
   - Конфликтов с LSP-change почти не должно быть; пересечения возможны только если оба change полезут в shared DTO/типовую модель.
 
-  5. update-docs-and-scripts-consistency
+  5. update-docs-and-scripts-consistency +
 
   - Почему после крупных code-change: правит конкретные места (docs/guides/roadmap-verification.md, scripts/compact_completed_milestones.py — сейчас там есть ссылки на несуществующий backend/src/system/
     tree_sitter_adapter.rs).
   - Делая после фич, уменьшаем шанс, что придётся “переправлять ссылки” повторно из‑за переездов/рефакторингов.
 
-  6. update-ci-references
+  6. update-ci-references +
 
   - Почему ближе к концу: это широкий doc sweep (точно трогает README.md — CI badge сейчас фиктивный, и CONTRIBUTING.md тоже), легко конфликтует почти с любыми док-правками.
   - Лучше выполнить, когда README/INSTALLATION уже стабилизированы предыдущими changes.

@@ -109,8 +109,8 @@ references("SystemCoordinator")
 
 # Безопасно переименовать
 rename_symbol(
-  file: "backend/src/system/mod.rs",
-  line: 45,
+  file: "bsl-runtime/src/system/system_coordinator/coordinator.rs",
+  line: 27,
   column: 12,
   new_name: "SystemOrchestrator"
 )
@@ -119,11 +119,11 @@ rename_symbol(
 **3. Проверка совместимости API**
 
 ```bash
-# Проверить, что application фасад использует AnalysisEngine корректно
-hover(backend/src/application/type_system_service.rs, line: 120, column: 25)
+# Проверить, что AnalysisEngine доступен и имеет ожидаемый API
+hover(shared/src/engine.rs, line: 106, column: 12)
 
 # Проверить сигнатуру метода
-definition("AnalysisEngine::analyze_program")
+definition("AnalysisEngine::resolve_type")
 ```
 
 ---

@@ -165,7 +165,7 @@ cargo run -p bsl-backend --bin intellisense_perf -- \
 
 ### `run-intellisense-tests.sh` - Smoke/full тесты IntelliSense
 
-**Назначение:** стабильный набор тестов M8 для shared CI и локального полного прогона.
+**Назначение:** стабильный набор тестов M8 для локального полного прогона; подходит для CI при подключении.
 
 **Использование:**
 ```bash

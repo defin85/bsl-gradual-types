@@ -9,38 +9,32 @@
 
 - В workspace присутствуют отдельные крейты для типов и репозитория: `bsl-types`, `bsl-repository`.
 - `bsl-analysis-v2` используется в backend для LSP/семантики (v2 pipeline).
-- Flow-sensitive инфраструктура существует, но находится в переходном состоянии:
-  - В `bsl-shared` есть flow-sensitive доменная модель и контекст: `shared/src/domain/flow_analysis.rs`.
-  - В `bsl-shared` есть CFG в IR: `shared/src/ir/cfg.rs`.
-  - В `analysis-v2` построение CFG пока заглушено: `analysis-v2/src/ast_to_ir/converter.rs` (метод `build_cfg()` возвращает `None`).
-  - В `bsl-runtime` есть экспериментальные анализаторы потока: `bsl-runtime/src/domain/flow_analyzer.rs` и `bsl-runtime/src/domain/flow_analyzer_simple.rs`, при этом «полный» analyzer не подключен модулем (`bsl-runtime/src/domain/mod.rs`).
+- Flow-sensitive инфраструктура есть и постепенно интегрируется в v2 pipeline:
+  - Канонический CFG живёт в IR: `shared/src/ir/cfg.rs`.
+  - Domain слой использует тот же тип (реэкспорт): `shared/src/domain/flow_analysis.rs`.
+  - `analysis-v2` строит CFG при AST → IR: `analysis-v2/src/ast_to_ir/converter.rs` (`SemanticProgram.cfg`).
+  - В `bsl-runtime` оставлен только устаревший экспериментальный analyzer: `bsl-runtime/src/domain/flow_analyzer_simple.rs` (deprecated).
 
-1) Flow-sensitive анализ и CFG: раздвоение и незавершенная интеграция
+1) Flow-sensitive анализ и CFG: консолидация выполнена, остались долги интеграции
 Критичность: Высокая
 
 Описание:
 
-- Существует как минимум два разных типа CFG с одинаковым именем `ControlFlowGraph`:
-  - IR CFG: `shared/src/ir/cfg.rs` (используется IR-слоем, в т.ч. `shared/src/ir/program.rs`).
-  - Domain CFG: `shared/src/domain/flow_analysis.rs` (используется flow-sensitive доменной логикой, тестами интеграции narrowing/null-safety и экспериментальным runtime analyzer).
-- `bsl-analysis-v2` строит IR (через `AstToIrConverter`), но CFG для flow-sensitive анализа пока не формируется (возвращается `None`), из-за чего часть flow-sensitive фич остается вне v2 пайплайна.
-- Экспериментальный `bsl-runtime/src/domain/flow_analyzer.rs` содержит TODO по интеграции с `TypeMetadataLookup`, но сам модуль сейчас не является активной частью runtime (не экспортируется из `bsl-runtime/src/domain/mod.rs`).
+- Дублирование типов `ControlFlowGraph` между слоями устранено:
+  - канонический тип — `shared/src/ir/cfg.rs`;
+  - domain-слой использует тот же тип (через реэкспорт): `shared/src/domain/flow_analysis.rs`.
+- CFG теперь формируется в v2 pipeline и доступен из IR snapshot: `analysis-v2/src/ast_to_ir/converter.rs` (`SemanticProgram.cfg`).
+- Устаревшие экспериментальные анализаторы в `bsl-runtime` не развиваются (см. `bsl-runtime/src/domain/flow_analyzer_simple.rs`).
 
 Риски:
 
-- Путаница типов и границ слоев (IR vs Domain) из-за одинаковых имен и параллельных реализаций.
-- Сложность доведения flow-sensitive анализа до production (из-за отсутствия единого «канонического» CFG).
-- Потенциальные регрессии при попытке «склеить» компоненты, потому что разные части системы ожидают разные структуры CFG.
+- Качество/точность построения CFG (особенно извлечение условий и привязка к спанам) напрямую влияет на полезность narrowing/null-safety.
+- Вопрос моделирования CFG для нескольких процедур/функций (один CFG на файл vs per-body компоненты) может осложнить интеграцию анализа в IDE.
 
 Рекомендация:
 
-- Определить один канонический формат CFG и один путь интеграции в v2:
-  - либо CFG является частью IR (`bsl-shared::ir`) и используется downstream-логикой;
-  - либо CFG является доменной моделью (`bsl-shared::domain`) и строится в рамках доменного пайплайна.
-- После выбора:
-  - убрать дублирование типов (переименование/удаление второго `ControlFlowGraph` или четкое разведение имен, например `IrControlFlowGraph` vs `DomainControlFlowGraph`);
-  - реализовать реальное построение CFG в `analysis-v2` (вместо `None`);
-  - либо подключить `bsl-runtime` flow analyzer (если он нужен), либо переместить/удалить как мертвый код.
+- Зафиксировать контракт CFG как части v2 snapshot (что именно гарантируется: наличие, базовые узлы/рёбра, семантика edge kinds).
+- Следующий шаг — wiring flow-sensitive результатов в интерфейсы (LSP/Web DTO) там, где это реально приносит пользу пользователю (и не ломает производительность).
 
 2) `bsl-shared` как агрегатор слоев: долг уменьшен, но риск «god-crate» остается
 Критичность: Средняя
@@ -93,7 +87,7 @@
 Описание:
 
 - Документы могут ссылаться на несуществующие модули/пути и тем самым вводить в заблуждение разработчиков.
-  Например, в `backend/src/README.md` описан `domain/flow_analyzer.rs`, но директории `backend/src/domain/` в текущей структуре нет.
+  Проблема особенно заметна на архитектурных документах и README, которые используются как «инструкция к действию».
 
 Рекомендация:
 

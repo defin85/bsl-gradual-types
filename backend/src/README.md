@@ -74,101 +74,51 @@ Backend реализует многослойную архитектуру с ч
 
 ## Структура модулей
 
-### `application/` - Application Layer
+`bsl-backend` в первую очередь содержит presentation и binary targets; остальные слои поставляются через re-export из `bsl-runtime` (см. `backend/src/lib.rs`).
 
-Бизнес-логика типизации и LSP функций.
+### `backend/src/presentation/` - Presentation Layer
+
+HTTP/Web и LSP интерфейсы.
 
 **Ключевые компоненты:**
-- `type_system/` - entrypoints и services (hover, completion, web_api)
-- `semantic_validation_visitor/` - валидация семантических правил
-- `ast_to_ir/` - конвертация AST → Intermediate Representation
-- `type_inference_service.rs` - вывод типов выражений
+- `backend/src/presentation/web/` - Web API handlers (в т.ч. diagnostics / semantic tree)
+- `backend/src/presentation/lsp/` - LSP адаптеры/DTO
+- `backend/src/presentation/semantic_html_generator/` - генерация HTML визуализации типов
+- `backend/src/presentation/cli/` - CLI presentation (если используется)
 
-**Точки входа:**
-- `application::get_hover_info_with_semantic_program()` - hover по IR + type_at_position (v2)
-- `application::get_completion_with_semantic_program_snapshot()` - completion по IR + index snapshot + type hint (v2)
-- `bsl_analysis_v2::AnalysisV2::{syntax_diagnostics, semantic_diagnostics}` - диагностики (salsa queries)
+### `backend/src/bin/` - Binary Targets
 
-### `domain/` - Domain Layer (backend-specific)
+**Ключевые компоненты:**
+- `backend/src/bin/lsp_server/` - LSP server для VSCode
+- `backend/src/main.rs` - Web server (bsl-web-server)
 
-Backend-специфичная доменная логика.
+### `backend/src/config/` - Конфигурация
 
-**Компоненты:**
-- `flow_analyzer.rs` - flow-sensitive анализ типов (в процессе разработки)
+Конфиг/параметры запуска backend.
 
-**Примечание:** Основная доменная логика (TypeResolver, TypeRepository) находится в `shared` crate.
+### `bsl-runtime/src/application/` - Application Layer
 
-### `data/` - Data Layer
+Entry points для hover/completion/diagnostics (в т.ч. v2 pipeline).
 
-Загрузка данных из внешних источников.
+**Примеры:**
+- `bsl-runtime/src/application/type_system/services/hover_service.rs`
+- `bsl-runtime/src/application/type_system/services/completion_service.rs`
 
-**Структура:**
-- `loaders/` - загрузчики данных
-  - `config_loader/` - метаданные конфигурации 1С
-  - `syntax_helper/` - типы платформы из syntax helper
-- `adapters/` - адаптеры к внешним API
-
-**Основные операции:**
-- Чтение XML конфигурации 1С
-- Парсинг HTML документации синтаксис-помощника
-- Восстановление повреждённых .hbk файлов
-
-### `parsing/` - Parsing Layer
-
-Адаптер к tree-sitter парсеру.
-
-**Компоненты:**
-- `tree_sitter_adapter.rs` - обёртка над tree-sitter-bsl
-- `node_utils.rs` - утилиты для работы с AST
-
-**Особенность:** После Milestone 2.8 AST конвертируется в IR (Intermediate Representation), который не зависит от конкретного парсера.
-
-### `system/` - System Layer
+### `bsl-runtime/src/system/` - System Layer
 
 Координация подсистем и кеширование.
 
-**Компоненты:**
-- `system_coordinator/` - SystemCoordinator - главный координатор
-- `disk_cache.rs` / `ast_cache.rs` - кеширование артефактов (не влияет на корректность)
-- `parser_coordinator/` - ParserCoordinator - управление парсингом
-- `observability/` - BasicObservability - метрики и мониторинг
+**Примеры:**
+- `bsl-runtime/src/system/deps_bundle_v2.rs`
+- `bsl-runtime/src/system/system_coordinator/`
 
-**Роль:** Обеспечивает integration point между всеми слоями.
+### `bsl-runtime/src/data/` и `bsl-runtime/src/parsing/`
 
-### `presentation/` - Presentation Layer
+Загрузка данных и парсинг BSL (tree-sitter).
 
-API endpoints и адаптеры для клиентов.
+### `bsl-runtime/src/domain/` и `shared/src/domain/`
 
-**Структура:**
-- `web_api/` - HTTP API endpoints
-- `semantic_html_generator/` - генерация HTML визуализации типов
-- `formatters/` - форматирование ответов
-
-**API группы:**
-- `/api/hover` - hover информация
-- `/api/diagnostics` - синтаксические и семантические ошибки
-- `/api/types` - поиск и информация о типах
-- `/api/debug/ast` - отладочная информация
-
-### `helpers/` - Helper Layer
-
-Вспомогательные утилиты.
-
-**Компоненты:**
-- `hover_formatter.rs` - форматирование hover сообщений
-- `type_display.rs` - отображение типов в читаемом виде
-
-### `bin/` - Binary Targets
-
-Исполняемые файлы и серверы.
-
-**Структура:**
-- `lsp_server/` - LSP server для VSCode
-  - `server/` - core LSP logic
-  - `handlers/` - LSP request handlers
-  - `commands/` - custom LSP commands
-  - `converters/` - конвертация типов LSP ↔ internal
-- `main.rs` - Web server (bsl-web-server)
+Domain-логика. Основные доменные компоненты (TypeResolver/TypeRepository) находятся в `shared`.
 
 ## Типичный поток данных
 
@@ -218,27 +168,27 @@ API endpoints и адаптеры для клиентов.
 **Начните с этих файлов (в порядке приоритета):**
 
 1. `bin/lsp_server/server/analysis_v2_runtime.rs` - v2 runtime (writer thread + snapshots)
-2. `application/type_system/services/completion_service.rs` - completion логика
-3. `application/type_system/services/hover_service.rs` - hover логика
-4. `system/deps_bundle_v2.rs` - deps snapshot (P8/P9)
-5. `system/system_coordinator/` - загрузка типов платформы/конфигурации
+2. `../../bsl-runtime/src/application/type_system/services/completion_service.rs` - completion логика
+3. `../../bsl-runtime/src/application/type_system/services/hover_service.rs` - hover логика
+4. `../../bsl-runtime/src/system/deps_bundle_v2.rs` - deps snapshot (P8/P9)
+5. `../../bsl-runtime/src/system/system_coordinator/` - загрузка типов платформы/конфигурации
 
 ### Для добавления новой LSP функции
 
 1. Добавить handler в `bin/lsp_server/handlers/`
-2. Добавить service метод в `application/type_system/services/`
-3. Использовать v2 снапшот (IR + deps bundle) и entrypoints из `application/type_system`
+2. Добавить service метод в `../../bsl-runtime/src/application/type_system/services/`
+3. Использовать v2 снапшот (IR + deps bundle) и entrypoints из `../../bsl-runtime/src/application/type_system/`
 4. Обновить `bin/lsp_server/server/language_server.rs`
 
 ### Для добавления нового типа валидации
 
-1. Расширить `SemanticValidationVisitor` в `application/semantic_validation_visitor/`
-2. Добавить новый тип ошибки в `shared/src/domain/semantic_error.rs`
+1. Добавить правило/проверку в `../../semantic-diagnostics/src/visitor.rs` (и/или `../../semantic-diagnostics/src/validators/`)
+2. При необходимости расширить диагностический формат в `../../shared/src/domain/types/diagnostics.rs`
 3. Добавить тест в `backend/tests/context_diagnostics_lsp_test.rs`
 
 ## Связанные документы
 
-- [Application Layer README](application/README.md) - детали application layer
+- [Application Layer README](../../bsl-runtime/src/application/README.md) - детали application layer
 - [LSP Client README](../../vscode-extension/src/lsp/README.md) - VSCode extension
 - [Архитектура системы типов](../../docs/architecture/type_system_architecture.md) - полная архитектурная диаграмма
 - [Web API Reference](../../docs/api/web-api-reference.md) - документация API endpoints

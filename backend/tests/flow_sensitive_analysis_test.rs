@@ -111,8 +111,6 @@ fn test_cfg_basic_blocks() {
     let entry_id = cfg.add_node(CfgNode {
         id: 0,
         kind: CfgNodeKind::Entry,
-        context_in: None,
-        context_out: None,
     });
 
     // Basic block
@@ -121,16 +119,12 @@ fn test_cfg_basic_blocks() {
         kind: CfgNodeKind::BasicBlock {
             statements: vec!["x = 42".to_string()],
         },
-        context_in: None,
-        context_out: None,
     });
 
     // Exit узел
     let exit_id = cfg.add_node(CfgNode {
         id: 2,
         kind: CfgNodeKind::Exit,
-        context_in: None,
-        context_out: None,
     });
 
     // Связываем узлы
@@ -151,8 +145,6 @@ fn test_cfg_conditional_flow() {
     let entry_id = cfg.add_node(CfgNode {
         id: 0,
         kind: CfgNodeKind::Entry,
-        context_in: None,
-        context_out: None,
     });
 
     // Conditional узел (if condition)
@@ -161,8 +153,6 @@ fn test_cfg_conditional_flow() {
         kind: CfgNodeKind::Conditional {
             condition: "x > 0".to_string(),
         },
-        context_in: None,
-        context_out: None,
     });
 
     // Then блок
@@ -171,8 +161,6 @@ fn test_cfg_conditional_flow() {
         kind: CfgNodeKind::BasicBlock {
             statements: vec!["y = 1".to_string()],
         },
-        context_in: None,
-        context_out: None,
     });
 
     // Else блок
@@ -181,8 +169,6 @@ fn test_cfg_conditional_flow() {
         kind: CfgNodeKind::BasicBlock {
             statements: vec!["y = 0".to_string()],
         },
-        context_in: None,
-        context_out: None,
     });
 
     // Merge узел
@@ -191,16 +177,12 @@ fn test_cfg_conditional_flow() {
         kind: CfgNodeKind::BasicBlock {
             statements: vec!["merge".to_string()],
         },
-        context_in: None,
-        context_out: None,
     });
 
     // Exit
     let exit_id = cfg.add_node(CfgNode {
         id: 5,
         kind: CfgNodeKind::Exit,
-        context_in: None,
-        context_out: None,
     });
 
     // Связываем узлы

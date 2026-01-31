@@ -615,17 +615,7 @@ cargo build --release
 
 ## 🤖 Автоматизация
 
-Для автоматизации используй Claude Skills:
+Для автоматизации ориентируйся на инструкции репозитория:
 
-```bash
-# Комплексное тестирование
-/test-runner
-
-# Тестирование Web API
-/api-tester
-
-# Проверка Roadmap
-/roadmap-checker
-```
-
-**См. также:** `.claude/skills/` для деталей каждого навыка
+- `AGENTS.md`
+- `openspec/AGENTS.md`

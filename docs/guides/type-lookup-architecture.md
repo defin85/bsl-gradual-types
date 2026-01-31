@@ -616,7 +616,7 @@ if let Some(raw) = self.repository.find_type(&name) {
 | `shared/src/domain/facet_utils.rs` | Централизованная логика извлечения базовых типов |
 | `shared/src/domain/signature_index.rs` | Хранение сигнатур с merge-логикой и fallback поиском |
 | `shared/src/domain/signature_registry.rs` | Регистрация источников типов с приоритетами |
-| `shared/src/domain/metadata_lookup.rs` | Мост между TypeResolution и RawTypeData |
+| `shared/src/domain/metadata_lookup/mod.rs` | Мост между TypeResolution и RawTypeData |
 
 ---
 

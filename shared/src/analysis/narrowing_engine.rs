@@ -210,7 +210,7 @@ impl NarrowingEngine {
             let node_ctx = self.contexts.get(&node.id).cloned().unwrap_or_default();
 
             match &node.kind {
-                CfgNodeKind::Conditional { condition } => {
+                CfgNodeKind::Conditional { condition } | CfgNodeKind::LoopHeader { condition } => {
                     // Обнаруживаем type guards в условии
                     let guards = detect_type_guards(condition);
 
@@ -374,8 +374,6 @@ mod tests {
         let entry_id = cfg.add_node(CfgNode {
             id: 0,
             kind: CfgNodeKind::Entry,
-            context_in: None,
-            context_out: None,
         });
 
         let cond_id = cfg.add_node(CfgNode {
@@ -383,8 +381,6 @@ mod tests {
             kind: CfgNodeKind::Conditional {
                 condition: "ТипЗнч(x) = Тип(\"Строка\")".to_string(),
             },
-            context_in: None,
-            context_out: None,
         });
 
         let then_id = cfg.add_node(CfgNode {
@@ -392,8 +388,6 @@ mod tests {
             kind: CfgNodeKind::BasicBlock {
                 statements: vec!["y = x.Length".to_string()],
             },
-            context_in: None,
-            context_out: None,
         });
 
         cfg.add_edge(entry_id, cond_id, EdgeKind::Unconditional);

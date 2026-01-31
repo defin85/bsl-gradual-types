@@ -96,6 +96,19 @@ impl NullSafetyAnalyzer {
                         });
                     }
                 }
+                CfgNodeKind::Conditional { condition } => {
+                    // v2 CFG использует `Conditional { condition }` для if/while.
+                    // Для null-safety считаем это эквивалентом `Condition`.
+                    let cond = condition.clone();
+                    if self.is_null_check(&cond) {
+                        self.mark_non_null_in_successors(node_id, &cond);
+                        safe_operations.push(SafeOperation {
+                            variable: cond,
+                            unwrapped: true,
+                            line: None,
+                        });
+                    }
+                }
 
                 CfgNodeKind::MethodCall { object, .. } => {
                     // Проверяем, может ли object быть Null
@@ -171,16 +184,19 @@ impl NullSafetyAnalyzer {
     /// Пометить переменную как non-null в последующих узлах
     fn mark_non_null_in_successors(&mut self, node_id: usize, variable: &str) {
         // Находим then-ветку (обычно первый successor)
-        if let Some(edge) = self.cfg.edges().iter().find(|e| e.from == node_id) {
-            if edge.kind == EdgeKind::ConditionalTrue {
-                self.non_null_vars
-                    .entry(edge.to)
-                    .or_default()
-                    .insert(TypeId::new(variable));
+        if let Some(edge) = self
+            .cfg
+            .edges()
+            .iter()
+            .find(|e| e.from == node_id && e.kind == EdgeKind::ConditionalTrue)
+        {
+            self.non_null_vars
+                .entry(edge.to)
+                .or_default()
+                .insert(TypeId::new(variable));
 
-                // Рекурсивно для всех последующих узлов в then-ветке
-                self.propagate_non_null(edge.to, variable);
-            }
+            // Рекурсивно для всех последующих узлов в then-ветке
+            self.propagate_non_null(edge.to, variable);
         }
     }
 
@@ -271,8 +287,6 @@ mod tests {
                 variable: "x".to_string(),
                 value: "Неопределено".to_string(),
             },
-            context_in: None,
-            context_out: None,
         });
 
         cfg.add_node(CfgNode {
@@ -280,8 +294,6 @@ mod tests {
             kind: CfgNodeKind::Condition {
                 variable: "ЗначениеЗаполнено(x)".to_string(),
             },
-            context_in: None,
-            context_out: None,
         });
 
         cfg.add_node(CfgNode {
@@ -291,8 +303,6 @@ mod tests {
                 method: "Метод".to_string(),
                 arguments: vec![],
             },
-            context_in: None,
-            context_out: None,
         });
 
         cfg.add_edge(0, 1, EdgeKind::Unconditional);
@@ -333,8 +343,6 @@ mod tests {
                 variable: "x".to_string(),
                 value: "Неопределено".to_string(),
             },
-            context_in: None,
-            context_out: None,
         });
 
         cfg.add_node(CfgNode {
@@ -344,8 +352,6 @@ mod tests {
                 method: "Метод".to_string(),
                 arguments: vec![],
             },
-            context_in: None,
-            context_out: None,
         });
 
         cfg.add_edge(0, 1, EdgeKind::Unconditional);
@@ -385,8 +391,6 @@ mod tests {
                 variable: "x".to_string(),
                 value: "\"строка\"".to_string(),
             },
-            context_in: None,
-            context_out: None,
         });
 
         cfg.add_node(CfgNode {
@@ -396,8 +400,6 @@ mod tests {
                 method: "Длина".to_string(),
                 arguments: vec![],
             },
-            context_in: None,
-            context_out: None,
         });
 
         cfg.add_edge(0, 1, EdgeKind::Unconditional);
@@ -434,8 +436,6 @@ mod tests {
                 object: "obj".to_string(),
                 property: "Свойство".to_string(),
             },
-            context_in: None,
-            context_out: None,
         });
 
         let mut analyzer = NullSafetyAnalyzer::new(cfg);

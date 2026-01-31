@@ -46,7 +46,7 @@ pub use types::{
 pub use symbol_table::{Scope, ScopeId, ScopeKind, SymbolTable};
 
 // Re-exports: Control Flow Graph
-pub use cfg::{CfgNode, CfgNodeId, ControlFlowGraph};
+pub use cfg::{CfgEdge, CfgNode, CfgNodeId, CfgNodeKind, ControlFlowGraph, EdgeKind};
 
 // Re-exports: SemanticProgram
 pub use program::SemanticProgram;

@@ -10,6 +10,7 @@ use std::sync::Arc;
 use bsl_shared::domain::code_location::CompilerDirective;
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::signature_index::SignatureIndex;
+use bsl_shared::ir::{CfgNodeKind, EdgeKind};
 use bsl_shared::ir::SemanticNodeKind;
 
 use bsl_syntax::ast::{Expression, Program, Span as AstSpan, Statement};
@@ -60,6 +61,136 @@ fn test_variable_declaration_conversion() {
     } else {
         panic!("Expected VariableDeclaration");
     }
+}
+
+#[test]
+fn test_cfg_present_for_root_level_assignment() {
+    let ast = Program {
+        statements: vec![Statement::Assignment {
+            target: Expression::Identifier {
+                name: "x".to_string(),
+                span: AstSpan::stub(),
+            },
+            value: Expression::Number {
+                value: 42.0,
+                span: AstSpan::stub(),
+            },
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "x = 42;".to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    let cfg = ir.cfg.expect("CFG must be built for root-level executable code");
+    assert!(cfg.nodes().iter().any(|n| matches!(n.kind, CfgNodeKind::Entry)));
+    assert!(cfg.nodes().iter().any(|n| matches!(n.kind, CfgNodeKind::Exit)));
+}
+
+#[test]
+fn test_cfg_present_for_function_body() {
+    let ast = Program {
+        statements: vec![Statement::FunctionDecl {
+            name: "TestFunc".to_string(),
+            params: vec![],
+            body: vec![Statement::Assignment {
+                target: Expression::Identifier {
+                    name: "x".to_string(),
+                    span: AstSpan::stub(),
+                },
+                value: Expression::Number {
+                    value: 1.0,
+                    span: AstSpan::stub(),
+                },
+                span: AstSpan::stub(),
+            }],
+            compiler_directive: None,
+            is_export: false,
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "Функция TestFunc()\n  x = 1;\nКонецФункции".to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    let cfg = ir.cfg.expect("CFG must be built for non-empty function body");
+    assert!(cfg.nodes().len() >= 3); // Entry + stmt + Exit (или больше)
+    assert!(cfg.edges().len() >= 2);
+    assert!(cfg
+        .nodes()
+        .iter()
+        .any(|n| matches!(n.kind, CfgNodeKind::Assignment { .. })));
+}
+
+#[test]
+fn test_cfg_contains_conditional_edges_for_if_statement() {
+    let ast = Program {
+        statements: vec![Statement::FunctionDecl {
+            name: "TestFunc".to_string(),
+            params: vec![],
+            body: vec![Statement::If {
+                condition: Expression::Boolean {
+                    value: true,
+                    span: AstSpan::stub(),
+                },
+                then_body: vec![Statement::Assignment {
+                    target: Expression::Identifier {
+                        name: "x".to_string(),
+                        span: AstSpan::stub(),
+                    },
+                    value: Expression::Number {
+                        value: 1.0,
+                        span: AstSpan::stub(),
+                    },
+                    span: AstSpan::stub(),
+                }],
+                else_body: Some(vec![Statement::Assignment {
+                    target: Expression::Identifier {
+                        name: "x".to_string(),
+                        span: AstSpan::stub(),
+                    },
+                    value: Expression::Number {
+                        value: 2.0,
+                        span: AstSpan::stub(),
+                    },
+                    span: AstSpan::stub(),
+                }]),
+                span: AstSpan::stub(),
+            }],
+            compiler_directive: None,
+            is_export: false,
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "Функция TestFunc()\nЕсли Истина Тогда\n  x = 1;\nИначе\n  x = 2;\nКонецЕсли\nКонецФункции"
+            .to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    let cfg = ir.cfg.expect("CFG must be built for if statement");
+    assert!(cfg.edges().iter().any(|e| e.kind == EdgeKind::ConditionalTrue));
+    assert!(cfg
+        .edges()
+        .iter()
+        .any(|e| e.kind == EdgeKind::ConditionalFalse));
 }
 
 #[test]

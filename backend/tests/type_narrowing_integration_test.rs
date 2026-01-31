@@ -105,8 +105,6 @@ fn test_narrowing_engine_with_if_statement() {
     let entry_id = cfg.add_node(CfgNode {
         id: 0,
         kind: CfgNodeKind::Entry,
-        context_in: None,
-        context_out: None,
     });
 
     let cond_id = cfg.add_node(CfgNode {
@@ -114,8 +112,6 @@ fn test_narrowing_engine_with_if_statement() {
         kind: CfgNodeKind::Conditional {
             condition: "ТипЗнч(Параметр) = Тип(\"Строка\")".to_string(),
         },
-        context_in: None,
-        context_out: None,
     });
 
     let then_id = cfg.add_node(CfgNode {
@@ -123,8 +119,6 @@ fn test_narrowing_engine_with_if_statement() {
         kind: CfgNodeKind::BasicBlock {
             statements: vec!["Длина = Параметр.Length".to_string()],
         },
-        context_in: None,
-        context_out: None,
     });
 
     let else_id = cfg.add_node(CfgNode {
@@ -132,15 +126,11 @@ fn test_narrowing_engine_with_if_statement() {
         kind: CfgNodeKind::BasicBlock {
             statements: vec!["Длина = 0".to_string()],
         },
-        context_in: None,
-        context_out: None,
     });
 
     let exit_id = cfg.add_node(CfgNode {
         id: 4,
         kind: CfgNodeKind::Exit,
-        context_in: None,
-        context_out: None,
     });
 
     cfg.add_edge(entry_id, cond_id, EdgeKind::Unconditional);
@@ -278,8 +268,6 @@ fn test_cfg_with_loop_narrowing() {
     let entry_id = cfg.add_node(CfgNode {
         id: 0,
         kind: CfgNodeKind::Entry,
-        context_in: None,
-        context_out: None,
     });
 
     let loop_header_id = cfg.add_node(CfgNode {
@@ -287,22 +275,16 @@ fn test_cfg_with_loop_narrowing() {
         kind: CfgNodeKind::LoopHeader {
             condition: "ЗначениеЗаполнено(Элемент)".to_string(),
         },
-        context_in: None,
-        context_out: None,
     });
 
     let loop_body_id = cfg.add_node(CfgNode {
         id: 2,
         kind: CfgNodeKind::LoopBody,
-        context_in: None,
-        context_out: None,
     });
 
     let exit_id = cfg.add_node(CfgNode {
         id: 3,
         kind: CfgNodeKind::Exit,
-        context_in: None,
-        context_out: None,
     });
 
     cfg.add_edge(entry_id, loop_header_id, EdgeKind::Unconditional);
@@ -321,8 +303,6 @@ fn test_narrowing_multiple_variables() {
     let entry_id = cfg.add_node(CfgNode {
         id: 0,
         kind: CfgNodeKind::Entry,
-        context_in: None,
-        context_out: None,
     });
 
     let cond_id = cfg.add_node(CfgNode {
@@ -330,8 +310,6 @@ fn test_narrowing_multiple_variables() {
         kind: CfgNodeKind::Conditional {
             condition: "ТипЗнч(A) = Тип(\"Число\")".to_string(),
         },
-        context_in: None,
-        context_out: None,
     });
 
     let then_id = cfg.add_node(CfgNode {
@@ -339,8 +317,6 @@ fn test_narrowing_multiple_variables() {
         kind: CfgNodeKind::BasicBlock {
             statements: vec!["B = A + 10".to_string()],
         },
-        context_in: None,
-        context_out: None,
     });
 
     cfg.add_edge(entry_id, cond_id, EdgeKind::Unconditional);

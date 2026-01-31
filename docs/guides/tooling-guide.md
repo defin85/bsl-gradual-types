@@ -500,22 +500,12 @@ tavily_search(query: "1C:Enterprise static typing gradual")
 
 ---
 
-## 🤖 Автоматизация через Claude Skills
+## 🤖 Автоматизация
 
-Для частых задач используй Skills:
+Для автоматизации ориентируйся на инструкции репозитория:
 
-```bash
-# Комплексное тестирование
-/test-runner
-
-# Тестирование Web API
-/api-tester
-
-# Проверка Roadmap
-/roadmap-checker
-```
-
-**См. также:** `.claude/skills/` для детальных описаний навыков
+- `AGENTS.md`
+- `openspec/AGENTS.md`
 
 ---
 

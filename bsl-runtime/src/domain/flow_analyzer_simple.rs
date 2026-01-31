@@ -2,6 +2,8 @@
 //!
 //! Базовая реализация flow-sensitive анализа для текущей структуры AST
 
+#![allow(deprecated)]
+
 use bsl_shared::domain::type_id::TypeId;
 use bsl_shared::domain::types::TypeResolution;
 use bsl_shared::domain::{FlowAnalysisContext, TypeResolver};
@@ -9,6 +11,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Упрощённый flow analyzer для работы с текущим AST
+#[deprecated(
+    note = "Устаревший экспериментальный анализатор. Используйте v2 pipeline (bsl-analysis-v2) + SemanticProgram.cfg."
+)]
 pub struct SimpleFlowAnalyzer {
     resolver: Arc<TypeResolver>,
 }
@@ -126,6 +131,9 @@ impl SimpleFlowAnalyzer {
 
 /// Результат упрощённого flow-анализа
 #[derive(Debug, Clone)]
+#[deprecated(
+    note = "Устаревший экспериментальный результат. Используйте v2 pipeline (bsl-analysis-v2) + SemanticProgram.cfg."
+)]
 pub struct FlowAnalysisResult {
     /// Типы переменных (ключ: TypeId для регистронезависимого поиска)
     pub variables: HashMap<TypeId, TypeResolution>,

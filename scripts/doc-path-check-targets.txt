@@ -1,0 +1,13 @@
+# Документы, где пути к файлам считаются «инструкцией к действию» и должны существовать в репозитории.
+#
+# Формат:
+# - одна строка = glob (от корня репозитория)
+# - пустые строки и строки, начинающиеся с `#`, игнорируются
+
+architectural_report.md
+backend/src/README.md
+docs/guides/development-workflow.md
+docs/guides/roadmap-verification.md
+docs/guides/tooling-guide.md
+docs/guides/type-lookup-architecture.md
+docs/guides/unified_documentation.md

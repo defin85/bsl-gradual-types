@@ -37,7 +37,10 @@ run_smoke() {
 
 run_full() {
   run_smoke
-  cargo test -p bsl-backend --test shared_test_fixtures_test
+  # Дополнительные интеграционные тесты, которые используют репозиторные фикстуры
+  # (Syntax Helper + fixture конфигурации).
+  cargo test -p bsl-backend --test metadata_completion_fixture_test
+  cargo test -p bsl-backend --test property_type_inference_real_data_test
 }
 
 case "${PROFILE}" in

@@ -390,7 +390,7 @@ fn test_search_types_unicode_query() {
 // ============================================================================
 
 #[test]
-#[ignore] // Требует наличия Syntax Helper архива
+#[ignore = "Требует наличия Syntax Helper (examples/syntax_helper)"]
 fn test_search_types_production_syntax_helper() {
     // ARRANGE - загружаем РЕАЛЬНЫЕ типы из Syntax Helper
     use std::path::PathBuf;

@@ -353,22 +353,6 @@ fn test_diagnostic_utf16_coordinates() {
     println!("\n============================================\n");
 }
 
-// === РЕКОМЕНДАЦИЯ: Публичная функция для конвертации ===
-
-#[test]
-#[ignore] // Игнорируем, пока не реализована публичная функция
-fn test_public_conversion_function() {
-    // РЕКОМЕНДАЦИЯ для будущего улучшения:
-    // Вынести логику конвертации в публичную функцию в backend модуле
-
-    // Пример:
-    // pub fn parse_errors_to_diagnostics(errors: &[ParseError]) -> Vec<Diagnostic> { ... }
-
-    println!("\n=== РЕКОМЕНДАЦИЯ ===");
-    println!("Для лучшей тестируемости рекомендуется:");
-    println!("1. Создать pub(crate) функцию в backend/src/lsp/diagnostics.rs");
-    println!("2. Функция: parse_errors_to_diagnostics(errors: &[ParseError]) -> Vec<Diagnostic>");
-    println!("3. Использовать её в BslLanguageServer::syntax_errors_to_diagnostics()");
-    println!("4. Написать unit-тесты для этой функции");
-    println!("====================\n");
-}
+// NOTE: Ранее здесь был #[ignore] "тест-рекомендация" без проверок (только println).
+// Удалён как не-тест. Если понадобится выделить публичный helper для конвертации диагностик,
+// лучше добавить отдельный issue/change и покрыть реальными unit-тестами.

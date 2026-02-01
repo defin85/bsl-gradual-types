@@ -17,9 +17,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - name: cargo fmt
         run: cargo fmt --all -- --check
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install tailwindcss
+        run: npm install -g tailwindcss@3.4.0
+      - name: Install trunk
+        run: cargo install trunk --locked
+      - name: Build frontend (target/site)
+        run: (cd frontend && NO_COLOR=true trunk build --release)
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: cargo test

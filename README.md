@@ -2,12 +2,11 @@
 
 *Система градуальной типизации для языка 1С:Предприятие (BSL)*
 
-[![Repo policy](https://github.com/defin85/bsl-gradual-types/actions/workflows/repo-policy.yml/badge.svg)](https://github.com/defin85/bsl-gradual-types/actions/workflows/repo-policy.yml)
 [![CI](https://github.com/defin85/bsl-gradual-types/actions/workflows/ci.yml/badge.svg)](https://github.com/defin85/bsl-gradual-types/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-1.70+-brightgreen.svg)](https://www.rust-lang.org/)
 
-GitHub Actions выполняет проверки политики репозитория (workflow `Repo policy`) и Rust quality gates (workflow `CI`: `cargo fmt`/`cargo clippy`/`cargo test`). Перед PR всё равно рекомендуется прогонять эти команды локально (см. `CONTRIBUTING.md`).
+GitHub Actions выполняет Rust quality gates и проверки политики репозитория (workflow `CI`). Перед PR всё равно рекомендуется прогонять эти команды локально (см. `CONTRIBUTING.md`).
 
 ## 📋 Обзор
 

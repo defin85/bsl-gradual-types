@@ -26,6 +26,13 @@ jobs:
           node-version: "20"
       - name: Install tailwindcss
         run: npm install -g tailwindcss@3.4.0
+      - name: Cache ~/.cargo/bin
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin
+          key: ${{ runner.os }}-cargo-bin-${{ hashFiles('Cargo.lock') }}-v1
+          restore-keys: |
+            ${{ runner.os }}-cargo-bin-
       - name: Install trunk
         run: cargo install trunk --locked
       - name: Build frontend (target/site)

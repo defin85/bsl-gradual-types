@@ -173,6 +173,7 @@ fn walk_node<V: SemanticVisitor>(
         SemanticNodeKind::Assignment {
             variable,
             value_node,
+            ..
         } => {
             let updated = match context.variable_states.get(variable).cloned() {
                 Some(mut state) => {
@@ -328,6 +329,7 @@ mod tests {
             kind: SemanticNodeKind::Assignment {
                 variable: "x".to_string(),
                 value_node: None,
+                value_span: Span::stub(),
             },
             span: Span::stub(),
             scope_id: program.symbols.root_scope,
@@ -385,6 +387,7 @@ mod tests {
             kind: SemanticNodeKind::Assignment {
                 variable: "x".to_string(),
                 value_node: None,
+                value_span: Span::stub(),
             },
             span: Span::stub(),
             scope_id: program.symbols.root_scope,

@@ -175,7 +175,27 @@ impl AstToIrConverter {
         value: Expression,
         ast_span: Span,
     ) -> Result<Option<usize>> {
+        fn expression_span(expr: &Expression) -> Span {
+            match expr {
+                Expression::Identifier { span, .. }
+                | Expression::String { span, .. }
+                | Expression::Number { span, .. }
+                | Expression::Boolean { span, .. }
+                | Expression::Date { span, .. }
+                | Expression::Call { span, .. }
+                | Expression::Binary { span, .. }
+                | Expression::Unary { span, .. }
+                | Expression::Ternary { span, .. }
+                | Expression::New { span, .. }
+                | Expression::PropertyAccess { span, .. }
+                | Expression::IndexAccess { span, .. }
+                | Expression::Await { span, .. } => *span,
+            }
+        }
+
         if let Expression::Identifier { name: var_name, .. } = target {
+            let value_span = self.ast_span_to_ir_span(expression_span(&value));
+
             // ИСПРАВЛЕНИЕ Milestone 3.5 + 3.16: Обрабатываем value expression ПЕРЕД Assignment
             // Это создаст промежуточные узлы (FunctionCall, MemberAccess) для hover и валидации
             let value_node_idx = self.convert_expression_for_hover(&value)?;
@@ -202,6 +222,7 @@ impl AstToIrConverter {
                 kind: SemanticNodeKind::Assignment {
                     variable: var_name.clone(),
                     value_node: value_node_idx, // MILESTONE 3.5: сохраняем индекс узла value
+                    value_span,
                 },
                 span,
                 scope_id: self.current_scope,

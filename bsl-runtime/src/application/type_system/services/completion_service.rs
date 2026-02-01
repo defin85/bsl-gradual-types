@@ -25,6 +25,7 @@ use super::super::extractors::symbol_extractor::{
 };
 use super::completion_ranking::{rank_candidates_with_trace, RankingCandidate};
 use super::completion_target::extract_completion_target_for_member_access;
+use super::flow_sensitive::narrow_type_for_variable_at;
 use crate::system::keyword_index::DEFAULT_KEYWORDS;
 use crate::system::{
     IndexItemKind, IndexSnapshot, IntellisenseIndexStore, LineIndex, SymbolScope, TypeKind,
@@ -1075,6 +1076,7 @@ fn resolve_member_owner_type_sync(
             SemanticNodeKind::Assignment {
                 variable,
                 value_node,
+                ..
             } if variable.to_lowercase() == base_lower => (None, *value_node),
             _ => continue,
         };
@@ -1101,68 +1103,84 @@ fn resolve_member_owner_type_sync(
     }
 
     let best = best?;
+    let mut resolved: Option<TypeResolution> = None;
+
     if let Some(type_hint) = best.type_hint {
-        let resolved = resolve_type_from_string(Some(ctx.resolver), &type_hint);
-        return (!resolved.is_unknown()).then_some(resolved);
-    }
-
-    let init_index = best.initializer_node?;
-    let init_node = ir_program.nodes.get(init_index)?;
-
-    fn build_ir_expr(program: &SemanticProgram, node_index: usize, depth: u8) -> Option<String> {
-        if depth == 0 {
-            return None;
+        let from_hint = resolve_type_from_string(Some(ctx.resolver), &type_hint);
+        if !from_hint.is_unknown() {
+            resolved = Some(from_hint);
         }
-        let node = program.nodes.get(node_index)?;
-        match &node.kind {
-            SemanticNodeKind::GlobalPropertyAccess { name } => Some(name.clone()),
-            SemanticNodeKind::MemberAccess {
-                object_node,
-                object_name,
-                member_name,
-                ..
-            } => {
-                let base = if let Some(obj_node) = object_node {
-                    build_ir_expr(program, *obj_node, depth - 1)?
-                } else {
-                    object_name.clone()?
-                };
-                Some(format!("{}.{}", base, member_name))
-            }
-            SemanticNodeKind::FunctionCall {
-                function_name,
-                object_name,
-                object_node,
-            } => {
-                let base = if let Some(obj_node) = object_node {
-                    Some(build_ir_expr(program, *obj_node, depth - 1)?)
-                } else {
-                    object_name.clone()
-                };
+    } else if let Some(init_index) = best.initializer_node {
+        let init_node = ir_program.nodes.get(init_index)?;
 
-                match base {
-                    Some(base) => Some(format!("{}.{}()", base, function_name)),
-                    None => Some(format!("{}()", function_name)),
+        fn build_ir_expr(
+            program: &SemanticProgram,
+            node_index: usize,
+            depth: u8,
+        ) -> Option<String> {
+            if depth == 0 {
+                return None;
+            }
+            let node = program.nodes.get(node_index)?;
+            match &node.kind {
+                SemanticNodeKind::GlobalPropertyAccess { name } => Some(name.clone()),
+                SemanticNodeKind::MemberAccess {
+                    object_node,
+                    object_name,
+                    member_name,
+                    ..
+                } => {
+                    let base = if let Some(obj_node) = object_node {
+                        build_ir_expr(program, *obj_node, depth - 1)?
+                    } else {
+                        object_name.clone()?
+                    };
+                    Some(format!("{}.{}", base, member_name))
                 }
+                SemanticNodeKind::FunctionCall {
+                    function_name,
+                    object_name,
+                    object_node,
+                } => {
+                    let base = if let Some(obj_node) = object_node {
+                        Some(build_ir_expr(program, *obj_node, depth - 1)?)
+                    } else {
+                        object_name.clone()
+                    };
+
+                    match base {
+                        Some(base) => Some(format!("{}.{}()", base, function_name)),
+                        None => Some(format!("{}()", function_name)),
+                    }
+                }
+                _ => None,
+            }
+        }
+
+        let from_init = match &init_node.kind {
+            SemanticNodeKind::NewExpression { type_name, .. } => {
+                let resolved = resolve_type_from_string(Some(ctx.resolver), type_name);
+                (!resolved.is_unknown()).then_some(resolved)
+            }
+            SemanticNodeKind::MemberAccess { .. }
+            | SemanticNodeKind::FunctionCall { .. }
+            | SemanticNodeKind::GlobalPropertyAccess { .. } => {
+                let expr = build_ir_expr(ir_program, init_index, 16)?;
+                let resolved = ctx.resolver.resolve_expression_sync(&expr);
+                (!resolved.is_unknown()).then_some(resolved)
             }
             _ => None,
-        }
+        };
+
+        resolved = from_init;
     }
 
-    match &init_node.kind {
-        SemanticNodeKind::NewExpression { type_name, .. } => {
-            let resolved = resolve_type_from_string(Some(ctx.resolver), type_name);
-            (!resolved.is_unknown()).then_some(resolved)
-        }
-        SemanticNodeKind::MemberAccess { .. }
-        | SemanticNodeKind::FunctionCall { .. }
-        | SemanticNodeKind::GlobalPropertyAccess { .. } => {
-            let expr = build_ir_expr(ir_program, init_index, 16)?;
-            let resolved = ctx.resolver.resolve_expression_sync(&expr);
-            (!resolved.is_unknown()).then_some(resolved)
-        }
-        _ => None,
+    let base = resolved.clone().unwrap_or_else(TypeResolution::unknown);
+    if let Some(narrowed) = narrow_type_for_variable_at(ir_program, byte_offset, base_name, base) {
+        resolved = Some(narrowed);
     }
+
+    resolved.filter(|t| !t.is_unknown())
 }
 
 fn resolve_receiver_types_from_expression(
@@ -2122,6 +2140,92 @@ mod tests {
         );
         assert!(
             labels.contains(&"Количество".to_string()),
+            "labels: {:?}",
+            labels
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_uses_flow_sensitive_narrowing_for_member_access() {
+        let repository = Arc::new(InMemoryTypeRepository::new());
+        repository
+            .load_types(vec![RawTypeData {
+                name: "Строка".to_string(),
+                source: RawDataSource::Platform,
+                methods: vec![RawMethodData {
+                    name: "Длина".to_string(),
+                    return_type: "Число".to_string(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }])
+            .expect("load types");
+
+        let repo: Arc<dyn bsl_shared::domain::repository::TypeRepository> = repository.clone();
+        let resolver = Arc::new(TypeResolver::new(repo.clone()));
+        let metadata_lookup = TypeMetadataLookup::new(repo.clone());
+        let index = IntellisenseIndexStore::new("cfg", "platform");
+
+        let content = concat!(
+            "Процедура Тест()\n",
+            "    Перем x;\n",
+            "    Если ТипЗнч(x) = Тип(\"Строка\") Тогда\n",
+            "        x.\n",
+            "    КонецЕсли;\n",
+            "КонецПроцедуры\n"
+        );
+
+        let line = 3;
+        let line_text = "        x.";
+        let column = line_text.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+
+        let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+            signature_index: repo.get_signature_index_clone(),
+            resolver: Some(resolver.clone()),
+            repository: repo.clone(),
+            platform_signatures_loaded: false,
+        });
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(ChangeV2::SetDepsSnapshot {
+            deps_id: DepsSnapshotId::from_hash("test"),
+            deps,
+        });
+        host.apply_change(ChangeV2::SetSettingsSnapshot {
+            settings_id: SettingsId::from_hash("test"),
+            diagnostics_detail_level: DetailLevel::Full,
+        });
+        host.apply_change(ChangeV2::SetFile {
+            file_id: V2FileId(1),
+            text: Arc::from(content.to_string()),
+            version: 0,
+            path: Arc::from("completion_narrowing_test.bsl"),
+        });
+        let analysis = host.analysis();
+        let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
+
+        let ctx = CompletionAnalysisContext {
+            ir_program: Some(ir_program),
+            resolver: resolver.as_ref(),
+            file_path: "completion_narrowing_test.bsl",
+            parse_result: None,
+            member_access_owner_type_hint: None,
+        };
+
+        let result = get_completion_with_analysis(
+            content,
+            line,
+            column,
+            Some("completion_narrowing_test.bsl"),
+            &index,
+            &metadata_lookup,
+            Some(&ctx),
+        )
+        .await
+        .expect("completion ok");
+
+        let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
+        assert!(
+            labels.contains(&"Длина".to_string()),
             "labels: {:?}",
             labels
         );

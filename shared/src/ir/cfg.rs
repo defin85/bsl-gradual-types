@@ -5,6 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::span::Span;
+
 /// Идентификатор узла CFG
 ///
 /// В каноническом CFG node id совпадает с индексом узла в `ControlFlowGraph.nodes`.
@@ -20,6 +22,19 @@ pub struct ControlFlowGraph {
 
     /// Рёбра графа (переходы между блоками)
     edges: Vec<CfgEdge>,
+
+    /// Span (byte offsets) в исходном коде для каждого CFG-узла.
+    ///
+    /// Индекс вектора совпадает с `CfgNodeId` / индексом в `nodes`.
+    #[serde(default)]
+    node_spans: Vec<Option<Span>>,
+
+    /// Индекс IR-ноды (`SemanticProgram.nodes`) для каждого CFG-узла, если узел
+    /// был построен из конкретного IR statement/expression.
+    ///
+    /// Индекс вектора совпадает с `CfgNodeId` / индексом в `nodes`.
+    #[serde(default)]
+    node_ir_node_indices: Vec<Option<usize>>,
 }
 
 impl ControlFlowGraph {
@@ -27,6 +42,8 @@ impl ControlFlowGraph {
         Self {
             nodes: Vec::new(),
             edges: Vec::new(),
+            node_spans: Vec::new(),
+            node_ir_node_indices: Vec::new(),
         }
     }
 
@@ -34,12 +51,38 @@ impl ControlFlowGraph {
     pub fn add_node(&mut self, node: CfgNode) -> usize {
         let id = self.nodes.len();
         self.nodes.push(node);
+        self.node_spans.push(None);
+        self.node_ir_node_indices.push(None);
         id
     }
 
     /// Добавить ребро между узлами
     pub fn add_edge(&mut self, from: usize, to: usize, kind: EdgeKind) {
         self.edges.push(CfgEdge { from, to, kind });
+    }
+
+    /// Установить span для узла (по id).
+    pub fn set_node_span(&mut self, node_id: usize, span: Option<Span>) {
+        if let Some(slot) = self.node_spans.get_mut(node_id) {
+            *slot = span;
+        }
+    }
+
+    /// Установить индекс IR-ноды (`SemanticProgram.nodes`) для CFG-узла.
+    pub fn set_node_ir_node_index(&mut self, node_id: usize, ir_node_index: Option<usize>) {
+        if let Some(slot) = self.node_ir_node_indices.get_mut(node_id) {
+            *slot = ir_node_index;
+        }
+    }
+
+    /// Получить span для CFG-узла.
+    pub fn node_span(&self, node_id: usize) -> Option<Span> {
+        self.node_spans.get(node_id).copied().flatten()
+    }
+
+    /// Получить индекс IR-ноды (`SemanticProgram.nodes`) для CFG-узла.
+    pub fn node_ir_node_index(&self, node_id: usize) -> Option<usize> {
+        self.node_ir_node_indices.get(node_id).copied().flatten()
     }
 
     /// Получить все узлы

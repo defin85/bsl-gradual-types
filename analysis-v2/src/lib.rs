@@ -18,6 +18,7 @@ use bsl_shared::domain::types::TypeResolution;
 use bsl_shared::domain::types::{DiagnosticSeverity, ParseError, TypeDiagnostic};
 use bsl_shared::domain::validators::TypeValidator;
 use bsl_shared::domain::TypeMetadataLookup;
+use bsl_shared::domain::{FlowAnalysisContext, NullSafetyAnalyzer};
 use bsl_shared::formatting::DetailLevel;
 use bsl_shared::ir::walk_program;
 use bsl_shared::ir::SemanticProgram;
@@ -386,6 +387,11 @@ pub fn semantic_diagnostics(
     walk_program(&program, &mut visitor);
 
     let mut diagnostics = visitor.into_errors();
+    diagnostics.extend(flow_sensitive_null_safety_diagnostics(
+        &program,
+        &type_index,
+        resolver.as_ref(),
+    ));
     diagnostics.sort_by(|a, b| {
         let severity_key = |severity: DiagnosticSeverity| match severity {
             DiagnosticSeverity::Error => 0_u8,
@@ -410,6 +416,138 @@ pub fn semantic_diagnostics(
     SemanticDiagnosticsSnapshot(Arc::new(diagnostics))
 }
 
+fn flow_sensitive_null_safety_diagnostics(
+    program: &SemanticProgram,
+    type_index: &type_inference_v2::TypeIndex,
+    resolver: &TypeResolver,
+) -> Vec<TypeDiagnostic> {
+    use bsl_shared::domain::types::{ConcreteType, PlatformType, ResolutionResult, SpecialType};
+    use bsl_shared::ir::CfgNodeKind;
+    use bsl_shared::ir::SemanticNodeKind;
+
+    let Some(cfg) = program.cfg.as_ref() else {
+        return Vec::new();
+    };
+
+    fn merge_var(ctx: &mut FlowAnalysisContext, name: &str, res: TypeResolution) {
+        let mut other = FlowAnalysisContext::new();
+        other.set_variable(name, res);
+        ctx.merge(&other);
+    }
+
+    let mut ctx = FlowAnalysisContext::new();
+
+    fn is_nullish_resolution(resolution: &TypeResolution) -> bool {
+        if resolution.result.is_nullable() {
+            return true;
+        }
+        matches!(
+            &resolution.result,
+            ResolutionResult::Concrete(ConcreteType::Special(SpecialType::Null))
+                | ResolutionResult::Concrete(ConcreteType::Special(SpecialType::Undefined))
+        ) || matches!(
+            &resolution.result,
+            ResolutionResult::Concrete(ConcreteType::Platform(PlatformType { name })) if {
+                let lower = name.to_lowercase();
+                lower == "null" || lower == "неопределено" || lower == "undefined"
+            }
+        )
+    }
+
+    fn leading_ident_token_lower(value: &str) -> Option<String> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        let token: String = trimmed
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        (!token.is_empty()).then(|| token.to_lowercase())
+    }
+
+    // Минимальная и надёжная база для null-safety: фиксируем явные присваивания
+    // `Null` / `Неопределено` из CFG (не завися от совпадения span-ов IR и type_index).
+    for node in cfg.nodes() {
+        let CfgNodeKind::Assignment { variable, value } = &node.kind else {
+            continue;
+        };
+
+        let Some(v) = leading_ident_token_lower(value) else {
+            continue;
+        };
+        if v == "null" {
+            merge_var(
+                &mut ctx,
+                variable.as_str(),
+                TypeResolution::primitive("Null"),
+            );
+        } else if v == "неопределено" || v == "undefined" {
+            merge_var(
+                &mut ctx,
+                variable.as_str(),
+                TypeResolution::primitive("Неопределено"),
+            );
+        }
+    }
+
+    // Инициализация контекста из type_index по rhs-span присваивания.
+    for node in &program.nodes {
+        let SemanticNodeKind::Assignment {
+            variable,
+            value_span,
+            ..
+        } = &node.kind
+        else {
+            continue;
+        };
+        let Some(resolution) = type_index_resolution_for_span(type_index, *value_span) else {
+            continue;
+        };
+        if is_nullish_resolution(&resolution) {
+            merge_var(&mut ctx, variable.as_str(), resolution);
+        }
+    }
+
+    for node in &program.nodes {
+        let SemanticNodeKind::VariableDeclaration {
+            name, type_hint, ..
+        } = &node.kind
+        else {
+            continue;
+        };
+        if let Some(hint) = type_hint
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            let resolved = resolver.resolve_expression_sync(hint);
+            if !resolved.is_unknown() {
+                merge_var(&mut ctx, name.as_str(), resolved);
+            }
+        }
+    }
+
+    let mut analyzer = NullSafetyAnalyzer::new(cfg.clone());
+    let result = analyzer.analyze(&ctx);
+
+    result
+        .warnings
+        .into_iter()
+        .filter_map(|w| {
+            let span = w.span.or_else(|| {
+                cfg.node_ir_node_index(w.node_id)
+                    .and_then(|idx| program.nodes.get(idx).map(|n| n.span))
+            })?;
+            Some(TypeDiagnostic {
+                severity: DiagnosticSeverity::Warning,
+                message: w.message,
+                span,
+            })
+        })
+        .collect()
+}
+
 fn populate_assignment_value_hints(
     program: &SemanticProgram,
     type_index: &type_inference_v2::TypeIndex,
@@ -418,16 +556,10 @@ fn populate_assignment_value_hints(
     use bsl_shared::ir::SemanticNodeKind;
 
     for node in &program.nodes {
-        let SemanticNodeKind::Assignment { value_node, .. } = &node.kind else {
+        let SemanticNodeKind::Assignment { value_span, .. } = &node.kind else {
             continue;
         };
-        let Some(value_node_idx) = value_node else {
-            continue;
-        };
-        let Some(value_node) = program.nodes.get(*value_node_idx) else {
-            continue;
-        };
-        if let Some(resolution) = type_index_resolution_for_span(type_index, value_node.span) {
+        if let Some(resolution) = type_index_resolution_for_span(type_index, *value_span) {
             out.assignment_value_type_by_span
                 .insert(node.span, resolution);
         }
@@ -1501,6 +1633,52 @@ mod tests {
             .unwrap();
         assert_eq!(compact.len(), detailed.len());
         assert_ne!(compact[0].message, detailed[0].message);
+    }
+
+    #[test]
+    fn semantic_diagnostics_include_flow_sensitive_null_safety() {
+        let mut host = AnalysisHostV2::default();
+        let file_id = FileId(1);
+
+        host.apply_change(Change::SetFile {
+            file_id,
+            text: Arc::from(
+                "Procedure Test()\n\
+                 x = Null;\n\
+                 x.Method();\n\
+                 EndProcedure",
+            ),
+            version: 1,
+            path: Arc::from("test.bsl"),
+        });
+
+        let repository = Arc::new(InMemoryTypeRepository::new()) as Arc<dyn TypeRepository>;
+        let platform_signatures_loaded = repository.platform_docs_loaded();
+        let deps = Arc::new(SemanticDeps {
+            signature_index: repository.get_signature_index_clone(),
+            resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
+            repository,
+            platform_signatures_loaded,
+        });
+
+        host.apply_change(Change::SetDepsSnapshot {
+            deps_id: DepsSnapshotId::from_hash("deps"),
+            deps,
+        });
+
+        let diagnostics = host
+            .analysis()
+            .semantic_diagnostics(file_id)
+            .unwrap()
+            .unwrap();
+
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("может быть Null")),
+            "diagnostics: {:?}",
+            diagnostics
+        );
     }
 
     #[test]

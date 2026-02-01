@@ -350,7 +350,21 @@ impl AstToIrConverter {
 
         fn add_cfg_node(cfg: &mut ControlFlowGraph, kind: CfgNodeKind) -> CfgNodeId {
             let id = cfg.nodes().len();
-            cfg.add_node(CfgNode { id, kind })
+            let node_id = cfg.add_node(CfgNode { id, kind });
+            debug_assert_eq!(id, node_id);
+            node_id
+        }
+
+        fn add_cfg_node_from_ir(
+            cfg: &mut ControlFlowGraph,
+            kind: CfgNodeKind,
+            ir_node: &SemanticNode,
+            ir_node_index: Option<usize>,
+        ) -> CfgNodeId {
+            let id = add_cfg_node(cfg, kind);
+            cfg.set_node_span(id, Some(ir_node.span));
+            cfg.set_node_ir_node_index(id, ir_node_index);
+            id
         }
 
         struct Builder<'a> {
@@ -399,20 +413,21 @@ impl AstToIrConverter {
                 match &node.kind {
                     SemanticNodeKind::Assignment {
                         variable,
-                        value_node,
+                        value_span,
+                        ..
                     } => {
-                        let value = value_node
-                            .and_then(|idx| self.ir_nodes.get(idx))
-                            .and_then(|n| slice_span(self.source, n.span))
+                        let value = slice_span(self.source, *value_span)
                             .map(normalize_ws)
-                            .unwrap_or_else(String::new);
+                            .unwrap_or_default();
 
-                        let id = add_cfg_node(
+                        let id = add_cfg_node_from_ir(
                             &mut self.cfg,
                             CfgNodeKind::Assignment {
                                 variable: variable.clone(),
                                 value,
                             },
+                            node,
+                            Some(stmt_idx),
                         );
                         (id, vec![id])
                     }
@@ -421,12 +436,15 @@ impl AstToIrConverter {
                         then_branch,
                         else_branch,
                     } => {
-                        let header = node_snippet(self.source, node);
-                        let condition =
-                            extract_condition_from_header(first_line(&header), &node.kind);
+                        let raw = slice_span(self.source, node.span).unwrap_or("");
+                        let condition = extract_condition_from_header(first_line(raw), &node.kind);
 
-                        let cond_id =
-                            add_cfg_node(&mut self.cfg, CfgNodeKind::Conditional { condition });
+                        let cond_id = add_cfg_node_from_ir(
+                            &mut self.cfg,
+                            CfgNodeKind::Conditional { condition },
+                            node,
+                            Some(stmt_idx),
+                        );
                         let merge_id = add_cfg_node(
                             &mut self.cfg,
                             CfgNodeKind::BasicBlock {
@@ -443,8 +461,16 @@ impl AstToIrConverter {
                                 self.cfg.add_edge(from, merge_id, EdgeKind::Unconditional);
                             }
                         } else {
+                            let then_empty_id = add_cfg_node(
+                                &mut self.cfg,
+                                CfgNodeKind::BasicBlock {
+                                    statements: Vec::new(),
+                                },
+                            );
                             self.cfg
-                                .add_edge(cond_id, merge_id, EdgeKind::ConditionalTrue);
+                                .add_edge(cond_id, then_empty_id, EdgeKind::ConditionalTrue);
+                            self.cfg
+                                .add_edge(then_empty_id, merge_id, EdgeKind::Unconditional);
                         }
 
                         if let Some(else_branch) = else_branch {
@@ -471,12 +497,15 @@ impl AstToIrConverter {
                     SemanticNodeKind::WhileLoop { body }
                     | SemanticNodeKind::ForLoop { body, .. }
                     | SemanticNodeKind::ForEachLoop { body, .. } => {
-                        let header = node_snippet(self.source, node);
-                        let condition =
-                            extract_condition_from_header(first_line(&header), &node.kind);
+                        let raw = slice_span(self.source, node.span).unwrap_or("");
+                        let condition = extract_condition_from_header(first_line(raw), &node.kind);
 
-                        let header_id =
-                            add_cfg_node(&mut self.cfg, CfgNodeKind::LoopHeader { condition });
+                        let header_id = add_cfg_node_from_ir(
+                            &mut self.cfg,
+                            CfgNodeKind::LoopHeader { condition },
+                            node,
+                            Some(stmt_idx),
+                        );
                         let after_loop_id = add_cfg_node(
                             &mut self.cfg,
                             CfgNodeKind::BasicBlock {
@@ -525,22 +554,26 @@ impl AstToIrConverter {
                             format!("return {}", value)
                         };
 
-                        let id = add_cfg_node(
+                        let id = add_cfg_node_from_ir(
                             &mut self.cfg,
                             CfgNodeKind::BasicBlock {
                                 statements: vec![statement],
                             },
+                            node,
+                            Some(stmt_idx),
                         );
                         self.cfg.add_edge(id, fn_exit, EdgeKind::Unconditional);
                         (id, Vec::new())
                     }
 
                     SemanticNodeKind::Break => {
-                        let id = add_cfg_node(
+                        let id = add_cfg_node_from_ir(
                             &mut self.cfg,
                             CfgNodeKind::BasicBlock {
                                 statements: vec!["break".to_string()],
                             },
+                            node,
+                            Some(stmt_idx),
                         );
 
                         if let Some(frame) = self.loop_stack.last().copied() {
@@ -553,11 +586,13 @@ impl AstToIrConverter {
                     }
 
                     SemanticNodeKind::Continue => {
-                        let id = add_cfg_node(
+                        let id = add_cfg_node_from_ir(
                             &mut self.cfg,
                             CfgNodeKind::BasicBlock {
                                 statements: vec!["continue".to_string()],
                             },
+                            node,
+                            Some(stmt_idx),
                         );
 
                         if let Some(frame) = self.loop_stack.last().copied() {
@@ -572,11 +607,13 @@ impl AstToIrConverter {
                         try_body,
                         except_body,
                     } => {
-                        let cond_id = add_cfg_node(
+                        let cond_id = add_cfg_node_from_ir(
                             &mut self.cfg,
                             CfgNodeKind::Conditional {
                                 condition: "exception".to_string(),
                             },
+                            node,
+                            Some(stmt_idx),
                         );
                         let merge_id = add_cfg_node(
                             &mut self.cfg,
@@ -627,23 +664,27 @@ impl AstToIrConverter {
                                 function_name.clone(),
                             ),
                             (None, None) => {
-                                let id = add_cfg_node(
+                                let id = add_cfg_node_from_ir(
                                     &mut self.cfg,
                                     CfgNodeKind::BasicBlock {
                                         statements: vec![format!("{}()", function_name)],
                                     },
+                                    node,
+                                    Some(stmt_idx),
                                 );
                                 return (id, vec![id]);
                             }
                         };
 
-                        let id = add_cfg_node(
+                        let id = add_cfg_node_from_ir(
                             &mut self.cfg,
                             CfgNodeKind::MethodCall {
                                 object,
                                 method,
                                 arguments: Vec::new(),
                             },
+                            node,
+                            Some(stmt_idx),
                         );
                         (id, vec![id])
                     }
@@ -677,16 +718,18 @@ impl AstToIrConverter {
                             }
                         };
 
-                        let id = add_cfg_node(&mut self.cfg, kind);
+                        let id = add_cfg_node_from_ir(&mut self.cfg, kind, node, Some(stmt_idx));
                         (id, vec![id])
                     }
 
                     _ => {
-                        let id = add_cfg_node(
+                        let id = add_cfg_node_from_ir(
                             &mut self.cfg,
                             CfgNodeKind::BasicBlock {
                                 statements: vec![node_snippet(self.source, node)],
                             },
+                            node,
+                            Some(stmt_idx),
                         );
                         (id, vec![id])
                     }

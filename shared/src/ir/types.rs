@@ -73,6 +73,11 @@ pub enum SemanticNodeKind {
     Assignment {
         variable: String,
         value_node: Option<usize>, // MILESTONE 3.5: индекс узла value expression (для hover)
+        /// Span правой части присваивания (value expression) в исходном коде.
+        ///
+        /// Нужен даже когда `value_node` отсутствует (например, для `Null`/`Неопределено`,
+        /// которые не конвертируются в отдельные IR-узлы для hover).
+        value_span: Span,
     },
 
     /// Бинарное выражение (для hover/diagnostics): `"a" + 1`, `1 < 2`

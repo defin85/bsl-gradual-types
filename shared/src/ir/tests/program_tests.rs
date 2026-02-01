@@ -51,6 +51,7 @@ fn test_find_node_at_byte_offset() {
         kind: SemanticNodeKind::Assignment {
             variable: "x".to_string(),
             value_node: None,
+            value_span: Span::stub(),
         },
         span: Span::new(20, 30),
         scope_id: program.symbols.root_scope,

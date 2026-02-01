@@ -15,6 +15,7 @@ use crate::system::LineIndex;
 use super::super::extractors::symbol_extractor::extract_word_at_position;
 use super::super::formatters::format_semantic_node_info;
 use super::super::formatters::hover_formatters::format_expected_type_hover;
+use super::flow_sensitive::narrow_type_for_variable_at;
 
 /// Hover по уже готовому `SemanticProgram` (без legacy парсинга/IR build).
 ///
@@ -164,6 +165,20 @@ fn compute_hover_info_from_ir(
                     metadata_lookup,
                 ));
             }
+        }
+    }
+
+    if let (Some(word), Some(offset)) = (word_under_cursor.as_deref(), byte_offset) {
+        let base = type_at_cursor
+            .clone()
+            .unwrap_or_else(TypeResolution::unknown);
+        if let Some(narrowed) = narrow_type_for_variable_at(ir_program, offset, word, base) {
+            info!(
+                "Hover v2 flow-sensitive narrowed_at({}): {}",
+                offset,
+                narrowed.type_name()
+            );
+            return Some(formatter.format_variable(word, &narrowed));
         }
     }
 

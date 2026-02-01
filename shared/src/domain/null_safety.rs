@@ -7,6 +7,10 @@
 
 use crate::domain::flow_analysis::*;
 use crate::domain::type_id::TypeId;
+use crate::domain::types::{
+    ConcreteType, PlatformType, ResolutionResult, SpecialType, TypeResolution,
+};
+use crate::ir::Span;
 use std::collections::{HashMap, HashSet};
 
 /// Null safety analyzer
@@ -33,6 +37,10 @@ pub struct NullSafetyWarning {
     pub variable: String,
     pub line: Option<u32>,
     pub message: String,
+    /// CFG node id, где была обнаружена проблема.
+    pub node_id: usize,
+    /// Span исходного кода (если доступен из CFG).
+    pub span: Option<Span>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,7 +80,7 @@ impl NullSafetyAnalyzer {
                 CfgNodeKind::Assignment { variable, .. } => {
                     // Проверяем, nullable ли присваиваемое значение
                     if let Some(resolution) = context.get_variable(variable.as_str()) {
-                        if resolution.result.is_nullable() {
+                        if self.is_nullish_resolution(resolution) {
                             self.nullable_vars
                                 .entry(node_id)
                                 .or_default()
@@ -82,13 +90,8 @@ impl NullSafetyAnalyzer {
                 }
 
                 CfgNodeKind::Condition { variable } => {
-                    // Проверка на Null делает переменную non-null в then-ветке
-                    let var_name = variable.clone();
-                    if self.is_null_check(&var_name) {
-                        // В then-ветке переменная точно не Null
+                    if let Some(var_name) = self.extract_null_checked_variable(variable.as_str()) {
                         self.mark_non_null_in_successors(node_id, &var_name);
-
-                        // Это безопасная операция
                         safe_operations.push(SafeOperation {
                             variable: var_name,
                             unwrapped: true,
@@ -96,14 +99,14 @@ impl NullSafetyAnalyzer {
                         });
                     }
                 }
+
                 CfgNodeKind::Conditional { condition } => {
                     // v2 CFG использует `Conditional { condition }` для if/while.
                     // Для null-safety считаем это эквивалентом `Condition`.
-                    let cond = condition.clone();
-                    if self.is_null_check(&cond) {
-                        self.mark_non_null_in_successors(node_id, &cond);
+                    if let Some(var_name) = self.extract_null_checked_variable(condition.as_str()) {
+                        self.mark_non_null_in_successors(node_id, &var_name);
                         safe_operations.push(SafeOperation {
-                            variable: cond,
+                            variable: var_name,
                             unwrapped: true,
                             line: None,
                         });
@@ -121,6 +124,8 @@ impl NullSafetyAnalyzer {
                                 "Переменная '{}' может быть Null при вызове метода",
                                 object
                             ),
+                            node_id,
+                            span: self.cfg.node_span(node_id),
                         });
                     }
                 }
@@ -136,6 +141,8 @@ impl NullSafetyAnalyzer {
                                 "Переменная '{}' может быть Null при доступе к свойству",
                                 object
                             ),
+                            node_id,
+                            span: self.cfg.node_span(node_id),
                         });
                     }
                 }
@@ -170,15 +177,84 @@ impl NullSafetyAnalyzer {
     // Private helpers
     // =========================================================================
 
-    /// Проверить, является ли условие проверкой на Null
+    fn is_nullish_resolution(&self, resolution: &TypeResolution) -> bool {
+        if resolution.result.is_nullable() {
+            return true;
+        }
+        matches!(
+            &resolution.result,
+            ResolutionResult::Concrete(ConcreteType::Special(SpecialType::Null))
+                | ResolutionResult::Concrete(ConcreteType::Special(SpecialType::Undefined))
+        ) || matches!(&resolution.result, ResolutionResult::Concrete(ConcreteType::Platform(PlatformType { name })) if {
+            let lower = name.to_lowercase();
+            lower == "null" || lower == "неопределено" || lower == "undefined"
+        })
+    }
+
+    /// Проверить, является ли условие проверкой на Null/Неопределено.
+    #[cfg(test)]
     fn is_null_check(&self, condition: &str) -> bool {
-        // Простая эвристика: ищем ЗначениеЗаполнено, НЕ Неопределено и т.д.
-        condition.contains("ЗначениеЗаполнено")
-            || condition.contains("ValueIsFilled")
-            || condition.contains("НЕ Неопределено")
-            || condition.contains("NOT Undefined")
-            || condition.contains("<> Неопределено")
-            || condition.contains("<> Undefined")
+        self.extract_null_checked_variable(condition).is_some()
+    }
+
+    fn extract_null_checked_variable(&self, condition: &str) -> Option<String> {
+        let cond = condition.trim();
+
+        fn extract_inside_parens(haystack: &str, needle: &str) -> Option<String> {
+            let pos = haystack.find(needle)?;
+            let after = &haystack[pos + needle.len()..];
+            let open = after.find('(')?;
+            let after_open = &after[open + 1..];
+            let close = after_open.find(')')?;
+            let inner = after_open[..close].trim();
+            let var = inner.split(',').next().unwrap_or(inner).trim();
+            (!var.is_empty()).then(|| var.to_string())
+        }
+
+        if let Some(v) = extract_inside_parens(cond, "ЗначениеЗаполнено") {
+            return Some(v);
+        }
+        if let Some(v) = extract_inside_parens(cond, "ValueIsFilled") {
+            return Some(v);
+        }
+
+        fn split_cmp<'a>(cond: &'a str, op: &str) -> Option<(&'a str, &'a str)> {
+            let (l, r) = cond.split_once(op)?;
+            Some((l.trim(), r.trim()))
+        }
+
+        let (left, right) = split_cmp(cond, "<>")
+            .or_else(|| split_cmp(cond, "!="))
+            .unwrap_or(("", ""));
+
+        if !left.is_empty() {
+            let rhs = right.to_lowercase();
+            let lhs = left.to_lowercase();
+
+            let is_special = |s: &str| {
+                s.contains("неопределено") || s.contains("undefined") || s.contains("null")
+            };
+
+            if is_special(&rhs) && !is_special(&lhs) {
+                return left
+                    .split_whitespace()
+                    .last()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string);
+            }
+
+            if is_special(&lhs) && !is_special(&rhs) {
+                return right
+                    .split_whitespace()
+                    .last()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string);
+            }
+        }
+
+        None
     }
 
     /// Пометить переменную как non-null в последующих узлах
@@ -249,10 +325,10 @@ impl NullSafetyAnalyzer {
 
         // Проверяем тип переменной
         if let Some(resolution) = context.get_variable(variable) {
-            resolution.result.is_nullable()
+            self.is_nullish_resolution(resolution)
         } else {
-            // Неизвестная переменная - лучше предупредить
-            true
+            // Неизвестная переменная — не предупреждаем: слишком шумно для IDE.
+            false
         }
     }
 }

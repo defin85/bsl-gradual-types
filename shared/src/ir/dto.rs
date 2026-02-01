@@ -175,11 +175,13 @@ impl SemanticProgram {
             SemanticNodeKind::Assignment {
                 variable,
                 value_node,
+                value_span,
             } => {
                 attributes.insert("variable".to_string(), variable.clone());
                 if let Some(vn) = value_node {
                     attributes.insert("value_node".to_string(), vn.to_string());
                 }
+                attributes.insert("value_span".to_string(), value_span.to_string());
                 // Показываем имя переменной в UI
                 (
                     "Assignment".to_string(),

@@ -254,25 +254,19 @@ fn test_metadata_objects_structure() {
         );
 
         // Проверяем, что тип объекта распознан (если возможно)
-        if obj.object_type.is_some() {
-            println!(
-                "  ✅ Объект '{}' распознан как {:?}",
-                obj.name,
-                obj.object_type.unwrap()
+        if let Some(object_type) = &obj.object_type {
+            println!("  ✅ Объект '{}' распознан как {:?}", obj.name, object_type);
+
+            // Проверяем наличие фасетов для известных типов
+            assert!(
+                !obj.facets.is_empty(),
+                "Распознанный объект '{}' должен иметь фасеты",
+                obj.name
             );
         } else {
             println!(
                 "  ℹ️ Объект '{}' имеет нераспознанный тип: {}",
                 obj.name, obj.object_type_raw
-            );
-        }
-
-        // Проверяем наличие фасетов для известных типов
-        if obj.object_type.is_some() {
-            assert!(
-                !obj.facets.is_empty(),
-                "Распознанный объект '{}' должен иметь фасеты",
-                obj.name
             );
         }
     }

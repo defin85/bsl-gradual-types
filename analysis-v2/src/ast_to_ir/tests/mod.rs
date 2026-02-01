@@ -8,8 +8,13 @@
 use std::sync::Arc;
 
 use bsl_shared::domain::code_location::CompilerDirective;
+use bsl_shared::domain::flow_analysis::FlowAnalysisContext;
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::signature_index::SignatureIndex;
+use bsl_shared::domain::types::{
+    Certainty, ConcreteType, ResolutionMetadata, ResolutionResult, ResolutionSource, TypeResolution,
+};
+use bsl_shared::domain::NullSafetyAnalyzer;
 use bsl_shared::ir::SemanticNodeKind;
 use bsl_shared::ir::{CfgNodeKind, EdgeKind};
 
@@ -204,6 +209,66 @@ fn test_cfg_contains_conditional_edges_for_if_statement() {
         .edges()
         .iter()
         .any(|e| e.kind == EdgeKind::ConditionalFalse));
+}
+
+#[test]
+fn test_null_safety_can_run_on_v2_cfg_method_call() {
+    let ast = Program {
+        statements: vec![Statement::FunctionDecl {
+            name: "TestFunc".to_string(),
+            params: vec![],
+            body: vec![Statement::Call {
+                expression: Expression::Call {
+                    function: Box::new(Expression::PropertyAccess {
+                        object: Box::new(Expression::Identifier {
+                            name: "x".to_string(),
+                            span: AstSpan::stub(),
+                        }),
+                        property: "Метод".to_string(),
+                        span: AstSpan::stub(),
+                    }),
+                    args: vec![],
+                    span: AstSpan::stub(),
+                },
+                span: AstSpan::stub(),
+            }],
+            compiler_directive: None,
+            is_export: false,
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "Функция TestFunc()\n  x.Метод();\nКонецФункции".to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    let cfg = ir.cfg.expect("CFG must be built for function body");
+    assert!(cfg
+        .nodes()
+        .iter()
+        .any(|n| matches!(n.kind, CfgNodeKind::MethodCall { .. })));
+
+    let mut ctx = FlowAnalysisContext::new();
+    ctx.set_variable(
+        "x",
+        TypeResolution {
+            result: ResolutionResult::nullable(ConcreteType::string()),
+            certainty: Certainty::Known,
+            source: ResolutionSource::Static,
+            metadata: ResolutionMetadata::default(),
+            active_facet: None,
+            available_facets: vec![],
+        },
+    );
+
+    let mut analyzer = NullSafetyAnalyzer::new(cfg);
+    let result = analyzer.analyze(&ctx);
+    assert!(!result.warnings.is_empty());
 }
 
 #[test]

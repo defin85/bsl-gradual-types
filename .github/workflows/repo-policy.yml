@@ -33,3 +33,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Check bsl-agent does not depend on bsl-backend
         run: ./scripts/check-bsl-agent-backend-dep.sh
+
+  doc_paths_policy:
+    name: Doc paths policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check documentation path references exist
+        run: python3 scripts/check-doc-paths.py --targets scripts/doc-path-check-targets.txt

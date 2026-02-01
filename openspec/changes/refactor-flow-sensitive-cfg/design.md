@@ -1,25 +1,26 @@
 # Дизайн: Консолидация CFG и flow-sensitive анализа в v2 pipeline
 
 ## Проблема
-В репозитории одновременно присутствуют:
-- IR CFG: `shared/src/ir/cfg.rs` (CFG как часть IR/semantic program).
-- Domain CFG: `shared/src/domain/flow_analysis.rs` (CFG как часть доменной модели + контексты/edge kinds).
+Канонический CFG уже определён в IR-слое: `shared/src/ir/cfg.rs`.
+
+При этом flow-sensitive логика живёт в Domain-слое и должна использовать CFG из v2 pipeline:
+- `shared/src/domain/flow_analysis.rs` реэкспортирует IR CFG типы (`pub use crate::ir::...`) и содержит доменные структуры (например, `FlowAnalysisContext`).
+- `analysis-v2/src/ast_to_ir/converter.rs` строит CFG и пишет его в `SemanticProgram.cfg` (поле `cfg: Option<ControlFlowGraph>`).
 
 Дополнительно:
-- `analysis-v2/src/ast_to_ir/converter.rs` содержит `build_cfg()`, но сейчас это заглушка (возвращает `None`).
-- Flow-sensitive «экспериментальные» анализаторы существуют в `bsl-runtime/src/domain/flow_analyzer*.rs`, но один из них не подключён в `bsl-runtime/src/domain/mod.rs`.
+- Flow-sensitive «экспериментальные» анализаторы существуют в `bsl-runtime/src/domain/flow_analyzer*.rs`; нужно зафиксировать их статус относительно канонического CFG/v2 pipeline.
 
 ### Текущее использование (инвентаризация)
 
-- **Domain CFG используется активно**:
+ - **Flow-sensitive логика использует CFG активно**:
   - `shared/src/analysis/narrowing_engine.rs` строит/обходит CFG по `CfgNodeKind`/`EdgeKind`.
   - `shared/src/domain/null_safety.rs` выполняет анализ null-safety по CFG.
   - интеграционные тесты backend строят CFG вручную: `backend/tests/type_narrowing_integration_test.rs`, `backend/tests/flow_sensitive_analysis_test.rs`.
-- **IR CFG присутствует как поле в IR, но фактически не строится**:
+- **CFG присутствует как поле в IR и строится в v2 pipeline**:
   - `shared/src/ir/program.rs` содержит `cfg: Option<ControlFlowGraph>`.
-  - `analysis-v2/src/ast_to_ir/converter.rs` вызывает `build_cfg()`, но она возвращает `None`.
+  - `analysis-v2/src/ast_to_ir/converter.rs` вызывает `build_cfg()` и возвращает `cfg: Some(...)` на исполняемых конструкциях (assignment/if/loop и т.п.).
 
-Следствие: существуют **две разные структуры с одинаковым именем** `ControlFlowGraph`, при этом «рабочая» — в Domain, а «проваленная интеграция в v2» — в IR.
+Следствие: основная техническая цель этого change — не “устранить раздвоение типов” (оно уже устранено через реэкспорт), а закрепить CFG как first-class часть v2 snapshot и довести потребителей/документацию/тесты до консистентного состояния.
 
 ## Цели
 - Ввести один «канонический» CFG формат/тип для использования в flow-sensitive анализе.
@@ -59,6 +60,12 @@
 2) Реализовать построение CFG в v2 при AST → IR и хранить его в `SemanticProgram.cfg` (не `None`).
 3) Адаптировать доменные анализаторы (narrowing/null-safety) под канонический CFG (без дублирования типов).
 4) Определить судьбу экспериментальных `bsl-runtime` flow analyzer модулей после появления канонического CFG в v2.
+
+Текущее состояние на момент старта реализации:
+- (1) выполнено: Domain слой реэкспортирует IR CFG, отдельного Domain `ControlFlowGraph` нет.
+- (2) выполнено в базовом виде: CFG строится в `bsl-analysis-v2`; требуется закрепить контракт тестами и убедиться, что CFG доступен из v2 snapshot для flow-sensitive логики.
+- (3) частично выполнено: потребители используют `crate::domain::flow_analysis::ControlFlowGraph`, который является IR CFG типом; требуется убрать оставшиеся “ручные” пути построения CFG из тестов/кода, если они обходят v2.
+- (4) требует решения: зафиксировать, какие `bsl-runtime` flow-analyzer модули остаются, и какие удаляются/переносятся после консолидации.
 
 ## Критерии успеха (DoD)
 

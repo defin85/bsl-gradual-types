@@ -78,11 +78,10 @@ Backend реализует многослойную архитектуру с ч
 
 ### `backend/src/presentation/` - Presentation Layer
 
-HTTP/Web и LSP интерфейсы.
+HTTP/Web интерфейс и presentation-компоненты для визуализации/CLI. LSP сервер живёт в `backend/src/bin/lsp_server/`.
 
 **Ключевые компоненты:**
 - `backend/src/presentation/web/` - Web API handlers (в т.ч. diagnostics / semantic tree)
-- `backend/src/presentation/lsp/` - LSP адаптеры/DTO
 - `backend/src/presentation/semantic_html_generator/` - генерация HTML визуализации типов
 - `backend/src/presentation/cli/` - CLI presentation (если используется)
 

@@ -236,7 +236,7 @@ pub fn my_function(param1: Type1, param2: Type2) -> Result<ReturnType> {
 5. ✅ Обновите CHANGELOG.md
 
 ### PR Review Process
-1. **Repo policy (GitHub Actions)** - workflow должен пройти (см. `.github/workflows/repo-policy.yml`; `cargo fmt`/`cargo clippy`/`cargo test` прогоняются локально). Расширение CI до полного набора проверок — отдельный change: `add-ci-full-suite` (placeholder).
+1. **GitHub Actions** - должны пройти workflow `Repo policy` и `CI` (см. `.github/workflows/repo-policy.yml` и `.github/workflows/ci.yml`).
 2. **Code Review** - Минимум 1 approve от maintainer
 3. **Testing** - Comprehensive testing в разных окружениях
 4. **Documentation** - Проверка актуальности документации

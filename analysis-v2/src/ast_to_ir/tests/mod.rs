@@ -10,8 +10,8 @@ use std::sync::Arc;
 use bsl_shared::domain::code_location::CompilerDirective;
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::signature_index::SignatureIndex;
-use bsl_shared::ir::{CfgNodeKind, EdgeKind};
 use bsl_shared::ir::SemanticNodeKind;
+use bsl_shared::ir::{CfgNodeKind, EdgeKind};
 
 use bsl_syntax::ast::{Expression, Program, Span as AstSpan, Statement};
 
@@ -88,9 +88,17 @@ fn test_cfg_present_for_root_level_assignment() {
     )
     .unwrap();
 
-    let cfg = ir.cfg.expect("CFG must be built for root-level executable code");
-    assert!(cfg.nodes().iter().any(|n| matches!(n.kind, CfgNodeKind::Entry)));
-    assert!(cfg.nodes().iter().any(|n| matches!(n.kind, CfgNodeKind::Exit)));
+    let cfg = ir
+        .cfg
+        .expect("CFG must be built for root-level executable code");
+    assert!(cfg
+        .nodes()
+        .iter()
+        .any(|n| matches!(n.kind, CfgNodeKind::Entry)));
+    assert!(cfg
+        .nodes()
+        .iter()
+        .any(|n| matches!(n.kind, CfgNodeKind::Exit)));
 }
 
 #[test]
@@ -125,7 +133,9 @@ fn test_cfg_present_for_function_body() {
     )
     .unwrap();
 
-    let cfg = ir.cfg.expect("CFG must be built for non-empty function body");
+    let cfg = ir
+        .cfg
+        .expect("CFG must be built for non-empty function body");
     assert!(cfg.nodes().len() >= 3); // Entry + stmt + Exit (или больше)
     assert!(cfg.edges().len() >= 2);
     assert!(cfg
@@ -186,7 +196,10 @@ fn test_cfg_contains_conditional_edges_for_if_statement() {
     .unwrap();
 
     let cfg = ir.cfg.expect("CFG must be built for if statement");
-    assert!(cfg.edges().iter().any(|e| e.kind == EdgeKind::ConditionalTrue));
+    assert!(cfg
+        .edges()
+        .iter()
+        .any(|e| e.kind == EdgeKind::ConditionalTrue));
     assert!(cfg
         .edges()
         .iter()

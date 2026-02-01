@@ -276,7 +276,7 @@ impl AstToIrConverter {
             text.split_whitespace().collect::<Vec<_>>().join(" ")
         }
 
-        fn slice_span<'a>(source: &'a str, span: Span) -> Option<&'a str> {
+        fn slice_span(source: &str, span: Span) -> Option<&str> {
             let start = span.start as usize;
             let end = span.end as usize;
             source.get(start..end)
@@ -313,7 +313,10 @@ impl AstToIrConverter {
                         header.trim_start(),
                         &["Если ", "если ", "IF ", "If ", "if "],
                     );
-                    let trimmed = strip_suffixes(after_if.trim_end(), &[" Тогда", " тогда", " Then", " then"]);
+                    let trimmed = strip_suffixes(
+                        after_if.trim_end(),
+                        &[" Тогда", " тогда", " Then", " then"],
+                    );
                     normalize_ws(trimmed)
                 }
                 SemanticNodeKind::WhileLoop { .. } => {
@@ -321,7 +324,8 @@ impl AstToIrConverter {
                         header.trim_start(),
                         &["Пока ", "пока ", "WHILE ", "While ", "while "],
                     );
-                    let trimmed = strip_suffixes(after_while.trim_end(), &[" Цикл", " цикл", " Do", " do"]);
+                    let trimmed =
+                        strip_suffixes(after_while.trim_end(), &[" Цикл", " цикл", " Do", " do"]);
                     normalize_ws(trimmed)
                 }
                 SemanticNodeKind::ForLoop { .. } | SemanticNodeKind::ForEachLoop { .. } => {
@@ -329,7 +333,8 @@ impl AstToIrConverter {
                         header.trim_start(),
                         &["Для ", "для ", "FOR ", "For ", "for "],
                     );
-                    let trimmed = strip_suffixes(after_for.trim_end(), &[" Цикл", " цикл", " Do", " do"]);
+                    let trimmed =
+                        strip_suffixes(after_for.trim_end(), &[" Цикл", " цикл", " Do", " do"]);
                     normalize_ws(trimmed)
                 }
                 _ => normalize_ws(header_line),
@@ -356,7 +361,11 @@ impl AstToIrConverter {
         }
 
         impl<'a> Builder<'a> {
-            fn build_block(&mut self, stmts: &[usize], fn_exit: CfgNodeId) -> Option<(CfgNodeId, Vec<CfgNodeId>)> {
+            fn build_block(
+                &mut self,
+                stmts: &[usize],
+                fn_exit: CfgNodeId,
+            ) -> Option<(CfgNodeId, Vec<CfgNodeId>)> {
                 let mut iter = stmts.iter().copied();
                 let first_stmt = iter.next()?;
                 let (entry, mut open) = self.build_stmt(first_stmt, fn_exit);
@@ -372,7 +381,11 @@ impl AstToIrConverter {
                 Some((entry, open))
             }
 
-            fn build_stmt(&mut self, stmt_idx: usize, fn_exit: CfgNodeId) -> (CfgNodeId, Vec<CfgNodeId>) {
+            fn build_stmt(
+                &mut self,
+                stmt_idx: usize,
+                fn_exit: CfgNodeId,
+            ) -> (CfgNodeId, Vec<CfgNodeId>) {
                 let Some(node) = self.ir_nodes.get(stmt_idx) else {
                     let id = add_cfg_node(
                         &mut self.cfg,
@@ -384,7 +397,10 @@ impl AstToIrConverter {
                 };
 
                 match &node.kind {
-                    SemanticNodeKind::Assignment { variable, value_node } => {
+                    SemanticNodeKind::Assignment {
+                        variable,
+                        value_node,
+                    } => {
                         let value = value_node
                             .and_then(|idx| self.ir_nodes.get(idx))
                             .and_then(|n| slice_span(self.source, n.span))
@@ -406,9 +422,11 @@ impl AstToIrConverter {
                         else_branch,
                     } => {
                         let header = node_snippet(self.source, node);
-                        let condition = extract_condition_from_header(first_line(&header), &node.kind);
+                        let condition =
+                            extract_condition_from_header(first_line(&header), &node.kind);
 
-                        let cond_id = add_cfg_node(&mut self.cfg, CfgNodeKind::Conditional { condition });
+                        let cond_id =
+                            add_cfg_node(&mut self.cfg, CfgNodeKind::Conditional { condition });
                         let merge_id = add_cfg_node(
                             &mut self.cfg,
                             CfgNodeKind::BasicBlock {
@@ -416,26 +434,35 @@ impl AstToIrConverter {
                             },
                         );
 
-                        if let Some((then_entry, then_open)) = self.build_block(then_branch, fn_exit) {
-                            self.cfg.add_edge(cond_id, then_entry, EdgeKind::ConditionalTrue);
+                        if let Some((then_entry, then_open)) =
+                            self.build_block(then_branch, fn_exit)
+                        {
+                            self.cfg
+                                .add_edge(cond_id, then_entry, EdgeKind::ConditionalTrue);
                             for from in then_open {
                                 self.cfg.add_edge(from, merge_id, EdgeKind::Unconditional);
                             }
                         } else {
-                            self.cfg.add_edge(cond_id, merge_id, EdgeKind::ConditionalTrue);
+                            self.cfg
+                                .add_edge(cond_id, merge_id, EdgeKind::ConditionalTrue);
                         }
 
                         if let Some(else_branch) = else_branch {
-                            if let Some((else_entry, else_open)) = self.build_block(else_branch, fn_exit) {
-                                self.cfg.add_edge(cond_id, else_entry, EdgeKind::ConditionalFalse);
+                            if let Some((else_entry, else_open)) =
+                                self.build_block(else_branch, fn_exit)
+                            {
+                                self.cfg
+                                    .add_edge(cond_id, else_entry, EdgeKind::ConditionalFalse);
                                 for from in else_open {
                                     self.cfg.add_edge(from, merge_id, EdgeKind::Unconditional);
                                 }
                             } else {
-                                self.cfg.add_edge(cond_id, merge_id, EdgeKind::ConditionalFalse);
+                                self.cfg
+                                    .add_edge(cond_id, merge_id, EdgeKind::ConditionalFalse);
                             }
                         } else {
-                            self.cfg.add_edge(cond_id, merge_id, EdgeKind::ConditionalFalse);
+                            self.cfg
+                                .add_edge(cond_id, merge_id, EdgeKind::ConditionalFalse);
                         }
 
                         (cond_id, vec![merge_id])
@@ -445,7 +472,8 @@ impl AstToIrConverter {
                     | SemanticNodeKind::ForLoop { body, .. }
                     | SemanticNodeKind::ForEachLoop { body, .. } => {
                         let header = node_snippet(self.source, node);
-                        let condition = extract_condition_from_header(first_line(&header), &node.kind);
+                        let condition =
+                            extract_condition_from_header(first_line(&header), &node.kind);
 
                         let header_id =
                             add_cfg_node(&mut self.cfg, CfgNodeKind::LoopHeader { condition });
@@ -456,7 +484,8 @@ impl AstToIrConverter {
                             },
                         );
 
-                        self.cfg.add_edge(header_id, after_loop_id, EdgeKind::LoopExit);
+                        self.cfg
+                            .add_edge(header_id, after_loop_id, EdgeKind::LoopExit);
 
                         let body_marker_id = add_cfg_node(&mut self.cfg, CfgNodeKind::LoopBody);
                         self.cfg
@@ -474,7 +503,8 @@ impl AstToIrConverter {
                                 self.cfg.add_edge(from, header_id, EdgeKind::LoopBack);
                             }
                         } else {
-                            self.cfg.add_edge(body_marker_id, header_id, EdgeKind::LoopBack);
+                            self.cfg
+                                .add_edge(body_marker_id, header_id, EdgeKind::LoopBack);
                         }
 
                         let _ = self.loop_stack.pop();
@@ -556,21 +586,27 @@ impl AstToIrConverter {
                         );
 
                         if let Some((try_entry, try_open)) = self.build_block(try_body, fn_exit) {
-                            self.cfg.add_edge(cond_id, try_entry, EdgeKind::ConditionalTrue);
+                            self.cfg
+                                .add_edge(cond_id, try_entry, EdgeKind::ConditionalTrue);
                             for from in try_open {
                                 self.cfg.add_edge(from, merge_id, EdgeKind::Unconditional);
                             }
                         } else {
-                            self.cfg.add_edge(cond_id, merge_id, EdgeKind::ConditionalTrue);
+                            self.cfg
+                                .add_edge(cond_id, merge_id, EdgeKind::ConditionalTrue);
                         }
 
-                        if let Some((except_entry, except_open)) = self.build_block(except_body, fn_exit) {
-                            self.cfg.add_edge(cond_id, except_entry, EdgeKind::ConditionalFalse);
+                        if let Some((except_entry, except_open)) =
+                            self.build_block(except_body, fn_exit)
+                        {
+                            self.cfg
+                                .add_edge(cond_id, except_entry, EdgeKind::ConditionalFalse);
                             for from in except_open {
                                 self.cfg.add_edge(from, merge_id, EdgeKind::Unconditional);
                             }
                         } else {
-                            self.cfg.add_edge(cond_id, merge_id, EdgeKind::ConditionalFalse);
+                            self.cfg
+                                .add_edge(cond_id, merge_id, EdgeKind::ConditionalFalse);
                         }
 
                         (cond_id, vec![merge_id])
@@ -662,12 +698,14 @@ impl AstToIrConverter {
                 let exit_id = add_cfg_node(&mut self.cfg, CfgNodeKind::Exit);
 
                 if let Some((body_entry, body_open)) = self.build_block(stmts, exit_id) {
-                    self.cfg.add_edge(entry_id, body_entry, EdgeKind::Unconditional);
+                    self.cfg
+                        .add_edge(entry_id, body_entry, EdgeKind::Unconditional);
                     for from in body_open {
                         self.cfg.add_edge(from, exit_id, EdgeKind::Unconditional);
                     }
                 } else {
-                    self.cfg.add_edge(entry_id, exit_id, EdgeKind::Unconditional);
+                    self.cfg
+                        .add_edge(entry_id, exit_id, EdgeKind::Unconditional);
                 }
             }
         }

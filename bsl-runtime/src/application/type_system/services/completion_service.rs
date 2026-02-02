@@ -17,7 +17,7 @@ use bsl_shared::domain::types::{
     ConcreteType, FacetKind, MetadataKind, ResolutionResult, SpecialType,
 };
 use bsl_shared::domain::{CompletionItem, CompletionKind, TypeMetadataLookup, TypeResolution};
-use bsl_shared::ir::{CfgNodeAtByteOffsetBias, ScopeId, SemanticNodeKind, SemanticProgram};
+use bsl_shared::ir::{ScopeId, SemanticNodeKind, SemanticProgram};
 use bsl_syntax::ast::Expression;
 
 use super::super::extractors::symbol_extractor::{
@@ -1176,13 +1176,7 @@ fn resolve_member_owner_type_sync(
     }
 
     let base = resolved.clone().unwrap_or_else(TypeResolution::unknown);
-    if let Some(narrowed) = narrow_type_for_variable_at(
-        ir_program,
-        byte_offset,
-        base_name,
-        base,
-        CfgNodeAtByteOffsetBias::PreferLeft,
-    ) {
+    if let Some(narrowed) = narrow_type_for_variable_at(ir_program, byte_offset, base_name, base) {
         resolved = Some(narrowed);
     }
 

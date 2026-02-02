@@ -7,9 +7,7 @@ use tracing::{debug, info, warn};
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::types::TypeResolution;
 use bsl_shared::domain::TypeMetadataLookup;
-use bsl_shared::ir::{
-    CfgNodeAtByteOffsetBias, SemanticNode, SemanticNodeKind, SemanticProgram, Span,
-};
+use bsl_shared::ir::{SemanticNode, SemanticNodeKind, SemanticProgram, Span};
 
 use crate::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter};
 use crate::system::LineIndex;
@@ -174,13 +172,7 @@ fn compute_hover_info_from_ir(
         let base = type_at_cursor
             .clone()
             .unwrap_or_else(TypeResolution::unknown);
-        if let Some(narrowed) = narrow_type_for_variable_at(
-            ir_program,
-            offset,
-            word,
-            base,
-            CfgNodeAtByteOffsetBias::Exact,
-        ) {
+        if let Some(narrowed) = narrow_type_for_variable_at(ir_program, offset, word, base) {
             info!(
                 "Hover v2 flow-sensitive narrowed_at({}): {}",
                 offset,

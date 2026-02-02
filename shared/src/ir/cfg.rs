@@ -37,15 +37,6 @@ pub struct ControlFlowGraph {
     node_ir_node_indices: Vec<Option<usize>>,
 }
 
-/// Bias (смещение) для поиска CFG-узла по byte offset.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CfgNodeAtByteOffsetBias {
-    /// Ищет узел, span которого содержит `offset` (без эвристик).
-    Exact,
-    /// Предпочитает узел слева от позиции (например, completion на границе токена).
-    PreferLeft,
-}
-
 impl ControlFlowGraph {
     pub fn new() -> Self {
         Self {
@@ -92,34 +83,6 @@ impl ControlFlowGraph {
     /// Получить индекс IR-ноды (`SemanticProgram.nodes`) для CFG-узла.
     pub fn node_ir_node_index(&self, node_id: usize) -> Option<usize> {
         self.node_ir_node_indices.get(node_id).copied().flatten()
-    }
-
-    /// Найти CFG-узел по byte offset в исходном тексте.
-    ///
-    /// Алгоритм детерминирован:
-    /// - выбирает узел с самым узким span, содержащим позицию;
-    /// - при равной длине span выбирает узел с меньшим `node_id`;
-    /// - в режиме `PreferLeft` сначала пытается `offset - 1`, затем `offset`.
-    pub fn node_at_byte_offset(
-        &self,
-        offset: u32,
-        bias: CfgNodeAtByteOffsetBias,
-    ) -> Option<CfgNodeId> {
-        let find_at = |at: u32| {
-            (0..self.nodes.len())
-                .filter_map(|node_id| self.node_span(node_id).map(|span| (node_id, span)))
-                .filter(|(_, span)| span.contains(at))
-                .min_by_key(|(node_id, span)| (span.len(), *node_id))
-                .map(|(node_id, _)| node_id)
-        };
-
-        match bias {
-            CfgNodeAtByteOffsetBias::Exact => find_at(offset),
-            CfgNodeAtByteOffsetBias::PreferLeft => offset
-                .checked_sub(1)
-                .and_then(find_at)
-                .or_else(|| find_at(offset)),
-        }
     }
 
     /// Получить все узлы
@@ -244,55 +207,5 @@ mod tests {
 
         assert_eq!(cfg.nodes().len(), 2);
         assert_eq!(cfg.edges().len(), 1);
-    }
-
-    #[test]
-    fn test_node_at_byte_offset_most_specific_and_bias() {
-        let mut cfg = ControlFlowGraph::new();
-
-        let wide = cfg.add_node(CfgNode {
-            id: 0,
-            kind: CfgNodeKind::BasicBlock {
-                statements: vec![],
-            },
-        });
-        cfg.set_node_span(
-            wide,
-            Some(Span {
-                start: 0,
-                end: 10,
-            }),
-        );
-
-        let narrow = cfg.add_node(CfgNode {
-            id: 1,
-            kind: CfgNodeKind::BasicBlock {
-                statements: vec![],
-            },
-        });
-        cfg.set_node_span(
-            narrow,
-            Some(Span {
-                start: 0,
-                end: 5,
-            }),
-        );
-
-        assert_eq!(
-            cfg.node_at_byte_offset(3, CfgNodeAtByteOffsetBias::Exact),
-            Some(narrow)
-        );
-        assert_eq!(
-            cfg.node_at_byte_offset(10, CfgNodeAtByteOffsetBias::Exact),
-            None
-        );
-        assert_eq!(
-            cfg.node_at_byte_offset(10, CfgNodeAtByteOffsetBias::PreferLeft),
-            Some(wide)
-        );
-        assert_eq!(
-            cfg.node_at_byte_offset(5, CfgNodeAtByteOffsetBias::PreferLeft),
-            Some(narrow)
-        );
     }
 }

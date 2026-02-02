@@ -450,6 +450,7 @@ async fn run_iterations(
                 resolver,
                 ir_program,
                 None,
+                false,
             )
             .await;
             let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;

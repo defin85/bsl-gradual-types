@@ -1287,6 +1287,8 @@ impl LanguageServer for BslLanguageServer {
                         }
                     }
 
+                    let enable_flow_sensitive = self.settings.read().await.enable_flow_sensitive;
+
                     let member_access_owner_type_hint = file_content.as_deref().and_then(|text| {
                         let line_text = text.lines().nth(position.line as usize)?;
                         let cursor_byte = bsl_backend::system::positioning::utf16_to_byte_offset(
@@ -1307,10 +1309,32 @@ impl LanguageServer for BslLanguageServer {
                             .utf16_position_to_byte_offset(file_id, position.line, probe_utf16)
                             .ok()
                             .flatten()?;
-                        analysis
-                            .type_at_byte_offset(file_id, offset.min(u32::MAX as usize) as u32)
-                            .ok()
-                            .flatten()
+                        if enable_flow_sensitive {
+                            analysis
+                                .flow_type_at_byte_offset(
+                                    file_id,
+                                    offset.min(u32::MAX as usize) as u32,
+                                )
+                                .ok()
+                                .flatten()
+                                .or_else(|| {
+                                    analysis
+                                        .type_at_byte_offset(
+                                            file_id,
+                                            offset.min(u32::MAX as usize) as u32,
+                                        )
+                                        .ok()
+                                        .flatten()
+                                })
+                        } else {
+                            analysis
+                                .type_at_byte_offset(
+                                    file_id,
+                                    offset.min(u32::MAX as usize) as u32,
+                                )
+                                .ok()
+                                .flatten()
+                        }
                     });
 
                     (
@@ -1337,6 +1361,7 @@ impl LanguageServer for BslLanguageServer {
                             &uri,
                             index_snapshot.as_ref(),
                             snippet_support,
+                            self.settings.read().await.enable_flow_sensitive,
                         )
                         .await
                     }
@@ -1557,6 +1582,7 @@ impl LanguageServer for BslLanguageServer {
                         position,
                         &uri,
                         &settings.hover,
+                        settings.enable_flow_sensitive,
                     )
                 }
                 _ => None,
@@ -1851,16 +1877,29 @@ impl LanguageServer for BslLanguageServer {
                     }
                 }
 
+                let enable_flow_sensitive = self.settings.read().await.enable_flow_sensitive;
+
                 let type_at_position_hint = {
                     let offset = analysis
                         .utf16_position_to_byte_offset(file_id, position.line, position.character)
                         .ok()
                         .flatten();
                     offset.and_then(|offset| {
-                        analysis
-                            .type_at_byte_offset(file_id, offset.min(u32::MAX as usize) as u32)
-                            .ok()
-                            .flatten()
+                        let offset = offset.min(u32::MAX as usize) as u32;
+                        if enable_flow_sensitive {
+                            analysis
+                                .flow_type_at_byte_offset(file_id, offset)
+                                .ok()
+                                .flatten()
+                                .or_else(|| {
+                                    analysis
+                                        .type_at_byte_offset(file_id, offset)
+                                        .ok()
+                                        .flatten()
+                                })
+                        } else {
+                            analysis.type_at_byte_offset(file_id, offset).ok().flatten()
+                        }
                     })
                 };
                 let receiver_type_hint = ir_program.as_ref().and_then(|program| {
@@ -1882,10 +1921,23 @@ impl LanguageServer for BslLanguageServer {
                         _ => None,
                     }?;
 
-                    analysis
-                        .type_at_byte_offset(file_id, object_span.start)
-                        .ok()
-                        .flatten()
+                    if enable_flow_sensitive {
+                        analysis
+                            .flow_type_at_byte_offset(file_id, object_span.start)
+                            .ok()
+                            .flatten()
+                            .or_else(|| {
+                                analysis
+                                    .type_at_byte_offset(file_id, object_span.start)
+                                    .ok()
+                                    .flatten()
+                            })
+                    } else {
+                        analysis
+                            .type_at_byte_offset(file_id, object_span.start)
+                            .ok()
+                            .flatten()
+                    }
                 });
 
                 (
@@ -2044,6 +2096,8 @@ impl LanguageServer for BslLanguageServer {
                 let file_content = analysis.file_text(file_id).ok().flatten();
                 let deps = analysis.deps_data().ok();
 
+                let enable_flow_sensitive = self.settings.read().await.enable_flow_sensitive;
+
                 let receiver_type_hint = file_content.as_ref().and_then(|text| {
                     let query = bsl_backend::application::type_system::signature_help_query(
                         text.as_ref(),
@@ -2059,10 +2113,18 @@ impl LanguageServer for BslLanguageServer {
                         )
                         .ok()
                         .flatten()?;
-                    analysis
-                        .type_at_byte_offset(file_id, offset.min(u32::MAX as usize) as u32)
-                        .ok()
-                        .flatten()
+                    let offset = offset.min(u32::MAX as usize) as u32;
+                    if enable_flow_sensitive {
+                        analysis
+                            .flow_type_at_byte_offset(file_id, offset)
+                            .ok()
+                            .flatten()
+                            .or_else(|| {
+                                analysis.type_at_byte_offset(file_id, offset).ok().flatten()
+                            })
+                    } else {
+                        analysis.type_at_byte_offset(file_id, offset).ok().flatten()
+                    }
                 });
 
                 (file_content, deps, receiver_type_hint)

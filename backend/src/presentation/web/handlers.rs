@@ -58,6 +58,9 @@ pub struct HoverRequest {
     pub column: u32,
     #[serde(default = "default_detail_level")]
     pub detail_level: String,
+    /// Feature gate: include flow-sensitive (CFG-based) results (default: false).
+    #[serde(default)]
+    pub include_flow_sensitive: bool,
 }
 
 fn default_detail_level() -> String {
@@ -306,6 +309,7 @@ pub async fn validate_code(
 
     let deps_bundle = state.deps_bundle_v2.read().await.clone();
     let code = payload.code.clone();
+    let include_flow_sensitive = payload.include_flow_sensitive;
     let validation_result =
         tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<ValidationErrorDto>> {
             let mut host = AnalysisHostV2::default();
@@ -328,10 +332,17 @@ pub async fn validate_code(
             });
 
             let analysis = host.analysis();
-            let diagnostics = analysis
-                .semantic_diagnostics(V2FileId(1))
-                .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
-                .unwrap_or_else(|| Arc::new(Vec::new()));
+            let diagnostics = if include_flow_sensitive {
+                analysis
+                    .semantic_diagnostics_flow_sensitive(V2FileId(1))
+                    .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
+                    .unwrap_or_else(|| Arc::new(Vec::new()))
+            } else {
+                analysis
+                    .semantic_diagnostics(V2FileId(1))
+                    .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
+                    .unwrap_or_else(|| Arc::new(Vec::new()))
+            };
 
             Ok(type_diagnostics_to_validation_errors(
                 diagnostics.as_ref(),
@@ -375,6 +386,7 @@ pub async fn get_hover(
     let code = req.code.clone();
     let line = req.line;
     let column = req.column;
+    let include_flow_sensitive = req.include_flow_sensitive;
     let syntax_helper_path = state.syntax_helper_path.clone();
 
     let hover_result = tokio::task::spawn_blocking(move || -> anyhow::Result<Option<String>> {
@@ -423,6 +435,7 @@ pub async fn get_hover(
             file_content.as_ref(),
             line,
             column,
+            include_flow_sensitive,
             &metadata_lookup,
             &hover_formatter,
             None,
@@ -461,6 +474,7 @@ pub async fn get_diagnostics(
 
     let deps_bundle = state.deps_bundle_v2.read().await.clone();
     let code = payload.code.clone();
+    let include_flow_sensitive = payload.include_flow_sensitive;
 
     let diagnostics_result = tokio::task::spawn_blocking(
         move || -> anyhow::Result<(Vec<SyntaxErrorDto>, Vec<SemanticErrorDto>)> {
@@ -506,10 +520,17 @@ pub async fn get_diagnostics(
                 return Ok((syntax_errors, Vec::new()));
             }
 
-            let diagnostics = analysis
-                .semantic_diagnostics(V2FileId(1))
-                .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
-                .unwrap_or_else(|| Arc::new(Vec::new()));
+            let diagnostics = if include_flow_sensitive {
+                analysis
+                    .semantic_diagnostics_flow_sensitive(V2FileId(1))
+                    .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
+                    .unwrap_or_else(|| Arc::new(Vec::new()))
+            } else {
+                analysis
+                    .semantic_diagnostics(V2FileId(1))
+                    .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
+                    .unwrap_or_else(|| Arc::new(Vec::new()))
+            };
 
             let semantic_errors: Vec<SemanticErrorDto> = diagnostics
                 .iter()
@@ -559,6 +580,7 @@ pub async fn get_diagnostics_debug(
 
     let deps_bundle = state.deps_bundle_v2.read().await.clone();
     let code = payload.code.clone();
+    let include_flow_sensitive = payload.include_flow_sensitive;
 
     let diagnostics_result =
         tokio::task::spawn_blocking(move || -> anyhow::Result<serde_json::Value> {
@@ -647,10 +669,17 @@ pub async fn get_diagnostics_debug(
                 "has_cfg": ir.cfg.is_some()
             });
 
-            let diagnostics = analysis
-                .semantic_diagnostics(V2FileId(1))
-                .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
-                .unwrap_or_else(|| Arc::new(Vec::new()));
+            let diagnostics = if include_flow_sensitive {
+                analysis
+                    .semantic_diagnostics_flow_sensitive(V2FileId(1))
+                    .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
+                    .unwrap_or_else(|| Arc::new(Vec::new()))
+            } else {
+                analysis
+                    .semantic_diagnostics(V2FileId(1))
+                    .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
+                    .unwrap_or_else(|| Arc::new(Vec::new()))
+            };
 
             let errors = diagnostics.as_ref();
 
@@ -743,6 +772,7 @@ pub async fn get_enhanced_hover(
     let code = req.code.clone();
     let line = req.line;
     let column = req.column;
+    let include_flow_sensitive = req.include_flow_sensitive;
     let syntax_helper_path = state.syntax_helper_path.clone();
 
     let hover_result = tokio::task::spawn_blocking(move || -> anyhow::Result<Option<String>> {
@@ -798,6 +828,7 @@ pub async fn get_enhanced_hover(
             file_content.as_ref(),
             line,
             column,
+            include_flow_sensitive,
             &metadata_lookup,
             &hover_formatter,
             Some(hover_config),
@@ -844,8 +875,8 @@ pub struct SemanticTreeRequest {
     /// Включить граф вызовов (по умолчанию: true)
     #[serde(default = "default_true")]
     pub include_call_graph: bool,
-    /// Включить flow-sensitive информацию (по умолчанию: true)
-    #[serde(default = "default_true")]
+    /// Включить flow-sensitive информацию (по умолчанию: false)
+    #[serde(default)]
     pub include_flow_sensitive: bool,
 }
 

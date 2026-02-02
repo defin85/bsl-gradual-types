@@ -246,6 +246,25 @@ unsafe impl salsa::Update for SemanticDiagnosticsSnapshot {
 }
 
 #[derive(Debug, Clone)]
+pub struct FlowTypeAtOffsetSnapshot(Arc<Option<TypeResolution>>);
+
+impl PartialEq for FlowTypeAtOffsetSnapshot {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for FlowTypeAtOffsetSnapshot {}
+
+unsafe impl salsa::Update for FlowTypeAtOffsetSnapshot {
+    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
+        let old_value: &mut Self = unsafe { &mut *old_pointer };
+        *old_value = new_value;
+        true
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct TypeIndexSnapshot(Arc<type_inference_v2::TypeIndex>);
 
 impl PartialEq for TypeIndexSnapshot {
@@ -387,6 +406,75 @@ pub fn semantic_diagnostics(
     walk_program(&program, &mut visitor);
 
     let mut diagnostics = visitor.into_errors();
+    diagnostics.sort_by(|a, b| {
+        let severity_key = |severity: DiagnosticSeverity| match severity {
+            DiagnosticSeverity::Error => 0_u8,
+            DiagnosticSeverity::Warning => 1_u8,
+            DiagnosticSeverity::Info => 2_u8,
+            DiagnosticSeverity::Hint => 3_u8,
+        };
+        (
+            a.span.start,
+            a.span.end,
+            severity_key(a.severity),
+            &a.message,
+        )
+            .cmp(&(
+                b.span.start,
+                b.span.end,
+                severity_key(b.severity),
+                &b.message,
+            ))
+    });
+
+    SemanticDiagnosticsSnapshot(Arc::new(diagnostics))
+}
+
+#[salsa::tracked]
+pub fn semantic_diagnostics_flow_sensitive(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    deps: DepsSnapshot,
+    settings: SettingsSnapshot,
+) -> SemanticDiagnosticsSnapshot {
+    let _deps_id = deps.id(db);
+    let _settings_id = settings.id(db);
+    let deps_data = deps.data(db).0.clone();
+
+    let parsed = parse_result(db, file, settings).0;
+    if !parsed.syntax_errors.is_empty()
+        && !syntax_errors_only_in_directives(file.text(db), &parsed.syntax_errors)
+    {
+        return SemanticDiagnosticsSnapshot(Arc::new(Vec::new()));
+    }
+
+    let program = ir(db, file, deps, settings).0;
+    let type_index = type_index(db, file, deps, settings).0;
+
+    let mut type_hints = SemanticTypeHints::default();
+    populate_assignment_value_hints(&program, &type_index, &mut type_hints);
+    populate_call_and_member_hints(&parsed.program, &type_index, &mut type_hints);
+
+    let resolver = deps_data
+        .resolver
+        .clone()
+        .unwrap_or_else(|| Arc::new(TypeResolver::new(deps_data.repository.clone())));
+    let metadata_lookup = TypeMetadataLookup::new(deps_data.repository.clone());
+    let validator = TypeValidator::new(&metadata_lookup);
+
+    let detail_level = settings.diagnostics_detail_level(db);
+    let mut visitor = SemanticValidationVisitor::with_detail_level(
+        &validator,
+        &program,
+        resolver.as_ref(),
+        &deps_data.signature_index,
+        detail_level,
+    );
+    visitor.set_platform_signatures_loaded(deps_data.platform_signatures_loaded);
+    visitor.set_type_hints(Some(&type_hints));
+    walk_program(&program, &mut visitor);
+
+    let mut diagnostics = visitor.into_errors();
     diagnostics.extend(flow_sensitive_null_safety_diagnostics(
         &program,
         &type_index,
@@ -414,6 +502,158 @@ pub fn semantic_diagnostics(
     });
 
     SemanticDiagnosticsSnapshot(Arc::new(diagnostics))
+}
+
+fn cfg_node_at_byte_offset(cfg: &bsl_shared::ir::ControlFlowGraph, byte_offset: u32) -> Option<usize> {
+    let find = |offset: u32| {
+        (0..cfg.nodes().len())
+            .filter_map(|node_id| cfg.node_span(node_id).map(|span| (node_id, span)))
+            .filter(|(_, span)| span.contains(offset))
+            .min_by_key(|(_, span)| span.len())
+            .map(|(node_id, _)| node_id)
+    };
+
+    // Hover/completion часто вызываются на границе токена (например, сразу после '.'),
+    // поэтому пробуем небольшое окно назад.
+    for delta in 0..=32_u32 {
+        if let Some(offset) = byte_offset.checked_sub(delta) {
+            if let Some(node_id) = find(offset) {
+                return Some(node_id);
+            }
+        }
+    }
+    None
+}
+
+fn conditional_branch_node_at_byte_offset(
+    program: &bsl_shared::ir::SemanticProgram,
+    cfg: &bsl_shared::ir::ControlFlowGraph,
+    conditional_node_id: usize,
+    byte_offset: u32,
+) -> usize {
+    use bsl_shared::ir::EdgeKind;
+    use bsl_shared::ir::SemanticNodeKind;
+
+    let mut edge_kind = EdgeKind::ConditionalTrue;
+
+    if let Some(ir_node_idx) = cfg.node_ir_node_index(conditional_node_id) {
+        if let Some(ir_node) = program.nodes.get(ir_node_idx) {
+            if let SemanticNodeKind::IfStatement { else_branch, .. } = &ir_node.kind {
+                if let Some(else_branch) = else_branch.as_ref().filter(|b| !b.is_empty()) {
+                    let else_start = else_branch
+                        .iter()
+                        .filter_map(|idx| program.nodes.get(*idx).map(|n| n.span.start))
+                        .min();
+
+                    if else_start.is_some_and(|start| byte_offset >= start) {
+                        edge_kind = EdgeKind::ConditionalFalse;
+                    }
+                }
+            }
+        }
+    }
+
+    cfg.edges()
+        .iter()
+        .find(|e| e.from == conditional_node_id && e.kind == edge_kind)
+        .map(|e| e.to)
+        .unwrap_or(conditional_node_id)
+}
+
+fn build_initial_flow_context_for_narrowing(
+    cfg: &bsl_shared::ir::ControlFlowGraph,
+    variable_name: &str,
+    base_type: TypeResolution,
+) -> FlowAnalysisContext {
+    use bsl_shared::analysis::detect_type_guards;
+    use bsl_shared::ir::CfgNodeKind;
+
+    let mut ctx = FlowAnalysisContext::new();
+    ctx.set_variable(variable_name, base_type);
+
+    for node in cfg.nodes() {
+        match &node.kind {
+            CfgNodeKind::Conditional { condition } | CfgNodeKind::LoopHeader { condition } => {
+                for guard in detect_type_guards(condition) {
+                    let var = guard.variable_name();
+                    if ctx.get_variable(var).is_none() {
+                        ctx.set_variable(var, TypeResolution::unknown());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    ctx
+}
+
+fn narrow_type_for_variable_at(
+    program: &bsl_shared::ir::SemanticProgram,
+    byte_offset: u32,
+    variable_name: &str,
+    base_type: TypeResolution,
+) -> Option<TypeResolution> {
+    use bsl_shared::analysis::NarrowingEngine;
+    use bsl_shared::ir::{CfgNodeKind, EdgeKind};
+
+    let cfg = program.cfg.as_ref()?;
+    let mut node_id = cfg_node_at_byte_offset(cfg, byte_offset)?;
+
+    // Если позиция попала в span условного узла (например, внутри then/else блока),
+    // смещаемся на соответствующую ветку, чтобы получить корректный контекст narrowing.
+    match &cfg.nodes().get(node_id)?.kind {
+        CfgNodeKind::Conditional { .. } => {
+            node_id = conditional_branch_node_at_byte_offset(program, cfg, node_id, byte_offset);
+        }
+        CfgNodeKind::LoopHeader { .. } => {
+            node_id = cfg
+                .edges()
+                .iter()
+                .find(|e| e.from == node_id && e.kind == EdgeKind::ConditionalTrue)
+                .map(|e| e.to)
+                .unwrap_or(node_id);
+        }
+        _ => {}
+    }
+
+    let initial = build_initial_flow_context_for_narrowing(cfg, variable_name, base_type);
+    let mut engine = NarrowingEngine::new(cfg.clone());
+    engine.build_narrowing_contexts(initial);
+
+    engine
+        .get_context(node_id)
+        .and_then(|ctx| ctx.get_type(variable_name))
+        .cloned()
+        .filter(|t| !t.is_unknown())
+}
+
+#[salsa::tracked]
+pub fn flow_type_at_byte_offset(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    deps: DepsSnapshot,
+    settings: SettingsSnapshot,
+    byte_offset: u32,
+) -> FlowTypeAtOffsetSnapshot {
+    let _deps_id = deps.id(db);
+    let _settings_id = settings.id(db);
+
+    let program = ir(db, file, deps, settings).0;
+    let type_index = type_index(db, file, deps, settings).0;
+
+    let base = type_index.type_at_byte_offset(byte_offset);
+    let (var_name, _state) = match program.find_variable_at_byte_offset(byte_offset) {
+        Some(v) => v,
+        None => return FlowTypeAtOffsetSnapshot(Arc::new(base)),
+    };
+
+    let base_for_narrowing = base.clone().unwrap_or_else(TypeResolution::unknown);
+    if let Some(narrowed) = narrow_type_for_variable_at(&program, byte_offset, &var_name, base_for_narrowing) {
+        return FlowTypeAtOffsetSnapshot(Arc::new(Some(narrowed)));
+    }
+
+    FlowTypeAtOffsetSnapshot(Arc::new(base))
 }
 
 fn flow_sensitive_null_safety_diagnostics(
@@ -1014,6 +1254,17 @@ impl AnalysisV2 {
         cancellable(|| semantic_diagnostics(&self.db, file, self.deps, self.settings).0).map(Some)
     }
 
+    pub fn semantic_diagnostics_flow_sensitive(
+        &self,
+        file_id: FileId,
+    ) -> Cancellable<Option<Arc<Vec<TypeDiagnostic>>>> {
+        let Some(&file) = self.files.get(&file_id) else {
+            return Ok(None);
+        };
+        cancellable(|| semantic_diagnostics_flow_sensitive(&self.db, file, self.deps, self.settings).0)
+            .map(Some)
+    }
+
     pub fn utf16_position_to_byte_offset(
         &self,
         file_id: FileId,
@@ -1086,6 +1337,18 @@ impl AnalysisV2 {
                 .clone()
         })
         .map(|index| index.type_at_byte_offset(byte_offset))
+    }
+
+    pub fn flow_type_at_byte_offset(
+        &self,
+        file_id: FileId,
+        byte_offset: u32,
+    ) -> Cancellable<Option<TypeResolution>> {
+        let Some(&file) = self.files.get(&file_id) else {
+            return Ok(None);
+        };
+        cancellable(|| flow_type_at_byte_offset(&self.db, file, self.deps, self.settings, byte_offset).0.clone())
+            .map(|s| (*s).clone())
     }
 }
 
@@ -1636,7 +1899,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_diagnostics_include_flow_sensitive_null_safety() {
+    fn semantic_diagnostics_do_not_include_flow_sensitive_null_safety_by_default() {
         let mut host = AnalysisHostV2::default();
         let file_id = FileId(1);
 
@@ -1675,10 +1938,113 @@ mod tests {
         assert!(
             diagnostics
                 .iter()
-                .any(|d| d.message.contains("может быть Null")),
-            "diagnostics: {:?}",
+                .all(|d| !d.message.contains("может быть Null")),
+            "diagnostics unexpectedly contain flow-sensitive null-safety: {:?}",
             diagnostics
         );
+    }
+
+    #[test]
+    fn semantic_diagnostics_flow_sensitive_includes_null_safety() {
+        let mut host = AnalysisHostV2::default();
+        let file_id = FileId(1);
+
+        host.apply_change(Change::SetFile {
+            file_id,
+            text: Arc::from(
+                "Procedure Test()\n\
+                 x = Null;\n\
+                 x.Method();\n\
+                 EndProcedure",
+            ),
+            version: 1,
+            path: Arc::from("test.bsl"),
+        });
+
+        let repository = Arc::new(InMemoryTypeRepository::new()) as Arc<dyn TypeRepository>;
+        let platform_signatures_loaded = repository.platform_docs_loaded();
+        let deps = Arc::new(SemanticDeps {
+            signature_index: repository.get_signature_index_clone(),
+            resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
+            repository,
+            platform_signatures_loaded,
+        });
+
+        host.apply_change(Change::SetDepsSnapshot {
+            deps_id: DepsSnapshotId::from_hash("deps"),
+            deps,
+        });
+
+        let diagnostics = host
+            .analysis()
+            .semantic_diagnostics_flow_sensitive(file_id)
+            .unwrap()
+            .unwrap();
+
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("может быть Null")),
+            "flow-sensitive diagnostics should contain null-safety warning: {:?}",
+            diagnostics
+        );
+    }
+
+    #[test]
+    fn flow_type_at_byte_offset_does_not_depend_on_first_entry_node() {
+        let mut host = AnalysisHostV2::default();
+        let file_id = FileId(1);
+
+        host.apply_change(Change::SetFile {
+            file_id,
+            text: Arc::from(
+                "Procedure First()\n\
+                 a = 1;\n\
+                 EndProcedure\n\
+                 \n\
+                 Procedure Second()\n\
+                 x = 0;\n\
+                 Если ТипЗнч(x) = Тип(\"Строка\") Тогда\n\
+                 y = x;\n\
+                 КонецЕсли;\n\
+                 EndProcedure",
+            ),
+            version: 1,
+            path: Arc::from("test.bsl"),
+        });
+
+        let repository = Arc::new(InMemoryTypeRepository::new()) as Arc<dyn TypeRepository>;
+        let platform_signatures_loaded = repository.platform_docs_loaded();
+        let deps = Arc::new(SemanticDeps {
+            signature_index: repository.get_signature_index_clone(),
+            resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
+            repository,
+            platform_signatures_loaded,
+        });
+
+        host.apply_change(Change::SetDepsSnapshot {
+            deps_id: DepsSnapshotId::from_hash("deps"),
+            deps,
+        });
+
+        let analysis = host.analysis();
+        let code = analysis.file_text(file_id).unwrap().unwrap();
+        let byte_offset = code
+            .find("y = x")
+            .map(|idx| (idx + "y = ".len()) as u32)
+            .expect("offset for 'x' in 'y = x'");
+
+        let flow_type = analysis
+            .flow_type_at_byte_offset(file_id, byte_offset)
+            .unwrap()
+            .expect("flow type at offset");
+
+        match flow_type.result {
+            bsl_shared::domain::types::ResolutionResult::Concrete(
+                bsl_shared::domain::types::ConcreteType::Platform(pt),
+            ) => assert_eq!(pt.name, "Строка"),
+            other => panic!("Expected Строка, got: {:?}", other),
+        }
     }
 
     #[test]

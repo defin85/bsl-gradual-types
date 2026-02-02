@@ -200,6 +200,7 @@ pub fn hover_for_code_with_config(
         code,
         line,
         column,
+        false,
         &metadata_lookup,
         &hover_formatter,
         hover_config,

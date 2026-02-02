@@ -69,17 +69,6 @@ pub enum Statement {
         condition: Expression,
         then_body: Vec<Statement>,
         else_body: Option<Vec<Statement>>,
-        /// Span заголовка (IF ... THEN), без тела веток.
-        ///
-        /// Tree-sitter pipeline заполняет это поле; fallback-парсеры могут оставить `None`.
-        #[serde(default)]
-        header_span: Option<Span>,
-        /// Span тела then-ветки (между THEN и ELSE/ENDIF), без ключевых слов.
-        #[serde(default)]
-        then_span: Option<Span>,
-        /// Span тела else/elseif-ветки (между ELSE/ELSIF и ENDIF), без ключевых слов.
-        #[serde(default)]
-        else_span: Option<Span>,
         span: Span,
     },
     For {
@@ -87,35 +76,17 @@ pub enum Statement {
         start: Expression,
         end: Expression,
         body: Vec<Statement>,
-        /// Span заголовка (FOR ... DO), без тела цикла.
-        #[serde(default)]
-        header_span: Option<Span>,
-        /// Span тела цикла (между DO и ENDDO), без ключевых слов.
-        #[serde(default)]
-        body_span: Option<Span>,
         span: Span,
     },
     ForEach {
         variable: String,
         collection: Expression,
         body: Vec<Statement>,
-        /// Span заголовка (FOREACH ... DO), без тела цикла.
-        #[serde(default)]
-        header_span: Option<Span>,
-        /// Span тела цикла (между DO и ENDDO), без ключевых слов.
-        #[serde(default)]
-        body_span: Option<Span>,
         span: Span,
     },
     While {
         condition: Expression,
         body: Vec<Statement>,
-        /// Span заголовка (WHILE ... DO), без тела цикла.
-        #[serde(default)]
-        header_span: Option<Span>,
-        /// Span тела цикла (между DO и ENDDO), без ключевых слов.
-        #[serde(default)]
-        body_span: Option<Span>,
         span: Span,
     },
     Return {
@@ -125,15 +96,6 @@ pub enum Statement {
     Try {
         try_body: Vec<Statement>,
         except_body: Vec<Statement>,
-        /// Span заголовка (TRY keyword). Нужен для корректного отделения header/body.
-        #[serde(default)]
-        header_span: Option<Span>,
-        /// Span тела try (между TRY и EXCEPT), без ключевых слов.
-        #[serde(default)]
-        try_span: Option<Span>,
-        /// Span тела except (между EXCEPT и ENDTRY), без ключевых слов.
-        #[serde(default)]
-        except_span: Option<Span>,
         span: Span,
     },
     Call {

@@ -435,21 +435,9 @@ impl AstToIrConverter {
                     SemanticNodeKind::IfStatement {
                         then_branch,
                         else_branch,
-                        header_span,
-                        then_span,
-                        else_span,
-                        condition_span,
                     } => {
                         let raw = slice_span(self.source, node.span).unwrap_or("");
-                        let condition = condition_span
-                            .and_then(|span| slice_span(self.source, span))
-                            .map(normalize_ws)
-                            .unwrap_or_else(|| extract_condition_from_header(first_line(raw), &node.kind));
-                        let header_span = header_span.unwrap_or(Span {
-                            start: node.span.start,
-                            end: node.span.start,
-                        });
-                        let then_span = then_span.unwrap_or(node.span);
+                        let condition = extract_condition_from_header(first_line(raw), &node.kind);
 
                         let cond_id = add_cfg_node_from_ir(
                             &mut self.cfg,
@@ -457,16 +445,6 @@ impl AstToIrConverter {
                             node,
                             Some(stmt_idx),
                         );
-                        self.cfg.set_node_span(cond_id, Some(header_span));
-
-                        let then_marker_id = add_cfg_node(
-                            &mut self.cfg,
-                            CfgNodeKind::BasicBlock {
-                                statements: Vec::new(),
-                            },
-                        );
-                        self.cfg.set_node_span(then_marker_id, Some(then_span));
-
                         let merge_id = add_cfg_node(
                             &mut self.cfg,
                             CfgNodeKind::BasicBlock {
@@ -474,56 +452,39 @@ impl AstToIrConverter {
                             },
                         );
 
-                        self.cfg
-                            .add_edge(cond_id, then_marker_id, EdgeKind::ConditionalTrue);
-
                         if let Some((then_entry, then_open)) =
                             self.build_block(then_branch, fn_exit)
                         {
                             self.cfg
-                                .add_edge(then_marker_id, then_entry, EdgeKind::Unconditional);
+                                .add_edge(cond_id, then_entry, EdgeKind::ConditionalTrue);
                             for from in then_open {
                                 self.cfg.add_edge(from, merge_id, EdgeKind::Unconditional);
                             }
                         } else {
-                            self.cfg
-                                .add_edge(then_marker_id, merge_id, EdgeKind::Unconditional);
-                        }
-
-                        if let Some(else_branch) = else_branch {
-                            let else_marker_id = add_cfg_node(
+                            let then_empty_id = add_cfg_node(
                                 &mut self.cfg,
                                 CfgNodeKind::BasicBlock {
                                     statements: Vec::new(),
                                 },
                             );
-                            if let Some(span) = else_span {
-                                self.cfg.set_node_span(else_marker_id, Some(*span));
-                            } else {
-                                self.cfg.set_node_span(else_marker_id, Some(node.span));
-                            }
+                            self.cfg
+                                .add_edge(cond_id, then_empty_id, EdgeKind::ConditionalTrue);
+                            self.cfg
+                                .add_edge(then_empty_id, merge_id, EdgeKind::Unconditional);
+                        }
 
+                        if let Some(else_branch) = else_branch {
                             if let Some((else_entry, else_open)) =
                                 self.build_block(else_branch, fn_exit)
                             {
                                 self.cfg
-                                    .add_edge(cond_id, else_marker_id, EdgeKind::ConditionalFalse);
-                                self.cfg.add_edge(
-                                    else_marker_id,
-                                    else_entry,
-                                    EdgeKind::Unconditional,
-                                );
+                                    .add_edge(cond_id, else_entry, EdgeKind::ConditionalFalse);
                                 for from in else_open {
                                     self.cfg.add_edge(from, merge_id, EdgeKind::Unconditional);
                                 }
                             } else {
                                 self.cfg
-                                    .add_edge(cond_id, else_marker_id, EdgeKind::ConditionalFalse);
-                                self.cfg.add_edge(
-                                    else_marker_id,
-                                    merge_id,
-                                    EdgeKind::Unconditional,
-                                );
+                                    .add_edge(cond_id, merge_id, EdgeKind::ConditionalFalse);
                             }
                         } else {
                             self.cfg
@@ -533,85 +494,11 @@ impl AstToIrConverter {
                         (cond_id, vec![merge_id])
                     }
 
-                    SemanticNodeKind::WhileLoop {
-                        body,
-                        header_span,
-                        body_span,
-                        condition_span,
-                    } => {
-                        let raw = slice_span(self.source, node.span).unwrap_or("");
-                        let condition = condition_span
-                            .and_then(|span| slice_span(self.source, span))
-                            .map(normalize_ws)
-                            .unwrap_or_else(|| extract_condition_from_header(first_line(raw), &node.kind));
-                        let header_span = header_span.unwrap_or(Span {
-                            start: node.span.start,
-                            end: node.span.start,
-                        });
-                        let body_span = body_span.unwrap_or(node.span);
-
-                        let header_id = add_cfg_node_from_ir(
-                            &mut self.cfg,
-                            CfgNodeKind::LoopHeader { condition },
-                            node,
-                            Some(stmt_idx),
-                        );
-                        self.cfg.set_node_span(header_id, Some(header_span));
-                        let after_loop_id = add_cfg_node(
-                            &mut self.cfg,
-                            CfgNodeKind::BasicBlock {
-                                statements: Vec::new(),
-                            },
-                        );
-
-                        self.cfg
-                            .add_edge(header_id, after_loop_id, EdgeKind::LoopExit);
-
-                        let body_marker_id = add_cfg_node(&mut self.cfg, CfgNodeKind::LoopBody);
-                        self.cfg.set_node_span(body_marker_id, Some(body_span));
-                        self.cfg
-                            .add_edge(header_id, body_marker_id, EdgeKind::ConditionalTrue);
-
-                        self.loop_stack.push(LoopFrame {
-                            header_id,
-                            after_loop_id,
-                        });
-
-                        if let Some((body_entry, body_open)) = self.build_block(body, fn_exit) {
-                            self.cfg
-                                .add_edge(body_marker_id, body_entry, EdgeKind::Unconditional);
-                            for from in body_open {
-                                self.cfg.add_edge(from, header_id, EdgeKind::LoopBack);
-                            }
-                        } else {
-                            self.cfg
-                                .add_edge(body_marker_id, header_id, EdgeKind::LoopBack);
-                        }
-
-                        let _ = self.loop_stack.pop();
-
-                        (header_id, vec![after_loop_id])
-                    }
-
-                    SemanticNodeKind::ForLoop {
-                        body,
-                        header_span,
-                        body_span,
-                        ..
-                    }
-                    | SemanticNodeKind::ForEachLoop {
-                        body,
-                        header_span,
-                        body_span,
-                        ..
-                    } => {
+                    SemanticNodeKind::WhileLoop { body }
+                    | SemanticNodeKind::ForLoop { body, .. }
+                    | SemanticNodeKind::ForEachLoop { body, .. } => {
                         let raw = slice_span(self.source, node.span).unwrap_or("");
                         let condition = extract_condition_from_header(first_line(raw), &node.kind);
-                        let header_span = header_span.unwrap_or(Span {
-                            start: node.span.start,
-                            end: node.span.start,
-                        });
-                        let body_span = body_span.unwrap_or(node.span);
 
                         let header_id = add_cfg_node_from_ir(
                             &mut self.cfg,
@@ -619,7 +506,6 @@ impl AstToIrConverter {
                             node,
                             Some(stmt_idx),
                         );
-                        self.cfg.set_node_span(header_id, Some(header_span));
                         let after_loop_id = add_cfg_node(
                             &mut self.cfg,
                             CfgNodeKind::BasicBlock {
@@ -631,7 +517,6 @@ impl AstToIrConverter {
                             .add_edge(header_id, after_loop_id, EdgeKind::LoopExit);
 
                         let body_marker_id = add_cfg_node(&mut self.cfg, CfgNodeKind::LoopBody);
-                        self.cfg.set_node_span(body_marker_id, Some(body_span));
                         self.cfg
                             .add_edge(header_id, body_marker_id, EdgeKind::ConditionalTrue);
 
@@ -721,9 +606,6 @@ impl AstToIrConverter {
                     SemanticNodeKind::TryExcept {
                         try_body,
                         except_body,
-                        header_span,
-                        try_span,
-                        except_span,
                     } => {
                         let cond_id = add_cfg_node_from_ir(
                             &mut self.cfg,
@@ -733,29 +615,6 @@ impl AstToIrConverter {
                             node,
                             Some(stmt_idx),
                         );
-                        let header_span = header_span.unwrap_or(Span {
-                            start: node.span.start,
-                            end: node.span.start,
-                        });
-                        self.cfg.set_node_span(cond_id, Some(header_span));
-
-                        let try_marker_id = add_cfg_node(
-                            &mut self.cfg,
-                            CfgNodeKind::BasicBlock {
-                                statements: Vec::new(),
-                            },
-                        );
-                        self.cfg.set_node_span(try_marker_id, Some(try_span.unwrap_or(node.span)));
-
-                        let except_marker_id = add_cfg_node(
-                            &mut self.cfg,
-                            CfgNodeKind::BasicBlock {
-                                statements: Vec::new(),
-                            },
-                        );
-                        self.cfg
-                            .set_node_span(except_marker_id, Some(except_span.unwrap_or(node.span)));
-
                         let merge_id = add_cfg_node(
                             &mut self.cfg,
                             CfgNodeKind::BasicBlock {
@@ -763,42 +622,28 @@ impl AstToIrConverter {
                             },
                         );
 
-                        self.cfg
-                            .add_edge(cond_id, try_marker_id, EdgeKind::ConditionalTrue);
-
                         if let Some((try_entry, try_open)) = self.build_block(try_body, fn_exit) {
                             self.cfg
-                                .add_edge(try_marker_id, try_entry, EdgeKind::Unconditional);
+                                .add_edge(cond_id, try_entry, EdgeKind::ConditionalTrue);
                             for from in try_open {
                                 self.cfg.add_edge(from, merge_id, EdgeKind::Unconditional);
                             }
                         } else {
                             self.cfg
-                                .add_edge(try_marker_id, merge_id, EdgeKind::Unconditional);
+                                .add_edge(cond_id, merge_id, EdgeKind::ConditionalTrue);
                         }
-
-                        self.cfg
-                            .add_edge(cond_id, except_marker_id, EdgeKind::ConditionalFalse);
 
                         if let Some((except_entry, except_open)) =
                             self.build_block(except_body, fn_exit)
                         {
                             self.cfg
-                                .add_edge(
-                                    except_marker_id,
-                                    except_entry,
-                                    EdgeKind::Unconditional,
-                                );
+                                .add_edge(cond_id, except_entry, EdgeKind::ConditionalFalse);
                             for from in except_open {
                                 self.cfg.add_edge(from, merge_id, EdgeKind::Unconditional);
                             }
                         } else {
                             self.cfg
-                                .add_edge(
-                                    except_marker_id,
-                                    merge_id,
-                                    EdgeKind::Unconditional,
-                                );
+                                .add_edge(cond_id, merge_id, EdgeKind::ConditionalFalse);
                         }
 
                         (cond_id, vec![merge_id])
@@ -961,9 +806,7 @@ impl AstToIrConverter {
         }
 
         if !has_executable {
-            // Даже если в файле нет исполняемых конструкций, CFG должен быть доступен
-            // для flow-sensitive инфраструктуры (минимум Entry -> Exit).
-            builder.build_component(&[]);
+            return None;
         }
 
         Some(builder.cfg)

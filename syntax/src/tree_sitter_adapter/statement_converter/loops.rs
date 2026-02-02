@@ -11,10 +11,6 @@ use crate::tree_sitter_adapter::expression_converter::convert_expression;
 use crate::tree_sitter_adapter::span::{node_to_span_cached, LineIndex};
 use crate::tree_sitter_adapter::utils::node_text;
 
-fn span_from_bounds(start: u32, end: u32) -> Span {
-    Span { start, end }
-}
-
 /// Конвертировать for_statement с использованием кеша строк (Milestone 2.19)
 pub(crate) fn convert_for_statement_cached(
     node: &Node,
@@ -35,8 +31,6 @@ pub(crate) fn convert_for_statement_cached(
     let mut body = Vec::new();
     let mut in_body = false;
     let mut expr_count = 0;
-    let mut do_kw_span: Option<Span> = None;
-    let mut enddo_kw_span: Option<Span> = None;
 
     for child in node.children(&mut cursor) {
         match child.kind() {
@@ -46,11 +40,9 @@ pub(crate) fn convert_for_statement_cached(
                 }
             }
             "DO_KEYWORD" | "ЦИКЛ_KEYWORD" => {
-                do_kw_span = Some(node_to_span_cached(&child, source, line_index));
                 in_body = true;
             }
             "ENDDO_KEYWORD" | "КОНЕЦЦИКЛА_KEYWORD" => {
-                enddo_kw_span = Some(node_to_span_cached(&child, source, line_index));
                 break;
             }
             _ if child.kind().contains("expression")
@@ -81,19 +73,11 @@ pub(crate) fn convert_for_statement_cached(
         }
     }
 
-    let header_span = do_kw_span.map(|do_kw| span_from_bounds(span.start, do_kw.end));
-    let body_span = match (do_kw_span, enddo_kw_span) {
-        (Some(do_kw), Some(enddo_kw)) => Some(span_from_bounds(do_kw.end, enddo_kw.start)),
-        _ => None,
-    };
-
     Ok(Statement::For {
         variable,
         start,
         end,
         body,
-        header_span,
-        body_span,
         span,
     })
 }
@@ -113,8 +97,6 @@ pub(crate) fn convert_for_each_statement_cached(
     };
     let mut body = Vec::new();
     let mut in_body = false;
-    let mut do_kw_span: Option<Span> = None;
-    let mut enddo_kw_span: Option<Span> = None;
 
     for child in node.children(&mut cursor) {
         match child.kind() {
@@ -124,11 +106,9 @@ pub(crate) fn convert_for_each_statement_cached(
                 }
             }
             "DO_KEYWORD" | "ЦИКЛ_KEYWORD" => {
-                do_kw_span = Some(node_to_span_cached(&child, source, line_index));
                 in_body = true;
             }
             "ENDDO_KEYWORD" | "КОНЕЦЦИКЛА_KEYWORD" => {
-                enddo_kw_span = Some(node_to_span_cached(&child, source, line_index));
                 break;
             }
             _ if !in_body && child.kind().contains("expression") => {
@@ -152,11 +132,6 @@ pub(crate) fn convert_for_each_statement_cached(
         variable,
         collection,
         body,
-        header_span: do_kw_span.map(|do_kw| span_from_bounds(span.start, do_kw.end)),
-        body_span: match (do_kw_span, enddo_kw_span) {
-            (Some(do_kw), Some(enddo_kw)) => Some(span_from_bounds(do_kw.end, enddo_kw.start)),
-            _ => None,
-        },
         span,
     })
 }
@@ -175,18 +150,14 @@ pub(crate) fn convert_while_statement_cached(
     };
     let mut body = Vec::new();
     let mut in_body = false;
-    let mut do_kw_span: Option<Span> = None;
-    let mut enddo_kw_span: Option<Span> = None;
 
     for child in node.children(&mut cursor) {
         match child.kind() {
             "WHILE_KEYWORD" | "ПОКА_KEYWORD" => {}
             "DO_KEYWORD" | "ЦИКЛ_KEYWORD" => {
-                do_kw_span = Some(node_to_span_cached(&child, source, line_index));
                 in_body = true;
             }
             "ENDDO_KEYWORD" | "КОНЕЦЦИКЛА_KEYWORD" => {
-                enddo_kw_span = Some(node_to_span_cached(&child, source, line_index));
                 break;
             }
             _ if !in_body => {
@@ -205,11 +176,6 @@ pub(crate) fn convert_while_statement_cached(
     Ok(Statement::While {
         condition,
         body,
-        header_span: do_kw_span.map(|do_kw| span_from_bounds(span.start, do_kw.end)),
-        body_span: match (do_kw_span, enddo_kw_span) {
-            (Some(do_kw), Some(enddo_kw)) => Some(span_from_bounds(do_kw.end, enddo_kw.start)),
-            _ => None,
-        },
         span,
     })
 }

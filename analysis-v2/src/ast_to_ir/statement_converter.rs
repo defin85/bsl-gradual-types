@@ -12,24 +12,6 @@ use bsl_syntax::ast::{Expression, Statement};
 
 use super::converter::AstToIrConverter;
 
-fn expression_span(expr: &Expression) -> Span {
-    match expr {
-        Expression::Identifier { span, .. }
-        | Expression::String { span, .. }
-        | Expression::Number { span, .. }
-        | Expression::Boolean { span, .. }
-        | Expression::Date { span, .. }
-        | Expression::Call { span, .. }
-        | Expression::Binary { span, .. }
-        | Expression::Unary { span, .. }
-        | Expression::Ternary { span, .. }
-        | Expression::New { span, .. }
-        | Expression::PropertyAccess { span, .. }
-        | Expression::IndexAccess { span, .. }
-        | Expression::Await { span, .. } => *span,
-    }
-}
-
 impl AstToIrConverter {
     /// Конвертация Statement -> SemanticNode
     ///
@@ -75,46 +57,29 @@ impl AstToIrConverter {
                 condition,
                 then_body,
                 else_body,
-                header_span,
-                then_span,
-                else_span,
                 span: ast_span,
-            } => self.convert_if_statement(
-                condition,
-                then_body,
-                else_body,
-                header_span,
-                then_span,
-                else_span,
-                ast_span,
-            ),
+            } => self.convert_if_statement(condition, then_body, else_body, ast_span),
 
             Statement::While {
                 condition,
                 body,
-                header_span,
-                body_span,
                 span: ast_span,
-            } => self.convert_while_loop(condition, body, header_span, body_span, ast_span),
+            } => self.convert_while_loop(condition, body, ast_span),
 
             Statement::For {
                 variable,
                 start,
                 end,
                 body,
-                header_span,
-                body_span,
                 span: ast_span,
-            } => self.convert_for_loop(variable, start, end, body, header_span, body_span, ast_span),
+            } => self.convert_for_loop(variable, start, end, body, ast_span),
 
             Statement::ForEach {
                 variable,
                 collection,
                 body,
-                header_span,
-                body_span,
                 span: ast_span,
-            } => self.convert_foreach_loop(variable, collection, body, header_span, body_span, ast_span),
+            } => self.convert_foreach_loop(variable, collection, body, ast_span),
 
             Statement::Return {
                 value,
@@ -140,18 +105,8 @@ impl AstToIrConverter {
             Statement::Try {
                 try_body,
                 except_body,
-                header_span,
-                try_span,
-                except_span,
                 span: ast_span,
-            } => self.convert_try_statement(
-                try_body,
-                except_body,
-                header_span,
-                try_span,
-                except_span,
-                ast_span,
-            ),
+            } => self.convert_try_statement(try_body, except_body, ast_span),
 
             Statement::Call {
                 expression,
@@ -220,6 +175,24 @@ impl AstToIrConverter {
         value: Expression,
         ast_span: Span,
     ) -> Result<Option<usize>> {
+        fn expression_span(expr: &Expression) -> Span {
+            match expr {
+                Expression::Identifier { span, .. }
+                | Expression::String { span, .. }
+                | Expression::Number { span, .. }
+                | Expression::Boolean { span, .. }
+                | Expression::Date { span, .. }
+                | Expression::Call { span, .. }
+                | Expression::Binary { span, .. }
+                | Expression::Unary { span, .. }
+                | Expression::Ternary { span, .. }
+                | Expression::New { span, .. }
+                | Expression::PropertyAccess { span, .. }
+                | Expression::IndexAccess { span, .. }
+                | Expression::Await { span, .. } => *span,
+            }
+        }
+
         if let Expression::Identifier { name: var_name, .. } = target {
             let value_span = self.ast_span_to_ir_span(expression_span(&value));
 
@@ -267,18 +240,11 @@ impl AstToIrConverter {
         condition: Expression,
         then_body: Vec<Statement>,
         else_body: Option<Vec<Statement>>,
-        header_span: Option<Span>,
-        then_span: Option<Span>,
-        else_span: Option<Span>,
         ast_span: Span,
     ) -> Result<Option<usize>> {
         self.convert_expression_for_hover(&condition)?;
 
-        let condition_span = Some(self.ast_span_to_ir_span(expression_span(&condition)));
         let span = self.ast_span_to_ir_span(ast_span);
-        let header_span = header_span.map(|s| self.ast_span_to_ir_span(s));
-        let then_span = then_span.map(|s| self.ast_span_to_ir_span(s));
-        let else_span = else_span.map(|s| self.ast_span_to_ir_span(s));
 
         // Создаём scope для then ветки
         let then_scope = self.symbol_table.create_scope(self.current_scope);
@@ -318,10 +284,6 @@ impl AstToIrConverter {
             kind: SemanticNodeKind::IfStatement {
                 then_branch: then_indices,
                 else_branch: else_indices,
-                header_span,
-                then_span,
-                else_span,
-                condition_span,
             },
             span,
             scope_id: self.current_scope,
@@ -336,16 +298,11 @@ impl AstToIrConverter {
         &mut self,
         condition: Expression,
         body: Vec<Statement>,
-        header_span: Option<Span>,
-        body_span: Option<Span>,
         ast_span: Span,
     ) -> Result<Option<usize>> {
         self.convert_expression_for_hover(&condition)?;
 
-        let condition_span = Some(self.ast_span_to_ir_span(expression_span(&condition)));
         let span = self.ast_span_to_ir_span(ast_span);
-        let header_span = header_span.map(|s| self.ast_span_to_ir_span(s));
-        let body_span = body_span.map(|s| self.ast_span_to_ir_span(s));
 
         let body_scope = self.symbol_table.create_scope(self.current_scope);
         let old_scope = self.current_scope;
@@ -362,12 +319,7 @@ impl AstToIrConverter {
         self.current_scope = old_scope;
 
         let node = SemanticNode {
-            kind: SemanticNodeKind::WhileLoop {
-                body: body_indices,
-                header_span,
-                body_span,
-                condition_span,
-            },
+            kind: SemanticNodeKind::WhileLoop { body: body_indices },
             span,
             scope_id: self.current_scope,
         };
@@ -383,16 +335,12 @@ impl AstToIrConverter {
         start: Expression,
         end: Expression,
         body: Vec<Statement>,
-        header_span: Option<Span>,
-        body_span: Option<Span>,
         ast_span: Span,
     ) -> Result<Option<usize>> {
         self.convert_expression_for_hover(&start)?;
         self.convert_expression_for_hover(&end)?;
 
         let span = self.ast_span_to_ir_span(ast_span);
-        let header_span = header_span.map(|s| self.ast_span_to_ir_span(s));
-        let body_span = body_span.map(|s| self.ast_span_to_ir_span(s));
 
         let body_scope = self.symbol_table.create_scope(self.current_scope);
         let old_scope = self.current_scope;
@@ -416,8 +364,6 @@ impl AstToIrConverter {
             kind: SemanticNodeKind::ForLoop {
                 variable,
                 body: body_indices,
-                header_span,
-                body_span,
             },
             span,
             scope_id: self.current_scope,
@@ -433,15 +379,11 @@ impl AstToIrConverter {
         variable: String,
         collection: Expression,
         body: Vec<Statement>,
-        header_span: Option<Span>,
-        body_span: Option<Span>,
         ast_span: Span,
     ) -> Result<Option<usize>> {
         self.convert_expression_for_hover(&collection)?;
 
         let span = self.ast_span_to_ir_span(ast_span);
-        let header_span = header_span.map(|s| self.ast_span_to_ir_span(s));
-        let body_span = body_span.map(|s| self.ast_span_to_ir_span(s));
 
         let body_scope = self.symbol_table.create_scope(self.current_scope);
         let old_scope = self.current_scope;
@@ -465,8 +407,6 @@ impl AstToIrConverter {
             kind: SemanticNodeKind::ForEachLoop {
                 variable,
                 body: body_indices,
-                header_span,
-                body_span,
             },
             span,
             scope_id: self.current_scope,
@@ -481,15 +421,9 @@ impl AstToIrConverter {
         &mut self,
         try_body: Vec<Statement>,
         except_body: Vec<Statement>,
-        header_span: Option<Span>,
-        try_span: Option<Span>,
-        except_span: Option<Span>,
         ast_span: Span,
     ) -> Result<Option<usize>> {
         let span = self.ast_span_to_ir_span(ast_span);
-        let header_span = header_span.map(|s| self.ast_span_to_ir_span(s));
-        let try_span = try_span.map(|s| self.ast_span_to_ir_span(s));
-        let except_span = except_span.map(|s| self.ast_span_to_ir_span(s));
 
         // Try scope
         let try_scope = self.symbol_table.create_scope(self.current_scope);
@@ -524,9 +458,6 @@ impl AstToIrConverter {
             kind: SemanticNodeKind::TryExcept {
                 try_body: try_indices,
                 except_body: except_indices,
-                header_span,
-                try_span,
-                except_span,
             },
             span,
             scope_id: self.current_scope,

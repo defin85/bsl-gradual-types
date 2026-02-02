@@ -189,7 +189,6 @@ fn walk_node<V: SemanticVisitor>(
         SemanticNodeKind::IfStatement {
             then_branch,
             else_branch,
-            ..
         } => {
             // Обходим then ветку
             for &node_idx in then_branch {
@@ -222,7 +221,6 @@ fn walk_node<V: SemanticVisitor>(
         SemanticNodeKind::TryExcept {
             try_body,
             except_body,
-            ..
         } => {
             // Обходим try блок
             for &node_idx in try_body {

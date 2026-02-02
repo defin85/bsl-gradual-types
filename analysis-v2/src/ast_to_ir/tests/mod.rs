@@ -16,7 +16,7 @@ use bsl_shared::domain::types::{
 };
 use bsl_shared::domain::NullSafetyAnalyzer;
 use bsl_shared::ir::SemanticNodeKind;
-use bsl_shared::ir::{CfgNodeAtByteOffsetBias, CfgNodeKind, EdgeKind};
+use bsl_shared::ir::{CfgNodeKind, EdgeKind};
 
 use bsl_syntax::ast::{Expression, Program, Span as AstSpan, Statement};
 
@@ -107,178 +107,6 @@ fn test_cfg_present_for_root_level_assignment() {
 }
 
 #[test]
-fn test_cfg_present_for_empty_program() {
-    let ast = Program { statements: vec![] };
-
-    let ir = AstToIrConverter::convert(
-        ast,
-        "".to_string(),
-        "test.bsl".to_string(),
-        create_test_repository(),
-        create_test_signature_index(),
-    )
-    .unwrap();
-
-    let cfg = ir.cfg.expect("CFG must always be present");
-    assert!(cfg
-        .nodes()
-        .iter()
-        .any(|n| matches!(n.kind, CfgNodeKind::Entry)));
-    assert!(cfg
-        .nodes()
-        .iter()
-        .any(|n| matches!(n.kind, CfgNodeKind::Exit)));
-    assert!(cfg
-        .edges()
-        .iter()
-        .any(|e| matches!(e.kind, EdgeKind::Unconditional)));
-}
-
-#[test]
-fn test_cfg_present_for_declarations_only() {
-    let source = "Процедура P()\nКонецПроцедуры";
-    let ast = bsl_syntax::parse(source, &bsl_syntax::ParseOptions::default())
-        .unwrap()
-        .program;
-
-    let ir = AstToIrConverter::convert(
-        ast,
-        source.to_string(),
-        "test.bsl".to_string(),
-        create_test_repository(),
-        create_test_signature_index(),
-    )
-    .unwrap();
-
-    let cfg = ir.cfg.expect("CFG must always be present");
-    assert!(cfg
-        .nodes()
-        .iter()
-        .any(|n| matches!(n.kind, CfgNodeKind::Entry)));
-    assert!(cfg
-        .nodes()
-        .iter()
-        .any(|n| matches!(n.kind, CfgNodeKind::Exit)));
-    assert!(cfg
-        .edges()
-        .iter()
-        .any(|e| matches!(e.kind, EdgeKind::Unconditional)));
-}
-
-#[test]
-fn test_cfg_node_mapping_in_empty_then_branch_is_deterministic() {
-    let source =
-        "Процедура P()\nЕсли Истина Тогда\n\nИначе\n  x = 1;\nКонецЕсли\nКонецПроцедуры";
-    let ast = bsl_syntax::parse(source, &bsl_syntax::ParseOptions::default())
-        .unwrap()
-        .program;
-
-    let ir = AstToIrConverter::convert(
-        ast,
-        source.to_string(),
-        "test.bsl".to_string(),
-        create_test_repository(),
-        create_test_signature_index(),
-    )
-    .unwrap();
-
-    let cfg = ir.cfg.expect("CFG must be built");
-
-    let pos = source
-        .find("\n\nИначе")
-        .expect("expected empty then branch marker");
-    let offset = (pos + 1) as u32;
-
-    let a = cfg
-        .node_at_byte_offset(offset, CfgNodeAtByteOffsetBias::Exact)
-        .expect("expected node in empty then branch");
-    let b = cfg
-        .node_at_byte_offset(offset, CfgNodeAtByteOffsetBias::Exact)
-        .expect("expected node in empty then branch");
-    assert_eq!(a, b);
-
-    let span = cfg.node_span(a).expect("expected node span");
-    assert!(span.contains(offset));
-    assert!(
-        cfg.edges()
-            .iter()
-            .any(|e| e.to == a && e.kind == EdgeKind::ConditionalTrue),
-        "expected node to be ConditionalTrue target"
-    );
-}
-
-#[test]
-fn test_cfg_node_mapping_in_empty_loop_body_points_to_loop_body() {
-    let source = "Процедура P()\nПока x <> Null Цикл\n\nКонецЦикла\nКонецПроцедуры";
-    let ast = bsl_syntax::parse(source, &bsl_syntax::ParseOptions::default())
-        .unwrap()
-        .program;
-
-    let ir = AstToIrConverter::convert(
-        ast,
-        source.to_string(),
-        "test.bsl".to_string(),
-        create_test_repository(),
-        create_test_signature_index(),
-    )
-    .unwrap();
-
-    let cfg = ir.cfg.expect("CFG must be built");
-
-    let pos = source
-        .find("\n\nКонецЦикла")
-        .expect("expected empty loop body marker");
-    let offset = (pos + 1) as u32;
-
-    let node_id = cfg
-        .node_at_byte_offset(offset, CfgNodeAtByteOffsetBias::Exact)
-        .expect("expected node in empty loop body");
-
-    assert!(matches!(cfg.nodes()[node_id].kind, CfgNodeKind::LoopBody));
-    assert!(
-        cfg.edges().iter().any(|e| {
-            e.to == node_id
-                && e.kind == EdgeKind::ConditionalTrue
-                && matches!(cfg.nodes()[e.from].kind, CfgNodeKind::LoopHeader { .. })
-        }),
-        "expected LoopHeader --(ConditionalTrue)--> LoopBody"
-    );
-}
-
-#[test]
-fn test_cfg_node_mapping_prefer_left_bias_picks_node_at_right_boundary() {
-    let source = "Процедура P()\n  x = 1;\nКонецПроцедуры";
-    let ast = bsl_syntax::parse(source, &bsl_syntax::ParseOptions::default())
-        .unwrap()
-        .program;
-
-    let ir = AstToIrConverter::convert(
-        ast,
-        source.to_string(),
-        "test.bsl".to_string(),
-        create_test_repository(),
-        create_test_signature_index(),
-    )
-    .unwrap();
-
-    let cfg = ir.cfg.expect("CFG must be built");
-
-    let assignment_id = (0..cfg.nodes().len())
-        .find(|id| matches!(cfg.nodes()[*id].kind, CfgNodeKind::Assignment { .. }))
-        .expect("expected Assignment node in CFG");
-    let span = cfg.node_span(assignment_id).expect("expected Assignment span");
-
-    assert_eq!(
-        cfg.node_at_byte_offset(span.end, CfgNodeAtByteOffsetBias::Exact),
-        None
-    );
-    assert_eq!(
-        cfg.node_at_byte_offset(span.end, CfgNodeAtByteOffsetBias::PreferLeft),
-        Some(assignment_id)
-    );
-}
-
-#[test]
 fn test_cfg_present_for_function_body() {
     let ast = Program {
         statements: vec![Statement::FunctionDecl {
@@ -354,9 +182,6 @@ fn test_cfg_contains_conditional_edges_for_if_statement() {
                     },
                     span: AstSpan::stub(),
                 }]),
-                header_span: None,
-                then_span: None,
-                else_span: None,
                 span: AstSpan::stub(),
             }],
             compiler_directive: None,
@@ -447,110 +272,22 @@ fn test_null_safety_can_run_on_v2_cfg_method_call() {
 }
 
 #[test]
-fn test_null_safety_while_header_null_check_suppresses_warning_in_body() {
-    let source = "Процедура P()\nПока x <> Null Цикл\n  x.Метод();\nКонецЦикла\nКонецПроцедуры";
-    let ast = bsl_syntax::parse(source, &bsl_syntax::ParseOptions::default())
-        .unwrap()
-        .program;
-
-    let ir = AstToIrConverter::convert(
-        ast,
-        source.to_string(),
-        "test.bsl".to_string(),
-        create_test_repository(),
-        create_test_signature_index(),
-    )
-    .unwrap();
-
-    let cfg = ir.cfg.expect("CFG must be built");
-    assert!(cfg
-        .nodes()
-        .iter()
-        .any(|n| matches!(n.kind, CfgNodeKind::LoopHeader { .. })));
-    assert!(cfg
-        .nodes()
-        .iter()
-        .any(|n| matches!(n.kind, CfgNodeKind::MethodCall { .. })));
-
-    let mut ctx = FlowAnalysisContext::new();
-    ctx.set_variable(
-        "x",
-        TypeResolution {
-            result: ResolutionResult::nullable(ConcreteType::string()),
-            certainty: Certainty::Known,
-            source: ResolutionSource::Static,
-            metadata: ResolutionMetadata::default(),
-            active_facet: None,
-            available_facets: vec![],
-        },
-    );
-
-    let mut analyzer = NullSafetyAnalyzer::new(cfg);
-    let result = analyzer.analyze(&ctx);
-    assert!(
-        result.warnings.is_empty(),
-        "expected no warnings inside loop body, got: {:?}",
-        result.warnings
-    );
-}
-
-#[test]
-fn test_null_safety_while_header_value_is_filled_suppresses_warning_in_body() {
-    let source =
-        "Процедура P()\nПока ЗначениеЗаполнено(x) Цикл\n  x.Метод();\nКонецЦикла\nКонецПроцедуры";
-    let ast = bsl_syntax::parse(source, &bsl_syntax::ParseOptions::default())
-        .unwrap()
-        .program;
-
-    let ir = AstToIrConverter::convert(
-        ast,
-        source.to_string(),
-        "test.bsl".to_string(),
-        create_test_repository(),
-        create_test_signature_index(),
-    )
-    .unwrap();
-
-    let cfg = ir.cfg.expect("CFG must be built");
-
-    let mut ctx = FlowAnalysisContext::new();
-    ctx.set_variable(
-        "x",
-        TypeResolution {
-            result: ResolutionResult::nullable(ConcreteType::string()),
-            certainty: Certainty::Known,
-            source: ResolutionSource::Static,
-            metadata: ResolutionMetadata::default(),
-            active_facet: None,
-            available_facets: vec![],
-        },
-    );
-
-    let mut analyzer = NullSafetyAnalyzer::new(cfg);
-    let result = analyzer.analyze(&ctx);
-    assert!(result.warnings.is_empty());
-}
-
-#[test]
-    fn test_if_statement_with_scope() {
-        let ast = Program {
-            statements: vec![Statement::If {
-                condition: Expression::Boolean {
-                    value: true,
-                    span: AstSpan::stub(),
-                },
-                then_body: vec![Statement::VarDeclaration {
-                    name: "y".to_string(),
-                    type_hint: None,
-                    span: AstSpan::stub(),
-                }],
-                else_body: None,
-                header_span: None,
-                then_span: None,
-                else_span: None,
+fn test_if_statement_with_scope() {
+    let ast = Program {
+        statements: vec![Statement::If {
+            condition: Expression::Boolean {
+                value: true,
+                span: AstSpan::stub(),
+            },
+            then_body: vec![Statement::VarDeclaration {
+                name: "y".to_string(),
+                type_hint: None,
                 span: AstSpan::stub(),
             }],
-        };
+            else_body: None,
+            span: AstSpan::stub(),
+        }],
+    };
 
     let ir = AstToIrConverter::convert(
         ast,

@@ -124,59 +124,16 @@ pub enum SemanticNodeKind {
     IfStatement {
         then_branch: Vec<usize>, // Индексы SemanticNode в then ветке
         else_branch: Option<Vec<usize>>,
-        /// Span заголовка (IF ... THEN), без тела веток.
-        #[serde(default)]
-        header_span: Option<Span>,
-        /// Span тела then-ветки (между THEN и ELSE/ENDIF), без ключевых слов.
-        #[serde(default)]
-        then_span: Option<Span>,
-        /// Span тела else/elseif-ветки (между ELSE/ELSIF и ENDIF), без ключевых слов.
-        #[serde(default)]
-        else_span: Option<Span>,
-        /// Span выражения-условия (без IF/THEN ключевых слов).
-        ///
-        /// Используется для извлечения текста условия без строковых эвристик.
-        #[serde(default)]
-        condition_span: Option<Span>,
     },
 
     /// Цикл While: `Пока условие Цикл ... КонецЦикла`
-    WhileLoop {
-        body: Vec<usize>,
-        /// Span заголовка (WHILE ... DO), без тела цикла.
-        #[serde(default)]
-        header_span: Option<Span>,
-        /// Span тела цикла (между DO и ENDDO), без ключевых слов.
-        #[serde(default)]
-        body_span: Option<Span>,
-        /// Span выражения-условия (без WHILE/DO ключевых слов).
-        #[serde(default)]
-        condition_span: Option<Span>,
-    },
+    WhileLoop { body: Vec<usize> },
 
     /// Цикл For: `Для i = 1 По 10 Цикл ... КонецЦикла`
-    ForLoop {
-        variable: String,
-        body: Vec<usize>,
-        /// Span заголовка (FOR ... DO), без тела цикла.
-        #[serde(default)]
-        header_span: Option<Span>,
-        /// Span тела цикла (между DO и ENDDO), без ключевых слов.
-        #[serde(default)]
-        body_span: Option<Span>,
-    },
+    ForLoop { variable: String, body: Vec<usize> },
 
     /// Цикл ForEach: `Для Каждого элемент Из коллекция Цикл ... КонецЦикла`
-    ForEachLoop {
-        variable: String,
-        body: Vec<usize>,
-        /// Span заголовка (FOREACH ... DO), без тела цикла.
-        #[serde(default)]
-        header_span: Option<Span>,
-        /// Span тела цикла (между DO и ENDDO), без ключевых слов.
-        #[serde(default)]
-        body_span: Option<Span>,
-    },
+    ForEachLoop { variable: String, body: Vec<usize> },
 
     /// Возврат из функции: `Возврат значение;`
     Return { value_node: Option<usize> },
@@ -191,15 +148,6 @@ pub enum SemanticNodeKind {
     TryExcept {
         try_body: Vec<usize>,
         except_body: Vec<usize>,
-        /// Span заголовка (TRY keyword), без тел веток.
-        #[serde(default)]
-        header_span: Option<Span>,
-        /// Span тела try (между TRY и EXCEPT), без ключевых слов.
-        #[serde(default)]
-        try_span: Option<Span>,
-        /// Span тела except (между EXCEPT и ENDTRY), без ключевых слов.
-        #[serde(default)]
-        except_span: Option<Span>,
     },
 
     // === Global Property Access (платформенные менеджеры) ===

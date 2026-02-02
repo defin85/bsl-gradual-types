@@ -100,8 +100,8 @@ impl NullSafetyAnalyzer {
                     }
                 }
 
-                CfgNodeKind::Conditional { condition } => {
-                    // v2 CFG использует `Conditional { condition }` для if/while.
+                CfgNodeKind::Conditional { condition } | CfgNodeKind::LoopHeader { condition } => {
+                    // v2 CFG использует `Conditional` (if) и `LoopHeader` (while/for/foreach).
                     // Для null-safety считаем это эквивалентом `Condition`.
                     if let Some(var_name) = self.extract_null_checked_variable(condition.as_str()) {
                         self.mark_non_null_in_successors(node_id, &var_name);
@@ -278,33 +278,44 @@ impl NullSafetyAnalyzer {
 
     /// Распространить информацию о non-null дальше по графу
     fn propagate_non_null(&mut self, node_id: usize, variable: &str) {
-        let successors: Vec<_> = self
-            .cfg
-            .edges()
-            .iter()
-            .filter(|e| e.from == node_id && e.kind != EdgeKind::ConditionalFalse)
-            .map(|e| e.to)
-            .collect();
+        let mut visited: HashSet<usize> = HashSet::new();
+        let mut stack = vec![node_id];
 
-        for successor in successors {
-            // Не распространяем, если переменная переприсваивается
-            let node = &self.cfg.nodes()[successor];
-            if let CfgNodeKind::Assignment {
-                variable: assigned, ..
-            } = &node.kind
-            {
-                if assigned == variable {
-                    continue;
-                }
+        while let Some(current) = stack.pop() {
+            if !visited.insert(current) {
+                continue;
             }
 
-            self.non_null_vars
-                .entry(successor)
-                .or_default()
-                .insert(TypeId::new(variable));
+            let successors: Vec<_> = self
+                .cfg
+                .edges()
+                .iter()
+                .filter(|e| {
+                    e.from == current
+                        && !matches!(e.kind, EdgeKind::ConditionalFalse | EdgeKind::LoopExit)
+                })
+                .map(|e| e.to)
+                .collect();
 
-            // Рекурсивно
-            self.propagate_non_null(successor, variable);
+            for successor in successors {
+                // Не распространяем, если переменная переприсваивается
+                let node = &self.cfg.nodes()[successor];
+                if let CfgNodeKind::Assignment {
+                    variable: assigned, ..
+                } = &node.kind
+                {
+                    if assigned == variable {
+                        continue;
+                    }
+                }
+
+                self.non_null_vars
+                    .entry(successor)
+                    .or_default()
+                    .insert(TypeId::new(variable));
+
+                stack.push(successor);
+            }
         }
     }
 

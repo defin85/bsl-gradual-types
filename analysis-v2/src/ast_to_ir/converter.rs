@@ -348,6 +348,160 @@ impl AstToIrConverter {
             normalize_ws(raw)
         }
 
+        #[derive(Debug, Clone, Copy)]
+        struct LineInfo {
+            start: usize,
+            len: usize,
+        }
+
+        fn collect_lines(text: &str) -> Vec<LineInfo> {
+            let bytes = text.as_bytes();
+            let mut lines = Vec::new();
+            let mut i = 0_usize;
+
+            while i < bytes.len() {
+                let line_start = i;
+                while i < bytes.len() && bytes[i] != b'\n' && bytes[i] != b'\r' {
+                    i += 1;
+                }
+                let line_end = i;
+
+                if i < bytes.len() {
+                    if bytes[i] == b'\r' {
+                        i += 1;
+                        if i < bytes.len() && bytes[i] == b'\n' {
+                            i += 1;
+                        }
+                    } else if bytes[i] == b'\n' {
+                        i += 1;
+                    }
+                }
+
+                lines.push(LineInfo {
+                    start: line_start,
+                    len: line_end - line_start,
+                });
+            }
+
+            if lines.is_empty() {
+                lines.push(LineInfo {
+                    start: 0,
+                    len: 0,
+                });
+            }
+
+            lines
+        }
+
+        fn line_starts_with_any_keyword(line: &str, keywords_lower: &[&str]) -> bool {
+            let trimmed = line.trim_start();
+            let lowered = trimmed.to_lowercase();
+            keywords_lower.iter().any(|kw| lowered.starts_with(kw))
+        }
+
+        fn find_last_line_idx_with_keywords(
+            raw: &str,
+            lines: &[LineInfo],
+            keywords_lower: &[&str],
+        ) -> Option<usize> {
+            lines.iter().enumerate().rev().find_map(|(idx, info)| {
+                let line = raw.get(info.start..info.start + info.len)?;
+                line_starts_with_any_keyword(line, keywords_lower).then_some(idx)
+            })
+        }
+
+        fn find_last_line_idx_with_keywords_before(
+            raw: &str,
+            lines: &[LineInfo],
+            keywords_lower: &[&str],
+            before_idx: usize,
+        ) -> Option<usize> {
+            lines
+                .iter()
+                .enumerate()
+                .take(before_idx)
+                .rev()
+                .find_map(|(idx, info)| {
+                    let line = raw.get(info.start..info.start + info.len)?;
+                    line_starts_with_any_keyword(line, keywords_lower).then_some(idx)
+                })
+        }
+
+        fn compute_if_spans(raw: &str, stmt_span: Span, has_else: bool) -> (Span, Span, Option<Span>) {
+            let lines = collect_lines(raw);
+            let base = stmt_span.start;
+
+            let header_end_rel = lines[0].len as u32;
+
+            let endif_idx = find_last_line_idx_with_keywords(raw, &lines, &["конецесли", "endif"])
+                .unwrap_or_else(|| lines.len().saturating_sub(1));
+            let endif_line_start_rel = lines[endif_idx].start as u32;
+
+            let then_body_start = base.saturating_add(header_end_rel);
+            let then_body_end_rel = if has_else {
+                let else_idx = find_last_line_idx_with_keywords_before(
+                    raw,
+                    &lines,
+                    &["иначе", "else", "elsif", "иначеесли"],
+                    endif_idx,
+                );
+                else_idx
+                    .map(|idx| lines[idx].start as u32)
+                    .unwrap_or(endif_line_start_rel)
+            } else {
+                endif_line_start_rel
+            };
+            let then_body_end = base.saturating_add(then_body_end_rel);
+
+            let header_span = Span {
+                start: base,
+                end: then_body_start,
+            };
+            let then_body_span = Span {
+                start: then_body_start,
+                end: then_body_end.max(then_body_start),
+            };
+
+            if !has_else {
+                return (header_span, then_body_span, None);
+            }
+
+            let else_body_start_rel = then_body_end_rel;
+            let else_body_start = base.saturating_add(else_body_start_rel);
+            let else_body_end = base.saturating_add(endif_line_start_rel).max(else_body_start);
+
+            let else_body_span = Span {
+                start: else_body_start,
+                end: else_body_end,
+            };
+
+            (header_span, then_body_span, Some(else_body_span))
+        }
+
+        fn compute_loop_spans(raw: &str, stmt_span: Span) -> (Span, Span) {
+            let lines = collect_lines(raw);
+            let base = stmt_span.start;
+
+            let header_end_rel = lines[0].len as u32;
+            let enddo_idx =
+                find_last_line_idx_with_keywords(raw, &lines, &["конеццикла", "enddo"])
+                    .unwrap_or_else(|| lines.len().saturating_sub(1));
+            let enddo_line_start_rel = lines[enddo_idx].start as u32;
+
+            let header_span = Span {
+                start: base,
+                end: base.saturating_add(header_end_rel),
+            };
+            let body_span = Span {
+                start: header_span.end,
+                end: base
+                    .saturating_add(enddo_line_start_rel)
+                    .max(header_span.end),
+            };
+
+            (header_span, body_span)
+        }
+
         fn add_cfg_node(cfg: &mut ControlFlowGraph, kind: CfgNodeKind) -> CfgNodeId {
             let id = cfg.nodes().len();
             let node_id = cfg.add_node(CfgNode { id, kind });
@@ -438,6 +592,8 @@ impl AstToIrConverter {
                     } => {
                         let raw = slice_span(self.source, node.span).unwrap_or("");
                         let condition = extract_condition_from_header(first_line(raw), &node.kind);
+                        let (header_span, then_span, else_span) =
+                            compute_if_spans(raw, node.span, else_branch.is_some());
 
                         let cond_id = add_cfg_node_from_ir(
                             &mut self.cfg,
@@ -445,6 +601,16 @@ impl AstToIrConverter {
                             node,
                             Some(stmt_idx),
                         );
+                        self.cfg.set_node_span(cond_id, Some(header_span));
+
+                        let then_marker_id = add_cfg_node(
+                            &mut self.cfg,
+                            CfgNodeKind::BasicBlock {
+                                statements: Vec::new(),
+                            },
+                        );
+                        self.cfg.set_node_span(then_marker_id, Some(then_span));
+
                         let merge_id = add_cfg_node(
                             &mut self.cfg,
                             CfgNodeKind::BasicBlock {
@@ -452,39 +618,54 @@ impl AstToIrConverter {
                             },
                         );
 
+                        self.cfg
+                            .add_edge(cond_id, then_marker_id, EdgeKind::ConditionalTrue);
+
                         if let Some((then_entry, then_open)) =
                             self.build_block(then_branch, fn_exit)
                         {
                             self.cfg
-                                .add_edge(cond_id, then_entry, EdgeKind::ConditionalTrue);
+                                .add_edge(then_marker_id, then_entry, EdgeKind::Unconditional);
                             for from in then_open {
                                 self.cfg.add_edge(from, merge_id, EdgeKind::Unconditional);
                             }
                         } else {
-                            let then_empty_id = add_cfg_node(
+                            self.cfg
+                                .add_edge(then_marker_id, merge_id, EdgeKind::Unconditional);
+                        }
+
+                        if let Some(else_branch) = else_branch {
+                            let else_marker_id = add_cfg_node(
                                 &mut self.cfg,
                                 CfgNodeKind::BasicBlock {
                                     statements: Vec::new(),
                                 },
                             );
-                            self.cfg
-                                .add_edge(cond_id, then_empty_id, EdgeKind::ConditionalTrue);
-                            self.cfg
-                                .add_edge(then_empty_id, merge_id, EdgeKind::Unconditional);
-                        }
+                            if let Some(span) = else_span {
+                                self.cfg.set_node_span(else_marker_id, Some(span));
+                            }
 
-                        if let Some(else_branch) = else_branch {
                             if let Some((else_entry, else_open)) =
                                 self.build_block(else_branch, fn_exit)
                             {
                                 self.cfg
-                                    .add_edge(cond_id, else_entry, EdgeKind::ConditionalFalse);
+                                    .add_edge(cond_id, else_marker_id, EdgeKind::ConditionalFalse);
+                                self.cfg.add_edge(
+                                    else_marker_id,
+                                    else_entry,
+                                    EdgeKind::Unconditional,
+                                );
                                 for from in else_open {
                                     self.cfg.add_edge(from, merge_id, EdgeKind::Unconditional);
                                 }
                             } else {
                                 self.cfg
-                                    .add_edge(cond_id, merge_id, EdgeKind::ConditionalFalse);
+                                    .add_edge(cond_id, else_marker_id, EdgeKind::ConditionalFalse);
+                                self.cfg.add_edge(
+                                    else_marker_id,
+                                    merge_id,
+                                    EdgeKind::Unconditional,
+                                );
                             }
                         } else {
                             self.cfg
@@ -499,6 +680,7 @@ impl AstToIrConverter {
                     | SemanticNodeKind::ForEachLoop { body, .. } => {
                         let raw = slice_span(self.source, node.span).unwrap_or("");
                         let condition = extract_condition_from_header(first_line(raw), &node.kind);
+                        let (header_span, body_span) = compute_loop_spans(raw, node.span);
 
                         let header_id = add_cfg_node_from_ir(
                             &mut self.cfg,
@@ -506,6 +688,7 @@ impl AstToIrConverter {
                             node,
                             Some(stmt_idx),
                         );
+                        self.cfg.set_node_span(header_id, Some(header_span));
                         let after_loop_id = add_cfg_node(
                             &mut self.cfg,
                             CfgNodeKind::BasicBlock {
@@ -517,6 +700,7 @@ impl AstToIrConverter {
                             .add_edge(header_id, after_loop_id, EdgeKind::LoopExit);
 
                         let body_marker_id = add_cfg_node(&mut self.cfg, CfgNodeKind::LoopBody);
+                        self.cfg.set_node_span(body_marker_id, Some(body_span));
                         self.cfg
                             .add_edge(header_id, body_marker_id, EdgeKind::ConditionalTrue);
 
@@ -806,7 +990,9 @@ impl AstToIrConverter {
         }
 
         if !has_executable {
-            return None;
+            // Даже если в файле нет исполняемых конструкций, CFG должен быть доступен
+            // для flow-sensitive инфраструктуры (минимум Entry -> Exit).
+            builder.build_component(&[]);
         }
 
         Some(builder.cfg)

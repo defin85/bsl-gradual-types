@@ -354,6 +354,9 @@ fn test_cfg_contains_conditional_edges_for_if_statement() {
                     },
                     span: AstSpan::stub(),
                 }]),
+                header_span: None,
+                then_span: None,
+                else_span: None,
                 span: AstSpan::stub(),
             }],
             compiler_directive: None,
@@ -529,22 +532,25 @@ fn test_null_safety_while_header_value_is_filled_suppresses_warning_in_body() {
 }
 
 #[test]
-fn test_if_statement_with_scope() {
-    let ast = Program {
-        statements: vec![Statement::If {
-            condition: Expression::Boolean {
-                value: true,
-                span: AstSpan::stub(),
-            },
-            then_body: vec![Statement::VarDeclaration {
-                name: "y".to_string(),
-                type_hint: None,
+    fn test_if_statement_with_scope() {
+        let ast = Program {
+            statements: vec![Statement::If {
+                condition: Expression::Boolean {
+                    value: true,
+                    span: AstSpan::stub(),
+                },
+                then_body: vec![Statement::VarDeclaration {
+                    name: "y".to_string(),
+                    type_hint: None,
+                    span: AstSpan::stub(),
+                }],
+                else_body: None,
+                header_span: None,
+                then_span: None,
+                else_span: None,
                 span: AstSpan::stub(),
             }],
-            else_body: None,
-            span: AstSpan::stub(),
-        }],
-    };
+        };
 
     let ir = AstToIrConverter::convert(
         ast,

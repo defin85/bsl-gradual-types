@@ -318,6 +318,7 @@ impl SemanticProgram {
             TryExcept {
                 try_body,
                 except_body,
+                ..
             } => {
                 let mut indices = try_body.clone();
                 indices.extend(except_body);

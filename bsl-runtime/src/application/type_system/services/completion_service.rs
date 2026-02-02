@@ -1102,77 +1102,78 @@ fn resolve_member_owner_type_sync(
         }
     }
 
-    let best = best?;
     let mut resolved: Option<TypeResolution> = None;
 
-    if let Some(type_hint) = best.type_hint {
-        let from_hint = resolve_type_from_string(Some(ctx.resolver), &type_hint);
-        if !from_hint.is_unknown() {
-            resolved = Some(from_hint);
-        }
-    } else if let Some(init_index) = best.initializer_node {
-        let init_node = ir_program.nodes.get(init_index)?;
-
-        fn build_ir_expr(
-            program: &SemanticProgram,
-            node_index: usize,
-            depth: u8,
-        ) -> Option<String> {
-            if depth == 0 {
-                return None;
+    if let Some(best) = best {
+        if let Some(type_hint) = best.type_hint {
+            let from_hint = resolve_type_from_string(Some(ctx.resolver), &type_hint);
+            if !from_hint.is_unknown() {
+                resolved = Some(from_hint);
             }
-            let node = program.nodes.get(node_index)?;
-            match &node.kind {
-                SemanticNodeKind::GlobalPropertyAccess { name } => Some(name.clone()),
-                SemanticNodeKind::MemberAccess {
-                    object_node,
-                    object_name,
-                    member_name,
-                    ..
-                } => {
-                    let base = if let Some(obj_node) = object_node {
-                        build_ir_expr(program, *obj_node, depth - 1)?
-                    } else {
-                        object_name.clone()?
-                    };
-                    Some(format!("{}.{}", base, member_name))
-                }
-                SemanticNodeKind::FunctionCall {
-                    function_name,
-                    object_name,
-                    object_node,
-                } => {
-                    let base = if let Some(obj_node) = object_node {
-                        Some(build_ir_expr(program, *obj_node, depth - 1)?)
-                    } else {
-                        object_name.clone()
-                    };
+        } else if let Some(init_index) = best.initializer_node {
+            let init_node = ir_program.nodes.get(init_index)?;
 
-                    match base {
-                        Some(base) => Some(format!("{}.{}()", base, function_name)),
-                        None => Some(format!("{}()", function_name)),
+            fn build_ir_expr(
+                program: &SemanticProgram,
+                node_index: usize,
+                depth: u8,
+            ) -> Option<String> {
+                if depth == 0 {
+                    return None;
+                }
+                let node = program.nodes.get(node_index)?;
+                match &node.kind {
+                    SemanticNodeKind::GlobalPropertyAccess { name } => Some(name.clone()),
+                    SemanticNodeKind::MemberAccess {
+                        object_node,
+                        object_name,
+                        member_name,
+                        ..
+                    } => {
+                        let base = if let Some(obj_node) = object_node {
+                            build_ir_expr(program, *obj_node, depth - 1)?
+                        } else {
+                            object_name.clone()?
+                        };
+                        Some(format!("{}.{}", base, member_name))
                     }
+                    SemanticNodeKind::FunctionCall {
+                        function_name,
+                        object_name,
+                        object_node,
+                    } => {
+                        let base = if let Some(obj_node) = object_node {
+                            Some(build_ir_expr(program, *obj_node, depth - 1)?)
+                        } else {
+                            object_name.clone()
+                        };
+
+                        match base {
+                            Some(base) => Some(format!("{}.{}()", base, function_name)),
+                            None => Some(format!("{}()", function_name)),
+                        }
+                    }
+                    _ => None,
+                }
+            }
+
+            let from_init = match &init_node.kind {
+                SemanticNodeKind::NewExpression { type_name, .. } => {
+                    let resolved = resolve_type_from_string(Some(ctx.resolver), type_name);
+                    (!resolved.is_unknown()).then_some(resolved)
+                }
+                SemanticNodeKind::MemberAccess { .. }
+                | SemanticNodeKind::FunctionCall { .. }
+                | SemanticNodeKind::GlobalPropertyAccess { .. } => {
+                    let expr = build_ir_expr(ir_program, init_index, 16)?;
+                    let resolved = ctx.resolver.resolve_expression_sync(&expr);
+                    (!resolved.is_unknown()).then_some(resolved)
                 }
                 _ => None,
-            }
+            };
+
+            resolved = from_init;
         }
-
-        let from_init = match &init_node.kind {
-            SemanticNodeKind::NewExpression { type_name, .. } => {
-                let resolved = resolve_type_from_string(Some(ctx.resolver), type_name);
-                (!resolved.is_unknown()).then_some(resolved)
-            }
-            SemanticNodeKind::MemberAccess { .. }
-            | SemanticNodeKind::FunctionCall { .. }
-            | SemanticNodeKind::GlobalPropertyAccess { .. } => {
-                let expr = build_ir_expr(ir_program, init_index, 16)?;
-                let resolved = ctx.resolver.resolve_expression_sync(&expr);
-                (!resolved.is_unknown()).then_some(resolved)
-            }
-            _ => None,
-        };
-
-        resolved = from_init;
     }
 
     let base = resolved.clone().unwrap_or_else(TypeResolution::unknown);

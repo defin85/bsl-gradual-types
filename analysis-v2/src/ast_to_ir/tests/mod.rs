@@ -246,6 +246,134 @@ fn test_cfg_node_mapping_in_empty_loop_body_points_to_loop_body() {
 }
 
 #[test]
+fn test_cfg_node_mapping_in_elseif_condition_points_to_nested_conditional() {
+    let source = "Процедура P()\nЕсли A Тогда\n  x = 1;\nИначеЕсли B Тогда\n  x = 2;\nКонецЕсли\nКонецПроцедуры";
+    let ast = bsl_syntax::parse(source, &bsl_syntax::ParseOptions::default())
+        .unwrap()
+        .program;
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        source.to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    let cfg = ir.cfg.expect("CFG must be built");
+
+    let pos = source
+        .find("B Тогда")
+        .expect("expected elseif condition marker");
+    let offset = pos as u32;
+
+    let node_id = cfg
+        .node_at_byte_offset(offset, CfgNodeAtByteOffsetBias::Exact)
+        .expect("expected node in elseif condition header");
+
+    assert!(matches!(
+        cfg.nodes()[node_id].kind,
+        CfgNodeKind::Conditional { .. }
+    ));
+    let span = cfg.node_span(node_id).expect("expected node span");
+    assert!(span.contains(offset));
+}
+
+#[test]
+fn test_cfg_node_mapping_in_empty_elseif_body_is_conditional_true_target() {
+    let source =
+        "Процедура P()\nЕсли A Тогда\n  x = 1;\nИначеЕсли B Тогда\n\nИначе\n  x = 2;\nКонецЕсли\nКонецПроцедуры";
+    let ast = bsl_syntax::parse(source, &bsl_syntax::ParseOptions::default())
+        .unwrap()
+        .program;
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        source.to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    let cfg = ir.cfg.expect("CFG must be built");
+
+    let else_line_start = source
+        .find("\nИначе\n")
+        .expect("expected else clause marker");
+    let offset = (else_line_start.saturating_sub(1)) as u32;
+
+    let node_id = cfg
+        .node_at_byte_offset(offset, CfgNodeAtByteOffsetBias::Exact)
+        .expect("expected node in empty elseif branch");
+
+    assert!(
+        cfg.edges().iter().any(|e| {
+            e.to == node_id
+                && e.kind == EdgeKind::ConditionalTrue
+                && matches!(cfg.nodes()[e.from].kind, CfgNodeKind::Conditional { .. })
+        }),
+        "expected node to be ConditionalTrue target of a Conditional"
+    );
+}
+
+#[test]
+fn test_cfg_node_mapping_in_empty_try_except_bodies_points_to_branch_markers() {
+    let source = "Процедура P()\nПопытка\n\nИсключение\n\nКонецПопытки\nКонецПроцедуры";
+    let ast = bsl_syntax::parse(source, &bsl_syntax::ParseOptions::default())
+        .unwrap()
+        .program;
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        source.to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    let cfg = ir.cfg.expect("CFG must be built");
+
+    let except_line_start = source
+        .find("\nИсключение\n")
+        .expect("expected except clause marker");
+    let try_offset = (except_line_start.saturating_sub(1)) as u32;
+    let try_node = cfg
+        .node_at_byte_offset(try_offset, CfgNodeAtByteOffsetBias::Exact)
+        .expect("expected node in empty try body");
+
+    assert!(
+        cfg.edges().iter().any(|e| {
+            if e.to != try_node || e.kind != EdgeKind::ConditionalTrue {
+                return false;
+            }
+            matches!(cfg.nodes()[e.from].kind, CfgNodeKind::Conditional { ref condition } if condition == "exception")
+        }),
+        "expected empty try-body to map to ConditionalTrue target of TryExcept conditional"
+    );
+
+    let endtry_line_start = source
+        .find("\nКонецПопытки")
+        .expect("expected endtry marker");
+    let except_offset = (endtry_line_start.saturating_sub(1)) as u32;
+    let except_node = cfg
+        .node_at_byte_offset(except_offset, CfgNodeAtByteOffsetBias::Exact)
+        .expect("expected node in empty except body");
+
+    assert!(
+        cfg.edges().iter().any(|e| {
+            if e.to != except_node || e.kind != EdgeKind::ConditionalFalse {
+                return false;
+            }
+            matches!(cfg.nodes()[e.from].kind, CfgNodeKind::Conditional { ref condition } if condition == "exception")
+        }),
+        "expected empty except-body to map to ConditionalFalse target of TryExcept conditional"
+    );
+}
+
+#[test]
 fn test_cfg_node_mapping_prefer_left_bias_picks_node_at_right_boundary() {
     let source = "Процедура P()\n  x = 1;\nКонецПроцедуры";
     let ast = bsl_syntax::parse(source, &bsl_syntax::ParseOptions::default())

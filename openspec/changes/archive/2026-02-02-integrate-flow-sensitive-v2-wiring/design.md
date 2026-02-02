@@ -9,7 +9,7 @@
 ## Текущее состояние (наблюдения)
 - CFG присутствует в IR (`SemanticProgram.cfg`) и строится в v2 конвертере.
 - LSP hover сейчас опирается на `analysis.type_at_byte_offset(...)` (типовой индекс v2) и не использует CFG (`backend/src/bin/lsp_server/handlers/hover.rs`, `analysis-v2/src/lib.rs`).
-- Web API принимает `include_flow_sensitive` для semantic tree, но на уровне DTO он пока не влияет (`shared/src/ir/dto.rs`).
+- Web API принимает `includeFlowSensitive` (camelCase) для flow-sensitive вариантов и должен явно отвергать `include_flow_sensitive` (snake_case) с `400 Bad Request`, чтобы контракт был однозначным.
 - В MCP спецификации уже есть `bsl_type_at_position_start` и `bsl_members_start`, но они не фиксируют flow-sensitive контракт/параметры (см. `openspec/specs/mcp-bsl-agent/spec.md`).
 
 ## Архитектурное решение
@@ -82,7 +82,8 @@ Flow-sensitive вычисления включаются только при я�
    - wiring: hover/completion/diagnostics/signatureHelp/definition выбирают базовый vs flow-sensitive путь по этому флагу.
 
 2) **Web API**:
-   - все параметры `include_flow_sensitive` должны иметь default `false`;
+   - все параметры `includeFlowSensitive` должны иметь default `false`;
+   - `include_flow_sensitive` (snake_case) не поддерживается и должен возвращать `400 Bad Request`;
    - minimum endpoints: semantic tree и запросы, использующие `type-at-position` / diagnostics.
 
 3) **MCP (bsl-agent)**:

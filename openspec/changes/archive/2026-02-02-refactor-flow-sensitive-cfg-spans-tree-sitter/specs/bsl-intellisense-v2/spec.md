@@ -1,6 +1,6 @@
 ## MODIFIED Requirements
 
-### Requirement: Привязка “позиция → CFG узел” опирается на структурные spans tree-sitter и покрывает все Conditional (MUST)
+### Requirement: Привязка “позиция → CFG узел” детерминирована и bias-aware (MUST)
 Система MUST вычислять spans CFG узлов на основе структурной информации tree-sitter (через Syntax AST), а не строковых эвристик поиска ключевых слов.
 
 Для всех CFG узлов вида `CfgNodeKind::Conditional` (включая `If` и `TryExcept`) система MUST:
@@ -19,6 +19,8 @@
 - **WHEN** IDE запрашивает контекст по позиции внутри try-body и внутри except-body
 - **THEN** система выбирает marker-узлы соответствующих веток по spans
 
+## ADDED Requirements
+
 ### Requirement: Completion на `.` в then-ветке после `ТипЗнч`-guard использует narrowing (MUST)
 Система MUST обеспечивать, что completion на позиции сразу после `.` внутри then-ветки условия `ТипЗнч(x) = Тип("...")` использует flow-sensitive narrowing и выбирает контекст ветки (а не fallback).
 
@@ -29,4 +31,3 @@
 - **WHEN** IDE запрашивает completion в позиции сразу после `x.`
 - **THEN** среди результатов присутствует член `Колонки` (как member типа `ТаблицаЗначений`)
 - **AND** тест LSP уровня интеграции фиксирует этот сценарий
-

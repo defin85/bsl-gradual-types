@@ -62,7 +62,7 @@ Salsa обеспечивает demand-driven вычисления: если ин
 Flow-sensitive вычисления включаются только при явном флаге/настройке:
 - **LSP (IDE)**: настройка сервера/клиента (например, `enable_flow_sensitive`) с default `false`.
   - Сервер MUST иметь быстрый путь без дополнительных запросов/алокаций при `false`.
-- **Web API**: параметр запроса `include_flow_sensitive` (default `false`), влияющий на:
+- **Web API**: параметр запроса `includeFlowSensitive` (camelCase, default `false`), влияющий на:
   - включение flow-sensitive полей в ответ,
   - запуск соответствующих v2 queries.
 - **MCP**: параметры tools `include_flow_sensitive` (default `false`) и/или session-level настройка.

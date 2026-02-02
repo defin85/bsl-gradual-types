@@ -8,6 +8,9 @@ pub mod position;
 #[path = "../src/bin/lsp_server/handlers/completion.rs"]
 mod completion_handler;
 
+#[path = "../src/bin/lsp_server/handlers/definition.rs"]
+mod definition_handler;
+
 #[path = "../src/bin/lsp_server/handlers/signature_help.rs"]
 mod signature_help_handler;
 
@@ -19,6 +22,7 @@ use bsl_analysis_v2::{
 use bsl_backend::system::{
     IndexItem, IndexItemKind, IndexKind, IndexSnapshot, IntellisenseIndexStore, TypeKind,
 };
+use bsl_shared::domain::type_definition_location::TypeDefinitionLocation;
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::signature_index::{
     ConstructorSignature, MethodSignature, SignatureIndex, SignatureSource,
@@ -30,6 +34,7 @@ use bsl_shared::domain::types::{
 use bsl_shared::formatting::DetailLevel;
 use bsl_shared::ir::SemanticProgram;
 use bsl_shared::TypeResolver;
+use tempfile::TempDir;
 use tower_lsp::lsp_types::{CompletionResponse, InsertTextFormat, Position, Url};
 
 struct TestEnv {
@@ -290,6 +295,132 @@ fn build_v2_ir_with_parse_result(
         .expect("parse_result");
 
     (file_content, file_path, ir_program, parse_result)
+}
+
+#[tokio::test]
+async fn lsp_definition_flow_sensitive_receiver_hint_changes_result() {
+    let tmp = TempDir::new().expect("temp dir");
+    let method_file = tmp.path().join("string_methods.bsl");
+    let method_text = "Процедура Длина() Экспорт\nКонецПроцедуры\n";
+    std::fs::write(&method_file, method_text).expect("write method file");
+
+    let start = method_text
+        .find("Длина")
+        .map(|idx| idx as u32)
+        .expect("method name offset");
+    let end = start + ("Длина".len() as u32);
+
+    let repository = build_repository_with_array();
+    repository.add_config_method_definition_location(
+        "Строка",
+        "Длина",
+        TypeDefinitionLocation::user_defined(method_file.clone(), start, end),
+    );
+
+    let deps = build_deps(repository);
+
+    let content = "Процедура Test()\n\
+                   x = 0;\n\
+                   Если ТипЗнч(x) = Тип(\"Строка\") Тогда\n\
+                       x.Длина();\n\
+                   КонецЕсли;\n\
+                   КонецПроцедуры\n";
+    let uri = Url::parse("file:///flow_sensitive_definition_gate.bsl").expect("url");
+    let mut position = position_at_marker(content, "Длина");
+    // find_marker_position возвращает позицию *после* маркера; для корректного попадания в span
+    // метода смещаемся на 1 UTF-16 unit влево.
+    position.character = position.character.saturating_sub(1);
+
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(ChangeV2::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("test"),
+        deps: deps.clone(),
+    });
+    host.apply_change(ChangeV2::SetSettingsSnapshot {
+        settings_id: SettingsId::from_hash("test"),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+    let file_id = V2FileId(1);
+    host.apply_change(ChangeV2::SetFile {
+        file_id,
+        text: Arc::from(content.to_string()),
+        version: 0,
+        path: Arc::from("flow_sensitive_definition_gate.bsl"),
+    });
+
+    let analysis = host.snapshot();
+    let file_content = analysis.file_text(file_id).ok().flatten().expect("file_text");
+    let file_path = analysis.file_path(file_id).ok().flatten().expect("file_path");
+    let ir_program = analysis.ir(file_id).ok().flatten().expect("ir");
+
+    // Считаем тип receiver'а (`x`) на старте выражения `x.Длина()`:
+    // - базовый v2 тип: Число (из `x = 0`)
+    // - flow-sensitive тип в then-ветке: Строка (из type guard)
+    let receiver_offset = file_content
+        .find("x.Длина")
+        .map(|idx| idx as u32)
+        .expect("receiver offset");
+
+    let base_receiver_type = analysis
+        .type_at_byte_offset(file_id, receiver_offset)
+        .ok()
+        .flatten();
+    let flow_receiver_type = analysis
+        .flow_type_at_byte_offset(file_id, receiver_offset)
+        .ok()
+        .flatten();
+
+    assert_eq!(
+        base_receiver_type
+            .as_ref()
+            .map(|value| value.type_name())
+            .as_deref(),
+        Some("Число")
+    );
+    assert_eq!(
+        flow_receiver_type
+            .as_ref()
+            .map(|value| value.type_name())
+            .as_deref(),
+        Some("Строка")
+    );
+
+    let disabled = definition_handler::handle_goto_definition_v2(
+        file_path.clone(),
+        file_content.clone(),
+        ir_program.clone(),
+        None,
+        base_receiver_type,
+        deps.clone(),
+        position,
+        &uri,
+    )
+    .await;
+    assert!(
+        disabled.is_none(),
+        "expected no definition without flow-sensitive receiver hint"
+    );
+
+    let enabled = definition_handler::handle_goto_definition_v2(
+        file_path,
+        file_content,
+        ir_program,
+        None,
+        flow_receiver_type,
+        deps,
+        position,
+        &uri,
+    )
+    .await
+    .expect("definition (flow-sensitive)");
+
+    let expected_uri = Url::from_file_path(&method_file).expect("expected method uri");
+    match enabled {
+        tower_lsp::lsp_types::GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, expected_uri);
+        }
+        other => panic!("expected scalar location, got {:?}", other),
+    }
 }
 
 #[tokio::test]

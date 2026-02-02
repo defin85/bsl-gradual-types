@@ -16,7 +16,8 @@
 - [ ] 3.5 SignatureHelp/Definition: использовать flow-sensitive тип там, где это влияет на результат; добавить минимальные тесты.
 
 ## 4. Web API
-- [ ] 4.1 Уточнить/добавить параметр `include_flow_sensitive` (default false) для релевантных endpoints и задокументировать поведение.
+- [ ] 4.1 Уточнить/добавить параметр `includeFlowSensitive` (camelCase, default false) для релевантных endpoints и задокументировать поведение.
+- [ ] 4.1.1 (breaking) `include_flow_sensitive` (snake_case) не поддерживается и должен возвращать `400 Bad Request`, чтобы контракт был однозначным.
 - [ ] 4.2 Реализовать выдачу flow-sensitive полей/улучшений при включении (в т.ч. semantic tree DTO, если применимо).
 - [ ] 4.3 Добавить тесты/смоук проверки для Web API (ON/OFF).
 
@@ -32,4 +33,3 @@
 ## 7. Validation
 - [ ] 7.1 `openspec validate integrate-flow-sensitive-v2-wiring --strict --no-interactive`.
 - [ ] 7.2 `cargo test --workspace` (после реализации; до архивации change).
-

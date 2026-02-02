@@ -147,8 +147,7 @@ mod tests {
             "formatting": { "enabled": false, "indentSize": 4 },
             "enableFlowSensitive": true
         });
-        let settings: BslSettings =
-            serde_json::from_value(raw_enabled).expect("BslSettings");
+        let settings: BslSettings = serde_json::from_value(raw_enabled).expect("BslSettings");
         assert!(settings.enable_flow_sensitive);
     }
 }

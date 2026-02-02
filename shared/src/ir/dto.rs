@@ -517,7 +517,7 @@ impl SemanticProgram {
                                 is_union: None,
                                 union_components: Vec::new(),
                             },
-                            range: range.clone(),
+                            range,
                             confidence: 1.0,
                         });
                     }

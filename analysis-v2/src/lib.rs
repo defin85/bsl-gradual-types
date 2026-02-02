@@ -504,7 +504,10 @@ pub fn semantic_diagnostics_flow_sensitive(
     SemanticDiagnosticsSnapshot(Arc::new(diagnostics))
 }
 
-fn cfg_node_at_byte_offset(cfg: &bsl_shared::ir::ControlFlowGraph, byte_offset: u32) -> Option<usize> {
+fn cfg_node_at_byte_offset(
+    cfg: &bsl_shared::ir::ControlFlowGraph,
+    byte_offset: u32,
+) -> Option<usize> {
     let find = |offset: u32| {
         (0..cfg.nodes().len())
             .filter_map(|node_id| cfg.node_span(node_id).map(|span| (node_id, span)))
@@ -649,7 +652,9 @@ pub fn flow_type_at_byte_offset(
     };
 
     let base_for_narrowing = base.clone().unwrap_or_else(TypeResolution::unknown);
-    if let Some(narrowed) = narrow_type_for_variable_at(&program, byte_offset, &var_name, base_for_narrowing) {
+    if let Some(narrowed) =
+        narrow_type_for_variable_at(&program, byte_offset, &var_name, base_for_narrowing)
+    {
         return FlowTypeAtOffsetSnapshot(Arc::new(Some(narrowed)));
     }
 
@@ -1261,8 +1266,10 @@ impl AnalysisV2 {
         let Some(&file) = self.files.get(&file_id) else {
             return Ok(None);
         };
-        cancellable(|| semantic_diagnostics_flow_sensitive(&self.db, file, self.deps, self.settings).0)
-            .map(Some)
+        cancellable(|| {
+            semantic_diagnostics_flow_sensitive(&self.db, file, self.deps, self.settings).0
+        })
+        .map(Some)
     }
 
     pub fn utf16_position_to_byte_offset(
@@ -1347,8 +1354,12 @@ impl AnalysisV2 {
         let Some(&file) = self.files.get(&file_id) else {
             return Ok(None);
         };
-        cancellable(|| flow_type_at_byte_offset(&self.db, file, self.deps, self.settings, byte_offset).0.clone())
-            .map(|s| (*s).clone())
+        cancellable(|| {
+            flow_type_at_byte_offset(&self.db, file, self.deps, self.settings, byte_offset)
+                .0
+                .clone()
+        })
+        .map(|s| (*s).clone())
     }
 }
 

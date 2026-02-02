@@ -642,7 +642,10 @@ impl BslLanguageServer {
 
                 let (show_hints, enable_flow_sensitive) = {
                     let settings = server.settings.read().await;
-                    (settings.diagnostics.show_hints, settings.enable_flow_sensitive)
+                    (
+                        settings.diagnostics.show_hints,
+                        settings.enable_flow_sensitive,
+                    )
                 };
 
                 // If a newer version is requested, skip work for the stale one early.
@@ -1483,10 +1486,7 @@ mod tests {
             .call(did_change_req)
             .await
             .expect("didChange notification");
-        assert!(
-            did_change_response.is_none(),
-            "didChange is a notification"
-        );
+        assert!(did_change_response.is_none(), "didChange is a notification");
 
         let enabled = tokio::time::timeout(tokio::time::Duration::from_secs(4), async {
             loop {
@@ -1506,7 +1506,9 @@ mod tests {
         .expect("diagnostics v2 publish")
         .diagnostics;
         assert!(
-            enabled.iter().any(|diag| diag.message.contains("может быть Null")),
+            enabled
+                .iter()
+                .any(|diag| diag.message.contains("может быть Null")),
             "expected flow-sensitive null-safety diagnostics when enabled, got {:?}",
             enabled
                 .iter()

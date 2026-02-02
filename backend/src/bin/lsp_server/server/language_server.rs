@@ -43,6 +43,15 @@ use crate::types::{GetCurrentContextParams, ServerStatus, ServerStatusParams};
 
 use super::BslLanguageServer;
 
+fn effective_get_semantic_tree_include_flow_sensitive(
+    request: &GetSemanticTreeRequest,
+    enable_flow_sensitive: bool,
+) -> bool {
+    request
+        .include_flow_sensitive
+        .unwrap_or(enable_flow_sensitive)
+}
+
 #[tower_lsp::async_trait]
 impl LanguageServer for BslLanguageServer {
     // ========================================================================
@@ -1328,10 +1337,7 @@ impl LanguageServer for BslLanguageServer {
                                 })
                         } else {
                             analysis
-                                .type_at_byte_offset(
-                                    file_id,
-                                    offset.min(u32::MAX as usize) as u32,
-                                )
+                                .type_at_byte_offset(file_id, offset.min(u32::MAX as usize) as u32)
                                 .ok()
                                 .flatten()
                         }
@@ -1892,10 +1898,7 @@ impl LanguageServer for BslLanguageServer {
                                 .ok()
                                 .flatten()
                                 .or_else(|| {
-                                    analysis
-                                        .type_at_byte_offset(file_id, offset)
-                                        .ok()
-                                        .flatten()
+                                    analysis.type_at_byte_offset(file_id, offset).ok().flatten()
                                 })
                         } else {
                             analysis.type_at_byte_offset(file_id, offset).ok().flatten()
@@ -2350,10 +2353,15 @@ impl LanguageServer for BslLanguageServer {
                     .flatten()
                     .ok_or_else(tower_lsp::jsonrpc::Error::internal_error)?;
 
+                let include_flow_sensitive = effective_get_semantic_tree_include_flow_sensitive(
+                    &request,
+                    self.settings.read().await.enable_flow_sensitive,
+                );
+
                 let result = semantic_tree_from_ir(
                     ir_program.as_ref(),
                     request.include_call_graph,
-                    request.include_flow_sensitive,
+                    include_flow_sensitive,
                     file_text.as_ref(),
                     line_index.as_ref(),
                 );
@@ -2606,4 +2614,51 @@ fn normalize_optional_string(value: Option<String>) -> Option<String> {
             Some(trimmed.to_string())
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_semantic_tree_flow_sensitive_defaults_to_setting_when_missing() {
+        let request = GetSemanticTreeRequest {
+            uri: "file:///test.bsl".to_string(),
+            include_call_graph: true,
+            include_flow_sensitive: None,
+            max_depth: None,
+        };
+
+        assert!(!effective_get_semantic_tree_include_flow_sensitive(
+            &request, false
+        ));
+        assert!(effective_get_semantic_tree_include_flow_sensitive(
+            &request, true
+        ));
+    }
+
+    #[test]
+    fn get_semantic_tree_flow_sensitive_explicit_value_overrides_setting() {
+        let request_true = GetSemanticTreeRequest {
+            uri: "file:///test.bsl".to_string(),
+            include_call_graph: true,
+            include_flow_sensitive: Some(true),
+            max_depth: None,
+        };
+        assert!(effective_get_semantic_tree_include_flow_sensitive(
+            &request_true,
+            false
+        ));
+
+        let request_false = GetSemanticTreeRequest {
+            uri: "file:///test.bsl".to_string(),
+            include_call_graph: true,
+            include_flow_sensitive: Some(false),
+            max_depth: None,
+        };
+        assert!(!effective_get_semantic_tree_include_flow_sensitive(
+            &request_false,
+            true
+        ));
+    }
 }

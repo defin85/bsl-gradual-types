@@ -2,6 +2,13 @@
 
 All notable changes to BSL Gradual Type System will be documented in this file.
 
+## [Unreleased]
+
+### ⚠️ Breaking changes
+- **Web API**: flow-sensitive флаг в JSON теперь только `includeFlowSensitive` (camelCase). `include_flow_sensitive` (snake_case) возвращает `400 Bad Request`.
+- **LSP**: `bsl.getSemanticTree` — если `include_flow_sensitive` не передан, режим подчиняется workspace setting `enableFlowSensitive` (явное значение параметра имеет приоритет).
+- **MCP (bsl-agent)**: ответы `bsl_type_at_position_start`, `bsl_members_start`, `bsl_diagnostics_start` содержат поле `flow_sensitive_enabled: bool` (effective режим).
+
 ## [1.1.0] - 2025-11-22 - 🎨 Enhanced UX (Milestone 3.6)
 
 ### ✨ Added - Phase 1: Settings & Detail Levels

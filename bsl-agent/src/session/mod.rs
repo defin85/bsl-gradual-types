@@ -1321,6 +1321,7 @@ impl SessionManager {
 
         Ok(BslDiagnosticsResponse {
             analysis_revision,
+            flow_sensitive_enabled: params.include_flow_sensitive,
             diagnostics,
             truncated,
         })
@@ -1534,6 +1535,7 @@ impl SessionManager {
         let Some(program) = program else {
             return Ok(BslTypeAtPositionResponse {
                 analysis_revision,
+                flow_sensitive_enabled: params.include_flow_sensitive,
                 type_info: None,
                 node: None,
                 warnings: vec!["IR not available".to_string()],
@@ -1572,6 +1574,7 @@ impl SessionManager {
 
         Ok(BslTypeAtPositionResponse {
             analysis_revision,
+            flow_sensitive_enabled: params.include_flow_sensitive,
             type_info,
             node,
             warnings: Vec::new(),
@@ -1626,6 +1629,7 @@ impl SessionManager {
         let Some(program) = program else {
             return Ok(BslMembersResponse {
                 analysis_revision,
+                flow_sensitive_enabled: params.include_flow_sensitive,
                 members: Vec::new(),
                 truncated: false,
             });
@@ -1633,6 +1637,7 @@ impl SessionManager {
         let Some(parse_result) = parse_result else {
             return Ok(BslMembersResponse {
                 analysis_revision,
+                flow_sensitive_enabled: params.include_flow_sensitive,
                 members: Vec::new(),
                 truncated: false,
             });
@@ -1692,6 +1697,7 @@ impl SessionManager {
 
         Ok(BslMembersResponse {
             analysis_revision,
+            flow_sensitive_enabled: params.include_flow_sensitive,
             members,
             truncated,
         })

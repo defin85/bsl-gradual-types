@@ -1101,6 +1101,7 @@ async fn stdio_flow_sensitive_tools_are_gated_by_flag() {
         wait_job_succeeded(&service, &start.job_id).await;
         let resp: BslTypeAtPositionResponse =
             call_tool(&service, "job_result", json!({ "job_id": &start.job_id })).await;
+        assert!(!resp.flow_sensitive_enabled);
         assert_eq!(
             resp.type_info.as_ref().map(|t| t.name.as_str()),
             Some("Число")
@@ -1120,6 +1121,7 @@ async fn stdio_flow_sensitive_tools_are_gated_by_flag() {
         wait_job_succeeded(&service, &start.job_id).await;
         let resp: BslTypeAtPositionResponse =
             call_tool(&service, "job_result", json!({ "job_id": &start.job_id })).await;
+        assert!(resp.flow_sensitive_enabled);
         assert_eq!(
             resp.type_info.as_ref().map(|t| t.name.as_str()),
             Some("Массив")
@@ -1153,6 +1155,7 @@ async fn stdio_flow_sensitive_tools_are_gated_by_flag() {
         wait_job_succeeded(&service, &start.job_id).await;
         let resp: BslMembersResponse =
             call_tool(&service, "job_result", json!({ "job_id": &start.job_id })).await;
+        assert!(!resp.flow_sensitive_enabled);
         assert!(
             !resp.members.iter().any(|m| m.name == "Добавить"),
             "unexpected flow-sensitive method when disabled"
@@ -1173,6 +1176,7 @@ async fn stdio_flow_sensitive_tools_are_gated_by_flag() {
         wait_job_succeeded(&service, &start.job_id).await;
         let resp: BslMembersResponse =
             call_tool(&service, "job_result", json!({ "job_id": &start.job_id })).await;
+        assert!(resp.flow_sensitive_enabled);
         assert!(
             resp.members.iter().any(|m| m.name == "Добавить"),
             "expected Array method when flow-sensitive is enabled"
@@ -1194,6 +1198,7 @@ async fn stdio_flow_sensitive_tools_are_gated_by_flag() {
         wait_job_succeeded(&service, &start.job_id).await;
         let resp: BslDiagnosticsResponse =
             call_tool(&service, "job_result", json!({ "job_id": &start.job_id })).await;
+        assert!(!resp.flow_sensitive_enabled);
         assert!(
             resp.diagnostics
                 .iter()
@@ -1215,8 +1220,11 @@ async fn stdio_flow_sensitive_tools_are_gated_by_flag() {
         wait_job_succeeded(&service, &start.job_id).await;
         let resp: BslDiagnosticsResponse =
             call_tool(&service, "job_result", json!({ "job_id": &start.job_id })).await;
+        assert!(resp.flow_sensitive_enabled);
         assert!(
-            resp.diagnostics.iter().any(|d| d.message.contains("может быть Null")),
+            resp.diagnostics
+                .iter()
+                .any(|d| d.message.contains("может быть Null")),
             "expected null-safety diagnostics when enabled"
         );
     }

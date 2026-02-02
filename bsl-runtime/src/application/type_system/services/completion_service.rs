@@ -1183,7 +1183,9 @@ fn resolve_member_owner_type_sync(
 
     if ctx.include_flow_sensitive {
         let base = resolved.clone().unwrap_or_else(TypeResolution::unknown);
-        if let Some(narrowed) = narrow_type_for_variable_at(ir_program, byte_offset, base_name, base) {
+        if let Some(narrowed) =
+            narrow_type_for_variable_at(ir_program, byte_offset, base_name, base)
+        {
             resolved = Some(narrowed);
         }
     }

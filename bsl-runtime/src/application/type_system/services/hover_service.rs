@@ -230,9 +230,17 @@ fn type_at_span_start(
             .flow_type_at_byte_offset(file_id, span.start)
             .ok()
             .flatten()
-            .or_else(|| analysis.type_at_byte_offset(file_id, span.start).ok().flatten());
+            .or_else(|| {
+                analysis
+                    .type_at_byte_offset(file_id, span.start)
+                    .ok()
+                    .flatten()
+            });
     }
-    analysis.type_at_byte_offset(file_id, span.start).ok().flatten()
+    analysis
+        .type_at_byte_offset(file_id, span.start)
+        .ok()
+        .flatten()
 }
 
 fn control_node_at_position(

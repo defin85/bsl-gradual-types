@@ -62,15 +62,18 @@ async fn diagnostics_endpoint_flow_sensitive_null_safety_is_gated_by_flag() {
         .cloned()
         .unwrap_or_default();
     assert!(
-        semantic
-            .iter()
-            .all(|entry| !entry.get("message").and_then(|m| m.as_str()).unwrap_or("").contains("может быть Null")),
+        semantic.iter().all(|entry| !entry
+            .get("message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("")
+            .contains("может быть Null")),
         "unexpected null-safety diagnostics when disabled: {}",
         json
     );
 
     let enabled_body = serde_json::json!({ "code": code, "includeFlowSensitive": true });
     let resp = app
+        .clone()
         .oneshot(
             Request::post("/api/diagnostics")
                 .header("content-type", "application/json")
@@ -98,6 +101,20 @@ async fn diagnostics_endpoint_flow_sensitive_null_safety_is_gated_by_flag() {
         "expected null-safety diagnostics when enabled: {}",
         json
     );
+
+    // Breaking: legacy snake_case flag must be rejected with 400.
+    let legacy_body = serde_json::json!({ "code": code, "include_flow_sensitive": true });
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::post("/api/diagnostics")
+                .header("content-type", "application/json")
+                .body(Body::from(legacy_body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -154,9 +171,10 @@ async fn semantic_tree_flow_variants_are_gated_by_flag_and_default_off() {
         "file_path": "inline.bsl",
         "compact": false,
         "include_call_graph": false,
-        "include_flow_sensitive": true
+        "includeFlowSensitive": true
     });
     let resp = app
+        .clone()
         .oneshot(
             Request::post("/api/semantic-tree")
                 .header("content-type", "application/json")
@@ -187,5 +205,24 @@ async fn semantic_tree_flow_variants_are_gated_by_flag_and_default_off() {
         "expected semantic-tree to include flow_variants when enabled: {}",
         json
     );
-}
 
+    // Breaking: legacy snake_case flag must be rejected with 400.
+    let legacy_body = serde_json::json!({
+        "code": code,
+        "file_path": "inline.bsl",
+        "compact": false,
+        "include_call_graph": false,
+        "include_flow_sensitive": true
+    });
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::post("/api/semantic-tree")
+                .header("content-type", "application/json")
+                .body(Body::from(legacy_body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::BAD_REQUEST);
+}

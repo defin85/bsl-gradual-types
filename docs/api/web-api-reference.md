@@ -298,6 +298,9 @@ curl -X POST "http://127.0.0.1:3002/api/hover" \
 | `code` | String | ✅ | BSL код для анализа |
 | `line` | Number | ✅ | Строка (0-based) |
 | `column` | Number | ✅ | Колонка (0-based) |
+| `includeFlowSensitive` | Bool | ❌ | Включить flow-sensitive режим (default: `false`) |
+
+Примечание: `include_flow_sensitive` (snake_case) не поддерживается и приводит к `400 Bad Request` (breaking).
 
 #### Статус коды
 
@@ -587,12 +590,16 @@ curl -s "http://127.0.0.1:3002/api/search?q=$(urlencode "Массив")" | jq '.
 ```bash
 curl -X POST "http://127.0.0.1:3002/api/hover/enhanced" \
   -H "Content-Type: application/json" \
-  -d '{
-    "code": "Функция Тест()\n    ТЗ = Новый ТаблицаЗначений();\nКонецФункции",
-    "line": 2,
-    "column": 4
-  }' | jq '.'
+	  -d '{
+	    "code": "Функция Тест()\n    ТЗ = Новый ТаблицаЗначений();\nКонецФункции",
+	    "line": 2,
+	    "column": 4
+	  }' | jq '.'
 ```
+
+**Опционально (flow-sensitive):**
+- `includeFlowSensitive`: `true|false` (по умолчанию `false`).
+- `include_flow_sensitive` (snake_case) **не поддерживается** и приводит к `400 Bad Request` (breaking).
 
 #### Ответ
 
@@ -628,6 +635,10 @@ curl -X POST "http://127.0.0.1:3002/api/diagnostics" \
     "code": "Функция Тест()\n    массив.НесуществующийМетод();\nКонецФункции"
   }' | jq '.'
 ```
+
+**Опционально (flow-sensitive):**
+- `includeFlowSensitive`: `true|false` (по умолчанию `false`) — включает flow-sensitive семантические diagnostics (например, null-safety).
+- `include_flow_sensitive` (snake_case) **не поддерживается** и приводит к `400 Bad Request` (breaking).
 
 #### Ответ
 
@@ -755,6 +766,7 @@ with codecs.open('test_api.json', 'w', 'utf-8') as f:
 |------|-----|-------------|----------|
 | `code` | String | ✅ | BSL код для анализа |
 | `file_path` | String | ❌ | Путь к файлу (для отображения) |
+| `includeFlowSensitive` | Bool | ❌ | Включить flow-sensitive данные (default: `false`) |
 
 #### Ответ
 

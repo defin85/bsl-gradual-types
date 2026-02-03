@@ -149,7 +149,6 @@ async fn test_v2_completion_and_hover_smoke() {
         code,
         3,
         5,
-        false,
         &metadata_lookup,
         &hover_formatter,
         None,
@@ -169,7 +168,6 @@ async fn test_v2_completion_and_hover_smoke() {
         resolver.as_ref(),
         ir_program,
         None,
-        false,
     )
     .await
     .expect("completion");

@@ -194,7 +194,6 @@ pub(crate) fn collect_decls_and_call_sites(
                     .collect();
                 decls.push(ParsedDecl {
                     return_type: infer_return_type_from_body(body),
-                    return_facts: None,
                     name: name.clone(),
                     params,
                     is_export: *is_export,
@@ -222,7 +221,6 @@ pub(crate) fn collect_decls_and_call_sites(
                     .collect();
                 decls.push(ParsedDecl {
                     return_type: None,
-                    return_facts: None,
                     name: name.clone(),
                     params,
                     is_export: *is_export,

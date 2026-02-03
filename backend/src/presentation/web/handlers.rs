@@ -58,12 +58,6 @@ pub struct HoverRequest {
     pub column: u32,
     #[serde(default = "default_detail_level")]
     pub detail_level: String,
-    /// Feature gate: include flow-sensitive (CFG-based) results (default: false).
-    #[serde(default, rename = "includeFlowSensitive")]
-    pub include_flow_sensitive: bool,
-    /// Legacy (breaking): previously accepted snake_case. Must be rejected explicitly.
-    #[serde(default, rename = "include_flow_sensitive")]
-    pub legacy_include_flow_sensitive: Option<bool>,
 }
 
 fn default_detail_level() -> String {
@@ -124,34 +118,6 @@ fn type_diagnostics_to_validation_errors(
             }
         })
         .collect()
-}
-
-fn parse_validate_code_request(
-    payload: serde_json::Value,
-) -> Result<bsl_shared::api::ValidateCodeRequest, Box<axum::response::Response>> {
-    if let serde_json::Value::Object(map) = &payload {
-        if map.contains_key("include_flow_sensitive") {
-            return Err(Box::new(
-                (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({
-                        "error": "Unsupported field: include_flow_sensitive. Use includeFlowSensitive (camelCase)."
-                    })),
-                )
-                    .into_response(),
-            ));
-        }
-    }
-
-    serde_json::from_value::<bsl_shared::api::ValidateCodeRequest>(payload).map_err(|e| {
-        Box::new(
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": format!("Invalid request: {}", e) })),
-            )
-                .into_response(),
-        )
-    })
 }
 
 fn deps_resolver(deps: &Arc<bsl_analysis_v2::SemanticDeps>) -> Arc<TypeResolver> {
@@ -334,18 +300,12 @@ pub async fn get_startup_progress(State(state): State<AppState>) -> impl IntoRes
 /// Phase 4: TypeValidator integration - проверяет методы и свойства
 pub async fn validate_code(
     State(state): State<AppState>,
-    Json(payload): Json<serde_json::Value>,
+    Json(payload): Json<bsl_shared::api::ValidateCodeRequest>,
 ) -> impl IntoResponse {
     let start = Instant::now();
 
-    let payload = match parse_validate_code_request(payload) {
-        Ok(payload) => payload,
-        Err(resp) => return *resp,
-    };
-
     let deps_bundle = state.deps_bundle_v2.read().await.clone();
     let code = payload.code.clone();
-    let include_flow_sensitive = payload.include_flow_sensitive;
     let validation_result =
         tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<ValidationErrorDto>> {
             let mut host = AnalysisHostV2::default();
@@ -368,17 +328,10 @@ pub async fn validate_code(
             });
 
             let analysis = host.analysis();
-            let diagnostics = if include_flow_sensitive {
-                analysis
-                    .semantic_diagnostics_flow_sensitive(V2FileId(1))
-                    .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
-                    .unwrap_or_else(|| Arc::new(Vec::new()))
-            } else {
-                analysis
-                    .semantic_diagnostics(V2FileId(1))
-                    .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
-                    .unwrap_or_else(|| Arc::new(Vec::new()))
-            };
+            let diagnostics = analysis
+                .semantic_diagnostics(V2FileId(1))
+                .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
+                .unwrap_or_else(|| Arc::new(Vec::new()));
 
             Ok(type_diagnostics_to_validation_errors(
                 diagnostics.as_ref(),
@@ -418,21 +371,10 @@ pub async fn get_hover(
 ) -> impl IntoResponse {
     let start = Instant::now();
 
-    if req.legacy_include_flow_sensitive.is_some() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": "Unsupported field: include_flow_sensitive. Use includeFlowSensitive (camelCase)."
-            })),
-        )
-            .into_response();
-    }
-
     let deps_bundle = state.deps_bundle_v2.read().await.clone();
     let code = req.code.clone();
     let line = req.line;
     let column = req.column;
-    let include_flow_sensitive = req.include_flow_sensitive;
     let syntax_helper_path = state.syntax_helper_path.clone();
 
     let hover_result = tokio::task::spawn_blocking(move || -> anyhow::Result<Option<String>> {
@@ -481,7 +423,6 @@ pub async fn get_hover(
             file_content.as_ref(),
             line,
             column,
-            include_flow_sensitive,
             &metadata_lookup,
             &hover_formatter,
             None,
@@ -514,18 +455,12 @@ pub async fn get_hover(
 /// UPDATED Phase 5: Now uses validate_semantics for full semantic validation
 pub async fn get_diagnostics(
     State(state): State<AppState>,
-    Json(payload): Json<serde_json::Value>,
+    Json(payload): Json<bsl_shared::api::ValidateCodeRequest>,
 ) -> impl IntoResponse {
     let start = Instant::now();
 
-    let payload = match parse_validate_code_request(payload) {
-        Ok(payload) => payload,
-        Err(resp) => return *resp,
-    };
-
     let deps_bundle = state.deps_bundle_v2.read().await.clone();
     let code = payload.code.clone();
-    let include_flow_sensitive = payload.include_flow_sensitive;
 
     let diagnostics_result = tokio::task::spawn_blocking(
         move || -> anyhow::Result<(Vec<SyntaxErrorDto>, Vec<SemanticErrorDto>)> {
@@ -571,17 +506,10 @@ pub async fn get_diagnostics(
                 return Ok((syntax_errors, Vec::new()));
             }
 
-            let diagnostics = if include_flow_sensitive {
-                analysis
-                    .semantic_diagnostics_flow_sensitive(V2FileId(1))
-                    .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
-                    .unwrap_or_else(|| Arc::new(Vec::new()))
-            } else {
-                analysis
-                    .semantic_diagnostics(V2FileId(1))
-                    .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
-                    .unwrap_or_else(|| Arc::new(Vec::new()))
-            };
+            let diagnostics = analysis
+                .semantic_diagnostics(V2FileId(1))
+                .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
+                .unwrap_or_else(|| Arc::new(Vec::new()));
 
             let semantic_errors: Vec<SemanticErrorDto> = diagnostics
                 .iter()
@@ -625,18 +553,12 @@ pub async fn get_diagnostics(
 /// Debug diagnostics endpoint - returns extended debug info
 pub async fn get_diagnostics_debug(
     State(state): State<AppState>,
-    Json(payload): Json<serde_json::Value>,
+    Json(payload): Json<bsl_shared::api::ValidateCodeRequest>,
 ) -> impl IntoResponse {
     let start = Instant::now();
 
-    let payload = match parse_validate_code_request(payload) {
-        Ok(payload) => payload,
-        Err(resp) => return *resp,
-    };
-
     let deps_bundle = state.deps_bundle_v2.read().await.clone();
     let code = payload.code.clone();
-    let include_flow_sensitive = payload.include_flow_sensitive;
 
     let diagnostics_result =
         tokio::task::spawn_blocking(move || -> anyhow::Result<serde_json::Value> {
@@ -725,17 +647,10 @@ pub async fn get_diagnostics_debug(
                 "has_cfg": ir.cfg.is_some()
             });
 
-            let diagnostics = if include_flow_sensitive {
-                analysis
-                    .semantic_diagnostics_flow_sensitive(V2FileId(1))
-                    .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
-                    .unwrap_or_else(|| Arc::new(Vec::new()))
-            } else {
-                analysis
-                    .semantic_diagnostics(V2FileId(1))
-                    .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
-                    .unwrap_or_else(|| Arc::new(Vec::new()))
-            };
+            let diagnostics = analysis
+                .semantic_diagnostics(V2FileId(1))
+                .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
+                .unwrap_or_else(|| Arc::new(Vec::new()));
 
             let errors = diagnostics.as_ref();
 
@@ -788,14 +703,10 @@ pub async fn get_diagnostics_debug(
 /// Milestone 2.16: Semantic visualization
 pub async fn get_debug_ast(
     State(_state): State<AppState>,
-    Json(payload): Json<serde_json::Value>,
+    Json(_payload): Json<bsl_shared::api::ValidateCodeRequest>,
 ) -> impl IntoResponse {
     let start = Instant::now();
     let duration_ms = start.elapsed().as_millis();
-
-    if let Err(resp) = parse_validate_code_request(payload) {
-        return *resp;
-    }
 
     // Stub implementation - returns minimal AST for testing
     let response = DebugAstResponseDto {
@@ -825,16 +736,6 @@ pub async fn get_enhanced_hover(
 
     let start = Instant::now();
 
-    if req.legacy_include_flow_sensitive.is_some() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": "Unsupported field: include_flow_sensitive. Use includeFlowSensitive (camelCase)."
-            })),
-        )
-            .into_response();
-    }
-
     // Parse detail_level from request
     let detail_level = DetailLevel::parse(&req.detail_level);
 
@@ -842,7 +743,6 @@ pub async fn get_enhanced_hover(
     let code = req.code.clone();
     let line = req.line;
     let column = req.column;
-    let include_flow_sensitive = req.include_flow_sensitive;
     let syntax_helper_path = state.syntax_helper_path.clone();
 
     let hover_result = tokio::task::spawn_blocking(move || -> anyhow::Result<Option<String>> {
@@ -898,7 +798,6 @@ pub async fn get_enhanced_hover(
             file_content.as_ref(),
             line,
             column,
-            include_flow_sensitive,
             &metadata_lookup,
             &hover_formatter,
             Some(hover_config),
@@ -945,12 +844,9 @@ pub struct SemanticTreeRequest {
     /// Включить граф вызовов (по умолчанию: true)
     #[serde(default = "default_true")]
     pub include_call_graph: bool,
-    /// Включить flow-sensitive информацию (по умолчанию: false)
-    #[serde(default, rename = "includeFlowSensitive")]
+    /// Включить flow-sensitive информацию (по умолчанию: true)
+    #[serde(default = "default_true")]
     pub include_flow_sensitive: bool,
-    /// Legacy (breaking): previously accepted snake_case. Must be rejected explicitly.
-    #[serde(default, rename = "include_flow_sensitive")]
-    pub legacy_include_flow_sensitive: Option<bool>,
 }
 
 fn default_file_path() -> String {
@@ -968,16 +864,6 @@ pub async fn get_semantic_tree(
     Json(req): Json<SemanticTreeRequest>,
 ) -> impl IntoResponse {
     let start = Instant::now();
-
-    if req.legacy_include_flow_sensitive.is_some() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": "Unsupported field: include_flow_sensitive. Use includeFlowSensitive (camelCase)."
-            })),
-        )
-            .into_response();
-    }
 
     let deps_bundle = state.deps_bundle_v2.read().await.clone();
     let code = req.code.clone();

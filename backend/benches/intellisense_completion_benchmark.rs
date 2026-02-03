@@ -156,7 +156,6 @@ fn completion_benchmark(c: &mut Criterion) {
                         resolver.as_ref(),
                         ir_program,
                         None,
-                        false,
                     )
                     .await;
                     black_box(result).ok();

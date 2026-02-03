@@ -27,7 +27,6 @@ pub fn handle_hover_v2(
     position: Position,
     uri: &Url,
     settings: &HoverSettings,
-    include_flow_sensitive: bool,
 ) -> Option<Hover> {
     // Get syntax_helper path from environment or standard locations
     let syntax_helper_path = std::env::var("BSL_SYNTAX_HELPER_PATH")
@@ -78,7 +77,6 @@ pub fn handle_hover_v2(
         file_content.as_ref(),
         position.line,
         position.character,
-        include_flow_sensitive,
         &metadata_lookup,
         &hover_formatter,
         None,
@@ -285,7 +283,6 @@ mod tests {
             position,
             &uri,
             &settings,
-            false,
         )
         .expect("hover v2");
         let v2_text = hover_text(v2);
@@ -309,75 +306,9 @@ mod tests {
             position,
             &uri,
             &settings,
-            false,
         )
         .expect("hover v2 (second)");
         let v2_second_text = hover_text(v2_second);
         assert_eq!(v2_text, v2_second_text);
-    }
-
-    #[tokio::test]
-    async fn hover_flow_sensitive_is_gated_by_flag() {
-        let content = "Процедура Test()\n\
-                       x = 0;\n\
-                       Если ТипЗнч(x) = Тип(\"Массив\") Тогда\n\
-                       y = x;\n\
-                       КонецЕсли;\n\
-                       КонецПроцедуры\n";
-        let mut position = find_position(content, "y = x");
-        position.character = position.character.saturating_sub(1);
-
-        let uri = Url::parse("file:///flow_sensitive_hover_gate.bsl").expect("url");
-        let env = create_test_env();
-
-        let settings = HoverSettings {
-            detail_level: "compact".to_string(),
-            max_methods: 10,
-            max_properties: 5,
-            show_certainty: false,
-        };
-
-        let (analysis, file_id, file_content, file_path, ir_program) =
-            build_v2_ir(content, &uri, env.deps.clone());
-
-        let disabled = handle_hover_v2(
-            &analysis,
-            file_id,
-            file_content.clone(),
-            file_path.clone(),
-            ir_program.clone(),
-            env.deps.clone(),
-            position,
-            &uri,
-            &settings,
-            false,
-        )
-        .expect("hover (flow-sensitive disabled)");
-        let disabled_text = hover_text(disabled);
-        assert!(
-            disabled_text.contains("Число"),
-            "expected base type to be Число when flow-sensitive is disabled, hover={}",
-            disabled_text
-        );
-
-        let enabled = handle_hover_v2(
-            &analysis,
-            file_id,
-            file_content,
-            file_path,
-            ir_program,
-            env.deps,
-            position,
-            &uri,
-            &settings,
-            true,
-        )
-        .expect("hover (flow-sensitive enabled)");
-        let enabled_text = hover_text(enabled);
-        assert!(
-            enabled_text.contains("Массив"),
-            "expected narrowed type to be Массив when flow-sensitive is enabled, hover={}",
-            enabled_text
-        );
     }
 }

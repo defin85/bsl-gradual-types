@@ -1246,17 +1246,10 @@ impl SessionManager {
             else {
                 continue;
             };
-            let file_diags = if params.include_flow_sensitive {
-                analysis
-                    .semantic_diagnostics_flow_sensitive(bsl_analysis_v2::FileId(1))
-                    .ok()
-                    .flatten()
-            } else {
-                analysis
-                    .semantic_diagnostics(bsl_analysis_v2::FileId(1))
-                    .ok()
-                    .flatten()
-            };
+            let file_diags = analysis
+                .semantic_diagnostics(bsl_analysis_v2::FileId(1))
+                .ok()
+                .flatten();
             let Some(file_diags) = file_diags else {
                 continue;
             };
@@ -1321,7 +1314,6 @@ impl SessionManager {
 
         Ok(BslDiagnosticsResponse {
             analysis_revision,
-            flow_sensitive_enabled: params.include_flow_sensitive,
             diagnostics,
             truncated,
         })
@@ -1535,7 +1527,6 @@ impl SessionManager {
         let Some(program) = program else {
             return Ok(BslTypeAtPositionResponse {
                 analysis_revision,
-                flow_sensitive_enabled: params.include_flow_sensitive,
                 type_info: None,
                 node: None,
                 warnings: vec!["IR not available".to_string()],
@@ -1543,20 +1534,16 @@ impl SessionManager {
         };
 
         let pos = params.position;
-        let resolution = if params.include_flow_sensitive {
-            flow_type_at_utf16_position(&analysis, FileId(1), pos.line, pos.character)
-                .or_else(|| type_at_utf16_position(&analysis, FileId(1), pos.line, pos.character))
-        } else {
-            type_at_utf16_position(&analysis, FileId(1), pos.line, pos.character)
-        };
-        let type_info = resolution.map(|resolution| TypeInfoDto {
-            name: resolution.type_name(),
-            certainty: format!("{:?}", resolution.certainty).to_lowercase(),
-            active_facet: resolution
-                .active_facet
-                .as_ref()
-                .map(|facet| format!("{:?}", facet)),
-        });
+        let type_info = type_at_utf16_position(&analysis, FileId(1), pos.line, pos.character).map(
+            |resolution| TypeInfoDto {
+                name: resolution.type_name(),
+                certainty: format!("{:?}", resolution.certainty).to_lowercase(),
+                active_facet: resolution
+                    .active_facet
+                    .as_ref()
+                    .map(|facet| format!("{:?}", facet)),
+            },
+        );
 
         let node = node_at_utf16_position(
             &analysis,
@@ -1574,7 +1561,6 @@ impl SessionManager {
 
         Ok(BslTypeAtPositionResponse {
             analysis_revision,
-            flow_sensitive_enabled: params.include_flow_sensitive,
             type_info,
             node,
             warnings: Vec::new(),
@@ -1629,7 +1615,6 @@ impl SessionManager {
         let Some(program) = program else {
             return Ok(BslMembersResponse {
                 analysis_revision,
-                flow_sensitive_enabled: params.include_flow_sensitive,
                 members: Vec::new(),
                 truncated: false,
             });
@@ -1637,7 +1622,6 @@ impl SessionManager {
         let Some(parse_result) = parse_result else {
             return Ok(BslMembersResponse {
                 analysis_revision,
-                flow_sensitive_enabled: params.include_flow_sensitive,
                 members: Vec::new(),
                 truncated: false,
             });
@@ -1661,7 +1645,6 @@ impl SessionManager {
             program,
             parse_result,
             None,
-            params.include_flow_sensitive,
         )
         .await
         .map_err(|err| rmcp::ErrorData::internal_error(err.to_string(), None))?;
@@ -1697,7 +1680,6 @@ impl SessionManager {
 
         Ok(BslMembersResponse {
             analysis_revision,
-            flow_sensitive_enabled: params.include_flow_sensitive,
             members,
             truncated,
         })
@@ -2148,7 +2130,6 @@ impl SessionManager {
                         limit: 500,
                         include_impact: false,
                         include_coverage: false,
-                        include_flow_sensitive: false,
                     })
                     .await?;
                 let diagnostic = diagnostics
@@ -3228,23 +3209,6 @@ fn type_at_utf16_position(
 
     analysis
         .type_at_byte_offset(file_id, byte_offset)
-        .ok()
-        .flatten()
-}
-
-fn flow_type_at_utf16_position(
-    analysis: &bsl_analysis_v2::AnalysisV2,
-    file_id: bsl_analysis_v2::FileId,
-    line: u32,
-    character: u32,
-) -> Option<bsl_shared::domain::types::TypeResolution> {
-    let byte_offset = analysis
-        .utf16_position_to_byte_offset(file_id, line, character)
-        .ok()
-        .flatten()? as u32;
-
-    analysis
-        .flow_type_at_byte_offset(file_id, byte_offset)
         .ok()
         .flatten()
 }

@@ -100,9 +100,12 @@ impl NullSafetyAnalyzer {
                     }
                 }
 
-                CfgNodeKind::Conditional { condition } => {
-                    // v2 CFG использует `Conditional { condition }` для if/while.
-                    // Для null-safety считаем это эквивалентом `Condition`.
+                CfgNodeKind::Conditional { condition } | CfgNodeKind::LoopHeader { condition } => {
+                    // v2 CFG использует:
+                    // - `Conditional { condition }` для if,
+                    // - `LoopHeader { condition }` для while/for/foreach.
+                    //
+                    // Для null-safety считаем оба варианта эквивалентом `Condition`.
                     if let Some(var_name) = self.extract_null_checked_variable(condition.as_str()) {
                         self.mark_non_null_in_successors(node_id, &var_name);
                         safe_operations.push(SafeOperation {
@@ -406,6 +409,55 @@ mod tests {
         // После проверки в узле 2 не должно быть предупреждений
         // (но текущая реализация ещё не достаточно умная)
         assert!(!result.safe_operations.is_empty());
+    }
+
+    #[test]
+    fn test_loop_header_null_check_suppresses_warning_in_body() {
+        let mut cfg = ControlFlowGraph::new();
+
+        cfg.add_node(CfgNode {
+            id: 0,
+            kind: CfgNodeKind::LoopHeader {
+                condition: "x <> Null".to_string(),
+            },
+        });
+
+        cfg.add_node(CfgNode {
+            id: 1,
+            kind: CfgNodeKind::MethodCall {
+                object: "x".to_string(),
+                method: "Метод".to_string(),
+                arguments: vec![],
+            },
+        });
+
+        cfg.add_edge(0, 1, EdgeKind::ConditionalTrue);
+
+        let mut analyzer = NullSafetyAnalyzer::new(cfg);
+        let mut context = FlowAnalysisContext::new();
+
+        context.set_variable(
+            "x",
+            TypeResolution {
+                result: ResolutionResult::nullable(ConcreteType::string()),
+                certainty: Certainty::Known,
+                source: ResolutionSource::Static,
+                metadata: ResolutionMetadata::default(),
+                active_facet: None,
+                available_facets: vec![],
+            },
+        );
+
+        let result = analyzer.analyze(&context);
+        assert!(
+            result.warnings.is_empty(),
+            "expected no warnings for x.Method() guarded by loop header, warnings={:?}",
+            result.warnings
+        );
+        assert!(
+            !result.safe_operations.is_empty(),
+            "expected safe operation to be recorded"
+        );
     }
 
     #[test]

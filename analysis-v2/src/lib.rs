@@ -11,6 +11,7 @@ pub use ast_to_ir::AstToIrConverter;
 mod type_inference_v2;
 
 use bsl_diagnostics::{SemanticTypeHints, SemanticValidationVisitor};
+use bsl_shared::analysis::{detect_type_guards, NarrowingEngine};
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::SignatureIndex;
@@ -20,6 +21,7 @@ use bsl_shared::domain::validators::TypeValidator;
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::domain::{FlowAnalysisContext, NullSafetyAnalyzer};
 use bsl_shared::formatting::DetailLevel;
+use bsl_shared::ir::{CfgNodeKind, NodeAtByteOffsetBias};
 use bsl_shared::ir::walk_program;
 use bsl_shared::ir::SemanticProgram;
 use bsl_shared::utils::hash::hash_content;
@@ -387,6 +389,56 @@ pub fn semantic_diagnostics(
     walk_program(&program, &mut visitor);
 
     let mut diagnostics = visitor.into_errors();
+    diagnostics.sort_by(|a, b| {
+        let severity_key = |severity: DiagnosticSeverity| match severity {
+            DiagnosticSeverity::Error => 0_u8,
+            DiagnosticSeverity::Warning => 1_u8,
+            DiagnosticSeverity::Info => 2_u8,
+            DiagnosticSeverity::Hint => 3_u8,
+        };
+        (
+            a.span.start,
+            a.span.end,
+            severity_key(a.severity),
+            &a.message,
+        )
+            .cmp(&(
+                b.span.start,
+                b.span.end,
+                severity_key(b.severity),
+                &b.message,
+            ))
+    });
+
+    SemanticDiagnosticsSnapshot(Arc::new(diagnostics))
+}
+
+#[salsa::tracked]
+pub fn semantic_diagnostics_flow_sensitive(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    deps: DepsSnapshot,
+    settings: SettingsSnapshot,
+) -> SemanticDiagnosticsSnapshot {
+    let _deps_id = deps.id(db);
+    let _settings_id = settings.id(db);
+
+    let base = semantic_diagnostics(db, file, deps, settings).0;
+
+    // Если base пустой из-за синтаксических ошибок, всё равно не пытаемся добавлять flow-sensitive.
+    if base.is_empty() {
+        return SemanticDiagnosticsSnapshot(base);
+    }
+
+    let deps_data = deps.data(db).0.clone();
+    let program = ir(db, file, deps, settings).0;
+    let type_index = type_index(db, file, deps, settings).0;
+    let resolver = deps_data
+        .resolver
+        .clone()
+        .unwrap_or_else(|| Arc::new(TypeResolver::new(deps_data.repository.clone())));
+
+    let mut diagnostics = (*base).clone();
     diagnostics.extend(flow_sensitive_null_safety_diagnostics(
         &program,
         &type_index,
@@ -414,6 +466,46 @@ pub fn semantic_diagnostics(
     });
 
     SemanticDiagnosticsSnapshot(Arc::new(diagnostics))
+}
+
+fn flow_type_at_byte_offset_impl(
+    program: &SemanticProgram,
+    byte_offset: u32,
+    base_type: TypeResolution,
+) -> Option<TypeResolution> {
+    let (variable_name, _) = program.find_variable_at_byte_offset(byte_offset)?;
+    let cfg = program.cfg.as_ref()?;
+    let node_id = cfg.node_at_byte_offset(byte_offset, NodeAtByteOffsetBias::PreferLeft)?;
+
+    let mut ctx = FlowAnalysisContext::new();
+    ctx.set_variable(variable_name.as_str(), base_type.clone());
+
+    // Убедимся, что все переменные из type-guards присутствуют в контексте (хотя бы как Unknown),
+    // иначе NarrowingEngine может не применить narrowing к нужной переменной.
+    for node in cfg.nodes() {
+        match &node.kind {
+            CfgNodeKind::Conditional { condition } | CfgNodeKind::LoopHeader { condition } => {
+                for guard in detect_type_guards(condition) {
+                    let var = guard.variable_name();
+                    if ctx.get_variable(var).is_none() {
+                        ctx.set_variable(var, TypeResolution::unknown());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut engine = NarrowingEngine::new(cfg.clone());
+    engine.build_narrowing_contexts(ctx);
+
+    let narrowed = engine
+        .get_context(node_id)
+        .and_then(|ctx| ctx.get_type(variable_name.as_str()))
+        .cloned()
+        .filter(|t| !t.is_unknown())?;
+
+    (narrowed.type_name() != base_type.type_name()).then_some(narrowed)
 }
 
 fn flow_sensitive_null_safety_diagnostics(
@@ -1014,6 +1106,17 @@ impl AnalysisV2 {
         cancellable(|| semantic_diagnostics(&self.db, file, self.deps, self.settings).0).map(Some)
     }
 
+    pub fn semantic_diagnostics_flow_sensitive(
+        &self,
+        file_id: FileId,
+    ) -> Cancellable<Option<Arc<Vec<TypeDiagnostic>>>> {
+        let Some(&file) = self.files.get(&file_id) else {
+            return Ok(None);
+        };
+        cancellable(|| semantic_diagnostics_flow_sensitive(&self.db, file, self.deps, self.settings).0)
+            .map(Some)
+    }
+
     pub fn utf16_position_to_byte_offset(
         &self,
         file_id: FileId,
@@ -1086,6 +1189,24 @@ impl AnalysisV2 {
                 .clone()
         })
         .map(|index| index.type_at_byte_offset(byte_offset))
+    }
+
+    pub fn flow_type_at_byte_offset(
+        &self,
+        file_id: FileId,
+        byte_offset: u32,
+    ) -> Cancellable<Option<TypeResolution>> {
+        let Some(&file) = self.files.get(&file_id) else {
+            return Ok(None);
+        };
+        cancellable(|| {
+            let program = ir(&self.db, file, self.deps, self.settings).0;
+            let index = type_index(&self.db, file, self.deps, self.settings).0;
+            let base = index
+                .type_at_byte_offset(byte_offset)
+                .unwrap_or_else(TypeResolution::unknown);
+            flow_type_at_byte_offset_impl(program.as_ref(), byte_offset, base)
+        })
     }
 }
 
@@ -1636,7 +1757,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_diagnostics_include_flow_sensitive_null_safety() {
+    fn semantic_diagnostics_do_not_include_flow_sensitive_null_safety_by_default() {
         let mut host = AnalysisHostV2::default();
         let file_id = FileId(1);
 
@@ -1666,18 +1787,30 @@ mod tests {
             deps,
         });
 
-        let diagnostics = host
+        let base = host
             .analysis()
             .semantic_diagnostics(file_id)
             .unwrap()
             .unwrap();
 
         assert!(
-            diagnostics
+            base.iter().all(|d| !d.message.contains("может быть Null")),
+            "base diagnostics unexpectedly contain flow-sensitive null-safety: {:?}",
+            base
+        );
+
+        let flow = host
+            .analysis()
+            .semantic_diagnostics_flow_sensitive(file_id)
+            .unwrap()
+            .unwrap();
+
+        assert!(
+            flow
                 .iter()
                 .any(|d| d.message.contains("может быть Null")),
-            "diagnostics: {:?}",
-            diagnostics
+            "flow-sensitive diagnostics should contain null-safety warning: {:?}",
+            flow
         );
     }
 

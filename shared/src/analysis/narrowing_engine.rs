@@ -193,16 +193,28 @@ impl NarrowingEngine {
     pub fn build_narrowing_contexts(&mut self, initial_context: FlowAnalysisContext) {
         use crate::domain::flow_analysis::{CfgNodeKind, EdgeKind};
 
-        // Инициализируем контекст для entry узла
-        if let Some(entry_node) = self.cfg.nodes().first() {
+        // Инициализируем контекст для всех entry-узлов (CFG может содержать несколько компонентов).
+        let mut seeded = false;
+        for node in self.cfg.nodes() {
+            if !matches!(node.kind, CfgNodeKind::Entry) {
+                continue;
+            }
             let mut ctx = NarrowingContext::new();
-
-            // Копируем начальные типы переменных из FlowAnalysisContext
             for (var_id, resolution) in initial_context.get_all_variables() {
                 ctx.set_type(var_id.display(), resolution.clone());
             }
-
-            self.contexts.insert(entry_node.id, ctx);
+            self.contexts.insert(node.id, ctx);
+            seeded = true;
+        }
+        if !seeded {
+            // Fallback для CFG без явного Entry.
+            if let Some(entry_node) = self.cfg.nodes().first() {
+                let mut ctx = NarrowingContext::new();
+                for (var_id, resolution) in initial_context.get_all_variables() {
+                    ctx.set_type(var_id.display(), resolution.clone());
+                }
+                self.contexts.insert(entry_node.id, ctx);
+            }
         }
 
         // Проходим по всем узлам в топологическом порядке
@@ -420,6 +432,59 @@ mod tests {
         } else {
             panic!("Then branch context should exist");
         }
+    }
+
+    #[test]
+    fn test_narrowing_engine_build_contexts_multiple_entries() {
+        let mut cfg = ControlFlowGraph::new();
+
+        // Component A
+        let entry_a = cfg.add_node(CfgNode {
+            id: 0,
+            kind: CfgNodeKind::Entry,
+        });
+        let cond_a = cfg.add_node(CfgNode {
+            id: 1,
+            kind: CfgNodeKind::Conditional {
+                condition: "ТипЗнч(x) = Тип(\"Строка\")".to_string(),
+            },
+        });
+        let then_a = cfg.add_node(CfgNode {
+            id: 2,
+            kind: CfgNodeKind::BasicBlock {
+                statements: vec!["a = x".to_string()],
+            },
+        });
+        cfg.add_edge(entry_a, cond_a, EdgeKind::Unconditional);
+        cfg.add_edge(cond_a, then_a, EdgeKind::ConditionalTrue);
+
+        // Component B (separate entry)
+        let entry_b = cfg.add_node(CfgNode {
+            id: 3,
+            kind: CfgNodeKind::Entry,
+        });
+        let cond_b = cfg.add_node(CfgNode {
+            id: 4,
+            kind: CfgNodeKind::Conditional {
+                condition: "ТипЗнч(x) = Тип(\"Число\")".to_string(),
+            },
+        });
+        let then_b = cfg.add_node(CfgNode {
+            id: 5,
+            kind: CfgNodeKind::BasicBlock {
+                statements: vec!["b = x".to_string()],
+            },
+        });
+        cfg.add_edge(entry_b, cond_b, EdgeKind::Unconditional);
+        cfg.add_edge(cond_b, then_b, EdgeKind::ConditionalTrue);
+
+        let mut engine = NarrowingEngine::new(cfg);
+        let mut initial = FlowAnalysisContext::new();
+        initial.set_variable("x", TypeResolution::unknown());
+        engine.build_narrowing_contexts(initial);
+
+        assert!(engine.get_context(then_a).is_some());
+        assert!(engine.get_context(then_b).is_some());
     }
 
     #[test]

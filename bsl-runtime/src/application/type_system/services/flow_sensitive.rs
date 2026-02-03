@@ -1,28 +1,9 @@
 use bsl_shared::analysis::{detect_type_guards, NarrowingEngine};
 use bsl_shared::domain::flow_analysis::FlowAnalysisContext;
 use bsl_shared::domain::types::TypeResolution;
-use bsl_shared::ir::{ControlFlowGraph, EdgeKind, SemanticNodeKind, SemanticProgram};
-
-fn cfg_node_at_byte_offset(cfg: &ControlFlowGraph, byte_offset: u32) -> Option<usize> {
-    let find = |offset: u32| {
-        (0..cfg.nodes().len())
-            .filter_map(|node_id| cfg.node_span(node_id).map(|span| (node_id, span)))
-            .filter(|(_, span)| span.contains(offset))
-            .min_by_key(|(_, span)| span.len())
-            .map(|(node_id, _)| node_id)
-    };
-
-    // Completion/hover часто вызываются на границе токена (например, сразу после '.'),
-    // поэтому пробуем небольшое окно назад.
-    for delta in 0..=32_u32 {
-        if let Some(offset) = byte_offset.checked_sub(delta) {
-            if let Some(node_id) = find(offset) {
-                return Some(node_id);
-            }
-        }
-    }
-    None
-}
+use bsl_shared::ir::{
+    ControlFlowGraph, EdgeKind, NodeAtByteOffsetBias, SemanticNodeKind, SemanticProgram,
+};
 
 fn conditional_branch_node_at_byte_offset(
     program: &SemanticProgram,
@@ -89,7 +70,7 @@ pub(crate) fn narrow_type_for_variable_at(
     base_type: TypeResolution,
 ) -> Option<TypeResolution> {
     let cfg = program.cfg.as_ref()?;
-    let mut node_id = cfg_node_at_byte_offset(cfg, byte_offset)?;
+    let mut node_id = cfg.node_at_byte_offset(byte_offset, NodeAtByteOffsetBias::PreferLeft)?;
 
     // Если позиция попала в span условного узла (например, внутри then/else блока),
     // смещаемся на соответствующую ветку, чтобы получить корректный контекст narrowing.

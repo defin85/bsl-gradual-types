@@ -147,7 +147,61 @@ impl BslAgentHandler {
                             "limit": 200
                         }
                     }));
+                    examples.push(serde_json::json!({
+                        "name": "bsl_diagnostics_start",
+                        "arguments": {
+                            "session_id": "<session_id>",
+                            "scope": "hot",
+                            "limit": 200,
+                            "include_flow_sensitive": true
+                        }
+                    }));
                     notes.push("scope string supports only: project|hot. For a single file use tagged: {kind:\"file\",document:...}.".to_string());
+                    notes.push("Flow-sensitive is opt-in: pass include_flow_sensitive=true. Responses include flow_sensitive_enabled (bool).".to_string());
+                }
+                "bsl_type_at_position_start" => {
+                    examples.push(serde_json::json!({
+                        "name": "bsl_type_at_position_start",
+                        "arguments": {
+                            "session_id": "<session_id>",
+                            "file": { "doc": { "path": "/ws/ext1/src/CommonModules/Foo/Module.bsl" } },
+                            "position": { "line": 10, "character": 15 },
+                            "include_flow_sensitive": false
+                        }
+                    }));
+                    examples.push(serde_json::json!({
+                        "name": "bsl_type_at_position_start",
+                        "arguments": {
+                            "session_id": "<session_id>",
+                            "file": { "doc": { "path": "/ws/ext1/src/CommonModules/Foo/Module.bsl" } },
+                            "position": { "line": 10, "character": 15 },
+                            "include_flow_sensitive": true
+                        }
+                    }));
+                    notes.push("Flow-sensitive is opt-in: include_flow_sensitive defaults to false. Responses include flow_sensitive_enabled (bool).".to_string());
+                }
+                "bsl_members_start" => {
+                    examples.push(serde_json::json!({
+                        "name": "bsl_members_start",
+                        "arguments": {
+                            "session_id": "<session_id>",
+                            "file": { "doc": { "path": "/ws/ext1/src/CommonModules/Foo/Module.bsl" } },
+                            "position": { "line": 10, "character": 15 },
+                            "limit": 200,
+                            "include_flow_sensitive": false
+                        }
+                    }));
+                    examples.push(serde_json::json!({
+                        "name": "bsl_members_start",
+                        "arguments": {
+                            "session_id": "<session_id>",
+                            "file": { "doc": { "path": "/ws/ext1/src/CommonModules/Foo/Module.bsl" } },
+                            "position": { "line": 10, "character": 15 },
+                            "limit": 200,
+                            "include_flow_sensitive": true
+                        }
+                    }));
+                    notes.push("Flow-sensitive is opt-in: include_flow_sensitive defaults to false. Responses include flow_sensitive_enabled (bool).".to_string());
                 }
                 "job_wait" => {
                     examples.push(serde_json::json!({
@@ -194,7 +248,7 @@ impl BslAgentHandler {
                 0,
                 "mcp_help(tool_name?) for examples (read-only)".to_string(),
             );
-            notes.push("Pass tool_name to get examples: workspace_open, workspace_documents_set, workspace_documents_clear, bsl_diagnostics_start, bsl_types_list_start, bsl_types_search_start, bsl_type_get_start, job_wait.".to_string());
+            notes.push("Pass tool_name to get examples: workspace_open, workspace_documents_set, workspace_documents_clear, bsl_diagnostics_start, bsl_type_at_position_start, bsl_members_start, bsl_types_list_start, bsl_types_search_start, bsl_type_get_start, job_wait.".to_string());
         }
 
         Content::json(McpHelpResponse {

@@ -1181,6 +1181,7 @@ impl SessionManager {
         params: BslDiagnosticsParams,
     ) -> Result<BslDiagnosticsResponse, rmcp::ErrorData> {
         let uuid = parse_session_id(&params.session_id)?;
+        let flow_sensitive_enabled = params.include_flow_sensitive;
         let (roots, hot_set, overlays, analysis_revision, deps_id, deps) = {
             let sessions = self.sessions.read().await;
             let session = sessions
@@ -1246,10 +1247,17 @@ impl SessionManager {
             else {
                 continue;
             };
-            let file_diags = analysis
-                .semantic_diagnostics(bsl_analysis_v2::FileId(1))
-                .ok()
-                .flatten();
+            let file_diags = if flow_sensitive_enabled {
+                analysis
+                    .semantic_diagnostics_flow_sensitive(bsl_analysis_v2::FileId(1))
+                    .ok()
+                    .flatten()
+            } else {
+                analysis
+                    .semantic_diagnostics(bsl_analysis_v2::FileId(1))
+                    .ok()
+                    .flatten()
+            };
             let Some(file_diags) = file_diags else {
                 continue;
             };
@@ -1314,6 +1322,7 @@ impl SessionManager {
 
         Ok(BslDiagnosticsResponse {
             analysis_revision,
+            flow_sensitive_enabled,
             diagnostics,
             truncated,
         })
@@ -1485,6 +1494,7 @@ impl SessionManager {
         params: BslTypeAtPositionParams,
     ) -> Result<BslTypeAtPositionResponse, rmcp::ErrorData> {
         let uuid = parse_session_id(&params.session_id)?;
+        let flow_sensitive_enabled = params.include_flow_sensitive;
         let (analysis_revision, roots, overlays, deps_id, deps, index_snapshot) = {
             let sessions = self.sessions.read().await;
             let session = sessions
@@ -1527,6 +1537,7 @@ impl SessionManager {
         let Some(program) = program else {
             return Ok(BslTypeAtPositionResponse {
                 analysis_revision,
+                flow_sensitive_enabled,
                 type_info: None,
                 node: None,
                 warnings: vec!["IR not available".to_string()],
@@ -1534,16 +1545,21 @@ impl SessionManager {
         };
 
         let pos = params.position;
-        let type_info = type_at_utf16_position(&analysis, FileId(1), pos.line, pos.character).map(
-            |resolution| TypeInfoDto {
-                name: resolution.type_name(),
-                certainty: format!("{:?}", resolution.certainty).to_lowercase(),
-                active_facet: resolution
-                    .active_facet
-                    .as_ref()
-                    .map(|facet| format!("{:?}", facet)),
-            },
-        );
+        let type_info = type_at_utf16_position(
+            &analysis,
+            FileId(1),
+            pos.line,
+            pos.character,
+            flow_sensitive_enabled,
+        )
+        .map(|resolution| TypeInfoDto {
+            name: resolution.type_name(),
+            certainty: format!("{:?}", resolution.certainty).to_lowercase(),
+            active_facet: resolution
+                .active_facet
+                .as_ref()
+                .map(|facet| format!("{:?}", facet)),
+        });
 
         let node = node_at_utf16_position(
             &analysis,
@@ -1561,6 +1577,7 @@ impl SessionManager {
 
         Ok(BslTypeAtPositionResponse {
             analysis_revision,
+            flow_sensitive_enabled,
             type_info,
             node,
             warnings: Vec::new(),
@@ -1572,6 +1589,7 @@ impl SessionManager {
         params: BslMembersParams,
     ) -> Result<BslMembersResponse, rmcp::ErrorData> {
         let uuid = parse_session_id(&params.session_id)?;
+        let flow_sensitive_enabled = params.include_flow_sensitive;
         let (analysis_revision, roots, overlays, deps_id, deps, index_snapshot) = {
             let sessions = self.sessions.read().await;
             let session = sessions
@@ -1615,6 +1633,7 @@ impl SessionManager {
         let Some(program) = program else {
             return Ok(BslMembersResponse {
                 analysis_revision,
+                flow_sensitive_enabled,
                 members: Vec::new(),
                 truncated: false,
             });
@@ -1622,6 +1641,7 @@ impl SessionManager {
         let Some(parse_result) = parse_result else {
             return Ok(BslMembersResponse {
                 analysis_revision,
+                flow_sensitive_enabled,
                 members: Vec::new(),
                 truncated: false,
             });
@@ -1632,6 +1652,15 @@ impl SessionManager {
             .clone()
             .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())));
         let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
+
+        let member_access_owner_type_hint = member_access_owner_type_hint_at_position(
+            &analysis,
+            FileId(1),
+            text.as_str(),
+            params.position.line,
+            params.position.character,
+            flow_sensitive_enabled,
+        );
 
         let result = bsl_runtime::application::type_system::get_completion_with_semantic_program_snapshot_v2(
             text.as_str(),
@@ -1644,7 +1673,8 @@ impl SessionManager {
             resolver.as_ref(),
             program,
             parse_result,
-            None,
+            member_access_owner_type_hint,
+            flow_sensitive_enabled,
         )
         .await
         .map_err(|err| rmcp::ErrorData::internal_error(err.to_string(), None))?;
@@ -1680,6 +1710,7 @@ impl SessionManager {
 
         Ok(BslMembersResponse {
             analysis_revision,
+            flow_sensitive_enabled,
             members,
             truncated,
         })
@@ -1781,7 +1812,7 @@ impl SessionManager {
             });
         };
         let type_at_position_hint =
-            type_at_utf16_position(&analysis, FileId(1), position.line, position.character);
+            type_at_utf16_position(&analysis, FileId(1), position.line, position.character, false);
         let receiver_type_hint = None;
         let target = bsl_runtime::application::type_system::goto_definition_v2_with_source(
             abs_path.to_string_lossy().as_ref(),
@@ -2110,6 +2141,7 @@ impl SessionManager {
                             FileId(1),
                             position.line,
                             position.character,
+                            false,
                         ) {
                             text.push_line(&format!("type_at_position: {}", type_info.type_name()));
                             text.push_line("");
@@ -2130,6 +2162,7 @@ impl SessionManager {
                         limit: 500,
                         include_impact: false,
                         include_coverage: false,
+                        include_flow_sensitive: false,
                     })
                     .await?;
                 let diagnostic = diagnostics
@@ -3201,16 +3234,56 @@ fn type_at_utf16_position(
     file_id: bsl_analysis_v2::FileId,
     line: u32,
     character: u32,
+    include_flow_sensitive: bool,
 ) -> Option<bsl_shared::domain::types::TypeResolution> {
     let byte_offset = analysis
         .utf16_position_to_byte_offset(file_id, line, character)
         .ok()
         .flatten()? as u32;
 
-    analysis
-        .type_at_byte_offset(file_id, byte_offset)
+    if include_flow_sensitive {
+        analysis
+            .flow_type_at_byte_offset(file_id, byte_offset)
+            .ok()
+            .flatten()
+            .or_else(|| analysis.type_at_byte_offset(file_id, byte_offset).ok().flatten())
+    } else {
+        analysis.type_at_byte_offset(file_id, byte_offset).ok().flatten()
+    }
+}
+
+fn member_access_owner_type_hint_at_position(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    file_content: &str,
+    line: u32,
+    character: u32,
+    include_flow_sensitive: bool,
+) -> Option<bsl_shared::domain::types::TypeResolution> {
+    let line_text = file_content.lines().nth(line as usize)?;
+    let cursor_byte = bsl_analysis_v2::utf16_to_byte_offset(line_text, character);
+    let line_prefix = line_text.get(..cursor_byte)?;
+    let dot_in_line = line_prefix.rfind('.')?;
+    let receiver = line_prefix.get(..dot_in_line)?.trim_end();
+    let (probe_byte, _) = receiver
+        .char_indices()
+        .rev()
+        .find(|(_, ch)| !ch.is_whitespace())?;
+    let probe_utf16 = bsl_analysis_v2::byte_offset_to_utf16(line_text, probe_byte);
+    let offset = analysis
+        .utf16_position_to_byte_offset(file_id, line, probe_utf16)
         .ok()
-        .flatten()
+        .flatten()?;
+    let offset = offset.min(u32::MAX as usize) as u32;
+    if include_flow_sensitive {
+        analysis
+            .flow_type_at_byte_offset(file_id, offset)
+            .ok()
+            .flatten()
+            .or_else(|| analysis.type_at_byte_offset(file_id, offset).ok().flatten())
+    } else {
+        analysis.type_at_byte_offset(file_id, offset).ok().flatten()
+    }
 }
 
 fn node_at_utf16_position<'a>(
@@ -3466,9 +3539,10 @@ mod tests {
     use super::*;
     use crate::jobs::JobManager;
     use crate::server::types::{
-        CanonicalDocumentRef, ContextExpandParams, ContextFocus, ContextInclude, ContextPackParams,
-        DocumentRef, FileRef, Position, WorkspaceDocumentsSetFile, WorkspaceOpenParams,
-        WorkspaceScope,
+        BslDiagnosticsParams, BslMembersParams, BslTypeAtPositionParams, CanonicalDocumentRef,
+        ContextExpandParams, ContextFocus, ContextInclude, ContextPackParams, DocumentRef, FileRef,
+        Position, WorkspaceDocumentsSetFile, WorkspaceOpenParams, WorkspaceScope,
+        WorkspaceScopeTagged,
     };
     use crate::types::JobStateDto;
     use std::sync::Arc;
@@ -3680,6 +3754,143 @@ mod tests {
             "context_expand_snippet",
             serde_json::to_value(expand1).expect("json")
         );
+    }
+
+    #[tokio::test]
+    async fn flow_sensitive_flags_are_explicit_in_mcp_responses() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+
+        let job_manager = Arc::new(JobManager::new());
+        let manager = Arc::new(SessionManager::new());
+        let open = manager
+            .open(
+                WorkspaceOpenParams {
+                    roots: vec![temp.path().to_string_lossy().to_string()],
+                    platform_docs_archive: None,
+                    platform_version: None,
+                    configuration_path: None,
+                    mode: None,
+                },
+                Arc::clone(&job_manager),
+            )
+            .await
+            .expect("open");
+        wait_startup(job_manager.as_ref(), &open).await;
+
+        let session_id = open.session_id.clone();
+        let root_id = open.roots[0].root_id.clone();
+
+        let overlay_file = FileRef {
+            doc: DocumentRef::Canonical(CanonicalDocumentRef {
+                root_id: root_id.clone(),
+                path: "src/CommonModules/Foo/Module.bsl".to_string(),
+            }),
+            text: Some(
+                "Procedure Test()\n    x = Null;\n    x.Добавить(1);\n    x.\nEndProcedure\n"
+                    .to_string(),
+            ),
+            version: Some(1),
+        };
+        manager
+            .documents_set(
+                &session_id,
+                &[WorkspaceDocumentsSetFile::File(overlay_file.clone())],
+                true,
+            )
+            .await
+            .expect("documents_set");
+
+        // Diagnostics: null-safety only when enabled.
+        let diags_base = manager
+            .bsl_diagnostics(BslDiagnosticsParams {
+                session_id: session_id.clone(),
+                scope: WorkspaceScope::Tagged(WorkspaceScopeTagged::Hot),
+                limit: 500,
+                include_impact: false,
+                include_coverage: false,
+                include_flow_sensitive: false,
+            })
+            .await
+            .expect("diagnostics base");
+        assert!(!diags_base.flow_sensitive_enabled);
+
+        let diags_flow = manager
+            .bsl_diagnostics(BslDiagnosticsParams {
+                session_id: session_id.clone(),
+                scope: WorkspaceScope::Tagged(WorkspaceScopeTagged::Hot),
+                limit: 500,
+                include_impact: false,
+                include_coverage: false,
+                include_flow_sensitive: true,
+            })
+            .await
+            .expect("diagnostics flow");
+        assert!(diags_flow.flow_sensitive_enabled);
+
+        // Type-at-position: flag is explicit even when narrowing might not apply.
+        let file = FileRef {
+            doc: overlay_file.doc.clone(),
+            text: None,
+            version: None,
+        };
+        let type_base = manager
+            .bsl_type_at_position(BslTypeAtPositionParams {
+                session_id: session_id.clone(),
+                file: file.clone(),
+                position: Position {
+                    line: 3,
+                    character: 6,
+                },
+                include_flow_sensitive: false,
+            })
+            .await
+            .expect("type_at_position base");
+        assert!(!type_base.flow_sensitive_enabled);
+
+        let type_flow = manager
+            .bsl_type_at_position(BslTypeAtPositionParams {
+                session_id: session_id.clone(),
+                file: file.clone(),
+                position: Position {
+                    line: 3,
+                    character: 6,
+                },
+                include_flow_sensitive: true,
+            })
+            .await
+            .expect("type_at_position flow");
+        assert!(type_flow.flow_sensitive_enabled);
+
+        // Members: flag is explicit.
+        let members_base = manager
+            .bsl_members(BslMembersParams {
+                session_id: session_id.clone(),
+                file: file.clone(),
+                position: Position {
+                    line: 3,
+                    character: 6,
+                },
+                limit: 50,
+                include_flow_sensitive: false,
+            })
+            .await
+            .expect("members base");
+        assert!(!members_base.flow_sensitive_enabled);
+
+        let members_flow = manager
+            .bsl_members(BslMembersParams {
+                session_id,
+                file,
+                position: Position {
+                    line: 3,
+                    character: 6,
+                },
+                limit: 50,
+                include_flow_sensitive: true,
+            })
+            .await
+            .expect("members flow");
+        assert!(members_flow.flow_sensitive_enabled);
     }
 
     #[test]

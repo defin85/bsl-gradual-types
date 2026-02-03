@@ -12,6 +12,19 @@ use super::span::Span;
 /// В каноническом CFG node id совпадает с индексом узла в `ControlFlowGraph.nodes`.
 pub type CfgNodeId = usize;
 
+/// Bias/предпочтение при выборе CFG-узла по byte offset.
+///
+/// Нужен для стабильного поведения на границах токенов (например, completion на `.`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeAtByteOffsetBias {
+    /// Точный выбор по `offset`: берём самый специфичный (минимальный span), содержащий позицию.
+    Exact,
+    /// Предпочесть контекст слева от позиции (например, если курсор стоит сразу после `.`).
+    PreferLeft,
+    /// Предпочесть контекст справа от позиции (резерв для будущего).
+    PreferRight,
+}
+
 /// Граф потока управления (для flow-sensitive анализа)
 ///
 /// Упрощённая версия для отслеживания последовательности блоков кода.
@@ -78,6 +91,55 @@ impl ControlFlowGraph {
     /// Получить span для CFG-узла.
     pub fn node_span(&self, node_id: usize) -> Option<Span> {
         self.node_spans.get(node_id).copied().flatten()
+    }
+
+    /// Найти CFG-узел по позиции (UTF-8 byte offset) с учётом bias.
+    ///
+    /// Алгоритм:
+    /// 1) Находит все узлы, span которых содержит offset.
+    /// 2) Выбирает “самый специфичный” узел (с минимальным span.len()).
+    /// 3) При равенстве выбирает детерминированно по (span.start, node_id).
+    ///
+    /// Для `PreferLeft`/`PreferRight` пытается небольшое окно вокруг позиции, чтобы
+    /// устойчиво обрабатывать границы токенов (например, completion на `.`).
+    pub fn node_at_byte_offset(
+        &self,
+        byte_offset: u32,
+        bias: NodeAtByteOffsetBias,
+    ) -> Option<CfgNodeId> {
+        let find_at = |offset: u32| {
+            (0..self.nodes.len())
+                .filter_map(|node_id| self.node_span(node_id).map(|span| (node_id, span)))
+                .filter(|(_, span)| span.contains(offset))
+                .min_by_key(|(node_id, span)| (span.len(), span.start, *node_id))
+                .map(|(node_id, _)| node_id)
+        };
+
+        const WINDOW: u32 = 32;
+
+        match bias {
+            NodeAtByteOffsetBias::Exact => find_at(byte_offset),
+            NodeAtByteOffsetBias::PreferLeft => {
+                for delta in 0..=WINDOW {
+                    if let Some(offset) = byte_offset.checked_sub(delta) {
+                        if let Some(node_id) = find_at(offset) {
+                            return Some(node_id);
+                        }
+                    }
+                }
+                None
+            }
+            NodeAtByteOffsetBias::PreferRight => {
+                for delta in 0..=WINDOW {
+                    if let Some(offset) = byte_offset.checked_add(delta) {
+                        if let Some(node_id) = find_at(offset) {
+                            return Some(node_id);
+                        }
+                    }
+                }
+                None
+            }
+        }
     }
 
     /// Получить индекс IR-ноды (`SemanticProgram.nodes`) для CFG-узла.
@@ -207,5 +269,53 @@ mod tests {
 
         assert_eq!(cfg.nodes().len(), 2);
         assert_eq!(cfg.edges().len(), 1);
+    }
+
+    #[test]
+    fn test_node_at_byte_offset_picks_most_specific_span() {
+        let mut cfg = ControlFlowGraph::new();
+        let entry = cfg.add_node(CfgNode {
+            id: 0,
+            kind: CfgNodeKind::Entry,
+        });
+        let wide = cfg.add_node(CfgNode {
+            id: 1,
+            kind: CfgNodeKind::BasicBlock {
+                statements: vec!["wide".to_string()],
+            },
+        });
+        let narrow = cfg.add_node(CfgNode {
+            id: 2,
+            kind: CfgNodeKind::BasicBlock {
+                statements: vec!["narrow".to_string()],
+            },
+        });
+
+        cfg.set_node_span(wide, Some(Span::new(0, 10)));
+        cfg.set_node_span(narrow, Some(Span::new(2, 3)));
+        cfg.add_edge(entry, wide, EdgeKind::Unconditional);
+
+        let node = cfg
+            .node_at_byte_offset(2, NodeAtByteOffsetBias::Exact)
+            .expect("node");
+        assert_eq!(node, narrow);
+    }
+
+    #[test]
+    fn test_node_at_byte_offset_prefer_left_handles_end_boundary() {
+        let mut cfg = ControlFlowGraph::new();
+        let block = cfg.add_node(CfgNode {
+            id: 0,
+            kind: CfgNodeKind::BasicBlock {
+                statements: vec!["x".to_string()],
+            },
+        });
+        cfg.set_node_span(block, Some(Span::new(0, 10)));
+
+        // Span.contains(10) == false (end exclusive), но PreferLeft должен найти узел по offset=9.
+        let node = cfg
+            .node_at_byte_offset(10, NodeAtByteOffsetBias::PreferLeft)
+            .expect("node");
+        assert_eq!(node, block);
     }
 }

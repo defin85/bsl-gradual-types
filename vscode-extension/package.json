@@ -235,23 +235,29 @@
                         "description": "Enable code actions/quick fixes (requires LSP server support)",
                         "order": 1
                     },
+                    "bsl.enableFlowSensitive": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Enable flow-sensitive analysis (type narrowing + null-safety). Can impact performance.",
+                        "order": 2
+                    },
                     "bsl.typeHints.showVariableTypes": {
                         "type": "boolean",
                         "default": true,
                         "description": "Show type hints for variables",
-                        "order": 2
+                        "order": 3
                     },
                     "bsl.typeHints.showReturnTypes": {
                         "type": "boolean",
                         "default": true,
                         "description": "Show type hints for function return types",
-                        "order": 3
+                        "order": 4
                     },
                     "bsl.typeHints.showUnionDetails": {
                         "type": "boolean",
                         "default": true,
                         "description": "Show detailed information for Union types",
-                        "order": 4
+                        "order": 5
                     },
                     "bsl.typeHints.minCertainty": {
                         "type": "number",
@@ -259,30 +265,30 @@
                         "minimum": 0,
                         "maximum": 1,
                         "description": "Minimum certainty level to show type hints",
-                        "order": 5
+                        "order": 6
                     },
                     "bsl.performance.enableProfiling": {
                         "type": "boolean",
                         "default": false,
                         "description": "Enable automatic performance profiling",
-                        "order": 6
+                        "order": 7
                     },
                     "bsl.analysis.useParallelProcessing": {
                         "type": "boolean",
                         "default": true,
                         "description": "Use parallel processing for project analysis",
-                        "order": 7
+                        "order": 8
                     },
                     "bsl.analysis.enableCaching": {
                         "type": "boolean",
                         "default": true,
                         "description": "Enable caching of analysis results",
-                        "order": 8
+                        "order": 9
                     },
                     "bsl.analysis.cacheDirectory": {
                         "type": "string",
                         "description": "Custom directory for analysis cache (leave empty for auto)",
-                        "order": 9
+                        "order": 10
                     }
                 }
             },

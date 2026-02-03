@@ -289,9 +289,12 @@ pub struct GetSemanticTreeRequest {
     #[serde(default = "default_true")]
     pub include_call_graph: bool,
 
-    /// Включить flow-sensitive анализ
-    #[serde(default = "default_true")]
-    pub include_flow_sensitive: bool,
+    /// Включить flow-sensitive анализ.
+    ///
+    /// Если поле отсутствует, effective режим определяется внешним адаптером (например,
+    /// workspace setting `enableFlowSensitive` в LSP).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_flow_sensitive: Option<bool>,
 
     /// Максимальная глубина дерева (для оптимизации)
     #[serde(skip_serializing_if = "Option::is_none")]

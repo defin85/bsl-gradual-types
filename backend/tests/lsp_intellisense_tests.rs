@@ -226,6 +226,7 @@ async fn lsp_completion_returns_items_and_stats() {
         &uri,
         &env.index_snapshot,
         false,
+        false,
     )
     .await
     .expect("completion response");
@@ -259,6 +260,7 @@ async fn lsp_completion_resolve_respects_snippet_support() {
         position,
         &uri,
         &env.index_snapshot,
+        false,
         false,
     )
     .await
@@ -401,6 +403,7 @@ async fn lsp_completion_with_empty_index_returns_default_keywords() {
         Position::new(0, 0),
         &uri,
         &index_snapshot,
+        false,
         false,
     )
     .await

@@ -27,6 +27,7 @@ pub fn handle_hover_v2(
     position: Position,
     uri: &Url,
     settings: &HoverSettings,
+    include_flow_sensitive: bool,
 ) -> Option<Hover> {
     // Get syntax_helper path from environment or standard locations
     let syntax_helper_path = std::env::var("BSL_SYNTAX_HELPER_PATH")
@@ -77,6 +78,7 @@ pub fn handle_hover_v2(
         file_content.as_ref(),
         position.line,
         position.character,
+        include_flow_sensitive,
         &metadata_lookup,
         &hover_formatter,
         None,
@@ -283,6 +285,7 @@ mod tests {
             position,
             &uri,
             &settings,
+            false,
         )
         .expect("hover v2");
         let v2_text = hover_text(v2);
@@ -306,6 +309,7 @@ mod tests {
             position,
             &uri,
             &settings,
+            false,
         )
         .expect("hover v2 (second)");
         let v2_second_text = hover_text(v2_second);

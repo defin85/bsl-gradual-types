@@ -69,6 +69,35 @@ fn test_variable_declaration_conversion() {
 }
 
 #[test]
+fn test_cfg_present_for_declarations_only() {
+    let ast = Program {
+        statements: vec![Statement::FunctionDecl {
+            name: "Empty".to_string(),
+            params: vec![],
+            body: vec![],
+            compiler_directive: None,
+            is_export: false,
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "Функция Empty()\nКонецФункции".to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    let cfg = ir.cfg.expect("CFG must always be present");
+    assert_eq!(cfg.nodes().len(), 2);
+    assert_eq!(cfg.edges().len(), 1);
+    assert!(cfg.nodes().iter().any(|n| matches!(n.kind, CfgNodeKind::Entry)));
+    assert!(cfg.nodes().iter().any(|n| matches!(n.kind, CfgNodeKind::Exit)));
+}
+
+#[test]
 fn test_cfg_present_for_root_level_assignment() {
     let ast = Program {
         statements: vec![Statement::Assignment {

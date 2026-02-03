@@ -65,9 +65,14 @@ cargo test -p bsl-backend --test api_semantic_tree_test test_simple_procedure --
 ```json
 {
   "code": "Процедура Тест()\n    Сообщить(\"Привет\");\nКонецПроцедуры",
-  "file_path": "test.bsl"
+  "file_path": "test.bsl",
+  "includeFlowSensitive": false
 }
 ```
+
+Параметры:
+- `includeFlowSensitive` (bool, optional, default: `false`) — включает flow-sensitive вычисления (если нужны в дереве/метриках).
+- Legacy `include_flow_sensitive` (snake_case) **не поддерживается** и возвращает `400 Bad Request` (breaking change).
 
 ### Response (200 OK)
 
@@ -149,7 +154,7 @@ cargo test -p bsl-backend --test debug_semantic_tree_output -- --ignored --nocap
 ```bash
 curl -s -X POST http://localhost:3002/api/semantic-tree \
   -H "Content-Type: application/json" \
-  -d '{"code": "Процедура Тест()\nКонецПроцедуры", "file_path": "test.bsl"}' \
+  -d '{"code": "Процедура Тест()\nКонецПроцедуры", "file_path": "test.bsl", "includeFlowSensitive": false}' \
   | jq '.'
 ```
 
@@ -158,7 +163,7 @@ curl -s -X POST http://localhost:3002/api/semantic-tree \
 ```bash
 curl -s -X POST http://localhost:3002/api/semantic-tree \
   -H "Content-Type: application/json" \
-  -d '{"code": "Процедура Тест()\nКонецПроцедуры", "file_path": "test.bsl"}' \
+  -d '{"code": "Процедура Тест()\nКонецПроцедуры", "file_path": "test.bsl", "includeFlowSensitive": false}' \
   | jq '.metrics'
 ```
 
@@ -167,7 +172,7 @@ curl -s -X POST http://localhost:3002/api/semantic-tree \
 ```bash
 curl -s -X POST http://localhost:3002/api/semantic-tree \
   -H "Content-Type: application/json" \
-  -d '{"code": "Процедура Тест()\nКонецПроцедуры", "file_path": "test.bsl"}' \
+  -d '{"code": "Процедура Тест()\nКонецПроцедуры", "file_path": "test.bsl", "includeFlowSensitive": false}' \
   | jq '.root_nodes[] | {kind, name, location}'
 ```
 

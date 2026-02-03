@@ -298,6 +298,16 @@ pub struct ValidateCodeRequest {
     /// Optional file path for context
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_path: Option<String>,
+
+    /// Enable flow-sensitive analysis (opt-in).
+    ///
+    /// Default: false.
+    #[serde(default)]
+    pub include_flow_sensitive: bool,
+
+    /// Legacy field: `include_flow_sensitive` (snake_case) is explicitly rejected by adapters.
+    #[serde(default, rename = "include_flow_sensitive", skip_serializing)]
+    pub legacy_include_flow_sensitive: Option<bool>,
 }
 
 /// Response with validation results

@@ -151,6 +151,9 @@ pub struct BslDiagnosticsParams {
     pub include_impact: bool,
     #[serde(default)]
     pub include_coverage: bool,
+    /// Opt-in: include flow-sensitive rules (default: false).
+    #[serde(default)]
+    pub include_flow_sensitive: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -166,6 +169,9 @@ pub struct BslTypeAtPositionParams {
     pub session_id: String,
     pub file: FileRef,
     pub position: Position,
+    /// Opt-in: include flow-sensitive type narrowing (default: false).
+    #[serde(default)]
+    pub include_flow_sensitive: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -175,6 +181,9 @@ pub struct BslMembersParams {
     pub position: Position,
     #[serde(default = "default_limit_200")]
     pub limit: u32,
+    /// Opt-in: include flow-sensitive type narrowing (default: false).
+    #[serde(default)]
+    pub include_flow_sensitive: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

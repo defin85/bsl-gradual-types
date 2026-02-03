@@ -118,6 +118,9 @@ export class EnhancedLspClient {
         const codeActionsEnabled = vscode.workspace
             .getConfiguration('bsl.codeActions')
             .get<boolean>('enabled', false);
+        const flowSensitiveEnabled = vscode.workspace
+            .getConfiguration('bsl')
+            .get<boolean>('enableFlowSensitive', false);
         
         // Настройки сервера
         const serverOptions: ServerOptions = {
@@ -152,7 +155,7 @@ export class EnhancedLspClient {
             
             // Enhanced capabilities
             initializationOptions: {
-                enableFlowSensitiveAnalysis: true,
+                enableFlowSensitiveAnalysis: flowSensitiveEnabled,
                 enableUnionTypes: true,
                 enableInterproceduralAnalysis: true,
                 enableTypeHints: typeHintsEnabled,

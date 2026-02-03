@@ -644,6 +644,10 @@ impl BslLanguageServer {
                     let settings = server.settings.read().await;
                     settings.diagnostics.show_hints
                 };
+                let include_flow_sensitive = {
+                    let settings = server.settings.read().await;
+                    settings.enable_flow_sensitive
+                };
 
                 // If a newer version is requested, skip work for the stale one early.
                 let current_requested = {
@@ -848,7 +852,11 @@ impl BslLanguageServer {
                     }
 
                     let semantic_started = Instant::now();
-                    let semantic_result = analysis.semantic_diagnostics(file_id);
+                    let semantic_result = if include_flow_sensitive {
+                        analysis.semantic_diagnostics_flow_sensitive(file_id)
+                    } else {
+                        analysis.semantic_diagnostics(file_id)
+                    };
                     let semantic_elapsed = semantic_started.elapsed();
                     server
                         .coordinator

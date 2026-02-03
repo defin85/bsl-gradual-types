@@ -43,6 +43,13 @@ use crate::types::{GetCurrentContextParams, ServerStatus, ServerStatusParams};
 
 use super::BslLanguageServer;
 
+fn effective_include_flow_sensitive(
+    request_override: Option<bool>,
+    enable_flow_sensitive_setting: bool,
+) -> bool {
+    request_override.unwrap_or(enable_flow_sensitive_setting)
+}
+
 #[tower_lsp::async_trait]
 impl LanguageServer for BslLanguageServer {
     // ========================================================================
@@ -550,13 +557,14 @@ impl LanguageServer for BslLanguageServer {
                 match serde_json::from_value::<BslSettings>(bsl_value.clone()) {
                     Ok(new_settings) => {
                         info!(
-                            "Parsed BslSettings: hover.detailLevel={}, diagnostics.detailLevel={}, formatting.enabled={}, formatting.indentSize={}, typeHints.enabled={}, codeActions.enabled={}",
+                            "Parsed BslSettings: hover.detailLevel={}, diagnostics.detailLevel={}, formatting.enabled={}, formatting.indentSize={}, typeHints.enabled={}, codeActions.enabled={}, enableFlowSensitive={}",
                             new_settings.hover.detail_level,
                             new_settings.diagnostics.detail_level,
                             new_settings.formatting.enabled,
                             new_settings.formatting.indent_size,
                             new_settings.type_hints.enabled,
                             new_settings.code_actions.enabled,
+                            new_settings.enable_flow_sensitive,
                         );
                         *self.settings.write().await = new_settings;
 
@@ -1171,6 +1179,7 @@ impl LanguageServer for BslLanguageServer {
                     deps,
                     ir_program,
                     index_snapshot,
+                    include_flow_sensitive,
                 ) = {
                     let snapshot_started = Instant::now();
                     let (analysis, index_snapshot, deps_id) =
@@ -1287,6 +1296,11 @@ impl LanguageServer for BslLanguageServer {
                         }
                     }
 
+                    let include_flow_sensitive = {
+                        let settings = self.settings.read().await;
+                        settings.enable_flow_sensitive
+                    };
+
                     let member_access_owner_type_hint = file_content.as_deref().and_then(|text| {
                         let line_text = text.lines().nth(position.line as usize)?;
                         let cursor_byte = bsl_backend::system::positioning::utf16_to_byte_offset(
@@ -1307,10 +1321,18 @@ impl LanguageServer for BslLanguageServer {
                             .utf16_position_to_byte_offset(file_id, position.line, probe_utf16)
                             .ok()
                             .flatten()?;
-                        analysis
-                            .type_at_byte_offset(file_id, offset.min(u32::MAX as usize) as u32)
-                            .ok()
-                            .flatten()
+                        let offset = offset.min(u32::MAX as usize) as u32;
+                        if include_flow_sensitive {
+                            analysis
+                                .flow_type_at_byte_offset(file_id, offset)
+                                .ok()
+                                .flatten()
+                                .or_else(|| {
+                                    analysis.type_at_byte_offset(file_id, offset).ok().flatten()
+                                })
+                        } else {
+                            analysis.type_at_byte_offset(file_id, offset).ok().flatten()
+                        }
                     });
 
                     (
@@ -1321,6 +1343,7 @@ impl LanguageServer for BslLanguageServer {
                         deps,
                         ir_program,
                         index_snapshot,
+                        include_flow_sensitive,
                     )
                 };
 
@@ -1337,6 +1360,7 @@ impl LanguageServer for BslLanguageServer {
                             &uri,
                             index_snapshot.as_ref(),
                             snippet_support,
+                            include_flow_sensitive,
                         )
                         .await
                     }
@@ -1545,6 +1569,7 @@ impl LanguageServer for BslLanguageServer {
             };
 
             let settings = self.settings.read().await;
+            let include_flow_sensitive = settings.enable_flow_sensitive;
             let result = match (file_content, file_path, deps, ir_program) {
                 (Some(file_content), Some(file_path), Some(deps), Some(ir_program)) => {
                     handle_hover_v2(
@@ -1557,6 +1582,7 @@ impl LanguageServer for BslLanguageServer {
                         position,
                         &uri,
                         &settings.hover,
+                        include_flow_sensitive,
                     )
                 }
                 _ => None,
@@ -1851,16 +1877,29 @@ impl LanguageServer for BslLanguageServer {
                     }
                 }
 
+                let include_flow_sensitive = {
+                    let settings = self.settings.read().await;
+                    settings.enable_flow_sensitive
+                };
+
                 let type_at_position_hint = {
                     let offset = analysis
                         .utf16_position_to_byte_offset(file_id, position.line, position.character)
                         .ok()
                         .flatten();
                     offset.and_then(|offset| {
-                        analysis
-                            .type_at_byte_offset(file_id, offset.min(u32::MAX as usize) as u32)
-                            .ok()
-                            .flatten()
+                        let offset = offset.min(u32::MAX as usize) as u32;
+                        if include_flow_sensitive {
+                            analysis
+                                .flow_type_at_byte_offset(file_id, offset)
+                                .ok()
+                                .flatten()
+                                .or_else(|| {
+                                    analysis.type_at_byte_offset(file_id, offset).ok().flatten()
+                                })
+                        } else {
+                            analysis.type_at_byte_offset(file_id, offset).ok().flatten()
+                        }
                     })
                 };
                 let receiver_type_hint = ir_program.as_ref().and_then(|program| {
@@ -1882,10 +1921,23 @@ impl LanguageServer for BslLanguageServer {
                         _ => None,
                     }?;
 
-                    analysis
-                        .type_at_byte_offset(file_id, object_span.start)
-                        .ok()
-                        .flatten()
+                    if include_flow_sensitive {
+                        analysis
+                            .flow_type_at_byte_offset(file_id, object_span.start)
+                            .ok()
+                            .flatten()
+                            .or_else(|| {
+                                analysis
+                                    .type_at_byte_offset(file_id, object_span.start)
+                                    .ok()
+                                    .flatten()
+                            })
+                    } else {
+                        analysis
+                            .type_at_byte_offset(file_id, object_span.start)
+                            .ok()
+                            .flatten()
+                    }
                 });
 
                 (
@@ -2044,6 +2096,11 @@ impl LanguageServer for BslLanguageServer {
                 let file_content = analysis.file_text(file_id).ok().flatten();
                 let deps = analysis.deps_data().ok();
 
+                let include_flow_sensitive = {
+                    let settings = self.settings.read().await;
+                    settings.enable_flow_sensitive
+                };
+
                 let receiver_type_hint = file_content.as_ref().and_then(|text| {
                     let query = bsl_backend::application::type_system::signature_help_query(
                         text.as_ref(),
@@ -2059,10 +2116,18 @@ impl LanguageServer for BslLanguageServer {
                         )
                         .ok()
                         .flatten()?;
-                    analysis
-                        .type_at_byte_offset(file_id, offset.min(u32::MAX as usize) as u32)
-                        .ok()
-                        .flatten()
+                    let offset = offset.min(u32::MAX as usize) as u32;
+                    if include_flow_sensitive {
+                        analysis
+                            .flow_type_at_byte_offset(file_id, offset)
+                            .ok()
+                            .flatten()
+                            .or_else(|| {
+                                analysis.type_at_byte_offset(file_id, offset).ok().flatten()
+                            })
+                    } else {
+                        analysis.type_at_byte_offset(file_id, offset).ok().flatten()
+                    }
                 });
 
                 (file_content, deps, receiver_type_hint)
@@ -2288,10 +2353,19 @@ impl LanguageServer for BslLanguageServer {
                     .flatten()
                     .ok_or_else(tower_lsp::jsonrpc::Error::internal_error)?;
 
+                let enable_flow_sensitive = {
+                    let settings = self.settings.read().await;
+                    settings.enable_flow_sensitive
+                };
+                let include_flow_sensitive = effective_include_flow_sensitive(
+                    request.include_flow_sensitive,
+                    enable_flow_sensitive,
+                );
+
                 let result = semantic_tree_from_ir(
                     ir_program.as_ref(),
                     request.include_call_graph,
-                    request.include_flow_sensitive,
+                    include_flow_sensitive,
                     file_text.as_ref(),
                     line_index.as_ref(),
                 );

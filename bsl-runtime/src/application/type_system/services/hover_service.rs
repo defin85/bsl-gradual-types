@@ -15,7 +15,6 @@ use crate::system::LineIndex;
 use super::super::extractors::symbol_extractor::extract_word_at_position;
 use super::super::formatters::format_semantic_node_info;
 use super::super::formatters::hover_formatters::format_expected_type_hover;
-use super::flow_sensitive::narrow_type_for_variable_at;
 
 /// Hover по уже готовому `SemanticProgram` (без legacy парсинга/IR build).
 ///
@@ -27,6 +26,7 @@ pub fn get_hover_info_with_semantic_program(
     file_content: &str,
     line: u32,
     column: u32,
+    include_flow_sensitive: bool,
     metadata_lookup: &TypeMetadataLookup,
     hover_formatter: &HoverFormatter,
     hover_config: Option<HoverFormatConfig>,
@@ -43,6 +43,7 @@ pub fn get_hover_info_with_semantic_program(
         file_content,
         line,
         column,
+        include_flow_sensitive,
         hover_config,
     )
 }
@@ -58,6 +59,7 @@ fn compute_hover_info_from_ir(
     file_content: &str,
     line: u32,
     column: u32,
+    include_flow_sensitive: bool,
     hover_config: Option<HoverFormatConfig>,
 ) -> Option<String> {
     // Milestone 2.11 Task B1: DEBUG logs for node search
@@ -72,8 +74,17 @@ fn compute_hover_info_from_ir(
     let node_at_position =
         byte_offset.and_then(|offset| ir_program.find_node_at_byte_offset(offset));
     let word_under_cursor = extract_word_at_position(file_content, line, column);
-    let type_at_cursor =
-        byte_offset.and_then(|offset| analysis.type_at_byte_offset(file_id, offset).ok().flatten());
+    let type_at_cursor = byte_offset.and_then(|offset| {
+        if include_flow_sensitive {
+            analysis
+                .flow_type_at_byte_offset(file_id, offset)
+                .ok()
+                .flatten()
+                .or_else(|| analysis.type_at_byte_offset(file_id, offset).ok().flatten())
+        } else {
+            analysis.type_at_byte_offset(file_id, offset).ok().flatten()
+        }
+    });
 
     let formatter = if let Some(config) = hover_config.clone() {
         HoverFormatter::new(config, metadata_lookup.clone())
@@ -165,20 +176,6 @@ fn compute_hover_info_from_ir(
                     metadata_lookup,
                 ));
             }
-        }
-    }
-
-    if let (Some(word), Some(offset)) = (word_under_cursor.as_deref(), byte_offset) {
-        let base = type_at_cursor
-            .clone()
-            .unwrap_or_else(TypeResolution::unknown);
-        if let Some(narrowed) = narrow_type_for_variable_at(ir_program, offset, word, base) {
-            info!(
-                "Hover v2 flow-sensitive narrowed_at({}): {}",
-                offset,
-                narrowed.type_name()
-            );
-            return Some(formatter.format_variable(word, &narrowed));
         }
     }
 

@@ -439,18 +439,19 @@ async fn run_iterations(
                 .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
                 .context("ir unavailable")?;
 
-            let result = get_completion_with_semantic_program_snapshot(
-                case.content.as_ref(),
-                case.line,
-                case.column,
-                Some(case.file_uri.as_str()),
-                index_snapshot,
-                metadata_lookup,
-                case.file_uri.as_str(),
-                resolver,
-                ir_program,
-                None,
-            )
+	            let result = get_completion_with_semantic_program_snapshot(
+	                case.content.as_ref(),
+	                case.line,
+	                case.column,
+	                Some(case.file_uri.as_str()),
+	                index_snapshot,
+	                metadata_lookup,
+	                case.file_uri.as_str(),
+	                resolver,
+	                ir_program,
+	                None,
+	                false,
+	            )
             .await;
             let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
 

@@ -121,3 +121,112 @@ AST→IR конвертация (если требуется) MUST быть ре
 - **THEN** используется v2 deps snapshot (`SemanticDeps`) и/или v2 queries
 - **AND** в коде агента нет использования `TypeInferenceService`
 
+### Requirement: `SemanticProgram.cfg` всегда присутствует в v2 snapshot (MUST)
+Система MUST всегда включать CFG в v2 snapshot как `SemanticProgram.cfg = Some(ControlFlowGraph)`, даже если в файле нет исполняемых конструкций.
+
+Минимальный CFG в таком случае MUST содержать:
+- узлы `Entry` и `Exit`,
+- ребро `Entry -> Exit`.
+
+#### Scenario: CFG присутствует для файлов без исполняемых конструкций
+- **GIVEN** пользователь открывает `.bsl` файл, который содержит только объявления (или пустые тела процедур/функций)
+- **WHEN** система строит v2 snapshot (IR) для hover/completion/diagnostics
+- **THEN** `SemanticProgram.cfg` присутствует и содержит как минимум `Entry -> Exit`
+- **AND** flow-sensitive операции (narrowing / null-safety) не требуют fallback на отсутствие CFG
+
+### Requirement: Привязка “позиция → CFG узел” детерминирована и bias-aware (MUST)
+Система MUST иметь единый детерминированный алгоритм выбора CFG узла по byte offset, используемый всеми flow-sensitive consumers (hover/completion/diagnostics).
+
+Алгоритм MUST:
+- выбирать “самый специфичный” (наиболее узкий) узел, чей span содержит позицию;
+- поддерживать bias для случаев, когда позиция находится на границе токена (например, completion на `.` предпочитает выражение слева).
+
+#### Scenario: Completion на `.` выбирает владельца слева
+- **GIVEN** пользователь вводит `x.` в теле условной ветки
+- **WHEN** IDE запрашивает completion в позиции сразу после `.`
+- **THEN** система выбирает CFG узел/контекст, соответствующий выражению слева (`x`), а не произвольный соседний узел
+- **AND** результат детерминирован при повторных запросах
+
+### Requirement: Flow-sensitive null-safety учитывает null-check в заголовках циклов (MUST)
+Система MUST учитывать null-check условия в заголовках циклов (например, `Пока x <> Null Цикл`) при выполнении flow-sensitive null-safety анализа в v2 pipeline.
+
+#### Scenario: Null-check в `Пока` подавляет warning в теле
+- **GIVEN** переменная `x` потенциально nullable
+- **WHEN** код содержит цикл `Пока x <> Null Цикл ... x.Method() ... КонецЦикла`
+- **THEN** flow-sensitive null-safety не выдаёт предупреждение о возможном Null‑dereference для `x.Method()` внутри тела цикла
+
+### Requirement: v2 pipeline предоставляет CFG для flow-sensitive анализа (MUST)
+Система MUST строить и включать control-flow graph (CFG) в v2 pipeline таким образом, чтобы flow-sensitive анализ (type narrowing / null-safety) мог выполняться на основе v2 snapshot без альтернативных путей построения CFG.
+
+#### Scenario: Flow-sensitive анализ доступен из v2 snapshot
+- **GIVEN** пользователь работает с `.bsl` файлом в IDE
+- **WHEN** система строит v2 snapshot для hover/completion/diagnostics
+- **THEN** CFG присутствует в структуре программы (или доступен через стабильный API v2), и flow-sensitive логика использует этот CFG (без fallback на отдельные CFG/анализаторы вне v2)
+
+### Requirement: В репозитории не существует двусмысленного `ControlFlowGraph` между слоями (MUST)
+Система MUST избегать ситуации, когда в разных слоях (IR vs Domain) одновременно существуют разные типы с одинаковым именем `ControlFlowGraph`, если они оба используются/экспортируются как часть публичного API.
+
+#### Scenario: Потребители однозначно импортируют CFG
+- **GIVEN** разработчик пишет код, который использует CFG для анализа
+- **WHEN** он импортирует `ControlFlowGraph`
+- **THEN** импорт однозначен (нет двух разных `ControlFlowGraph` в публичной поверхности), либо используются явно разные имена (`Ir*`/`Domain*`) с понятной семантикой
+
+### Requirement: Единый контракт включения flow-sensitive в v2 интерфейсах (MUST)
+Система MUST иметь единый, недвусмысленный контракт включения flow-sensitive режима во всех v2 интерфейсах (IDE/LSP и Web API), чтобы клиент мог надёжно управлять производительностью и результатами.
+
+#### Scenario: Web API принимает только `includeFlowSensitive` (breaking)
+- **GIVEN** клиент вызывает Web API endpoint, поддерживающий flow-sensitive режим
+- **WHEN** клиент передаёт `includeFlowSensitive=true`
+- **THEN** сервер включает flow-sensitive вычисления для запроса
+- **AND WHEN** клиент передаёт `include_flow_sensitive=true`
+- **THEN** сервер отвечает `400 Bad Request` и явно сообщает, что поддерживается только `includeFlowSensitive`
+
+### Requirement: `bsl.getSemanticTree` подчиняется `enableFlowSensitive`, если параметр не указан (MUST)
+Если LSP custom request `bsl.getSemanticTree` не содержит явного параметра `include_flow_sensitive`, система MUST определять effective режим по workspace setting `enableFlowSensitive`.
+
+Если `include_flow_sensitive` указан явно, он MUST иметь приоритет над `enableFlowSensitive`.
+
+#### Scenario: `bsl.getSemanticTree` без параметра использует `enableFlowSensitive`
+- **GIVEN** workspace setting `enableFlowSensitive=false`
+- **WHEN** IDE вызывает `bsl.getSemanticTree` без `include_flow_sensitive`
+- **THEN** сервер вычисляет результат без flow-sensitive вычислений
+
+#### Scenario: `bsl.getSemanticTree` с параметром переопределяет настройку
+- **GIVEN** workspace setting `enableFlowSensitive=false`
+- **WHEN** IDE вызывает `bsl.getSemanticTree` с `include_flow_sensitive=true`
+- **THEN** сервер включает flow-sensitive вычисления для запроса
+
+### Requirement: Flow-sensitive результаты доступны во всех интерфейсах v2 и вычисляются только по запросу (MUST)
+Система MUST предоставлять flow-sensitive результаты (type narrowing и null-safety) для IDE (LSP), Web API и MCP, используя только v2 snapshot/queries.
+
+Flow-sensitive вычисления MUST выполняться только при явном включении флага/настройки (default: OFF), чтобы не ухудшать производительность по умолчанию.
+
+#### Scenario: Flow-sensitive выключен по умолчанию
+- **GIVEN** пользователь использует IDE/Web API/MCP без явного включения flow-sensitive режима
+- **WHEN** выполняются hover/completion/diagnostics/type-at-position запросы
+- **THEN** система не запускает flow-sensitive вычисления и возвращает результаты на основе базовых v2 queries (как и ранее)
+
+#### Scenario: Flow-sensitive включён и влияет на hover/completion/diagnostics
+- **GIVEN** пользователь явно включил flow-sensitive режим в IDE/Web API/MCP
+- **WHEN** система отвечает на hover/completion/diagnostics запросы
+- **THEN** ответы используют flow-sensitive результаты, вычисленные из v2 snapshot/queries (на основе CFG), и эти результаты согласованы между интерфейсами
+
+### Requirement: v2 предоставляет корректный контракт “позиция → flow-sensitive тип” (MUST)
+Система MUST иметь стабильный механизм получения flow-sensitive `TypeResolution` для byte offset позиции в документе, чтобы hover/completion/signatureHelp/definition могли использовать уточнённый тип в текущем control-flow контексте.
+
+Реализация SHOULD быть локальной по области анализа (например, CFG-per-body), чтобы минимизировать стоимость вычислений.
+
+#### Scenario: Type-at-position учитывает narrowing в then-ветке
+- **GIVEN** переменная имеет широкий/nullable тип до условия
+- **WHEN** курсор находится внутри then-ветки после type guard (например, `x <> Неопределено` / `ТипЗнч(x)=...`)
+- **THEN** flow-sensitive `type-at-position` возвращает уточнённый тип (narrowed) для `x`
+
+### Requirement: Null-safety diagnostics интегрированы в v2 diagnostics при включении (MUST)
+Система MUST добавлять null-safety diagnostics, вычисленные на основе CFG и flow-sensitive контекста, в v2 diagnostics pipeline при включённом flow-sensitive режиме.
+
+#### Scenario: Null-safety предупреждение появляется только при включённом режиме
+- **GIVEN** код содержит потенциальный null dereference по CFG (receiver может быть null/undefined)
+- **WHEN** запрашиваются diagnostics при включённом flow-sensitive режиме
+- **THEN** система возвращает null-safety diagnostics
+- **AND** при выключенном режиме эти diagnostics отсутствуют
+

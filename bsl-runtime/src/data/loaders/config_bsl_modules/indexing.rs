@@ -20,6 +20,7 @@ use crate::system::fs_utils::read_bsl_file;
 use super::inference::infer_export_param_types_across_modules;
 use super::metrics::{human_duration, parse_metrics_config, report_slow_modules};
 use super::parsing::parse_bsl_module;
+use super::return_inference::infer_return_types_across_modules;
 use super::types::{
     IndexedConfigSignatures, ModuleIndexProgress, ModuleIndexResult, ModuleSignatureSnapshot,
     ParsedModule, ParsedModuleData,
@@ -47,8 +48,6 @@ where
     let metrics = parse_metrics_config();
     let common_module_props = collect_common_module_props(metadata);
     let all_module_paths = collect_module_paths(config_root, metadata);
-
-    let mut out = IndexedConfigSignatures::default();
 
     let mut parsed_modules: Vec<ParsedModule> = Vec::new();
     let mut slow_modules: Vec<(Duration, PathBuf)> = Vec::new();
@@ -118,89 +117,8 @@ where
         });
     }
 
-    let inferred_param_types = infer_export_param_types_across_modules(&parsed_modules);
-
-    for module in parsed_modules {
-        let module_context = module_context_requirements(&module.module_type, &common_module_props);
-        let mut snapshot = ModuleSignatureSnapshot {
-            module_path: module.module_path.clone(),
-            owner_type: Some(module.owner_type_name.clone()),
-            method_names: Vec::new(),
-            global_function_names: Vec::new(),
-        };
-
-        for decl in module.decls {
-            if !decl.is_export {
-                continue;
-            }
-
-            let method_name = decl.name.clone();
-            let ctx = decl.directive_ctx.unwrap_or(module_context);
-            let inferred_for_decl =
-                inferred_param_types.get(&(module.owner_type_name.clone(), decl.name.clone()));
-
-            let signature = MethodSignature::new(
-                method_name.clone(),
-                Some(module.owner_type_name.clone()),
-                decl.params
-                    .into_iter()
-                    .enumerate()
-                    .map(|(idx, p)| ParameterInfo {
-                        name: p.name,
-                        type_name: inferred_for_decl
-                            .and_then(|v| v.get(idx))
-                            .cloned()
-                            .flatten(),
-                        is_optional: p.is_optional,
-                        default_value: None,
-                        description: None,
-                    })
-                    .collect(),
-                decl.return_type.clone(),
-                None,
-                None,
-                SignatureSource::Configuration,
-                None, // return_facet: неизвестен на этапе извлечения
-                ctx,
-            );
-
-            out.config_methods
-                .push((module.owner_type_name.clone(), signature.clone()));
-            snapshot.method_names.push(method_name.clone());
-
-            if module.is_global_common_module {
-                let mut global_sig = signature;
-                global_sig.owner_type = None;
-                out.global_functions.push((method_name.clone(), global_sig));
-                snapshot.global_function_names.push(method_name.clone());
-                out.global_definition_locations.push((
-                    method_name.clone(),
-                    TypeDefinitionLocation::user_defined(
-                        module.module_path.clone(),
-                        decl.span.start,
-                        decl.span.end,
-                    ),
-                ));
-            }
-
-            out.definition_locations.push((
-                module.owner_type_name.clone(),
-                method_name,
-                TypeDefinitionLocation::user_defined(
-                    module.module_path.clone(),
-                    decl.span.start,
-                    decl.span.end,
-                ),
-            ));
-        }
-
-        if !snapshot.method_names.is_empty() || !snapshot.global_function_names.is_empty() {
-            out.module_signatures.push(snapshot);
-        }
-    }
-
+    let out = build_index_from_parsed_modules(parsed_modules, &common_module_props);
     report_slow_modules(&mut slow_modules);
-    sort_indexed_signatures(&mut out);
     Ok(out)
 }
 
@@ -672,6 +590,7 @@ fn build_index_from_parsed_modules(
 ) -> IndexedConfigSignatures {
     let mut out = IndexedConfigSignatures::default();
     let inferred_param_types = infer_export_param_types_across_modules(&parsed_modules);
+    let inferred_return_types = infer_return_types_across_modules(&parsed_modules);
 
     for module in parsed_modules {
         let module_context = module_context_requirements(&module.module_type, common_module_props);
@@ -691,8 +610,13 @@ fn build_index_from_parsed_modules(
             let ctx = decl.directive_ctx.unwrap_or(module_context);
             let inferred_for_decl =
                 inferred_param_types.get(&(module.owner_type_name.clone(), decl.name.clone()));
+            let inferred_return_domain = inferred_return_types
+                .get(&(module.owner_type_name.clone(), decl.name.to_lowercase()));
+            let inferred_return_type = inferred_return_domain
+                .and_then(|d| d.to_union_string())
+                .or_else(|| decl.return_type.clone());
 
-            let signature = MethodSignature::new(
+            let mut signature = MethodSignature::new(
                 method_name.clone(),
                 Some(module.owner_type_name.clone()),
                 decl.params
@@ -709,13 +633,14 @@ fn build_index_from_parsed_modules(
                         description: None,
                     })
                     .collect(),
-                decl.return_type.clone(),
+                inferred_return_type,
                 None,
                 None,
                 SignatureSource::Configuration,
                 None,
                 ctx,
             );
+            signature.return_is_weak = inferred_return_domain.is_some_and(|d| d.has_dynamic);
 
             out.config_methods
                 .push((module.owner_type_name.clone(), signature.clone()));

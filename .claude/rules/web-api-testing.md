@@ -117,18 +117,20 @@ with codecs.open('test_api.json', 'w', 'utf-8') as f:
 
 ### /api/diagnostics
 ```json
-{"code": "Процедура Тест()\n    x = 1;\nКонецПроцедуры"}
+{"code": "Процедура Тест()\n    x = 1;\nКонецПроцедуры", "includeFlowSensitive": false}
 ```
 
 ### /api/hover/enhanced
 ```json
-{"code": "ТЗ = Новый ТаблицаЗначений;", "line": 0, "column": 10}
+{"code": "ТЗ = Новый ТаблицаЗначений;", "line": 0, "column": 10, "includeFlowSensitive": false}
 ```
 
 ### /api/semantic-tree
 ```json
-{"code": "Процедура Тест()\n    x = 1;\nКонецПроцедуры", "file_path": "test.bsl"}
+{"code": "Процедура Тест()\n    x = 1;\nКонецПроцедуры", "file_path": "test.bsl", "includeFlowSensitive": false}
 ```
+
+Примечание: `include_flow_sensitive` (snake_case) не поддерживается и приводит к `400 Bad Request`.
 
 ## Различия endpoints
 

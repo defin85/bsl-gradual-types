@@ -69,7 +69,79 @@ detect_platform
 # Параметры
 # ============================================================================
 
-PORT=${PORT:-3002}
+is_port_in_use() {
+    local port="$1"
+
+    if command -v ss >/dev/null 2>&1; then
+        ss -ltnH 2>/dev/null | awk '{print $4}' | grep -Eq "(:|\\])${port}$"
+        return $?
+    fi
+
+    if command -v lsof >/dev/null 2>&1; then
+        lsof -iTCP:"$port" -sTCP:LISTEN -nP >/dev/null 2>&1
+        return $?
+    fi
+
+    return 1
+}
+
+is_port_excluded_on_windows_host() {
+    local port="$1"
+
+    # Excluded port ranges are a Windows concept; relevant mostly for WSL.
+    if [[ "${PLATFORM:-}" != "wsl" ]]; then
+        return 1
+    fi
+
+    if ! command -v powershell.exe >/dev/null 2>&1; then
+        return 1
+    fi
+
+    # Parse: netsh interface ipv4 show excludedportrange protocol=tcp
+    # Output language varies; we rely on numeric columns (start/end).
+    local ranges
+    ranges="$(powershell.exe -NoProfile -Command "netsh interface ipv4 show excludedportrange protocol=tcp" 2>/dev/null \
+        | tr -d '\r' \
+        | awk '$1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ {print $1, $2}')"
+
+    if [[ -z "$ranges" ]]; then
+        return 1
+    fi
+
+    while read -r start end; do
+        if [[ -n "$start" && -n "$end" ]] && (( port >= start && port <= end )); then
+            return 0
+        fi
+    done <<< "$ranges"
+
+    return 1
+}
+
+pick_default_port() {
+    local start_port="$1"
+    local max_tries="${2:-200}"
+
+    local port="$start_port"
+    local i=0
+    while (( i < max_tries )); do
+        if ! is_port_excluded_on_windows_host "$port" && ! is_port_in_use "$port"; then
+            echo "$port"
+            return 0
+        fi
+        port=$((port + 1))
+        i=$((i + 1))
+    done
+
+    # If we failed to find a "good" port, fall back to the initial default.
+    echo "$start_port"
+    return 0
+}
+
+DEFAULT_PORT=3100
+if [[ -z "${PORT:-}" ]]; then
+    PORT="$(pick_default_port "$DEFAULT_PORT")"
+fi
+
 SYNTAX_HELPER_PATH="examples/syntax_helper"
 PROJECT_PATH="${PROJECT_PATH:-$DEFAULT_PROJECT_PATH}"
 PLATFORM_VERSION="${BSL_PLATFORM_VERSION:-}"
@@ -116,7 +188,7 @@ for arg in "$@"; do
             echo "  --log-each-module      Логировать время парсинга каждого модуля"
             echo ""
             echo "Переменные окружения:"
-            echo "  PORT           Порт сервера (по умолчанию: 3002)"
+            echo "  PORT           Порт сервера (по умолчанию: 3100; в WSL избегает excluded ranges Windows)"
             echo "  PROJECT_PATH   Путь к конфигурации 1С"
             echo "  BSL_SLOW_MODULE_THRESHOLD_MS  Порог медленного парсинга (ms)"
             echo "  BSL_SLOW_MODULE_TOP_N         Топ-N медленных модулей"

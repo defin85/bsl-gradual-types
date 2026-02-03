@@ -92,7 +92,7 @@ fn default_min_certainty() -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::LspConfig;
+    use super::{BslSettings, LspConfig};
 
     #[test]
     fn lsp_config_deserializes_feature_flags_from_initialization_options() {
@@ -119,6 +119,37 @@ mod tests {
         assert_eq!(cfg.enable_type_hints, Some(true));
         assert_eq!(cfg.enable_code_actions, Some(false));
     }
+
+    #[test]
+    fn bsl_settings_enable_flow_sensitive_is_optional_and_defaults_to_false() {
+        let raw = serde_json::json!({
+            "hover": {
+                "detailLevel": "full",
+                "maxMethods": 10,
+                "maxProperties": 5,
+                "showCertainty": true
+            },
+            "diagnostics": { "detailLevel": "standard", "showHints": true },
+            "formatting": { "enabled": false, "indentSize": 4 }
+        });
+
+        let settings: BslSettings = serde_json::from_value(raw).expect("BslSettings");
+        assert!(!settings.enable_flow_sensitive);
+
+        let raw_enabled = serde_json::json!({
+            "hover": {
+                "detailLevel": "full",
+                "maxMethods": 10,
+                "maxProperties": 5,
+                "showCertainty": true
+            },
+            "diagnostics": { "detailLevel": "standard", "showHints": true },
+            "formatting": { "enabled": false, "indentSize": 4 },
+            "enableFlowSensitive": true
+        });
+        let settings: BslSettings = serde_json::from_value(raw_enabled).expect("BslSettings");
+        assert!(settings.enable_flow_sensitive);
+    }
 }
 
 /// MILESTONE 3.6 Phase 1+3: BSL Settings (from workspace/didChangeConfiguration)
@@ -133,6 +164,11 @@ pub struct BslSettings {
     pub type_hints: TypeHintsSettings,
     #[serde(default, rename = "codeActions")]
     pub code_actions: CodeActionsSettings,
+    /// Feature gate: enable flow-sensitive (CFG-based) улучшения в v2 интерфейсах.
+    ///
+    /// Default: false. Важно, чтобы при false не выполнялись дополнительные flow-sensitive вычисления.
+    #[serde(default, rename = "enableFlowSensitive")]
+    pub enable_flow_sensitive: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

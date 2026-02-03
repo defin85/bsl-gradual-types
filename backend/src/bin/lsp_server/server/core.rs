@@ -640,9 +640,12 @@ impl BslLanguageServer {
                     }
                 }
 
-                let show_hints = {
+                let (show_hints, enable_flow_sensitive) = {
                     let settings = server.settings.read().await;
-                    settings.diagnostics.show_hints
+                    (
+                        settings.diagnostics.show_hints,
+                        settings.enable_flow_sensitive,
+                    )
                 };
 
                 // If a newer version is requested, skip work for the stale one early.
@@ -848,7 +851,11 @@ impl BslLanguageServer {
                     }
 
                     let semantic_started = Instant::now();
-                    let semantic_result = analysis.semantic_diagnostics(file_id);
+                    let semantic_result = if enable_flow_sensitive {
+                        analysis.semantic_diagnostics_flow_sensitive(file_id)
+                    } else {
+                        analysis.semantic_diagnostics(file_id)
+                    };
                     let semantic_elapsed = semantic_started.elapsed();
                     server
                         .coordinator
@@ -1287,6 +1294,227 @@ mod tests {
                 version
             );
         }
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
+    async fn p6_flow_sensitive_diagnostics_are_gated_by_flag() {
+        let coordinator = Arc::new(SystemCoordinator::new());
+
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            move |client| BslLanguageServer::new(client, coordinator.clone())
+        })
+        .finish();
+
+        let (published_tx, mut published_rx) = tokio::sync::mpsc::unbounded_channel::<
+            tower_lsp::lsp_types::PublishDiagnosticsParams,
+        >();
+
+        let drain_task = tokio::spawn(async move {
+            while let Some(req) = socket.next().await {
+                if req.method() != "textDocument/publishDiagnostics" {
+                    continue;
+                }
+                let Some(params) = req.params().cloned() else {
+                    continue;
+                };
+                let Ok(parsed) = serde_json::from_value::<
+                    tower_lsp::lsp_types::PublishDiagnosticsParams,
+                >(params) else {
+                    continue;
+                };
+                let _ = published_tx.send(parsed);
+            }
+        });
+
+        let initialize_params = InitializeParams {
+            capabilities: ClientCapabilities::default(),
+            ..Default::default()
+        };
+        let initialize = Request::build("initialize")
+            .id(1)
+            .params(serde_json::to_value(initialize_params).expect("InitializeParams"))
+            .finish();
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialize)
+            .await
+            .expect("initialize request");
+        assert!(response.is_some(), "initialize should return a response");
+
+        let initialized = Request::build("initialized")
+            .params(serde_json::to_value(InitializedParams {}).expect("InitializedParams"))
+            .finish();
+        let initialized_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialized)
+            .await
+            .expect("initialized notification");
+        assert!(
+            initialized_response.is_none(),
+            "initialized is a notification"
+        );
+
+        let uri = Url::parse("file:///flow_sensitive_diagnostics_gate.bsl").expect("test uri");
+
+        let config_disabled = DidChangeConfigurationParams {
+            settings: serde_json::json!({
+                "bsl": {
+                    "hover": { "detailLevel": "full", "maxMethods": 10, "maxProperties": 5, "showCertainty": true },
+                    "diagnostics": { "detailLevel": "standard", "showHints": true },
+                    "formatting": { "enabled": false, "indentSize": 4 },
+                    "enableFlowSensitive": false
+                }
+            }),
+        };
+        let did_change_config = Request::build("workspace/didChangeConfiguration")
+            .params(serde_json::to_value(config_disabled).expect("DidChangeConfigurationParams"))
+            .finish();
+        let did_change_config_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_change_config)
+            .await
+            .expect("didChangeConfiguration notification");
+        assert!(
+            did_change_config_response.is_none(),
+            "didChangeConfiguration is a notification"
+        );
+
+        let text = "Procedure Test()\n\
+                    x = Null;\n\
+                    x.Method();\n\
+                    EndProcedure\n";
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        };
+        let did_open_req = Request::build("textDocument/didOpen")
+            .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+            .finish();
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+
+        let disabled = tokio::time::timeout(tokio::time::Duration::from_secs(4), async {
+            loop {
+                let Some(params) = published_rx.recv().await else {
+                    continue;
+                };
+                if params.uri != uri {
+                    continue;
+                }
+                if params.version != Some(1) {
+                    continue;
+                }
+                break params;
+            }
+        })
+        .await
+        .expect("diagnostics v1 publish")
+        .diagnostics;
+        assert!(
+            disabled
+                .iter()
+                .all(|diag| !diag.message.contains("может быть Null")),
+            "unexpected flow-sensitive null-safety diagnostics when disabled: {:?}",
+            disabled
+                .iter()
+                .map(|diag| diag.message.as_str())
+                .collect::<Vec<_>>()
+        );
+
+        let config_enabled = DidChangeConfigurationParams {
+            settings: serde_json::json!({
+                "bsl": {
+                    "hover": { "detailLevel": "full", "maxMethods": 10, "maxProperties": 5, "showCertainty": true },
+                    "diagnostics": { "detailLevel": "standard", "showHints": true },
+                    "formatting": { "enabled": false, "indentSize": 4 },
+                    "enableFlowSensitive": true
+                }
+            }),
+        };
+        let did_change_config = Request::build("workspace/didChangeConfiguration")
+            .params(serde_json::to_value(config_enabled).expect("DidChangeConfigurationParams"))
+            .finish();
+        let did_change_config_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_change_config)
+            .await
+            .expect("didChangeConfiguration notification (enabled)");
+        assert!(
+            did_change_config_response.is_none(),
+            "didChangeConfiguration is a notification"
+        );
+
+        let did_change = DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: uri.clone(),
+                version: 2,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                range: None,
+                range_length: None,
+                text: text.to_string(),
+            }],
+        };
+        let did_change_req = Request::build("textDocument/didChange")
+            .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+            .finish();
+        let did_change_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_change_req)
+            .await
+            .expect("didChange notification");
+        assert!(did_change_response.is_none(), "didChange is a notification");
+
+        let enabled = tokio::time::timeout(tokio::time::Duration::from_secs(4), async {
+            loop {
+                let Some(params) = published_rx.recv().await else {
+                    continue;
+                };
+                if params.uri != uri {
+                    continue;
+                }
+                if params.version != Some(2) {
+                    continue;
+                }
+                break params;
+            }
+        })
+        .await
+        .expect("diagnostics v2 publish")
+        .diagnostics;
+        assert!(
+            enabled
+                .iter()
+                .any(|diag| diag.message.contains("может быть Null")),
+            "expected flow-sensitive null-safety diagnostics when enabled, got {:?}",
+            enabled
+                .iter()
+                .map(|diag| diag.message.as_str())
+                .collect::<Vec<_>>()
+        );
 
         drain_task.abort();
     }

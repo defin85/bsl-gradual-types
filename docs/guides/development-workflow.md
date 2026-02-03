@@ -537,6 +537,24 @@ cargo test --workspace
 cargo check --workspace --all-targets
 ```
 
+### Repo policy (как в CI)
+
+Эти проверки запускаются в GitHub Actions workflow `CI` (см. `.github/workflows/ci.yml`) и должны проходить перед PR:
+
+```bash
+# Политика артефактов VSCode extension (out/, *.vsix)
+./scripts/check-vscode-artifacts-policy.sh
+
+# Политика Cargo.lock (файл должен быть tracked)
+./scripts/check-cargo-lockfile-policy.sh
+
+# Границы крейтов (bsl-agent не должен зависеть от bsl-backend)
+./scripts/check-bsl-agent-backend-dep.sh
+
+# Ссылки на пути в документации должны существовать
+python3 scripts/check-doc-paths.py --targets scripts/doc-path-check-targets.txt
+```
+
 ### Перед релизом
 
 ```bash

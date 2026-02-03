@@ -11,6 +11,7 @@ pub mod metadata_patterns; // MetadataKind pattern registry from Syntax Helper (
 pub mod null_safety; // Null safety analysis via CFG (Milestone 2.3)
 pub mod repository;
 pub mod resolver;
+pub mod return_summary; // Return-type inference summaries (interprocedural)
 pub mod runtime_context; // Runtime execution context tracking (Milestone 3.11 Phase 2)
 pub mod signature_index; // Function signature validation system (Milestone 2.20)
 pub mod signature_registry; // Registry pattern for SignatureIndex data sources
@@ -43,6 +44,7 @@ pub use metadata_patterns::{ExtractedPattern, MetadataPatternRegistry};
 pub use null_safety::{NullSafetyAnalyzer, NullSafetyResult, NullSafetyWarning, NullWarningKind};
 pub use repository::{CompletionItem, CompletionKind, TypeRepository};
 pub use resolver::{ConstructorResolution, TypeResolver, ValidationResult, ValidationResultV2};
+pub use return_summary::ReturnDomain;
 pub use runtime_context::{ContextRequirements, RuntimeExecutionContext};
 pub use signature_index::{
     ConstructorSignature, ContextRequirements as SignatureContextRequirements, MethodSignature,

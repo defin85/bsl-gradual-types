@@ -46,6 +46,51 @@ flowchart TD
    - сначала тип объекта/функции;
    - затем поиск сигнатуры/return type через `SignatureIndex`/`TypeResolver` (цепочки вида `Ссылка.ТабличнаяЧасть.Метод()` критичны).
 
+## Межпроцедурный вывод return-типа пользовательских функций (multi-file)
+
+Цель: корректно поднимать return-типы **экспортных** функций/процедур конфигурации даже когда они возвращают значение через:
+
+- локальные helper-функции внутри того же модуля;
+- вызовы экспортов из других модулей конфигурации;
+- изменения в одном из открытых файлов (без переиндексации конфигурации).
+
+Реализовано в 2 контурах (persistent + overlay):
+
+### Контур A: индексация конфигурации (persistent, DiskCache)
+
+- Источник данных: `bsl-runtime/src/data/loaders/config_bsl_modules/*`.
+- Парсинг модулей (tree-sitter single-pass) сохраняет `ReturnFacts` (атомы `ReturnAtom`) в disk cache `config-module-parse`.
+  - В кэш попадает достаточно информации, чтобы построить граф вызовов и сделать фикс‑пойнт без CFG.
+- Межмодульный фикс‑пойнт вычисляет return‑summaries для всех функций в индексе (включая локальные helper’ы внутри модуля),
+  затем записывает результат:
+  - как строковый union (`"Строка | Число"`) в `SignatureIndex.config_methods[*].return_type`;
+  - как метку слабости (`return_is_weak`), если при выводе встретилась неопределённость/dynamic.
+  - Алгоритм: `bsl-runtime/src/data/loaders/config_bsl_modules/return_inference.rs`.
+- Инвалидация кэша при изменении формата/логики делается через fingerprint в
+  `bsl-runtime/src/system/system_coordinator/config_loader.rs` (чтобы старые записи не смешивались с новыми).
+
+### Контур B: overlay для открытых файлов (salsa, analysis-v2)
+
+- Источник данных: **только** открытые файлы из `AnalysisHostV2` (несохранённые изменения учитываются сразу).
+- `analysis-v2` строит overlay return‑summaries поверх `SignatureIndex`:
+  - salsa query: `analysis-v2/src/lib.rs` (`open_files_return_overlay(...)`).
+  - сбор/фикс‑пойнт: `analysis-v2/src/open_file_overlay.rs`.
+  - использование: `analysis-v2/src/type_inference_v2.rs` (overlay проверяется перед `SignatureIndex`).
+- Overlay работает для открытых файлов, которые относятся к module types, индексируемым в `SignatureIndex`:
+  - CommonModule → `ОбщиеМодули.<Имя>`
+  - ManagerModule → `<МенеджерФасет>.<Имя>` (например, `СправочникМенеджер.Контрагенты`)
+  - ObjectModule → `<ОбъектФасет>.<Имя>` (например, `СправочникОбъект.Контрагенты`)
+  - RecordSetModule → `<НаборЗаписей>.<Имя>` (например, `РегистрНакопленияНаборЗаписей.РегистрНакопления`)
+- При вычислении доменов overlay может использовать `SignatureIndex` как внешний источник return‑summary для вызовов в неоткрытые модули (без I/O).
+- Семантика “dynamic/weak”:
+  - известные типы сохраняются как union;
+  - если в выводе встретилась динамика/неподдержанная конструкция, возвращаемый `TypeResolution` понижается до
+    `Certainty::InferredWeak` (с `UncertaintyReason::Other(...)`), но union известных типов не теряется.
+
+Ограничения текущей версии:
+
+- overlay подменяет только **экспортные** функции при межмодульных вызовах (локальные — только для вывода внутри модуля).
+
 ## Детализация: резолв строк типов (Domain слой)
 
 Ключевая точка: `shared/src/domain/resolver/type_resolver.rs`.
@@ -87,4 +132,3 @@ flowchart TD
 
 1. `SymbolTable → resolve_variable_with_context → resolve_expression_sync → repository.find_type(TypeId)` (CamelCase/space варианты имени дают один результат).
 2. `TypeResolver → TypeMetadataLookup.get_methods → SignatureIndex(TypeId)` (встроенные методы `ТабличнаяЧасть.*` доступны даже когда репозиторий хранит тип как `"Табличная часть"`).
-

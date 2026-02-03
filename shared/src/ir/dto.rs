@@ -6,7 +6,9 @@ use std::collections::HashMap;
 
 use bsl_line_index::LineIndex;
 
+use crate::analysis::type_guards::{detect_type_guards, TypeGuard};
 use crate::api::semantic_dtos::*;
+use crate::domain::type_id::TypeId;
 
 use super::program::SemanticProgram;
 use super::types::{SemanticNode, SemanticNodeKind};
@@ -357,11 +359,12 @@ impl SemanticProgram {
     /// Конвертировать таблицу символов в DTO
     fn symbols_to_dto(
         &self,
-        _include_flow_sensitive: bool,
+        include_flow_sensitive: bool,
         source: &str,
         line_index: &LineIndex,
     ) -> HashMap<String, SymbolInfoDto> {
         let mut result = HashMap::new();
+        let mut var_key_by_id: HashMap<TypeId, String> = HashMap::new();
 
         // Обходим все scopes используя публичное API
         for (_scope_id, scope) in self.symbols.iter_all_scopes() {
@@ -389,6 +392,7 @@ impl SemanticProgram {
                 };
 
                 result.insert(var_name.clone(), symbol);
+                var_key_by_id.insert(TypeId::new(var_name), var_name.clone());
             }
         }
 
@@ -429,6 +433,96 @@ impl SemanticProgram {
             };
 
             result.insert(proc_name.clone(), symbol);
+        }
+
+        if include_flow_sensitive {
+            if let Some(cfg) = &self.cfg {
+                for node in cfg.nodes() {
+                    let condition = match &node.kind {
+                        crate::ir::CfgNodeKind::Conditional { condition } => Some(condition),
+                        crate::ir::CfgNodeKind::LoopHeader { condition } => Some(condition),
+                        _ => None,
+                    };
+                    let Some(condition) = condition else {
+                        continue;
+                    };
+
+                    let range = cfg
+                        .node_span(node.id)
+                        .map(|span| {
+                            let (start_line, start_column) = line_index
+                                .byte_offset_to_utf16_position(source, span.start as usize);
+                            let (end_line, end_column) =
+                                line_index.byte_offset_to_utf16_position(source, span.end as usize);
+                            SourceRangeDto {
+                                start: SourceLocationDto {
+                                    line: start_line,
+                                    column: start_column,
+                                },
+                                end: SourceLocationDto {
+                                    line: end_line,
+                                    column: end_column,
+                                },
+                            }
+                        })
+                        .unwrap_or_else(|| SourceRangeDto {
+                            start: SourceLocationDto { line: 0, column: 0 },
+                            end: SourceLocationDto { line: 0, column: 0 },
+                        });
+
+                    for guard in detect_type_guards(condition) {
+                        let expected_type = match &guard {
+                            TypeGuard::TypeCheck { expected_type, .. } => {
+                                Some(expected_type.clone())
+                            }
+                            TypeGuard::IsNull { .. } => Some("Null".to_string()),
+                            TypeGuard::NotEmptyString { .. } => Some("Строка".to_string()),
+                            TypeGuard::NotZero { .. } => Some("Число".to_string()),
+                            TypeGuard::IsTrue { .. } | TypeGuard::IsFalse { .. } => {
+                                Some("Булево".to_string())
+                            }
+                            _ => None,
+                        };
+
+                        let Some(expected_type) = expected_type else {
+                            continue;
+                        };
+
+                        let var_id = TypeId::new(guard.variable_name());
+                        let Some(var_key) = var_key_by_id.get(&var_id).cloned() else {
+                            continue;
+                        };
+                        let Some(symbol) = result.get_mut(&var_key) else {
+                            continue;
+                        };
+
+                        let already_present = symbol.flow_variants.iter().any(|variant| {
+                            variant.condition == condition.as_str()
+                                && variant.type_info.name == expected_type.as_str()
+                        });
+                        if already_present {
+                            continue;
+                        }
+
+                        symbol.flow_variants.push(FlowTypeVariantDto {
+                            condition: condition.to_string(),
+                            type_info: TypeResolutionDto {
+                                name: expected_type,
+                                category: "Platform".to_string(),
+                                certainty: "Inferred".to_string(),
+                                certainty_percent: 50,
+                                active_facet: None,
+                                methods: Vec::new(),
+                                properties: Vec::new(),
+                                is_union: None,
+                                union_components: Vec::new(),
+                            },
+                            range,
+                            confidence: 1.0,
+                        });
+                    }
+                }
+            }
         }
 
         result

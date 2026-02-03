@@ -98,6 +98,7 @@ pub(crate) struct CompletionAnalysisContext<'a> {
     pub file_path: &'a str,
     pub parse_result: Option<Arc<bsl_syntax::ast::ParseResult>>,
     pub member_access_owner_type_hint: Option<TypeResolution>,
+    pub include_flow_sensitive: bool,
 }
 
 /// LSP operations - get completion at position
@@ -150,6 +151,7 @@ pub async fn get_completion_with_semantic_program(
         file_path,
         parse_result: None,
         member_access_owner_type_hint,
+        include_flow_sensitive: false,
     };
 
     get_completion_with_analysis(
@@ -176,6 +178,7 @@ pub async fn get_completion_with_semantic_program_snapshot(
     resolver: &TypeResolver,
     ir_program: Arc<SemanticProgram>,
     member_access_owner_type_hint: Option<TypeResolution>,
+    include_flow_sensitive: bool,
 ) -> Result<CompletionResult> {
     let analysis = CompletionAnalysisContext {
         ir_program: Some(ir_program),
@@ -183,6 +186,7 @@ pub async fn get_completion_with_semantic_program_snapshot(
         file_path,
         parse_result: None,
         member_access_owner_type_hint,
+        include_flow_sensitive,
     };
 
     get_completion_with_analysis(
@@ -210,6 +214,7 @@ pub async fn get_completion_with_semantic_program_snapshot_v2(
     ir_program: Arc<SemanticProgram>,
     parse_result: Arc<bsl_syntax::ast::ParseResult>,
     member_access_owner_type_hint: Option<TypeResolution>,
+    include_flow_sensitive: bool,
 ) -> Result<CompletionResult> {
     let analysis = CompletionAnalysisContext {
         ir_program: Some(ir_program),
@@ -217,6 +222,7 @@ pub async fn get_completion_with_semantic_program_snapshot_v2(
         file_path,
         parse_result: Some(parse_result),
         member_access_owner_type_hint,
+        include_flow_sensitive,
     };
 
     get_completion_with_analysis(
@@ -1175,9 +1181,13 @@ fn resolve_member_owner_type_sync(
         resolved = from_init;
     }
 
-    let base = resolved.clone().unwrap_or_else(TypeResolution::unknown);
-    if let Some(narrowed) = narrow_type_for_variable_at(ir_program, byte_offset, base_name, base) {
-        resolved = Some(narrowed);
+    if ctx.include_flow_sensitive {
+        let base = resolved.clone().unwrap_or_else(TypeResolution::unknown);
+        if let Some(narrowed) =
+            narrow_type_for_variable_at(ir_program, byte_offset, base_name, base)
+        {
+            resolved = Some(narrowed);
+        }
     }
 
     resolved.filter(|t| !t.is_unknown())
@@ -2113,6 +2123,7 @@ mod tests {
             file_path: "completion_test.bsl",
             parse_result: None,
             member_access_owner_type_hint: None,
+            include_flow_sensitive: false,
         };
 
         let resolved = resolve_member_owner_type(Some(&ctx), content, line, column, "ТаблЗнач")
@@ -2209,6 +2220,7 @@ mod tests {
             file_path: "completion_narrowing_test.bsl",
             parse_result: None,
             member_access_owner_type_hint: None,
+            include_flow_sensitive: true,
         };
 
         let result = get_completion_with_analysis(
@@ -2304,6 +2316,7 @@ mod tests {
             file_path: "completion_nested_chain_test.bsl",
             parse_result: None,
             member_access_owner_type_hint: None,
+            include_flow_sensitive: false,
         };
 
         let result = get_completion_with_analysis(
@@ -2414,6 +2427,7 @@ mod tests {
             file_path: "completion_call_chain_test.bsl",
             parse_result: Some(parse_result),
             member_access_owner_type_hint: None,
+            include_flow_sensitive: false,
         };
 
         let result = get_completion_with_analysis(
@@ -2507,6 +2521,7 @@ mod tests {
             file_path: "completion_index_access_test.bsl",
             parse_result: Some(parse_result),
             member_access_owner_type_hint: None,
+            include_flow_sensitive: false,
         };
 
         let result = get_completion_with_analysis(
@@ -2600,6 +2615,7 @@ mod tests {
             file_path: "completion_map_index_access_test.bsl",
             parse_result: Some(parse_result),
             member_access_owner_type_hint: None,
+            include_flow_sensitive: false,
         };
 
         let result = get_completion_with_analysis(
@@ -2695,6 +2711,7 @@ mod tests {
             file_path: "completion_ternary_test.bsl",
             parse_result: Some(parse_result),
             member_access_owner_type_hint: None,
+            include_flow_sensitive: false,
         };
 
         let result = get_completion_with_analysis(
@@ -2802,6 +2819,7 @@ mod tests {
             file_path: "completion_choice_test.bsl",
             parse_result: Some(parse_result),
             member_access_owner_type_hint: None,
+            include_flow_sensitive: false,
         };
 
         let result = get_completion_with_analysis(
@@ -2912,6 +2930,7 @@ mod tests {
             file_path: "completion_facet_substitution_test.bsl",
             parse_result: Some(parse_result),
             member_access_owner_type_hint: None,
+            include_flow_sensitive: false,
         };
 
         let result = get_completion_with_analysis(

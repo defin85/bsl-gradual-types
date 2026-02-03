@@ -53,6 +53,13 @@ pub struct MethodSignature {
     pub owner_type: Option<String>, // None для глобальных функций
     pub params: Vec<ParameterInfo>,
     pub return_type: Option<String>,
+    /// Признак слабого/неопределённого inferred return-типа (dynamic/unknown в return inference).
+    ///
+    /// Контракт:
+    /// - если true, возвращаемый тип на call-site должен понижать `Certainty` (например, до `InferredWeak`),
+    ///   но **не** должен затирать `return_type` (union известных вариантов).
+    #[serde(default)]
+    pub return_is_weak: bool,
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
@@ -103,6 +110,7 @@ impl Clone for MethodSignature {
             owner_type: self.owner_type.clone(),
             params: self.params.clone(),
             return_type: self.return_type.clone(),
+            return_is_weak: self.return_is_weak,
             description: self.description.clone(),
             return_description: self.return_description.clone(),
             source: self.source,
@@ -136,6 +144,7 @@ impl MethodSignature {
             owner_type,
             params,
             return_type,
+            return_is_weak: false,
             description,
             return_description,
             source,

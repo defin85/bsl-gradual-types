@@ -12,6 +12,9 @@ use bsl_shared::domain::{CodeLocation, ModuleType};
 use bsl_syntax::ast::{Expression, Program, Statement};
 
 use crate::ast_to_ir::{is_global_collection, lookup_global_collection};
+use crate::open_file_overlay::{
+    module_owner_key_from_file_path, OpenFilesReturnOverlay, ReturnSummary,
+};
 use crate::SemanticDeps;
 
 #[derive(Debug, Clone)]
@@ -58,21 +61,30 @@ struct TypeInferencer {
     resolver: Arc<TypeResolver>,
     signature_index: SignatureIndex,
     metadata_lookup: TypeMetadataLookup,
+    open_files_overlay: Option<Arc<OpenFilesReturnOverlay>>,
+    module_owner_type_name: Option<String>,
 }
 
 impl TypeInferencer {
-    fn new(deps: Arc<SemanticDeps>) -> Self {
+    fn new(
+        deps: Arc<SemanticDeps>,
+        file_path: &str,
+        open_files_overlay: Option<Arc<OpenFilesReturnOverlay>>,
+    ) -> Self {
         let resolver = deps
             .resolver
             .clone()
             .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())));
         let signature_index = deps.signature_index.clone();
         let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
+        let module_owner_type_name = module_owner_key_from_file_path(file_path);
         Self {
             deps,
             resolver,
             signature_index,
             metadata_lookup,
+            open_files_overlay,
+            module_owner_type_name,
         }
     }
 
@@ -428,6 +440,13 @@ impl TypeInferencer {
         {
             return self.resolver.resolve_expression_sync(&common_module_type);
         }
+        if self
+            .open_files_overlay
+            .as_ref()
+            .is_some_and(|overlay| overlay.has_owner_type_name(&common_module_type))
+        {
+            return TypeResolution::inferred(&common_module_type);
+        }
 
         TypeResolution::undeclared_variable(name)
     }
@@ -515,12 +534,17 @@ impl TypeInferencer {
     }
 
     fn infer_global_function_call(&self, name: &str) -> TypeResolution {
+        if let (Some(owner), Some(overlay)) = (
+            self.module_owner_type_name.as_deref(),
+            self.open_files_overlay.as_ref(),
+        ) {
+            if let Some(summary) = overlay.get(owner, name) {
+                return self.resolve_return_summary(summary);
+            }
+        }
         if let Some(sig) = self.signature_index.find_global_function(name) {
-            if let Some(return_type) = sig.return_type.as_deref().filter(|s| !s.is_empty()) {
-                if let Some(resolved) = self.try_resolve_configuration_type(return_type) {
-                    return resolved;
-                }
-                return self.resolver.resolve_expression_sync(return_type);
+            if let Some(resolved) = self.resolve_signature_return_type(sig) {
+                return resolved;
             }
         }
         TypeResolution::unknown()
@@ -528,12 +552,14 @@ impl TypeInferencer {
 
     fn infer_method_call(&self, receiver: &TypeResolution, method: &str) -> TypeResolution {
         let type_name = signature_lookup_type_name(receiver);
+        if let Some(overlay) = self.open_files_overlay.as_ref() {
+            if let Some(summary) = overlay.get(&type_name, method).filter(|s| s.is_export) {
+                return self.resolve_return_summary(summary);
+            }
+        }
         if let Some(sig) = self.signature_index.find_method(&type_name, method) {
-            if let Some(return_type) = sig.return_type.as_deref().filter(|s| !s.is_empty()) {
-                if let Some(resolved) = self.try_resolve_configuration_type(return_type) {
-                    return resolved;
-                }
-                return self.resolver.resolve_expression_sync(return_type);
+            if let Some(resolved) = self.resolve_signature_return_type(sig) {
+                return resolved;
             }
         }
 
@@ -552,6 +578,65 @@ impl TypeInferencer {
         }
 
         TypeResolution::unknown()
+    }
+
+    fn resolve_signature_return_type(
+        &self,
+        sig: &bsl_shared::domain::signature_index::MethodSignature,
+    ) -> Option<TypeResolution> {
+        let return_type = sig.return_type.as_deref()?.trim();
+        if return_type.is_empty() {
+            return None;
+        }
+
+        let mut res = self
+            .try_resolve_configuration_type(return_type)
+            .unwrap_or_else(|| self.resolver.resolve_expression_sync(return_type));
+        if res.is_unknown() {
+            res = TypeResolution::inferred(return_type);
+        }
+
+        if sig.return_is_weak {
+            res.certainty = Certainty::InferredWeak;
+            if res.metadata.uncertainty_reason.is_none() {
+                res.metadata.uncertainty_reason = Some(UncertaintyReason::Other(
+                    "SignatureIndex return type помечен как weak/dynamic".to_string(),
+                ));
+            }
+        }
+
+        Some(res)
+    }
+
+    fn resolve_return_summary(&self, summary: &ReturnSummary) -> TypeResolution {
+        let types: Vec<String> = summary.domain.known.iter().cloned().collect();
+        if types.is_empty() {
+            return TypeResolution::unknown();
+        }
+
+        let union = if types.len() == 1 {
+            types[0].clone()
+        } else {
+            types.join(" | ")
+        };
+
+        let mut res = self
+            .try_resolve_configuration_type(&union)
+            .unwrap_or_else(|| self.resolver.resolve_expression_sync(&union));
+        if res.is_unknown() {
+            res = TypeResolution::inferred(&union);
+        }
+
+        if summary.domain.has_dynamic {
+            res.certainty = Certainty::InferredWeak;
+            if res.metadata.uncertainty_reason.is_none() {
+                res.metadata.uncertainty_reason = Some(UncertaintyReason::Other(
+                    "open-file return inference содержит dynamic/unknown".to_string(),
+                ));
+            }
+        }
+
+        res
     }
 
     fn infer_binary(
@@ -628,8 +713,9 @@ pub(crate) fn build_type_index_with_path(
     program: &Program,
     file_path: &str,
     deps: Arc<SemanticDeps>,
+    open_files_overlay: Option<Arc<OpenFilesReturnOverlay>>,
 ) -> TypeIndex {
-    TypeInferencer::new(deps).build_index(program, file_path)
+    TypeInferencer::new(deps, file_path, open_files_overlay).build_index(program, file_path)
 }
 
 #[cfg(test)]
@@ -694,7 +780,7 @@ mod tests {
 "#;
         let program = parse(source);
         let deps = deps_with_array_method();
-        let index = build_type_index_with_path(&program, "test.bsl", deps);
+        let index = build_type_index_with_path(&program, "test.bsl", deps, None);
 
         let array_ident_offset = source
             .find("\nМ =")
@@ -776,7 +862,7 @@ mod tests {
             "expected synthetic form elements type to be present"
         );
 
-        let index = build_type_index_with_path(&program, file_path, deps);
+        let index = build_type_index_with_path(&program, file_path, deps, None);
 
         let receiver_offset = source.find("Элементы").expect("Элементы") as u32;
         let receiver = index

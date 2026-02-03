@@ -124,7 +124,6 @@ async fn apply_and_complete_at_member_dot(
         uri,
         index_snapshot.as_ref(),
         false,
-        false,
     )
     .await
     .expect("completion response")
@@ -185,7 +184,6 @@ async fn m8_lsp_incremental_typing_triggers_completion_on_dot() {
             position,
             &uri,
             index_snapshot.as_ref(),
-            false,
             false,
         )
         .await
@@ -305,7 +303,6 @@ async fn m8_lsp_completion_inside_string_and_comment_does_not_suggest_member_acc
         &uri,
         index_snapshot.as_ref(),
         false,
-        false,
     )
     .await
     .expect("completion response");
@@ -327,7 +324,6 @@ async fn m8_lsp_completion_inside_string_and_comment_does_not_suggest_member_acc
         position_in_comment,
         &uri,
         index_snapshot.as_ref(),
-        false,
         false,
     )
     .await

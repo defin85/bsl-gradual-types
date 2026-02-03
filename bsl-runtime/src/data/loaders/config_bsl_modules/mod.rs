@@ -13,7 +13,6 @@ mod indexing;
 mod inference;
 mod metrics;
 mod parsing;
-mod return_inference;
 mod single_pass;
 #[cfg(test)]
 mod tests;

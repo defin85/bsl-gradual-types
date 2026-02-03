@@ -114,7 +114,6 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
         ir_program.clone(),
         parse_result.clone(),
         None,
-        false,
     )
     .await
     .expect("completion ok");
@@ -158,7 +157,6 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
         ir_program.clone(),
         parse_result.clone(),
         None,
-        false,
     )
     .await
     .expect("completion ok");
@@ -184,7 +182,6 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
         ir_program.clone(),
         parse_result.clone(),
         None,
-        false,
     )
     .await
     .expect("completion ok");
@@ -215,7 +212,6 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
         ir_program.clone(),
         parse_result.clone(),
         None,
-        false,
     )
     .await
     .expect("completion ok");
@@ -241,7 +237,6 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
         ir_program.clone(),
         parse_result.clone(),
         None,
-        false,
     )
     .await
     .expect("completion ok");
@@ -267,7 +262,6 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
         ir_program,
         parse_result,
         None,
-        false,
     )
     .await
     .expect("completion ok");

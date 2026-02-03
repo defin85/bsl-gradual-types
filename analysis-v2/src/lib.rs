@@ -8,7 +8,6 @@ pub use bsl_line_index::{byte_offset_to_utf16, utf16_to_byte_offset, LineIndex};
 pub mod ast_to_ir;
 pub use ast_to_ir::AstToIrConverter;
 
-mod open_file_overlay;
 mod type_inference_v2;
 
 use bsl_diagnostics::{SemanticTypeHints, SemanticValidationVisitor};
@@ -110,25 +109,6 @@ unsafe impl salsa::Update for DepsDataSnapshot {
     }
 }
 
-#[derive(Clone)]
-pub struct OpenFilesSnapshotData(pub Arc<Vec<SourceFile>>);
-
-impl PartialEq for OpenFilesSnapshotData {
-    fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
-    }
-}
-
-impl Eq for OpenFilesSnapshotData {}
-
-unsafe impl salsa::Update for OpenFilesSnapshotData {
-    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
-        let old_value: &mut Self = unsafe { &mut *old_pointer };
-        *old_value = new_value;
-        true
-    }
-}
-
 #[derive(Debug, Clone)]
 pub enum Change {
     SetFile {
@@ -185,12 +165,6 @@ pub struct SettingsSnapshot {
     #[returns(ref)]
     pub id: SettingsId,
     pub diagnostics_detail_level: DetailLevel,
-}
-
-#[salsa::input]
-pub struct OpenFilesSnapshot {
-    #[returns(ref)]
-    pub data: OpenFilesSnapshotData,
 }
 
 #[derive(Debug, Clone)]
@@ -272,25 +246,6 @@ unsafe impl salsa::Update for SemanticDiagnosticsSnapshot {
 }
 
 #[derive(Debug, Clone)]
-pub struct FlowTypeAtOffsetSnapshot(Arc<Option<TypeResolution>>);
-
-impl PartialEq for FlowTypeAtOffsetSnapshot {
-    fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
-    }
-}
-
-impl Eq for FlowTypeAtOffsetSnapshot {}
-
-unsafe impl salsa::Update for FlowTypeAtOffsetSnapshot {
-    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
-        let old_value: &mut Self = unsafe { &mut *old_pointer };
-        *old_value = new_value;
-        true
-    }
-}
-
-#[derive(Debug, Clone)]
 pub struct TypeIndexSnapshot(Arc<type_inference_v2::TypeIndex>);
 
 impl PartialEq for TypeIndexSnapshot {
@@ -302,25 +257,6 @@ impl PartialEq for TypeIndexSnapshot {
 impl Eq for TypeIndexSnapshot {}
 
 unsafe impl salsa::Update for TypeIndexSnapshot {
-    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
-        let old_value: &mut Self = unsafe { &mut *old_pointer };
-        *old_value = new_value;
-        true
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct OpenFilesReturnOverlaySnapshot(Arc<open_file_overlay::OpenFilesReturnOverlay>);
-
-impl PartialEq for OpenFilesReturnOverlaySnapshot {
-    fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
-    }
-}
-
-impl Eq for OpenFilesReturnOverlaySnapshot {}
-
-unsafe impl salsa::Update for OpenFilesReturnOverlaySnapshot {
     unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
         let old_value: &mut Self = unsafe { &mut *old_pointer };
         *old_value = new_value;
@@ -361,28 +297,6 @@ pub fn parse_result(
             }],
         ))),
     }
-}
-
-#[salsa::tracked]
-pub fn open_files_return_overlay(
-    db: &dyn salsa::Database,
-    open_files: OpenFilesSnapshot,
-    deps: DepsSnapshot,
-    settings: SettingsSnapshot,
-) -> OpenFilesReturnOverlaySnapshot {
-    let _deps_id = deps.id(db);
-    let _settings_id = settings.id(db);
-    let deps_data = deps.data(db).0.clone();
-    let signature_index = deps_data.signature_index.clone();
-    let files = open_files.data(db).0.clone();
-    OpenFilesReturnOverlaySnapshot(Arc::new(
-        open_file_overlay::build_return_overlay_for_open_files(
-            db,
-            files.as_slice(),
-            &signature_index,
-            settings,
-        ),
-    ))
 }
 
 #[salsa::tracked]
@@ -434,7 +348,6 @@ pub fn semantic_diagnostics(
     file: SourceFile,
     deps: DepsSnapshot,
     settings: SettingsSnapshot,
-    open_files: OpenFilesSnapshot,
 ) -> SemanticDiagnosticsSnapshot {
     let _deps_id = deps.id(db);
     let _settings_id = settings.id(db);
@@ -448,77 +361,7 @@ pub fn semantic_diagnostics(
     }
 
     let program = ir(db, file, deps, settings).0;
-    let type_index = type_index(db, file, deps, settings, open_files).0;
-
-    let mut type_hints = SemanticTypeHints::default();
-    populate_assignment_value_hints(&program, &type_index, &mut type_hints);
-    populate_call_and_member_hints(&parsed.program, &type_index, &mut type_hints);
-
-    let resolver = deps_data
-        .resolver
-        .clone()
-        .unwrap_or_else(|| Arc::new(TypeResolver::new(deps_data.repository.clone())));
-    let metadata_lookup = TypeMetadataLookup::new(deps_data.repository.clone());
-    let validator = TypeValidator::new(&metadata_lookup);
-
-    let detail_level = settings.diagnostics_detail_level(db);
-    let mut visitor = SemanticValidationVisitor::with_detail_level(
-        &validator,
-        &program,
-        resolver.as_ref(),
-        &deps_data.signature_index,
-        detail_level,
-    );
-    visitor.set_platform_signatures_loaded(deps_data.platform_signatures_loaded);
-    visitor.set_type_hints(Some(&type_hints));
-    walk_program(&program, &mut visitor);
-
-    let mut diagnostics = visitor.into_errors();
-    diagnostics.sort_by(|a, b| {
-        let severity_key = |severity: DiagnosticSeverity| match severity {
-            DiagnosticSeverity::Error => 0_u8,
-            DiagnosticSeverity::Warning => 1_u8,
-            DiagnosticSeverity::Info => 2_u8,
-            DiagnosticSeverity::Hint => 3_u8,
-        };
-        (
-            a.span.start,
-            a.span.end,
-            severity_key(a.severity),
-            &a.message,
-        )
-            .cmp(&(
-                b.span.start,
-                b.span.end,
-                severity_key(b.severity),
-                &b.message,
-            ))
-    });
-
-    SemanticDiagnosticsSnapshot(Arc::new(diagnostics))
-}
-
-#[salsa::tracked]
-pub fn semantic_diagnostics_flow_sensitive(
-    db: &dyn salsa::Database,
-    file: SourceFile,
-    deps: DepsSnapshot,
-    settings: SettingsSnapshot,
-    open_files: OpenFilesSnapshot,
-) -> SemanticDiagnosticsSnapshot {
-    let _deps_id = deps.id(db);
-    let _settings_id = settings.id(db);
-    let deps_data = deps.data(db).0.clone();
-
-    let parsed = parse_result(db, file, settings).0;
-    if !parsed.syntax_errors.is_empty()
-        && !syntax_errors_only_in_directives(file.text(db), &parsed.syntax_errors)
-    {
-        return SemanticDiagnosticsSnapshot(Arc::new(Vec::new()));
-    }
-
-    let program = ir(db, file, deps, settings).0;
-    let type_index = type_index(db, file, deps, settings, open_files).0;
+    let type_index = type_index(db, file, deps, settings).0;
 
     let mut type_hints = SemanticTypeHints::default();
     populate_assignment_value_hints(&program, &type_index, &mut type_hints);
@@ -571,164 +414,6 @@ pub fn semantic_diagnostics_flow_sensitive(
     });
 
     SemanticDiagnosticsSnapshot(Arc::new(diagnostics))
-}
-
-fn cfg_node_at_byte_offset(
-    cfg: &bsl_shared::ir::ControlFlowGraph,
-    byte_offset: u32,
-) -> Option<usize> {
-    let find = |offset: u32| {
-        (0..cfg.nodes().len())
-            .filter_map(|node_id| cfg.node_span(node_id).map(|span| (node_id, span)))
-            .filter(|(_, span)| span.contains(offset))
-            .min_by_key(|(_, span)| span.len())
-            .map(|(node_id, _)| node_id)
-    };
-
-    // Hover/completion часто вызываются на границе токена (например, сразу после '.'),
-    // поэтому пробуем небольшое окно назад.
-    for delta in 0..=32_u32 {
-        if let Some(offset) = byte_offset.checked_sub(delta) {
-            if let Some(node_id) = find(offset) {
-                return Some(node_id);
-            }
-        }
-    }
-    None
-}
-
-fn conditional_branch_node_at_byte_offset(
-    program: &bsl_shared::ir::SemanticProgram,
-    cfg: &bsl_shared::ir::ControlFlowGraph,
-    conditional_node_id: usize,
-    byte_offset: u32,
-) -> usize {
-    use bsl_shared::ir::EdgeKind;
-    use bsl_shared::ir::SemanticNodeKind;
-
-    let mut edge_kind = EdgeKind::ConditionalTrue;
-
-    if let Some(ir_node_idx) = cfg.node_ir_node_index(conditional_node_id) {
-        if let Some(ir_node) = program.nodes.get(ir_node_idx) {
-            if let SemanticNodeKind::IfStatement { else_branch, .. } = &ir_node.kind {
-                if let Some(else_branch) = else_branch.as_ref().filter(|b| !b.is_empty()) {
-                    let else_start = else_branch
-                        .iter()
-                        .filter_map(|idx| program.nodes.get(*idx).map(|n| n.span.start))
-                        .min();
-
-                    if else_start.is_some_and(|start| byte_offset >= start) {
-                        edge_kind = EdgeKind::ConditionalFalse;
-                    }
-                }
-            }
-        }
-    }
-
-    cfg.edges()
-        .iter()
-        .find(|e| e.from == conditional_node_id && e.kind == edge_kind)
-        .map(|e| e.to)
-        .unwrap_or(conditional_node_id)
-}
-
-fn build_initial_flow_context_for_narrowing(
-    cfg: &bsl_shared::ir::ControlFlowGraph,
-    variable_name: &str,
-    base_type: TypeResolution,
-) -> FlowAnalysisContext {
-    use bsl_shared::analysis::detect_type_guards;
-    use bsl_shared::ir::CfgNodeKind;
-
-    let mut ctx = FlowAnalysisContext::new();
-    ctx.set_variable(variable_name, base_type);
-
-    for node in cfg.nodes() {
-        match &node.kind {
-            CfgNodeKind::Conditional { condition } | CfgNodeKind::LoopHeader { condition } => {
-                for guard in detect_type_guards(condition) {
-                    let var = guard.variable_name();
-                    if ctx.get_variable(var).is_none() {
-                        ctx.set_variable(var, TypeResolution::unknown());
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    ctx
-}
-
-fn narrow_type_for_variable_at(
-    program: &bsl_shared::ir::SemanticProgram,
-    byte_offset: u32,
-    variable_name: &str,
-    base_type: TypeResolution,
-) -> Option<TypeResolution> {
-    use bsl_shared::analysis::NarrowingEngine;
-    use bsl_shared::ir::{CfgNodeKind, EdgeKind};
-
-    let cfg = program.cfg.as_ref()?;
-    let mut node_id = cfg_node_at_byte_offset(cfg, byte_offset)?;
-
-    // Если позиция попала в span условного узла (например, внутри then/else блока),
-    // смещаемся на соответствующую ветку, чтобы получить корректный контекст narrowing.
-    match &cfg.nodes().get(node_id)?.kind {
-        CfgNodeKind::Conditional { .. } => {
-            node_id = conditional_branch_node_at_byte_offset(program, cfg, node_id, byte_offset);
-        }
-        CfgNodeKind::LoopHeader { .. } => {
-            node_id = cfg
-                .edges()
-                .iter()
-                .find(|e| e.from == node_id && e.kind == EdgeKind::ConditionalTrue)
-                .map(|e| e.to)
-                .unwrap_or(node_id);
-        }
-        _ => {}
-    }
-
-    let initial = build_initial_flow_context_for_narrowing(cfg, variable_name, base_type);
-    let mut engine = NarrowingEngine::new(cfg.clone());
-    engine.build_narrowing_contexts(initial);
-
-    engine
-        .get_context(node_id)
-        .and_then(|ctx| ctx.get_type(variable_name))
-        .cloned()
-        .filter(|t| !t.is_unknown())
-}
-
-#[salsa::tracked]
-pub fn flow_type_at_byte_offset(
-    db: &dyn salsa::Database,
-    file: SourceFile,
-    deps: DepsSnapshot,
-    settings: SettingsSnapshot,
-    open_files: OpenFilesSnapshot,
-    byte_offset: u32,
-) -> FlowTypeAtOffsetSnapshot {
-    let _deps_id = deps.id(db);
-    let _settings_id = settings.id(db);
-
-    let program = ir(db, file, deps, settings).0;
-    let type_index = type_index(db, file, deps, settings, open_files).0;
-
-    let base = type_index.type_at_byte_offset(byte_offset);
-    let (var_name, _state) = match program.find_variable_at_byte_offset(byte_offset) {
-        Some(v) => v,
-        None => return FlowTypeAtOffsetSnapshot(Arc::new(base)),
-    };
-
-    let base_for_narrowing = base.clone().unwrap_or_else(TypeResolution::unknown);
-    if let Some(narrowed) =
-        narrow_type_for_variable_at(&program, byte_offset, &var_name, base_for_narrowing)
-    {
-        return FlowTypeAtOffsetSnapshot(Arc::new(Some(narrowed)));
-    }
-
-    FlowTypeAtOffsetSnapshot(Arc::new(base))
 }
 
 fn flow_sensitive_null_safety_diagnostics(
@@ -1122,18 +807,15 @@ pub fn type_index(
     file: SourceFile,
     deps: DepsSnapshot,
     settings: SettingsSnapshot,
-    open_files: OpenFilesSnapshot,
 ) -> TypeIndexSnapshot {
     let _deps_id = deps.id(db);
     let _settings_id = settings.id(db);
     let deps_data = deps.data(db).0.clone();
     let parsed = parse_result(db, file, settings).0;
-    let overlay = open_files_return_overlay(db, open_files, deps, settings).0;
     TypeIndexSnapshot(Arc::new(type_inference_v2::build_type_index_with_path(
         &parsed.program,
         file.path(db).as_ref(),
         deps_data,
-        Some(overlay.clone()),
     )))
 }
 
@@ -1160,7 +842,6 @@ pub struct AnalysisHostV2 {
     files: HashMap<FileId, SourceFile>,
     deps: DepsSnapshot,
     settings: SettingsSnapshot,
-    open_files: OpenFilesSnapshot,
 }
 
 impl Default for AnalysisHostV2 {
@@ -1180,13 +861,11 @@ impl Default for AnalysisHostV2 {
             DepsDataSnapshot(deps_data),
         );
         let settings = SettingsSnapshot::new(&db, SettingsId::from_hash(""), DetailLevel::Full);
-        let open_files = OpenFilesSnapshot::new(&db, OpenFilesSnapshotData(Arc::new(Vec::new())));
         Self {
             db,
             files: HashMap::new(),
             deps,
             settings,
-            open_files,
         }
     }
 }
@@ -1202,7 +881,6 @@ impl AnalysisHostV2 {
             } => self.set_file(file_id, text, version, path),
             Change::RemoveFile { file_id } => {
                 self.files.remove(&file_id);
-                self.refresh_open_files_snapshot();
             }
             Change::SetDepsSnapshot { deps_id, deps } => {
                 self.deps.set_id(&mut self.db).to(deps_id);
@@ -1229,17 +907,8 @@ impl AnalysisHostV2 {
             None => {
                 let file = SourceFile::new(&self.db, file_id.0, text, version, path);
                 self.files.insert(file_id, file);
-                self.refresh_open_files_snapshot();
             }
         }
-    }
-
-    fn refresh_open_files_snapshot(&mut self) {
-        let mut files: Vec<SourceFile> = self.files.values().copied().collect();
-        files.sort_by_key(|file| file.id(&self.db));
-        self.open_files
-            .set_data(&mut self.db)
-            .to(OpenFilesSnapshotData(Arc::new(files)));
     }
 
     pub fn has_file(&self, file_id: FileId) -> bool {
@@ -1260,7 +929,6 @@ impl AnalysisHostV2 {
             files: self.files.clone(),
             deps: self.deps,
             settings: self.settings,
-            open_files: self.open_files,
         }
     }
 
@@ -1274,7 +942,6 @@ pub struct AnalysisV2 {
     files: HashMap<FileId, SourceFile>,
     deps: DepsSnapshot,
     settings: SettingsSnapshot,
-    open_files: OpenFilesSnapshot,
 }
 
 impl AnalysisV2 {
@@ -1344,30 +1011,7 @@ impl AnalysisV2 {
         let Some(&file) = self.files.get(&file_id) else {
             return Ok(None);
         };
-        cancellable(|| {
-            semantic_diagnostics(&self.db, file, self.deps, self.settings, self.open_files).0
-        })
-        .map(Some)
-    }
-
-    pub fn semantic_diagnostics_flow_sensitive(
-        &self,
-        file_id: FileId,
-    ) -> Cancellable<Option<Arc<Vec<TypeDiagnostic>>>> {
-        let Some(&file) = self.files.get(&file_id) else {
-            return Ok(None);
-        };
-        cancellable(|| {
-            semantic_diagnostics_flow_sensitive(
-                &self.db,
-                file,
-                self.deps,
-                self.settings,
-                self.open_files,
-            )
-            .0
-        })
-        .map(Some)
+        cancellable(|| semantic_diagnostics(&self.db, file, self.deps, self.settings).0).map(Some)
     }
 
     pub fn utf16_position_to_byte_offset(
@@ -1437,34 +1081,11 @@ impl AnalysisV2 {
             return Ok(None);
         };
         cancellable(|| {
-            type_index(&self.db, file, self.deps, self.settings, self.open_files)
+            type_index(&self.db, file, self.deps, self.settings)
                 .0
                 .clone()
         })
         .map(|index| index.type_at_byte_offset(byte_offset))
-    }
-
-    pub fn flow_type_at_byte_offset(
-        &self,
-        file_id: FileId,
-        byte_offset: u32,
-    ) -> Cancellable<Option<TypeResolution>> {
-        let Some(&file) = self.files.get(&file_id) else {
-            return Ok(None);
-        };
-        cancellable(|| {
-            flow_type_at_byte_offset(
-                &self.db,
-                file,
-                self.deps,
-                self.settings,
-                self.open_files,
-                byte_offset,
-            )
-            .0
-            .clone()
-        })
-        .map(|s| (*s).clone())
     }
 }
 
@@ -1974,265 +1595,6 @@ mod tests {
     }
 
     #[test]
-    fn type_index_uses_open_file_return_overlay_across_files() {
-        let repository = Arc::new(InMemoryTypeRepository::new()) as Arc<dyn TypeRepository>;
-        let platform_signatures_loaded = repository.platform_docs_loaded();
-        let deps = Arc::new(SemanticDeps {
-            signature_index: SignatureIndex::new(),
-            resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
-            repository,
-            platform_signatures_loaded,
-        });
-
-        let mut host = AnalysisHostV2::default();
-        host.apply_change(Change::SetDepsSnapshot {
-            deps_id: DepsSnapshotId::from_hash("deps"),
-            deps,
-        });
-        host.apply_change(Change::SetSettingsSnapshot {
-            settings_id: SettingsId::from_hash("settings"),
-            diagnostics_detail_level: DetailLevel::Full,
-        });
-
-        let file_a = FileId(1);
-        let file_b = FileId(2);
-
-        let source_a: Arc<str> = Arc::from(
-            "Процедура Тест()\n\
-             Р = ОбщийМодуль1.Ф1();\n\
-             КонецПроцедуры",
-        );
-        let offset = source_a.find("Ф1").expect("Ф1 offset") as u32;
-
-        host.apply_change(Change::SetFile {
-            file_id: file_a,
-            text: source_a.clone(),
-            version: 1,
-            path: Arc::from("test.bsl"),
-        });
-
-        host.apply_change(Change::SetFile {
-            file_id: file_b,
-            text: Arc::from(
-                "Функция Ф1() Экспорт\n\
-                 Возврат 1;\n\
-                 КонецФункции",
-            ),
-            version: 1,
-            path: Arc::from("CommonModules/ОбщийМодуль1/Ext/Module.bsl"),
-        });
-
-        let analysis = host.analysis();
-        let ty = analysis
-            .type_at_byte_offset(file_a, offset)
-            .unwrap()
-            .unwrap();
-        assert_eq!(ty.type_name(), "Число");
-        drop(analysis);
-
-        // Несохранённое изменение в другом open file должно обновлять overlay.
-        host.apply_change(Change::SetFile {
-            file_id: file_b,
-            text: Arc::from(
-                "Функция Ф1() Экспорт\n\
-                 Возврат \"x\";\n\
-                 КонецФункции",
-            ),
-            version: 2,
-            path: Arc::from("CommonModules/ОбщийМодуль1/Ext/Module.bsl"),
-        });
-
-        let analysis = host.analysis();
-        let ty = analysis
-            .type_at_byte_offset(file_a, offset)
-            .unwrap()
-            .unwrap();
-        assert_eq!(ty.type_name(), "Строка");
-    }
-
-    #[test]
-    fn type_index_uses_open_file_return_overlay_across_files_object_module() {
-        let repository = Arc::new(InMemoryTypeRepository::new()) as Arc<dyn TypeRepository>;
-        let platform_signatures_loaded = repository.platform_docs_loaded();
-        let mut signature_index = SignatureIndex::new();
-        signature_index.add_platform_method(
-            bsl_shared::domain::TypeId::new("СправочникМенеджер.Контрагенты"),
-            bsl_shared::domain::signature_index::MethodSignature::new(
-                "ПолучитьОбъект".to_string(),
-                Some("СправочникМенеджер.Контрагенты".to_string()),
-                vec![],
-                Some("СправочникОбъект.Контрагенты".to_string()),
-                None,
-                None,
-                bsl_shared::domain::signature_index::SignatureSource::Platform,
-                None,
-                Default::default(),
-            ),
-        );
-        let deps = Arc::new(SemanticDeps {
-            signature_index,
-            resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
-            repository,
-            platform_signatures_loaded,
-        });
-
-        let mut host = AnalysisHostV2::default();
-        host.apply_change(Change::SetDepsSnapshot {
-            deps_id: DepsSnapshotId::from_hash("deps"),
-            deps,
-        });
-        host.apply_change(Change::SetSettingsSnapshot {
-            settings_id: SettingsId::from_hash("settings"),
-            diagnostics_detail_level: DetailLevel::Full,
-        });
-
-        let file_a = FileId(1);
-        let file_b = FileId(2);
-
-        let source_a: Arc<str> = Arc::from(
-            "Процедура Тест()\n\
-             Р = Справочники.Контрагенты.ПолучитьОбъект().Ф1();\n\
-             КонецПроцедуры",
-        );
-        let offset = source_a.find("Ф1").expect("Ф1 offset") as u32;
-
-        host.apply_change(Change::SetFile {
-            file_id: file_a,
-            text: source_a.clone(),
-            version: 1,
-            path: Arc::from("test.bsl"),
-        });
-
-        host.apply_change(Change::SetFile {
-            file_id: file_b,
-            text: Arc::from(
-                "Функция Ф1() Экспорт\n\
-                 Возврат 1;\n\
-                 КонецФункции",
-            ),
-            version: 1,
-            path: Arc::from("Catalogs/Контрагенты/Ext/ObjectModule.bsl"),
-        });
-
-        let analysis = host.analysis();
-        let ty = analysis
-            .type_at_byte_offset(file_a, offset)
-            .unwrap()
-            .unwrap();
-        assert_eq!(ty.type_name(), "Число");
-        drop(analysis);
-
-        host.apply_change(Change::SetFile {
-            file_id: file_b,
-            text: Arc::from(
-                "Функция Ф1() Экспорт\n\
-                 Возврат \"x\";\n\
-                 КонецФункции",
-            ),
-            version: 2,
-            path: Arc::from("Catalogs/Контрагенты/Ext/ObjectModule.bsl"),
-        });
-
-        let analysis = host.analysis();
-        let ty = analysis
-            .type_at_byte_offset(file_a, offset)
-            .unwrap()
-            .unwrap();
-        assert_eq!(ty.type_name(), "Строка");
-    }
-
-    #[test]
-    fn type_index_uses_open_file_return_overlay_across_files_record_set_module() {
-        let repository = Arc::new(InMemoryTypeRepository::new()) as Arc<dyn TypeRepository>;
-        let platform_signatures_loaded = repository.platform_docs_loaded();
-        let mut signature_index = SignatureIndex::new();
-        signature_index.add_platform_method(
-            bsl_shared::domain::TypeId::new("РегистрНакопленияМенеджер.РегистрНакопления"),
-            bsl_shared::domain::signature_index::MethodSignature::new(
-                "СоздатьНаборЗаписей".to_string(),
-                Some("РегистрНакопленияМенеджер.РегистрНакопления".to_string()),
-                vec![],
-                Some("РегистрНакопленияНаборЗаписей.РегистрНакопления".to_string()),
-                None,
-                None,
-                bsl_shared::domain::signature_index::SignatureSource::Platform,
-                None,
-                Default::default(),
-            ),
-        );
-        let deps = Arc::new(SemanticDeps {
-            signature_index,
-            resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
-            repository,
-            platform_signatures_loaded,
-        });
-
-        let mut host = AnalysisHostV2::default();
-        host.apply_change(Change::SetDepsSnapshot {
-            deps_id: DepsSnapshotId::from_hash("deps"),
-            deps,
-        });
-        host.apply_change(Change::SetSettingsSnapshot {
-            settings_id: SettingsId::from_hash("settings"),
-            diagnostics_detail_level: DetailLevel::Full,
-        });
-
-        let file_a = FileId(1);
-        let file_b = FileId(2);
-
-        let source_a: Arc<str> = Arc::from(
-            "Процедура Тест()\n\
-             Р = РегистрыНакопления.РегистрНакопления.СоздатьНаборЗаписей().Ф1();\n\
-             КонецПроцедуры",
-        );
-        let offset = source_a.find("Ф1").expect("Ф1 offset") as u32;
-
-        host.apply_change(Change::SetFile {
-            file_id: file_a,
-            text: source_a.clone(),
-            version: 1,
-            path: Arc::from("test.bsl"),
-        });
-
-        host.apply_change(Change::SetFile {
-            file_id: file_b,
-            text: Arc::from(
-                "Функция Ф1() Экспорт\n\
-                 Возврат 1;\n\
-                 КонецФункции",
-            ),
-            version: 1,
-            path: Arc::from("AccumulationRegisters/РегистрНакопления/Ext/RecordSetModule.bsl"),
-        });
-
-        let analysis = host.analysis();
-        let ty = analysis
-            .type_at_byte_offset(file_a, offset)
-            .unwrap()
-            .unwrap();
-        assert_eq!(ty.type_name(), "Число");
-        drop(analysis);
-
-        host.apply_change(Change::SetFile {
-            file_id: file_b,
-            text: Arc::from(
-                "Функция Ф1() Экспорт\n\
-                 Возврат \"x\";\n\
-                 КонецФункции",
-            ),
-            version: 2,
-            path: Arc::from("AccumulationRegisters/РегистрНакопления/Ext/RecordSetModule.bsl"),
-        });
-
-        let analysis = host.analysis();
-        let ty = analysis
-            .type_at_byte_offset(file_a, offset)
-            .unwrap()
-            .unwrap();
-        assert_eq!(ty.type_name(), "Строка");
-    }
-
-    #[test]
     fn semantic_diagnostics_respect_diagnostics_detail_level() {
         let mut host = AnalysisHostV2::default();
         let file_id = FileId(1);
@@ -2274,73 +1636,7 @@ mod tests {
     }
 
     #[test]
-    fn signature_index_weak_return_type_produces_inferredweak_without_losing_type() {
-        use bsl_shared::domain::signature_index::{
-            ContextRequirements, MethodSignature, SignatureSource,
-        };
-        use bsl_shared::ParameterInfo;
-        use bsl_shared::domain::types::Certainty;
-
-        let repository = Arc::new(InMemoryTypeRepository::new()) as Arc<dyn TypeRepository>;
-        let platform_signatures_loaded = repository.platform_docs_loaded();
-
-        let mut signature_index = SignatureIndex::new();
-        let mut sig = MethodSignature::new(
-            "Ф1".to_string(),
-            None,
-            Vec::<ParameterInfo>::new(),
-            Some("Строка".to_string()),
-            None,
-            None,
-            SignatureSource::Configuration,
-            None,
-            ContextRequirements::Universal,
-        );
-        sig.return_is_weak = true;
-        signature_index.add_global_function(bsl_shared::domain::TypeId::new("Ф1"), sig);
-
-        let deps = Arc::new(SemanticDeps {
-            signature_index,
-            resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
-            repository,
-            platform_signatures_loaded,
-        });
-
-        let mut host = AnalysisHostV2::default();
-        host.apply_change(Change::SetDepsSnapshot {
-            deps_id: DepsSnapshotId::from_hash("deps"),
-            deps,
-        });
-        host.apply_change(Change::SetSettingsSnapshot {
-            settings_id: SettingsId::from_hash("settings"),
-            diagnostics_detail_level: DetailLevel::Full,
-        });
-
-        let file_id = FileId(1);
-        let source: Arc<str> = Arc::from(
-            "Процедура Тест()\n\
-             Р = Ф1();\n\
-             КонецПроцедуры",
-        );
-        let offset = source.find("Ф1").expect("Ф1 offset") as u32;
-        host.apply_change(Change::SetFile {
-            file_id,
-            text: source,
-            version: 1,
-            path: Arc::from("test.bsl"),
-        });
-
-        let analysis = host.analysis();
-        let ty = analysis
-            .type_at_byte_offset(file_id, offset)
-            .unwrap()
-            .unwrap();
-        assert_eq!(ty.type_name(), "Строка");
-        assert_eq!(ty.certainty, Certainty::InferredWeak);
-    }
-
-    #[test]
-    fn semantic_diagnostics_do_not_include_flow_sensitive_null_safety_by_default() {
+    fn semantic_diagnostics_include_flow_sensitive_null_safety() {
         let mut host = AnalysisHostV2::default();
         let file_id = FileId(1);
 
@@ -2379,113 +1675,10 @@ mod tests {
         assert!(
             diagnostics
                 .iter()
-                .all(|d| !d.message.contains("может быть Null")),
-            "diagnostics unexpectedly contain flow-sensitive null-safety: {:?}",
-            diagnostics
-        );
-    }
-
-    #[test]
-    fn semantic_diagnostics_flow_sensitive_includes_null_safety() {
-        let mut host = AnalysisHostV2::default();
-        let file_id = FileId(1);
-
-        host.apply_change(Change::SetFile {
-            file_id,
-            text: Arc::from(
-                "Procedure Test()\n\
-                 x = Null;\n\
-                 x.Method();\n\
-                 EndProcedure",
-            ),
-            version: 1,
-            path: Arc::from("test.bsl"),
-        });
-
-        let repository = Arc::new(InMemoryTypeRepository::new()) as Arc<dyn TypeRepository>;
-        let platform_signatures_loaded = repository.platform_docs_loaded();
-        let deps = Arc::new(SemanticDeps {
-            signature_index: repository.get_signature_index_clone(),
-            resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
-            repository,
-            platform_signatures_loaded,
-        });
-
-        host.apply_change(Change::SetDepsSnapshot {
-            deps_id: DepsSnapshotId::from_hash("deps"),
-            deps,
-        });
-
-        let diagnostics = host
-            .analysis()
-            .semantic_diagnostics_flow_sensitive(file_id)
-            .unwrap()
-            .unwrap();
-
-        assert!(
-            diagnostics
-                .iter()
                 .any(|d| d.message.contains("может быть Null")),
-            "flow-sensitive diagnostics should contain null-safety warning: {:?}",
+            "diagnostics: {:?}",
             diagnostics
         );
-    }
-
-    #[test]
-    fn flow_type_at_byte_offset_does_not_depend_on_first_entry_node() {
-        let mut host = AnalysisHostV2::default();
-        let file_id = FileId(1);
-
-        host.apply_change(Change::SetFile {
-            file_id,
-            text: Arc::from(
-                "Procedure First()\n\
-                 a = 1;\n\
-                 EndProcedure\n\
-                 \n\
-                 Procedure Second()\n\
-                 x = 0;\n\
-                 Если ТипЗнч(x) = Тип(\"Строка\") Тогда\n\
-                 y = x;\n\
-                 КонецЕсли;\n\
-                 EndProcedure",
-            ),
-            version: 1,
-            path: Arc::from("test.bsl"),
-        });
-
-        let repository = Arc::new(InMemoryTypeRepository::new()) as Arc<dyn TypeRepository>;
-        let platform_signatures_loaded = repository.platform_docs_loaded();
-        let deps = Arc::new(SemanticDeps {
-            signature_index: repository.get_signature_index_clone(),
-            resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
-            repository,
-            platform_signatures_loaded,
-        });
-
-        host.apply_change(Change::SetDepsSnapshot {
-            deps_id: DepsSnapshotId::from_hash("deps"),
-            deps,
-        });
-
-        let analysis = host.analysis();
-        let code = analysis.file_text(file_id).unwrap().unwrap();
-        let byte_offset = code
-            .find("y = x")
-            .map(|idx| (idx + "y = ".len()) as u32)
-            .expect("offset for 'x' in 'y = x'");
-
-        let flow_type = analysis
-            .flow_type_at_byte_offset(file_id, byte_offset)
-            .unwrap()
-            .expect("flow type at offset");
-
-        match flow_type.result {
-            bsl_shared::domain::types::ResolutionResult::Concrete(
-                bsl_shared::domain::types::ConcreteType::Platform(pt),
-            ) => assert_eq!(pt.name, "Строка"),
-            other => panic!("Expected Строка, got: {:?}", other),
-        }
     }
 
     #[test]

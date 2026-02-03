@@ -166,8 +166,6 @@ pub struct WorkspaceDocumentsClearResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BslDiagnosticsResponse {
     pub analysis_revision: u64,
-    #[serde(default)]
-    pub flow_sensitive_enabled: bool,
     pub diagnostics: Vec<DiagnosticDto>,
     pub truncated: bool,
 }
@@ -206,8 +204,6 @@ pub struct NodeInfoDto {
 pub struct BslTypeAtPositionResponse {
     pub analysis_revision: u64,
     #[serde(default)]
-    pub flow_sensitive_enabled: bool,
-    #[serde(default)]
     pub type_info: Option<TypeInfoDto>,
     #[serde(default)]
     pub node: Option<NodeInfoDto>,
@@ -226,8 +222,6 @@ pub struct MemberDto {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BslMembersResponse {
     pub analysis_revision: u64,
-    #[serde(default)]
-    pub flow_sensitive_enabled: bool,
     pub members: Vec<MemberDto>,
     pub truncated: bool,
 }

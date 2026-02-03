@@ -15,6 +15,7 @@ use crate::system::LineIndex;
 use super::super::extractors::symbol_extractor::extract_word_at_position;
 use super::super::formatters::format_semantic_node_info;
 use super::super::formatters::hover_formatters::format_expected_type_hover;
+use super::flow_sensitive::narrow_type_for_variable_at;
 
 /// Hover по уже готовому `SemanticProgram` (без legacy парсинга/IR build).
 ///
@@ -26,7 +27,6 @@ pub fn get_hover_info_with_semantic_program(
     file_content: &str,
     line: u32,
     column: u32,
-    include_flow_sensitive: bool,
     metadata_lookup: &TypeMetadataLookup,
     hover_formatter: &HoverFormatter,
     hover_config: Option<HoverFormatConfig>,
@@ -43,7 +43,6 @@ pub fn get_hover_info_with_semantic_program(
         file_content,
         line,
         column,
-        include_flow_sensitive,
         hover_config,
     )
 }
@@ -59,7 +58,6 @@ fn compute_hover_info_from_ir(
     file_content: &str,
     line: u32,
     column: u32,
-    include_flow_sensitive: bool,
     hover_config: Option<HoverFormatConfig>,
 ) -> Option<String> {
     // Milestone 2.11 Task B1: DEBUG logs for node search
@@ -76,16 +74,6 @@ fn compute_hover_info_from_ir(
     let word_under_cursor = extract_word_at_position(file_content, line, column);
     let type_at_cursor =
         byte_offset.and_then(|offset| analysis.type_at_byte_offset(file_id, offset).ok().flatten());
-    let flow_type_at_cursor = if include_flow_sensitive {
-        byte_offset.and_then(|offset| {
-            analysis
-                .flow_type_at_byte_offset(file_id, offset)
-                .ok()
-                .flatten()
-        })
-    } else {
-        None
-    };
 
     let formatter = if let Some(config) = hover_config.clone() {
         HoverFormatter::new(config, metadata_lookup.clone())
@@ -112,9 +100,8 @@ fn compute_hover_info_from_ir(
                 let owner_span = object_node
                     .and_then(|idx| ir_program.nodes.get(idx).map(|n| n.span))
                     .unwrap_or(node.span);
-                let owner_resolution =
-                    type_at_span_start(analysis, file_id, owner_span, include_flow_sensitive)
-                        .unwrap_or_else(TypeResolution::unknown);
+                let owner_resolution = type_at_span_start(analysis, file_id, owner_span)
+                    .unwrap_or_else(TypeResolution::unknown);
 
                 let (prop_type, is_readonly) = metadata_lookup
                     .get_properties(&owner_resolution)
@@ -126,9 +113,7 @@ fn compute_hover_info_from_ir(
                 let property_resolution = if !prop_type.trim().is_empty() {
                     resolver.resolve_expression_sync(&prop_type)
                 } else {
-                    flow_type_at_cursor
-                        .clone()
-                        .or_else(|| type_at_cursor.clone())
+                    type_at_cursor
                         .clone()
                         .unwrap_or_else(TypeResolution::unknown)
                 };
@@ -183,16 +168,18 @@ fn compute_hover_info_from_ir(
         }
     }
 
-    if let (Some(word), Some(flow)) = (
-        word_under_cursor.as_deref(),
-        flow_type_at_cursor.as_ref().filter(|t| !t.is_unknown()),
-    ) {
-        info!(
-            "Hover v2 flow_type_at_byte_offset({}): {}",
-            byte_offset.unwrap_or_default(),
-            flow.type_name()
-        );
-        return Some(formatter.format_variable(word, flow));
+    if let (Some(word), Some(offset)) = (word_under_cursor.as_deref(), byte_offset) {
+        let base = type_at_cursor
+            .clone()
+            .unwrap_or_else(TypeResolution::unknown);
+        if let Some(narrowed) = narrow_type_for_variable_at(ir_program, offset, word, base) {
+            info!(
+                "Hover v2 flow-sensitive narrowed_at({}): {}",
+                offset,
+                narrowed.type_name()
+            );
+            return Some(formatter.format_variable(word, &narrowed));
+        }
     }
 
     if let (Some(word), Some(resolution)) = (&word_under_cursor, &type_at_cursor) {
@@ -223,20 +210,7 @@ fn type_at_span_start(
     analysis: &bsl_analysis_v2::AnalysisV2,
     file_id: bsl_analysis_v2::FileId,
     span: Span,
-    include_flow_sensitive: bool,
 ) -> Option<TypeResolution> {
-    if include_flow_sensitive {
-        return analysis
-            .flow_type_at_byte_offset(file_id, span.start)
-            .ok()
-            .flatten()
-            .or_else(|| {
-                analysis
-                    .type_at_byte_offset(file_id, span.start)
-                    .ok()
-                    .flatten()
-            });
-    }
     analysis
         .type_at_byte_offset(file_id, span.start)
         .ok()

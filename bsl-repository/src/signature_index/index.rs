@@ -88,9 +88,6 @@ impl SignatureIndex {
                 );
             }
 
-            // Слабость return-типа (динамика/неопределённость) объединяем монотонно (OR).
-            existing.return_is_weak |= method.return_is_weak;
-
             // Обновляем return_facet если у существующего None
             if existing.return_facet.is_none() && method.return_facet.is_some() {
                 tracing::debug!(

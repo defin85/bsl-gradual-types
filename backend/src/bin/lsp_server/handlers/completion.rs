@@ -83,7 +83,6 @@ pub async fn handle_completion_v2(
     file_uri: &Url,
     index_snapshot: &IndexSnapshot,
     snippet_support: bool,
-    include_flow_sensitive: bool,
 ) -> Option<CompletionResponseWithStats> {
     let resolver = deps
         .resolver
@@ -105,7 +104,6 @@ pub async fn handle_completion_v2(
                 ir_program,
                 parse_result,
                 member_access_owner_type_hint,
-                include_flow_sensitive,
             )
             .await
         }
@@ -121,7 +119,6 @@ pub async fn handle_completion_v2(
                 resolver.as_ref(),
                 ir_program,
                 member_access_owner_type_hint,
-                include_flow_sensitive,
             )
             .await
         }
@@ -1036,7 +1033,6 @@ mod tests {
             &uri,
             &index_snapshot,
             true,
-            false,
         )
         .await
         .expect("completion v2");
@@ -1060,7 +1056,6 @@ mod tests {
             &uri,
             &index_snapshot,
             true,
-            false,
         )
         .await
         .expect("completion v2 (second)");
@@ -1090,7 +1085,6 @@ mod tests {
             &uri,
             &index_snapshot,
             true,
-            false,
         )
         .await
         .expect("completion");

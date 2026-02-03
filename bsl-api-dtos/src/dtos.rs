@@ -298,9 +298,6 @@ pub struct ValidateCodeRequest {
     /// Optional file path for context
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_path: Option<String>,
-    /// Feature gate: include flow-sensitive (CFG-based) diagnostics (default: false).
-    #[serde(default)]
-    pub include_flow_sensitive: bool,
 }
 
 /// Response with validation results

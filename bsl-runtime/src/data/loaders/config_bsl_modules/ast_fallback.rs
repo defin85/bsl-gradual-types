@@ -5,7 +5,7 @@ use anyhow::{anyhow, Result};
 use crate::system::tree_sitter_adapter::TreeSitterAdapter;
 
 use super::directives::context_from_directive;
-use super::types::{CallSite, CallTarget, ParsedDecl, ParsedModuleData, ReturnAtom, ReturnFacts};
+use super::types::{CallSite, CallTarget, ParsedDecl, ParsedModuleData};
 use super::utils::normalize_union_parts;
 
 pub(crate) fn parse_bsl_module_ast_with_progress(
@@ -158,15 +158,6 @@ pub(crate) fn collect_decls_and_call_sites(
         st: &Statement,
         env: &mut VarEnv,
     ) {
-        fn conservative_return_facts() -> ReturnFacts {
-            ReturnFacts {
-                returns: vec![ReturnAtom::Unknown],
-                vars: HashMap::new(),
-                has_return_without_value: false,
-                has_dynamic: true,
-            }
-        }
-
         match st {
             Statement::Assignment { target, value, .. } => {
                 walk_expr(calls, target, env);
@@ -203,7 +194,6 @@ pub(crate) fn collect_decls_and_call_sites(
                     .collect();
                 decls.push(ParsedDecl {
                     return_type: infer_return_type_from_body(body),
-                    return_facts: Some(conservative_return_facts()),
                     name: name.clone(),
                     params,
                     is_export: *is_export,
@@ -231,7 +221,6 @@ pub(crate) fn collect_decls_and_call_sites(
                     .collect();
                 decls.push(ParsedDecl {
                     return_type: None,
-                    return_facts: None,
                     name: name.clone(),
                     params,
                     is_export: *is_export,
@@ -334,36 +323,6 @@ pub(crate) fn collect_decls_and_call_sites(
     let mut env: VarEnv = HashMap::new();
     walk_block(&mut decls, &mut calls, statements, &mut env);
     (decls, calls)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::data::loaders::config_bsl_modules::parsing::parse_with_thread_parser;
-
-    #[test]
-    fn ast_fallback_collects_conservative_return_facts_for_functions() {
-        let source = r#"
-Функция Ф1() Экспорт
-    Возврат 1;
-КонецФункции
-"#;
-
-        let tree = parse_with_thread_parser(source).expect("parse tree-sitter");
-        let parsed = TreeSitterAdapter::convert_tree_fast(&tree, source).expect("convert AST");
-        let (decls, _calls) = collect_decls_and_call_sites(&parsed.program.statements);
-
-        let decl = decls.iter().find(|d| d.name == "Ф1").expect("decl Ф1");
-        let facts = decl.return_facts.as_ref().expect("return_facts");
-        assert!(facts.has_dynamic, "fallback facts should be marked dynamic");
-        assert!(
-            facts
-                .returns
-                .iter()
-                .any(|a| matches!(a, ReturnAtom::Unknown)),
-            "fallback facts should include Unknown atom"
-        );
-    }
 }
 
 pub(crate) fn infer_return_type_from_body(

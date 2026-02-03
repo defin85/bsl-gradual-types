@@ -1660,18 +1660,13 @@ fn config_layer_b_fingerprint(
 
 fn config_layer_b_settings_fingerprint(strict: bool) -> String {
     format!(
-        "config_layer_b_v2;modules_indexing_v2;strict_fingerprint={}",
+        "config_layer_b_v2;modules_indexing_v1;strict_fingerprint={}",
         strict
     )
 }
 
 fn module_cache_settings_fingerprint(strict: bool) -> String {
-    // v3: ParsedModuleData включает return_facts (interprocedural return inference).
-    // v2: AST fallback формирует conservative return_facts (не выключаем return inference полностью).
-    format!(
-        "config_module_parse_v3;return_facts_v2;strict_fingerprint={}",
-        strict
-    )
+    format!("config_module_parse_v2;strict_fingerprint={}", strict)
 }
 
 fn file_fingerprint(path: &Path, strict: bool) -> Result<String> {

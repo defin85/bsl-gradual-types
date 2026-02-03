@@ -193,20 +193,15 @@ impl NarrowingEngine {
     pub fn build_narrowing_contexts(&mut self, initial_context: FlowAnalysisContext) {
         use crate::domain::flow_analysis::{CfgNodeKind, EdgeKind};
 
-        // Инициализируем контексты для КАЖДОГО entry узла.
-        //
-        // В v2 CFG может быть несколько компонент (root-scope + каждое тело процедуры/функции),
-        // поэтому нельзя полагаться на "первый Entry в файле".
-        for entry_node in self
-            .cfg
-            .nodes()
-            .iter()
-            .filter(|n| matches!(n.kind, CfgNodeKind::Entry))
-        {
+        // Инициализируем контекст для entry узла
+        if let Some(entry_node) = self.cfg.nodes().first() {
             let mut ctx = NarrowingContext::new();
+
+            // Копируем начальные типы переменных из FlowAnalysisContext
             for (var_id, resolution) in initial_context.get_all_variables() {
                 ctx.set_type(var_id.display(), resolution.clone());
             }
+
             self.contexts.insert(entry_node.id, ctx);
         }
 

@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -71,46 +70,7 @@ pub(crate) struct ParsedDecl {
     pub(crate) is_export: bool,
     pub(crate) directive_ctx: Option<ContextRequirements>,
     pub(crate) return_type: Option<String>,
-    /// Данные для межпроцедурного вывода return-типа (summary-based).
-    ///
-    /// Заполняется парсером модуля (tree-sitter single-pass или AST fallback).
-    /// Может быть None для процедур или если парсер не смог извлечь факты.
-    #[serde(default)]
-    pub(crate) return_facts: Option<ReturnFacts>,
     pub(crate) span: crate::parsing::bsl::ast::Span,
-}
-
-/// Атом выражения, достаточный для межпроцедурного вывода return-типа.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub(crate) enum ReturnAtom {
-    /// Известный тип (в строковом виде, например "Строка", "Число", "СправочникСсылка.Номенклатура").
-    Known(String),
-    /// Ссылка на переменную (case-sensitive, как в исходнике; нормализация на этапе inference).
-    Var(String),
-    /// Результат вызова функции/метода (таргет для построения графа вызовов).
-    Call(CallTarget),
-    /// Не удалось извлечь полезную информацию (динамика/неподдерживаемая конструкция).
-    Unknown,
-}
-
-/// Набор фактов о теле функции, необходимый для межпроцедурного вывода return-типа.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct ReturnFacts {
-    /// Атомы значений, встреченных в `Возврат ...`.
-    ///
-    /// `Возврат;` отражается флагом `has_return_without_value`.
-    pub(crate) returns: Vec<ReturnAtom>,
-    /// Снимок значений переменных, которые фигурируют в `returns` как `Var`.
-    ///
-    /// Хранит только подмножество переменных, чтобы не раздувать кэш.
-    #[serde(default)]
-    pub(crate) vars: HashMap<String, Vec<ReturnAtom>>,
-    /// Были ли return'ы без значения (`Возврат;`) в функции.
-    #[serde(default)]
-    pub(crate) has_return_without_value: bool,
-    /// Есть ли в собранных фактах явная неопределённость (`Unknown`).
-    #[serde(default)]
-    pub(crate) has_dynamic: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,7 +95,7 @@ pub(crate) struct ParsedModule {
     pub(crate) call_sites: Vec<CallSite>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum CallTarget {
     /// Невозможно различить между "локальной" функцией и глобальной (например, из Global common module),
     /// поэтому этот таргет резолвим только в рамках текущего модуля.

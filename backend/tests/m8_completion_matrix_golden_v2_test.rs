@@ -232,7 +232,6 @@ async fn m8_completion_matrix_golden_v2() {
             ir_program,
             parse_result,
             None,
-            false,
         )
         .await
         .expect("completion ok");

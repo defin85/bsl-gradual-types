@@ -1,5 +1,7 @@
 # Change: Встраивание flow-sensitive анализа в v2 по всем интерфейсам (IDE/Web API/MCP)
 
+> Статус: закрыто как superseded новым change `fix-flow-sensitive-v2-wiring`.
+
 ## Why
 Сейчас в репозитории уже есть базовая инфраструктура flow-sensitive анализа:
 - CFG как часть IR (`SemanticProgram.cfg`) строится в v2 pipeline;
@@ -43,4 +45,3 @@
 ## Dependencies / Assumptions
 - В репозитории уже существует канонический CFG в IR и построение CFG в v2 pipeline (не требуется новый альтернативный путь).
 - Текущие flow-sensitive анализаторы (narrowing/null-safety) могут быть переиспользованы или адаптированы, но результаты MUST вычисляться на основе v2 snapshot/queries.
-

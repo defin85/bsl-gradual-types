@@ -8,6 +8,7 @@ pub use bsl_line_index::{byte_offset_to_utf16, utf16_to_byte_offset, LineIndex};
 pub mod ast_to_ir;
 pub use ast_to_ir::AstToIrConverter;
 
+mod open_file_overlay;
 mod type_inference_v2;
 
 use bsl_diagnostics::{SemanticTypeHints, SemanticValidationVisitor};
@@ -109,6 +110,25 @@ unsafe impl salsa::Update for DepsDataSnapshot {
     }
 }
 
+#[derive(Clone)]
+pub struct OpenFilesSnapshotData(pub Arc<Vec<SourceFile>>);
+
+impl PartialEq for OpenFilesSnapshotData {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for OpenFilesSnapshotData {}
+
+unsafe impl salsa::Update for OpenFilesSnapshotData {
+    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
+        let old_value: &mut Self = unsafe { &mut *old_pointer };
+        *old_value = new_value;
+        true
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Change {
     SetFile {
@@ -165,6 +185,12 @@ pub struct SettingsSnapshot {
     #[returns(ref)]
     pub id: SettingsId,
     pub diagnostics_detail_level: DetailLevel,
+}
+
+#[salsa::input]
+pub struct OpenFilesSnapshot {
+    #[returns(ref)]
+    pub data: OpenFilesSnapshotData,
 }
 
 #[derive(Debug, Clone)]
@@ -283,6 +309,25 @@ unsafe impl salsa::Update for TypeIndexSnapshot {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct OpenFilesReturnOverlaySnapshot(Arc<open_file_overlay::OpenFilesReturnOverlay>);
+
+impl PartialEq for OpenFilesReturnOverlaySnapshot {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for OpenFilesReturnOverlaySnapshot {}
+
+unsafe impl salsa::Update for OpenFilesReturnOverlaySnapshot {
+    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
+        let old_value: &mut Self = unsafe { &mut *old_pointer };
+        *old_value = new_value;
+        true
+    }
+}
+
 #[salsa::tracked]
 pub fn file_text_len(db: &dyn salsa::Database, file: SourceFile) -> usize {
     file.text(db).len()
@@ -316,6 +361,21 @@ pub fn parse_result(
             }],
         ))),
     }
+}
+
+#[salsa::tracked]
+pub fn open_files_return_overlay(
+    db: &dyn salsa::Database,
+    open_files: OpenFilesSnapshot,
+    settings: SettingsSnapshot,
+) -> OpenFilesReturnOverlaySnapshot {
+    let _settings_id = settings.id(db);
+    let files = open_files.data(db).0.clone();
+    OpenFilesReturnOverlaySnapshot(Arc::new(open_file_overlay::build_return_overlay_for_open_files(
+        db,
+        files.as_slice(),
+        settings,
+    )))
 }
 
 #[salsa::tracked]
@@ -367,6 +427,7 @@ pub fn semantic_diagnostics(
     file: SourceFile,
     deps: DepsSnapshot,
     settings: SettingsSnapshot,
+    open_files: OpenFilesSnapshot,
 ) -> SemanticDiagnosticsSnapshot {
     let _deps_id = deps.id(db);
     let _settings_id = settings.id(db);
@@ -380,7 +441,7 @@ pub fn semantic_diagnostics(
     }
 
     let program = ir(db, file, deps, settings).0;
-    let type_index = type_index(db, file, deps, settings).0;
+    let type_index = type_index(db, file, deps, settings, open_files).0;
 
     let mut type_hints = SemanticTypeHints::default();
     populate_assignment_value_hints(&program, &type_index, &mut type_hints);
@@ -436,6 +497,7 @@ pub fn semantic_diagnostics_flow_sensitive(
     file: SourceFile,
     deps: DepsSnapshot,
     settings: SettingsSnapshot,
+    open_files: OpenFilesSnapshot,
 ) -> SemanticDiagnosticsSnapshot {
     let _deps_id = deps.id(db);
     let _settings_id = settings.id(db);
@@ -449,7 +511,7 @@ pub fn semantic_diagnostics_flow_sensitive(
     }
 
     let program = ir(db, file, deps, settings).0;
-    let type_index = type_index(db, file, deps, settings).0;
+    let type_index = type_index(db, file, deps, settings, open_files).0;
 
     let mut type_hints = SemanticTypeHints::default();
     populate_assignment_value_hints(&program, &type_index, &mut type_hints);
@@ -637,13 +699,14 @@ pub fn flow_type_at_byte_offset(
     file: SourceFile,
     deps: DepsSnapshot,
     settings: SettingsSnapshot,
+    open_files: OpenFilesSnapshot,
     byte_offset: u32,
 ) -> FlowTypeAtOffsetSnapshot {
     let _deps_id = deps.id(db);
     let _settings_id = settings.id(db);
 
     let program = ir(db, file, deps, settings).0;
-    let type_index = type_index(db, file, deps, settings).0;
+    let type_index = type_index(db, file, deps, settings, open_files).0;
 
     let base = type_index.type_at_byte_offset(byte_offset);
     let (var_name, _state) = match program.find_variable_at_byte_offset(byte_offset) {
@@ -1052,15 +1115,18 @@ pub fn type_index(
     file: SourceFile,
     deps: DepsSnapshot,
     settings: SettingsSnapshot,
+    open_files: OpenFilesSnapshot,
 ) -> TypeIndexSnapshot {
     let _deps_id = deps.id(db);
     let _settings_id = settings.id(db);
     let deps_data = deps.data(db).0.clone();
     let parsed = parse_result(db, file, settings).0;
+    let overlay = open_files_return_overlay(db, open_files, settings).0;
     TypeIndexSnapshot(Arc::new(type_inference_v2::build_type_index_with_path(
         &parsed.program,
         file.path(db).as_ref(),
         deps_data,
+        Some(overlay.clone()),
     )))
 }
 
@@ -1087,6 +1153,7 @@ pub struct AnalysisHostV2 {
     files: HashMap<FileId, SourceFile>,
     deps: DepsSnapshot,
     settings: SettingsSnapshot,
+    open_files: OpenFilesSnapshot,
 }
 
 impl Default for AnalysisHostV2 {
@@ -1106,11 +1173,13 @@ impl Default for AnalysisHostV2 {
             DepsDataSnapshot(deps_data),
         );
         let settings = SettingsSnapshot::new(&db, SettingsId::from_hash(""), DetailLevel::Full);
+        let open_files = OpenFilesSnapshot::new(&db, OpenFilesSnapshotData(Arc::new(Vec::new())));
         Self {
             db,
             files: HashMap::new(),
             deps,
             settings,
+            open_files,
         }
     }
 }
@@ -1126,6 +1195,7 @@ impl AnalysisHostV2 {
             } => self.set_file(file_id, text, version, path),
             Change::RemoveFile { file_id } => {
                 self.files.remove(&file_id);
+                self.refresh_open_files_snapshot();
             }
             Change::SetDepsSnapshot { deps_id, deps } => {
                 self.deps.set_id(&mut self.db).to(deps_id);
@@ -1152,8 +1222,17 @@ impl AnalysisHostV2 {
             None => {
                 let file = SourceFile::new(&self.db, file_id.0, text, version, path);
                 self.files.insert(file_id, file);
+                self.refresh_open_files_snapshot();
             }
         }
+    }
+
+    fn refresh_open_files_snapshot(&mut self) {
+        let mut files: Vec<SourceFile> = self.files.values().copied().collect();
+        files.sort_by_key(|file| file.id(&self.db));
+        self.open_files
+            .set_data(&mut self.db)
+            .to(OpenFilesSnapshotData(Arc::new(files)));
     }
 
     pub fn has_file(&self, file_id: FileId) -> bool {
@@ -1174,6 +1253,7 @@ impl AnalysisHostV2 {
             files: self.files.clone(),
             deps: self.deps,
             settings: self.settings,
+            open_files: self.open_files,
         }
     }
 
@@ -1187,6 +1267,7 @@ pub struct AnalysisV2 {
     files: HashMap<FileId, SourceFile>,
     deps: DepsSnapshot,
     settings: SettingsSnapshot,
+    open_files: OpenFilesSnapshot,
 }
 
 impl AnalysisV2 {
@@ -1256,7 +1337,8 @@ impl AnalysisV2 {
         let Some(&file) = self.files.get(&file_id) else {
             return Ok(None);
         };
-        cancellable(|| semantic_diagnostics(&self.db, file, self.deps, self.settings).0).map(Some)
+        cancellable(|| semantic_diagnostics(&self.db, file, self.deps, self.settings, self.open_files).0)
+            .map(Some)
     }
 
     pub fn semantic_diagnostics_flow_sensitive(
@@ -1267,7 +1349,7 @@ impl AnalysisV2 {
             return Ok(None);
         };
         cancellable(|| {
-            semantic_diagnostics_flow_sensitive(&self.db, file, self.deps, self.settings).0
+            semantic_diagnostics_flow_sensitive(&self.db, file, self.deps, self.settings, self.open_files).0
         })
         .map(Some)
     }
@@ -1339,7 +1421,7 @@ impl AnalysisV2 {
             return Ok(None);
         };
         cancellable(|| {
-            type_index(&self.db, file, self.deps, self.settings)
+            type_index(&self.db, file, self.deps, self.settings, self.open_files)
                 .0
                 .clone()
         })
@@ -1355,7 +1437,7 @@ impl AnalysisV2 {
             return Ok(None);
         };
         cancellable(|| {
-            flow_type_at_byte_offset(&self.db, file, self.deps, self.settings, byte_offset)
+            flow_type_at_byte_offset(&self.db, file, self.deps, self.settings, self.open_files, byte_offset)
                 .0
                 .clone()
         })
@@ -1866,6 +1948,83 @@ mod tests {
             !Arc::ptr_eq(&diagnostics_a, &diagnostics_b),
             "semantic diagnostics should be recomputed when deps_id changes"
         );
+    }
+
+    #[test]
+    fn type_index_uses_open_file_return_overlay_across_files() {
+        let repository = Arc::new(InMemoryTypeRepository::new()) as Arc<dyn TypeRepository>;
+        let platform_signatures_loaded = repository.platform_docs_loaded();
+        let deps = Arc::new(SemanticDeps {
+            signature_index: SignatureIndex::new(),
+            resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
+            repository,
+            platform_signatures_loaded,
+        });
+
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(Change::SetDepsSnapshot {
+            deps_id: DepsSnapshotId::from_hash("deps"),
+            deps,
+        });
+        host.apply_change(Change::SetSettingsSnapshot {
+            settings_id: SettingsId::from_hash("settings"),
+            diagnostics_detail_level: DetailLevel::Full,
+        });
+
+        let file_a = FileId(1);
+        let file_b = FileId(2);
+
+        let source_a: Arc<str> = Arc::from(
+            "Процедура Тест()\n\
+             Р = ОбщийМодуль1.Ф1();\n\
+             КонецПроцедуры",
+        );
+        let offset = source_a.find("Ф1").expect("Ф1 offset") as u32;
+
+        host.apply_change(Change::SetFile {
+            file_id: file_a,
+            text: source_a.clone(),
+            version: 1,
+            path: Arc::from("test.bsl"),
+        });
+
+        host.apply_change(Change::SetFile {
+            file_id: file_b,
+            text: Arc::from(
+                "Функция Ф1() Экспорт\n\
+                 Возврат 1;\n\
+                 КонецФункции",
+            ),
+            version: 1,
+            path: Arc::from("CommonModules/ОбщийМодуль1/Ext/Module.bsl"),
+        });
+
+        let analysis = host.analysis();
+        let ty = analysis
+            .type_at_byte_offset(file_a, offset)
+            .unwrap()
+            .unwrap();
+        assert_eq!(ty.type_name(), "Число");
+        drop(analysis);
+
+        // Несохранённое изменение в другом open file должно обновлять overlay.
+        host.apply_change(Change::SetFile {
+            file_id: file_b,
+            text: Arc::from(
+                "Функция Ф1() Экспорт\n\
+                 Возврат \"x\";\n\
+                 КонецФункции",
+            ),
+            version: 2,
+            path: Arc::from("CommonModules/ОбщийМодуль1/Ext/Module.bsl"),
+        });
+
+        let analysis = host.analysis();
+        let ty = analysis
+            .type_at_byte_offset(file_a, offset)
+            .unwrap()
+            .unwrap();
+        assert_eq!(ty.type_name(), "Строка");
     }
 
     #[test]

@@ -1666,7 +1666,11 @@ fn config_layer_b_settings_fingerprint(strict: bool) -> String {
 }
 
 fn module_cache_settings_fingerprint(strict: bool) -> String {
-    format!("config_module_parse_v2;strict_fingerprint={}", strict)
+    // v3: ParsedModuleData включает return_facts (interprocedural return inference).
+    format!(
+        "config_module_parse_v3;return_facts_v1;strict_fingerprint={}",
+        strict
+    )
 }
 
 fn file_fingerprint(path: &Path, strict: bool) -> Result<String> {

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -6,7 +7,8 @@ use bsl_shared::domain::is_configuration_type_pattern;
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::SignatureIndex;
 use bsl_shared::domain::types::MetadataKind;
-use bsl_shared::domain::types::{Certainty, TypeResolution, UncertaintyReason};
+use bsl_shared::domain::types::{Certainty, ResolutionMetadata, ResolutionResult, ResolutionSource};
+use bsl_shared::domain::types::{TypeResolution, UncertaintyReason, WeightedType};
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::domain::{CodeLocation, ModuleType};
 use bsl_syntax::ast::{Expression, Program, Statement};
@@ -48,9 +50,25 @@ impl TypeIndex {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 struct TypeEnv {
     variables: HashMap<String, TypeResolution>,
+    local_function_summaries: Arc<HashMap<String, LocalFunctionSummary>>,
+}
+
+impl Default for TypeEnv {
+    fn default() -> Self {
+        Self {
+            variables: HashMap::new(),
+            local_function_summaries: Arc::new(HashMap::new()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct LocalFunctionSummary {
+    return_type: TypeResolution,
+    may_fallthrough: bool,
 }
 
 struct TypeInferencer {
@@ -80,10 +98,550 @@ impl TypeInferencer {
         let mut env = TypeEnv::default();
         let mut index = TypeIndex::default();
         self.seed_module_context(file_path, &mut env);
+        env.local_function_summaries = Arc::new(self.infer_local_function_summaries(program, &env));
         for stmt in &program.statements {
             self.visit_statement(stmt, &mut env, &mut index);
         }
         index
+    }
+
+    fn infer_local_function_summaries(
+        &self,
+        program: &Program,
+        base_env: &TypeEnv,
+    ) -> HashMap<String, LocalFunctionSummary> {
+        #[derive(Clone, Copy, Debug)]
+        struct Def<'a> {
+            params: &'a [String],
+            body: &'a [Statement],
+        }
+
+        fn collect_called_locals_in_expr(expr: &Expression, out: &mut BTreeSet<String>) {
+            match expr {
+                Expression::Call { function, args, .. } => {
+                    if let Expression::Identifier { name, .. } = function.as_ref() {
+                        out.insert(name.to_lowercase());
+                    }
+                    collect_called_locals_in_expr(function, out);
+                    for arg in args {
+                        collect_called_locals_in_expr(arg, out);
+                    }
+                }
+                Expression::PropertyAccess { object, .. } => collect_called_locals_in_expr(object, out),
+                Expression::IndexAccess { object, index, .. } => {
+                    collect_called_locals_in_expr(object, out);
+                    collect_called_locals_in_expr(index, out);
+                }
+                Expression::Binary { left, right, .. } => {
+                    collect_called_locals_in_expr(left, out);
+                    collect_called_locals_in_expr(right, out);
+                }
+                Expression::Unary { operand, .. } => collect_called_locals_in_expr(operand, out),
+                Expression::Ternary {
+                    condition,
+                    then_expr,
+                    else_expr,
+                    ..
+                } => {
+                    collect_called_locals_in_expr(condition, out);
+                    collect_called_locals_in_expr(then_expr, out);
+                    collect_called_locals_in_expr(else_expr, out);
+                }
+                Expression::New { args, .. } => {
+                    for arg in args {
+                        collect_called_locals_in_expr(arg, out);
+                    }
+                }
+                Expression::Await { expression, .. } => collect_called_locals_in_expr(expression, out),
+                _ => {}
+            }
+        }
+
+        fn collect_called_locals_in_stmt(stmt: &Statement, out: &mut BTreeSet<String>) {
+            match stmt {
+                Statement::Assignment { target, value, .. } => {
+                    collect_called_locals_in_expr(target, out);
+                    collect_called_locals_in_expr(value, out);
+                }
+                Statement::VarDeclaration { .. } => {}
+                Statement::FunctionDecl { .. } | Statement::ProcedureDecl { .. } => {}
+                Statement::If {
+                    condition,
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    collect_called_locals_in_expr(condition, out);
+                    for s in then_body {
+                        collect_called_locals_in_stmt(s, out);
+                    }
+                    if let Some(else_body) = else_body {
+                        for s in else_body {
+                            collect_called_locals_in_stmt(s, out);
+                        }
+                    }
+                }
+                Statement::For {
+                    start, end, body, ..
+                } => {
+                    collect_called_locals_in_expr(start, out);
+                    collect_called_locals_in_expr(end, out);
+                    for s in body {
+                        collect_called_locals_in_stmt(s, out);
+                    }
+                }
+                Statement::ForEach {
+                    collection, body, ..
+                } => {
+                    collect_called_locals_in_expr(collection, out);
+                    for s in body {
+                        collect_called_locals_in_stmt(s, out);
+                    }
+                }
+                Statement::While {
+                    condition, body, ..
+                } => {
+                    collect_called_locals_in_expr(condition, out);
+                    for s in body {
+                        collect_called_locals_in_stmt(s, out);
+                    }
+                }
+                Statement::Return { value, .. } => {
+                    if let Some(v) = value {
+                        collect_called_locals_in_expr(v, out);
+                    }
+                }
+                Statement::Try {
+                    try_body,
+                    except_body,
+                    ..
+                } => {
+                    for s in try_body {
+                        collect_called_locals_in_stmt(s, out);
+                    }
+                    for s in except_body {
+                        collect_called_locals_in_stmt(s, out);
+                    }
+                }
+                Statement::Call { expression, .. } => collect_called_locals_in_expr(expression, out),
+                Statement::Execute { code, .. } => collect_called_locals_in_expr(code, out),
+                Statement::RaiseError { message, .. } => {
+                    if let Some(m) = message {
+                        collect_called_locals_in_expr(m, out);
+                    }
+                }
+                Statement::AddHandler { event, handler, .. }
+                | Statement::RemoveHandler { event, handler, .. } => {
+                    collect_called_locals_in_expr(event, out);
+                    collect_called_locals_in_expr(handler, out);
+                }
+                Statement::Await { expression, .. } => collect_called_locals_in_expr(expression, out),
+                Statement::Break { .. }
+                | Statement::Continue { .. }
+                | Statement::Goto { .. }
+                | Statement::Label { .. } => {}
+            }
+        }
+
+        fn block_always_exits(body: &[Statement]) -> bool {
+            for stmt in body {
+                let exits = match stmt {
+                    Statement::Return { .. } => true,
+                    Statement::RaiseError { .. } => true,
+                    Statement::If {
+                        then_body,
+                        else_body,
+                        ..
+                    } => else_body
+                        .as_ref()
+                        .is_some_and(|else_body| block_always_exits(then_body) && block_always_exits(else_body)),
+                    Statement::Try {
+                        try_body,
+                        except_body,
+                        ..
+                    } => block_always_exits(try_body) && block_always_exits(except_body),
+                    _ => false,
+                };
+                if exits {
+                    return true;
+                }
+            }
+            false
+        }
+
+        fn resolution_for_type_names(types: &BTreeSet<String>) -> TypeResolution {
+            if types.is_empty() {
+                return TypeResolution::inferred_weak("Произвольный");
+            }
+            if types.len() == 1 {
+                return TypeResolution::inferred(types.iter().next().expect("len=1"));
+            }
+            // NOTE: keep ordering deterministic for stable outputs in hover/diagnostics/tests.
+            let variants: Vec<WeightedType> = types
+                .iter()
+                .map(|t| WeightedType::new(TypeResolution::string_to_concrete(t)))
+                .collect();
+            TypeResolution {
+                certainty: Certainty::Inferred,
+                result: ResolutionResult::Union(variants),
+                source: ResolutionSource::Inferred,
+                metadata: ResolutionMetadata::default(),
+                active_facet: None,
+                available_facets: vec![],
+            }
+        }
+
+        #[derive(Debug, Clone)]
+        struct LocalFunctionState {
+            /// Set of return type names (e.g. "Строка", "Число", "Неопределено", "Произвольный").
+            return_types: BTreeSet<String>,
+        }
+
+        impl LocalFunctionState {
+            fn return_type(&self) -> TypeResolution {
+                resolution_for_type_names(&self.return_types)
+            }
+        }
+
+        fn collect_return_type_names(
+            inferencer: &TypeInferencer,
+            body: &[Statement],
+            env: &mut TypeEnv,
+            index: &mut TypeIndex,
+            out: &mut BTreeSet<String>,
+        ) {
+            for stmt in body {
+                match stmt {
+                    Statement::Return { value, .. } => {
+                        if let Some(expr) = value {
+                            let t = inferencer.infer_expr(expr, env, index);
+                            if t.is_unknown() || t.is_dynamic() {
+                                out.insert("Произвольный".to_string());
+                            } else {
+                                out.insert(t.type_name());
+                            }
+                        } else {
+                            out.insert("Неопределено".to_string());
+                        }
+                    }
+                    Statement::If {
+                        condition,
+                        then_body,
+                        else_body,
+                        ..
+                    } => {
+                        let _ = inferencer.infer_expr(condition, env, index);
+                        let mut then_env = env.clone();
+                        collect_return_type_names(
+                            inferencer,
+                            then_body,
+                            &mut then_env,
+                            index,
+                            out,
+                        );
+                        if let Some(else_body) = else_body {
+                            let mut else_env = env.clone();
+                            collect_return_type_names(
+                                inferencer,
+                                else_body,
+                                &mut else_env,
+                                index,
+                                out,
+                            );
+                        }
+                    }
+                    Statement::While { condition, body, .. } => {
+                        let _ = inferencer.infer_expr(condition, env, index);
+                        let mut body_env = env.clone();
+                        collect_return_type_names(inferencer, body, &mut body_env, index, out);
+                    }
+                    Statement::For {
+                        variable,
+                        start,
+                        end,
+                        body,
+                        ..
+                    } => {
+                        let _ = inferencer.infer_expr(start, env, index);
+                        let _ = inferencer.infer_expr(end, env, index);
+                        let mut body_env = env.clone();
+                        body_env.variables.insert(
+                            variable.to_lowercase(),
+                            TypeResolution::primitive("Число"),
+                        );
+                        collect_return_type_names(inferencer, body, &mut body_env, index, out);
+                    }
+                    Statement::ForEach {
+                        variable,
+                        collection,
+                        body,
+                        ..
+                    } => {
+                        let _ = inferencer.infer_expr(collection, env, index);
+                        let mut body_env = env.clone();
+                        body_env
+                            .variables
+                            .insert(variable.to_lowercase(), TypeResolution::unknown());
+                        collect_return_type_names(inferencer, body, &mut body_env, index, out);
+                    }
+                    Statement::Try {
+                        try_body,
+                        except_body,
+                        ..
+                    } => {
+                        let mut try_env = env.clone();
+                        collect_return_type_names(inferencer, try_body, &mut try_env, index, out);
+                        let mut except_env = env.clone();
+                        collect_return_type_names(
+                            inferencer,
+                            except_body,
+                            &mut except_env,
+                            index,
+                            out,
+                        );
+                    }
+                    Statement::FunctionDecl { .. } | Statement::ProcedureDecl { .. } => {}
+                    _ => inferencer.visit_statement(stmt, env, index),
+                }
+            }
+        }
+
+        let mut function_defs: Vec<(String, Def<'_>)> = Vec::new();
+        for stmt in &program.statements {
+            if let Statement::FunctionDecl {
+                name, params, body, ..
+            } = stmt
+            {
+                function_defs.push((
+                    name.to_lowercase(),
+                    Def {
+                        params,
+                        body,
+                    },
+                ));
+            }
+        }
+        if function_defs.is_empty() {
+            return HashMap::new();
+        }
+
+        // Stable node ordering: appearance in file.
+        let n = function_defs.len();
+        let mut name_to_idx: HashMap<String, usize> = HashMap::new();
+        for (idx, (name_lower, _)) in function_defs.iter().enumerate() {
+            name_to_idx.insert(name_lower.clone(), idx);
+        }
+
+        let mut may_fallthrough: Vec<bool> = Vec::with_capacity(n);
+        for (_, def) in &function_defs {
+            may_fallthrough.push(!block_always_exits(def.body));
+        }
+
+        // Call graph edges: caller -> callee (by index), only for local functions in this file.
+        let mut edges: Vec<Vec<usize>> = vec![Vec::new(); n];
+        for (caller_idx, (_, def)) in function_defs.iter().enumerate() {
+            let mut called = BTreeSet::<String>::new();
+            for stmt in def.body {
+                collect_called_locals_in_stmt(stmt, &mut called);
+            }
+            for callee in called {
+                if let Some(&callee_idx) = name_to_idx.get(&callee) {
+                    edges[caller_idx].push(callee_idx);
+                }
+            }
+            edges[caller_idx].sort_unstable();
+            edges[caller_idx].dedup();
+        }
+
+        // Tarjan SCC
+        fn scc_tarjan(edges: &[Vec<usize>]) -> Vec<Vec<usize>> {
+            let n = edges.len();
+            let mut index: usize = 0;
+            let mut stack: Vec<usize> = Vec::new();
+            let mut on_stack = vec![false; n];
+            let mut indices: Vec<Option<usize>> = vec![None; n];
+            let mut lowlink: Vec<usize> = vec![0; n];
+            let mut sccs: Vec<Vec<usize>> = Vec::new();
+
+            fn strongconnect(
+                v: usize,
+                index: &mut usize,
+                stack: &mut Vec<usize>,
+                on_stack: &mut [bool],
+                indices: &mut [Option<usize>],
+                lowlink: &mut [usize],
+                edges: &[Vec<usize>],
+                sccs: &mut Vec<Vec<usize>>,
+            ) {
+                indices[v] = Some(*index);
+                lowlink[v] = *index;
+                *index += 1;
+                stack.push(v);
+                on_stack[v] = true;
+
+                for &w in &edges[v] {
+                    if indices[w].is_none() {
+                        strongconnect(
+                            w, index, stack, on_stack, indices, lowlink, edges, sccs,
+                        );
+                        lowlink[v] = lowlink[v].min(lowlink[w]);
+                    } else if on_stack[w] {
+                        lowlink[v] = lowlink[v].min(indices[w].expect("index set"));
+                    }
+                }
+
+                if lowlink[v] == indices[v].expect("index set") {
+                    let mut component = Vec::new();
+                    loop {
+                        let w = stack.pop().expect("stack pop");
+                        on_stack[w] = false;
+                        component.push(w);
+                        if w == v {
+                            break;
+                        }
+                    }
+                    component.sort_unstable();
+                    sccs.push(component);
+                }
+            }
+
+            for v in 0..n {
+                if indices[v].is_none() {
+                    strongconnect(
+                        v,
+                        &mut index,
+                        &mut stack,
+                        &mut on_stack,
+                        &mut indices,
+                        &mut lowlink,
+                        edges,
+                        &mut sccs,
+                    );
+                }
+            }
+
+            sccs
+        }
+
+        let sccs = scc_tarjan(&edges);
+        let mut node_to_scc = vec![0usize; n];
+        for (scc_id, nodes) in sccs.iter().enumerate() {
+            for &node in nodes {
+                node_to_scc[node] = scc_id;
+            }
+        }
+
+        // Condensation graph topo (reverse order: callees first).
+        let scc_count = sccs.len();
+        let mut scc_edges: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); scc_count];
+        let mut indegree: Vec<usize> = vec![0; scc_count];
+        for (from, tos) in edges.iter().enumerate() {
+            let from_scc = node_to_scc[from];
+            for &to in tos {
+                let to_scc = node_to_scc[to];
+                if from_scc == to_scc {
+                    continue;
+                }
+                if scc_edges[from_scc].insert(to_scc) {
+                    indegree[to_scc] += 1;
+                }
+            }
+        }
+
+        let mut ready: Vec<usize> = (0..scc_count).filter(|&i| indegree[i] == 0).collect();
+        // Deterministic ordering: smallest node index inside SCC first.
+        ready.sort_by_key(|&scc_id| sccs[scc_id].first().copied().unwrap_or(usize::MAX));
+
+        let mut topo: Vec<usize> = Vec::with_capacity(scc_count);
+        while let Some(scc_id) = ready.first().copied() {
+            ready.remove(0);
+            topo.push(scc_id);
+            for &to in &scc_edges[scc_id] {
+                indegree[to] = indegree[to].saturating_sub(1);
+                if indegree[to] == 0 {
+                    ready.push(to);
+                    ready.sort_by_key(|&scc_id| sccs[scc_id].first().copied().unwrap_or(usize::MAX));
+                }
+            }
+        }
+
+        let mut states: Vec<LocalFunctionState> = (0..n)
+            .map(|_| LocalFunctionState {
+                return_types: BTreeSet::new(),
+            })
+            .collect();
+
+        // Process SCCs in reverse topo order so that callees are stabilized first.
+        for &scc_id in topo.iter().rev() {
+            let nodes = &sccs[scc_id];
+            loop {
+                let mut changed = false;
+
+                // Snapshot: expose current return types to expression inference via env.local_function_summaries.
+                let mut snapshot: HashMap<String, LocalFunctionSummary> = HashMap::new();
+                for (idx, (name_lower, _def)) in function_defs.iter().enumerate() {
+                    snapshot.insert(
+                        name_lower.clone(),
+                        LocalFunctionSummary {
+                            return_type: states[idx].return_type(),
+                            may_fallthrough: may_fallthrough[idx],
+                        },
+                    );
+                }
+                let snapshot = Arc::new(snapshot);
+
+                for &node_idx in nodes {
+                    let (_name_lower, def) = &function_defs[node_idx];
+
+                    let mut fn_env = base_env.clone();
+                    fn_env.local_function_summaries = snapshot.clone();
+                    for p in def.params {
+                        fn_env
+                            .variables
+                            .insert(p.to_lowercase(), TypeResolution::unknown());
+                    }
+
+                    let mut scratch_index = TypeIndex::default();
+                    let mut type_names = BTreeSet::<String>::new();
+                    collect_return_type_names(
+                        self,
+                        def.body,
+                        &mut fn_env,
+                        &mut scratch_index,
+                        &mut type_names,
+                    );
+
+                    if type_names.is_empty() || may_fallthrough[node_idx] {
+                        type_names.insert("Неопределено".to_string());
+                    }
+                    if type_names.is_empty() {
+                        type_names.insert("Произвольный".to_string());
+                    }
+
+                    if states[node_idx].return_types != type_names {
+                        states[node_idx].return_types = type_names;
+                        changed = true;
+                    }
+                }
+
+                if !changed {
+                    break;
+                }
+            }
+        }
+
+        let mut out: HashMap<String, LocalFunctionSummary> = HashMap::new();
+        for (idx, (name_lower, _def)) in function_defs.iter().enumerate() {
+            out.insert(
+                name_lower.clone(),
+                LocalFunctionSummary {
+                    return_type: states[idx].return_type(),
+                    may_fallthrough: may_fallthrough[idx],
+                },
+            );
+        }
+
+        out
     }
 
     fn seed_module_context(&self, file_path: &str, env: &mut TypeEnv) {
@@ -425,8 +983,9 @@ impl TypeInferencer {
             .repository
             .find_type(&common_module_type)
             .is_some()
+            || !self.signature_index.get_type_methods(&common_module_type).is_empty()
         {
-            return self.resolver.resolve_expression_sync(&common_module_type);
+            return TypeResolution::metadata_type(MetadataKind::CommonModule, name, None);
         }
 
         TypeResolution::undeclared_variable(name)
@@ -503,7 +1062,7 @@ impl TypeInferencer {
         index: &mut TypeIndex,
     ) -> TypeResolution {
         match function {
-            Expression::Identifier { name, .. } => self.infer_global_function_call(name),
+            Expression::Identifier { name, .. } => self.infer_global_function_call(name, env),
             Expression::PropertyAccess {
                 object, property, ..
             } => {
@@ -514,7 +1073,12 @@ impl TypeInferencer {
         }
     }
 
-    fn infer_global_function_call(&self, name: &str) -> TypeResolution {
+    fn infer_global_function_call(&self, name: &str, env: &TypeEnv) -> TypeResolution {
+        let name_lower = name.to_lowercase();
+        if let Some(local) = env.local_function_summaries.get(&name_lower) {
+            return local.return_type.clone();
+        }
+
         if let Some(sig) = self.signature_index.find_global_function(name) {
             if let Some(return_type) = sig.return_type.as_deref().filter(|s| !s.is_empty()) {
                 if let Some(resolved) = self.try_resolve_configuration_type(return_type) {
@@ -686,6 +1250,37 @@ mod tests {
         })
     }
 
+    fn deps_with_common_module_method() -> Arc<SemanticDeps> {
+        let repository_impl = Arc::new(InMemoryTypeRepository::new());
+        let mut sigs = SignatureIndex::new();
+        sigs.add_config_method(
+            TypeId::new("ОбщиеМодули.ОбщийМодуль1"),
+            MethodSignature::new(
+                "Ф1".to_string(),
+                Some("ОбщиеМодули.ОбщийМодуль1".to_string()),
+                vec![],
+                Some("Число".to_string()),
+                None,
+                None,
+                SignatureSource::Configuration,
+                None,
+                Default::default(),
+            ),
+        );
+        repository_impl.set_signature_index(sigs.clone());
+
+        let repository =
+            repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+        let resolver = Arc::new(TypeResolver::new(repository.clone()));
+
+        Arc::new(SemanticDeps {
+            repository,
+            signature_index: sigs,
+            resolver: Some(resolver),
+            platform_signatures_loaded: true,
+        })
+    }
+
     #[test]
     fn builds_type_index_for_simple_assignment_and_method_call() {
         let source = r#"Перем М;
@@ -710,6 +1305,91 @@ mod tests {
             .type_at_byte_offset(method_call_offset)
             .expect("type at method call");
         assert_eq!(method_call.type_name(), "Число");
+    }
+
+    #[test]
+    fn resolves_common_module_method_return_type_from_signature_index() {
+        let source = r#"Процедура Тест()
+    x = ОбщийМодуль1.Ф1();
+КонецПроцедуры
+"#;
+        let program = parse(source);
+        let deps = deps_with_common_module_method();
+        let index = build_type_index_with_path(&program, "test.bsl", deps);
+
+        let offset = source.find("Ф1").expect("method name") as u32;
+        let result = index
+            .type_at_byte_offset(offset)
+            .expect("type at method call");
+        assert_eq!(result.type_name(), "Число");
+    }
+
+    #[test]
+    fn resolves_local_function_return_type_defined_later_in_common_module_file() {
+        let source = r#"Процедура Тест()
+    x = ФункцияКотораяВозвращаетСтроку();
+КонецПроцедуры
+
+Функция ФункцияКотораяВозвращаетСтроку()
+    Возврат "ТестоваяСтрока";
+КонецФункции
+"#;
+        let program = parse(source);
+        let deps = deps_with_array_method();
+        let file_path = "CommonModules/АвансовыйОтчетФормы/Ext/Module.bsl";
+        let index = build_type_index_with_path(&program, file_path, deps);
+
+        let offset = source
+            .find("ФункцияКотораяВозвращаетСтроку")
+            .expect("function name") as u32;
+        let result = index
+            .type_at_byte_offset(offset)
+            .expect("type at function call");
+        assert_eq!(result.type_name(), "Строка");
+    }
+
+    #[test]
+    fn infers_union_return_type_for_local_function() {
+        let source = r#"Функция F(Флаг)
+    Если Флаг Тогда
+        Возврат 1;
+    Иначе
+        Возврат "x";
+    КонецЕсли;
+КонецФункции
+
+Процедура Тест()
+    x = F(Истина);
+КонецПроцедуры
+"#;
+        let program = parse(source);
+        let deps = deps_with_array_method();
+        let index = build_type_index_with_path(&program, "test.bsl", deps);
+
+        let offset = source.find("F(Истина)").expect("call") as u32;
+        let result = index.type_at_byte_offset(offset).expect("type at call");
+        assert_eq!(result.type_name(), "Строка | Число");
+    }
+
+    #[test]
+    fn adds_undefined_when_function_can_fallthrough() {
+        let source = r#"Функция F(Флаг)
+    Если Флаг Тогда
+        Возврат 1;
+    КонецЕсли;
+КонецФункции
+
+Процедура Тест()
+    x = F(Истина);
+КонецПроцедуры
+"#;
+        let program = parse(source);
+        let deps = deps_with_array_method();
+        let index = build_type_index_with_path(&program, "test.bsl", deps);
+
+        let offset = source.find("F(Истина)").expect("call") as u32;
+        let result = index.type_at_byte_offset(offset).expect("type at call");
+        assert_eq!(result.type_name(), "Неопределено | Число");
     }
 
     #[test]

@@ -11,9 +11,7 @@ use bsl_shared::domain::types::MetadataKind;
 use bsl_shared::domain::types::{
     Certainty, ResolutionMetadata, ResolutionResult, ResolutionSource,
 };
-use bsl_shared::domain::types::{
-    ConcreteType, PlatformType, TypeResolution, UncertaintyReason, WeightedType,
-};
+use bsl_shared::domain::types::{ConcreteType, TypeResolution, UncertaintyReason, WeightedType};
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::domain::{CodeLocation, ModuleType};
 use bsl_syntax::ast::{Expression, Program, Statement};
@@ -295,14 +293,23 @@ impl TypeInferencer {
 
         #[derive(Debug, Clone, PartialEq, Default)]
         struct ReturnTypeSet {
+            /// If any return expression is unknown/dynamic, the whole return type degrades to Dynamic.
+            has_dynamic: bool,
             // Key is a stable display name for deterministic ordering.
-            variants: BTreeMap<String, ConcreteType>,
+            concrete_variants: BTreeMap<String, ConcreteType>,
+            // If a function returns a non-concrete type (e.g. Generic/Nullable/Intersection), we keep it structurally
+            // only if it's the sole variant. Otherwise we degrade to Dynamic.
+            non_concrete: Option<TypeResolution>,
         }
 
         impl ReturnTypeSet {
             fn insert_concrete(&mut self, concrete: ConcreteType) {
                 let key = TypeResolution::known(concrete.clone()).type_name();
-                self.variants.entry(key).or_insert(concrete);
+                if self.non_concrete.is_some() {
+                    self.has_dynamic = true;
+                    return;
+                }
+                self.concrete_variants.entry(key).or_insert(concrete);
             }
 
             fn insert_named(&mut self, type_name: &str) {
@@ -310,10 +317,9 @@ impl TypeInferencer {
             }
 
             fn insert_resolution(&mut self, resolution: &TypeResolution) {
-                // Dynamic is the top type; keep local return inference useful by mapping it to
-                // a stable "Произвольный" variant instead of propagating "Dynamic".
-                if resolution.is_dynamic() {
-                    self.insert_named("Произвольный");
+                // Dynamic/Unknown is the top type for our purposes.
+                if resolution.is_unknown() || resolution.is_dynamic() {
+                    self.has_dynamic = true;
                     return;
                 }
 
@@ -321,32 +327,55 @@ impl TypeInferencer {
                     ResolutionResult::Concrete(concrete) => self.insert_concrete(concrete.clone()),
                     ResolutionResult::Union(variants) => {
                         if variants.is_empty() {
-                            self.insert_named("Произвольный");
+                            self.has_dynamic = true;
                         } else {
                             for v in variants {
                                 self.insert_concrete(v.type_.clone());
                             }
                         }
                     }
-                    ResolutionResult::Dynamic => self.insert_named("Произвольный"),
-                    // Union in the type system only holds ConcreteType variants; for other result kinds
-                    // keep a stable platform type using the formatted name.
-                    _ => self.insert_concrete(ConcreteType::Platform(PlatformType {
-                        name: resolution.type_name(),
-                    })),
+                    ResolutionResult::Dynamic => self.has_dynamic = true,
+                    // Non-concrete return types are preserved only if they are the only return variant.
+                    _ => {
+                        if !self.concrete_variants.is_empty() {
+                            self.has_dynamic = true;
+                            return;
+                        }
+                        match self.non_concrete.as_ref() {
+                            None => self.non_concrete = Some(resolution.clone()),
+                            Some(existing) => {
+                                if existing.type_name() != resolution.type_name() {
+                                    self.has_dynamic = true;
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
             fn is_empty(&self) -> bool {
-                self.variants.is_empty()
+                !self.has_dynamic
+                    && self.concrete_variants.is_empty()
+                    && self.non_concrete.is_none()
             }
 
             fn to_resolution(&self) -> TypeResolution {
-                if self.variants.is_empty() {
-                    return TypeResolution::inferred_weak("Произвольный");
+                if self.has_dynamic {
+                    return TypeResolution::unknown();
                 }
-                if self.variants.len() == 1 {
-                    let concrete = self.variants.values().next().expect("len=1").clone();
+                if let Some(non_concrete) = self.non_concrete.as_ref() {
+                    return non_concrete.clone();
+                }
+                if self.concrete_variants.is_empty() {
+                    return TypeResolution::unknown();
+                }
+                if self.concrete_variants.len() == 1 {
+                    let concrete = self
+                        .concrete_variants
+                        .values()
+                        .next()
+                        .expect("len=1")
+                        .clone();
                     return TypeResolution {
                         certainty: Certainty::Inferred,
                         result: ResolutionResult::Concrete(concrete),
@@ -358,7 +387,7 @@ impl TypeInferencer {
                 }
 
                 let variants: Vec<WeightedType> = self
-                    .variants
+                    .concrete_variants
                     .values()
                     .cloned()
                     .map(WeightedType::new)
@@ -1513,7 +1542,11 @@ mod tests {
 
         let offset = source.find("A();").expect("call") as u32;
         let result = index.type_at_byte_offset(offset).expect("type at call");
-        assert_eq!(result.type_name(), "Произвольный");
+        assert!(
+            result.is_unknown() && matches!(result.result, ResolutionResult::Dynamic),
+            "expected Unknown/Dynamic, got: {:?}",
+            result
+        );
     }
 
     #[test]

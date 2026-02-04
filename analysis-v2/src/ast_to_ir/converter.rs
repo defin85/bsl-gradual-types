@@ -355,41 +355,41 @@ impl AstToIrConverter {
             node_id
         }
 
-	        fn add_cfg_node_from_ir(
-	            cfg: &mut ControlFlowGraph,
-	            kind: CfgNodeKind,
-	            ir_node: &SemanticNode,
-	            ir_node_index: Option<usize>,
-	        ) -> CfgNodeId {
-	            let id = add_cfg_node(cfg, kind);
-	            cfg.set_node_span(id, Some(ir_node.span));
-	            cfg.set_node_ir_node_index(id, ir_node_index);
-	            id
-	        }
+        fn add_cfg_node_from_ir(
+            cfg: &mut ControlFlowGraph,
+            kind: CfgNodeKind,
+            ir_node: &SemanticNode,
+            ir_node_index: Option<usize>,
+        ) -> CfgNodeId {
+            let id = add_cfg_node(cfg, kind);
+            cfg.set_node_span(id, Some(ir_node.span));
+            cfg.set_node_ir_node_index(id, ir_node_index);
+            id
+        }
 
-	        fn header_span(source: &str, full: Span) -> Span {
-	            let Some(raw) = slice_span(source, full) else {
-	                return full;
-	            };
+        fn header_span(source: &str, full: Span) -> Span {
+            let Some(raw) = slice_span(source, full) else {
+                return full;
+            };
 
-	            let line_end = raw
-	                .bytes()
-	                .position(|b| b == b'\n' || b == b'\r')
-	                .unwrap_or(raw.len());
+            let line_end = raw
+                .bytes()
+                .position(|b| b == b'\n' || b == b'\r')
+                .unwrap_or(raw.len());
 
-	            let end = (full.start as usize)
-	                .saturating_add(line_end)
-	                .min(full.end as usize) as u32;
-	            // Пустой span не содержит offset; делаем минимум 1 байт.
-	            let end = end.max(full.start.saturating_add(1)).min(full.end);
+            let end = (full.start as usize)
+                .saturating_add(line_end)
+                .min(full.end as usize) as u32;
+            // Пустой span не содержит offset; делаем минимум 1 байт.
+            let end = end.max(full.start.saturating_add(1)).min(full.end);
 
-	            Span::new(full.start, end)
-	        }
+            Span::new(full.start, end)
+        }
 
-	        struct Builder<'a> {
-	            source: &'a str,
-	            ir_nodes: &'a [SemanticNode],
-	            cfg: ControlFlowGraph,
+        struct Builder<'a> {
+            source: &'a str,
+            ir_nodes: &'a [SemanticNode],
+            cfg: ControlFlowGraph,
             loop_stack: Vec<LoopFrame>,
         }
 
@@ -454,25 +454,25 @@ impl AstToIrConverter {
                     SemanticNodeKind::IfStatement {
                         then_branch,
                         else_branch,
-	                    } => {
-	                        let raw = slice_span(self.source, node.span).unwrap_or("");
-	                        let condition = extract_condition_from_header(first_line(raw), &node.kind);
+                    } => {
+                        let raw = slice_span(self.source, node.span).unwrap_or("");
+                        let condition = extract_condition_from_header(first_line(raw), &node.kind);
 
-	                        let cond_id = add_cfg_node_from_ir(
-	                            &mut self.cfg,
-	                            CfgNodeKind::Conditional { condition },
-	                            node,
-	                            Some(stmt_idx),
-	                        );
-	                        // Span условного узла должен быть только "шапкой" (первая строка),
-	                        // иначе mapping "позиция → CFG контекст" начинает зависеть от эвристик.
-	                        let cond_span = header_span(self.source, node.span);
-	                        self.cfg.set_node_span(cond_id, Some(cond_span));
+                        let cond_id = add_cfg_node_from_ir(
+                            &mut self.cfg,
+                            CfgNodeKind::Conditional { condition },
+                            node,
+                            Some(stmt_idx),
+                        );
+                        // Span условного узла должен быть только "шапкой" (первая строка),
+                        // иначе mapping "позиция → CFG контекст" начинает зависеть от эвристик.
+                        let cond_span = header_span(self.source, node.span);
+                        self.cfg.set_node_span(cond_id, Some(cond_span));
 
-	                        let merge_id = add_cfg_node(
-	                            &mut self.cfg,
-	                            CfgNodeKind::BasicBlock {
-	                                statements: Vec::new(),
+                        let merge_id = add_cfg_node(
+                            &mut self.cfg,
+                            CfgNodeKind::BasicBlock {
+                                statements: Vec::new(),
                             },
                         );
 
@@ -484,32 +484,32 @@ impl AstToIrConverter {
                             for from in then_open {
                                 self.cfg.add_edge(from, merge_id, EdgeKind::Unconditional);
                             }
-	                        } else {
-	                            let then_empty_id = add_cfg_node(
-	                                &mut self.cfg,
-	                                CfgNodeKind::BasicBlock {
-	                                    statements: Vec::new(),
-	                                },
-	                            );
-	                            let else_start = else_branch
-	                                .as_ref()
-	                                .filter(|b| !b.is_empty())
-	                                .and_then(|b| {
-	                                    b.iter()
-	                                        .filter_map(|idx| {
-	                                            self.ir_nodes.get(*idx).map(|n| n.span.start)
-	                                        })
-	                                        .min()
-	                                })
-	                                .unwrap_or(node.span.end);
-	                            self.cfg.set_node_span(
-	                                then_empty_id,
-	                                Some(Span::new(cond_span.end, else_start)),
-	                            );
-	                            self.cfg
-	                                .add_edge(cond_id, then_empty_id, EdgeKind::ConditionalTrue);
-	                            self.cfg
-	                                .add_edge(then_empty_id, merge_id, EdgeKind::Unconditional);
+                        } else {
+                            let then_empty_id = add_cfg_node(
+                                &mut self.cfg,
+                                CfgNodeKind::BasicBlock {
+                                    statements: Vec::new(),
+                                },
+                            );
+                            let else_start = else_branch
+                                .as_ref()
+                                .filter(|b| !b.is_empty())
+                                .and_then(|b| {
+                                    b.iter()
+                                        .filter_map(|idx| {
+                                            self.ir_nodes.get(*idx).map(|n| n.span.start)
+                                        })
+                                        .min()
+                                })
+                                .unwrap_or(node.span.end);
+                            self.cfg.set_node_span(
+                                then_empty_id,
+                                Some(Span::new(cond_span.end, else_start)),
+                            );
+                            self.cfg
+                                .add_edge(cond_id, then_empty_id, EdgeKind::ConditionalTrue);
+                            self.cfg
+                                .add_edge(then_empty_id, merge_id, EdgeKind::Unconditional);
                         }
 
                         if let Some(else_branch) = else_branch {
@@ -534,37 +534,37 @@ impl AstToIrConverter {
                     }
 
                     SemanticNodeKind::WhileLoop { body }
-	                    | SemanticNodeKind::ForLoop { body, .. }
-	                    | SemanticNodeKind::ForEachLoop { body, .. } => {
-	                        let raw = slice_span(self.source, node.span).unwrap_or("");
-	                        let condition = extract_condition_from_header(first_line(raw), &node.kind);
+                    | SemanticNodeKind::ForLoop { body, .. }
+                    | SemanticNodeKind::ForEachLoop { body, .. } => {
+                        let raw = slice_span(self.source, node.span).unwrap_or("");
+                        let condition = extract_condition_from_header(first_line(raw), &node.kind);
 
-	                        let header_id = add_cfg_node_from_ir(
-	                            &mut self.cfg,
-	                            CfgNodeKind::LoopHeader { condition },
-	                            node,
-	                            Some(stmt_idx),
-	                        );
-	                        let header_span = header_span(self.source, node.span);
-	                        self.cfg.set_node_span(header_id, Some(header_span));
+                        let header_id = add_cfg_node_from_ir(
+                            &mut self.cfg,
+                            CfgNodeKind::LoopHeader { condition },
+                            node,
+                            Some(stmt_idx),
+                        );
+                        let header_span = header_span(self.source, node.span);
+                        self.cfg.set_node_span(header_id, Some(header_span));
 
-	                        let after_loop_id = add_cfg_node(
-	                            &mut self.cfg,
-	                            CfgNodeKind::BasicBlock {
-	                                statements: Vec::new(),
+                        let after_loop_id = add_cfg_node(
+                            &mut self.cfg,
+                            CfgNodeKind::BasicBlock {
+                                statements: Vec::new(),
                             },
                         );
 
                         self.cfg
                             .add_edge(header_id, after_loop_id, EdgeKind::LoopExit);
 
-	                        let body_marker_id = add_cfg_node(&mut self.cfg, CfgNodeKind::LoopBody);
-	                        self.cfg.set_node_span(
-	                            body_marker_id,
-	                            Some(Span::new(header_span.end, node.span.end)),
-	                        );
-	                        self.cfg
-	                            .add_edge(header_id, body_marker_id, EdgeKind::ConditionalTrue);
+                        let body_marker_id = add_cfg_node(&mut self.cfg, CfgNodeKind::LoopBody);
+                        self.cfg.set_node_span(
+                            body_marker_id,
+                            Some(Span::new(header_span.end, node.span.end)),
+                        );
+                        self.cfg
+                            .add_edge(header_id, body_marker_id, EdgeKind::ConditionalTrue);
 
                         self.loop_stack.push(LoopFrame {
                             header_id,
@@ -851,19 +851,19 @@ impl AstToIrConverter {
             }
         }
 
-	        if !has_executable {
-	            let mut cfg = ControlFlowGraph::new();
-	            let entry_id = cfg.add_node(CfgNode {
-	                id: 0,
-	                kind: CfgNodeKind::Entry,
-	            });
-	            let exit_id = cfg.add_node(CfgNode {
-	                id: 1,
-	                kind: CfgNodeKind::Exit,
-	            });
-	            cfg.add_edge(entry_id, exit_id, EdgeKind::Unconditional);
-	            return Some(cfg);
-	        }
+        if !has_executable {
+            let mut cfg = ControlFlowGraph::new();
+            let entry_id = cfg.add_node(CfgNode {
+                id: 0,
+                kind: CfgNodeKind::Entry,
+            });
+            let exit_id = cfg.add_node(CfgNode {
+                id: 1,
+                kind: CfgNodeKind::Exit,
+            });
+            cfg.add_edge(entry_id, exit_id, EdgeKind::Unconditional);
+            return Some(cfg);
+        }
 
         Some(builder.cfg)
     }

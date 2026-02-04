@@ -114,11 +114,9 @@ async fn diagnostics_includes_null_safety_only_when_enabled() {
         .oneshot(
             Request::post("/api/diagnostics")
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(
-                    axum::body::Body::from(
-                        json!({ "code": code, "includeFlowSensitive": true }).to_string(),
-                    ),
-                )
+                .body(axum::body::Body::from(
+                    json!({ "code": code, "includeFlowSensitive": true }).to_string(),
+                ))
                 .unwrap(),
         )
         .await
@@ -141,4 +139,3 @@ async fn diagnostics_includes_null_safety_only_when_enabled() {
         json_flow
     );
 }
-

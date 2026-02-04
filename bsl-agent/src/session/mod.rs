@@ -1811,8 +1811,13 @@ impl SessionManager {
                 snippet: None,
             });
         };
-        let type_at_position_hint =
-            type_at_utf16_position(&analysis, FileId(1), position.line, position.character, false);
+        let type_at_position_hint = type_at_utf16_position(
+            &analysis,
+            FileId(1),
+            position.line,
+            position.character,
+            false,
+        );
         let receiver_type_hint = None;
         let target = bsl_runtime::application::type_system::goto_definition_v2_with_source(
             abs_path.to_string_lossy().as_ref(),
@@ -3246,9 +3251,17 @@ fn type_at_utf16_position(
             .flow_type_at_byte_offset(file_id, byte_offset)
             .ok()
             .flatten()
-            .or_else(|| analysis.type_at_byte_offset(file_id, byte_offset).ok().flatten())
+            .or_else(|| {
+                analysis
+                    .type_at_byte_offset(file_id, byte_offset)
+                    .ok()
+                    .flatten()
+            })
     } else {
-        analysis.type_at_byte_offset(file_id, byte_offset).ok().flatten()
+        analysis
+            .type_at_byte_offset(file_id, byte_offset)
+            .ok()
+            .flatten()
     }
 }
 

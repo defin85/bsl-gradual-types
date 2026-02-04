@@ -220,7 +220,7 @@ async fn m8_completion_matrix_golden_v2() {
         let (ir_program, parse_result) =
             build_ir_and_parse(deps_bundle.as_ref(), file_path, &content);
 
-	        let result = get_completion_with_semantic_program_snapshot_v2(
+        let result = get_completion_with_semantic_program_snapshot_v2(
             &content,
             line,
             column,
@@ -229,11 +229,11 @@ async fn m8_completion_matrix_golden_v2() {
             &metadata_lookup,
             file_path,
             resolver.as_ref(),
-	            ir_program,
-	            parse_result,
-	            None,
-	            false,
-	        )
+            ir_program,
+            parse_result,
+            None,
+            false,
+        )
         .await
         .expect("completion ok");
 

@@ -21,9 +21,9 @@ use bsl_shared::domain::validators::TypeValidator;
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::domain::{FlowAnalysisContext, NullSafetyAnalyzer};
 use bsl_shared::formatting::DetailLevel;
-use bsl_shared::ir::{CfgNodeKind, NodeAtByteOffsetBias};
 use bsl_shared::ir::walk_program;
 use bsl_shared::ir::SemanticProgram;
+use bsl_shared::ir::{CfgNodeKind, NodeAtByteOffsetBias};
 use bsl_shared::utils::hash::hash_content;
 use bsl_syntax::ParseOptions;
 
@@ -1113,8 +1113,10 @@ impl AnalysisV2 {
         let Some(&file) = self.files.get(&file_id) else {
             return Ok(None);
         };
-        cancellable(|| semantic_diagnostics_flow_sensitive(&self.db, file, self.deps, self.settings).0)
-            .map(Some)
+        cancellable(|| {
+            semantic_diagnostics_flow_sensitive(&self.db, file, self.deps, self.settings).0
+        })
+        .map(Some)
     }
 
     pub fn utf16_position_to_byte_offset(
@@ -1806,9 +1808,7 @@ mod tests {
             .unwrap();
 
         assert!(
-            flow
-                .iter()
-                .any(|d| d.message.contains("может быть Null")),
+            flow.iter().any(|d| d.message.contains("может быть Null")),
             "flow-sensitive diagnostics should contain null-safety warning: {:?}",
             flow
         );

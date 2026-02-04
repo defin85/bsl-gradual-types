@@ -93,8 +93,14 @@ fn test_cfg_present_for_declarations_only() {
     let cfg = ir.cfg.expect("CFG must always be present");
     assert_eq!(cfg.nodes().len(), 2);
     assert_eq!(cfg.edges().len(), 1);
-    assert!(cfg.nodes().iter().any(|n| matches!(n.kind, CfgNodeKind::Entry)));
-    assert!(cfg.nodes().iter().any(|n| matches!(n.kind, CfgNodeKind::Exit)));
+    assert!(cfg
+        .nodes()
+        .iter()
+        .any(|n| matches!(n.kind, CfgNodeKind::Entry)));
+    assert!(cfg
+        .nodes()
+        .iter()
+        .any(|n| matches!(n.kind, CfgNodeKind::Exit)));
 }
 
 #[test]

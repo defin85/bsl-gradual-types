@@ -83,4 +83,3 @@ fn conf_big_local_function_call_resolves_return_type_before_declaration() {
         "expected return type of local function call to be resolved"
     );
 }
-

@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -7,8 +8,12 @@ use bsl_shared::domain::is_configuration_type_pattern;
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::SignatureIndex;
 use bsl_shared::domain::types::MetadataKind;
-use bsl_shared::domain::types::{Certainty, ResolutionMetadata, ResolutionResult, ResolutionSource};
-use bsl_shared::domain::types::{TypeResolution, UncertaintyReason, WeightedType};
+use bsl_shared::domain::types::{
+    Certainty, ResolutionMetadata, ResolutionResult, ResolutionSource,
+};
+use bsl_shared::domain::types::{
+    ConcreteType, PlatformType, TypeResolution, UncertaintyReason, WeightedType,
+};
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::domain::{CodeLocation, ModuleType};
 use bsl_syntax::ast::{Expression, Program, Statement};
@@ -127,7 +132,9 @@ impl TypeInferencer {
                         collect_called_locals_in_expr(arg, out);
                     }
                 }
-                Expression::PropertyAccess { object, .. } => collect_called_locals_in_expr(object, out),
+                Expression::PropertyAccess { object, .. } => {
+                    collect_called_locals_in_expr(object, out)
+                }
                 Expression::IndexAccess { object, index, .. } => {
                     collect_called_locals_in_expr(object, out);
                     collect_called_locals_in_expr(index, out);
@@ -152,7 +159,9 @@ impl TypeInferencer {
                         collect_called_locals_in_expr(arg, out);
                     }
                 }
-                Expression::Await { expression, .. } => collect_called_locals_in_expr(expression, out),
+                Expression::Await { expression, .. } => {
+                    collect_called_locals_in_expr(expression, out)
+                }
                 _ => {}
             }
         }
@@ -223,7 +232,9 @@ impl TypeInferencer {
                         collect_called_locals_in_stmt(s, out);
                     }
                 }
-                Statement::Call { expression, .. } => collect_called_locals_in_expr(expression, out),
+                Statement::Call { expression, .. } => {
+                    collect_called_locals_in_expr(expression, out)
+                }
                 Statement::Execute { code, .. } => collect_called_locals_in_expr(code, out),
                 Statement::RaiseError { message, .. } => {
                     if let Some(m) = message {
@@ -235,7 +246,9 @@ impl TypeInferencer {
                     collect_called_locals_in_expr(event, out);
                     collect_called_locals_in_expr(handler, out);
                 }
-                Statement::Await { expression, .. } => collect_called_locals_in_expr(expression, out),
+                Statement::Await { expression, .. } => {
+                    collect_called_locals_in_expr(expression, out)
+                }
                 Statement::Break { .. }
                 | Statement::Continue { .. }
                 | Statement::Goto { .. }
@@ -252,9 +265,9 @@ impl TypeInferencer {
                         then_body,
                         else_body,
                         ..
-                    } => else_body
-                        .as_ref()
-                        .is_some_and(|else_body| block_always_exits(then_body) && block_always_exits(else_body)),
+                    } => else_body.as_ref().is_some_and(|else_body| {
+                        block_always_exits(then_body) && block_always_exits(else_body)
+                    }),
                     Statement::Try {
                         try_body,
                         except_body,
@@ -269,37 +282,95 @@ impl TypeInferencer {
             false
         }
 
-        fn resolution_for_type_names(types: &BTreeSet<String>) -> TypeResolution {
-            if types.is_empty() {
-                return TypeResolution::inferred_weak("Произвольный");
-            }
-            if types.len() == 1 {
-                return TypeResolution::inferred(types.iter().next().expect("len=1"));
-            }
-            // NOTE: keep ordering deterministic for stable outputs in hover/diagnostics/tests.
-            let variants: Vec<WeightedType> = types
-                .iter()
-                .map(|t| WeightedType::new(TypeResolution::string_to_concrete(t)))
-                .collect();
-            TypeResolution {
-                certainty: Certainty::Inferred,
-                result: ResolutionResult::Union(variants),
-                source: ResolutionSource::Inferred,
-                metadata: ResolutionMetadata::default(),
-                active_facet: None,
-                available_facets: vec![],
-            }
-        }
-
         #[derive(Debug, Clone)]
         struct LocalFunctionState {
-            /// Set of return type names (e.g. "Строка", "Число", "Неопределено", "Произвольный").
-            return_types: BTreeSet<String>,
+            return_types: ReturnTypeSet,
         }
 
         impl LocalFunctionState {
             fn return_type(&self) -> TypeResolution {
-                resolution_for_type_names(&self.return_types)
+                self.return_types.to_resolution()
+            }
+        }
+
+        #[derive(Debug, Clone, PartialEq, Default)]
+        struct ReturnTypeSet {
+            // Key is a stable display name for deterministic ordering.
+            variants: BTreeMap<String, ConcreteType>,
+        }
+
+        impl ReturnTypeSet {
+            fn insert_concrete(&mut self, concrete: ConcreteType) {
+                let key = TypeResolution::known(concrete.clone()).type_name();
+                self.variants.entry(key).or_insert(concrete);
+            }
+
+            fn insert_named(&mut self, type_name: &str) {
+                self.insert_concrete(TypeResolution::string_to_concrete(type_name));
+            }
+
+            fn insert_resolution(&mut self, resolution: &TypeResolution) {
+                // Dynamic is the top type; keep local return inference useful by mapping it to
+                // a stable "Произвольный" variant instead of propagating "Dynamic".
+                if resolution.is_dynamic() {
+                    self.insert_named("Произвольный");
+                    return;
+                }
+
+                match &resolution.result {
+                    ResolutionResult::Concrete(concrete) => self.insert_concrete(concrete.clone()),
+                    ResolutionResult::Union(variants) => {
+                        if variants.is_empty() {
+                            self.insert_named("Произвольный");
+                        } else {
+                            for v in variants {
+                                self.insert_concrete(v.type_.clone());
+                            }
+                        }
+                    }
+                    ResolutionResult::Dynamic => self.insert_named("Произвольный"),
+                    // Union in the type system only holds ConcreteType variants; for other result kinds
+                    // keep a stable platform type using the formatted name.
+                    _ => self.insert_concrete(ConcreteType::Platform(PlatformType {
+                        name: resolution.type_name(),
+                    })),
+                }
+            }
+
+            fn is_empty(&self) -> bool {
+                self.variants.is_empty()
+            }
+
+            fn to_resolution(&self) -> TypeResolution {
+                if self.variants.is_empty() {
+                    return TypeResolution::inferred_weak("Произвольный");
+                }
+                if self.variants.len() == 1 {
+                    let concrete = self.variants.values().next().expect("len=1").clone();
+                    return TypeResolution {
+                        certainty: Certainty::Inferred,
+                        result: ResolutionResult::Concrete(concrete),
+                        source: ResolutionSource::Inferred,
+                        metadata: ResolutionMetadata::default(),
+                        active_facet: None,
+                        available_facets: vec![],
+                    };
+                }
+
+                let variants: Vec<WeightedType> = self
+                    .variants
+                    .values()
+                    .cloned()
+                    .map(WeightedType::new)
+                    .collect();
+                TypeResolution {
+                    certainty: Certainty::Inferred,
+                    result: ResolutionResult::Union(variants),
+                    source: ResolutionSource::Inferred,
+                    metadata: ResolutionMetadata::default(),
+                    active_facet: None,
+                    available_facets: vec![],
+                }
             }
         }
 
@@ -308,20 +379,16 @@ impl TypeInferencer {
             body: &[Statement],
             env: &mut TypeEnv,
             index: &mut TypeIndex,
-            out: &mut BTreeSet<String>,
+            out: &mut ReturnTypeSet,
         ) {
             for stmt in body {
                 match stmt {
                     Statement::Return { value, .. } => {
                         if let Some(expr) = value {
                             let t = inferencer.infer_expr(expr, env, index);
-                            if t.is_unknown() || t.is_dynamic() {
-                                out.insert("Произвольный".to_string());
-                            } else {
-                                out.insert(t.type_name());
-                            }
+                            out.insert_resolution(&t);
                         } else {
-                            out.insert("Неопределено".to_string());
+                            out.insert_named("Неопределено");
                         }
                     }
                     Statement::If {
@@ -332,13 +399,7 @@ impl TypeInferencer {
                     } => {
                         let _ = inferencer.infer_expr(condition, env, index);
                         let mut then_env = env.clone();
-                        collect_return_type_names(
-                            inferencer,
-                            then_body,
-                            &mut then_env,
-                            index,
-                            out,
-                        );
+                        collect_return_type_names(inferencer, then_body, &mut then_env, index, out);
                         if let Some(else_body) = else_body {
                             let mut else_env = env.clone();
                             collect_return_type_names(
@@ -350,7 +411,9 @@ impl TypeInferencer {
                             );
                         }
                     }
-                    Statement::While { condition, body, .. } => {
+                    Statement::While {
+                        condition, body, ..
+                    } => {
                         let _ = inferencer.infer_expr(condition, env, index);
                         let mut body_env = env.clone();
                         collect_return_type_names(inferencer, body, &mut body_env, index, out);
@@ -365,10 +428,9 @@ impl TypeInferencer {
                         let _ = inferencer.infer_expr(start, env, index);
                         let _ = inferencer.infer_expr(end, env, index);
                         let mut body_env = env.clone();
-                        body_env.variables.insert(
-                            variable.to_lowercase(),
-                            TypeResolution::primitive("Число"),
-                        );
+                        body_env
+                            .variables
+                            .insert(variable.to_lowercase(), TypeResolution::primitive("Число"));
                         collect_return_type_names(inferencer, body, &mut body_env, index, out);
                     }
                     Statement::ForEach {
@@ -412,13 +474,7 @@ impl TypeInferencer {
                 name, params, body, ..
             } = stmt
             {
-                function_defs.push((
-                    name.to_lowercase(),
-                    Def {
-                        params,
-                        body,
-                    },
-                ));
+                function_defs.push((name.to_lowercase(), Def { params, body }));
             }
         }
         if function_defs.is_empty() {
@@ -481,9 +537,7 @@ impl TypeInferencer {
 
                 for &w in &edges[v] {
                     if indices[w].is_none() {
-                        strongconnect(
-                            w, index, stack, on_stack, indices, lowlink, edges, sccs,
-                        );
+                        strongconnect(w, index, stack, on_stack, indices, lowlink, edges, sccs);
                         lowlink[v] = lowlink[v].min(lowlink[w]);
                     } else if on_stack[w] {
                         lowlink[v] = lowlink[v].min(indices[w].expect("index set"));
@@ -560,14 +614,15 @@ impl TypeInferencer {
                 indegree[to] = indegree[to].saturating_sub(1);
                 if indegree[to] == 0 {
                     ready.push(to);
-                    ready.sort_by_key(|&scc_id| sccs[scc_id].first().copied().unwrap_or(usize::MAX));
+                    ready
+                        .sort_by_key(|&scc_id| sccs[scc_id].first().copied().unwrap_or(usize::MAX));
                 }
             }
         }
 
         let mut states: Vec<LocalFunctionState> = (0..n)
             .map(|_| LocalFunctionState {
-                return_types: BTreeSet::new(),
+                return_types: ReturnTypeSet::default(),
             })
             .collect();
 
@@ -602,24 +657,21 @@ impl TypeInferencer {
                     }
 
                     let mut scratch_index = TypeIndex::default();
-                    let mut type_names = BTreeSet::<String>::new();
+                    let mut return_types = ReturnTypeSet::default();
                     collect_return_type_names(
                         self,
                         def.body,
                         &mut fn_env,
                         &mut scratch_index,
-                        &mut type_names,
+                        &mut return_types,
                     );
 
-                    if type_names.is_empty() || may_fallthrough[node_idx] {
-                        type_names.insert("Неопределено".to_string());
-                    }
-                    if type_names.is_empty() {
-                        type_names.insert("Произвольный".to_string());
+                    if return_types.is_empty() || may_fallthrough[node_idx] {
+                        return_types.insert_named("Неопределено");
                     }
 
-                    if states[node_idx].return_types != type_names {
-                        states[node_idx].return_types = type_names;
+                    if states[node_idx].return_types != return_types {
+                        states[node_idx].return_types = return_types;
                         changed = true;
                     }
                 }
@@ -983,7 +1035,10 @@ impl TypeInferencer {
             .repository
             .find_type(&common_module_type)
             .is_some()
-            || !self.signature_index.get_type_methods(&common_module_type).is_empty()
+            || !self
+                .signature_index
+                .get_type_methods(&common_module_type)
+                .is_empty()
         {
             return TypeResolution::metadata_type(MetadataKind::CommonModule, name, None);
         }
@@ -1202,7 +1257,7 @@ mod tests {
     use bsl_shared::domain::repository::InMemoryTypeRepository;
     use bsl_shared::domain::signature_index::{MethodSignature, SignatureSource};
     use bsl_shared::domain::type_id::TypeId;
-    use bsl_shared::domain::types::{RawDataSource, RawPropertyData, RawTypeData};
+    use bsl_shared::domain::types::{PrimitiveType, RawDataSource, RawPropertyData, RawTypeData};
     use bsl_shared::TypeRepository;
     use bsl_syntax::ParseOptions;
 
@@ -1372,6 +1427,52 @@ mod tests {
     }
 
     #[test]
+    fn propagates_union_return_type_through_local_function_call() {
+        let source = r#"Функция B(Флаг)
+    Если Флаг Тогда
+        Возврат 1;
+    Иначе
+        Возврат "x";
+    КонецЕсли;
+КонецФункции
+
+Функция A(Флаг)
+    Возврат B(Флаг);
+КонецФункции
+
+Процедура Тест()
+    x = A(Истина);
+КонецПроцедуры
+"#;
+        let program = parse(source);
+        let deps = deps_with_array_method();
+        let index = build_type_index_with_path(&program, "test.bsl", deps);
+
+        let offset = source.find("A(Истина)").expect("call") as u32;
+        let result = index.type_at_byte_offset(offset).expect("type at call");
+
+        match result.result {
+            ResolutionResult::Union(variants) => {
+                assert!(
+                    variants
+                        .iter()
+                        .any(|v| matches!(v.type_, ConcreteType::Primitive(PrimitiveType::String))),
+                    "expected String variant, got: {:?}",
+                    variants
+                );
+                assert!(
+                    variants
+                        .iter()
+                        .any(|v| matches!(v.type_, ConcreteType::Primitive(PrimitiveType::Number))),
+                    "expected Number variant, got: {:?}",
+                    variants
+                );
+            }
+            other => panic!("expected Union, got: {:?}", other),
+        }
+    }
+
+    #[test]
     fn adds_undefined_when_function_can_fallthrough() {
         let source = r#"Функция F(Флаг)
     Если Флаг Тогда
@@ -1390,6 +1491,29 @@ mod tests {
         let offset = source.find("F(Истина)").expect("call") as u32;
         let result = index.type_at_byte_offset(offset).expect("type at call");
         assert_eq!(result.type_name(), "Неопределено | Число");
+    }
+
+    #[test]
+    fn mutual_recursion_is_deterministic_and_terminates() {
+        let source = r#"Функция A()
+    Возврат B();
+КонецФункции
+
+Функция B()
+    Возврат A();
+КонецФункции
+
+Процедура Тест()
+    x = A();
+КонецПроцедуры
+"#;
+        let program = parse(source);
+        let deps = deps_with_array_method();
+        let index = build_type_index_with_path(&program, "test.bsl", deps);
+
+        let offset = source.find("A();").expect("call") as u32;
+        let result = index.type_at_byte_offset(offset).expect("type at call");
+        assert_eq!(result.type_name(), "Произвольный");
     }
 
     #[test]

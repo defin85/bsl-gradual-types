@@ -1826,6 +1826,28 @@ pub fn build_call_snippet(name: &str, params: &[(String, bool)]) -> Option<Strin
         return None;
     }
 
+    fn normalize_param_label(param_name: &str) -> String {
+        let trimmed = param_name.trim();
+        if trimmed.is_empty() {
+            return String::new();
+        }
+
+        // 1C Syntax Helper часто использует плейсхолдеры в угловых скобках:
+        // "<Имя>", "<Тип>", "<Заголовок>" и т.п. (в т.ч. HTML-encoded).
+        // Для сниппета нам нужен читабельный label без скобок.
+        let unwrapped = trimmed
+            .strip_prefix('<')
+            .and_then(|s| s.strip_suffix('>'))
+            .or_else(|| {
+                trimmed
+                    .strip_prefix("&lt;")
+                    .and_then(|s| s.strip_suffix("&gt;"))
+            })
+            .unwrap_or(trimmed);
+
+        unwrapped.trim().to_string()
+    }
+
     let mut required: Vec<(String, bool)> = Vec::new();
     let mut optional: Vec<(String, bool)> = Vec::new();
     for (param_name, is_optional) in params {
@@ -1839,14 +1861,22 @@ pub fn build_call_snippet(name: &str, params: &[(String, bool)]) -> Option<Strin
     let mut parts = Vec::with_capacity(params.len());
     let mut index = 1;
     for (param_name, is_optional) in required.into_iter().chain(optional) {
-        let placeholder = if is_optional {
+        let normalized = normalize_param_label(&param_name);
+        let label = if normalized.is_empty() {
+            format!("param{}", index)
+        } else {
+            normalized
+        };
+
+        // Даже если параметр необязательный, показываем его имя в плейсхолдере:
+        // это важно для UX (Tab по аргументам в сниппете).
+        //
+        // Клиент может удалять/пропускать необязательные параметры вручную,
+        // но пустые плейсхолдеры ухудшают подсказки и навигацию.
+        let placeholder = if is_optional && param_name.trim().is_empty() {
+            // Если имя реально пустое - оставляем пустым плейсхолдером.
             format!("${{{}:}}", index)
         } else {
-            let label = if param_name.is_empty() {
-                format!("param{}", index)
-            } else {
-                param_name
-            };
             format!("${{{}:{}}}", index, escape_snippet_text(&label))
         };
         parts.push(placeholder);
@@ -2022,7 +2052,22 @@ mod tests {
     fn build_call_snippet_includes_optional_placeholders() {
         let params = vec![("Путь".to_string(), false), ("Режим".to_string(), true)];
         let snippet = build_call_snippet("Открыть", &params).expect("snippet");
-        assert_eq!(snippet, "Открыть(${1:Путь}, ${2:})$0");
+        assert_eq!(snippet, "Открыть(${1:Путь}, ${2:Режим})$0");
+    }
+
+    #[test]
+    fn build_call_snippet_normalizes_angle_brackets_in_labels() {
+        let params = vec![
+            ("<Имя>".to_string(), false),
+            ("&lt;Тип&gt;".to_string(), false),
+            ("<Заголовок>".to_string(), false),
+            ("<Ширина>".to_string(), false),
+        ];
+        let snippet = build_call_snippet("Добавить", &params).expect("snippet");
+        assert_eq!(
+            snippet,
+            "Добавить(${1:Имя}, ${2:Тип}, ${3:Заголовок}, ${4:Ширина})$0"
+        );
     }
 
     #[test]

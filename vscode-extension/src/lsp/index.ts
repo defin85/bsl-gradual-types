@@ -22,3 +22,6 @@ export {
     sendCustomRequest,
     sendCustomNotification
 } from './client';
+
+// UX: auto-trigger signature help when moving cursor between arguments (snippets/Tab).
+export { initializeAutoSignatureHelpOnCursorMove } from './autoSignatureHelp';

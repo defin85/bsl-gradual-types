@@ -76,6 +76,12 @@
                         "description": "Максимальный размер файла для анализа (в байтах)",
                         "minimum": 0,
                         "order": 2
+                    },
+                    "bslAnalyzer.autoSignatureHelpOnCursorMove": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Автоматически показывать подсказку параметров при перемещении курсора внутри вызова (например, при Tab-переходе по аргументам в сниппете).",
+                        "order": 3
                     }
                 }
             },

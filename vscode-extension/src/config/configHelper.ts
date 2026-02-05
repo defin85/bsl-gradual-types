@@ -21,6 +21,10 @@ export class BslAnalyzerConfig {
     static get maxFileSize(): number {
         return this.getConfig().get<number>('maxFileSize', 1048576);
     }
+
+    static get autoSignatureHelpOnCursorMove(): boolean {
+        return this.getConfig().get<boolean>('autoSignatureHelpOnCursorMove', true);
+    }
     
     // Настройки сервера
     static get serverMode(): string {

@@ -8,7 +8,8 @@ import {
     initializeLspClient,
     startLanguageClient,
     stopLanguageClient,
-    getLanguageClient
+    getLanguageClient,
+    initializeAutoSignatureHelpOnCursorMove
 } from './lsp';
 import {
     initializeProgress,
@@ -139,6 +140,7 @@ export async function activate(context: vscode.ExtensionContext) {
         // Запускаем сразу без задержки
         outputChannel.appendLine('🚀 Starting LSP server...');
         await startLanguageClient(context);
+        initializeAutoSignatureHelpOnCursorMove(context);
         // ✅ ИСПРАВЛЕНО: НЕ перезаписываем статус, если идёт индексация
         // updateStatusBar обновит статус сам, когда индексация завершится
         const currentProgress = require('./lsp/progress').getCurrentProgress();

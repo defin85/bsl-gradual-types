@@ -83,25 +83,27 @@ impl TreeSitterAdapter {
         let line_index = LineIndex::new(source);
 
         // Собираем синтаксические ошибки из дерева с использованием индекса строк
-        let mut syntax_errors =
-            syntax_errors::collect_syntax_errors_cached(&root, source, &line_index);
+        let parser_errors = syntax_errors::collect_syntax_errors_cached(&root, source, &line_index);
 
         // Проверяем отсутствующие точки с запятой (BSL linter)
-        let semicolon_errors = syntax_errors::check_missing_semicolons(&root, source, &line_index);
-        syntax_errors.extend(semicolon_errors);
+        let mut heuristic_errors =
+            syntax_errors::check_missing_semicolons(&root, source, &line_index);
 
         // Проверяем незавершённые `Новый` без типа/аргументов (IDE-friendly)
         let new_errors = syntax_errors::check_incomplete_new_expressions(source, &line_index);
-        syntax_errors.extend(new_errors);
+        heuristic_errors.extend(new_errors);
 
         // Нормализация синтаксических diagnostics (rewrite/enrich + строгий line-cap + детерминизм)
-        if !syntax_errors.is_empty() {
-            syntax_errors = syntax_error_enhancers::normalize_syntax_errors(
+        let syntax_errors = if parser_errors.is_empty() && heuristic_errors.is_empty() {
+            Vec::new()
+        } else {
+            syntax_error_enhancers::normalize_syntax_errors(
                 source,
                 &line_index,
-                syntax_errors,
-            );
-        }
+                parser_errors,
+                heuristic_errors,
+            )
+        };
 
         // Пытаемся извлечь statements даже при наличии ошибок (partial recovery)
         let statements =

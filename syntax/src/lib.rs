@@ -258,7 +258,7 @@ mod tests {
 
     #[test]
     fn parse_general_for_rule_points_to_first_garbage_token_and_says_expected_loop() {
-        let source = "Для i = 10 По 0 abc Цикл\nКонецЦикла";
+        let source = "Для i = 10 По 0 abc def Цикл\nКонецЦикла";
         let result = parse(source, &ParseOptions::default()).unwrap();
         assert!(!result.syntax_errors.is_empty());
 

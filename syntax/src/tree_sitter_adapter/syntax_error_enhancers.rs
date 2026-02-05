@@ -7,37 +7,63 @@ use std::cmp::Ordering;
 
 use bsl_shared::domain::types::{ErrorType, ParseError, RelatedInformation};
 use bsl_shared::ir::Span;
+use tree_sitter::Parser;
 
 use super::span::LineIndex;
 
 pub(crate) fn normalize_syntax_errors(
     source: &str,
     line_index: &LineIndex,
-    errors: Vec<ParseError>,
+    parser_errors: Vec<ParseError>,
+    heuristic_errors: Vec<ParseError>,
 ) -> Vec<ParseError> {
-    if errors.is_empty() {
-        return errors;
+    if parser_errors.is_empty() && heuristic_errors.is_empty() {
+        return Vec::new();
     }
 
     let ctx = Context { source, line_index };
 
-    let has_parser_errors = errors.iter().any(|e| !is_heuristic_syntax_error(e));
-    let rewritten: Vec<ParseError> = if has_parser_errors {
-        errors
-            .into_iter()
-            .map(|e| rewrite_error(&ctx, &e).unwrap_or(e))
-            .collect()
-    } else {
-        errors
-    };
+    let mut diags = Vec::with_capacity(parser_errors.len() + heuristic_errors.len());
+    diags.extend(parser_errors.into_iter().map(|e| SyntaxDiag {
+        origin: Origin::Parser,
+        error: e,
+    }));
+    diags.extend(heuristic_errors.into_iter().map(|e| SyntaxDiag {
+        origin: Origin::Heuristic,
+        error: e,
+    }));
 
-    let capped = cap_one_error_per_line(&ctx, rewritten);
-    sort_deterministically(capped)
+    if diags.iter().any(|d| d.origin == Origin::Parser) {
+        for diag in diags.iter_mut() {
+            if diag.origin != Origin::Parser {
+                continue;
+            }
+            if let Some(rewritten) = rewrite_error(&ctx, &diag.error) {
+                diag.error = rewritten;
+            }
+        }
+    }
+
+    let capped = cap_one_error_per_line(&ctx, diags);
+    let sorted = sort_deterministically(capped);
+    sorted.into_iter().map(|d| d.error).collect()
 }
 
 struct Context<'a> {
     source: &'a str,
     line_index: &'a LineIndex,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Origin {
+    Parser,
+    Heuristic,
+}
+
+#[derive(Debug, Clone)]
+struct SyntaxDiag {
+    origin: Origin,
+    error: ParseError,
 }
 
 fn rewrite_error(ctx: &Context<'_>, error: &ParseError) -> Option<ParseError> {
@@ -104,7 +130,7 @@ fn rewrite_for_unexpected_clause(ctx: &Context<'_>, error: &ParseError) -> Optio
     }
 
     let between_masked = &masked[po_end..do_start];
-    let (rel_start, rel_end) = last_token_span(between_masked)?;
+    let (rel_start, rel_end) = first_unexpected_token_span_in_to_clause(between_masked)?;
     let token = line[po_end + rel_start..po_end + rel_end].trim().to_string();
     let line_start_abs = ctx
         .line_index
@@ -233,18 +259,63 @@ fn rewrite_try_structure(ctx: &Context<'_>, error: &ParseError) -> Option<ParseE
     })
 }
 
-fn cap_one_error_per_line(ctx: &Context<'_>, mut errors: Vec<ParseError>) -> Vec<ParseError> {
+fn first_unexpected_token_span_in_to_clause(between_masked: &str) -> Option<(usize, usize)> {
+    let leading_ws = between_masked
+        .as_bytes()
+        .iter()
+        .take_while(|b| b.is_ascii_whitespace())
+        .count();
+    let expr = between_masked[leading_ws..].trim_end();
+    if expr.is_empty() {
+        return None;
+    }
+
+    let snippet = format!("x = {};", expr);
+    let mut parser = Parser::new();
+    parser
+        .set_language(&tree_sitter_bsl::LANGUAGE.into())
+        .ok()?;
+    let tree = parser.parse(&snippet, None)?;
+
+    let snippet_line_index = LineIndex::new(&snippet);
+    let errors = super::syntax_errors::collect_syntax_errors_cached(
+        &tree.root_node(),
+        &snippet,
+        &snippet_line_index,
+    );
+    if errors.is_empty() {
+        return None;
+    }
+
+    let first_err = errors
+        .iter()
+        .filter(|e| e.error_type == ErrorType::ParseError)
+        .min_by_key(|e| e.span.start)
+        .or_else(|| errors.iter().min_by_key(|e| e.span.start))?;
+
+    let prefix_len = "x = ".len();
+    let err_pos = first_err.span.start as usize;
+    if err_pos < prefix_len {
+        return None;
+    }
+
+    let rel_in_expr = err_pos - prefix_len;
+    let abs_in_between = leading_ws + rel_in_expr;
+    token_span_at_or_after(between_masked, abs_in_between)
+}
+
+fn cap_one_error_per_line(ctx: &Context<'_>, mut errors: Vec<SyntaxDiag>) -> Vec<SyntaxDiag> {
     if errors.len() <= 1 {
         return errors;
     }
 
     errors.sort_by(|a, b| compare_errors_for_sort(ctx, a, b));
 
-    let mut out: Vec<ParseError> = Vec::new();
+    let mut out: Vec<SyntaxDiag> = Vec::new();
     let mut current_line: Option<usize> = None;
 
     for err in errors {
-        let line = error_line_number(ctx, &err).unwrap_or(usize::MAX);
+        let line = error_line_number(ctx, &err.error).unwrap_or(usize::MAX);
         if current_line == Some(line) {
             continue;
         }
@@ -255,35 +326,36 @@ fn cap_one_error_per_line(ctx: &Context<'_>, mut errors: Vec<ParseError>) -> Vec
     out
 }
 
-fn sort_deterministically(mut errors: Vec<ParseError>) -> Vec<ParseError> {
+fn sort_deterministically(mut errors: Vec<SyntaxDiag>) -> Vec<SyntaxDiag> {
     errors.sort_by(|a, b| {
-        a.span
+        a.error
+            .span
             .start
-            .cmp(&b.span.start)
-            .then_with(|| a.span.end.cmp(&b.span.end))
-            .then_with(|| origin_rank(a).cmp(&origin_rank(b)))
-            .then_with(|| error_type_rank(a.error_type).cmp(&error_type_rank(b.error_type)))
-            .then_with(|| a.message.cmp(&b.message))
+            .cmp(&b.error.span.start)
+            .then_with(|| a.error.span.end.cmp(&b.error.span.end))
+            .then_with(|| origin_rank(a.origin).cmp(&origin_rank(b.origin)))
+            .then_with(|| error_type_rank(a.error.error_type).cmp(&error_type_rank(b.error.error_type)))
+            .then_with(|| a.error.message.cmp(&b.error.message))
     });
     errors
 }
 
-fn compare_errors_for_sort(ctx: &Context<'_>, a: &ParseError, b: &ParseError) -> Ordering {
-    let line_a = error_line_number(ctx, a).unwrap_or(usize::MAX);
-    let line_b = error_line_number(ctx, b).unwrap_or(usize::MAX);
+fn compare_errors_for_sort(ctx: &Context<'_>, a: &SyntaxDiag, b: &SyntaxDiag) -> Ordering {
+    let line_a = error_line_number(ctx, &a.error).unwrap_or(usize::MAX);
+    let line_b = error_line_number(ctx, &b.error).unwrap_or(usize::MAX);
     line_a
         .cmp(&line_b)
         .then_with(|| compare_error_quality(a, b))
 }
 
-fn compare_error_quality(a: &ParseError, b: &ParseError) -> Ordering {
-    origin_rank(a)
-        .cmp(&origin_rank(b))
-        .then_with(|| error_type_rank(a.error_type).cmp(&error_type_rank(b.error_type)))
-        .then_with(|| span_len(a.span).cmp(&span_len(b.span)))
-        .then_with(|| a.span.start.cmp(&b.span.start))
-        .then_with(|| a.span.end.cmp(&b.span.end))
-        .then_with(|| a.message.cmp(&b.message))
+fn compare_error_quality(a: &SyntaxDiag, b: &SyntaxDiag) -> Ordering {
+    origin_rank(a.origin)
+        .cmp(&origin_rank(b.origin))
+        .then_with(|| error_type_rank(a.error.error_type).cmp(&error_type_rank(b.error.error_type)))
+        .then_with(|| span_len(a.error.span).cmp(&span_len(b.error.span)))
+        .then_with(|| a.error.span.start.cmp(&b.error.span.start))
+        .then_with(|| a.error.span.end.cmp(&b.error.span.end))
+        .then_with(|| a.error.message.cmp(&b.error.message))
 }
 
 fn error_type_rank(t: ErrorType) -> u8 {
@@ -295,17 +367,11 @@ fn error_type_rank(t: ErrorType) -> u8 {
     }
 }
 
-fn origin_rank(e: &ParseError) -> u8 {
-    if is_heuristic_syntax_error(e) {
-        1
-    } else {
-        0
+fn origin_rank(origin: Origin) -> u8 {
+    match origin {
+        Origin::Parser => 0,
+        Origin::Heuristic => 1,
     }
-}
-
-fn is_heuristic_syntax_error(e: &ParseError) -> bool {
-    e.message.starts_with("Отсутствует точка с запятой после оператора '")
-        || e.message == "Отсутствует тип после 'Новый'"
 }
 
 fn span_len(span: Span) -> u32 {
@@ -325,38 +391,38 @@ fn error_line<'a>(ctx: &'a Context<'a>, error: &ParseError) -> Option<(usize, &'
     Some((line_no, line, masked))
 }
 
-fn last_token_span(haystack: &str) -> Option<(usize, usize)> {
+fn token_span_at_or_after(haystack: &str, pos: usize) -> Option<(usize, usize)> {
     let bytes = haystack.as_bytes();
     if bytes.is_empty() {
         return None;
     }
 
-    let mut end = bytes.len();
-    while end > 0 && bytes[end - 1].is_ascii_whitespace() {
-        end -= 1;
+    let mut start = pos.min(bytes.len());
+    while start < bytes.len() && bytes[start].is_ascii_whitespace() {
+        start += 1;
     }
-    if end == 0 {
+    if start >= bytes.len() {
         return None;
     }
 
-    let mut start = end - 1;
+    let mut end = start + 1;
     let b = bytes[start];
 
     if is_word_byte(b) {
-        while start > 0 && is_word_byte(bytes[start - 1]) {
-            start -= 1;
+        while end < bytes.len() && is_word_byte(bytes[end]) {
+            end += 1;
         }
         return Some((start, end));
     }
 
     if b.is_ascii_digit() {
-        while start > 0 && (bytes[start - 1].is_ascii_digit() || bytes[start - 1] == b'.') {
-            start -= 1;
+        while end < bytes.len() && (bytes[end].is_ascii_digit() || bytes[end] == b'.') {
+            end += 1;
         }
         return Some((start, end));
     }
 
-    Some((start, start + 1))
+    Some((start, end))
 }
 
 fn starts_with_word_ci(haystack: &str, needle: &str) -> bool {
@@ -448,10 +514,25 @@ fn mask_line_for_rules(text: &str) -> String {
                 out.push(b'/');
                 i += 2;
                 while i < bytes.len() {
+                    let cb = bytes[i];
+                    if cb == b'\n' {
+                        out.push(b'\n');
+                        i += 1;
+                        break;
+                    }
+                    if cb == b'\r' {
+                        out.push(b'\r');
+                        i += 1;
+                        if i < bytes.len() && bytes[i] == b'\n' {
+                            out.push(b'\n');
+                            i += 1;
+                        }
+                        break;
+                    }
                     out.push(b' ');
                     i += 1;
                 }
-                break;
+                continue;
             }
             if b == b'"' {
                 in_string = true;
@@ -466,6 +547,22 @@ fn mask_line_for_rules(text: &str) -> String {
         }
 
         // in_string
+        if b == b'\n' {
+            in_string = false;
+            out.push(b'\n');
+            i += 1;
+            continue;
+        }
+        if b == b'\r' {
+            in_string = false;
+            out.push(b'\r');
+            i += 1;
+            if i < bytes.len() && bytes[i] == b'\n' {
+                out.push(b'\n');
+                i += 1;
+            }
+            continue;
+        }
         if b == b'"' {
             if i + 1 < bytes.len() && bytes[i + 1] == b'"' {
                 // escaped quote ("")
@@ -486,4 +583,62 @@ fn mask_line_for_rules(text: &str) -> String {
 
     // SAFETY: out contains either original bytes from valid UTF-8 text, or ASCII bytes.
     unsafe { String::from_utf8_unchecked(out) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generalized_for_picks_first_garbage_token_not_last() {
+        let between = " 0 abc def ";
+        let (start, end) = first_unexpected_token_span_in_to_clause(between).expect("token span");
+        assert_eq!(&between[start..end], "abc");
+    }
+
+    #[test]
+    fn masking_comment_stops_at_eol_and_keeps_next_line() {
+        let input = "// Шаг -1\nabc Цикл";
+        let masked = mask_line_for_rules(input);
+        assert!(masked.starts_with("//"));
+        assert!(
+            !masked.contains("Шаг"),
+            "comment text should be masked, got: {masked:?}"
+        );
+        assert!(
+            masked.contains("\nabc Цикл"),
+            "next line should remain visible, got: {masked:?}"
+        );
+    }
+
+    #[test]
+    fn line_cap_prefers_parser_origin_even_if_message_looks_heuristic() {
+        let source = "x y";
+        let line_index = LineIndex::new(source);
+
+        let parser_error = ParseError {
+            error_type: ErrorType::UnexpectedToken,
+            message: "Отсутствует тип после 'Новый'".to_string(),
+            span: Span::new(0, 0),
+            related: Vec::new(),
+        };
+        let heuristic_error = ParseError {
+            error_type: ErrorType::InvalidSyntax,
+            message: "parser-ish".to_string(),
+            span: Span::new(1, 1),
+            related: Vec::new(),
+        };
+
+        let out = normalize_syntax_errors(
+            source,
+            &line_index,
+            vec![parser_error.clone()],
+            vec![heuristic_error],
+        );
+
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].span, parser_error.span);
+        assert_eq!(out[0].message, parser_error.message);
+        assert_eq!(out[0].error_type, parser_error.error_type);
+    }
 }

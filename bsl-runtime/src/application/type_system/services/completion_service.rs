@@ -6,7 +6,6 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, Span};
 
@@ -49,11 +48,12 @@ impl IndexSnapshotSource for IndexSnapshot {
 
 pub const COMPLETION_MAX_ITEMS: usize = 200;
 const CONTEXT_WINDOW_CHARS: usize = 256;
-static COMPLETION_TRACE_ENABLED: OnceLock<bool> = OnceLock::new();
 static COMPLETION_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 
 fn completion_trace_enabled() -> bool {
-    *COMPLETION_TRACE_ENABLED.get_or_init(|| std::env::var("BSL_COMPLETION_TRACE").is_ok())
+    crate::system::runtime_config::global_runtime_config()
+        .get_bool(crate::system::runtime_config::RuntimeKey::CompletionTrace)
+        .unwrap_or(false)
 }
 
 fn next_completion_request_id() -> u64 {

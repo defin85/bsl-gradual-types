@@ -9,6 +9,7 @@ use std::sync::{Arc, RwLock};
 use lru::LruCache;
 
 use crate::parsing::ParseResult;
+use crate::system::runtime_config::{global_runtime_config, RuntimeKey};
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct AstCacheStats {
@@ -35,10 +36,8 @@ impl AstCache {
     }
 
     pub fn new_from_env() -> Self {
-        let capacity = std::env::var("BSL_AST_CACHE_CAPACITY")
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .filter(|value| *value > 0)
+        let capacity = global_runtime_config()
+            .get_usize(RuntimeKey::AstCacheCapacity)
             .unwrap_or(64);
         Self::new(capacity)
     }

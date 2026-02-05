@@ -1,6 +1,7 @@
 use std::path::PathBuf;
-use std::sync::OnceLock;
 use std::time::Duration;
+
+use crate::system::runtime_config::{global_runtime_config, RuntimeKey};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ParseMetricsConfig {
@@ -9,13 +10,21 @@ pub(crate) struct ParseMetricsConfig {
     pub(crate) log_each: bool,
 }
 
-pub(crate) fn parse_metrics_config() -> &'static ParseMetricsConfig {
-    static CONFIG: OnceLock<ParseMetricsConfig> = OnceLock::new();
-    CONFIG.get_or_init(|| ParseMetricsConfig {
-        slow_threshold: Duration::from_millis(env_u64("BSL_SLOW_MODULE_THRESHOLD_MS", 3000)),
-        top_n: env_usize("BSL_SLOW_MODULE_TOP_N", 5).max(1),
-        log_each: env_bool("BSL_MODULE_PARSE_LOG_EACH", false),
-    })
+pub(crate) fn parse_metrics_config() -> ParseMetricsConfig {
+    ParseMetricsConfig {
+        slow_threshold: Duration::from_millis(
+            global_runtime_config()
+                .get_u64(RuntimeKey::SlowModuleThresholdMs)
+                .unwrap_or(3000),
+        ),
+        top_n: global_runtime_config()
+            .get_usize(RuntimeKey::SlowModuleTopN)
+            .unwrap_or(5)
+            .max(1),
+        log_each: global_runtime_config()
+            .get_bool(RuntimeKey::ModuleParseLogEach)
+            .unwrap_or(false),
+    }
 }
 
 pub(crate) fn report_slow_modules(slow_modules: &mut [(Duration, PathBuf)]) {
@@ -40,27 +49,6 @@ pub(crate) fn human_duration(duration: Duration) -> String {
         format!("{}.{:03}s", secs, millis)
     } else {
         format!("{}ms", millis)
-    }
-}
-
-fn env_u64(key: &str, default: u64) -> u64 {
-    std::env::var(key)
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(default)
-}
-
-fn env_usize(key: &str, default: usize) -> usize {
-    std::env::var(key)
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(default)
-}
-
-fn env_bool(key: &str, default: bool) -> bool {
-    match std::env::var(key) {
-        Ok(v) => matches!(v.as_str(), "1" | "true" | "yes" | "on"),
-        Err(_) => default,
     }
 }
 

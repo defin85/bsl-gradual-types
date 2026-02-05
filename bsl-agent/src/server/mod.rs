@@ -18,8 +18,8 @@ use types::{
     BslSymbolSearchParams, BslTypeAtPositionParams, BslTypeGetParams, BslTypesListParams,
     BslTypesSearchParams, BuildInfoParams, ContextExpandParams, ContextPackParams, JobCancelParams,
     JobResultParams, JobStatusParams, JobWaitParams, McpHelpParams, UiUrlParams,
-    WorkspaceCloseParams, WorkspaceListParams, WorkspaceOpenParams, WorkspaceResumeParams,
-    WorkspaceStatusParams,
+    WorkspaceCloseParams, WorkspaceGetSettingsParams, WorkspaceListParams, WorkspaceOpenParams,
+    WorkspaceResumeParams, WorkspaceStatusParams, WorkspaceUpdateSettingsParams,
 };
 use types::{WorkspaceDocumentsClearParams, WorkspaceDocumentsSetParams};
 
@@ -332,6 +332,36 @@ impl BslAgentHandler {
         Parameters(params): Parameters<WorkspaceStatusParams>,
     ) -> Result<Content, rmcp::ErrorData> {
         let response = self.session_manager.status(&params.session_id).await?;
+        Content::json(response)
+    }
+
+    #[tool(
+        description = "Get unified runtime settings: env overrides, dev overrides (if enabled), and effective snapshot (read-only)."
+    )]
+    async fn workspace_get_settings(
+        &self,
+        Parameters(params): Parameters<WorkspaceGetSettingsParams>,
+    ) -> Result<Content, rmcp::ErrorData> {
+        let response = self.session_manager.settings_get(&params.session_id).await?;
+        Content::json(response)
+    }
+
+    #[tool(
+        description = "Patch unified runtime settings for this session. env_overrides/dev_env_overrides are maps of BSL_* keys to JSON values; null removes a key."
+    )]
+    async fn workspace_update_settings(
+        &self,
+        Parameters(params): Parameters<WorkspaceUpdateSettingsParams>,
+    ) -> Result<Content, rmcp::ErrorData> {
+        let response = self
+            .session_manager
+            .settings_update(
+                &params.session_id,
+                params.env_overrides.as_ref(),
+                params.dev_env_overrides.as_ref(),
+                params.allow_dev_overrides,
+            )
+            .await?;
         Content::json(response)
     }
 

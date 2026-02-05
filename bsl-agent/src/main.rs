@@ -3,10 +3,10 @@ use bsl_agent::jobs::JobManager;
 use bsl_agent::server::BslAgentHandler;
 use bsl_agent::session::SessionManager;
 use bsl_agent::ui_discovery::HttpUiDiscoveryRecord;
+use bsl_runtime::system::runtime_config::{global_runtime_config, RuntimeKey};
 use rmcp::{transport::stdio, ServiceExt};
 use std::io::Write;
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -192,14 +192,15 @@ async fn main() -> anyhow::Result<()> {
     let mut handler =
         BslAgentHandler::with_state(Arc::clone(&session_manager), Arc::clone(&job_manager));
 
-    if let Ok(addr_raw) = std::env::var("BSL_AGENT_HTTP_ADDR") {
+    if let Some(addr_raw) = global_runtime_config().get_string(RuntimeKey::AgentHttpAddr) {
         match parse_http_addr(&addr_raw) {
             Ok(addr) => {
-                let static_dir_override = std::env::var("BSL_AGENT_HTTP_STATIC_DIR")
-                    .ok()
-                    .map(PathBuf::from);
+                let static_dir_override =
+                    global_runtime_config().get_pathbuf(RuntimeKey::AgentHttpStaticDir);
                 let instance_id = Uuid::new_v4().to_string();
-                let cache_dir = std::env::var("BSL_CACHE_DIR").ok();
+                let cache_dir = global_runtime_config()
+                    .get_pathbuf(RuntimeKey::CacheDir)
+                    .map(|p| p.to_string_lossy().to_string());
 
                 match start_http_ui(
                     addr,

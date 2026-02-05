@@ -2,6 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use bsl_runtime::system::runtime_config::{global_runtime_config, RuntimeKey};
+
 pub const STATE_NAMESPACE: &str = "bsl-agent-state/v1";
 
 pub fn now_unix_secs() -> u64 {
@@ -12,8 +14,8 @@ pub fn now_unix_secs() -> u64 {
 }
 
 pub fn resolve_cache_root() -> PathBuf {
-    if let Ok(dir) = std::env::var("BSL_CACHE_DIR") {
-        return PathBuf::from(dir);
+    if let Some(dir) = global_runtime_config().get_pathbuf(RuntimeKey::CacheDir) {
+        return dir;
     }
     if let Ok(dir) = std::env::var("XDG_CACHE_HOME") {
         return PathBuf::from(dir).join("bsl-gradual-types");

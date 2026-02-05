@@ -6,6 +6,7 @@ use bsl_analysis_v2::{AnalysisHostV2, Change, FileId, SettingsId};
 use bsl_runtime::application::type_system::web_api_service;
 use bsl_runtime::data::loaders::progress::ProgressUpdate;
 use bsl_runtime::data::loaders::ConfigurationDiscovery;
+use bsl_runtime::system::runtime_config::{global_runtime_config, RuntimeKey};
 use bsl_shared::api::dtos::{
     AnalysisResultDto, McpRootDto, McpSessionDto, MetricsDto, SnapshotInputsDto, SnapshotMetaDto,
 };
@@ -35,8 +36,9 @@ use crate::types::{
     BslSymbolSearchResponse, BslTypeAtPositionResponse, CompletenessDto, ContextExpandResponse,
     ContextPackItemDto, ContextPackResponse, LocationDto, MemberDto, NodeInfoDto, ProgressDto,
     ReferenceDto, RootDto, SymbolDto, TypeInfoDto, WorkspaceDocumentsClearResponse,
-    WorkspaceDocumentsSetResponse, WorkspaceListItemDto, WorkspaceListResponse,
-    WorkspaceOpenResponse, WorkspaceStatusResponse,
+    WorkspaceDocumentsSetResponse, WorkspaceGetSettingsResponse, WorkspaceListItemDto,
+    WorkspaceListResponse, WorkspaceOpenResponse, WorkspaceStatusResponse,
+    WorkspaceUpdateSettingsResponse, RuntimeSettingsReportDto,
 };
 
 const MAX_OVERLAY_BYTES: usize = 2 * 1024 * 1024;
@@ -78,12 +80,15 @@ struct RootEntry {
     path: PathBuf,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 struct WorkspaceSettings {
     platform_docs_archive: Option<PathBuf>,
     platform_version: Option<String>,
     configuration_path: Option<PathBuf>,
     mode: Option<String>,
+    env_overrides: HashMap<String, serde_json::Value>,
+    dev_env_overrides: HashMap<String, serde_json::Value>,
+    allow_dev_overrides: bool,
 }
 
 #[derive(Default)]
@@ -276,6 +281,9 @@ impl SessionManager {
                 "configuration_path",
             )?,
             mode: normalize_mode(params.mode),
+            env_overrides: HashMap::new(),
+            dev_env_overrides: HashMap::new(),
+            allow_dev_overrides: false,
         };
         let settings = {
             let mut settings = settings;
@@ -878,6 +886,9 @@ impl SessionManager {
                 "configuration_path",
             )?,
             mode: normalize_mode(persisted.mode),
+            env_overrides: persisted.env_overrides,
+            dev_env_overrides: persisted.dev_env_overrides,
+            allow_dev_overrides: persisted.allow_dev_overrides,
         };
         let settings = {
             let mut settings = settings;
@@ -1054,8 +1065,157 @@ impl SessionManager {
             created_at: session.created_at,
             updated_at: crate::state::now_unix_secs(),
             startup_job_id: session.startup_job_id.clone(),
+            env_overrides: session.settings.env_overrides.clone(),
+            dev_env_overrides: session.settings.dev_env_overrides.clone(),
+            allow_dev_overrides: session.settings.allow_dev_overrides,
         };
         store.upsert(&mut persisted);
+    }
+
+    pub async fn settings_get(
+        &self,
+        session_id: &str,
+    ) -> Result<WorkspaceGetSettingsResponse, rmcp::ErrorData> {
+        let uuid = parse_session_id(session_id)?;
+        let sessions = self.sessions.read().await;
+        let session = sessions
+            .get(&uuid)
+            .ok_or_else(|| rmcp::ErrorData::invalid_params("session not found", None))?;
+
+        let snapshot = global_runtime_config().snapshot();
+        let runtime_config = serde_json::to_value(snapshot)
+            .map_err(|err| rmcp::ErrorData::internal_error(err.to_string(), None))?;
+
+        Ok(WorkspaceGetSettingsResponse {
+            session_id: session_id.to_string(),
+            allow_dev_overrides: session.settings.allow_dev_overrides,
+            env_overrides: session.settings.env_overrides.clone(),
+            dev_env_overrides: session.settings.dev_env_overrides.clone(),
+            runtime_config,
+        })
+    }
+
+    pub async fn settings_update(
+        &self,
+        session_id: &str,
+        env_patch: Option<&HashMap<String, serde_json::Value>>,
+        dev_patch: Option<&HashMap<String, serde_json::Value>>,
+        allow_dev_overrides: Option<bool>,
+    ) -> Result<WorkspaceUpdateSettingsResponse, rmcp::ErrorData> {
+        let uuid = parse_session_id(session_id)?;
+
+        fn apply_patch(
+            target: &mut HashMap<String, serde_json::Value>,
+            patch: &HashMap<String, serde_json::Value>,
+        ) {
+            for (k, v) in patch {
+                if v.is_null() {
+                    target.remove(k);
+                } else {
+                    target.insert(k.clone(), v.clone());
+                }
+            }
+        }
+
+        let (stable_overrides, dev_overrides, allow_dev, has_startup) = {
+            let mut sessions = self.sessions.write().await;
+            let session = sessions
+                .get_mut(&uuid)
+                .ok_or_else(|| rmcp::ErrorData::invalid_params("session not found", None))?;
+
+            if let Some(patch) = env_patch {
+                apply_patch(&mut session.settings.env_overrides, patch);
+            }
+            if let Some(patch) = dev_patch {
+                apply_patch(&mut session.settings.dev_env_overrides, patch);
+            }
+            if let Some(value) = allow_dev_overrides {
+                session.settings.allow_dev_overrides = value;
+            }
+
+            (
+                session.settings.env_overrides.clone(),
+                session.settings.dev_env_overrides.clone(),
+                session.settings.allow_dev_overrides,
+                session.startup.is_some(),
+            )
+        };
+
+        let store = global_runtime_config();
+        let stable_report = store.replace_stable_overrides(&stable_overrides);
+
+        // Ensure dev-only layer is cleared when opt-in is disabled, even if the client keeps values around.
+        let dev_report = if allow_dev {
+            store.replace_dev_overrides(&dev_overrides, true)
+        } else {
+            let empty: HashMap<String, serde_json::Value> = HashMap::new();
+            let mut report = store.replace_dev_overrides(&empty, true);
+            if !dev_overrides.is_empty() {
+                report.dev_overrides_ignored = true;
+            }
+            report
+        };
+
+        let mut report = stable_report;
+        report
+            .ignored_unknown_keys
+            .extend(dev_report.ignored_unknown_keys);
+        report
+            .ignored_invalid_values
+            .extend(dev_report.ignored_invalid_values);
+        report
+            .ignored_wrong_tier_keys
+            .extend(dev_report.ignored_wrong_tier_keys);
+        report.dev_overrides_ignored |= dev_report.dev_overrides_ignored;
+
+        // Apply a minimal runtime sync for coordinator-level settings.
+        if has_startup {
+            let coordinator = {
+                let sessions = self.sessions.read().await;
+                sessions
+                    .get(&uuid)
+                    .and_then(|session| session.startup.as_ref().map(|s| Arc::clone(&s.coordinator)))
+            };
+
+            if let Some(coordinator) = coordinator {
+                let cache_disable = store.get_bool(RuntimeKey::CacheDisable).unwrap_or(false);
+                let desired_cache_enabled = !cache_disable;
+                // NOTE: changing cache root dir at runtime is not supported yet (startup-only).
+                let effective_cache_enabled = coordinator
+                    .set_cache_enabled(desired_cache_enabled)
+                    .await
+                    .effective;
+
+                let strict = store
+                    .get_bool(RuntimeKey::CacheStrictFingerprint)
+                    .unwrap_or(false);
+                coordinator.set_strict_fingerprint(strict);
+
+                let mut sessions = self.sessions.write().await;
+                if let Some(session) = sessions.get_mut(&uuid) {
+                    if let Some(startup) = session.startup.as_mut() {
+                        startup.inputs.cache_enabled = effective_cache_enabled;
+                        startup.inputs.strict_fingerprint = strict;
+                    }
+                }
+            }
+        }
+
+        self.persist_session(uuid).await;
+
+        let snapshot = store.snapshot();
+        let runtime_config = serde_json::to_value(snapshot)
+            .map_err(|err| rmcp::ErrorData::internal_error(err.to_string(), None))?;
+
+        Ok(WorkspaceUpdateSettingsResponse {
+            ok: true,
+            session_id: session_id.to_string(),
+            allow_dev_overrides: allow_dev,
+            env_overrides: stable_overrides,
+            dev_env_overrides: dev_overrides,
+            report: RuntimeSettingsReportDto::from(report),
+            runtime_config,
+        })
     }
 
     pub async fn documents_set(
@@ -2696,6 +2856,17 @@ async fn start_semantic_runtime(
     settings: &WorkspaceSettings,
     progress_tx: Option<mpsc::UnboundedSender<ProgressUpdate>>,
 ) -> Result<bsl_runtime::system::StartupResultV2, rmcp::ErrorData> {
+    // Apply unified runtime overrides before coordinator initialization so bootstrap-only settings
+    // (e.g., cache root dir) are consistently picked up.
+    let _stable_report = global_runtime_config().replace_stable_overrides(&settings.env_overrides);
+    if settings.allow_dev_overrides {
+        let _dev_report =
+            global_runtime_config().replace_dev_overrides(&settings.dev_env_overrides, true);
+    } else {
+        let empty: HashMap<String, serde_json::Value> = HashMap::new();
+        let _dev_report = global_runtime_config().replace_dev_overrides(&empty, true);
+    }
+
     let coordinator = Arc::new(bsl_runtime::system::SystemCoordinator::new());
     let inputs = bsl_runtime::system::StartupInputs::from_web_flags(
         settings.platform_docs_archive.clone(),

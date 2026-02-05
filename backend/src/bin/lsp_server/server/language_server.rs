@@ -219,6 +219,7 @@ impl LanguageServer for BslLanguageServer {
                         "bsl.getTypeRepositoryStats".to_string(),
                         "bsl.getWorkspaceStats".to_string(),
                         "bsl.getObservabilityMetrics".to_string(),
+                        "bsl.getRuntimeConfig".to_string(),
                         "bsl.parseConfiguration".to_string(),
                         "bsl.cache.getStats".to_string(),
                         "bsl.cache.clear".to_string(),
@@ -566,6 +567,46 @@ impl LanguageServer for BslLanguageServer {
                             new_settings.code_actions.enabled,
                             new_settings.enable_flow_sensitive,
                         );
+
+                        // Apply runtime `BSL_*` overrides (stable + dev-only) without restarting the server.
+                        // Stable overrides are always accepted; dev-only overrides require explicit opt-in.
+                        {
+                            let store = bsl_runtime::system::global_runtime_config();
+                            let stable_report =
+                                store.replace_stable_overrides(&new_settings.env_overrides);
+                            if !stable_report.ignored_unknown_keys.is_empty()
+                                || !stable_report.ignored_invalid_values.is_empty()
+                                || !stable_report.ignored_wrong_tier_keys.is_empty()
+                            {
+                                warn!(
+                                    "RuntimeConfig stable overrides: unknown={:?}, invalid={:?}, wrong_tier={:?}",
+                                    stable_report.ignored_unknown_keys,
+                                    stable_report.ignored_invalid_values,
+                                    stable_report.ignored_wrong_tier_keys,
+                                );
+                            }
+
+                            let dev_report = store.replace_dev_overrides(
+                                &new_settings.dev_env_overrides,
+                                new_settings.dev.enable_dev_env_overrides,
+                            );
+                            if dev_report.dev_overrides_ignored {
+                                warn!(
+                                    "RuntimeConfig dev-only overrides ignored (enable bsl.dev.enableDevEnvOverrides=true to apply)."
+                                );
+                            } else if !dev_report.ignored_unknown_keys.is_empty()
+                                || !dev_report.ignored_invalid_values.is_empty()
+                                || !dev_report.ignored_wrong_tier_keys.is_empty()
+                            {
+                                warn!(
+                                    "RuntimeConfig dev overrides: unknown={:?}, invalid={:?}, wrong_tier={:?}",
+                                    dev_report.ignored_unknown_keys,
+                                    dev_report.ignored_invalid_values,
+                                    dev_report.ignored_wrong_tier_keys,
+                                );
+                            }
+                        }
+
                         *self.settings.write().await = new_settings;
 
                         // Keep feature gates (initializationOptions.*) aligned with runtime settings to
@@ -590,6 +631,32 @@ impl LanguageServer for BslLanguageServer {
                         self.sync_formatting_capability_registration().await;
                         self.sync_inlay_hints_capability_registration().await;
                         self.sync_code_actions_capability_registration().await;
+
+                        // Re-sync cache/strict-fingerprint toggles via coordinator to reflect runtime-config
+                        // changes (e.g., `BSL_CACHE_DISABLE`, `BSL_CACHE_STRICT_FINGERPRINT`) without restart.
+                        {
+                            let cache_disable = bsl_runtime::system::global_runtime_config()
+                                .get_bool(bsl_runtime::system::RuntimeKey::CacheDisable)
+                                .unwrap_or(false);
+                            let requested_cache_enabled = self
+                                .config
+                                .read()
+                                .await
+                                .as_ref()
+                                .and_then(|cfg| cfg.cache_enabled)
+                                .unwrap_or(true);
+                            let _ = self
+                                .coordinator
+                                .set_cache_enabled(requested_cache_enabled && !cache_disable)
+                                .await;
+
+                            let strict = bsl_runtime::system::global_runtime_config()
+                                .get_bool(
+                                    bsl_runtime::system::RuntimeKey::CacheStrictFingerprint,
+                                )
+                                .unwrap_or(false);
+                            self.coordinator.set_strict_fingerprint(strict);
+                        }
                     }
                     Err(e) => {
                         warn!("Failed to parse BslSettings: {}", e);
@@ -1265,7 +1332,10 @@ impl LanguageServer for BslLanguageServer {
                         }
                     }
 
-                    if std::env::var("BSL_INTELLISENSE_V2_P4_SMOKE").is_ok() {
+                    if bsl_runtime::system::global_runtime_config()
+                        .get_bool(bsl_runtime::system::RuntimeKey::IntellisenseV2P4Smoke)
+                        .unwrap_or(false)
+                    {
                         match ir_program.as_ref() {
                             Some(program) => debug!(
                                 "Completion v2 ir: uri={}, file_id={}, deps_id={:?}, nodes={}",
@@ -1281,7 +1351,10 @@ impl LanguageServer for BslLanguageServer {
                         }
                     }
 
-                    if std::env::var("BSL_INTELLISENSE_V2_P3_SMOKE").is_ok() {
+                    if bsl_runtime::system::global_runtime_config()
+                        .get_bool(bsl_runtime::system::RuntimeKey::IntellisenseV2P3Smoke)
+                        .unwrap_or(false)
+                    {
                         match parse_result.as_ref() {
                             Some(parsed) => debug!(
                                 "Completion v2 parse_result: uri={}, file_id={}, syntax_errors={}",
@@ -1392,7 +1465,10 @@ impl LanguageServer for BslLanguageServer {
                     .record_completion_stage_latency("format", stats.stage_format);
             }
 
-            if std::env::var("BSL_COMPLETION_QUALITY").is_ok() {
+            if bsl_runtime::system::global_runtime_config()
+                .get_bool(bsl_runtime::system::RuntimeKey::CompletionQuality)
+                .unwrap_or(false)
+            {
                 if let Some(stats) = &result.stats {
                     self.coordinator.record_completion_quality(
                         stats.total_candidates,
@@ -2471,6 +2547,12 @@ impl LanguageServer for BslLanguageServer {
             "bsl.getObservabilityMetrics" => {
                 let result = self.handle_get_observability_metrics().await?;
                 Ok(Some(serde_json::to_value(result).map_err(|_| {
+                    tower_lsp::jsonrpc::Error::internal_error()
+                })?))
+            }
+            "bsl.getRuntimeConfig" => {
+                let snapshot = bsl_runtime::system::global_runtime_config().snapshot();
+                Ok(Some(serde_json::to_value(snapshot).map_err(|_| {
                     tower_lsp::jsonrpc::Error::internal_error()
                 })?))
             }

@@ -79,7 +79,6 @@ pub struct CacheManifest {
 pub struct DiskCache {
     root: PathBuf,
     schema_version: u32,
-    env_disabled: bool,
     disabled: Arc<AtomicBool>,
     stats: Arc<DiskCacheStats>,
     last_cleanup_at: Arc<AtomicU64>,
@@ -128,15 +127,14 @@ impl DiskCache {
     }
 
     pub fn with_root(root: PathBuf, schema_version: u32) -> Result<Self> {
-        let env_disabled = is_cache_disabled();
-        if !env_disabled {
+        let disabled_at_start = is_cache_disabled();
+        if !disabled_at_start {
             fs::create_dir_all(&root).context("Failed to create disk cache root")?;
         }
         Ok(Self {
             root,
             schema_version,
-            env_disabled,
-            disabled: Arc::new(AtomicBool::new(env_disabled)),
+            disabled: Arc::new(AtomicBool::new(disabled_at_start)),
             stats: Arc::new(DiskCacheStats::default()),
             last_cleanup_at: Arc::new(AtomicU64::new(0)),
         })
@@ -146,7 +144,6 @@ impl DiskCache {
         Self {
             root: PathBuf::from(".bsl_cache"),
             schema_version,
-            env_disabled: false,
             disabled: Arc::new(AtomicBool::new(true)),
             stats: Arc::new(DiskCacheStats::default()),
             last_cleanup_at: Arc::new(AtomicU64::new(0)),
@@ -154,7 +151,7 @@ impl DiskCache {
     }
 
     pub fn env_disabled(&self) -> bool {
-        self.env_disabled
+        is_cache_disabled()
     }
 
     pub fn is_disabled(&self) -> bool {
@@ -166,7 +163,7 @@ impl DiskCache {
     }
 
     pub fn set_enabled(&self, enabled: bool) -> bool {
-        if self.env_disabled {
+        if is_cache_disabled() {
             self.disabled.store(true, Ordering::Relaxed);
             return false;
         }
@@ -751,7 +748,6 @@ impl DiskCache {
         Self {
             root: self.root.clone(),
             schema_version: self.schema_version,
-            env_disabled: self.env_disabled,
             disabled: Arc::clone(&self.disabled),
             stats: Arc::clone(&self.stats),
             last_cleanup_at: Arc::clone(&self.last_cleanup_at),
@@ -1016,8 +1012,10 @@ struct CacheEntryInfo {
 }
 
 fn resolve_cache_root() -> PathBuf {
-    if let Ok(dir) = std::env::var("BSL_CACHE_DIR") {
-        return PathBuf::from(dir);
+    if let Some(dir) = crate::system::runtime_config::global_runtime_config()
+        .get_pathbuf(crate::system::runtime_config::RuntimeKey::CacheDir)
+    {
+        return dir;
     }
     if let Ok(dir) = std::env::var("XDG_CACHE_HOME") {
         return PathBuf::from(dir).join("bsl-gradual-types");
@@ -1029,59 +1027,42 @@ fn resolve_cache_root() -> PathBuf {
 }
 
 fn is_cache_disabled() -> bool {
-    matches!(
-        std::env::var("BSL_CACHE_DISABLE")
-            .unwrap_or_default()
-            .to_ascii_lowercase()
-            .as_str(),
-        "1" | "true" | "yes"
-    )
+    crate::system::runtime_config::global_runtime_config()
+        .get_bool(crate::system::runtime_config::RuntimeKey::CacheDisable)
+        .unwrap_or(false)
 }
 
 fn cache_ttl_secs() -> Option<u64> {
-    std::env::var("BSL_CACHE_TTL_SECS")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .filter(|value| *value > 0)
+    crate::system::runtime_config::global_runtime_config()
+        .get_u64(crate::system::runtime_config::RuntimeKey::CacheTtlSecs)
 }
 
 fn cache_max_bytes() -> Option<u64> {
-    std::env::var("BSL_CACHE_MAX_BYTES")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .filter(|value| *value > 0)
+    crate::system::runtime_config::global_runtime_config()
+        .get_u64(crate::system::runtime_config::RuntimeKey::CacheMaxBytes)
 }
 
 fn cache_cleanup_interval_secs() -> Option<u64> {
-    std::env::var("BSL_CACHE_CLEANUP_INTERVAL_SECS")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .filter(|value| *value > 0)
-        .or(Some(300))
+    crate::system::runtime_config::global_runtime_config()
+        .get_u64(crate::system::runtime_config::RuntimeKey::CacheCleanupIntervalSecs)
 }
 
 fn cache_touch_interval_secs() -> u64 {
-    std::env::var("BSL_CACHE_TOUCH_INTERVAL_SECS")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .filter(|value| *value > 0)
+    crate::system::runtime_config::global_runtime_config()
+        .get_u64(crate::system::runtime_config::RuntimeKey::CacheTouchIntervalSecs)
         .unwrap_or(60)
 }
 
 fn cache_ttl_mode() -> String {
-    std::env::var("BSL_CACHE_TTL_MODE")
-        .ok()
+    crate::system::runtime_config::global_runtime_config()
+        .get_string(crate::system::runtime_config::RuntimeKey::CacheTtlMode)
         .unwrap_or_else(|| "created".to_string())
 }
 
 fn cache_swr_enabled() -> bool {
-    matches!(
-        std::env::var("BSL_CACHE_SWR")
-            .unwrap_or_else(|_| "1".to_string())
-            .to_ascii_lowercase()
-            .as_str(),
-        "1" | "true" | "yes"
-    )
+    crate::system::runtime_config::global_runtime_config()
+        .get_bool(crate::system::runtime_config::RuntimeKey::CacheSwr)
+        .unwrap_or(true)
 }
 
 fn cache_cleanup_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -1173,12 +1154,16 @@ mod tests {
         fn set(key: &'static str, value: &str) -> Self {
             let prev = std::env::var(key).ok();
             std::env::set_var(key, value);
+            crate::system::runtime_config::global_runtime_config()
+                .reload_env_bootstrap_from_env();
             Self { key, prev }
         }
 
         fn remove(key: &'static str) -> Self {
             let prev = std::env::var(key).ok();
             std::env::remove_var(key);
+            crate::system::runtime_config::global_runtime_config()
+                .reload_env_bootstrap_from_env();
             Self { key, prev }
         }
     }
@@ -1190,6 +1175,8 @@ mod tests {
             } else {
                 std::env::remove_var(self.key);
             }
+            crate::system::runtime_config::global_runtime_config()
+                .reload_env_bootstrap_from_env();
         }
     }
 

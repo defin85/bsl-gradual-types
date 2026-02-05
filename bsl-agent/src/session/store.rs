@@ -1,9 +1,11 @@
 use std::ffi::OsStr;
 use std::fs;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 
 use crate::state::{now_unix_secs, state_root, write_atomic};
 
@@ -26,6 +28,12 @@ pub struct PersistedSession {
     pub updated_at: u64,
     #[serde(default)]
     pub startup_job_id: Option<String>,
+    #[serde(default)]
+    pub env_overrides: HashMap<String, JsonValue>,
+    #[serde(default)]
+    pub dev_env_overrides: HashMap<String, JsonValue>,
+    #[serde(default)]
+    pub allow_dev_overrides: bool,
 }
 
 #[derive(Clone)]

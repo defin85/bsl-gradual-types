@@ -17,6 +17,7 @@ use crate::system::disk_cache::DiskCache;
 use crate::system::intellisense_index::IntellisenseIndexStore;
 use crate::system::intellisense_index_store::IntellisenseIndexDiskStore;
 use crate::system::parser_coordinator::ParserCoordinator;
+use crate::system::runtime_config::{global_runtime_config, RuntimeKey};
 use bsl_shared::api::StartupProgressDto;
 use bsl_shared::domain::repository::RepositoryStats;
 
@@ -94,7 +95,9 @@ impl SystemCoordinator {
             config_index_cache: Arc::new(RwLock::new(None)),
             platform_version: Arc::new(RwLock::new(None)),
             strict_fingerprint: Arc::new(RwLock::new(
-                std::env::var("BSL_CACHE_STRICT_FINGERPRINT").is_ok(),
+                global_runtime_config()
+                    .get_bool(RuntimeKey::CacheStrictFingerprint)
+                    .unwrap_or(false),
             )),
         }
     }

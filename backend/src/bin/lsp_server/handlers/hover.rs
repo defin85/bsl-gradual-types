@@ -30,9 +30,8 @@ pub fn handle_hover_v2(
     include_flow_sensitive: bool,
 ) -> Option<Hover> {
     // Get syntax_helper path from environment or standard locations
-    let syntax_helper_path = std::env::var("BSL_SYNTAX_HELPER_PATH")
-        .ok()
-        .map(std::path::PathBuf::from)
+    let syntax_helper_path = bsl_runtime::system::global_runtime_config()
+        .get_pathbuf(bsl_runtime::system::RuntimeKey::SyntaxHelperPath)
         .or_else(|| {
             let candidates = vec![
                 std::path::PathBuf::from("examples/syntax_helper"),

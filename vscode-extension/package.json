@@ -389,6 +389,33 @@
                         "order": 1
                     }
                 }
+            },
+            {
+                "title": "Runtime Overrides (Unified Config)",
+                "order": 14,
+                "properties": {
+                    "bsl.envOverrides": {
+                        "type": "object",
+                        "default": {},
+                        "description": "Runtime overrides for stable BSL_* keys. Map env name -> JSON value (string/number/boolean). Use null to unset a key. Applied without restart via LSP didChangeConfiguration.",
+                        "scope": "resource",
+                        "order": 0
+                    },
+                    "bsl.devEnvOverrides": {
+                        "type": "object",
+                        "default": {},
+                        "description": "Runtime overrides for dev-only BSL_* keys. Requires bsl.dev.enableDevEnvOverrides=true. Use null to unset a key.",
+                        "scope": "resource",
+                        "order": 1
+                    },
+                    "bsl.dev.enableDevEnvOverrides": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Opt-in: allow applying bsl.devEnvOverrides (dev-only runtime keys).",
+                        "scope": "resource",
+                        "order": 2
+                    }
+                }
             }
         ],
         "commands": [

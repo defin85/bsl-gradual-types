@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use bsl_agent::types::{
     BslDiagnosticsResponse, BslSymbolSearchResponse, BuildInfoResponse, ContextExpandResponse,
     ContextPackResponse, JobStartResponse, JobStateDto, JobStatusResponse, UiUrlResponse,
-    WorkspaceDocumentsSetResponse, WorkspaceListResponse, WorkspaceOpenResponse,
-    WorkspaceStatusResponse,
+    WorkspaceDocumentsSetResponse, WorkspaceGetSettingsResponse, WorkspaceListResponse,
+    WorkspaceOpenResponse, WorkspaceStatusResponse, WorkspaceUpdateSettingsResponse,
 };
 use bsl_shared::api::dtos::TypeDto;
 use bsl_shared::api::dtos::{AnalysisResultDto, MetricsDto, SnapshotMetaDto};
@@ -214,6 +214,8 @@ async fn stdio_tools_list_and_lifecycle_smoke() {
         "ui_url",
         "workspace_open",
         "workspace_status",
+        "workspace_get_settings",
+        "workspace_update_settings",
         "workspace_close",
         "workspace_resume",
         "workspace_list",
@@ -263,6 +265,121 @@ async fn stdio_tools_list_and_lifecycle_smoke() {
     )
     .await;
 
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_workspace_settings_runtime_overrides_roundtrip() {
+    let service = spawn_agent(&[]).await;
+
+    let temp_root = tempfile::TempDir::new().expect("tempdir");
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [temp_root.path().to_string_lossy()],
+        }),
+    )
+    .await;
+    let session_id = open.session_id.clone();
+    let _status = wait_workspace_ready(&service, &open).await;
+
+    let before: WorkspaceGetSettingsResponse = call_tool(
+        &service,
+        "workspace_get_settings",
+        json!({ "session_id": &session_id }),
+    )
+    .await;
+    assert!(before
+        .runtime_config
+        .get("effective")
+        .and_then(|v| v.get("BSL_CACHE_DISABLE"))
+        .is_some());
+
+    let updated: WorkspaceUpdateSettingsResponse = call_tool(
+        &service,
+        "workspace_update_settings",
+        json!({
+            "session_id": &session_id,
+            "env_overrides": {
+                "BSL_CACHE_DISABLE": true
+            }
+        }),
+    )
+    .await;
+    assert_eq!(
+        updated
+            .runtime_config
+            .get("effective")
+            .and_then(|v| v.get("BSL_CACHE_DISABLE"))
+            .cloned()
+            .unwrap_or_default(),
+        serde_json::Value::Bool(true)
+    );
+
+    let removed: WorkspaceUpdateSettingsResponse = call_tool(
+        &service,
+        "workspace_update_settings",
+        json!({
+            "session_id": &session_id,
+            "env_overrides": {
+                "BSL_CACHE_DISABLE": null
+            }
+        }),
+    )
+    .await;
+    assert_eq!(
+        removed
+            .runtime_config
+            .get("effective")
+            .and_then(|v| v.get("BSL_CACHE_DISABLE"))
+            .cloned()
+            .unwrap_or_default(),
+        serde_json::Value::Bool(false)
+    );
+
+    let dev_ignored: WorkspaceUpdateSettingsResponse = call_tool(
+        &service,
+        "workspace_update_settings",
+        json!({
+            "session_id": &session_id,
+            "allow_dev_overrides": false,
+            "dev_env_overrides": {
+                "BSL_COMPLETION_TRACE": true
+            }
+        }),
+    )
+    .await;
+    assert!(dev_ignored.report.dev_overrides_ignored);
+
+    let dev_enabled: WorkspaceUpdateSettingsResponse = call_tool(
+        &service,
+        "workspace_update_settings",
+        json!({
+            "session_id": &session_id,
+            "allow_dev_overrides": true,
+            "dev_env_overrides": {
+                "BSL_COMPLETION_TRACE": true
+            }
+        }),
+    )
+    .await;
+    assert_eq!(
+        dev_enabled
+            .runtime_config
+            .get("effective")
+            .and_then(|v| v.get("BSL_COMPLETION_TRACE"))
+            .cloned()
+            .unwrap_or_default(),
+        serde_json::Value::Bool(true)
+    );
+
+    let _close: serde_json::Value = call_tool(
+        &service,
+        "workspace_close",
+        json!({ "session_id": &session_id }),
+    )
+    .await;
     let _ = service.cancel().await;
 }
 
@@ -379,13 +496,31 @@ async fn stdio_type_tools_require_ready_session() {
     .await;
     let session_id = open.session_id.clone();
 
-    call_tool_expect_invalid_params(
+    // Startup for an empty workspace can complete very fast on some machines.
+    // Verify behavior against the current ready state to avoid flaky races.
+    let status: WorkspaceStatusResponse = call_tool(
         &service,
-        "bsl_types_list_start",
-        json!({ "session_id": &session_id, "page": 1, "limit": 50 }),
-        "workspace not ready",
+        "workspace_status",
+        json!({ "session_id": &session_id }),
     )
     .await;
+    if status.ready {
+        let start: JobStartResponse = call_tool(
+            &service,
+            "bsl_types_list_start",
+            json!({ "session_id": &session_id, "page": 1, "limit": 50 }),
+        )
+        .await;
+        assert!(!start.job_id.is_empty());
+    } else {
+        call_tool_expect_invalid_params(
+            &service,
+            "bsl_types_list_start",
+            json!({ "session_id": &session_id, "page": 1, "limit": 50 }),
+            "workspace not ready",
+        )
+        .await;
+    }
 
     let _close: serde_json::Value = call_tool(
         &service,

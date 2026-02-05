@@ -15,6 +15,7 @@ pub mod parser_coordinator;
 pub mod persistent_cache; // Milestone 2.4: Межсессионное кеширование
 mod platform_version;
 pub mod positioning; // UTF-16 <-> byte offsets for LSP/tree-sitter
+pub mod runtime_config;
 pub mod startup_v2;
 pub mod system_coordinator;
 pub mod tree_cache;
@@ -38,6 +39,10 @@ pub use parallel_analyzer::{ParallelAnalyzer, PerformanceStats, ProjectAnalysisR
 pub use parser_coordinator::ParserCoordinator;
 pub use persistent_cache::{CacheCleanupStats, CacheStats, CachedAnalysis, PersistentCache};
 pub use positioning::{byte_offset_to_utf16, utf16_to_byte_offset, LineIndex};
+pub use runtime_config::{
+    global_runtime_config, ApplyOverridesReport, ConfigTier, ConfigValue, RuntimeConfigSnapshot,
+    RuntimeConfigStore, RuntimeKey, ValueSource,
+};
 pub use startup_v2::{startup_v2, EffectiveStartupInputs, StartupInputs, StartupResultV2};
 pub use system_coordinator::{
     CacheClearReport, CacheScope, CacheStatsReport, CacheToggleResult, ConfigIndexCache,

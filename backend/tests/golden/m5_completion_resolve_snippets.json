@@ -15,7 +15,7 @@
   "resolveSnippetSupportTrue": {
     "detail": "Булево",
     "hasDocumentation": false,
-    "insertText": "Добавить(${1:Элемент}, ${2:})$0",
+    "insertText": "Добавить(${1:Элемент}, ${2:Позиция})$0",
     "insertTextFormat": "SNIPPET",
     "label": "Добавить"
   }

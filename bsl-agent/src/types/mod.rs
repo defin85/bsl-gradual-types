@@ -1,4 +1,8 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
+use std::collections::HashMap;
+
+use bsl_runtime::system::runtime_config::ApplyOverridesReport;
 
 use crate::semantic::dto::{DiagnosticDto, DocumentRefDto, RangeDto};
 
@@ -54,6 +58,45 @@ pub struct WorkspaceStatusResponse {
     pub startup_job_id: Option<String>,
     #[serde(default)]
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeSettingsReportDto {
+    pub ignored_unknown_keys: Vec<String>,
+    pub ignored_invalid_values: Vec<String>,
+    pub ignored_wrong_tier_keys: Vec<String>,
+    pub dev_overrides_ignored: bool,
+}
+
+impl From<ApplyOverridesReport> for RuntimeSettingsReportDto {
+    fn from(value: ApplyOverridesReport) -> Self {
+        Self {
+            ignored_unknown_keys: value.ignored_unknown_keys,
+            ignored_invalid_values: value.ignored_invalid_values,
+            ignored_wrong_tier_keys: value.ignored_wrong_tier_keys,
+            dev_overrides_ignored: value.dev_overrides_ignored,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceGetSettingsResponse {
+    pub session_id: String,
+    pub allow_dev_overrides: bool,
+    pub env_overrides: HashMap<String, JsonValue>,
+    pub dev_env_overrides: HashMap<String, JsonValue>,
+    pub runtime_config: JsonValue,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceUpdateSettingsResponse {
+    pub ok: bool,
+    pub session_id: String,
+    pub allow_dev_overrides: bool,
+    pub env_overrides: HashMap<String, JsonValue>,
+    pub dev_env_overrides: HashMap<String, JsonValue>,
+    pub report: RuntimeSettingsReportDto,
+    pub runtime_config: JsonValue,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

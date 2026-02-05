@@ -2136,13 +2136,9 @@ fn log_warmup_skip_reason(
 }
 
 fn index_warmup_disabled() -> bool {
-    matches!(
-        std::env::var("BSL_INDEX_WARMUP")
-            .unwrap_or_else(|_| "1".to_string())
-            .to_ascii_lowercase()
-            .as_str(),
-        "0" | "false" | "no"
-    )
+    !crate::system::runtime_config::global_runtime_config()
+        .get_bool(crate::system::runtime_config::RuntimeKey::IndexWarmup)
+        .unwrap_or(true)
 }
 
 #[cfg(test)]

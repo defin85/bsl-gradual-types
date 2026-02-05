@@ -1,5 +1,6 @@
 //! Configuration management for BSL Web Server
 
+use bsl_runtime::system::runtime_config::{global_runtime_config, RuntimeKey, ValueSource};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -60,33 +61,63 @@ impl WebServerConfig {
     pub fn from_env() -> Self {
         let mut config = Self::default();
 
-        if let Ok(host) = std::env::var("BSL_WEB_HOST") {
-            config.host = host;
+        let store = global_runtime_config();
+        let snapshot = store.snapshot();
+
+        let is_default = |key: RuntimeKey| {
+            snapshot
+                .sources
+                .get(key.env())
+                .is_some_and(|source| *source == ValueSource::Default)
+        };
+
+        if !is_default(RuntimeKey::WebHost) {
+            if let Some(host) = store.get_string(RuntimeKey::WebHost) {
+                config.host = host;
+            }
         }
 
-        if let Ok(port_str) = std::env::var("BSL_WEB_PORT") {
-            if let Ok(port) = port_str.parse::<u16>() {
+        if !is_default(RuntimeKey::WebPort) {
+            if let Some(port) = store.get_u16(RuntimeKey::WebPort) {
                 config.port = port;
             }
         }
 
-        if let Ok(static_path) = std::env::var("BSL_STATIC_PATH") {
-            config.static_files_path = Some(PathBuf::from(static_path));
+        if let Some(static_path) = store.get_pathbuf(RuntimeKey::StaticPath) {
+            config.static_files_path = Some(static_path);
         }
 
-        if let Ok(project_path) = std::env::var("BSL_PROJECT_PATH") {
-            config.project_path = Some(PathBuf::from(project_path));
+        if let Some(project_path) = store.get_pathbuf(RuntimeKey::ProjectPath) {
+            config.project_path = Some(project_path);
         }
-        if let Ok(platform_version) = std::env::var("BSL_PLATFORM_VERSION") {
+
+        if let Some(syntax_helper_path) = store.get_pathbuf(RuntimeKey::SyntaxHelperPath) {
+            config.syntax_helper_path = Some(syntax_helper_path);
+        }
+
+        if let Some(platform_version) = store.get_string(RuntimeKey::PlatformVersion) {
             config.platform_version = Some(platform_version);
         }
 
-        if let Ok(cors_str) = std::env::var("BSL_ENABLE_CORS") {
-            config.enable_cors = cors_str.to_lowercase() == "true";
+        if !is_default(RuntimeKey::EnableCors) {
+            if let Some(cors) = store.get_bool(RuntimeKey::EnableCors) {
+                config.enable_cors = cors;
+            }
         }
 
-        if let Ok(log_level) = std::env::var("BSL_LOG_LEVEL") {
-            config.log_level = log_level;
+        if !is_default(RuntimeKey::LogLevel) {
+            if let Some(log_level) = store.get_string(RuntimeKey::LogLevel) {
+                config.log_level = log_level;
+            }
+        }
+
+        if !is_default(RuntimeKey::CacheDisable) {
+            let disabled = store.get_bool(RuntimeKey::CacheDisable).unwrap_or(false);
+            config.cache_enabled = Some(!disabled);
+        }
+
+        if !is_default(RuntimeKey::CacheStrictFingerprint) {
+            config.strict_fingerprint = store.get_bool(RuntimeKey::CacheStrictFingerprint);
         }
 
         config

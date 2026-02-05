@@ -19,8 +19,12 @@ async function sendCacheEnabled(enabled: boolean, outputChannel: vscode.OutputCh
         });
         outputChannel.appendLine(`[Cache] setEnabled: ${JSON.stringify(result)}`);
         if (result && typeof result.effective === 'boolean' && result.effective !== enabled) {
+            const reason =
+                result && typeof result.env_disabled === 'boolean' && result.env_disabled
+                    ? 'BSL_CACHE_DISABLE=true (env или bsl.envOverrides)'
+                    : 'конфигурация/политика сервера';
             vscode.window.showWarningMessage(
-                'BSL Analyzer: кэш отключен через ENV (BSL_CACHE_DISABLE=1), настройка workspace проигнорирована.'
+                `BSL Analyzer: не удалось применить cacheEnabled=${enabled} (effective=${result.effective}). Причина: ${reason}.`
             );
         }
     } catch (error) {

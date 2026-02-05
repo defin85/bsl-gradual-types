@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use bsl_runtime::system::runtime_config::{global_runtime_config, RuntimeKey};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Notify, RwLock};
 use uuid::Uuid;
@@ -81,9 +82,8 @@ impl JobStore {
     }
 
     fn ttl_secs() -> u64 {
-        std::env::var("BSL_AGENT_STATE_TTL_SECS")
-            .ok()
-            .and_then(|value| value.parse::<u64>().ok())
+        global_runtime_config()
+            .get_u64(RuntimeKey::AgentStateTtlSecs)
             .filter(|value| *value > 0)
             .unwrap_or(DEFAULT_TTL_SECS)
     }

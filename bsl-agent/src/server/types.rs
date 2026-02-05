@@ -1,5 +1,7 @@
 use schemars::JsonSchema;
 use serde::{de, Deserialize, Serialize};
+use serde_json::Value as JsonValue;
+use std::collections::HashMap;
 use std::fmt;
 
 fn default_true() -> bool {
@@ -34,6 +36,25 @@ pub struct WorkspaceOpenParams {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkspaceStatusParams {
     pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct WorkspaceGetSettingsParams {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct WorkspaceUpdateSettingsParams {
+    pub session_id: String,
+    /// Patch stable runtime overrides (null removes a key).
+    #[serde(default)]
+    pub env_overrides: Option<HashMap<String, JsonValue>>,
+    /// Patch dev-only runtime overrides (null removes a key). Applied only when allow_dev_overrides=true.
+    #[serde(default)]
+    pub dev_env_overrides: Option<HashMap<String, JsonValue>>,
+    /// Gate dev-only overrides. When false, dev_env_overrides are ignored.
+    #[serde(default)]
+    pub allow_dev_overrides: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

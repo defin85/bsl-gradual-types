@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
-use std::sync::LazyLock;
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
@@ -101,52 +100,28 @@ pub(crate) struct DiagnosticsTaskV2 {
 
 type DiagnosticsTasksV2 = HashMap<V2FileId, DiagnosticsTaskV2>;
 
-fn parse_env_duration_ms(var: &str) -> Option<Duration> {
-    let raw = std::env::var(var).ok()?;
-    let parsed = raw.parse::<u64>().ok()?;
-    if parsed == 0 {
-        return None;
-    }
-    Some(Duration::from_millis(parsed))
-}
-
-fn parse_env_duration_ms_with_default(var: &str, default_ms: u64) -> Option<Duration> {
-    match std::env::var(var) {
-        Ok(raw) => match raw.parse::<u64>() {
-            Ok(0) => None,
-            Ok(ms) => Some(Duration::from_millis(ms)),
-            Err(_) => Some(Duration::from_millis(default_ms)),
-        },
-        Err(_) => Some(Duration::from_millis(default_ms)),
-    }
-}
-
-static INTELLISENSE_V2_SLOW_WAIT_WARN_THRESHOLD: LazyLock<Option<Duration>> =
-    LazyLock::new(|| parse_env_duration_ms("BSL_INTELLISENSE_V2_SLOW_WAIT_WARN_MS"));
-
-static INTELLISENSE_V2_SLOW_SNAPSHOT_WARN_THRESHOLD: LazyLock<Option<Duration>> =
-    LazyLock::new(|| parse_env_duration_ms("BSL_INTELLISENSE_V2_SLOW_SNAPSHOT_WARN_MS"));
-
-static INTELLISENSE_V2_SLOW_QUERY_WARN_THRESHOLD: LazyLock<Option<Duration>> =
-    LazyLock::new(|| parse_env_duration_ms("BSL_INTELLISENSE_V2_SLOW_QUERY_WARN_MS"));
-
-static INTELLISENSE_V2_SLOW_CLIENT_LOG_THRESHOLD: LazyLock<Option<Duration>> =
-    LazyLock::new(|| {
-        parse_env_duration_ms_with_default("BSL_INTELLISENSE_V2_SLOW_CLIENT_LOG_MS", 2000)
-    });
-
 pub(crate) fn intellisense_v2_slow_wait_warn_threshold() -> Option<Duration> {
-    *INTELLISENSE_V2_SLOW_WAIT_WARN_THRESHOLD
+    bsl_runtime::system::global_runtime_config()
+        .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2SlowWaitWarnMs)
+        .map(Duration::from_millis)
 }
 
 pub(crate) fn intellisense_v2_slow_snapshot_warn_threshold() -> Option<Duration> {
-    *INTELLISENSE_V2_SLOW_SNAPSHOT_WARN_THRESHOLD
+    bsl_runtime::system::global_runtime_config()
+        .get_u64(
+            bsl_runtime::system::RuntimeKey::IntellisenseV2SlowSnapshotWarnMs,
+        )
+        .map(Duration::from_millis)
 }
 
 pub(crate) fn intellisense_v2_slow_query_warn_threshold() -> Option<Duration> {
-    *INTELLISENSE_V2_SLOW_QUERY_WARN_THRESHOLD
+    bsl_runtime::system::global_runtime_config()
+        .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2SlowQueryWarnMs)
+        .map(Duration::from_millis)
 }
 
 pub(crate) fn intellisense_v2_slow_client_log_threshold() -> Option<Duration> {
-    *INTELLISENSE_V2_SLOW_CLIENT_LOG_THRESHOLD
+    bsl_runtime::system::global_runtime_config()
+        .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2SlowClientLogMs)
+        .map(Duration::from_millis)
 }

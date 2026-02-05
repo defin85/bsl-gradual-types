@@ -2,6 +2,8 @@
 //!
 //! Contains LSP initialization options and workspace settings.
 
+use std::collections::HashMap;
+
 use serde::Deserialize;
 
 /// LSP Configuration - passed from VSCode Extension through initializationOptions
@@ -159,6 +161,21 @@ pub struct BslSettings {
     /// Workspace setting `enableFlowSensitive` (default: false).
     #[serde(default, rename = "enableFlowSensitive")]
     pub enable_flow_sensitive: bool,
+    /// Stable runtime overrides for `BSL_*` keys (see bsl-runtime runtime_config registry).
+    #[serde(default, rename = "envOverrides")]
+    pub env_overrides: HashMap<String, serde_json::Value>,
+    /// Dev-only runtime overrides for `BSL_*` keys (applied only when `dev.enableDevEnvOverrides=true`).
+    #[serde(default, rename = "devEnvOverrides")]
+    pub dev_env_overrides: HashMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub dev: DevSettings,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DevSettings {
+    #[serde(default)]
+    pub enable_dev_env_overrides: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

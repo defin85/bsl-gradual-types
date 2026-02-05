@@ -265,6 +265,13 @@ fn build_candidate_id(
     origin_sources: &[u8],
     deps: Option<&bsl_analysis_v2::SemanticDeps>,
 ) -> CompletionCandidateId {
+    fn normalize_owner_type(owner: &str) -> String {
+        bsl_shared::domain::type_id::TypeId::new(owner)
+            .without_generic_params()
+            .display()
+            .to_string()
+    }
+
     let payload = if kind_tag.starts_with("metadata.") {
         CompletionCandidateIdPayload::Metadata {
             kind: item.kind.metadata_kind().unwrap_or(MetadataKind::Unknown),
@@ -274,12 +281,13 @@ fn build_candidate_id(
         match kind_tag {
             "method" => match owner_type {
                 Some(owner) => {
+                    let owner = normalize_owner_type(owner);
                     let sig_hash = deps
-                        .and_then(|deps| deps.signature_index.find_method(owner, &item.label))
+                        .and_then(|deps| deps.signature_index.find_method(&owner, &item.label))
                         .map(method_signature_hash);
 
                     CompletionCandidateIdPayload::Method {
-                        owner_type: owner.to_string(),
+                        owner_type: owner,
                         name: item.label.clone(),
                         sig_hash,
                     }
@@ -291,7 +299,7 @@ fn build_candidate_id(
             },
             "property" => match owner_type {
                 Some(owner) => CompletionCandidateIdPayload::Property {
-                    owner_type: owner.to_string(),
+                    owner_type: normalize_owner_type(owner),
                     name: item.label.clone(),
                 },
                 None => CompletionCandidateIdPayload::Other {
@@ -437,15 +445,20 @@ fn resolve_method_by_candidate_id(
     metadata_lookup: &TypeMetadataLookup,
     snippet_support: bool,
 ) -> Option<(Option<String>, Option<String>, Option<String>)> {
+    let owner_type = bsl_shared::domain::type_id::TypeId::new(owner_type)
+        .without_generic_params()
+        .display()
+        .to_string();
+
     let signature = sig_hash
         .and_then(|expected| {
             deps.signature_index
-                .find_methods(owner_type, name)
+                .find_methods(&owner_type, name)
                 .into_iter()
                 .find(|signature| method_signature_hash(signature) == expected)
                 .cloned()
         })
-        .or_else(|| deps.signature_index.find_method(owner_type, name).cloned());
+        .or_else(|| deps.signature_index.find_method(&owner_type, name).cloned());
 
     if let Some(signature) = signature {
         let detail = signature
@@ -467,7 +480,7 @@ fn resolve_method_by_candidate_id(
         return Some((detail, documentation, insert_text));
     }
 
-    resolve_method_completion(owner_type, name, metadata_lookup, snippet_support)
+    resolve_method_completion(&owner_type, name, metadata_lookup, snippet_support)
         .map(|details| (details.detail, details.documentation, details.insert_text))
 }
 
@@ -503,7 +516,11 @@ fn resolve_property_by_candidate_id(
     name: &str,
     metadata_lookup: &TypeMetadataLookup,
 ) -> Option<(Option<String>, Option<String>, Option<String>)> {
-    let resolution = TypeResolution::explicit(owner_type);
+    let owner_type = bsl_shared::domain::type_id::TypeId::new(owner_type)
+        .without_generic_params()
+        .display()
+        .to_string();
+    let resolution = TypeResolution::explicit(&owner_type);
     let lowered = name.to_lowercase();
     let property = metadata_lookup
         .get_properties(&resolution)

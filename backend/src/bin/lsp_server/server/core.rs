@@ -38,9 +38,8 @@ fn diagnostics_debounce_duration() -> Duration {
     // typing can build up a backlog and make completion/hover feel "frozen".
     //
     // Default: 250ms. Can be overridden via env for experiments.
-    let raw = std::env::var("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS")
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
+    let raw = bsl_runtime::system::global_runtime_config()
+        .get_u64(bsl_runtime::system::RuntimeKey::LspDiagnosticsDebounceMs)
         .unwrap_or(250);
     Duration::from_millis(raw)
 }

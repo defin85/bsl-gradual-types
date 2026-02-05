@@ -21,6 +21,7 @@ use crate::system::intellisense_index::{
 };
 use crate::system::tree_cache::{hash_content, TreeCache};
 use crate::system::tree_sitter_adapter::TreeSitterAdapter;
+use crate::system::runtime_config::{global_runtime_config, RuntimeKey};
 use bsl_shared::domain::repository::TypeRepository;
 use bsl_shared::domain::resolver::TypeResolver;
 
@@ -29,13 +30,9 @@ fn ast_cache_key(content: &str) -> [u8; 32] {
 }
 
 fn is_cache_disabled_env() -> bool {
-    matches!(
-        std::env::var("BSL_CACHE_DISABLE")
-            .unwrap_or_default()
-            .to_ascii_lowercase()
-            .as_str(),
-        "1" | "true" | "yes"
-    )
+    global_runtime_config()
+        .get_bool(RuntimeKey::CacheDisable)
+        .unwrap_or(false)
 }
 
 /// Текстовое изменение для инкрементального парсинга (из LSP)

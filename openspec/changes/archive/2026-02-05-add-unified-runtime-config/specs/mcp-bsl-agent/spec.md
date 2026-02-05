@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Runtime update settings для активной сессии `bsl-agent`
 Система SHALL предоставлять MCP tool (stdio) для обновления runtime-config активной workspace-сессии без её перезапуска.
@@ -16,4 +16,3 @@ Tool MUST принимать `session_id` и payload overrides, совмести
 - **GIVEN** активная сессия
 - **WHEN** клиент включает `devEnvOverrides.BSL_COMPLETION_TRACE=true`
 - **THEN** последующие операции логируют/экспортируют dev-only trace поведение согласно ключу
-

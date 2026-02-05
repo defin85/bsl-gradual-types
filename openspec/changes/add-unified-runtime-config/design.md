@@ -76,6 +76,28 @@ Dev-only overrides всегда “последние”, чтобы дев-ре
 - Unknown keys в overrides: по умолчанию ошибка уровня warning + игнор (но поведение фиксируется в спеках).
 
 ## Open Questions
-- Нужно ли “read back” (получить effective config) как отдельная команда/endpoint?
-- Нужен ли allowlist per-interface (например, VS Code не может менять часть dev-only по умолчанию)?
+### Q1: Нужно ли “read back” (получить effective config) как отдельная команда/endpoint?
+Да.
 
+Решение:
+- LSP: добавить custom command `bsl.getRuntimeConfig` (возвращает effective config + источники значений: default/env/runtime stable/runtime dev-only).
+- bsl-agent: добавить MCP tool `workspace_get_settings` (по `session_id`), возвращающий effective config в том же формате.
+
+Причины:
+- упрощает дебаг “почему резолвер/кэш/threshold ведёт себя так”,
+- позволяет детерминированно проверять применение runtime update (и писать тесты без чтения env),
+- облегчает будущую чистку dev-only: можно видеть, что реально задействовано.
+
+### Q2: Нужен ли allowlist per-interface (например, VS Code не может менять часть dev-only по умолчанию)?
+Да, но без ограничения “по возможности”, а как явная защитная шторка (opt-in) для dev-only.
+
+Решение:
+- `envOverrides` (stable) принимаются всегда (VS Code + LSP + bsl-agent).
+- `devEnvOverrides` (dev-only) принимаются только при явном opt-in:
+  - VS Code: отдельный булевый флаг `bsl.dev.enableDevEnvOverrides` (default: false). Пока false — `devEnvOverrides` игнорируется с warning.
+  - bsl-agent: параметр `allow_dev_overrides` в tool/runtime update (default: false). Пока false — `devEnvOverrides` игнорируется с warning.
+
+Причины:
+- dev-only флаги часто ломают детерминизм/производительность и не должны включаться “случайно”,
+- opt-in сохраняет требование “управляемы” (включая dev-only), но делает включение осознанным,
+- “легко убрать”: удаление dev-only слоя = удаление opt-in + поля `devEnvOverrides` из контрактов без затрагивания stable.

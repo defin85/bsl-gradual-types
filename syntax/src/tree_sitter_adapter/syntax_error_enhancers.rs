@@ -5,12 +5,12 @@
 
 use std::cmp::Ordering;
 
-use bsl_shared::domain::types::{ErrorType, ParseError};
+use bsl_shared::domain::types::{ErrorType, ParseError, RelatedInformation};
 use bsl_shared::ir::Span;
 
 use super::span::LineIndex;
 
-pub(crate) fn enhance_syntax_errors(
+pub(crate) fn normalize_syntax_errors(
     source: &str,
     line_index: &LineIndex,
     errors: Vec<ParseError>,
@@ -21,10 +21,15 @@ pub(crate) fn enhance_syntax_errors(
 
     let ctx = Context { source, line_index };
 
-    let rewritten: Vec<ParseError> = errors
-        .into_iter()
-        .map(|e| rewrite_error(&ctx, &e).unwrap_or(e))
-        .collect();
+    let has_parser_errors = errors.iter().any(|e| !is_heuristic_syntax_error(e));
+    let rewritten: Vec<ParseError> = if has_parser_errors {
+        errors
+            .into_iter()
+            .map(|e| rewrite_error(&ctx, &e).unwrap_or(e))
+            .collect()
+    } else {
+        errors
+    };
 
     let capped = cap_one_error_per_line(&ctx, rewritten);
     sort_deterministically(capped)
@@ -43,25 +48,25 @@ fn rewrite_error(ctx: &Context<'_>, error: &ParseError) -> Option<ParseError> {
 }
 
 fn rewrite_for_step_clause(ctx: &Context<'_>, error: &ParseError) -> Option<ParseError> {
-    let (line_no, line) = error_line(ctx, error)?;
+    let (line_no, _line, masked) = error_line(ctx, error)?;
 
-    if !line_contains_word_ci(line, "Для") && !line_contains_word_ci(line, "for") {
+    if !line_contains_word_ci(&masked, "Для") && !line_contains_word_ci(&masked, "for") {
         return None;
     }
-    if !line_contains_word_ci(line, "По") && !line_contains_word_ci(line, "to") {
+    if !line_contains_word_ci(&masked, "По") && !line_contains_word_ci(&masked, "to") {
         return None;
     }
-    if !line_contains_word_ci(line, "Цикл") && !line_contains_word_ci(line, "do") {
+    if !line_contains_word_ci(&masked, "Цикл") && !line_contains_word_ci(&masked, "do") {
         return None;
     }
 
-    let (_, po_end) = find_word_ci(line, "По").or_else(|| find_word_ci(line, "to"))?;
-    let (do_start, _) = find_word_ci(line, "Цикл").or_else(|| find_word_ci(line, "do"))?;
+    let (_, po_end) = find_word_ci(&masked, "По").or_else(|| find_word_ci(&masked, "to"))?;
+    let (do_start, _) = find_word_ci(&masked, "Цикл").or_else(|| find_word_ci(&masked, "do"))?;
     if po_end >= do_start {
         return None;
     }
 
-    let between = &line[po_end..do_start];
+    let between = &masked[po_end..do_start];
     let (step_rel_start, step_rel_end) =
         find_word_ci(between, "Шаг").or_else(|| find_word_ci(between, "step"))?;
 
@@ -80,40 +85,27 @@ fn rewrite_for_step_clause(ctx: &Context<'_>, error: &ParseError) -> Option<Pars
 }
 
 fn rewrite_for_unexpected_clause(ctx: &Context<'_>, error: &ParseError) -> Option<ParseError> {
-    let (line_no, line) = error_line(ctx, error)?;
+    let (line_no, line, masked) = error_line(ctx, error)?;
 
-    if !line_contains_word_ci(line, "Для") && !line_contains_word_ci(line, "for") {
+    if !line_contains_word_ci(&masked, "Для") && !line_contains_word_ci(&masked, "for") {
         return None;
     }
-    if !line_contains_word_ci(line, "По") && !line_contains_word_ci(line, "to") {
+    if !line_contains_word_ci(&masked, "По") && !line_contains_word_ci(&masked, "to") {
         return None;
     }
-    if !line_contains_word_ci(line, "Цикл") && !line_contains_word_ci(line, "do") {
+    if !line_contains_word_ci(&masked, "Цикл") && !line_contains_word_ci(&masked, "do") {
         return None;
     }
 
-    let (_, po_end) = find_word_ci(line, "По").or_else(|| find_word_ci(line, "to"))?;
-    let (do_start, _) = find_word_ci(line, "Цикл").or_else(|| find_word_ci(line, "do"))?;
+    let (_, po_end) = find_word_ci(&masked, "По").or_else(|| find_word_ci(&masked, "to"))?;
+    let (do_start, _) = find_word_ci(&masked, "Цикл").or_else(|| find_word_ci(&masked, "do"))?;
     if po_end >= do_start {
         return None;
     }
 
-    let between = &line[po_end..do_start];
-    let unexpected = find_any_word_ci(
-        between,
-        &[
-            "Шаг",
-            "step",
-            "Тогда",
-            "then",
-            "Иначе",
-            "else",
-            "Исключение",
-            "except",
-        ],
-    )?;
-
-    let (rel_start, rel_end, token) = unexpected;
+    let between_masked = &masked[po_end..do_start];
+    let (rel_start, rel_end) = last_token_span(between_masked)?;
+    let token = line[po_end + rel_start..po_end + rel_end].trim().to_string();
     let line_start_abs = ctx
         .line_index
         .utf16_position_to_byte_offset(ctx.source, line_no as u32, 0) as u32;
@@ -123,7 +115,7 @@ fn rewrite_for_unexpected_clause(ctx: &Context<'_>, error: &ParseError) -> Optio
     Some(ParseError {
         error_type: ErrorType::InvalidSyntax,
         message: format!(
-            "В заголовке цикла `Для` после `По <выражение>` ожидается `Цикл`, найдено `{}`.",
+            "После `По <выражение>` ожидается `Цикл`, найдено `{}`.",
             token
         ),
         span: Span::new(abs_start, abs_end),
@@ -132,13 +124,13 @@ fn rewrite_for_unexpected_clause(ctx: &Context<'_>, error: &ParseError) -> Optio
 }
 
 fn rewrite_if_missing_then(ctx: &Context<'_>, error: &ParseError) -> Option<ParseError> {
-    let (line_no, line) = error_line(ctx, error)?;
-    let trimmed = line.trim_start();
+    let (line_no, line, masked) = error_line(ctx, error)?;
+    let trimmed_masked = masked.trim_start();
 
-    if !starts_with_word_ci(trimmed, "Если") && !starts_with_word_ci(trimmed, "if") {
+    if !starts_with_word_ci(trimmed_masked, "Если") && !starts_with_word_ci(trimmed_masked, "if") {
         return None;
     }
-    if line_contains_word_ci(trimmed, "Тогда") || line_contains_word_ci(trimmed, "then") {
+    if line_contains_word_ci(trimmed_masked, "Тогда") || line_contains_word_ci(trimmed_masked, "then") {
         return None;
     }
 
@@ -174,11 +166,16 @@ fn rewrite_try_structure(ctx: &Context<'_>, error: &ParseError) -> Option<ParseE
             let (start, end) = if start <= end { (start, end) } else { (end, start) };
             let slice = &ctx.source[start..end];
 
-            let has_try = line_contains_word_ci(slice, "Попытка") || line_contains_word_ci(slice, "try");
-            let has_except = line_contains_word_ci(slice, "Исключение")
-                || line_contains_word_ci(slice, "except");
-            let has_end = line_contains_word_ci(slice, "КонецПопытки")
-                || line_contains_word_ci(slice, "endtry");
+            // В `ParseError` мы видим сырой кусок текста. Для безопасности маскируем строки/комментарии
+            // перед поиском ключевых слов, чтобы избежать ложных матчей.
+            let masked_slice = mask_line_for_rules(slice);
+
+            let has_try = line_contains_word_ci(&masked_slice, "Попытка")
+                || line_contains_word_ci(&masked_slice, "try");
+            let has_except = line_contains_word_ci(&masked_slice, "Исключение")
+                || line_contains_word_ci(&masked_slice, "except");
+            let has_end = line_contains_word_ci(&masked_slice, "КонецПопытки")
+                || line_contains_word_ci(&masked_slice, "endtry");
 
             if has_try && has_except && !has_end {
                 is_missing_end = true;
@@ -199,13 +196,15 @@ fn rewrite_try_structure(ctx: &Context<'_>, error: &ParseError) -> Option<ParseE
         .map(|r| r.span)
     {
         span = anchor;
-    } else if let Some((line_no, line)) = error_line(ctx, error) {
-        if let Some((start, end)) = find_word_ci(line, "Попытка").or_else(|| find_word_ci(line, "try"))
+    } else if let Some((line_no, line, masked)) = error_line(ctx, error) {
+        if let Some((start, end)) =
+            find_word_ci(&masked, "Попытка").or_else(|| find_word_ci(&masked, "try"))
         {
             let line_start_abs = ctx
                 .line_index
                 .utf16_position_to_byte_offset(ctx.source, line_no as u32, 0) as u32;
             span = Span::new(line_start_abs + start as u32, line_start_abs + end as u32);
+            let _ = line;
         }
     }
 
@@ -215,11 +214,22 @@ fn rewrite_try_structure(ctx: &Context<'_>, error: &ParseError) -> Option<ParseE
         "В блоке `Попытка` ожидается секция `Исключение`.".to_string()
     };
 
+    let mut related = error.related.clone();
+    if !related
+        .iter()
+        .any(|r| r.message.contains("Начало блока: Попытка"))
+    {
+        related.push(RelatedInformation {
+            message: "Начало блока: Попытка".to_string(),
+            span,
+        });
+    }
+
     Some(ParseError {
         error_type: ErrorType::MissingToken,
         message,
         span,
-        related: error.related.clone(),
+        related,
     })
 }
 
@@ -251,6 +261,7 @@ fn sort_deterministically(mut errors: Vec<ParseError>) -> Vec<ParseError> {
             .start
             .cmp(&b.span.start)
             .then_with(|| a.span.end.cmp(&b.span.end))
+            .then_with(|| origin_rank(a).cmp(&origin_rank(b)))
             .then_with(|| error_type_rank(a.error_type).cmp(&error_type_rank(b.error_type)))
             .then_with(|| a.message.cmp(&b.message))
     });
@@ -266,10 +277,9 @@ fn compare_errors_for_sort(ctx: &Context<'_>, a: &ParseError, b: &ParseError) ->
 }
 
 fn compare_error_quality(a: &ParseError, b: &ParseError) -> Ordering {
-    let prio_a = error_type_rank(a.error_type);
-    let prio_b = error_type_rank(b.error_type);
-    prio_a
-        .cmp(&prio_b)
+    origin_rank(a)
+        .cmp(&origin_rank(b))
+        .then_with(|| error_type_rank(a.error_type).cmp(&error_type_rank(b.error_type)))
         .then_with(|| span_len(a.span).cmp(&span_len(b.span)))
         .then_with(|| a.span.start.cmp(&b.span.start))
         .then_with(|| a.span.end.cmp(&b.span.end))
@@ -280,9 +290,22 @@ fn error_type_rank(t: ErrorType) -> u8 {
     match t {
         ErrorType::InvalidSyntax => 0,
         ErrorType::MissingToken => 1,
-        ErrorType::UnexpectedToken => 2,
-        ErrorType::ParseError => 3,
+        ErrorType::ParseError => 2,
+        ErrorType::UnexpectedToken => 3,
     }
+}
+
+fn origin_rank(e: &ParseError) -> u8 {
+    if is_heuristic_syntax_error(e) {
+        1
+    } else {
+        0
+    }
+}
+
+fn is_heuristic_syntax_error(e: &ParseError) -> bool {
+    e.message.starts_with("Отсутствует точка с запятой после оператора '")
+        || e.message == "Отсутствует тип после 'Новый'"
 }
 
 fn span_len(span: Span) -> u32 {
@@ -294,26 +317,46 @@ fn error_line_number(ctx: &Context<'_>, error: &ParseError) -> Option<usize> {
     Some(ctx.line_index.byte_offset_to_point(ctx.source, capped).0)
 }
 
-fn error_line<'a>(ctx: &'a Context<'a>, error: &ParseError) -> Option<(usize, &'a str)> {
+fn error_line<'a>(ctx: &'a Context<'a>, error: &ParseError) -> Option<(usize, &'a str, String)> {
     let capped = (error.span.start as usize).min(ctx.source.len());
     let (line_no, _) = ctx.line_index.byte_offset_to_point(ctx.source, capped);
     let line = ctx.line_index.line_text(ctx.source, line_no);
-    Some((line_no, line))
+    let masked = mask_line_for_rules(line);
+    Some((line_no, line, masked))
 }
 
-fn find_any_word_ci(haystack: &str, needles: &[&str]) -> Option<(usize, usize, String)> {
-    let mut best: Option<(usize, usize, String)> = None;
-    for &needle in needles {
-        if let Some((start, end)) = find_word_ci(haystack, needle) {
-            let token = haystack[start..end].to_string();
-            match &best {
-                None => best = Some((start, end, token)),
-                Some((best_start, _, _)) if start < *best_start => best = Some((start, end, token)),
-                _ => {}
-            }
-        }
+fn last_token_span(haystack: &str) -> Option<(usize, usize)> {
+    let bytes = haystack.as_bytes();
+    if bytes.is_empty() {
+        return None;
     }
-    best
+
+    let mut end = bytes.len();
+    while end > 0 && bytes[end - 1].is_ascii_whitespace() {
+        end -= 1;
+    }
+    if end == 0 {
+        return None;
+    }
+
+    let mut start = end - 1;
+    let b = bytes[start];
+
+    if is_word_byte(b) {
+        while start > 0 && is_word_byte(bytes[start - 1]) {
+            start -= 1;
+        }
+        return Some((start, end));
+    }
+
+    if b.is_ascii_digit() {
+        while start > 0 && (bytes[start - 1].is_ascii_digit() || bytes[start - 1] == b'.') {
+            start -= 1;
+        }
+        return Some((start, end));
+    }
+
+    Some((start, start + 1))
 }
 
 fn starts_with_word_ci(haystack: &str, needle: &str) -> bool {
@@ -384,4 +427,63 @@ fn is_word_boundary(text: &str, start: usize, end: usize) -> bool {
 
 fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
+}
+
+fn is_word_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80
+}
+
+fn mask_line_for_rules(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0usize;
+    let mut in_string = false;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+
+        if !in_string {
+            if b == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                out.push(b'/');
+                out.push(b'/');
+                i += 2;
+                while i < bytes.len() {
+                    out.push(b' ');
+                    i += 1;
+                }
+                break;
+            }
+            if b == b'"' {
+                in_string = true;
+                out.push(b'"');
+                i += 1;
+                continue;
+            }
+
+            out.push(b);
+            i += 1;
+            continue;
+        }
+
+        // in_string
+        if b == b'"' {
+            if i + 1 < bytes.len() && bytes[i + 1] == b'"' {
+                // escaped quote ("")
+                out.push(b'"');
+                out.push(b'"');
+                i += 2;
+                continue;
+            }
+            in_string = false;
+            out.push(b'"');
+            i += 1;
+            continue;
+        }
+
+        out.push(b' ');
+        i += 1;
+    }
+
+    // SAFETY: out contains either original bytes from valid UTF-8 text, or ASCII bytes.
+    unsafe { String::from_utf8_unchecked(out) }
 }

@@ -64,7 +64,7 @@ mod tests {
 
     #[test]
     fn parse_reports_byte_spans_for_incomplete_new_with_emoji_prefix() {
-        let source = "Процедура Тест()\n😀 = Новый\nКонецПроцедуры";
+        let source = "y = \"😀\"; x = Новый\nz = 1";
         let result = parse(source, &ParseOptions::default()).unwrap();
 
         let err = result
@@ -73,7 +73,7 @@ mod tests {
             .find(|e| e.message.contains("Отсутствует тип после 'Новый'"))
             .expect("expected incomplete 'Новый' diagnostic");
 
-        let line = "😀 = Новый";
+        let line = "y = \"😀\"; x = Новый";
         let start_of_line = source.find(line).expect("line offset");
         let expected_offset = (start_of_line + line.len()) as u32;
 
@@ -182,19 +182,26 @@ mod tests {
             });
 
         assert_eq!(err.error_type, ErrorType::MissingToken);
-        if !err.related.is_empty() {
-            assert!(
-                err.related
-                    .iter()
-                    .any(|r| r.message.contains("Начало блока: Попытка")),
-                "expected related info to include try start, got: {:?}",
-                err.related
-            );
-        }
+        assert!(
+            err.related
+                .iter()
+                .any(|r| r.message.contains("Начало блока: Попытка")),
+            "expected related info to include try start, got: {:?}",
+            err.related
+        );
 
         let (line, _) = line_index.byte_offset_to_point(source, err.span.start as usize);
         assert_eq!(line, 0);
         assert_eq!(err.span.start, 0);
+        assert_eq!(err.span.end, "Попытка".len() as u32);
+
+        let related = err
+            .related
+            .iter()
+            .find(|r| r.message.contains("Начало блока: Попытка"))
+            .expect("related try start");
+        assert_eq!(related.span.start, 0);
+        assert_eq!(related.span.end, "Попытка".len() as u32);
 
         let errors_on_try_line = result
             .syntax_errors
@@ -207,5 +214,79 @@ mod tests {
             })
             .count();
         assert_eq!(errors_on_try_line, 1);
+    }
+
+    #[test]
+    fn parse_strict_line_cap_keeps_parser_error_over_heuristics_on_same_line() {
+        let source = "Процедура Тест()\n    x = (1 + ) = Новый\n    y = 1;\nКонецПроцедуры";
+        let result = parse(source, &ParseOptions::default()).unwrap();
+        assert!(!result.syntax_errors.is_empty());
+
+        let line_index = LineIndex::new(source);
+
+        let line_with_errors = 1usize;
+        let errors_on_line = result
+            .syntax_errors
+            .iter()
+            .filter(|e| {
+                line_index
+                    .byte_offset_to_point(source, e.span.start as usize)
+                    .0
+                    == line_with_errors
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            errors_on_line.len(),
+            1,
+            "expected strict line-cap to keep 1 error on line, got: {:?}",
+            result.syntax_errors
+        );
+
+        let err = errors_on_line[0];
+        assert!(
+            !err.message.starts_with("Отсутствует точка с запятой после оператора '"),
+            "semicolon heuristic should be suppressed, got: {:?}",
+            err
+        );
+        assert_ne!(
+            err.message,
+            "Отсутствует тип после 'Новый'",
+            "incomplete `Новый` heuristic should be suppressed"
+        );
+    }
+
+    #[test]
+    fn parse_general_for_rule_points_to_first_garbage_token_and_says_expected_loop() {
+        let source = "Для i = 10 По 0 abc Цикл\nКонецЦикла";
+        let result = parse(source, &ParseOptions::default()).unwrap();
+        assert!(!result.syntax_errors.is_empty());
+
+        let err = result
+            .syntax_errors
+            .iter()
+            .find(|e| e.message.contains("ожидается `Цикл`"))
+            .expect("expected generalized `Для` diagnostic");
+
+        assert_eq!(err.error_type, ErrorType::InvalidSyntax);
+        let abc_offset = source.find("abc").expect("abc offset") as u32;
+        assert_eq!(err.span.start, abc_offset);
+        assert_eq!(err.span.end, abc_offset + "abc".len() as u32);
+    }
+
+    #[test]
+    fn parse_step_word_inside_string_does_not_trigger_step_clause_rule() {
+        let source = "Для i = 10 По 0 \"Шаг\" -1 Цикл\nКонецЦикла";
+        let result = parse(source, &ParseOptions::default()).unwrap();
+        assert!(!result.syntax_errors.is_empty());
+
+        assert!(
+            !result
+                .syntax_errors
+                .iter()
+                .any(|e| e.message.contains("нет синтаксиса `Шаг <expr>`")),
+            "step-clause rewrite should not trigger for `Шаг` inside string, got: {:?}",
+            result.syntax_errors
+        );
     }
 }

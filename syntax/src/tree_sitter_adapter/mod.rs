@@ -86,12 +86,6 @@ impl TreeSitterAdapter {
         let mut syntax_errors =
             syntax_errors::collect_syntax_errors_cached(&root, source, &line_index);
 
-        // IDE-friendly rewrite rules для синтаксических ошибок (только если уже есть parser errors)
-        if !syntax_errors.is_empty() {
-            syntax_errors =
-                syntax_error_enhancers::enhance_syntax_errors(source, &line_index, syntax_errors);
-        }
-
         // Проверяем отсутствующие точки с запятой (BSL linter)
         let semicolon_errors = syntax_errors::check_missing_semicolons(&root, source, &line_index);
         syntax_errors.extend(semicolon_errors);
@@ -99,6 +93,15 @@ impl TreeSitterAdapter {
         // Проверяем незавершённые `Новый` без типа/аргументов (IDE-friendly)
         let new_errors = syntax_errors::check_incomplete_new_expressions(source, &line_index);
         syntax_errors.extend(new_errors);
+
+        // Нормализация синтаксических diagnostics (rewrite/enrich + строгий line-cap + детерминизм)
+        if !syntax_errors.is_empty() {
+            syntax_errors = syntax_error_enhancers::normalize_syntax_errors(
+                source,
+                &line_index,
+                syntax_errors,
+            );
+        }
 
         // Пытаемся извлечь statements даже при наличии ошибок (partial recovery)
         let statements =

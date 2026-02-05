@@ -4,12 +4,23 @@
 //! не меняя грамматику и не добавляя ложноположительных diagnostics на валидном коде.
 
 use std::cmp::Ordering;
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 use bsl_shared::domain::types::{ErrorType, ParseError, RelatedInformation};
 use bsl_shared::ir::Span;
 use tree_sitter::Parser;
 
 use super::span::LineIndex;
+
+thread_local! {
+    static SNIPPET_PARSER: RefCell<Parser> = {
+        let mut parser = Parser::new();
+        let language = tree_sitter_bsl::LANGUAGE.into();
+        let _ = parser.set_language(&language);
+        RefCell::new(parser)
+    };
+}
 
 pub(crate) fn normalize_syntax_errors(
     source: &str,
@@ -21,7 +32,11 @@ pub(crate) fn normalize_syntax_errors(
         return Vec::new();
     }
 
-    let ctx = Context { source, line_index };
+    let ctx = Context {
+        source,
+        line_index,
+        for_unexpected_cache: RefCell::new(HashMap::new()),
+    };
 
     let mut diags = Vec::with_capacity(parser_errors.len() + heuristic_errors.len());
     diags.extend(parser_errors.into_iter().map(|e| SyntaxDiag {
@@ -52,6 +67,7 @@ pub(crate) fn normalize_syntax_errors(
 struct Context<'a> {
     source: &'a str,
     line_index: &'a LineIndex,
+    for_unexpected_cache: RefCell<HashMap<(usize, usize, usize), Option<(usize, usize)>>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,7 +146,17 @@ fn rewrite_for_unexpected_clause(ctx: &Context<'_>, error: &ParseError) -> Optio
     }
 
     let between_masked = &masked[po_end..do_start];
-    let (rel_start, rel_end) = first_unexpected_token_span_in_to_clause(between_masked)?;
+    let cache_key = (line_no, po_end, do_start);
+    let cached = ctx.for_unexpected_cache.borrow().get(&cache_key).cloned();
+    let (rel_start, rel_end) = if let Some(v) = cached {
+        v?
+    } else {
+        let computed = first_unexpected_token_span_in_to_clause(between_masked);
+        ctx.for_unexpected_cache
+            .borrow_mut()
+            .insert(cache_key, computed);
+        computed?
+    };
     let token = line[po_end + rel_start..po_end + rel_end].trim().to_string();
     let line_start_abs = ctx
         .line_index
@@ -271,30 +297,9 @@ fn first_unexpected_token_span_in_to_clause(between_masked: &str) -> Option<(usi
     }
 
     let snippet = format!("x = {};", expr);
-    let mut parser = Parser::new();
-    parser
-        .set_language(&tree_sitter_bsl::LANGUAGE.into())
-        .ok()?;
-    let tree = parser.parse(&snippet, None)?;
-
-    let snippet_line_index = LineIndex::new(&snippet);
-    let errors = super::syntax_errors::collect_syntax_errors_cached(
-        &tree.root_node(),
-        &snippet,
-        &snippet_line_index,
-    );
-    if errors.is_empty() {
-        return None;
-    }
-
-    let first_err = errors
-        .iter()
-        .filter(|e| e.error_type == ErrorType::ParseError)
-        .min_by_key(|e| e.span.start)
-        .or_else(|| errors.iter().min_by_key(|e| e.span.start))?;
-
     let prefix_len = "x = ".len();
-    let err_pos = first_err.span.start as usize;
+    let tree = SNIPPET_PARSER.with(|p| p.borrow_mut().parse(&snippet, None))?;
+    let err_pos = first_error_start_byte(&tree.root_node(), &snippet)?;
     if err_pos < prefix_len {
         return None;
     }
@@ -302,6 +307,39 @@ fn first_unexpected_token_span_in_to_clause(between_masked: &str) -> Option<(usi
     let rel_in_expr = err_pos - prefix_len;
     let abs_in_between = leading_ws + rel_in_expr;
     token_span_at_or_after(between_masked, abs_in_between)
+        .or_else(|| last_token_span(between_masked))
+}
+
+fn first_error_start_byte(root: &tree_sitter::Node<'_>, source: &str) -> Option<usize> {
+    let mut best_error: Option<usize> = None;
+    let mut best_missing: Option<usize> = None;
+
+    let mut stack = vec![*root];
+    while let Some(node) = stack.pop() {
+        if node.kind() == "ERROR" {
+            if let Ok(text) = node.utf8_text(source.as_bytes()) {
+                if text.trim_start().starts_with('&') {
+                    // ignore preprocessor directive errors (consistent with syntax_errors.rs)
+                } else {
+                    let pos = node.start_byte();
+                    best_error = Some(best_error.map_or(pos, |b| b.min(pos)));
+                }
+            } else {
+                let pos = node.start_byte();
+                best_error = Some(best_error.map_or(pos, |b| b.min(pos)));
+            }
+        } else if node.is_missing() {
+            let pos = node.start_byte();
+            best_missing = Some(best_missing.map_or(pos, |b| b.min(pos)));
+        }
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            stack.push(child);
+        }
+    }
+
+    best_error.or(best_missing)
 }
 
 fn cap_one_error_per_line(ctx: &Context<'_>, mut errors: Vec<SyntaxDiag>) -> Vec<SyntaxDiag> {
@@ -423,6 +461,40 @@ fn token_span_at_or_after(haystack: &str, pos: usize) -> Option<(usize, usize)> 
     }
 
     Some((start, end))
+}
+
+fn last_token_span(haystack: &str) -> Option<(usize, usize)> {
+    let bytes = haystack.as_bytes();
+    if bytes.is_empty() {
+        return None;
+    }
+
+    let mut end = bytes.len();
+    while end > 0 && bytes[end - 1].is_ascii_whitespace() {
+        end -= 1;
+    }
+    if end == 0 {
+        return None;
+    }
+
+    let mut start = end - 1;
+    let b = bytes[start];
+
+    if is_word_byte(b) {
+        while start > 0 && is_word_byte(bytes[start - 1]) {
+            start -= 1;
+        }
+        return Some((start, end));
+    }
+
+    if b.is_ascii_digit() {
+        while start > 0 && (bytes[start - 1].is_ascii_digit() || bytes[start - 1] == b'.') {
+            start -= 1;
+        }
+        return Some((start, end));
+    }
+
+    Some((start, start + 1))
 }
 
 fn starts_with_word_ci(haystack: &str, needle: &str) -> bool {

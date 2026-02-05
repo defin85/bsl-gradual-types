@@ -247,6 +247,12 @@ fn missing_token_related_info(
             line_index,
             &[("try_statement", "Начало блока: Попытка")],
         ),
+        "КОНЕЦПОПЫТКИ_KEYWORD" => find_related(
+            node,
+            source,
+            line_index,
+            &[("try_statement", "Начало блока: Попытка")],
+        ),
         "ENDFUNCTION_KEYWORD" => find_related(
             node,
             source,

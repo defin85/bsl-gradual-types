@@ -34,6 +34,7 @@ pub mod directives;
 mod expression_converter;
 pub mod span;
 mod statement_converter;
+mod syntax_error_enhancers;
 mod syntax_errors;
 pub mod utils;
 
@@ -84,6 +85,12 @@ impl TreeSitterAdapter {
         // Собираем синтаксические ошибки из дерева с использованием индекса строк
         let mut syntax_errors =
             syntax_errors::collect_syntax_errors_cached(&root, source, &line_index);
+
+        // IDE-friendly rewrite rules для синтаксических ошибок (только если уже есть parser errors)
+        if !syntax_errors.is_empty() {
+            syntax_errors =
+                syntax_error_enhancers::enhance_syntax_errors(source, &line_index, syntax_errors);
+        }
 
         // Проверяем отсутствующие точки с запятой (BSL linter)
         let semicolon_errors = syntax_errors::check_missing_semicolons(&root, source, &line_index);

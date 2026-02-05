@@ -1176,12 +1176,38 @@ impl TypeInferencer {
 
     fn infer_method_call(&self, receiver: &TypeResolution, method: &str) -> TypeResolution {
         let type_name = signature_lookup_type_name(receiver);
+        let metadata_name = SignatureIndex::extract_metadata_name(&type_name);
+        let concretize_return_type = |return_type: &str| -> String {
+            let Some(metadata_name) = metadata_name else {
+                return return_type.to_string();
+            };
+
+            // Подставляем имя объекта только когда return type действительно шаблонный:
+            // - содержит placeholder "<...>" / "&lt;...&gt;"
+            // - или является фасетным базовым типом без ".Имя"
+            //
+            // Это снижает риск перезаписать уже-конкретизированный return type
+            // (например "СправочникСсылка.Номенклатура").
+            if return_type.contains('<')
+                || return_type.contains("&lt;")
+                || !return_type.contains('.')
+            {
+                let substituted = SignatureIndex::substitute_type_name(return_type, metadata_name);
+                if substituted != return_type {
+                    return substituted;
+                }
+            }
+
+            return_type.to_string()
+        };
+
         if let Some(sig) = self.signature_index.find_method(&type_name, method) {
             if let Some(return_type) = sig.return_type.as_deref().filter(|s| !s.is_empty()) {
-                if let Some(resolved) = self.try_resolve_configuration_type(return_type) {
+                let return_type = concretize_return_type(return_type);
+                if let Some(resolved) = self.try_resolve_configuration_type(&return_type) {
                     return resolved;
                 }
-                return self.resolver.resolve_expression_sync(return_type);
+                return self.resolver.resolve_expression_sync(&return_type);
             }
         }
 
@@ -1192,6 +1218,7 @@ impl TypeInferencer {
             .find(|m| m.name.to_lowercase() == method_key)
         {
             if let Some(return_type) = (!m.return_type.is_empty()).then_some(m.return_type) {
+                let return_type = concretize_return_type(&return_type);
                 if let Some(resolved) = self.try_resolve_configuration_type(&return_type) {
                     return resolved;
                 }
@@ -1286,7 +1313,9 @@ mod tests {
     use bsl_shared::domain::repository::InMemoryTypeRepository;
     use bsl_shared::domain::signature_index::{MethodSignature, SignatureSource};
     use bsl_shared::domain::type_id::TypeId;
-    use bsl_shared::domain::types::{PrimitiveType, RawDataSource, RawPropertyData, RawTypeData};
+    use bsl_shared::domain::types::{
+        FacetKind, MetadataKind, PrimitiveType, RawDataSource, RawPropertyData, RawTypeData,
+    };
     use bsl_shared::TypeRepository;
     use bsl_syntax::ParseOptions;
 
@@ -1347,6 +1376,47 @@ mod tests {
                 None,
                 None,
                 SignatureSource::Configuration,
+                None,
+                Default::default(),
+            ),
+        );
+        repository_impl.set_signature_index(sigs.clone());
+
+        let repository =
+            repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+        let resolver = Arc::new(TypeResolver::new(repository.clone()));
+
+        Arc::new(SemanticDeps {
+            repository,
+            signature_index: sigs,
+            resolver: Some(resolver),
+            platform_signatures_loaded: true,
+        })
+    }
+
+    fn deps_with_document_create_document_method() -> Arc<SemanticDeps> {
+        let repository_impl = Arc::new(InMemoryTypeRepository::new());
+        repository_impl
+            .load_types(vec![RawTypeData {
+                name: "Документы.РеализацияТоваровУслуг".to_string(),
+                source: RawDataSource::Configuration,
+                facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+                kind: Some(MetadataKind::Document),
+                ..Default::default()
+            }])
+            .expect("load config document type");
+
+        let mut sigs = SignatureIndex::new();
+        sigs.add_platform_method(
+            TypeId::new("ДокументМенеджер"),
+            MethodSignature::new(
+                "СоздатьДокумент".to_string(),
+                Some("ДокументМенеджер".to_string()),
+                vec![],
+                Some("ДокументОбъект.<Имя документа>".to_string()),
+                None,
+                None,
+                SignatureSource::Platform,
                 None,
                 Default::default(),
             ),
@@ -1430,6 +1500,31 @@ mod tests {
             .type_at_byte_offset(offset)
             .expect("type at function call");
         assert_eq!(result.type_name(), "Строка");
+    }
+
+    #[test]
+    fn substitutes_placeholder_return_type_for_document_method_call() {
+        let source = r#"Процедура Тест()
+    Док = Документы.РеализацияТоваровУслуг.СоздатьДокумент();
+КонецПроцедуры
+"#;
+        let program = parse(source);
+        let deps = deps_with_document_create_document_method();
+        let index = build_type_index_with_path(&program, "test.bsl", deps);
+
+        let offset = source
+            .find("СоздатьДокумент()")
+            .map(|idx| idx + "СоздатьДокумент".len())
+            .expect("method call") as u32;
+        let result = index
+            .type_at_byte_offset(offset)
+            .expect("type at method call");
+        assert_eq!(
+            result.type_name(),
+            "ДокументОбъект.РеализацияТоваровУслуг",
+            "Expected placeholder <Имя документа> to be substituted from receiver metadata name"
+        );
+        assert!(!result.is_unknown());
     }
 
     #[test]

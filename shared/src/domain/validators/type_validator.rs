@@ -226,6 +226,21 @@ impl<'a> TypeValidator<'a> {
         if let Some(reason) = &resolution.metadata.uncertainty_reason {
             match reason {
                 UncertaintyReason::MetadataObjectNotFound { kind, name } => {
+                    // Плейсхолдеры из Syntax Helper (например "<Имя документа>") не являются
+                    // реальными объектами метаданных и не должны генерировать ошибку
+                    // "не найден в конфигурации".
+                    //
+                    // Такие имена возникают в сигнатурах платформы/шаблонных типах и
+                    // должны оставаться нейтральными (graceful degradation).
+                    let n = name.trim();
+                    if n.contains('<')
+                        || n.contains('>')
+                        || n.contains("&lt;")
+                        || n.contains("&gt;")
+                    {
+                        return None;
+                    }
+
                     // Generate suggestions for similar names
                     let suggestions = self.metadata_lookup.suggest_similar_names(*kind, name, 3);
 

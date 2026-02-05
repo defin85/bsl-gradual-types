@@ -243,6 +243,36 @@ fn test_validate_from_resolution_generates_error_for_unknown_metadata() {
     }
 }
 
+/// TEST 4b: validate_from_resolution НЕ должен ругаться на плейсхолдеры из Syntax Helper
+///
+/// Сценарий:
+/// - Конфигурация "загружена" (в репозитории есть хотя бы один конфиг-тип)
+/// - Резолвим шаблонный фасетный тип из справки: "ДокументОбъект.<Имя документа>"
+/// - validate_from_resolution() не должна генерировать "не найден в конфигурации"
+#[test]
+fn test_validate_from_resolution_skips_placeholder_metadata_name() {
+    let repo = create_repository_with_other_documents();
+    let resolver = TypeResolver::new(repo.clone());
+    let metadata_lookup = TypeMetadataLookup::new(repo);
+    let validator = TypeValidator::new(&metadata_lookup);
+
+    let resolution = resolver.resolve_expression_sync("ДокументОбъект.<Имя документа>");
+    assert_eq!(resolution.certainty, Certainty::Unknown);
+    assert!(
+        matches!(
+            resolution.metadata.uncertainty_reason,
+            Some(UncertaintyReason::MetadataObjectNotFound { .. })
+        ),
+        "Expected MetadataObjectNotFound for placeholder type"
+    );
+
+    let error = validator.validate_from_resolution(&resolution);
+    assert_eq!(
+        error, None,
+        "Placeholder metadata names must not produce 'not found in configuration' errors"
+    );
+}
+
 /// TEST 5: Graceful degradation - конфигурация не загружена
 ///
 /// Сценарий:

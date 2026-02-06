@@ -16,7 +16,7 @@ Tool MUST также принимать legacy snake_case поля как alias 
 - **WHEN** клиент вызывает tool с `env_overrides.BSL_CACHE_DISABLE=true`
 - **THEN** поведение совпадает с `envOverrides.BSL_CACHE_DISABLE=true`
 
-### Requirement: MCP tool возвращает effective runtime-config и канонические поля
+### Requirement: bsl-agent принимает stable и dev-only overrides
 Система SHALL возвращать в ответах `workspace_get_settings` и `workspace_update_settings`:
 - effective runtime-config snapshot,
 - канонические поля (`envOverrides`, `devEnvOverrides`, `allowDevOverrides`).
@@ -44,4 +44,3 @@ Tool MUST требовать `ready=true` и SHALL отклонять не-ready
 - **GIVEN** сессия `ready=false`
 - **WHEN** клиент вызывает `workspace_get_observability_metrics(session_id)`
 - **THEN** сервер возвращает `INVALID_PARAMS` с сообщением о том, что workspace не ready
-

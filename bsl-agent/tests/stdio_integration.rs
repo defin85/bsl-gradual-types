@@ -623,29 +623,45 @@ async fn stdio_type_tools_require_ready_session() {
     let session_id = open.session_id.clone();
 
     // Startup for an empty workspace can complete very fast on some machines.
-    // Verify behavior against the current ready state to avoid flaky races.
-    let status: WorkspaceStatusResponse = call_tool(
-        &service,
-        "workspace_status",
-        json!({ "session_id": &session_id }),
-    )
-    .await;
-    if status.ready {
-        let start: JobStartResponse = call_tool(
-            &service,
-            "bsl_types_list_start",
-            json!({ "session_id": &session_id, "page": 1, "limit": 50 }),
-        )
+    // Accept both outcomes and verify they are consistent with ready state.
+    let attempt = service
+        .call_tool(CallToolRequestParam {
+            name: "bsl_types_list_start".into(),
+            arguments: Some(json_object(
+                json!({ "session_id": &session_id, "page": 1, "limit": 50 }),
+            )),
+        })
         .await;
-        assert!(!start.job_id.is_empty());
-    } else {
-        call_tool_expect_invalid_params(
-            &service,
-            "bsl_types_list_start",
-            json!({ "session_id": &session_id, "page": 1, "limit": 50 }),
-            "workspace not ready",
-        )
-        .await;
+
+    match attempt {
+        Ok(result) => {
+            let value = extract_json_text(result);
+            let start: JobStartResponse = serde_json::from_value(value).expect("decode job start");
+            assert!(!start.job_id.is_empty());
+
+            let status: WorkspaceStatusResponse = call_tool(
+                &service,
+                "workspace_status",
+                json!({ "session_id": &session_id }),
+            )
+            .await;
+            assert!(
+                status.ready,
+                "type tool accepted request while workspace is still not ready"
+            );
+        }
+        Err(err) => {
+            let ServiceError::McpError(err) = err else {
+                panic!("unexpected error: {err:?}");
+            };
+            assert_eq!(err.code.0, rmcp::model::ErrorCode::INVALID_PARAMS.0);
+            assert!(
+                err.message.contains("workspace not ready"),
+                "message={:?} does not contain {:?}",
+                err.message,
+                "workspace not ready"
+            );
+        }
     }
 
     let _close: serde_json::Value = call_tool(

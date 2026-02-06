@@ -108,9 +108,7 @@ pub(crate) fn intellisense_v2_slow_wait_warn_threshold() -> Option<Duration> {
 
 pub(crate) fn intellisense_v2_slow_snapshot_warn_threshold() -> Option<Duration> {
     bsl_runtime::system::global_runtime_config()
-        .get_u64(
-            bsl_runtime::system::RuntimeKey::IntellisenseV2SlowSnapshotWarnMs,
-        )
+        .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2SlowSnapshotWarnMs)
         .map(Duration::from_millis)
 }
 

@@ -144,6 +144,33 @@ mod tests {
         let settings: BslSettings = serde_json::from_value(raw).expect("BslSettings");
         assert!(settings.enable_flow_sensitive);
     }
+
+    #[test]
+    fn bsl_settings_allow_dev_overrides_uses_canonical_when_present() {
+        let raw = serde_json::json!({
+            "hover": { "detailLevel": "full", "maxMethods": 10, "maxProperties": 5, "showCertainty": true },
+            "formatting": { "enabled": false, "indentSize": 4 },
+            "allowDevOverrides": false,
+            "dev": { "enableDevEnvOverrides": true }
+        });
+
+        let settings: BslSettings = serde_json::from_value(raw).expect("BslSettings");
+        assert_eq!(settings.allow_dev_overrides, Some(false));
+        assert!(!settings.enable_dev_env_overrides());
+    }
+
+    #[test]
+    fn bsl_settings_allow_dev_overrides_falls_back_to_legacy_flag() {
+        let raw = serde_json::json!({
+            "hover": { "detailLevel": "full", "maxMethods": 10, "maxProperties": 5, "showCertainty": true },
+            "formatting": { "enabled": false, "indentSize": 4 },
+            "dev": { "enableDevEnvOverrides": true }
+        });
+
+        let settings: BslSettings = serde_json::from_value(raw).expect("BslSettings");
+        assert_eq!(settings.allow_dev_overrides, None);
+        assert!(settings.enable_dev_env_overrides());
+    }
 }
 
 /// MILESTONE 3.6 Phase 1+3: BSL Settings (from workspace/didChangeConfiguration)
@@ -164,11 +191,27 @@ pub struct BslSettings {
     /// Stable runtime overrides for `BSL_*` keys (see bsl-runtime runtime_config registry).
     #[serde(default, rename = "envOverrides")]
     pub env_overrides: HashMap<String, serde_json::Value>,
-    /// Dev-only runtime overrides for `BSL_*` keys (applied only when `dev.enableDevEnvOverrides=true`).
+    /// Dev-only runtime overrides for `BSL_*` keys (applied only when effective gate is true).
     #[serde(default, rename = "devEnvOverrides")]
     pub dev_env_overrides: HashMap<String, serde_json::Value>,
+    /// Canonical gate for dev-only runtime overrides used by both LSP and bsl-agent payloads.
+    ///
+    /// If absent, legacy `dev.enableDevEnvOverrides` is used for backward compatibility.
+    #[serde(default, rename = "allowDevOverrides")]
+    pub allow_dev_overrides: Option<bool>,
     #[serde(default)]
     pub dev: DevSettings,
+}
+
+impl BslSettings {
+    /// Effective gate for dev-only runtime overrides.
+    ///
+    /// Canonical `allowDevOverrides` takes precedence; legacy `dev.enableDevEnvOverrides`
+    /// is used only as fallback for backward compatibility.
+    pub fn enable_dev_env_overrides(&self) -> bool {
+        self.allow_dev_overrides
+            .unwrap_or(self.dev.enable_dev_env_overrides)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]

@@ -1,6 +1,6 @@
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs;
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 

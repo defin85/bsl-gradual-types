@@ -588,11 +588,11 @@ impl LanguageServer for BslLanguageServer {
 
                             let dev_report = store.replace_dev_overrides(
                                 &new_settings.dev_env_overrides,
-                                new_settings.dev.enable_dev_env_overrides,
+                                new_settings.enable_dev_env_overrides(),
                             );
                             if dev_report.dev_overrides_ignored {
                                 warn!(
-                                    "RuntimeConfig dev-only overrides ignored (enable bsl.dev.enableDevEnvOverrides=true to apply)."
+                                    "RuntimeConfig dev-only overrides ignored (set bsl.allowDevOverrides=true or legacy bsl.dev.enableDevEnvOverrides=true to apply)."
                                 );
                             } else if !dev_report.ignored_unknown_keys.is_empty()
                                 || !dev_report.ignored_invalid_values.is_empty()
@@ -651,9 +651,7 @@ impl LanguageServer for BslLanguageServer {
                                 .await;
 
                             let strict = bsl_runtime::system::global_runtime_config()
-                                .get_bool(
-                                    bsl_runtime::system::RuntimeKey::CacheStrictFingerprint,
-                                )
+                                .get_bool(bsl_runtime::system::RuntimeKey::CacheStrictFingerprint)
                                 .unwrap_or(false);
                             self.coordinator.set_strict_fingerprint(strict);
                         }

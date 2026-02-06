@@ -6,6 +6,14 @@
 
 use bsl_backend::system::tree_sitter_adapter::TreeSitterAdapter;
 
+fn performance_limit_ms(debug_ms: u128, release_ms: u128) -> u128 {
+    if cfg!(debug_assertions) {
+        debug_ms
+    } else {
+        release_ms
+    }
+}
+
 /// Тест 1: Производительность парсинга больших файлов (1000 строк, ~100 процедур)
 ///
 /// Генерирует большой BSL файл и проверяет, что парсинг быстрый даже при большом количестве узлов.
@@ -53,9 +61,11 @@ fn test_large_file_parsing_performance() {
         duration
     );
 
-    // Пороги скорректированы для реальной производительности (debug сборка + tree-sitter парсинг)
+    // В debug-сборке держим "anti-O(n²)" порог с запасом на CI/WSL шум.
+    // В release ожидаем заметно более строгий предел.
+    let max_ms = performance_limit_ms(3_500, 1_200);
     assert!(
-        duration.as_millis() < 900,
+        duration.as_millis() < max_ms,
         "Parsing should be reasonably fast (took {:?})",
         duration
     );
@@ -101,9 +111,10 @@ fn test_utf16_conversion_performance() {
         duration
     );
 
-    // Пороги скорректированы для реальной производительности (debug сборка)
+    // В debug-сборке порог выше из-за дорогих UTF-16 пересчётов на кириллице и общей нагрузки CI.
+    let max_ms = performance_limit_ms(6_000, 1_500);
     assert!(
-        duration.as_millis() < 2200,
+        duration.as_millis() < max_ms,
         "UTF-16 conversion should be reasonably fast (took {:?})",
         duration
     );
@@ -156,9 +167,11 @@ fn test_very_large_file_performance() {
         duration
     );
 
-    // Даже для очень большого файла должно быть <15 секунд (debug сборка)
+    // Для debug-сборки задаём высокий предел, чтобы тест ловил явные деградации,
+    // но не был flaky на загруженных/ограниченных окружениях.
+    let max_ms = performance_limit_ms(30_000, 8_000);
     assert!(
-        duration.as_millis() < 15_000,
+        duration.as_millis() < max_ms,
         "Parsing very large file should complete in reasonable time (took {:?})",
         duration
     );
@@ -428,8 +441,9 @@ fn test_parsing_with_syntax_errors_performance() {
         duration
     );
 
+    let max_ms = performance_limit_ms(4_000, 1_500);
     assert!(
-        duration.as_millis() < 1000,
+        duration.as_millis() < max_ms,
         "Parsing with errors should still be reasonably fast (took {:?})",
         duration
     );

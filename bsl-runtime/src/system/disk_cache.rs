@@ -1154,16 +1154,14 @@ mod tests {
         fn set(key: &'static str, value: &str) -> Self {
             let prev = std::env::var(key).ok();
             std::env::set_var(key, value);
-            crate::system::runtime_config::global_runtime_config()
-                .reload_env_bootstrap_from_env();
+            crate::system::runtime_config::global_runtime_config().reload_env_bootstrap_from_env();
             Self { key, prev }
         }
 
         fn remove(key: &'static str) -> Self {
             let prev = std::env::var(key).ok();
             std::env::remove_var(key);
-            crate::system::runtime_config::global_runtime_config()
-                .reload_env_bootstrap_from_env();
+            crate::system::runtime_config::global_runtime_config().reload_env_bootstrap_from_env();
             Self { key, prev }
         }
     }
@@ -1175,8 +1173,7 @@ mod tests {
             } else {
                 std::env::remove_var(self.key);
             }
-            crate::system::runtime_config::global_runtime_config()
-                .reload_env_bootstrap_from_env();
+            crate::system::runtime_config::global_runtime_config().reload_env_bootstrap_from_env();
         }
     }
 

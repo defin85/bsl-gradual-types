@@ -171,6 +171,34 @@ Legacy-compatible payload (accepted on input):
 }
 ```
 
+### Example VS Code settings payload (`workspace/didChangeConfiguration`, section `bsl`)
+
+Canonical form:
+
+```json
+{
+  "bsl": {
+    "envOverrides": { "BSL_CACHE_DISABLE": true },
+    "allowDevOverrides": true,
+    "devEnvOverrides": { "BSL_COMPLETION_TRACE": true }
+  }
+}
+```
+
+Legacy compatibility (still supported by LSP while migrating clients):
+
+```json
+{
+  "bsl": {
+    "envOverrides": { "BSL_CACHE_DISABLE": true },
+    "devEnvOverrides": { "BSL_COMPLETION_TRACE": true },
+    "dev": {
+      "enableDevEnvOverrides": true
+    }
+  }
+}
+```
+
 ## MCP type discovery tools (stdio)
 
 Read-only, async tools for navigating platform/configuration types. All follow the `*_start` pattern and return a `job_id`.

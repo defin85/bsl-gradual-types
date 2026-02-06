@@ -44,8 +44,8 @@ pub(crate) fn parse_tree(source: &str) -> Result<tree_sitter::Tree, ParseFatalEr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bsl_shared::domain::types::ErrorType;
     use crate::tree_sitter_adapter::span::LineIndex;
+    use bsl_shared::domain::types::ErrorType;
 
     #[test]
     fn parse_valid_code_has_no_syntax_errors() {
@@ -163,8 +163,7 @@ mod tests {
 
     #[test]
     fn parse_unclosed_try_is_rewritten_and_preserves_related_info() {
-        let source =
-            "Попытка\n    Сообщить(1);\nИсключение\n    Сообщить(2);\nСообщить(3);\n";
+        let source = "Попытка\n    Сообщить(1);\nИсключение\n    Сообщить(2);\nСообщить(3);\n";
         let result = parse(source, &ParseOptions::default()).unwrap();
         assert!(!result.syntax_errors.is_empty());
 
@@ -245,13 +244,13 @@ mod tests {
 
         let err = errors_on_line[0];
         assert!(
-            !err.message.starts_with("Отсутствует точка с запятой после оператора '"),
+            !err.message
+                .starts_with("Отсутствует точка с запятой после оператора '"),
             "semicolon heuristic should be suppressed, got: {:?}",
             err
         );
         assert_ne!(
-            err.message,
-            "Отсутствует тип после 'Новый'",
+            err.message, "Отсутствует тип после 'Новый'",
             "incomplete `Новый` heuristic should be suppressed"
         );
     }

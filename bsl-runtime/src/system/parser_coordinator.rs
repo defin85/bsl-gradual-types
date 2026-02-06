@@ -19,9 +19,9 @@ use crate::system::disk_cache::{DiskCache, DiskCacheKey};
 use crate::system::intellisense_index::{
     IndexItem, IndexItemKind, IndexKind, IntellisenseIndexStore, SymbolKind, SymbolScope,
 };
+use crate::system::runtime_config::{global_runtime_config, RuntimeKey};
 use crate::system::tree_cache::{hash_content, TreeCache};
 use crate::system::tree_sitter_adapter::TreeSitterAdapter;
-use crate::system::runtime_config::{global_runtime_config, RuntimeKey};
 use bsl_shared::domain::repository::TypeRepository;
 use bsl_shared::domain::resolver::TypeResolver;
 

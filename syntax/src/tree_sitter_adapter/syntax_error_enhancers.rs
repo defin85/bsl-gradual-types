@@ -3,8 +3,8 @@
 //! Цель: улучшить UX в IDE/LSP (message/span) для распознаваемых паттернов,
 //! не меняя грамматику и не добавляя ложноположительных diagnostics на валидном коде.
 
-use std::cmp::Ordering;
 use std::cell::RefCell;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use bsl_shared::domain::types::{ErrorType, ParseError, RelatedInformation};
@@ -112,9 +112,9 @@ fn rewrite_for_step_clause(ctx: &Context<'_>, error: &ParseError) -> Option<Pars
     let (step_rel_start, step_rel_end) =
         find_word_ci(between, "Шаг").or_else(|| find_word_ci(between, "step"))?;
 
-    let line_start_abs = ctx
-        .line_index
-        .utf16_position_to_byte_offset(ctx.source, line_no as u32, 0) as u32;
+    let line_start_abs =
+        ctx.line_index
+            .utf16_position_to_byte_offset(ctx.source, line_no as u32, 0) as u32;
     let abs_start = line_start_abs + (po_end + step_rel_start) as u32;
     let abs_end = line_start_abs + (po_end + step_rel_end) as u32;
 
@@ -157,10 +157,12 @@ fn rewrite_for_unexpected_clause(ctx: &Context<'_>, error: &ParseError) -> Optio
             .insert(cache_key, computed);
         computed?
     };
-    let token = line[po_end + rel_start..po_end + rel_end].trim().to_string();
-    let line_start_abs = ctx
-        .line_index
-        .utf16_position_to_byte_offset(ctx.source, line_no as u32, 0) as u32;
+    let token = line[po_end + rel_start..po_end + rel_end]
+        .trim()
+        .to_string();
+    let line_start_abs =
+        ctx.line_index
+            .utf16_position_to_byte_offset(ctx.source, line_no as u32, 0) as u32;
     let abs_start = line_start_abs + (po_end + rel_start) as u32;
     let abs_end = line_start_abs + (po_end + rel_end) as u32;
 
@@ -179,16 +181,19 @@ fn rewrite_if_missing_then(ctx: &Context<'_>, error: &ParseError) -> Option<Pars
     let (line_no, line, masked) = error_line(ctx, error)?;
     let trimmed_masked = masked.trim_start();
 
-    if !starts_with_word_ci(trimmed_masked, "Если") && !starts_with_word_ci(trimmed_masked, "if") {
+    if !starts_with_word_ci(trimmed_masked, "Если") && !starts_with_word_ci(trimmed_masked, "if")
+    {
         return None;
     }
-    if line_contains_word_ci(trimmed_masked, "Тогда") || line_contains_word_ci(trimmed_masked, "then") {
+    if line_contains_word_ci(trimmed_masked, "Тогда")
+        || line_contains_word_ci(trimmed_masked, "then")
+    {
         return None;
     }
 
-    let line_start_abs = ctx
-        .line_index
-        .utf16_position_to_byte_offset(ctx.source, line_no as u32, 0);
+    let line_start_abs =
+        ctx.line_index
+            .utf16_position_to_byte_offset(ctx.source, line_no as u32, 0);
     let line_end_abs = line_start_abs + line.len();
     let end_u32 = line_end_abs.min(u32::MAX as usize) as u32;
 
@@ -207,15 +212,18 @@ fn rewrite_try_structure(ctx: &Context<'_>, error: &ParseError) -> Option<ParseE
     match error.error_type {
         ErrorType::MissingToken => {
             let msg = error.message.as_str();
-            is_missing_end =
-                msg.contains("ENDTRY_KEYWORD") || msg.contains("КОНЕЦПОПЫТКИ_KEYWORD");
+            is_missing_end = msg.contains("ENDTRY_KEYWORD") || msg.contains("КОНЕЦПОПЫТКИ_KEYWORD");
             is_missing_except =
                 msg.contains("EXCEPT_KEYWORD") || msg.contains("ИСКЛЮЧЕНИЕ_KEYWORD");
         }
         ErrorType::ParseError => {
             let start = (error.span.start as usize).min(ctx.source.len());
             let end = (error.span.end as usize).min(ctx.source.len());
-            let (start, end) = if start <= end { (start, end) } else { (end, start) };
+            let (start, end) = if start <= end {
+                (start, end)
+            } else {
+                (end, start)
+            };
             let slice = &ctx.source[start..end];
 
             // В `ParseError` мы видим сырой кусок текста. Для безопасности маскируем строки/комментарии
@@ -252,9 +260,10 @@ fn rewrite_try_structure(ctx: &Context<'_>, error: &ParseError) -> Option<ParseE
         if let Some((start, end)) =
             find_word_ci(&masked, "Попытка").or_else(|| find_word_ci(&masked, "try"))
         {
-            let line_start_abs = ctx
-                .line_index
-                .utf16_position_to_byte_offset(ctx.source, line_no as u32, 0) as u32;
+            let line_start_abs =
+                ctx.line_index
+                    .utf16_position_to_byte_offset(ctx.source, line_no as u32, 0)
+                    as u32;
             span = Span::new(line_start_abs + start as u32, line_start_abs + end as u32);
             let _ = line;
         }
@@ -372,7 +381,9 @@ fn sort_deterministically(mut errors: Vec<SyntaxDiag>) -> Vec<SyntaxDiag> {
             .cmp(&b.error.span.start)
             .then_with(|| a.error.span.end.cmp(&b.error.span.end))
             .then_with(|| origin_rank(a.origin).cmp(&origin_rank(b.origin)))
-            .then_with(|| error_type_rank(a.error.error_type).cmp(&error_type_rank(b.error.error_type)))
+            .then_with(|| {
+                error_type_rank(a.error.error_type).cmp(&error_type_rank(b.error.error_type))
+            })
             .then_with(|| a.error.message.cmp(&b.error.message))
     });
     errors

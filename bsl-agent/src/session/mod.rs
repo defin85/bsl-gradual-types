@@ -1158,6 +1158,11 @@ impl SessionManager {
 
         let mut report = stable_report;
         report
+            .requires_restart_keys
+            .extend(dev_report.requires_restart_keys.iter().cloned());
+        report.requires_restart_keys.sort();
+        report.requires_restart_keys.dedup();
+        report
             .ignored_unknown_keys
             .extend(dev_report.ignored_unknown_keys);
         report
@@ -3761,6 +3766,57 @@ mod tests {
                 other => panic!("startup job ended unexpectedly: {}", other.as_str()),
             }
         }
+    }
+
+    #[tokio::test]
+    async fn observability_metrics_rejects_not_ready_session_deterministically() {
+        let manager = SessionManager::new();
+        let session_uuid = uuid::Uuid::new_v4();
+        let session_id = session_uuid.to_string();
+        let temp = tempfile::TempDir::new().expect("tempdir");
+
+        {
+            let mut sessions = manager.sessions.write().await;
+            sessions.insert(
+                session_uuid,
+                WorkspaceSession {
+                    roots: vec![RootEntry {
+                        root_id: "root".to_string(),
+                        path: temp.path().to_path_buf(),
+                    }],
+                    documents: DocumentStore::default(),
+                    analysis_revision: 0,
+                    settings: WorkspaceSettings {
+                        platform_docs_archive: None,
+                        platform_version: None,
+                        configuration_path: None,
+                        mode: None,
+                        env_overrides: HashMap::new(),
+                        dev_env_overrides: HashMap::new(),
+                        allow_dev_overrides: false,
+                    },
+                    startup: None,
+                    startup_job_id: None,
+                    startup_phase: "startup/starting".to_string(),
+                    startup_progress: 0,
+                    startup_error: None,
+                    created_at: crate::state::now_unix_secs(),
+                    id_map: IdMap::default(),
+                    pack_store: PackStore::default(),
+                },
+            );
+        }
+
+        let err = manager
+            .observability_metrics_get(&session_id)
+            .await
+            .expect_err("workspace_get_observability_metrics must reject not-ready session");
+        assert_eq!(err.code.0, rmcp::model::ErrorCode::INVALID_PARAMS.0);
+        assert!(
+            err.message.contains("workspace not ready"),
+            "unexpected error message: {}",
+            err.message
+        );
     }
 
     #[tokio::test]

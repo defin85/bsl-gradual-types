@@ -18,8 +18,9 @@ use types::{
     BslSymbolSearchParams, BslTypeAtPositionParams, BslTypeGetParams, BslTypesListParams,
     BslTypesSearchParams, BuildInfoParams, ContextExpandParams, ContextPackParams, JobCancelParams,
     JobResultParams, JobStatusParams, JobWaitParams, McpHelpParams, UiUrlParams,
-    WorkspaceCloseParams, WorkspaceGetSettingsParams, WorkspaceListParams, WorkspaceOpenParams,
-    WorkspaceResumeParams, WorkspaceStatusParams, WorkspaceUpdateSettingsParams,
+    WorkspaceCloseParams, WorkspaceGetObservabilityMetricsParams, WorkspaceGetSettingsParams,
+    WorkspaceListParams, WorkspaceOpenParams, WorkspaceResumeParams, WorkspaceStatusParams,
+    WorkspaceUpdateSettingsParams,
 };
 use types::{WorkspaceDocumentsClearParams, WorkspaceDocumentsSetParams};
 
@@ -72,6 +73,8 @@ impl BslAgentHandler {
         let mut quickstart = vec![
             "workspace_open(roots[], platform_docs_archive?, configuration_path?, platform_version?, mode?)".to_string(),
             "workspace_status(session_id) poll until ready=true".to_string(),
+            "workspace_get_settings/workspace_update_settings use camelCase overrides payload (legacy snake_case accepted)".to_string(),
+            "workspace_get_observability_metrics(session_id)".to_string(),
             "workspace_documents_set(session_id, files[], mark_hot=true)".to_string(),
             "bsl_diagnostics_start(...) / bsl_symbol_search_start(...) / context_pack_start(...)".to_string(),
             "bsl_types_list_start(...) / bsl_types_search_start(...) / bsl_type_get_start(...)".to_string(),
@@ -236,6 +239,30 @@ impl BslAgentHandler {
                     }));
                     notes.push("bsl_type_get_start returns a TypeDto with properties[] and tabularSections[] for configuration objects.".to_string());
                 }
+                "workspace_update_settings" => {
+                    examples.push(serde_json::json!({
+                        "name": "workspace_update_settings",
+                        "arguments": {
+                            "session_id": "<session_id>",
+                            "envOverrides": { "BSL_CACHE_DISABLE": true },
+                            "allowDevOverrides": true,
+                            "devEnvOverrides": { "BSL_COMPLETION_TRACE": true }
+                        }
+                    }));
+                    examples.push(serde_json::json!({
+                        "name": "workspace_update_settings",
+                        "arguments": {
+                            "session_id": "<session_id>",
+                            "env_overrides": { "BSL_CACHE_DISABLE": true }
+                        }
+                    }));
+                }
+                "workspace_get_observability_metrics" => {
+                    examples.push(serde_json::json!({
+                        "name": "workspace_get_observability_metrics",
+                        "arguments": { "session_id": "<session_id>" }
+                    }));
+                }
                 other => {
                     return Err(rmcp::ErrorData::invalid_params(
                         format!("unknown tool_name: {other}"),
@@ -248,7 +275,7 @@ impl BslAgentHandler {
                 0,
                 "mcp_help(tool_name?) for examples (read-only)".to_string(),
             );
-            notes.push("Pass tool_name to get examples: workspace_open, workspace_documents_set, workspace_documents_clear, bsl_diagnostics_start, bsl_type_at_position_start, bsl_members_start, bsl_types_list_start, bsl_types_search_start, bsl_type_get_start, job_wait.".to_string());
+            notes.push("Pass tool_name to get examples: workspace_open, workspace_update_settings, workspace_get_observability_metrics, workspace_documents_set, workspace_documents_clear, bsl_diagnostics_start, bsl_type_at_position_start, bsl_members_start, bsl_types_list_start, bsl_types_search_start, bsl_type_get_start, job_wait.".to_string());
         }
 
         Content::json(McpHelpResponse {
@@ -342,12 +369,15 @@ impl BslAgentHandler {
         &self,
         Parameters(params): Parameters<WorkspaceGetSettingsParams>,
     ) -> Result<Content, rmcp::ErrorData> {
-        let response = self.session_manager.settings_get(&params.session_id).await?;
+        let response = self
+            .session_manager
+            .settings_get(&params.session_id)
+            .await?;
         Content::json(response)
     }
 
     #[tool(
-        description = "Patch unified runtime settings for this session. env_overrides/dev_env_overrides are maps of BSL_* keys to JSON values; null removes a key."
+        description = "Patch unified runtime settings for this session. Use camelCase payload: envOverrides/devEnvOverrides/allowDevOverrides (legacy snake_case aliases are accepted). null removes a key."
     )]
     async fn workspace_update_settings(
         &self,
@@ -361,6 +391,20 @@ impl BslAgentHandler {
                 params.dev_env_overrides.as_ref(),
                 params.allow_dev_overrides,
             )
+            .await?;
+        Content::json(response)
+    }
+
+    #[tool(
+        description = "Get observability metrics snapshot for a ready workspace session (read-only)."
+    )]
+    async fn workspace_get_observability_metrics(
+        &self,
+        Parameters(params): Parameters<WorkspaceGetObservabilityMetricsParams>,
+    ) -> Result<Content, rmcp::ErrorData> {
+        let response = self
+            .session_manager
+            .observability_metrics_get(&params.session_id)
             .await?;
         Content::json(response)
     }

@@ -216,6 +216,7 @@ async fn stdio_tools_list_and_lifecycle_smoke() {
         "workspace_status",
         "workspace_get_settings",
         "workspace_update_settings",
+        "workspace_get_observability_metrics",
         "workspace_close",
         "workspace_resume",
         "workspace_list",
@@ -284,29 +285,41 @@ async fn stdio_workspace_settings_runtime_overrides_roundtrip() {
     let session_id = open.session_id.clone();
     let _status = wait_workspace_ready(&service, &open).await;
 
-    let before: WorkspaceGetSettingsResponse = call_tool(
+    let before_raw: serde_json::Value = call_tool(
         &service,
         "workspace_get_settings",
         json!({ "session_id": &session_id }),
     )
     .await;
+    assert!(before_raw.get("envOverrides").is_some());
+    assert!(before_raw.get("devEnvOverrides").is_some());
+    assert!(before_raw.get("allowDevOverrides").is_some());
+    assert!(before_raw.get("env_overrides").is_none());
+    let before: WorkspaceGetSettingsResponse =
+        serde_json::from_value(before_raw).expect("decode workspace_get_settings");
     assert!(before
         .runtime_config
         .get("effective")
         .and_then(|v| v.get("BSL_CACHE_DISABLE"))
         .is_some());
 
-    let updated: WorkspaceUpdateSettingsResponse = call_tool(
+    let updated_raw: serde_json::Value = call_tool(
         &service,
         "workspace_update_settings",
         json!({
             "session_id": &session_id,
-            "env_overrides": {
+            "envOverrides": {
                 "BSL_CACHE_DISABLE": true
             }
         }),
     )
     .await;
+    assert!(updated_raw.get("envOverrides").is_some());
+    assert!(updated_raw.get("devEnvOverrides").is_some());
+    assert!(updated_raw.get("allowDevOverrides").is_some());
+    assert!(updated_raw.get("env_overrides").is_none());
+    let updated: WorkspaceUpdateSettingsResponse =
+        serde_json::from_value(updated_raw).expect("decode workspace_update_settings");
     assert_eq!(
         updated
             .runtime_config
@@ -317,12 +330,53 @@ async fn stdio_workspace_settings_runtime_overrides_roundtrip() {
         serde_json::Value::Bool(true)
     );
 
-    let removed: WorkspaceUpdateSettingsResponse = call_tool(
+    let legacy_snake_case: WorkspaceUpdateSettingsResponse = call_tool(
         &service,
         "workspace_update_settings",
         json!({
             "session_id": &session_id,
             "env_overrides": {
+                "BSL_CACHE_DISABLE": false
+            }
+        }),
+    )
+    .await;
+    assert_eq!(
+        legacy_snake_case
+            .runtime_config
+            .get("effective")
+            .and_then(|v| v.get("BSL_CACHE_DISABLE"))
+            .cloned()
+            .unwrap_or_default(),
+        serde_json::Value::Bool(false)
+    );
+
+    let startup_only_report: WorkspaceUpdateSettingsResponse = call_tool(
+        &service,
+        "workspace_update_settings",
+        json!({
+            "session_id": &session_id,
+            "envOverrides": {
+                "BSL_CACHE_DIR": "/tmp/bsl-agent-restart-needed"
+            }
+        }),
+    )
+    .await;
+    assert!(
+        startup_only_report
+            .report
+            .requires_restart_keys
+            .contains(&"BSL_CACHE_DIR".to_string()),
+        "expected BSL_CACHE_DIR in requires_restart_keys, got {:?}",
+        startup_only_report.report.requires_restart_keys
+    );
+
+    let removed: WorkspaceUpdateSettingsResponse = call_tool(
+        &service,
+        "workspace_update_settings",
+        json!({
+            "session_id": &session_id,
+            "envOverrides": {
                 "BSL_CACHE_DISABLE": null
             }
         }),
@@ -343,8 +397,8 @@ async fn stdio_workspace_settings_runtime_overrides_roundtrip() {
         "workspace_update_settings",
         json!({
             "session_id": &session_id,
-            "allow_dev_overrides": false,
-            "dev_env_overrides": {
+            "allowDevOverrides": false,
+            "devEnvOverrides": {
                 "BSL_COMPLETION_TRACE": true
             }
         }),
@@ -373,6 +427,78 @@ async fn stdio_workspace_settings_runtime_overrides_roundtrip() {
             .unwrap_or_default(),
         serde_json::Value::Bool(true)
     );
+
+    let _close: serde_json::Value = call_tool(
+        &service,
+        "workspace_close",
+        json!({ "session_id": &session_id }),
+    )
+    .await;
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_workspace_observability_metrics_tool_ready_and_not_ready() {
+    let service = spawn_agent(&[]).await;
+
+    let temp_root = tempfile::TempDir::new().expect("tempdir");
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [temp_root.path().to_string_lossy()],
+        }),
+    )
+    .await;
+    let session_id = open.session_id.clone();
+
+    let status: WorkspaceStatusResponse = call_tool(
+        &service,
+        "workspace_status",
+        json!({ "session_id": &session_id }),
+    )
+    .await;
+    if status.ready {
+        let metrics: serde_json::Value = call_tool(
+            &service,
+            "workspace_get_observability_metrics",
+            json!({ "session_id": &session_id }),
+        )
+        .await;
+        assert!(metrics.get("metrics").is_some());
+    } else {
+        let attempt = service
+            .call_tool(CallToolRequestParam {
+                name: "workspace_get_observability_metrics".into(),
+                arguments: Some(json_object(json!({ "session_id": &session_id }))),
+            })
+            .await;
+
+        match attempt {
+            Ok(result) => {
+                let value = extract_json_text(result);
+                assert!(value.get("metrics").is_some());
+            }
+            Err(ServiceError::McpError(err))
+                if err.code.0 == rmcp::model::ErrorCode::INVALID_PARAMS.0 =>
+            {
+                assert!(
+                    err.message.contains("workspace not ready"),
+                    "message={:?} does not contain workspace-not-ready hint",
+                    err.message
+                );
+                let _ = wait_workspace_ready(&service, &open).await;
+                let metrics: serde_json::Value = call_tool(
+                    &service,
+                    "workspace_get_observability_metrics",
+                    json!({ "session_id": &session_id }),
+                )
+                .await;
+                assert!(metrics.get("metrics").is_some());
+            }
+            Err(err) => panic!("unexpected error: {err:?}"),
+        }
+    }
 
     let _close: serde_json::Value = call_tool(
         &service,

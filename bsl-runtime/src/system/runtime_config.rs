@@ -19,6 +19,13 @@ pub enum ConfigTier {
     DevOnly,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyMutability {
+    Runtime,
+    StartupOnly,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BoolMode {
     /// `env.is_ok()` legacy behavior: any value => true, missing => false.
@@ -29,7 +36,9 @@ enum BoolMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ValueKind {
-    Bool { mode: BoolMode },
+    Bool {
+        mode: BoolMode,
+    },
     U16,
     U64 {
         positive_only: bool,
@@ -37,7 +46,9 @@ enum ValueKind {
         /// `BSL_*_MS` thresholds where `0` disables the feature.
         zero_means_none: bool,
     },
-    Usize { positive_only: bool },
+    Usize {
+        positive_only: bool,
+    },
     String,
     Path,
 }
@@ -118,6 +129,7 @@ struct KeySpec {
     kind: ValueKind,
     tier: ConfigTier,
     default: Option<ConfigValue>,
+    mutability: KeyMutability,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -137,6 +149,8 @@ pub struct RuntimeConfigSnapshot {
     pub sources: HashMap<&'static str, ValueSource>,
     #[serde(rename = "tiers")]
     pub tiers: HashMap<&'static str, ConfigTier>,
+    #[serde(rename = "mutability")]
+    pub mutability: HashMap<&'static str, KeyMutability>,
 }
 
 #[derive(Debug, Clone)]
@@ -159,10 +173,12 @@ impl RuntimeConfigState {
         let mut effective = HashMap::new();
         let mut sources = HashMap::new();
         let mut tiers = HashMap::new();
+        let mut mutability = HashMap::new();
 
         for (idx, key) in RuntimeKey::ALL.iter().enumerate() {
             let spec = key.spec();
             tiers.insert(spec.env, spec.tier);
+            mutability.insert(spec.env, spec.mutability);
 
             let (value, source) = if !self.dev_overrides[idx].is_unset() {
                 (
@@ -191,6 +207,7 @@ impl RuntimeConfigState {
             effective,
             sources,
             tiers,
+            mutability,
         }
     }
 }
@@ -201,6 +218,7 @@ pub struct ApplyOverridesReport {
     pub ignored_invalid_values: Vec<String>,
     pub ignored_wrong_tier_keys: Vec<String>,
     pub dev_overrides_ignored: bool,
+    pub requires_restart_keys: Vec<String>,
 }
 
 impl ApplyOverridesReport {
@@ -210,6 +228,7 @@ impl ApplyOverridesReport {
             ignored_invalid_values: Vec::new(),
             ignored_wrong_tier_keys: Vec::new(),
             dev_overrides_ignored: false,
+            requires_restart_keys: Vec::new(),
         }
     }
 }
@@ -242,12 +261,17 @@ impl RuntimeConfigStore {
     /// This is primarily used by tests that temporarily mutate `std::env` and expect the changes
     /// to affect behavior without restarting the process.
     pub fn reload_env_bootstrap_from_env(&self) {
-        let mut guard = self.state.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut guard = self
+            .state
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         for (idx, key) in RuntimeKey::ALL.iter().enumerate() {
             guard.env_bootstrap[idx] = read_env_value(key.spec());
         }
-        *self.snapshot.write().unwrap_or_else(|poisoned| poisoned.into_inner()) =
-            guard.compute_snapshot();
+        *self
+            .snapshot
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = guard.compute_snapshot();
     }
 
     pub fn snapshot(&self) -> RuntimeConfigSnapshot {
@@ -293,9 +317,16 @@ impl RuntimeConfigStore {
     }
 
     /// Replace stable overrides entirely (keys not present become unset).
-    pub fn replace_stable_overrides(&self, overrides: &HashMap<String, JsonValue>) -> ApplyOverridesReport {
+    pub fn replace_stable_overrides(
+        &self,
+        overrides: &HashMap<String, JsonValue>,
+    ) -> ApplyOverridesReport {
         let mut report = ApplyOverridesReport::empty();
-        let mut guard = self.state.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut guard = self
+            .state
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let before = guard.compute_snapshot();
 
         guard.stable_overrides.fill(LayerValue::Unset);
         for (k, v) in overrides {
@@ -308,8 +339,12 @@ impl RuntimeConfigStore {
             );
         }
 
-        *self.snapshot.write().unwrap_or_else(|poisoned| poisoned.into_inner()) =
-            guard.compute_snapshot();
+        let after = guard.compute_snapshot();
+        report.requires_restart_keys = collect_requires_restart_keys(&before, &after);
+        *self
+            .snapshot
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = after;
         report
     }
 
@@ -320,7 +355,11 @@ impl RuntimeConfigStore {
         allow_dev_overrides: bool,
     ) -> ApplyOverridesReport {
         let mut report = ApplyOverridesReport::empty();
-        let mut guard = self.state.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut guard = self
+            .state
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let before = guard.compute_snapshot();
         guard.dev_overrides.fill(LayerValue::Unset);
         if !allow_dev_overrides {
             if !overrides.is_empty() {
@@ -337,8 +376,12 @@ impl RuntimeConfigStore {
                 );
             }
         }
-        *self.snapshot.write().unwrap_or_else(|poisoned| poisoned.into_inner()) =
-            guard.compute_snapshot();
+        let after = guard.compute_snapshot();
+        report.requires_restart_keys = collect_requires_restart_keys(&before, &after);
+        *self
+            .snapshot
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = after;
         report
     }
 
@@ -350,7 +393,11 @@ impl RuntimeConfigStore {
         allow_dev_overrides: bool,
     ) -> ApplyOverridesReport {
         let mut report = ApplyOverridesReport::empty();
-        let mut guard = self.state.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut guard = self
+            .state
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let before = guard.compute_snapshot();
 
         if let Some(stable) = stable {
             for (k, v) in stable {
@@ -382,10 +429,34 @@ impl RuntimeConfigStore {
             }
         }
 
-        *self.snapshot.write().unwrap_or_else(|poisoned| poisoned.into_inner()) =
-            guard.compute_snapshot();
+        let after = guard.compute_snapshot();
+        report.requires_restart_keys = collect_requires_restart_keys(&before, &after);
+        *self
+            .snapshot
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = after;
         report
     }
+}
+
+fn collect_requires_restart_keys(
+    before: &RuntimeConfigSnapshot,
+    after: &RuntimeConfigSnapshot,
+) -> Vec<String> {
+    let mut changed = Vec::new();
+    for key in RuntimeKey::ALL {
+        let spec = key.spec();
+        if spec.mutability != KeyMutability::StartupOnly {
+            continue;
+        }
+        let env = spec.env;
+        let before_value = before.effective.get(env);
+        let after_value = after.effective.get(env);
+        if before_value != after_value {
+            changed.push(env.to_string());
+        }
+    }
+    changed
 }
 
 fn apply_one_override(
@@ -650,6 +721,21 @@ impl RuntimeKey {
             .expect("RuntimeKey present in ALL")
     }
 
+    fn mutability(self) -> KeyMutability {
+        match self {
+            RuntimeKey::CacheDir
+            | RuntimeKey::AgentHttpAddr
+            | RuntimeKey::AgentHttpStaticDir
+            | RuntimeKey::WebHost
+            | RuntimeKey::WebPort
+            | RuntimeKey::StaticPath
+            | RuntimeKey::ProjectPath
+            | RuntimeKey::PlatformVersion
+            | RuntimeKey::SyntaxHelperPath => KeyMutability::StartupOnly,
+            _ => KeyMutability::Runtime,
+        }
+    }
+
     fn spec(self) -> KeySpec {
         match self {
             RuntimeKey::CacheDir => KeySpec {
@@ -657,12 +743,16 @@ impl RuntimeKey {
                 kind: ValueKind::Path,
                 tier: ConfigTier::Stable,
                 default: None,
+                mutability: self.mutability(),
             },
             RuntimeKey::CacheDisable => KeySpec {
                 env: "BSL_CACHE_DISABLE",
-                kind: ValueKind::Bool { mode: BoolMode::Truthy },
+                kind: ValueKind::Bool {
+                    mode: BoolMode::Truthy,
+                },
                 tier: ConfigTier::Stable,
                 default: Some(ConfigValue::Bool(false)),
+                mutability: self.mutability(),
             },
             RuntimeKey::CacheTtlSecs => KeySpec {
                 env: "BSL_CACHE_TTL_SECS",
@@ -672,12 +762,14 @@ impl RuntimeKey {
                 },
                 tier: ConfigTier::Stable,
                 default: None,
+                mutability: self.mutability(),
             },
             RuntimeKey::CacheTtlMode => KeySpec {
                 env: "BSL_CACHE_TTL_MODE",
                 kind: ValueKind::String,
                 tier: ConfigTier::Stable,
                 default: Some(ConfigValue::String("created".to_string())),
+                mutability: self.mutability(),
             },
             RuntimeKey::CacheMaxBytes => KeySpec {
                 env: "BSL_CACHE_MAX_BYTES",
@@ -687,6 +779,7 @@ impl RuntimeKey {
                 },
                 tier: ConfigTier::Stable,
                 default: None,
+                mutability: self.mutability(),
             },
             RuntimeKey::CacheCleanupIntervalSecs => KeySpec {
                 env: "BSL_CACHE_CLEANUP_INTERVAL_SECS",
@@ -696,6 +789,7 @@ impl RuntimeKey {
                 },
                 tier: ConfigTier::Stable,
                 default: Some(ConfigValue::U64(300)),
+                mutability: self.mutability(),
             },
             RuntimeKey::CacheTouchIntervalSecs => KeySpec {
                 env: "BSL_CACHE_TOUCH_INTERVAL_SECS",
@@ -705,30 +799,43 @@ impl RuntimeKey {
                 },
                 tier: ConfigTier::Stable,
                 default: Some(ConfigValue::U64(60)),
+                mutability: self.mutability(),
             },
             RuntimeKey::CacheSwr => KeySpec {
                 env: "BSL_CACHE_SWR",
-                kind: ValueKind::Bool { mode: BoolMode::Truthy },
+                kind: ValueKind::Bool {
+                    mode: BoolMode::Truthy,
+                },
                 tier: ConfigTier::Stable,
                 default: Some(ConfigValue::Bool(true)),
+                mutability: self.mutability(),
             },
             RuntimeKey::CacheStrictFingerprint => KeySpec {
                 env: "BSL_CACHE_STRICT_FINGERPRINT",
-                kind: ValueKind::Bool { mode: BoolMode::Presence },
+                kind: ValueKind::Bool {
+                    mode: BoolMode::Presence,
+                },
                 tier: ConfigTier::Stable,
                 default: Some(ConfigValue::Bool(false)),
+                mutability: self.mutability(),
             },
             RuntimeKey::AstCacheCapacity => KeySpec {
                 env: "BSL_AST_CACHE_CAPACITY",
-                kind: ValueKind::Usize { positive_only: true },
+                kind: ValueKind::Usize {
+                    positive_only: true,
+                },
                 tier: ConfigTier::Stable,
                 default: Some(ConfigValue::Usize(64)),
+                mutability: self.mutability(),
             },
             RuntimeKey::IndexWarmup => KeySpec {
                 env: "BSL_INDEX_WARMUP",
-                kind: ValueKind::Bool { mode: BoolMode::Truthy },
+                kind: ValueKind::Bool {
+                    mode: BoolMode::Truthy,
+                },
                 tier: ConfigTier::Stable,
                 default: Some(ConfigValue::Bool(true)),
+                mutability: self.mutability(),
             },
             RuntimeKey::LspDiagnosticsDebounceMs => KeySpec {
                 env: "BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS",
@@ -738,6 +845,7 @@ impl RuntimeKey {
                 },
                 tier: ConfigTier::Stable,
                 default: Some(ConfigValue::U64(250)),
+                mutability: self.mutability(),
             },
             RuntimeKey::IntellisenseV2SlowClientLogMs => KeySpec {
                 env: "BSL_INTELLISENSE_V2_SLOW_CLIENT_LOG_MS",
@@ -747,6 +855,7 @@ impl RuntimeKey {
                 },
                 tier: ConfigTier::Stable,
                 default: Some(ConfigValue::U64(2000)),
+                mutability: self.mutability(),
             },
             RuntimeKey::IntellisenseV2SlowWaitWarnMs => KeySpec {
                 env: "BSL_INTELLISENSE_V2_SLOW_WAIT_WARN_MS",
@@ -756,6 +865,7 @@ impl RuntimeKey {
                 },
                 tier: ConfigTier::Stable,
                 default: None,
+                mutability: self.mutability(),
             },
             RuntimeKey::IntellisenseV2SlowSnapshotWarnMs => KeySpec {
                 env: "BSL_INTELLISENSE_V2_SLOW_SNAPSHOT_WARN_MS",
@@ -765,6 +875,7 @@ impl RuntimeKey {
                 },
                 tier: ConfigTier::Stable,
                 default: None,
+                mutability: self.mutability(),
             },
             RuntimeKey::IntellisenseV2SlowQueryWarnMs => KeySpec {
                 env: "BSL_INTELLISENSE_V2_SLOW_QUERY_WARN_MS",
@@ -774,18 +885,21 @@ impl RuntimeKey {
                 },
                 tier: ConfigTier::Stable,
                 default: None,
+                mutability: self.mutability(),
             },
             RuntimeKey::AgentHttpAddr => KeySpec {
                 env: "BSL_AGENT_HTTP_ADDR",
                 kind: ValueKind::String,
                 tier: ConfigTier::Stable,
                 default: None,
+                mutability: self.mutability(),
             },
             RuntimeKey::AgentHttpStaticDir => KeySpec {
                 env: "BSL_AGENT_HTTP_STATIC_DIR",
                 kind: ValueKind::Path,
                 tier: ConfigTier::Stable,
                 default: None,
+                mutability: self.mutability(),
             },
             RuntimeKey::AgentStateTtlSecs => KeySpec {
                 env: "BSL_AGENT_STATE_TTL_SECS",
@@ -795,78 +909,101 @@ impl RuntimeKey {
                 },
                 tier: ConfigTier::Stable,
                 default: Some(ConfigValue::U64(60 * 60 * 24 * 7)),
+                mutability: self.mutability(),
             },
             RuntimeKey::WebHost => KeySpec {
                 env: "BSL_WEB_HOST",
                 kind: ValueKind::String,
                 tier: ConfigTier::Stable,
                 default: Some(ConfigValue::String("127.0.0.1".to_string())),
+                mutability: self.mutability(),
             },
             RuntimeKey::WebPort => KeySpec {
                 env: "BSL_WEB_PORT",
                 kind: ValueKind::U16,
                 tier: ConfigTier::Stable,
                 default: Some(ConfigValue::U16(8080)),
+                mutability: self.mutability(),
             },
             RuntimeKey::StaticPath => KeySpec {
                 env: "BSL_STATIC_PATH",
                 kind: ValueKind::Path,
                 tier: ConfigTier::Stable,
                 default: None,
+                mutability: self.mutability(),
             },
             RuntimeKey::ProjectPath => KeySpec {
                 env: "BSL_PROJECT_PATH",
                 kind: ValueKind::Path,
                 tier: ConfigTier::Stable,
                 default: None,
+                mutability: self.mutability(),
             },
             RuntimeKey::PlatformVersion => KeySpec {
                 env: "BSL_PLATFORM_VERSION",
                 kind: ValueKind::String,
                 tier: ConfigTier::Stable,
                 default: None,
+                mutability: self.mutability(),
             },
             RuntimeKey::EnableCors => KeySpec {
                 env: "BSL_ENABLE_CORS",
-                kind: ValueKind::Bool { mode: BoolMode::Truthy },
+                kind: ValueKind::Bool {
+                    mode: BoolMode::Truthy,
+                },
                 tier: ConfigTier::Stable,
                 default: Some(ConfigValue::Bool(true)),
+                mutability: self.mutability(),
             },
             RuntimeKey::LogLevel => KeySpec {
                 env: "BSL_LOG_LEVEL",
                 kind: ValueKind::String,
                 tier: ConfigTier::Stable,
                 default: Some(ConfigValue::String("info".to_string())),
+                mutability: self.mutability(),
             },
             RuntimeKey::SyntaxHelperPath => KeySpec {
                 env: "BSL_SYNTAX_HELPER_PATH",
                 kind: ValueKind::Path,
                 tier: ConfigTier::DevOnly,
                 default: None,
+                mutability: self.mutability(),
             },
             RuntimeKey::CompletionTrace => KeySpec {
                 env: "BSL_COMPLETION_TRACE",
-                kind: ValueKind::Bool { mode: BoolMode::Presence },
+                kind: ValueKind::Bool {
+                    mode: BoolMode::Presence,
+                },
                 tier: ConfigTier::DevOnly,
                 default: Some(ConfigValue::Bool(false)),
+                mutability: self.mutability(),
             },
             RuntimeKey::CompletionQuality => KeySpec {
                 env: "BSL_COMPLETION_QUALITY",
-                kind: ValueKind::Bool { mode: BoolMode::Presence },
+                kind: ValueKind::Bool {
+                    mode: BoolMode::Presence,
+                },
                 tier: ConfigTier::DevOnly,
                 default: Some(ConfigValue::Bool(false)),
+                mutability: self.mutability(),
             },
             RuntimeKey::IntellisenseV2P3Smoke => KeySpec {
                 env: "BSL_INTELLISENSE_V2_P3_SMOKE",
-                kind: ValueKind::Bool { mode: BoolMode::Presence },
+                kind: ValueKind::Bool {
+                    mode: BoolMode::Presence,
+                },
                 tier: ConfigTier::DevOnly,
                 default: Some(ConfigValue::Bool(false)),
+                mutability: self.mutability(),
             },
             RuntimeKey::IntellisenseV2P4Smoke => KeySpec {
                 env: "BSL_INTELLISENSE_V2_P4_SMOKE",
-                kind: ValueKind::Bool { mode: BoolMode::Presence },
+                kind: ValueKind::Bool {
+                    mode: BoolMode::Presence,
+                },
                 tier: ConfigTier::DevOnly,
                 default: Some(ConfigValue::Bool(false)),
+                mutability: self.mutability(),
             },
             RuntimeKey::SlowModuleThresholdMs => KeySpec {
                 env: "BSL_SLOW_MODULE_THRESHOLD_MS",
@@ -876,30 +1013,41 @@ impl RuntimeKey {
                 },
                 tier: ConfigTier::DevOnly,
                 default: Some(ConfigValue::U64(3000)),
+                mutability: self.mutability(),
             },
             RuntimeKey::SlowModuleTopN => KeySpec {
                 env: "BSL_SLOW_MODULE_TOP_N",
-                kind: ValueKind::Usize { positive_only: true },
+                kind: ValueKind::Usize {
+                    positive_only: true,
+                },
                 tier: ConfigTier::DevOnly,
                 default: Some(ConfigValue::Usize(5)),
+                mutability: self.mutability(),
             },
             RuntimeKey::ModuleParseLogEach => KeySpec {
                 env: "BSL_MODULE_PARSE_LOG_EACH",
-                kind: ValueKind::Bool { mode: BoolMode::Truthy },
+                kind: ValueKind::Bool {
+                    mode: BoolMode::Truthy,
+                },
                 tier: ConfigTier::DevOnly,
                 default: Some(ConfigValue::Bool(false)),
+                mutability: self.mutability(),
             },
             RuntimeKey::RunWebApiTests => KeySpec {
                 env: "BSL_RUN_WEB_API_TESTS",
-                kind: ValueKind::Bool { mode: BoolMode::Truthy },
+                kind: ValueKind::Bool {
+                    mode: BoolMode::Truthy,
+                },
                 tier: ConfigTier::DevOnly,
                 default: Some(ConfigValue::Bool(false)),
+                mutability: self.mutability(),
             },
             RuntimeKey::WebApiBaseUrl => KeySpec {
                 env: "BSL_WEB_API_BASE_URL",
                 kind: ValueKind::String,
                 tier: ConfigTier::DevOnly,
                 default: None,
+                mutability: self.mutability(),
             },
         }
     }
@@ -927,7 +1075,11 @@ mod tests {
     fn registry_has_unique_names() {
         let mut names = std::collections::HashSet::new();
         for key in RuntimeKey::ALL {
-            assert!(names.insert(key.spec().env), "duplicate key: {}", key.spec().env);
+            assert!(
+                names.insert(key.spec().env),
+                "duplicate key: {}",
+                key.spec().env
+            );
         }
     }
 
@@ -937,7 +1089,10 @@ mod tests {
         let mut overrides = HashMap::new();
         overrides.insert("BSL_NOT_A_REAL_KEY".to_string(), JsonValue::Bool(true));
         let report = store.replace_stable_overrides(&overrides);
-        assert_eq!(report.ignored_unknown_keys, vec!["BSL_NOT_A_REAL_KEY".to_string()]);
+        assert_eq!(
+            report.ignored_unknown_keys,
+            vec!["BSL_NOT_A_REAL_KEY".to_string()]
+        );
     }
 
     #[test]
@@ -976,5 +1131,51 @@ mod tests {
         let report_disabled = store.replace_dev_overrides(&dev, false);
         assert!(report_disabled.dev_overrides_ignored);
         assert_eq!(store.get_bool(RuntimeKey::CompletionTrace), Some(false));
+    }
+
+    #[test]
+    fn snapshot_contains_mutability_map() {
+        let store = RuntimeConfigStore::new_from_env_bootstrap();
+        let snapshot = store.snapshot();
+
+        assert_eq!(
+            snapshot.mutability.get("BSL_CACHE_DIR"),
+            Some(&KeyMutability::StartupOnly)
+        );
+        assert_eq!(
+            snapshot.mutability.get("BSL_CACHE_DISABLE"),
+            Some(&KeyMutability::Runtime)
+        );
+    }
+
+    #[test]
+    fn startup_only_override_is_reported_as_requires_restart() {
+        let store = RuntimeConfigStore::new_from_env_bootstrap();
+        let mut stable = HashMap::new();
+        stable.insert(
+            "BSL_CACHE_DIR".to_string(),
+            JsonValue::String("/tmp/runtime-config-restart-a".to_string()),
+        );
+        let _ = store.replace_stable_overrides(&stable);
+
+        stable.insert(
+            "BSL_CACHE_DIR".to_string(),
+            JsonValue::String("/tmp/runtime-config-restart-b".to_string()),
+        );
+        let report = store.replace_stable_overrides(&stable);
+
+        assert_eq!(
+            report.requires_restart_keys,
+            vec!["BSL_CACHE_DIR".to_string()]
+        );
+    }
+
+    #[test]
+    fn runtime_override_is_not_reported_as_requires_restart() {
+        let store = RuntimeConfigStore::new_from_env_bootstrap();
+        let mut stable = HashMap::new();
+        stable.insert("BSL_CACHE_DISABLE".to_string(), JsonValue::Bool(true));
+        let report = store.replace_stable_overrides(&stable);
+        assert!(report.requires_restart_keys.is_empty());
     }
 }

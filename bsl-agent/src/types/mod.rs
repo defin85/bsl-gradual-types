@@ -62,10 +62,16 @@ pub struct WorkspaceStatusResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeSettingsReportDto {
+    #[serde(rename = "ignoredUnknownKeys")]
     pub ignored_unknown_keys: Vec<String>,
+    #[serde(rename = "ignoredInvalidValues")]
     pub ignored_invalid_values: Vec<String>,
+    #[serde(rename = "ignoredWrongTierKeys")]
     pub ignored_wrong_tier_keys: Vec<String>,
+    #[serde(rename = "devOverridesIgnored")]
     pub dev_overrides_ignored: bool,
+    #[serde(rename = "requiresRestartKeys")]
+    pub requires_restart_keys: Vec<String>,
 }
 
 impl From<ApplyOverridesReport> for RuntimeSettingsReportDto {
@@ -75,6 +81,7 @@ impl From<ApplyOverridesReport> for RuntimeSettingsReportDto {
             ignored_invalid_values: value.ignored_invalid_values,
             ignored_wrong_tier_keys: value.ignored_wrong_tier_keys,
             dev_overrides_ignored: value.dev_overrides_ignored,
+            requires_restart_keys: value.requires_restart_keys,
         }
     }
 }
@@ -82,9 +89,13 @@ impl From<ApplyOverridesReport> for RuntimeSettingsReportDto {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceGetSettingsResponse {
     pub session_id: String,
+    #[serde(rename = "allowDevOverrides")]
     pub allow_dev_overrides: bool,
+    #[serde(rename = "envOverrides")]
     pub env_overrides: HashMap<String, JsonValue>,
+    #[serde(rename = "devEnvOverrides")]
     pub dev_env_overrides: HashMap<String, JsonValue>,
+    #[serde(rename = "runtimeConfig")]
     pub runtime_config: JsonValue,
 }
 
@@ -92,11 +103,20 @@ pub struct WorkspaceGetSettingsResponse {
 pub struct WorkspaceUpdateSettingsResponse {
     pub ok: bool,
     pub session_id: String,
+    #[serde(rename = "allowDevOverrides")]
     pub allow_dev_overrides: bool,
+    #[serde(rename = "envOverrides")]
     pub env_overrides: HashMap<String, JsonValue>,
+    #[serde(rename = "devEnvOverrides")]
     pub dev_env_overrides: HashMap<String, JsonValue>,
     pub report: RuntimeSettingsReportDto,
+    #[serde(rename = "runtimeConfig")]
     pub runtime_config: JsonValue,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceObservabilityMetricsResponse {
+    pub metrics: JsonValue,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -126,3 +126,50 @@ Run `bd prime` for workflow context.
 - `bd sync` - Sync with git (run at session end)
 
 For full workflow details: `bd prime`
+
+## Semantic Search Playbook
+
+Use this checklist for semantic code search in this repository.
+
+### Search Order
+
+1. Use `mcp__claude-context__search_code` first (semantic search).
+2. Use `grep` second (exact/pattern search in known areas).
+3. Use glob/filename pattern search last.
+
+### Default Query Preset
+
+- Always set `extensionFilter: [".rs"]` for first-pass code discovery.
+- Start with `limit: 5-8`.
+- Use intent-focused queries (behavior + domain terms), not only symbol names.
+- If results are noisy, add concrete context keywords in the query:
+  `TypeResolver`, `SemanticValidationVisitor`, `AnalysisHostV2`, `lsp_server`.
+
+### Starter Query Templates
+
+Use these as ready-to-run prompts for `search_code`:
+
+1. `где реализована проверка совместимости типов аргументов вызова`
+2. `построение diagnostics для неизвестного метода или свойства`
+3. `понижение severity unknown member access до warning`
+4. `сужение типа после проверки ТипЗнч в условии`
+5. `entry point LSP diagnostics analysis pipeline`
+6. `как формируется TypeResolution для member access`
+7. `парсинг bsl модулей и построение индекса модулей конфигурации`
+8. `где используется TypeMetadataLookup для проверки методов и свойств`
+
+### Noise Control / Reindexing
+
+If semantic search returns too many docs/test artifacts, reindex with `force=true`
+and ignore these paths:
+
+- `docs/**`
+- `openspec/**`
+- `vscode-extension/.vscode-test/**`
+- `**/target/**`
+- `**/node_modules/**`
+- `**/dist/**`
+- `**/build/**`
+- `**/coverage/**`
+- `**/tests/**`
+- `examples/**`

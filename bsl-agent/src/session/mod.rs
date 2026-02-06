@@ -35,10 +35,10 @@ use crate::types::{
     BslDefinitionResponse, BslDiagnosticsResponse, BslMembersResponse, BslReferencesResponse,
     BslSymbolSearchResponse, BslTypeAtPositionResponse, CompletenessDto, ContextExpandResponse,
     ContextPackItemDto, ContextPackResponse, LocationDto, MemberDto, NodeInfoDto, ProgressDto,
-    ReferenceDto, RootDto, SymbolDto, TypeInfoDto, WorkspaceDocumentsClearResponse,
-    WorkspaceDocumentsSetResponse, WorkspaceGetSettingsResponse, WorkspaceListItemDto,
-    WorkspaceListResponse, WorkspaceOpenResponse, WorkspaceStatusResponse,
-    WorkspaceUpdateSettingsResponse, RuntimeSettingsReportDto,
+    ReferenceDto, RootDto, RuntimeSettingsReportDto, SymbolDto, TypeInfoDto,
+    WorkspaceDocumentsClearResponse, WorkspaceDocumentsSetResponse, WorkspaceGetSettingsResponse,
+    WorkspaceListItemDto, WorkspaceListResponse, WorkspaceObservabilityMetricsResponse,
+    WorkspaceOpenResponse, WorkspaceStatusResponse, WorkspaceUpdateSettingsResponse,
 };
 
 const MAX_OVERLAY_BYTES: usize = 2 * 1024 * 1024;
@@ -1172,9 +1172,9 @@ impl SessionManager {
         if has_startup {
             let coordinator = {
                 let sessions = self.sessions.read().await;
-                sessions
-                    .get(&uuid)
-                    .and_then(|session| session.startup.as_ref().map(|s| Arc::clone(&s.coordinator)))
+                sessions.get(&uuid).and_then(|session| {
+                    session.startup.as_ref().map(|s| Arc::clone(&s.coordinator))
+                })
             };
 
             if let Some(coordinator) = coordinator {
@@ -1215,6 +1215,23 @@ impl SessionManager {
             dev_env_overrides: dev_overrides,
             report: RuntimeSettingsReportDto::from(report),
             runtime_config,
+        })
+    }
+
+    pub async fn observability_metrics_get(
+        &self,
+        session_id: &str,
+    ) -> Result<WorkspaceObservabilityMetricsResponse, rmcp::ErrorData> {
+        let uuid = parse_session_id(session_id)?;
+        let sessions = self.sessions.read().await;
+        let session = sessions
+            .get(&uuid)
+            .ok_or_else(|| rmcp::ErrorData::invalid_params("session not found", None))?;
+        let startup = session.startup.as_ref().ok_or_else(|| {
+            rmcp::ErrorData::invalid_params("workspace not ready (startup in progress)", None)
+        })?;
+        Ok(WorkspaceObservabilityMetricsResponse {
+            metrics: startup.coordinator.observability_metrics(),
         })
     }
 

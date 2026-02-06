@@ -47,14 +47,19 @@ pub struct WorkspaceGetSettingsParams {
 pub struct WorkspaceUpdateSettingsParams {
     pub session_id: String,
     /// Patch stable runtime overrides (null removes a key).
-    #[serde(default)]
+    #[serde(default, rename = "envOverrides", alias = "env_overrides")]
     pub env_overrides: Option<HashMap<String, JsonValue>>,
-    /// Patch dev-only runtime overrides (null removes a key). Applied only when allow_dev_overrides=true.
-    #[serde(default)]
+    /// Patch dev-only runtime overrides (null removes a key). Applied only when allowDevOverrides=true.
+    #[serde(default, rename = "devEnvOverrides", alias = "dev_env_overrides")]
     pub dev_env_overrides: Option<HashMap<String, JsonValue>>,
-    /// Gate dev-only overrides. When false, dev_env_overrides are ignored.
-    #[serde(default)]
+    /// Gate dev-only overrides. When false, devEnvOverrides are ignored.
+    #[serde(default, rename = "allowDevOverrides", alias = "allow_dev_overrides")]
     pub allow_dev_overrides: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct WorkspaceGetObservabilityMetricsParams {
+    pub session_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

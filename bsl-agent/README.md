@@ -133,6 +133,44 @@ env = {
 - `bsl_diagnostics_start.scope` accepts `"project"` / `"hot"` as strings; for a single file use `{ "kind": "file", "document": <DocumentRef> }` (string `"file"` is invalid).
 - `job_status.progress.percent=100` is reserved for terminal states; running jobs report `0..99`.
 
+## Runtime settings and observability tools
+
+- `workspace_update_settings` canonical payload uses camelCase:
+  - `envOverrides` (stable overrides),
+  - `devEnvOverrides` (dev-only overrides),
+  - `allowDevOverrides` (gate for dev-only layer).
+- Legacy snake_case payload is still accepted as input aliases:
+  - `env_overrides`, `dev_env_overrides`, `allow_dev_overrides`.
+- `workspace_get_settings` and `workspace_update_settings` responses return canonical camelCase fields.
+- Startup-only semantics:
+  - `BSL_CACHE_DIR` is `startup_only`: override is reflected in runtime snapshot immediately, but requires session/coordinator restart to take effect.
+  - `report.requiresRestartKeys[]` lists startup-only keys whose effective values changed.
+- `workspace_get_observability_metrics(session_id)` is read-only and requires `ready=true`; non-ready sessions are rejected with `INVALID_PARAMS`.
+
+### Example MCP payloads
+
+Canonical payload:
+
+```json
+{
+  "session_id": "<session_id>",
+  "envOverrides": { "BSL_CACHE_DISABLE": true },
+  "allowDevOverrides": true,
+  "devEnvOverrides": { "BSL_COMPLETION_TRACE": true }
+}
+```
+
+Legacy-compatible payload (accepted on input):
+
+```json
+{
+  "session_id": "<session_id>",
+  "env_overrides": { "BSL_CACHE_DISABLE": true },
+  "allow_dev_overrides": true,
+  "dev_env_overrides": { "BSL_COMPLETION_TRACE": true }
+}
+```
+
 ## MCP type discovery tools (stdio)
 
 Read-only, async tools for navigating platform/configuration types. All follow the `*_start` pattern and return a `job_id`.

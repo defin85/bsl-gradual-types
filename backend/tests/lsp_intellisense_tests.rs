@@ -416,3 +416,58 @@ async fn lsp_completion_with_empty_index_returns_default_keywords() {
 
     assert!(items.iter().any(|item| item.label == "Процедура"));
 }
+
+#[tokio::test]
+async fn lsp_completion_non_member_excludes_locals_from_other_procedure() {
+    let env = build_env();
+    let content = concat!(
+        "Процедура Первая()\n",
+        "    ЛокалПервая = 1;\n",
+        "    Лок\n",
+        "КонецПроцедуры\n",
+        "\n",
+        "Процедура Вторая()\n",
+        "    ЛокалВторая = 2;\n",
+        "КонецПроцедуры\n"
+    );
+    let uri = Url::parse("file:///m8_lsp_local_scope_split.bsl").expect("url");
+
+    let position = Position {
+        line: 2,
+        character: "    Лок".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32,
+    };
+
+    let (file_content, file_path, ir_program) = build_v2_ir(content, &uri, env.deps.clone());
+    let response = completion_handler::handle_completion_v2(
+        file_content,
+        file_path,
+        ir_program,
+        None,
+        None,
+        env.deps,
+        position,
+        &uri,
+        &env.index_snapshot,
+        false,
+        false,
+    )
+    .await
+    .expect("completion response");
+
+    let items = match response.response {
+        CompletionResponse::List(list) => list.items,
+        CompletionResponse::Array(list) => list,
+    };
+    let labels: Vec<String> = items.into_iter().map(|item| item.label).collect();
+
+    assert!(
+        labels.iter().any(|label| label == "ЛокалПервая"),
+        "labels: {:?}",
+        labels
+    );
+    assert!(
+        !labels.iter().any(|label| label == "ЛокалВторая"),
+        "labels: {:?}",
+        labels
+    );
+}

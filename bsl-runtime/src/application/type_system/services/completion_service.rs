@@ -16,7 +16,7 @@ use bsl_shared::domain::types::{
     ConcreteType, FacetKind, MetadataKind, ResolutionResult, SpecialType,
 };
 use bsl_shared::domain::{CompletionItem, CompletionKind, TypeMetadataLookup, TypeResolution};
-use bsl_shared::ir::{ScopeId, SemanticNodeKind, SemanticProgram};
+use bsl_shared::ir::{ScopeId, ScopeKind, SemanticNodeKind, SemanticProgram};
 use bsl_syntax::ast::Expression;
 
 use super::super::extractors::symbol_extractor::{
@@ -437,7 +437,14 @@ pub(crate) async fn get_completion_with_analysis(
             add_keywords(&snapshot, &mut candidates, 4);
         }
     } else {
-        add_symbols(&snapshot, file_uri, &mut candidates, 0);
+        let can_collect_locals_from_ir = analysis.and_then(|ctx| ctx.ir_program.as_ref()).is_some();
+
+        if can_collect_locals_from_ir {
+            add_local_symbols_from_ir(analysis, file_content, line, column, &mut candidates, 0);
+            add_symbols(&snapshot, file_uri, &mut candidates, 0, false);
+        } else {
+            add_symbols(&snapshot, file_uri, &mut candidates, 0, true);
+        }
         add_module_symbols(&snapshot, &mut candidates, 1);
         add_metadata_items(&snapshot, None, &mut candidates, 2);
         add_types(&snapshot, &mut candidates, 3);
@@ -981,69 +988,9 @@ fn resolve_member_owner_type_sync(
     }
 
     let ir_program = ctx.ir_program.as_deref()?;
-    let index = LineIndex::new(file_content);
-    let byte_offset = index.utf16_position_to_byte_offset(file_content, line, column);
-    let byte_offset: u32 = byte_offset.try_into().ok()?;
-
-    let scope_id = {
-        let from_node = (0u32..=32)
-            .filter_map(|delta| byte_offset.checked_sub(delta))
-            .find_map(|offset| ir_program.find_node_at_byte_offset(offset))
-            .map(|node| match &node.kind {
-                SemanticNodeKind::FunctionDeclaration { body_scope, .. }
-                | SemanticNodeKind::ProcedureDeclaration { body_scope, .. } => *body_scope,
-                SemanticNodeKind::BlockScope { scope_id, .. } => *scope_id,
-                _ => node.scope_id,
-            });
-
-        let from_enclosing_decl = || {
-            ir_program
-                .nodes
-                .iter()
-                .filter(|node| node.span.contains(byte_offset))
-                .filter_map(|node| match &node.kind {
-                    SemanticNodeKind::FunctionDeclaration { body_scope, .. }
-                    | SemanticNodeKind::ProcedureDeclaration { body_scope, .. } => {
-                        Some((node.span.len(), *body_scope))
-                    }
-                    _ => None,
-                })
-                .min_by_key(|(len, _)| *len)
-                .map(|(_, scope_id)| scope_id)
-        };
-
-        let from_prev_node = || {
-            ir_program
-                .nodes
-                .iter()
-                .filter(|node| node.span.start < byte_offset)
-                .max_by_key(|node| node.span.start)
-                .map(|node| match &node.kind {
-                    SemanticNodeKind::FunctionDeclaration { body_scope, .. }
-                    | SemanticNodeKind::ProcedureDeclaration { body_scope, .. } => *body_scope,
-                    SemanticNodeKind::BlockScope { scope_id, .. } => *scope_id,
-                    _ => node.scope_id,
-                })
-        };
-
-        from_node
-            .or_else(from_enclosing_decl)
-            .or_else(from_prev_node)?
-    };
-
-    let mut visible_scopes = Vec::new();
-    let mut current_scope_id = Some(scope_id);
-    while let Some(sid) = current_scope_id {
-        visible_scopes.push(sid);
-        current_scope_id = ir_program.get_scope(sid).and_then(|scope| scope.parent);
-    }
-
-    let scope_rank: HashMap<ScopeId, usize> = visible_scopes
-        .iter()
-        .copied()
-        .enumerate()
-        .map(|(idx, sid)| (sid, idx))
-        .collect();
+    let scope_position = resolve_completion_scope_position(ir_program, file_content, line, column)?;
+    let byte_offset = scope_position.byte_offset;
+    let scope_rank = &scope_position.scope_rank;
 
     #[derive(Debug)]
     struct BestInit {
@@ -1606,11 +1553,326 @@ fn dedup_resolutions(resolutions: Vec<TypeResolution>) -> Vec<TypeResolution> {
     out
 }
 
+#[derive(Debug, Clone)]
+struct CompletionScopePosition {
+    byte_offset: u32,
+    scope_rank: HashMap<ScopeId, usize>,
+}
+
+#[derive(Debug, Clone)]
+struct LocalSymbolCandidate {
+    name: String,
+    scope_id: ScopeId,
+    span_start: u32,
+}
+
+fn resolve_loop_body_scope(
+    ir_program: &SemanticProgram,
+    parent_scope: ScopeId,
+    body: &[usize],
+    loop_variable: Option<&str>,
+    loop_span_start: u32,
+) -> Option<ScopeId> {
+    if let Some(scope_id) = body
+        .iter()
+        .filter_map(|idx| ir_program.nodes.get(*idx).map(|node| node.scope_id))
+        .next()
+    {
+        return Some(scope_id);
+    }
+
+    let parent = ir_program.get_scope(parent_scope)?;
+    match loop_variable {
+        Some(variable) => parent.children.iter().copied().find(|child| {
+            ir_program
+                .get_scope(*child)
+                .and_then(|scope| scope.variables.get(variable))
+                .map(|state| state.declaration_span.start == loop_span_start)
+                .unwrap_or(false)
+        }),
+        None => parent.children.first().copied(),
+    }
+}
+
+fn scope_from_body_nodes(ir_program: &SemanticProgram, body: &[usize]) -> Option<ScopeId> {
+    body.iter()
+        .filter_map(|idx| ir_program.nodes.get(*idx).map(|node| node.scope_id))
+        .next()
+}
+
+fn completion_scope_for_enclosing_node(
+    ir_program: &SemanticProgram,
+    node: &bsl_shared::ir::SemanticNode,
+    byte_offset: u32,
+) -> ScopeId {
+    match &node.kind {
+        SemanticNodeKind::FunctionDeclaration { body_scope, .. }
+        | SemanticNodeKind::ProcedureDeclaration { body_scope, .. } => *body_scope,
+        SemanticNodeKind::BlockScope { scope_id, .. } => *scope_id,
+        SemanticNodeKind::IfStatement {
+            then_branch,
+            else_branch,
+        } => {
+            let then_scope = scope_from_body_nodes(ir_program, then_branch);
+            let else_scope = else_branch
+                .as_ref()
+                .and_then(|body| scope_from_body_nodes(ir_program, body));
+            let else_start = else_branch.as_ref().and_then(|body| {
+                body.iter()
+                    .filter_map(|idx| ir_program.nodes.get(*idx).map(|child| child.span.start))
+                    .min()
+            });
+
+            match (then_scope, else_scope, else_start) {
+                (_, Some(scope), Some(start)) if byte_offset >= start => scope,
+                (Some(scope), _, _) => scope,
+                (None, Some(scope), _) => scope,
+                _ => node.scope_id,
+            }
+        }
+        SemanticNodeKind::TryExcept {
+            try_body,
+            except_body,
+        } => {
+            let try_scope = scope_from_body_nodes(ir_program, try_body);
+            let except_scope = scope_from_body_nodes(ir_program, except_body);
+            let except_start = except_body
+                .iter()
+                .filter_map(|idx| ir_program.nodes.get(*idx).map(|child| child.span.start))
+                .min();
+
+            match (try_scope, except_scope, except_start) {
+                (_, Some(scope), Some(start)) if byte_offset >= start => scope,
+                (Some(scope), _, _) => scope,
+                (None, Some(scope), _) => scope,
+                _ => node.scope_id,
+            }
+        }
+        SemanticNodeKind::ForLoop { variable, body }
+        | SemanticNodeKind::ForEachLoop { variable, body } => resolve_loop_body_scope(
+            ir_program,
+            node.scope_id,
+            body,
+            Some(variable.as_str()),
+            node.span.start,
+        )
+        .unwrap_or(node.scope_id),
+        SemanticNodeKind::WhileLoop { body } => {
+            resolve_loop_body_scope(ir_program, node.scope_id, body, None, node.span.start)
+                .unwrap_or(node.scope_id)
+        }
+        _ => node.scope_id,
+    }
+}
+
+fn resolve_completion_scope_position(
+    ir_program: &SemanticProgram,
+    file_content: &str,
+    line: u32,
+    column: u32,
+) -> Option<CompletionScopePosition> {
+    let line_index = LineIndex::new(file_content);
+    let byte_offset = line_index.utf16_position_to_byte_offset(file_content, line, column);
+    let byte_offset: u32 = byte_offset.try_into().ok()?;
+
+    let scope_id = {
+        let from_node = (0u32..=32)
+            .filter_map(|delta| byte_offset.checked_sub(delta))
+            .find_map(|offset| ir_program.find_node_at_byte_offset(offset))
+            .map(|node| completion_scope_for_enclosing_node(ir_program, node, byte_offset));
+
+        let from_enclosing_decl = || {
+            ir_program
+                .nodes
+                .iter()
+                .filter(|node| node.span.contains(byte_offset))
+                .filter_map(|node| match &node.kind {
+                    SemanticNodeKind::FunctionDeclaration { body_scope, .. }
+                    | SemanticNodeKind::ProcedureDeclaration { body_scope, .. } => {
+                        Some((node.span.len(), *body_scope))
+                    }
+                    _ => None,
+                })
+                .min_by_key(|(len, _)| *len)
+                .map(|(_, scope_id)| scope_id)
+        };
+
+        let from_prev_node = || {
+            ir_program
+                .nodes
+                .iter()
+                .filter(|node| node.span.start < byte_offset)
+                .max_by_key(|node| node.span.start)
+                .map(|node| match &node.kind {
+                    SemanticNodeKind::FunctionDeclaration { body_scope, .. }
+                    | SemanticNodeKind::ProcedureDeclaration { body_scope, .. } => *body_scope,
+                    SemanticNodeKind::BlockScope { scope_id, .. } => *scope_id,
+                    _ => node.scope_id,
+                })
+        };
+
+        from_node
+            .or_else(from_enclosing_decl)
+            .or_else(from_prev_node)?
+    };
+
+    let mut visible_scopes = Vec::new();
+    let mut current_scope_id = Some(scope_id);
+    while let Some(sid) = current_scope_id {
+        visible_scopes.push(sid);
+        current_scope_id = ir_program.get_scope(sid).and_then(|scope| scope.parent);
+    }
+
+    let scope_rank = visible_scopes
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(idx, sid)| (sid, idx))
+        .collect();
+
+    Some(CompletionScopePosition {
+        byte_offset,
+        scope_rank,
+    })
+}
+
+fn collect_local_candidates_from_ir(
+    ir_program: &SemanticProgram,
+    scope_position: &CompletionScopePosition,
+) -> Vec<LocalSymbolCandidate> {
+    let mut best_by_name: HashMap<String, LocalSymbolCandidate> = HashMap::new();
+
+    let mut push_candidate = |name: &str, scope_id: ScopeId, span_start: u32| {
+        if span_start > scope_position.byte_offset {
+            return;
+        }
+
+        let Some(candidate_rank) = scope_position.scope_rank.get(&scope_id).copied() else {
+            return;
+        };
+        let Some(scope) = ir_program.get_scope(scope_id) else {
+            return;
+        };
+        if matches!(scope.kind, ScopeKind::Global) {
+            return;
+        }
+
+        let candidate = LocalSymbolCandidate {
+            name: name.to_string(),
+            scope_id,
+            span_start,
+        };
+        let key = name.to_lowercase();
+
+        let should_replace = match best_by_name.get(&key) {
+            None => true,
+            Some(existing) => {
+                let existing_rank = scope_position
+                    .scope_rank
+                    .get(&existing.scope_id)
+                    .copied()
+                    .unwrap_or(usize::MAX);
+                candidate_rank < existing_rank
+                    || (candidate_rank == existing_rank && span_start > existing.span_start)
+            }
+        };
+
+        if should_replace {
+            best_by_name.insert(key, candidate);
+        }
+    };
+
+    for node in ir_program.nodes.iter() {
+        match &node.kind {
+            SemanticNodeKind::VariableDeclaration { name, .. } => {
+                push_candidate(name, node.scope_id, node.span.start);
+            }
+            SemanticNodeKind::Assignment { variable, .. } => {
+                push_candidate(variable, node.scope_id, node.span.start);
+            }
+            SemanticNodeKind::FunctionDeclaration {
+                params, body_scope, ..
+            }
+            | SemanticNodeKind::ProcedureDeclaration {
+                params, body_scope, ..
+            } => {
+                for param in params {
+                    push_candidate(&param.name, *body_scope, node.span.start);
+                }
+            }
+            SemanticNodeKind::ForLoop { variable, body }
+            | SemanticNodeKind::ForEachLoop { variable, body } => {
+                if let Some(loop_scope) = resolve_loop_body_scope(
+                    ir_program,
+                    node.scope_id,
+                    body,
+                    Some(variable.as_str()),
+                    node.span.start,
+                ) {
+                    push_candidate(variable, loop_scope, node.span.start);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut out: Vec<LocalSymbolCandidate> = best_by_name.into_values().collect();
+    out.sort_by(|left, right| {
+        let left_rank = scope_position
+            .scope_rank
+            .get(&left.scope_id)
+            .copied()
+            .unwrap_or(usize::MAX);
+        let right_rank = scope_position
+            .scope_rank
+            .get(&right.scope_id)
+            .copied()
+            .unwrap_or(usize::MAX);
+        left_rank
+            .cmp(&right_rank)
+            .then_with(|| right.span_start.cmp(&left.span_start))
+            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+    });
+
+    out
+}
+
+fn add_local_symbols_from_ir(
+    analysis: Option<&CompletionAnalysisContext<'_>>,
+    file_content: &str,
+    line: u32,
+    column: u32,
+    target: &mut Vec<Candidate>,
+    priority: u8,
+) {
+    let Some(ctx) = analysis else {
+        return;
+    };
+    let Some(ir_program) = ctx.ir_program.as_deref() else {
+        return;
+    };
+    let Some(scope_position) =
+        resolve_completion_scope_position(ir_program, file_content, line, column)
+    else {
+        return;
+    };
+
+    for local in collect_local_candidates_from_ir(ir_program, &scope_position) {
+        target.push(Candidate::new(
+            CompletionItem::new(local.name, CompletionKind::Variable),
+            priority,
+            None,
+            Some(SymbolScope::Local),
+        ));
+    }
+}
+
 fn add_symbols(
     snapshot: &IndexSnapshot,
     file_uri: Option<&str>,
     target: &mut Vec<Candidate>,
     priority: u8,
+    include_local: bool,
 ) {
     let Some(uri) = file_uri else {
         return;
@@ -1620,6 +1882,9 @@ fn add_symbols(
     };
 
     for item in items.iter() {
+        if !include_local && matches!(item.scope, Some(SymbolScope::Local)) {
+            continue;
+        }
         let kind = completion_kind_from_index_item(item);
         target.push(Candidate::new(
             CompletionItem::new(item.name.clone(), kind),
@@ -1911,7 +2176,7 @@ fn escape_snippet_text(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::system::IndexItem;
+    use crate::system::{IndexItem, SymbolKind, SymbolScope};
     use bsl_analysis_v2::{
         AnalysisHostV2, Change as ChangeV2, DepsSnapshotId, FileId as V2FileId, SettingsId,
     };
@@ -2100,6 +2365,375 @@ mod tests {
 
         assert!(result.is_incomplete);
         assert_eq!(result.items.len(), COMPLETION_MAX_ITEMS);
+    }
+
+    fn build_non_member_completion_fixture(
+        content: &str,
+        file_path: &str,
+    ) -> (
+        IntellisenseIndexStore,
+        TypeMetadataLookup,
+        Arc<TypeResolver>,
+        Arc<bsl_shared::ir::SemanticProgram>,
+    ) {
+        let repository = Arc::new(InMemoryTypeRepository::new());
+        let repo: Arc<dyn TypeRepository> = repository.clone();
+        let resolver = Arc::new(TypeResolver::new(repo.clone()));
+        let metadata_lookup = TypeMetadataLookup::new(repo.clone());
+
+        let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+            signature_index: repo.get_signature_index_clone(),
+            resolver: Some(resolver.clone()),
+            repository: repo,
+            platform_signatures_loaded: false,
+        });
+
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(ChangeV2::SetDepsSnapshot {
+            deps_id: DepsSnapshotId::from_hash("test"),
+            deps,
+        });
+        host.apply_change(ChangeV2::SetSettingsSnapshot {
+            settings_id: SettingsId::from_hash("test"),
+            diagnostics_detail_level: DetailLevel::Full,
+        });
+        host.apply_change(ChangeV2::SetFile {
+            file_id: V2FileId(1),
+            text: Arc::from(content.to_string()),
+            version: 0,
+            path: Arc::from(file_path.to_string()),
+        });
+
+        let analysis = host.analysis();
+        let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
+        let index = IntellisenseIndexStore::new("cfg", "platform");
+
+        (index, metadata_lookup, resolver, ir_program)
+    }
+
+    async fn completion_labels_non_member(
+        content: &str,
+        line: u32,
+        column: u32,
+        file_uri: Option<&str>,
+        file_path: &str,
+        index: &IntellisenseIndexStore,
+        metadata_lookup: &TypeMetadataLookup,
+        resolver: &TypeResolver,
+        ir_program: Arc<bsl_shared::ir::SemanticProgram>,
+    ) -> Vec<String> {
+        let ctx = CompletionAnalysisContext {
+            ir_program: Some(ir_program),
+            resolver,
+            file_path,
+            parse_result: None,
+            member_access_owner_type_hint: None,
+            include_flow_sensitive: false,
+        };
+
+        let result = get_completion_with_analysis(
+            content,
+            line,
+            column,
+            file_uri,
+            index,
+            metadata_lookup,
+            Some(&ctx),
+        )
+        .await
+        .expect("completion ok");
+
+        result
+            .items
+            .into_iter()
+            .map(|candidate| candidate.item.label)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn completion_non_member_hides_block_locals_outside_if() {
+        let content = concat!(
+            "Процедура Тест()\n",
+            "    Если Истина Тогда\n",
+            "        ВнутриБлока = 1;\n",
+            "    КонецЕсли;\n",
+            "    Вн\n",
+            "КонецПроцедуры\n"
+        );
+        let file_path = "completion_lexical_block_scope_test.bsl";
+        let (index, metadata_lookup, resolver, ir_program) =
+            build_non_member_completion_fixture(content, file_path);
+
+        let line = 4;
+        let column = "    Вн".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+        let labels = completion_labels_non_member(
+            content,
+            line,
+            column,
+            Some("file:///completion_lexical_block_scope_test.bsl"),
+            file_path,
+            &index,
+            &metadata_lookup,
+            resolver.as_ref(),
+            ir_program,
+        )
+        .await;
+
+        assert!(
+            !labels.iter().any(|label| label == "ВнутриБлока"),
+            "labels: {:?}",
+            labels
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_non_member_respects_position_before_and_after_declaration() {
+        let content = concat!(
+            "Процедура Тест()\n",
+            "    Пос\n",
+            "    После = 1;\n",
+            "    Пос\n",
+            "КонецПроцедуры\n"
+        );
+        let file_path = "completion_lexical_position_scope_test.bsl";
+        let (index, metadata_lookup, resolver, ir_program) =
+            build_non_member_completion_fixture(content, file_path);
+
+        let query_column = "    Пос".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+        let labels_before = completion_labels_non_member(
+            content,
+            1,
+            query_column,
+            Some("file:///completion_lexical_position_scope_test.bsl"),
+            file_path,
+            &index,
+            &metadata_lookup,
+            resolver.as_ref(),
+            ir_program.clone(),
+        )
+        .await;
+        assert!(
+            !labels_before.iter().any(|label| label == "После"),
+            "labels_before: {:?}",
+            labels_before
+        );
+
+        let labels_after = completion_labels_non_member(
+            content,
+            3,
+            query_column,
+            Some("file:///completion_lexical_position_scope_test.bsl"),
+            file_path,
+            &index,
+            &metadata_lookup,
+            resolver.as_ref(),
+            ir_program,
+        )
+        .await;
+        assert!(
+            labels_after.iter().any(|label| label == "После"),
+            "labels_after: {:?}",
+            labels_after
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_non_member_prefers_nearest_scope_for_shadowed_names() {
+        let content = concat!(
+            "Процедура Тест()\n",
+            "    Имя = 1;\n",
+            "    Если Истина Тогда\n",
+            "        ИМЯ = 2;\n",
+            "        им\n",
+            "    КонецЕсли;\n",
+            "    им\n",
+            "КонецПроцедуры\n"
+        );
+        let file_path = "completion_lexical_shadow_scope_test.bsl";
+        let (index, metadata_lookup, resolver, ir_program) =
+            build_non_member_completion_fixture(content, file_path);
+
+        let inner_column = "        им".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+        let labels_inner = completion_labels_non_member(
+            content,
+            4,
+            inner_column,
+            Some("file:///completion_lexical_shadow_scope_test.bsl"),
+            file_path,
+            &index,
+            &metadata_lookup,
+            resolver.as_ref(),
+            ir_program.clone(),
+        )
+        .await;
+        assert!(
+            labels_inner.iter().any(|label| label == "ИМЯ"),
+            "labels_inner: {:?}",
+            labels_inner
+        );
+        assert!(
+            !labels_inner.iter().any(|label| label == "Имя"),
+            "labels_inner: {:?}",
+            labels_inner
+        );
+
+        let outer_column = "    им".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+        let labels_outer = completion_labels_non_member(
+            content,
+            6,
+            outer_column,
+            Some("file:///completion_lexical_shadow_scope_test.bsl"),
+            file_path,
+            &index,
+            &metadata_lookup,
+            resolver.as_ref(),
+            ir_program,
+        )
+        .await;
+        assert!(
+            labels_outer.iter().any(|label| label == "Имя"),
+            "labels_outer: {:?}",
+            labels_outer
+        );
+        assert!(
+            !labels_outer.iter().any(|label| label == "ИМЯ"),
+            "labels_outer: {:?}",
+            labels_outer
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_non_member_implicit_local_visible_from_assignment() {
+        let content = concat!(
+            "Процедура Тест()\n",
+            "    Ло\n",
+            "    Локал = Новый Массив;\n",
+            "    Ло\n",
+            "КонецПроцедуры\n"
+        );
+        let file_path = "completion_lexical_implicit_local_test.bsl";
+        let (index, metadata_lookup, resolver, ir_program) =
+            build_non_member_completion_fixture(content, file_path);
+
+        let query_column = "    Ло".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+        let labels_before = completion_labels_non_member(
+            content,
+            1,
+            query_column,
+            Some("file:///completion_lexical_implicit_local_test.bsl"),
+            file_path,
+            &index,
+            &metadata_lookup,
+            resolver.as_ref(),
+            ir_program.clone(),
+        )
+        .await;
+        assert!(
+            !labels_before.iter().any(|label| label == "Локал"),
+            "labels_before: {:?}",
+            labels_before
+        );
+
+        let labels_after = completion_labels_non_member(
+            content,
+            3,
+            query_column,
+            Some("file:///completion_lexical_implicit_local_test.bsl"),
+            file_path,
+            &index,
+            &metadata_lookup,
+            resolver.as_ref(),
+            ir_program,
+        )
+        .await;
+        assert!(
+            labels_after.iter().any(|label| label == "Локал"),
+            "labels_after: {:?}",
+            labels_after
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_non_member_ignores_non_identifier_assignment_targets() {
+        let content = concat!(
+            "Процедура Тест()\n",
+            "    Объект.Поле = 1;\n",
+            "    По\n",
+            "КонецПроцедуры\n"
+        );
+        let file_path = "completion_lexical_assignment_target_test.bsl";
+        let (index, metadata_lookup, resolver, ir_program) =
+            build_non_member_completion_fixture(content, file_path);
+
+        let column = "    По".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+        let labels = completion_labels_non_member(
+            content,
+            2,
+            column,
+            Some("file:///completion_lexical_assignment_target_test.bsl"),
+            file_path,
+            &index,
+            &metadata_lookup,
+            resolver.as_ref(),
+            ir_program,
+        )
+        .await;
+
+        assert!(
+            !labels.iter().any(|label| label == "Поле"),
+            "labels: {:?}",
+            labels
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_non_member_uses_index_for_non_local_symbols_only() {
+        let content = concat!("Процедура Тест()\n", "    Инд\n", "КонецПроцедуры\n");
+        let file_path = "completion_lexical_sources_test.bsl";
+        let (index, metadata_lookup, resolver, ir_program) =
+            build_non_member_completion_fixture(content, file_path);
+
+        let uri = "file:///completion_lexical_sources_test.bsl";
+        let mut local_from_index = IndexItem::new(
+            "ИндексЛокал",
+            IndexItemKind::Symbol(SymbolKind::Variable),
+            crate::system::IndexKind::Symbol,
+        );
+        local_from_index.scope = Some(SymbolScope::Local);
+
+        let mut module_from_index = IndexItem::new(
+            "ИндексМодуль",
+            IndexItemKind::Symbol(SymbolKind::Function),
+            crate::system::IndexKind::Symbol,
+        );
+        module_from_index.scope = Some(SymbolScope::Module);
+
+        index.replace_symbols_for_uri(uri, vec![local_from_index, module_from_index]);
+
+        let column = "    Инд".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+        let labels = completion_labels_non_member(
+            content,
+            1,
+            column,
+            Some(uri),
+            file_path,
+            &index,
+            &metadata_lookup,
+            resolver.as_ref(),
+            ir_program,
+        )
+        .await;
+
+        assert!(
+            labels.iter().any(|label| label == "ИндексМодуль"),
+            "labels: {:?}",
+            labels
+        );
+        assert!(
+            !labels.iter().any(|label| label == "ИндексЛокал"),
+            "labels: {:?}",
+            labels
+        );
     }
 
     #[tokio::test]

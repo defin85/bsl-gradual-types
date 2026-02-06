@@ -12,7 +12,7 @@ use tracing::{debug, error, warn};
 use tree_sitter::{InputEdit, Parser, Point};
 use url::Url;
 
-use crate::parsing::bsl::ast::{Program, Statement};
+use crate::parsing::bsl::ast::{Expression, Program, Statement};
 use crate::parsing::ParseResult;
 use crate::system::ast_cache::AstCache;
 use crate::system::disk_cache::{DiskCache, DiskCacheKey};
@@ -605,6 +605,22 @@ fn collect_symbol_items_from_statements(
                 ));
                 collect_symbol_items_from_statements(body, uri, false, items);
             }
+            Statement::Assignment { target, span, .. } => {
+                if let Expression::Identifier { name, .. } = target {
+                    let scope = if is_top_level {
+                        SymbolScope::Module
+                    } else {
+                        SymbolScope::Local
+                    };
+                    items.push(symbol_item(
+                        name,
+                        SymbolKind::Variable,
+                        scope,
+                        Some(*span),
+                        uri,
+                    ));
+                }
+            }
             Statement::If {
                 then_body,
                 else_body,
@@ -626,8 +642,7 @@ fn collect_symbol_items_from_statements(
                 collect_symbol_items_from_statements(try_body, uri, false, items);
                 collect_symbol_items_from_statements(except_body, uri, false, items);
             }
-            Statement::Assignment { .. }
-            | Statement::Return { .. }
+            Statement::Return { .. }
             | Statement::Call { .. }
             | Statement::Break { .. }
             | Statement::Continue { .. }
@@ -886,6 +901,14 @@ mod symbol_index_tests {
                     type_hint: None,
                     span,
                 },
+                Statement::Assignment {
+                    target: Expression::Identifier {
+                        name: "assigned_top".to_string(),
+                        span,
+                    },
+                    value: expr.clone(),
+                    span,
+                },
                 Statement::FunctionDecl {
                     name: "Func".to_string(),
                     params: vec!["a".to_string(), "b".to_string()],
@@ -893,6 +916,26 @@ mod symbol_index_tests {
                         Statement::VarDeclaration {
                             name: "y".to_string(),
                             type_hint: None,
+                            span,
+                        },
+                        Statement::Assignment {
+                            target: Expression::Identifier {
+                                name: "assigned_local".to_string(),
+                                span,
+                            },
+                            value: expr.clone(),
+                            span,
+                        },
+                        Statement::Assignment {
+                            target: Expression::PropertyAccess {
+                                object: Box::new(Expression::Identifier {
+                                    name: "obj".to_string(),
+                                    span,
+                                }),
+                                property: "field".to_string(),
+                                span,
+                            },
+                            value: expr.clone(),
                             span,
                         },
                         Statement::For {
@@ -947,6 +990,12 @@ mod symbol_index_tests {
         ));
         assert!(has_symbol(
             &items,
+            "assigned_top",
+            SymbolKind::Variable,
+            SymbolScope::Module
+        ));
+        assert!(has_symbol(
+            &items,
             "Func",
             SymbolKind::Function,
             SymbolScope::Module
@@ -966,6 +1015,18 @@ mod symbol_index_tests {
         assert!(has_symbol(
             &items,
             "y",
+            SymbolKind::Variable,
+            SymbolScope::Local
+        ));
+        assert!(has_symbol(
+            &items,
+            "assigned_local",
+            SymbolKind::Variable,
+            SymbolScope::Local
+        ));
+        assert!(!has_symbol(
+            &items,
+            "field",
             SymbolKind::Variable,
             SymbolScope::Local
         ));
@@ -1015,6 +1076,7 @@ mod symbol_index_tests {
 
         let code = r#"Перем x;
 Процедура Test(p)
+    Неявная = 1;
     Перем y;
 КонецПроцедуры"#;
         let file_path = "test.bsl";
@@ -1046,6 +1108,12 @@ mod symbol_index_tests {
             items,
             "p",
             SymbolKind::Parameter,
+            SymbolScope::Local
+        ));
+        assert!(has_symbol(
+            items,
+            "Неявная",
+            SymbolKind::Variable,
             SymbolScope::Local
         ));
         assert!(has_symbol(

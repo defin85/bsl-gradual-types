@@ -23,9 +23,7 @@ use std::sync::Arc;
 
 use bsl_syntax::ast::{Program, Statement};
 
-use crate::implicit_bindings::{
-    form_module_type_names, module_implicit_bindings, FORM_CONTEXT_BOUND_SYMBOL_KEYS,
-};
+use crate::implicit_bindings::{ImplicitBindingResolver, FORM_CONTEXT_BOUND_SYMBOL_KEYS};
 
 /// Конвертер AST -> IR
 ///
@@ -180,7 +178,8 @@ impl AstToIrConverter {
         let root = self.symbol_table.root_scope;
         self.form_context_symbols.clear();
 
-        let bindings = module_implicit_bindings(&location.module_type);
+        let binding_resolver = ImplicitBindingResolver::new();
+        let bindings = binding_resolver.bindings_for_module(&location.module_type);
         if matches!(location.module_type, ModuleType::FormModule { .. }) {
             let mut seen = BTreeSet::new();
             for binding in bindings {
@@ -198,7 +197,8 @@ impl AstToIrConverter {
                 return;
             };
 
-            let Some(type_names) = form_module_type_names(owner_type, form_name) else {
+            let Some(type_names) = binding_resolver.form_module_type_names(owner_type, form_name)
+            else {
                 return;
             };
 

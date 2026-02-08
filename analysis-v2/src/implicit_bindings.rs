@@ -23,96 +23,109 @@ pub(crate) struct FormModuleTypeNames {
     pub(crate) form_elements_type_name: String,
 }
 
-fn parse_owner_kind(owner_type: &str) -> Option<(MetadataKind, &str)> {
-    let (xml_kind, object_name) = owner_type.split_once('.')?;
-    let kind = MetadataKind::from_xml_tag(xml_kind)?;
-    Some((kind, object_name))
-}
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct ImplicitBindingResolver;
 
-fn faceted_owner_type_name(owner_type: &str, facet: FacetKind) -> Option<String> {
-    let (kind, object_name) = parse_owner_kind(owner_type)?;
-    let prefix = kind.faceted_type_prefix(&facet);
-    Some(format!("{}.{}", prefix, object_name))
-}
+impl ImplicitBindingResolver {
+    pub(crate) fn new() -> Self {
+        Self
+    }
 
-pub(crate) fn form_module_type_names(
-    owner_type: &str,
-    form_name: &str,
-) -> Option<FormModuleTypeNames> {
-    let (kind, object_name) = parse_owner_kind(owner_type)?;
-    let collection = kind.display_name();
-    let object_type_prefix = kind.faceted_type_prefix(&FacetKind::Object);
-    Some(FormModuleTypeNames {
-        form_type_name: format!("Формы.{}.{}.{}", collection, object_name, form_name),
-        form_object_type_name: format!("{}.{}", object_type_prefix, object_name),
-        form_elements_type_name: format!(
-            "ЭлементыФормы.{}.{}.{}",
-            collection, object_name, form_name
-        ),
-    })
-}
+    pub(crate) fn form_module_type_names(
+        &self,
+        owner_type: &str,
+        form_name: &str,
+    ) -> Option<FormModuleTypeNames> {
+        let (kind, object_name) = Self::parse_owner_kind(owner_type)?;
+        let collection = kind.display_name();
+        let object_type_prefix = kind.faceted_type_prefix(&FacetKind::Object);
+        Some(FormModuleTypeNames {
+            form_type_name: format!("Формы.{}.{}.{}", collection, object_name, form_name),
+            // FormModule.Объект всегда резолвится в owner object facet.
+            form_object_type_name: format!("{}.{}", object_type_prefix, object_name),
+            form_elements_type_name: format!(
+                "ЭлементыФормы.{}.{}.{}",
+                collection, object_name, form_name
+            ),
+        })
+    }
 
-pub(crate) fn module_implicit_bindings(module_type: &ModuleType) -> Vec<ImplicitBinding> {
-    match module_type {
-        ModuleType::FormModule {
-            form_name,
-            owner_type,
-        } => {
-            let names = form_module_type_names(owner_type, form_name);
-            vec![
-                ImplicitBinding {
-                    name: "ЭтотОбъект",
-                    type_name: names.as_ref().map(|n| n.form_type_name.clone()),
-                },
-                ImplicitBinding {
-                    name: "ЭтаФорма",
-                    type_name: names.as_ref().map(|n| n.form_type_name.clone()),
-                },
-                ImplicitBinding {
-                    name: "Форма",
-                    type_name: names.as_ref().map(|n| n.form_type_name.clone()),
-                },
-                ImplicitBinding {
-                    name: "Объект",
-                    type_name: names.as_ref().map(|n| n.form_object_type_name.clone()),
-                },
-                ImplicitBinding {
-                    name: "Элементы",
-                    type_name: names.as_ref().map(|n| n.form_elements_type_name.clone()),
-                },
-                ImplicitBinding {
-                    name: "Параметры",
-                    type_name: Some("Структура".to_string()),
-                },
-            ]
+    pub(crate) fn bindings_for_module(&self, module_type: &ModuleType) -> Vec<ImplicitBinding> {
+        match module_type {
+            ModuleType::FormModule {
+                form_name,
+                owner_type,
+            } => {
+                let names = self.form_module_type_names(owner_type, form_name);
+                vec![
+                    ImplicitBinding {
+                        name: "ЭтотОбъект",
+                        type_name: names.as_ref().map(|n| n.form_type_name.clone()),
+                    },
+                    ImplicitBinding {
+                        name: "ЭтаФорма",
+                        type_name: names.as_ref().map(|n| n.form_type_name.clone()),
+                    },
+                    ImplicitBinding {
+                        name: "Форма",
+                        type_name: names.as_ref().map(|n| n.form_type_name.clone()),
+                    },
+                    ImplicitBinding {
+                        name: "Объект",
+                        type_name: names.as_ref().map(|n| n.form_object_type_name.clone()),
+                    },
+                    ImplicitBinding {
+                        name: "Элементы",
+                        type_name: names.as_ref().map(|n| n.form_elements_type_name.clone()),
+                    },
+                    ImplicitBinding {
+                        name: "Параметры",
+                        type_name: Some("Структура".to_string()),
+                    },
+                ]
+            }
+            ModuleType::ManagerModule { owner_type } => {
+                let manager_type_name =
+                    Self::faceted_owner_type_name(owner_type, FacetKind::Manager);
+                vec![
+                    ImplicitBinding {
+                        name: "ЭтотОбъект",
+                        type_name: manager_type_name.clone(),
+                    },
+                    ImplicitBinding {
+                        name: "Объект",
+                        type_name: manager_type_name,
+                    },
+                ]
+            }
+            ModuleType::ObjectModule { owner_type }
+            | ModuleType::RecordSetModule { owner_type } => {
+                let object_type_name = Self::faceted_owner_type_name(owner_type, FacetKind::Object);
+                vec![
+                    ImplicitBinding {
+                        name: "ЭтотОбъект",
+                        type_name: object_type_name.clone(),
+                    },
+                    ImplicitBinding {
+                        name: "Объект",
+                        type_name: object_type_name,
+                    },
+                ]
+            }
+            _ => Vec::new(),
         }
-        ModuleType::ManagerModule { owner_type } => {
-            let manager_type_name = faceted_owner_type_name(owner_type, FacetKind::Manager);
-            vec![
-                ImplicitBinding {
-                    name: "ЭтотОбъект",
-                    type_name: manager_type_name.clone(),
-                },
-                ImplicitBinding {
-                    name: "Объект",
-                    type_name: manager_type_name,
-                },
-            ]
-        }
-        ModuleType::ObjectModule { owner_type } | ModuleType::RecordSetModule { owner_type } => {
-            let object_type_name = faceted_owner_type_name(owner_type, FacetKind::Object);
-            vec![
-                ImplicitBinding {
-                    name: "ЭтотОбъект",
-                    type_name: object_type_name.clone(),
-                },
-                ImplicitBinding {
-                    name: "Объект",
-                    type_name: object_type_name,
-                },
-            ]
-        }
-        _ => Vec::new(),
+    }
+
+    fn parse_owner_kind(owner_type: &str) -> Option<(MetadataKind, &str)> {
+        let (xml_kind, object_name) = owner_type.split_once('.')?;
+        let kind = MetadataKind::from_xml_tag(xml_kind)?;
+        Some((kind, object_name))
+    }
+
+    fn faceted_owner_type_name(owner_type: &str, facet: FacetKind) -> Option<String> {
+        let (kind, object_name) = Self::parse_owner_kind(owner_type)?;
+        let prefix = kind.faceted_type_prefix(&facet);
+        Some(format!("{}.{}", prefix, object_name))
     }
 }
 
@@ -121,4 +134,135 @@ pub(crate) fn directive_disables_form_context(directive: Option<CompilerDirectiv
         directive,
         Some(CompilerDirective::OnServerNoContext | CompilerDirective::OnClientOnServerNoContext)
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::{ImplicitBindingResolver, ModuleType};
+
+    fn to_map(bindings: Vec<super::ImplicitBinding>) -> HashMap<String, Option<String>> {
+        bindings
+            .into_iter()
+            .map(|binding| (binding.name.to_string(), binding.type_name))
+            .collect()
+    }
+
+    #[test]
+    fn form_module_binding_matrix_is_contextual() {
+        let resolver = ImplicitBindingResolver::new();
+        let bindings = resolver.bindings_for_module(&ModuleType::FormModule {
+            form_name: "Форма1".to_string(),
+            owner_type: "Document.Док1".to_string(),
+        });
+        let map = to_map(bindings);
+
+        assert_eq!(
+            map.get("ЭтотОбъект").and_then(Clone::clone).as_deref(),
+            Some("Формы.Документы.Док1.Форма1")
+        );
+        assert_eq!(
+            map.get("ЭтаФорма").and_then(Clone::clone).as_deref(),
+            Some("Формы.Документы.Док1.Форма1")
+        );
+        assert_eq!(
+            map.get("Форма").and_then(Clone::clone).as_deref(),
+            Some("Формы.Документы.Док1.Форма1")
+        );
+        assert_eq!(
+            map.get("Объект").and_then(Clone::clone).as_deref(),
+            Some("ДокументОбъект.Док1")
+        );
+        assert_eq!(
+            map.get("Элементы").and_then(Clone::clone).as_deref(),
+            Some("ЭлементыФормы.Документы.Док1.Форма1")
+        );
+        assert_eq!(
+            map.get("Параметры").and_then(Clone::clone).as_deref(),
+            Some("Структура")
+        );
+    }
+
+    #[test]
+    fn manager_module_binding_matrix_uses_manager_facet() {
+        let resolver = ImplicitBindingResolver::new();
+        let bindings = resolver.bindings_for_module(&ModuleType::ManagerModule {
+            owner_type: "Document.Док1".to_string(),
+        });
+        let map = to_map(bindings);
+
+        assert_eq!(
+            map.get("ЭтотОбъект").and_then(Clone::clone).as_deref(),
+            Some("ДокументМенеджер.Док1")
+        );
+        assert_eq!(
+            map.get("Объект").and_then(Clone::clone).as_deref(),
+            Some("ДокументМенеджер.Док1")
+        );
+    }
+
+    #[test]
+    fn object_and_recordset_binding_matrix_uses_object_facet() {
+        let resolver = ImplicitBindingResolver::new();
+
+        let object_bindings = resolver.bindings_for_module(&ModuleType::ObjectModule {
+            owner_type: "Document.Док1".to_string(),
+        });
+        let object_map = to_map(object_bindings);
+        assert_eq!(
+            object_map
+                .get("ЭтотОбъект")
+                .and_then(Clone::clone)
+                .as_deref(),
+            Some("ДокументОбъект.Док1")
+        );
+        assert_eq!(
+            object_map.get("Объект").and_then(Clone::clone).as_deref(),
+            Some("ДокументОбъект.Док1")
+        );
+
+        let recordset_bindings = resolver.bindings_for_module(&ModuleType::RecordSetModule {
+            owner_type: "InformationRegister.Регистр1".to_string(),
+        });
+        let recordset_map = to_map(recordset_bindings);
+        assert_eq!(
+            recordset_map
+                .get("ЭтотОбъект")
+                .and_then(Clone::clone)
+                .as_deref(),
+            Some("РегистрСведенийНаборЗаписей.Регистр1")
+        );
+        assert_eq!(
+            recordset_map
+                .get("Объект")
+                .and_then(Clone::clone)
+                .as_deref(),
+            Some("РегистрСведенийНаборЗаписей.Регистр1")
+        );
+    }
+
+    #[test]
+    fn form_object_binding_does_not_use_legacy_alias() {
+        let resolver = ImplicitBindingResolver::new();
+        let bindings = resolver.bindings_for_module(&ModuleType::FormModule {
+            form_name: "Форма1".to_string(),
+            owner_type: "Document.Док1".to_string(),
+        });
+
+        let object_binding = bindings
+            .iter()
+            .find(|binding| binding.name == "Объект")
+            .expect("Объект binding");
+        let type_name = object_binding
+            .type_name
+            .as_deref()
+            .expect("Объект type name");
+        assert!(
+            !type_name.contains("ДанныеФормыОбъект"),
+            "legacy alias leaked into form object binding: {}",
+            type_name
+        );
+        assert_eq!(type_name, "ДокументОбъект.Док1");
+    }
 }

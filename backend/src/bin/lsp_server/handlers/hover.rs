@@ -11,7 +11,7 @@ use bsl_backend::helpers::hover_formatter::HoverFormatter;
 use bsl_backend::helpers::hover_formatter::{HoverFormatConfig, HoverOutputFormat};
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::TypeMetadataLookup;
-use bsl_shared::formatting::DetailLevel;
+use bsl_shared::formatting::{normalize_user_facing_type_name, DetailLevel};
 use bsl_shared::ir::SemanticProgram;
 
 use crate::config::HoverSettings;
@@ -85,10 +85,17 @@ pub fn handle_hover_v2(
         ir_program,
     );
 
-    hover_info.map(|info| Hover {
-        contents: HoverContents::Scalar(MarkedString::String(info)),
-        range: None,
-    })
+    hover_info
+        .map(|info| Hover {
+            contents: HoverContents::Scalar(MarkedString::String(info)),
+            range: None,
+        })
+        .map(|mut hover| {
+            if let HoverContents::Scalar(MarkedString::String(value)) = &mut hover.contents {
+                *value = normalize_user_facing_type_name(value);
+            }
+            hover
+        })
 }
 
 #[cfg(test)]

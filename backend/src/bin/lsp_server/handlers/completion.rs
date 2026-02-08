@@ -20,6 +20,7 @@ use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::{MethodSignature, SignatureSource};
 use bsl_shared::domain::types::{MetadataKind, TypeResolution};
 use bsl_shared::domain::TypeMetadataLookup;
+use bsl_shared::formatting::normalize_user_facing_type_name;
 use bsl_shared::ir::SemanticProgram;
 
 const COMPLETION_CANDIDATE_ID_VERSION: u32 = 1;
@@ -192,9 +193,9 @@ pub async fn handle_completion_resolve(
     );
 
     if let Some((detail, documentation, insert_text)) = resolved {
-        item.detail = detail;
+        item.detail = detail.map(|value| normalize_user_facing_type_name(&value));
         if let Some(doc) = documentation {
-            item.documentation = Some(Documentation::String(doc));
+            item.documentation = Some(Documentation::String(normalize_user_facing_type_name(&doc)));
         }
         if let Some(snippet) = insert_text {
             if snippet_support {

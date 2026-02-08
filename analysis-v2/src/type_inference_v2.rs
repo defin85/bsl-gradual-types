@@ -18,8 +18,7 @@ use bsl_syntax::ast::{Expression, Program, Statement};
 
 use crate::ast_to_ir::{is_global_collection, lookup_global_collection};
 use crate::implicit_bindings::{
-    directive_disables_form_context, form_module_type_names, module_implicit_bindings,
-    FORM_CONTEXT_BOUND_SYMBOL_KEYS,
+    directive_disables_form_context, ImplicitBindingResolver, FORM_CONTEXT_BOUND_SYMBOL_KEYS,
 };
 use crate::SemanticDeps;
 
@@ -735,7 +734,8 @@ impl TypeInferencer {
             return;
         };
 
-        for binding in module_implicit_bindings(&location.module_type) {
+        let binding_resolver = ImplicitBindingResolver::new();
+        for binding in binding_resolver.bindings_for_module(&location.module_type) {
             let resolution = match binding.type_name.as_deref() {
                 Some(type_name) => {
                     let resolved = self.resolver.resolve_expression_sync(type_name);
@@ -763,7 +763,8 @@ impl TypeInferencer {
             return;
         };
 
-        let Some(type_names) = form_module_type_names(owner_type, form_name) else {
+        let Some(type_names) = binding_resolver.form_module_type_names(owner_type, form_name)
+        else {
             return;
         };
         let Some(form_type) = self.deps.repository.find_type(&type_names.form_type_name) else {
@@ -1881,6 +1882,59 @@ mod tests {
             .type_at_byte_offset(object_offset)
             .expect("type at Объект");
         assert_eq!(object.type_name(), "ДокументМенеджер.Док1");
+    }
+
+    #[test]
+    fn seeds_object_module_context_for_this_object_and_object() {
+        let deps = deps_with_array_method();
+        let source = r#"Процедура Тест()
+    x = ЭтотОбъект;
+    y = Объект;
+КонецПроцедуры
+"#;
+        let program = parse(source);
+        let file_path = "Documents/Док1/Ext/ObjectModule.bsl";
+        let index = build_type_index_with_path(&program, file_path, deps);
+
+        let this_object_offset = source.find("ЭтотОбъект").expect("ЭтотОбъект") as u32;
+        let this_object = index
+            .type_at_byte_offset(this_object_offset)
+            .expect("type at ЭтотОбъект");
+        assert_eq!(this_object.type_name(), "ДокументОбъект.Док1");
+
+        let object_offset = source.find("Объект").expect("Объект") as u32;
+        let object = index
+            .type_at_byte_offset(object_offset)
+            .expect("type at Объект");
+        assert_eq!(object.type_name(), "ДокументОбъект.Док1");
+    }
+
+    #[test]
+    fn seeds_recordset_module_context_for_this_object_and_object() {
+        let deps = deps_with_array_method();
+        let source = r#"Процедура Тест()
+    x = ЭтотОбъект;
+    y = Объект;
+КонецПроцедуры
+"#;
+        let program = parse(source);
+        let file_path = "InformationRegisters/Регистр1/Ext/RecordSetModule.bsl";
+        let index = build_type_index_with_path(&program, file_path, deps);
+
+        let this_object_offset = source.find("ЭтотОбъект").expect("ЭтотОбъект") as u32;
+        let this_object = index
+            .type_at_byte_offset(this_object_offset)
+            .expect("type at ЭтотОбъект");
+        assert_eq!(
+            this_object.type_name(),
+            "РегистрСведенийНаборЗаписей.Регистр1"
+        );
+
+        let object_offset = source.find("Объект").expect("Объект") as u32;
+        let object = index
+            .type_at_byte_offset(object_offset)
+            .expect("type at Объект");
+        assert_eq!(object.type_name(), "РегистрСведенийНаборЗаписей.Регистр1");
     }
 
     #[test]

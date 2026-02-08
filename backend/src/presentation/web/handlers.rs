@@ -31,7 +31,7 @@ use bsl_shared::api::{
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::types::{DiagnosticSeverity, TypeDiagnostic};
 use bsl_shared::domain::TypeMetadataLookup;
-use bsl_shared::formatting::DetailLevel;
+use bsl_shared::formatting::{normalize_user_facing_type_name, DetailLevel};
 
 // --- СТАРЫЕ DTO УДАЛЕНЫ ---
 
@@ -471,6 +471,7 @@ pub async fn get_hover(
     match hover_result {
         Ok(Ok(hover_text)) => {
             let duration_ms = start.elapsed().as_millis() as u64;
+            let hover_text = hover_text.map(|value| normalize_user_facing_type_name(&value));
 
             let response = serde_json::json!({
                 "hover": hover_text,
@@ -895,8 +896,9 @@ pub async fn get_enhanced_hover(
         Ok(Ok(hover_text)) => {
             let duration_ms = start.elapsed().as_millis();
 
-            let hover_text_str =
-                hover_text.unwrap_or_else(|| "No information available".to_string());
+            let hover_text_str = hover_text
+                .map(|value| normalize_user_facing_type_name(&value))
+                .unwrap_or_else(|| "No information available".to_string());
 
             let response = EnhancedHoverResponse {
                 hover_text: hover_text_str,

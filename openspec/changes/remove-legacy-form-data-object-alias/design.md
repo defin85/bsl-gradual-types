@@ -20,11 +20,25 @@
 Ключевые правила:
 - `FormModule`:
   - `ЭтотОбъект/ЭтаФорма/Форма` -> тип формы.
-  - `Объект` -> form-data descriptor (платформенная модель данных формы), не `ДанныеФормыОбъект.*`.
+  - `Объект` -> owner object facet (`<ФасетОбъект>.<ИмяОбъекта>`), не `ДанныеФормыОбъект.*`.
   - `Элементы` -> контейнер элементов формы.
   - `Параметры` -> `Структура`.
 - `ManagerModule`: `ЭтотОбъект/Объект` -> manager facet.
 - `ObjectModule`/`RecordSetModule`: `ЭтотОбъект/Объект` -> object/recordset facet.
+
+Матрица `ModuleType x Symbol` (каноническая):
+
+| ModuleType | Объект | ЭтотОбъект | ЭтаФорма | Форма | Элементы | Параметры |
+| --- | --- | --- | --- | --- | --- | --- |
+| `FormModule` | `<Owner:ObjectFacet>.<Name>` | `Формы.<Коллекция>.<Объект>.<Форма>` | `Формы.<Коллекция>.<Объект>.<Форма>` | `Формы.<Коллекция>.<Объект>.<Форма>` | `ЭлементыФормы.<Коллекция>.<Объект>.<Форма>` | `Структура` |
+| `ManagerModule` | `<Owner:ManagerFacet>.<Name>` | `<Owner:ManagerFacet>.<Name>` | n/a | n/a | n/a | n/a |
+| `ObjectModule` | `<Owner:ObjectFacet>.<Name>` | `<Owner:ObjectFacet>.<Name>` | n/a | n/a | n/a | n/a |
+| `RecordSetModule` | `<Owner:ObjectFacet>.<Name>` | `<Owner:ObjectFacet>.<Name>` | n/a | n/a | n/a | n/a |
+
+Примеры:
+- `Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl` -> `Объект: ДокументОбъект.Док1`, `ЭтотОбъект: Формы.Документы.Док1.Форма1`.
+- `Documents/Док1/Ext/ManagerModule.bsl` -> `Объект/ЭтотОбъект: ДокументМенеджер.Док1`.
+- `InformationRegisters/Регистр1/Ext/RecordSetModule.bsl` -> `Объект/ЭтотОбъект: РегистрСведенийНаборЗаписей.Регистр1`.
 
 ### 2) Form-data member resolution pipeline
 Для `FormModule.Объект` member-resolution выполняется слоями:
@@ -33,6 +47,11 @@
 3. реквизиты формы;
 4. привязанные табличные части;
 5. controlled fallback (`InferredWeak`) без ложных `NonExistentProperty`.
+
+Модель form-data для `FormModule.Объект`:
+- В user-facing типе используется owner object facet (`ДокументОбъект.*`, `СправочникОбъект.*`, `РегистрСведенийНаборЗаписей.*`).
+- Семантика данных формы (`ДанныеФормыСтруктура`) трактуется как runtime-представление данных формы, а не как имя пользовательского типа в diagnostics/hover/completion/type-at-position.
+- Legacy alias `ДанныеФормыОбъект.*` не участвует в seed/inference/lookup и запрещён для вывода наружу.
 
 ### 3) Legacy cleanup
 - Удаляется генерация/использование `ДанныеФормыОбъект.*` в v2 core path.

@@ -4,6 +4,7 @@
 
 use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
 use bsl_shared::domain::types::{Certainty, TypeResolution};
+use bsl_shared::formatting::normalize_user_facing_type_name;
 
 use super::config::{HoverFormatConfig, HoverOutputFormat};
 use super::sections;
@@ -130,6 +131,7 @@ impl<'a> HoverBuilder<'a> {
     /// Собирает финальную строку hover content
     pub fn build(self) -> String {
         // Используем двойной перенос для разделения секций (параграфы в Markdown)
-        self.sections.join("\n\n")
+        let output = self.sections.join("\n\n");
+        normalize_user_facing_type_name(&output)
     }
 }

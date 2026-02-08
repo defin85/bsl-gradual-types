@@ -8,7 +8,7 @@
 use crate::domain::code_location::CompilerDirective;
 use crate::domain::runtime_context::ContextRequirements;
 use crate::domain::types::{DiagnosticSeverity, TypeDiagnostic};
-use crate::formatting::DetailLevel;
+use crate::formatting::{normalize_user_facing_type_name, DetailLevel};
 use crate::ir::Span;
 
 use super::TypeErrorKind;
@@ -67,7 +67,7 @@ impl TypeErrorKind {
 
     /// MILESTONE 3.6 Phase 3: Brief format - error type only (without variable name)
     pub(crate) fn format_brief(&self) -> String {
-        match self {
+        let message = match self {
             TypeErrorKind::IncorrectParameterType {
                 method_name,
                 param_index,
@@ -177,12 +177,13 @@ impl TypeErrorKind {
                 "Конкатенация строк требует тип 'Строка' для обоих операндов: получено '{}' и '{}'",
                 left_type, right_type
             ),
-        }
+        };
+        normalize_user_facing_type_name(&message)
     }
 
     /// MILESTONE 3.6 Phase 3: Standard format - type + variable name
     pub(crate) fn format_standard(&self) -> String {
-        match self {
+        let message = match self {
             TypeErrorKind::NonExistentMethod {
                 object_type,
                 method_name,
@@ -306,7 +307,8 @@ impl TypeErrorKind {
             TypeErrorKind::UninitializedVariableUsage { .. } => self.format_brief(),
             TypeErrorKind::UnknownType { .. } => self.format_brief(),
             TypeErrorKind::InvalidStringConcatenation { .. } => self.format_brief(),
-        }
+        };
+        normalize_user_facing_type_name(&message)
     }
 
     /// MILESTONE 3.6 Phase 3: Detailed format - Standard + smart hints
@@ -323,7 +325,7 @@ impl TypeErrorKind {
 
     /// MILESTONE 3.6 Phase 3: Generate smart hints
     pub(crate) fn generate_hint(&self) -> String {
-        match self {
+        let hint = match self {
             TypeErrorKind::NonExistentMethod {
                 object_type,
                 method_name,
@@ -474,6 +476,7 @@ impl TypeErrorKind {
                 "\u{1F4A1} Подсказка: Приведите операнд к строке, например: Строка(<выражение>)."
                     .to_string()
             }
-        }
+        };
+        normalize_user_facing_type_name(&hint)
     }
 }

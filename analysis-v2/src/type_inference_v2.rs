@@ -17,6 +17,10 @@ use bsl_shared::domain::{CodeLocation, ModuleType};
 use bsl_syntax::ast::{Expression, Program, Statement};
 
 use crate::ast_to_ir::{is_global_collection, lookup_global_collection};
+use crate::implicit_bindings::{
+    directive_disables_form_context, form_module_type_names, module_implicit_bindings,
+    FORM_CONTEXT_BOUND_SYMBOL_KEYS,
+};
 use crate::SemanticDeps;
 
 #[derive(Debug, Clone)]
@@ -731,64 +735,47 @@ impl TypeInferencer {
             return;
         };
 
+        for binding in module_implicit_bindings(&location.module_type) {
+            let resolution = match binding.type_name.as_deref() {
+                Some(type_name) => {
+                    if self.deps.repository.find_type(type_name).is_some() {
+                        TypeResolution::explicit(type_name)
+                    } else {
+                        TypeResolution::inferred_weak(type_name)
+                    }
+                }
+                None => TypeResolution::unknown(),
+            };
+            env.variables
+                .insert(binding.name.to_lowercase(), resolution);
+        }
+
         let ModuleType::FormModule {
-            form_name,
-            owner_type,
+            ref form_name,
+            ref owner_type,
         } = location.module_type
         else {
             return;
         };
 
-        let Some((xml_kind, object_name)) = owner_type.split_once('.') else {
+        let Some(type_names) = form_module_type_names(owner_type, form_name) else {
             return;
         };
-
-        let Some(kind) = MetadataKind::from_xml_tag(xml_kind) else {
-            return;
-        };
-
-        let collection = kind.display_name();
-        let form_type_name = format!("Формы.{}.{}.{}", collection, object_name, form_name);
-
-        if self.deps.repository.find_type(&form_type_name).is_none() {
-            return;
-        }
-
-        let form_elements_type_name =
-            format!("ЭлементыФормы.{}.{}.{}", collection, object_name, form_name);
-        if self
-            .deps
-            .repository
-            .find_type(&form_elements_type_name)
-            .is_some()
-        {
-            env.variables.insert(
-                "Элементы".to_lowercase(),
-                TypeResolution::explicit(&form_elements_type_name),
-            );
-        }
-
-        env.variables.insert(
-            "ЭтаФорма".to_lowercase(),
-            TypeResolution::explicit(&form_type_name),
-        );
-
-        let Some(form_type) = self.deps.repository.find_type(&form_type_name) else {
+        let Some(form_type) = self.deps.repository.find_type(&type_names.form_type_name) else {
             return;
         };
 
         for prop in form_type.properties {
-            if prop.name.to_lowercase() == "элементы" {
+            let key = prop.name.to_lowercase();
+            if env.variables.contains_key(&key) {
                 continue;
             }
             if prop.prop_type.is_empty() {
                 continue;
             }
             if prop.prop_type.contains("cfg:") {
-                env.variables.insert(
-                    prop.name.to_lowercase(),
-                    TypeResolution::inferred(&prop.prop_type),
-                );
+                env.variables
+                    .insert(key, TypeResolution::inferred(&prop.prop_type));
                 continue;
             }
             if is_configuration_type_pattern(&prop.prop_type) {
@@ -798,7 +785,7 @@ impl TypeInferencer {
                 } else {
                     resolved
                 };
-                env.variables.insert(prop.name.to_lowercase(), resolved);
+                env.variables.insert(key, resolved);
                 continue;
             }
             let resolved = if self.deps.repository.find_type(&prop.prop_type).is_some() {
@@ -807,7 +794,7 @@ impl TypeInferencer {
                 self.try_resolve_configuration_type(&prop.prop_type)
                     .unwrap_or_else(|| self.resolver.resolve_expression_sync(&prop.prop_type))
             };
-            env.variables.insert(prop.name.to_lowercase(), resolved);
+            env.variables.insert(key, resolved);
         }
     }
 
@@ -932,12 +919,27 @@ impl TypeInferencer {
             Statement::Await { expression, .. } => {
                 let _ = self.infer_expr(expression, env, index);
             }
-            Statement::FunctionDecl { params, body, .. }
-            | Statement::ProcedureDecl { params, body, .. } => {
+            Statement::FunctionDecl {
+                params,
+                body,
+                compiler_directive,
+                ..
+            }
+            | Statement::ProcedureDecl {
+                params,
+                body,
+                compiler_directive,
+                ..
+            } => {
                 // TODO(v2): полноценное вычисление типов внутри функций на основе call graph.
                 // Пока строим индекс внутри тела, наследуя module-level окружение
                 // (например, implicit переменные модуля формы) и добавляя параметры.
                 let mut fn_env = env.clone();
+                if directive_disables_form_context(*compiler_directive) {
+                    for key in FORM_CONTEXT_BOUND_SYMBOL_KEYS {
+                        fn_env.variables.remove(key);
+                    }
+                }
                 for param in params {
                     fn_env
                         .variables
@@ -1725,5 +1727,103 @@ mod tests {
             .type_at_byte_offset(member_offset)
             .expect("type at member access");
         assert_eq!(member.type_name(), "ГруппаФормы");
+    }
+
+    #[test]
+    fn seeds_form_module_context_for_this_object_and_parameters() {
+        let repository_impl = Arc::new(InMemoryTypeRepository::new());
+        repository_impl
+            .load_types(vec![
+                RawTypeData {
+                    name: "Формы.Документы.Док1.Форма1".to_string(),
+                    source: RawDataSource::Configuration,
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "ДанныеФормыОбъект.Документы.Док1".to_string(),
+                    source: RawDataSource::Configuration,
+                    ..Default::default()
+                },
+            ])
+            .expect("load types");
+
+        let repository =
+            repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+        let resolver = Arc::new(TypeResolver::new(repository.clone()));
+        let deps = Arc::new(SemanticDeps {
+            repository,
+            signature_index: SignatureIndex::new(),
+            resolver: Some(resolver),
+            platform_signatures_loaded: true,
+        });
+
+        let source = r#"Процедура Тест()
+    x = ЭтотОбъект;
+    y = Параметры;
+КонецПроцедуры
+"#;
+        let program = parse(source);
+        let file_path = "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl";
+        let index = build_type_index_with_path(&program, file_path, deps);
+
+        let this_object_offset = source.find("ЭтотОбъект").expect("ЭтотОбъект") as u32;
+        let this_object = index
+            .type_at_byte_offset(this_object_offset)
+            .expect("type at ЭтотОбъект");
+        assert_eq!(this_object.type_name(), "Формы.Документы.Док1.Форма1");
+
+        let params_offset = source.find("Параметры").expect("Параметры") as u32;
+        let params = index
+            .type_at_byte_offset(params_offset)
+            .expect("type at Параметры");
+        assert_eq!(params.type_name(), "Структура");
+    }
+
+    #[test]
+    fn seeds_manager_module_context_for_this_object_and_object() {
+        let deps = deps_with_array_method();
+        let source = r#"Процедура Тест()
+    x = ЭтотОбъект;
+    y = Объект;
+КонецПроцедуры
+"#;
+        let program = parse(source);
+        let file_path = "Documents/Док1/Ext/ManagerModule.bsl";
+        let index = build_type_index_with_path(&program, file_path, deps);
+
+        let this_object_offset = source.find("ЭтотОбъект").expect("ЭтотОбъект") as u32;
+        let this_object = index
+            .type_at_byte_offset(this_object_offset)
+            .expect("type at ЭтотОбъект");
+        assert_eq!(this_object.type_name(), "ДокументМенеджер.Док1");
+
+        let object_offset = source.find("Объект").expect("Объект") as u32;
+        let object = index
+            .type_at_byte_offset(object_offset)
+            .expect("type at Объект");
+        assert_eq!(object.type_name(), "ДокументМенеджер.Док1");
+    }
+
+    #[test]
+    fn no_context_directive_hides_form_context_symbols() {
+        let deps = deps_with_array_method();
+        let source = r#"&НаСервереБезКонтекста
+Процедура Тест()
+    x = ЭтотОбъект;
+КонецПроцедуры
+"#;
+        let program = parse(source);
+        let file_path = "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl";
+        let index = build_type_index_with_path(&program, file_path, deps);
+
+        let this_object_offset = source.find("ЭтотОбъект").expect("ЭтотОбъект") as u32;
+        let this_object = index
+            .type_at_byte_offset(this_object_offset)
+            .expect("type at ЭтотОбъект");
+        assert_eq!(
+            this_object.is_undeclared_variable(),
+            Some("ЭтотОбъект"),
+            "expected ЭтотОбъект to be undeclared in *БезКонтекста"
+        );
     }
 }

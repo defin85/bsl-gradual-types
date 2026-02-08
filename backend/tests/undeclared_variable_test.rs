@@ -2,13 +2,17 @@
 
 mod support;
 
-fn undeclared_messages(code: &str) -> Vec<String> {
+fn undeclared_messages_for_path(file_path: &str, code: &str) -> Vec<String> {
     let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
-    support::semantic_diagnostics_for_code(deps_bundle.as_ref(), "inline.bsl", code)
+    support::semantic_diagnostics_for_code(deps_bundle.as_ref(), file_path, code)
         .into_iter()
         .map(|diag| diag.message)
         .filter(|message| message.contains("Необъявленная переменная"))
         .collect()
+}
+
+fn undeclared_messages(code: &str) -> Vec<String> {
+    undeclared_messages_for_path("inline.bsl", code)
 }
 
 #[test]
@@ -83,6 +87,122 @@ fn local_function_call_before_declaration_is_not_undeclared_variable() {
     assert!(
         messages.is_empty(),
         "unexpected undeclared variable diagnostics: {:?}",
+        messages
+    );
+}
+
+#[test]
+fn form_module_implicit_arguments_are_not_reported_as_undeclared() {
+    let code = r#"
+Процедура ПриСозданииНаСервере()
+    ПроверкаСостоянияДокументаПередЗаписьюСервер.ПриСозданииНаСервереДокумент(ЭтотОбъект, Параметры);
+КонецПроцедуры
+"#;
+    let messages = undeclared_messages_for_path(
+        "Documents/РеализацияТоваровУслуг/Forms/ФормаДокументаОбщая/Ext/Form/Module.bsl",
+        code,
+    );
+
+    assert!(
+        !messages.iter().any(|msg| msg.contains("ЭтотОбъект")),
+        "unexpected undeclared diagnostics for ЭтотОбъект: {:?}",
+        messages
+    );
+    assert!(
+        !messages.iter().any(|msg| msg.contains("Параметры")),
+        "unexpected undeclared diagnostics for Параметры: {:?}",
+        messages
+    );
+}
+
+#[test]
+fn form_module_no_context_reports_this_object_as_undeclared() {
+    let code = r#"
+&НаСервереБезКонтекста
+Процедура Тест()
+    М = Справочники.Контрагенты;
+    М.НайтиПоКоду(ЭтотОбъект);
+КонецПроцедуры
+"#;
+    let messages = undeclared_messages_for_path(
+        "Documents/РеализацияТоваровУслуг/Forms/ФормаДокументаОбщая/Ext/Form/Module.bsl",
+        code,
+    );
+    assert!(
+        messages.iter().any(|msg| msg.contains("ЭтотОбъект")),
+        "expected undeclared diagnostics for ЭтотОбъект in *БезКонтекста, got: {:?}",
+        messages
+    );
+}
+
+#[test]
+fn manager_module_implicit_arguments_are_not_reported_as_undeclared() {
+    let code = r#"
+Процедура Тест()
+    М = Справочники.Контрагенты;
+    М.НайтиПоКоду(ЭтотОбъект);
+    М.НайтиПоКоду(Объект);
+КонецПроцедуры
+"#;
+    let messages = undeclared_messages_for_path("Documents/Док1/Ext/ManagerModule.bsl", code);
+
+    assert!(
+        !messages.iter().any(|msg| msg.contains("ЭтотОбъект")),
+        "unexpected undeclared diagnostics for ЭтотОбъект: {:?}",
+        messages
+    );
+    assert!(
+        !messages.iter().any(|msg| msg.contains("Объект")),
+        "unexpected undeclared diagnostics for Объект: {:?}",
+        messages
+    );
+}
+
+#[test]
+fn object_module_implicit_arguments_are_not_reported_as_undeclared() {
+    let code = r#"
+Процедура Тест()
+    М = Справочники.Контрагенты;
+    М.НайтиПоКоду(ЭтотОбъект);
+    М.НайтиПоКоду(Объект);
+КонецПроцедуры
+"#;
+    let messages = undeclared_messages_for_path("Documents/Док1/Ext/ObjectModule.bsl", code);
+
+    assert!(
+        !messages.iter().any(|msg| msg.contains("ЭтотОбъект")),
+        "unexpected undeclared diagnostics for ЭтотОбъект: {:?}",
+        messages
+    );
+    assert!(
+        !messages.iter().any(|msg| msg.contains("Объект")),
+        "unexpected undeclared diagnostics for Объект: {:?}",
+        messages
+    );
+}
+
+#[test]
+fn recordset_module_implicit_arguments_are_not_reported_as_undeclared() {
+    let code = r#"
+Процедура Тест()
+    М = Справочники.Контрагенты;
+    М.НайтиПоКоду(ЭтотОбъект);
+    М.НайтиПоКоду(Объект);
+КонецПроцедуры
+"#;
+    let messages = undeclared_messages_for_path(
+        "InformationRegisters/Регистр1/Ext/RecordSetModule.bsl",
+        code,
+    );
+
+    assert!(
+        !messages.iter().any(|msg| msg.contains("ЭтотОбъект")),
+        "unexpected undeclared diagnostics for ЭтотОбъект: {:?}",
+        messages
+    );
+    assert!(
+        !messages.iter().any(|msg| msg.contains("Объект")),
+        "unexpected undeclared diagnostics for Объект: {:?}",
         messages
     );
 }

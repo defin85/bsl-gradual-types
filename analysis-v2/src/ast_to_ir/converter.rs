@@ -14,14 +14,18 @@ use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
 use bsl_shared::domain::repository::TypeRepository;
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::SignatureIndex;
-use bsl_shared::domain::types::MetadataKind;
 use bsl_shared::domain::{CodeLocation, ModuleType};
 use bsl_shared::ir::*;
 use bsl_shared::utils::hash::hash_content;
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Arc;
 
 use bsl_syntax::ast::{Program, Statement};
+
+use crate::implicit_bindings::{
+    form_module_type_names, module_implicit_bindings, FORM_CONTEXT_BOUND_SYMBOL_KEYS,
+};
 
 /// Конвертер AST -> IR
 ///
@@ -56,6 +60,14 @@ pub struct AstToIrConverter {
     /// TypeMetadataLookup для получения свойств фасетных типов (Milestone 3.18)
     #[allow(dead_code)]
     pub(crate) metadata_lookup: TypeMetadataLookup,
+
+    /// Контекстные implicit-символы модуля формы, которые должны быть доступны в процедурах/функциях
+    /// кроме `*БезКонтекста`.
+    pub(crate) form_context_symbols: Vec<String>,
+
+    /// Стек доступности контекстных form symbols для вложенных процедур/функций.
+    /// `false` наследуется вглубь и запрещает инжект context-bound symbols.
+    pub(crate) form_context_enabled_stack: Vec<bool>,
 }
 
 impl AstToIrConverter {
@@ -80,6 +92,8 @@ impl AstToIrConverter {
             signature_index,
             resolver,
             metadata_lookup,
+            form_context_symbols: Vec::new(),
+            form_context_enabled_stack: vec![true],
         }
     }
 
@@ -162,46 +176,52 @@ impl AstToIrConverter {
             return;
         };
 
-        let ModuleType::FormModule {
-            form_name,
-            owner_type,
-        } = location.module_type
-        else {
-            return;
-        };
-
-        let Some((xml_kind, object_name)) = owner_type.split_once('.') else {
-            return;
-        };
-
-        let Some(kind) = MetadataKind::from_xml_tag(xml_kind) else {
-            return;
-        };
-
-        let collection = kind.display_name();
-
-        let form_type_name = format!("Формы.{}.{}.{}", collection, object_name, form_name);
-
         let span = Span::stub();
         let root = self.symbol_table.root_scope;
+        self.form_context_symbols.clear();
 
-        // Базовые implicit символы модуля формы (только биндинги имён, без TypeResolution)
-        self.symbol_table
-            .register_variable(root, "Объект".to_string(), span);
-        self.symbol_table
-            .register_variable(root, "Элементы".to_string(), span);
-        self.symbol_table
-            .register_variable(root, "ЭтаФорма".to_string(), span);
-
-        // Реквизиты формы (из синтетического типа `Формы.*`) — тоже только имена.
-        if let Some(form_type) = self.repository.find_type(&form_type_name) {
-            for prop in form_type.properties {
-                if prop.name == "Объект" || prop.name == "Элементы" || prop.prop_type.is_empty()
-                {
-                    continue;
+        let bindings = module_implicit_bindings(&location.module_type);
+        if matches!(location.module_type, ModuleType::FormModule { .. }) {
+            let mut seen = BTreeSet::new();
+            for binding in bindings {
+                let key = binding.name.to_lowercase();
+                if seen.insert(key) {
+                    self.form_context_symbols.push(binding.name.to_string());
                 }
-                self.symbol_table.register_variable(root, prop.name, span);
             }
+
+            let ModuleType::FormModule {
+                ref form_name,
+                ref owner_type,
+            } = location.module_type
+            else {
+                return;
+            };
+
+            let Some(type_names) = form_module_type_names(owner_type, form_name) else {
+                return;
+            };
+
+            // Реквизиты формы (из синтетического типа `Формы.*`) доступны в контексте формы.
+            if let Some(form_type) = self.repository.find_type(&type_names.form_type_name) {
+                for prop in form_type.properties {
+                    let key = prop.name.to_lowercase();
+                    if FORM_CONTEXT_BOUND_SYMBOL_KEYS.contains(&key.as_str())
+                        || prop.prop_type.is_empty()
+                    {
+                        continue;
+                    }
+                    if seen.insert(key) {
+                        self.form_context_symbols.push(prop.name);
+                    }
+                }
+            }
+            return;
+        }
+
+        for binding in bindings {
+            self.symbol_table
+                .register_variable(root, binding.name.to_string(), span);
         }
     }
 

@@ -336,3 +336,225 @@ async fn m8_lsp_completion_inside_string_and_comment_does_not_suggest_member_acc
     assert!(!labels.iter().any(|label| label == "Колонки"));
     assert!(!labels.iter().any(|label| label == "Добавить"));
 }
+
+#[tokio::test]
+async fn m8_lsp_completion_form_module_suggests_implicit_context_symbols() {
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
+    let index_snapshot = deps_bundle.index_snapshot.clone();
+
+    let uri = Url::parse("file:///m8_form_implicit_completion.bsl").expect("uri");
+    let module_path = "Documents/Док1/Forms/ФормаДокумента/Ext/Form/Module.bsl";
+    let file_id = V2FileId(1);
+
+    let mut host = setup_host(deps_bundle.as_ref());
+
+    let content_this = concat!(
+        "Процедура ПриСозданииНаСервере()\n",
+        "    Этот\n",
+        "КонецПроцедуры\n",
+    );
+    let (file_content, resolved_file_path, ir_program, parse_result) =
+        apply_file(&mut host, file_id, 1, module_path, content_this);
+    let response = completion_handler::handle_completion_v2(
+        file_content,
+        resolved_file_path,
+        ir_program,
+        Some(parse_result),
+        None,
+        deps_bundle.semantic_deps.clone(),
+        Position {
+            line: 1,
+            character: utf16_len("    Этот"),
+        },
+        &uri,
+        index_snapshot.as_ref(),
+        false,
+        false,
+    )
+    .await
+    .expect("completion response");
+    let labels = completion_labels(response.response);
+    assert!(
+        labels.iter().any(|label| label == "ЭтотОбъект"),
+        "completion should include ЭтотОбъект in form module, labels={:?}",
+        labels
+    );
+
+    let content_params = concat!(
+        "Процедура ПриСозданииНаСервере()\n",
+        "    Пар\n",
+        "КонецПроцедуры\n",
+    );
+    let (file_content, resolved_file_path, ir_program, parse_result) =
+        apply_file(&mut host, file_id, 2, module_path, content_params);
+    let response = completion_handler::handle_completion_v2(
+        file_content,
+        resolved_file_path,
+        ir_program,
+        Some(parse_result),
+        None,
+        deps_bundle.semantic_deps.clone(),
+        Position {
+            line: 1,
+            character: utf16_len("    Пар"),
+        },
+        &uri,
+        index_snapshot.as_ref(),
+        false,
+        false,
+    )
+    .await
+    .expect("completion response");
+    let labels = completion_labels(response.response);
+    assert!(
+        labels.iter().any(|label| label == "Параметры"),
+        "completion should include Параметры in form module, labels={:?}",
+        labels
+    );
+}
+
+#[tokio::test]
+async fn m8_lsp_completion_form_module_no_context_hides_implicit_context_symbols() {
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
+    let index_snapshot = deps_bundle.index_snapshot.clone();
+
+    let uri = Url::parse("file:///m8_form_implicit_completion_no_context.bsl").expect("uri");
+    let module_path = "Documents/Док1/Forms/ФормаДокумента/Ext/Form/Module.bsl";
+    let file_id = V2FileId(1);
+
+    let mut host = setup_host(deps_bundle.as_ref());
+
+    let content_this = concat!(
+        "&НаСервереБезКонтекста\n",
+        "Процедура Тест()\n",
+        "    Этот\n",
+        "КонецПроцедуры\n",
+    );
+    let (file_content, resolved_file_path, ir_program, parse_result) =
+        apply_file(&mut host, file_id, 1, module_path, content_this);
+    let response = completion_handler::handle_completion_v2(
+        file_content,
+        resolved_file_path,
+        ir_program,
+        Some(parse_result),
+        None,
+        deps_bundle.semantic_deps.clone(),
+        Position {
+            line: 2,
+            character: utf16_len("    Этот"),
+        },
+        &uri,
+        index_snapshot.as_ref(),
+        false,
+        false,
+    )
+    .await
+    .expect("completion response");
+    let labels = completion_labels(response.response);
+    assert!(
+        !labels.iter().any(|label| label == "ЭтотОбъект"),
+        "completion should not include ЭтотОбъект in *БезКонтекста, labels={:?}",
+        labels
+    );
+
+    let content_params = concat!(
+        "&НаСервереБезКонтекста\n",
+        "Процедура Тест()\n",
+        "    Пар\n",
+        "КонецПроцедуры\n",
+    );
+    let (file_content, resolved_file_path, ir_program, parse_result) =
+        apply_file(&mut host, file_id, 2, module_path, content_params);
+    let response = completion_handler::handle_completion_v2(
+        file_content,
+        resolved_file_path,
+        ir_program,
+        Some(parse_result),
+        None,
+        deps_bundle.semantic_deps.clone(),
+        Position {
+            line: 2,
+            character: utf16_len("    Пар"),
+        },
+        &uri,
+        index_snapshot.as_ref(),
+        false,
+        false,
+    )
+    .await
+    .expect("completion response");
+    let labels = completion_labels(response.response);
+    assert!(
+        !labels.iter().any(|label| label == "Параметры"),
+        "completion should not include Параметры in *БезКонтекста, labels={:?}",
+        labels
+    );
+}
+
+#[tokio::test]
+async fn m8_lsp_completion_manager_module_suggests_implicit_object_symbols() {
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
+    let index_snapshot = deps_bundle.index_snapshot.clone();
+
+    let uri = Url::parse("file:///m8_manager_implicit_completion.bsl").expect("uri");
+    let module_path = "Documents/Док1/Ext/ManagerModule.bsl";
+    let file_id = V2FileId(1);
+
+    let mut host = setup_host(deps_bundle.as_ref());
+
+    let content_this = concat!("Процедура Тест()\n", "    Этот\n", "КонецПроцедуры\n",);
+    let (file_content, resolved_file_path, ir_program, parse_result) =
+        apply_file(&mut host, file_id, 1, module_path, content_this);
+    let response = completion_handler::handle_completion_v2(
+        file_content,
+        resolved_file_path,
+        ir_program,
+        Some(parse_result),
+        None,
+        deps_bundle.semantic_deps.clone(),
+        Position {
+            line: 1,
+            character: utf16_len("    Этот"),
+        },
+        &uri,
+        index_snapshot.as_ref(),
+        false,
+        false,
+    )
+    .await
+    .expect("completion response");
+    let labels = completion_labels(response.response);
+    assert!(
+        labels.iter().any(|label| label == "ЭтотОбъект"),
+        "completion should include ЭтотОбъект in manager module, labels={:?}",
+        labels
+    );
+
+    let content_object = concat!("Процедура Тест()\n", "    Об\n", "КонецПроцедуры\n",);
+    let (file_content, resolved_file_path, ir_program, parse_result) =
+        apply_file(&mut host, file_id, 2, module_path, content_object);
+    let response = completion_handler::handle_completion_v2(
+        file_content,
+        resolved_file_path,
+        ir_program,
+        Some(parse_result),
+        None,
+        deps_bundle.semantic_deps.clone(),
+        Position {
+            line: 1,
+            character: utf16_len("    Об"),
+        },
+        &uri,
+        index_snapshot.as_ref(),
+        false,
+        false,
+    )
+    .await
+    .expect("completion response");
+    let labels = completion_labels(response.response);
+    assert!(
+        labels.iter().any(|label| label == "Объект"),
+        "completion should include Объект in manager module, labels={:?}",
+        labels
+    );
+}

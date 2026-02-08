@@ -1567,6 +1567,20 @@ struct LocalSymbolCandidate {
     span_start: u32,
 }
 
+const IMPLICIT_CONTEXT_SYMBOL_KEYS: [&str; 6] = [
+    "этотобъект",
+    "этаформа",
+    "форма",
+    "объект",
+    "элементы",
+    "параметры",
+];
+
+fn is_implicit_context_symbol(name: &str) -> bool {
+    let lowered = name.to_lowercase();
+    IMPLICIT_CONTEXT_SYMBOL_KEYS.contains(&lowered.as_str())
+}
+
 fn resolve_loop_body_scope(
     ir_program: &SemanticProgram,
     parent_scope: ScopeId,
@@ -1822,6 +1836,7 @@ fn collect_local_candidates_from_ir(
             name,
             scope_id,
             span_start,
+            false,
         );
     };
 
@@ -1895,6 +1910,29 @@ fn collect_local_candidates_from_ir(
                     }
                 }
                 _ => {}
+            }
+        }
+    }
+
+    drop(push_candidate);
+
+    // Дополняем кандидатов только implicit symbols из SymbolTable:
+    // они могут не иметь отдельных AST/IR-узлов.
+    for scope_id in scope_position.scope_rank.keys().copied() {
+        let Some(scope) = ir_program.get_scope(scope_id) else {
+            continue;
+        };
+        for (name, state) in scope.variables.iter() {
+            if is_implicit_context_symbol(name) {
+                push_local_candidate_if_visible(
+                    ir_program,
+                    scope_position,
+                    &mut best_by_name,
+                    name,
+                    scope_id,
+                    state.declaration_span.start,
+                    true,
+                );
             }
         }
     }
@@ -2026,6 +2064,7 @@ fn push_local_candidate_if_visible(
     name: &str,
     scope_id: ScopeId,
     span_start: u32,
+    allow_global: bool,
 ) {
     if span_start > scope_position.byte_offset {
         return;
@@ -2037,7 +2076,7 @@ fn push_local_candidate_if_visible(
     let Some(scope) = ir_program.get_scope(scope_id) else {
         return;
     };
-    if matches!(scope.kind, ScopeKind::Global) {
+    if !allow_global && matches!(scope.kind, ScopeKind::Global) {
         return;
     }
 

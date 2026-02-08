@@ -10,6 +10,8 @@ use bsl_shared::ir::{Parameter, ScopeKind, SemanticNode, SemanticNodeKind};
 
 use bsl_syntax::ast::{Expression, Statement};
 
+use crate::implicit_bindings::directive_disables_form_context;
+
 use super::converter::AstToIrConverter;
 
 impl AstToIrConverter {
@@ -496,19 +498,44 @@ impl AstToIrConverter {
         let old_scope = self.current_scope;
         self.current_scope = body_scope;
 
+        let parent_context_enabled = self
+            .form_context_enabled_stack
+            .last()
+            .copied()
+            .unwrap_or(true);
+        let context_enabled =
+            parent_context_enabled && !directive_disables_form_context(compiler_directive);
+        self.form_context_enabled_stack.push(context_enabled);
+
         // Регистрируем параметры функции в body_scope
         for param in &params_vec {
             self.symbol_table
                 .register_variable(body_scope, param.name.clone(), span);
         }
 
-        // Собираем только прямые дочерние индексы
-        let mut body_indices = Vec::new();
-        for stmt in body {
-            if let Some(idx) = self.convert_statement(stmt)? {
-                body_indices.push(idx);
+        // Контекстные implicit-переменные формы доступны внутри процедур/функций
+        // кроме `*БезКонтекста`.
+        if !self.form_context_symbols.is_empty() && context_enabled {
+            for name in &self.form_context_symbols {
+                if !self.symbol_table.has_variable(body_scope, name) {
+                    self.symbol_table
+                        .register_variable(body_scope, name.clone(), span);
+                }
             }
         }
+
+        // Собираем только прямые дочерние индексы
+        let body_result = (|| -> Result<Vec<usize>> {
+            let mut body_indices = Vec::new();
+            for stmt in body {
+                if let Some(idx) = self.convert_statement(stmt)? {
+                    body_indices.push(idx);
+                }
+            }
+            Ok(body_indices)
+        })();
+        self.form_context_enabled_stack.pop();
+        let body_indices = body_result?;
 
         self.current_scope = old_scope;
 
@@ -559,19 +586,44 @@ impl AstToIrConverter {
         let old_scope = self.current_scope;
         self.current_scope = body_scope;
 
+        let parent_context_enabled = self
+            .form_context_enabled_stack
+            .last()
+            .copied()
+            .unwrap_or(true);
+        let context_enabled =
+            parent_context_enabled && !directive_disables_form_context(compiler_directive);
+        self.form_context_enabled_stack.push(context_enabled);
+
         // Регистрируем параметры процедуры в body_scope
         for param in &params_vec {
             self.symbol_table
                 .register_variable(body_scope, param.name.clone(), span);
         }
 
-        // Собираем только прямые дочерние индексы
-        let mut body_indices = Vec::new();
-        for stmt in body {
-            if let Some(idx) = self.convert_statement(stmt)? {
-                body_indices.push(idx);
+        // Контекстные implicit-переменные формы доступны внутри процедур/функций
+        // кроме `*БезКонтекста`.
+        if !self.form_context_symbols.is_empty() && context_enabled {
+            for name in &self.form_context_symbols {
+                if !self.symbol_table.has_variable(body_scope, name) {
+                    self.symbol_table
+                        .register_variable(body_scope, name.clone(), span);
+                }
             }
         }
+
+        // Собираем только прямые дочерние индексы
+        let body_result = (|| -> Result<Vec<usize>> {
+            let mut body_indices = Vec::new();
+            for stmt in body {
+                if let Some(idx) = self.convert_statement(stmt)? {
+                    body_indices.push(idx);
+                }
+            }
+            Ok(body_indices)
+        })();
+        self.form_context_enabled_stack.pop();
+        let body_indices = body_result?;
 
         self.current_scope = old_scope;
 

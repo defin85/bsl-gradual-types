@@ -860,3 +860,199 @@ fn test_global_property_access_for_calculation_registers() {
         );
     }
 }
+
+#[test]
+fn test_form_module_implicit_symbols_are_injected_into_procedure_scope() {
+    let ast = Program {
+        statements: vec![Statement::ProcedureDecl {
+            name: "Тест".to_string(),
+            params: vec![],
+            body: vec![],
+            compiler_directive: Some(CompilerDirective::OnServer),
+            is_export: false,
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "Процедура Тест()\nКонецПроцедуры".to_string(),
+        "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    let body_scope = ir
+        .nodes
+        .iter()
+        .find_map(|node| match &node.kind {
+            SemanticNodeKind::ProcedureDeclaration { body_scope, .. } => Some(*body_scope),
+            _ => None,
+        })
+        .expect("procedure scope");
+
+    for name in [
+        "ЭтотОбъект",
+        "ЭтаФорма",
+        "Форма",
+        "Объект",
+        "Элементы",
+        "Параметры",
+    ] {
+        assert!(
+            ir.symbols.has_variable(body_scope, name),
+            "expected implicit symbol '{}' in form procedure scope",
+            name
+        );
+    }
+}
+
+#[test]
+fn test_form_module_no_context_does_not_inject_context_symbols() {
+    let ast = Program {
+        statements: vec![Statement::ProcedureDecl {
+            name: "Тест".to_string(),
+            params: vec![],
+            body: vec![],
+            compiler_directive: Some(CompilerDirective::OnServerNoContext),
+            is_export: false,
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "&НаСервереБезКонтекста\nПроцедура Тест()\nКонецПроцедуры".to_string(),
+        "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    let body_scope = ir
+        .nodes
+        .iter()
+        .find_map(|node| match &node.kind {
+            SemanticNodeKind::ProcedureDeclaration { body_scope, .. } => Some(*body_scope),
+            _ => None,
+        })
+        .expect("procedure scope");
+
+    for name in [
+        "ЭтотОбъект",
+        "ЭтаФорма",
+        "Форма",
+        "Объект",
+        "Элементы",
+        "Параметры",
+    ] {
+        assert!(
+            ir.symbols
+                .lookup_variable_in_hierarchy(body_scope, name)
+                .is_none(),
+            "expected no implicit symbol '{}' for *БезКонтекста procedure",
+            name
+        );
+    }
+}
+
+#[test]
+fn test_nested_local_function_inherits_no_context_from_outer_procedure() {
+    let ast = Program {
+        statements: vec![Statement::ProcedureDecl {
+            name: "Внешняя".to_string(),
+            params: vec![],
+            body: vec![Statement::FunctionDecl {
+                name: "Внутренняя".to_string(),
+                params: vec![],
+                body: vec![],
+                compiler_directive: None,
+                is_export: false,
+                span: AstSpan::stub(),
+            }],
+            compiler_directive: Some(CompilerDirective::OnServerNoContext),
+            is_export: false,
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "&НаСервереБезКонтекста\nПроцедура Внешняя()\n    Функция Внутренняя()\n    КонецФункции\nКонецПроцедуры".to_string(),
+        "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    let nested_body_scope = ir
+        .nodes
+        .iter()
+        .find_map(|node| match &node.kind {
+            SemanticNodeKind::FunctionDeclaration {
+                name, body_scope, ..
+            } if name == "Внутренняя" => Some(*body_scope),
+            _ => None,
+        })
+        .expect("nested function scope");
+
+    for name in [
+        "ЭтотОбъект",
+        "ЭтаФорма",
+        "Форма",
+        "Объект",
+        "Элементы",
+        "Параметры",
+    ] {
+        assert!(
+            ir.symbols
+                .lookup_variable_in_hierarchy(nested_body_scope, name)
+                .is_none(),
+            "expected no implicit symbol '{}' in nested function under *БезКонтекста",
+            name
+        );
+    }
+}
+
+#[test]
+fn test_manager_module_has_implicit_this_object_and_object() {
+    let ast = Program {
+        statements: vec![Statement::ProcedureDecl {
+            name: "Тест".to_string(),
+            params: vec![],
+            body: vec![],
+            compiler_directive: None,
+            is_export: false,
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "Процедура Тест()\nКонецПроцедуры".to_string(),
+        "Documents/Док1/Ext/ManagerModule.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    let body_scope = ir
+        .nodes
+        .iter()
+        .find_map(|node| match &node.kind {
+            SemanticNodeKind::ProcedureDeclaration { body_scope, .. } => Some(*body_scope),
+            _ => None,
+        })
+        .expect("procedure scope");
+
+    for name in ["ЭтотОбъект", "Объект"] {
+        assert!(
+            ir.symbols
+                .lookup_variable_in_hierarchy(body_scope, name)
+                .is_some(),
+            "expected implicit symbol '{}' in manager module",
+            name
+        );
+    }
+}

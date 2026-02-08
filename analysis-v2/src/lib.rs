@@ -8,6 +8,7 @@ pub use bsl_line_index::{byte_offset_to_utf16, utf16_to_byte_offset, LineIndex};
 pub mod ast_to_ir;
 pub use ast_to_ir::AstToIrConverter;
 
+mod implicit_bindings;
 mod type_inference_v2;
 
 use bsl_diagnostics::{SemanticTypeHints, SemanticValidationVisitor};

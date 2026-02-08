@@ -1600,6 +1600,24 @@ fn scope_from_body_nodes(ir_program: &SemanticProgram, body: &[usize]) -> Option
         .next()
 }
 
+fn body_bounds(ir_program: &SemanticProgram, body: &[usize]) -> Option<(u32, u32)> {
+    let mut start: Option<u32> = None;
+    let mut end: Option<u32> = None;
+
+    for node_index in body {
+        let Some(node) = ir_program.nodes.get(*node_index) else {
+            continue;
+        };
+        start = Some(start.map_or(node.span.start, |value| value.min(node.span.start)));
+        end = Some(end.map_or(node.span.end, |value| value.max(node.span.end)));
+    }
+
+    match (start, end) {
+        (Some(start), Some(end)) => Some((start, end)),
+        _ => None,
+    }
+}
+
 fn completion_scope_for_enclosing_node(
     ir_program: &SemanticProgram,
     node: &bsl_shared::ir::SemanticNode,
@@ -1614,39 +1632,70 @@ fn completion_scope_for_enclosing_node(
             else_branch,
         } => {
             let then_scope = scope_from_body_nodes(ir_program, then_branch);
+            let then_bounds = body_bounds(ir_program, then_branch);
             let else_scope = else_branch
                 .as_ref()
                 .and_then(|body| scope_from_body_nodes(ir_program, body));
-            let else_start = else_branch.as_ref().and_then(|body| {
-                body.iter()
-                    .filter_map(|idx| ir_program.nodes.get(*idx).map(|child| child.span.start))
-                    .min()
-            });
+            let else_bounds = else_branch
+                .as_ref()
+                .and_then(|body| body_bounds(ir_program, body));
 
-            match (then_scope, else_scope, else_start) {
-                (_, Some(scope), Some(start)) if byte_offset >= start => scope,
-                (Some(scope), _, _) => scope,
-                (None, Some(scope), _) => scope,
-                _ => node.scope_id,
+            if let (Some(scope), Some((else_start, _))) = (else_scope, else_bounds) {
+                if byte_offset >= else_start {
+                    return scope;
+                }
             }
+
+            if let (Some(scope), Some((then_start, then_end))) = (then_scope, then_bounds) {
+                if byte_offset >= then_start && byte_offset <= then_end {
+                    return scope;
+                }
+
+                if let Some(else_scope) = else_scope {
+                    if byte_offset > then_end {
+                        return else_scope;
+                    }
+                    return node.scope_id;
+                }
+
+                if node.span.contains(byte_offset) {
+                    return scope;
+                }
+                return node.scope_id;
+            }
+
+            then_scope.or(else_scope).unwrap_or(node.scope_id)
         }
         SemanticNodeKind::TryExcept {
             try_body,
             except_body,
         } => {
             let try_scope = scope_from_body_nodes(ir_program, try_body);
+            let try_bounds = body_bounds(ir_program, try_body);
             let except_scope = scope_from_body_nodes(ir_program, except_body);
-            let except_start = except_body
-                .iter()
-                .filter_map(|idx| ir_program.nodes.get(*idx).map(|child| child.span.start))
-                .min();
+            let except_bounds = body_bounds(ir_program, except_body);
 
-            match (try_scope, except_scope, except_start) {
-                (_, Some(scope), Some(start)) if byte_offset >= start => scope,
-                (Some(scope), _, _) => scope,
-                (None, Some(scope), _) => scope,
-                _ => node.scope_id,
+            if let (Some(scope), Some((except_start, _))) = (except_scope, except_bounds) {
+                if byte_offset >= except_start {
+                    return scope;
+                }
             }
+
+            if let (Some(scope), Some((try_start, try_end))) = (try_scope, try_bounds) {
+                if byte_offset >= try_start && byte_offset <= try_end {
+                    return scope;
+                }
+
+                if let Some(except_scope) = except_scope {
+                    if byte_offset > try_end {
+                        return except_scope;
+                    }
+                }
+
+                return node.scope_id;
+            }
+
+            try_scope.or(except_scope).unwrap_or(node.scope_id)
         }
         SemanticNodeKind::ForLoop { variable, body }
         | SemanticNodeKind::ForEachLoop { variable, body } => resolve_loop_body_scope(
@@ -1743,76 +1792,87 @@ fn collect_local_candidates_from_ir(
     let mut best_by_name: HashMap<String, LocalSymbolCandidate> = HashMap::new();
 
     let mut push_candidate = |name: &str, scope_id: ScopeId, span_start: u32| {
-        if span_start > scope_position.byte_offset {
-            return;
-        }
-
-        let Some(candidate_rank) = scope_position.scope_rank.get(&scope_id).copied() else {
-            return;
-        };
-        let Some(scope) = ir_program.get_scope(scope_id) else {
-            return;
-        };
-        if matches!(scope.kind, ScopeKind::Global) {
-            return;
-        }
-
-        let candidate = LocalSymbolCandidate {
-            name: name.to_string(),
+        push_local_candidate_if_visible(
+            ir_program,
+            scope_position,
+            &mut best_by_name,
+            name,
             scope_id,
             span_start,
-        };
-        let key = name.to_lowercase();
-
-        let should_replace = match best_by_name.get(&key) {
-            None => true,
-            Some(existing) => {
-                let existing_rank = scope_position
-                    .scope_rank
-                    .get(&existing.scope_id)
-                    .copied()
-                    .unwrap_or(usize::MAX);
-                candidate_rank < existing_rank
-                    || (candidate_rank == existing_rank && span_start > existing.span_start)
-            }
-        };
-
-        if should_replace {
-            best_by_name.insert(key, candidate);
-        }
+        );
     };
 
-    for node in ir_program.nodes.iter() {
-        match &node.kind {
-            SemanticNodeKind::VariableDeclaration { name, .. } => {
-                push_candidate(name, node.scope_id, node.span.start);
+    let enclosing_function_scope = scope_position
+        .scope_rank
+        .iter()
+        .filter_map(|(scope_id, rank)| {
+            let scope = ir_program.get_scope(*scope_id)?;
+            matches!(scope.kind, ScopeKind::Function).then_some((*rank, *scope_id))
+        })
+        .min_by_key(|(rank, _)| *rank)
+        .map(|(_, scope_id)| scope_id);
+
+    let mut collected_from_routine = false;
+    if let Some(function_scope_id) = enclosing_function_scope {
+        if let Some(decl_node) = ir_program.nodes.iter().find(|node| match &node.kind {
+            SemanticNodeKind::FunctionDeclaration { body_scope, .. }
+            | SemanticNodeKind::ProcedureDeclaration { body_scope, .. } => {
+                *body_scope == function_scope_id
             }
-            SemanticNodeKind::Assignment { variable, .. } => {
-                push_candidate(variable, node.scope_id, node.span.start);
-            }
-            SemanticNodeKind::FunctionDeclaration {
-                params, body_scope, ..
-            }
-            | SemanticNodeKind::ProcedureDeclaration {
-                params, body_scope, ..
-            } => {
-                for param in params {
-                    push_candidate(&param.name, *body_scope, node.span.start);
+            _ => false,
+        }) {
+            match &decl_node.kind {
+                SemanticNodeKind::FunctionDeclaration { params, body, .. }
+                | SemanticNodeKind::ProcedureDeclaration { params, body, .. } => {
+                    for param in params {
+                        push_candidate(&param.name, function_scope_id, decl_node.span.start);
+                    }
+                    collect_local_candidates_from_body(
+                        ir_program,
+                        scope_position,
+                        body,
+                        &mut push_candidate,
+                    );
+                    collected_from_routine = true;
                 }
+                _ => {}
             }
-            SemanticNodeKind::ForLoop { variable, body }
-            | SemanticNodeKind::ForEachLoop { variable, body } => {
-                if let Some(loop_scope) = resolve_loop_body_scope(
-                    ir_program,
-                    node.scope_id,
-                    body,
-                    Some(variable.as_str()),
-                    node.span.start,
-                ) {
-                    push_candidate(variable, loop_scope, node.span.start);
+        }
+    }
+
+    if !collected_from_routine {
+        for node in ir_program.nodes.iter() {
+            match &node.kind {
+                SemanticNodeKind::VariableDeclaration { name, .. } => {
+                    push_candidate(name, node.scope_id, node.span.start);
                 }
+                SemanticNodeKind::Assignment { variable, .. } => {
+                    push_candidate(variable, node.scope_id, node.span.start);
+                }
+                SemanticNodeKind::FunctionDeclaration {
+                    params, body_scope, ..
+                }
+                | SemanticNodeKind::ProcedureDeclaration {
+                    params, body_scope, ..
+                } => {
+                    for param in params {
+                        push_candidate(&param.name, *body_scope, node.span.start);
+                    }
+                }
+                SemanticNodeKind::ForLoop { variable, body }
+                | SemanticNodeKind::ForEachLoop { variable, body } => {
+                    if let Some(loop_scope) = resolve_loop_body_scope(
+                        ir_program,
+                        node.scope_id,
+                        body,
+                        Some(variable.as_str()),
+                        node.span.start,
+                    ) {
+                        push_candidate(variable, loop_scope, node.span.start);
+                    }
+                }
+                _ => {}
             }
-            _ => {}
         }
     }
 
@@ -1835,6 +1895,152 @@ fn collect_local_candidates_from_ir(
     });
 
     out
+}
+
+fn collect_local_candidates_from_body<F>(
+    ir_program: &SemanticProgram,
+    scope_position: &CompletionScopePosition,
+    body: &[usize],
+    push_candidate: &mut F,
+) where
+    F: FnMut(&str, ScopeId, u32),
+{
+    for node_index in body {
+        collect_local_candidates_from_node(ir_program, scope_position, *node_index, push_candidate);
+    }
+}
+
+fn collect_local_candidates_from_node<F>(
+    ir_program: &SemanticProgram,
+    scope_position: &CompletionScopePosition,
+    node_index: usize,
+    push_candidate: &mut F,
+) where
+    F: FnMut(&str, ScopeId, u32),
+{
+    let Some(node) = ir_program.nodes.get(node_index) else {
+        return;
+    };
+    if node.span.start > scope_position.byte_offset {
+        return;
+    }
+
+    match &node.kind {
+        SemanticNodeKind::VariableDeclaration { name, .. } => {
+            push_candidate(name, node.scope_id, node.span.start);
+        }
+        SemanticNodeKind::Assignment { variable, .. } => {
+            push_candidate(variable, node.scope_id, node.span.start);
+        }
+        SemanticNodeKind::IfStatement {
+            then_branch,
+            else_branch,
+        } => {
+            collect_local_candidates_from_body(
+                ir_program,
+                scope_position,
+                then_branch,
+                push_candidate,
+            );
+            if let Some(else_branch) = else_branch.as_ref() {
+                collect_local_candidates_from_body(
+                    ir_program,
+                    scope_position,
+                    else_branch,
+                    push_candidate,
+                );
+            }
+        }
+        SemanticNodeKind::TryExcept {
+            try_body,
+            except_body,
+        } => {
+            collect_local_candidates_from_body(
+                ir_program,
+                scope_position,
+                try_body,
+                push_candidate,
+            );
+            collect_local_candidates_from_body(
+                ir_program,
+                scope_position,
+                except_body,
+                push_candidate,
+            );
+        }
+        SemanticNodeKind::WhileLoop { body } => {
+            collect_local_candidates_from_body(ir_program, scope_position, body, push_candidate);
+        }
+        SemanticNodeKind::ForLoop { variable, body }
+        | SemanticNodeKind::ForEachLoop { variable, body } => {
+            if let Some(loop_scope) = resolve_loop_body_scope(
+                ir_program,
+                node.scope_id,
+                body,
+                Some(variable.as_str()),
+                node.span.start,
+            ) {
+                push_candidate(variable, loop_scope, node.span.start);
+            }
+            collect_local_candidates_from_body(ir_program, scope_position, body, push_candidate);
+        }
+        SemanticNodeKind::BlockScope { statements, .. } => {
+            collect_local_candidates_from_body(
+                ir_program,
+                scope_position,
+                statements,
+                push_candidate,
+            );
+        }
+        _ => {}
+    }
+}
+
+fn push_local_candidate_if_visible(
+    ir_program: &SemanticProgram,
+    scope_position: &CompletionScopePosition,
+    best_by_name: &mut HashMap<String, LocalSymbolCandidate>,
+    name: &str,
+    scope_id: ScopeId,
+    span_start: u32,
+) {
+    if span_start > scope_position.byte_offset {
+        return;
+    }
+
+    let Some(candidate_rank) = scope_position.scope_rank.get(&scope_id).copied() else {
+        return;
+    };
+    let Some(scope) = ir_program.get_scope(scope_id) else {
+        return;
+    };
+    if matches!(scope.kind, ScopeKind::Global) {
+        return;
+    }
+
+    let candidate = LocalSymbolCandidate {
+        name: name.to_string(),
+        scope_id,
+        span_start,
+    };
+    let key = name.to_lowercase();
+
+    let should_replace = match best_by_name.get(&key) {
+        None => true,
+        Some(existing) => {
+            let existing_rank = scope_position
+                .scope_rank
+                .get(&existing.scope_id)
+                .copied()
+                .unwrap_or(usize::MAX);
+            candidate_rank < existing_rank
+                || (candidate_rank == existing_rank && span_start > existing.span_start)
+        }
+    };
+
+    if should_replace {
+        best_by_name.insert(key, candidate);
+    }
 }
 
 fn add_local_symbols_from_ir(
@@ -2487,6 +2693,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn completion_non_member_handles_else_boundary_without_then_leak() {
+        let content = concat!(
+            "Процедура Тест()\n",
+            "    Если Истина Тогда\n",
+            "        ТогдаЛокал = 1;\n",
+            "    Иначе\n",
+            "        Ло\n",
+            "        ЛокалИначе = 2;\n",
+            "    КонецЕсли;\n",
+            "КонецПроцедуры\n"
+        );
+        let file_path = "completion_lexical_else_boundary_scope_test.bsl";
+        let (index, metadata_lookup, resolver, ir_program) =
+            build_non_member_completion_fixture(content, file_path);
+
+        let query_column = "        Ло".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+        let labels = completion_labels_non_member(
+            content,
+            4,
+            query_column,
+            Some("file:///completion_lexical_else_boundary_scope_test.bsl"),
+            file_path,
+            &index,
+            &metadata_lookup,
+            resolver.as_ref(),
+            ir_program,
+        )
+        .await;
+        assert!(
+            !labels.iter().any(|label| label == "ТогдаЛокал"),
+            "labels: {:?}",
+            labels
+        );
+        assert!(
+            !labels.iter().any(|label| label == "ЛокалИначе"),
+            "labels: {:?}",
+            labels
+        );
+    }
+
+    #[tokio::test]
     async fn completion_non_member_respects_position_before_and_after_declaration() {
         let content = concat!(
             "Процедура Тест()\n",
@@ -2654,6 +2901,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn completion_non_member_hides_loop_locals_outside_loop() {
+        let content = concat!(
+            "Процедура Тест()\n",
+            "    Для Счетчик = 1 По 2 Цикл\n",
+            "        ВЦикле = Счетчик;\n",
+            "    КонецЦикла;\n",
+            "    ВЦ\n",
+            "КонецПроцедуры\n"
+        );
+        let file_path = "completion_lexical_loop_scope_test.bsl";
+        let (index, metadata_lookup, resolver, ir_program) =
+            build_non_member_completion_fixture(content, file_path);
+
+        let query_column = "    ВЦ".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+        let labels = completion_labels_non_member(
+            content,
+            4,
+            query_column,
+            Some("file:///completion_lexical_loop_scope_test.bsl"),
+            file_path,
+            &index,
+            &metadata_lookup,
+            resolver.as_ref(),
+            ir_program,
+        )
+        .await;
+        assert!(
+            !labels.iter().any(|label| label == "ВЦикле"),
+            "labels: {:?}",
+            labels
+        );
+        assert!(
+            !labels.iter().any(|label| label == "Счетчик"),
+            "labels: {:?}",
+            labels
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_non_member_shows_loop_variable_inside_loop() {
+        let content = concat!(
+            "Процедура Тест()\n",
+            "    Для Счетчик = 1 По 2 Цикл\n",
+            "        Сч\n",
+            "    КонецЦикла;\n",
+            "КонецПроцедуры\n"
+        );
+        let file_path = "completion_lexical_loop_variable_inside_test.bsl";
+        let (index, metadata_lookup, resolver, ir_program) =
+            build_non_member_completion_fixture(content, file_path);
+
+        let query_column = "        Сч".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+        let labels = completion_labels_non_member(
+            content,
+            2,
+            query_column,
+            Some("file:///completion_lexical_loop_variable_inside_test.bsl"),
+            file_path,
+            &index,
+            &metadata_lookup,
+            resolver.as_ref(),
+            ir_program,
+        )
+        .await;
+        assert!(
+            labels.iter().any(|label| label == "Счетчик"),
+            "labels: {:?}",
+            labels
+        );
+    }
+
+    #[tokio::test]
     async fn completion_non_member_ignores_non_identifier_assignment_targets() {
         let content = concat!(
             "Процедура Тест()\n",
@@ -2681,6 +3000,47 @@ mod tests {
 
         assert!(
             !labels.iter().any(|label| label == "Поле"),
+            "labels: {:?}",
+            labels
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_non_member_handles_except_boundary_without_try_leak() {
+        let content = concat!(
+            "Процедура Тест()\n",
+            "    Попытка\n",
+            "        ЛокалПопытка = 1;\n",
+            "    Исключение\n",
+            "        Ло\n",
+            "        ЛокалИсключение = 2;\n",
+            "    КонецПопытки;\n",
+            "КонецПроцедуры\n"
+        );
+        let file_path = "completion_lexical_except_boundary_scope_test.bsl";
+        let (index, metadata_lookup, resolver, ir_program) =
+            build_non_member_completion_fixture(content, file_path);
+
+        let query_column = "        Ло".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+        let labels = completion_labels_non_member(
+            content,
+            4,
+            query_column,
+            Some("file:///completion_lexical_except_boundary_scope_test.bsl"),
+            file_path,
+            &index,
+            &metadata_lookup,
+            resolver.as_ref(),
+            ir_program,
+        )
+        .await;
+        assert!(
+            !labels.iter().any(|label| label == "ЛокалПопытка"),
+            "labels: {:?}",
+            labels
+        );
+        assert!(
+            !labels.iter().any(|label| label == "ЛокалИсключение"),
             "labels: {:?}",
             labels
         );

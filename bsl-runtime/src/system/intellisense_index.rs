@@ -197,6 +197,40 @@ impl IntellisenseIndexStore {
         });
     }
 
+    pub fn reset_metadata_snapshot_preserving_platform_types(
+        &self,
+        config_fingerprint: &str,
+        platform_version: &str,
+    ) {
+        let new_id = IndexSnapshotId::new(config_fingerprint, platform_version);
+        self.inner.rcu(|current| {
+            let mut snapshot = current.as_ref().clone();
+
+            let preserved_platform: Vec<(String, Arc<IndexItem>)> = current
+                .type_index
+                .iter()
+                .filter_map(|(name, item)| {
+                    matches!(
+                        item.kind,
+                        IndexItemKind::Type(TypeKind::Platform | TypeKind::Primitive)
+                    )
+                    .then_some((name.clone(), item.clone()))
+                })
+                .collect();
+
+            snapshot.id = new_id.clone();
+            snapshot.metadata_index = Arc::new(HashMap::new());
+            snapshot.type_index = Arc::new(HashMap::new());
+            if !preserved_platform.is_empty() {
+                let map = Arc::make_mut(&mut snapshot.type_index);
+                for (name, item) in preserved_platform {
+                    map.insert(name, item);
+                }
+            }
+            Arc::new(snapshot)
+        });
+    }
+
     pub fn upsert_type(&self, item: IndexItem) {
         let item = Arc::new(item);
         let name = item.name.clone();
@@ -433,6 +467,38 @@ mod tests {
         let snapshot = store.snapshot();
         assert_ne!(snapshot.id, before_id);
         assert!(snapshot.type_index.is_empty());
+        assert!(snapshot.metadata_index.is_empty());
+    }
+
+    #[test]
+    fn reset_metadata_snapshot_preserves_platform_and_clears_config_types() {
+        let store = IntellisenseIndexStore::new("cfg", "platform");
+        store.upsert_type(IndexItem::new(
+            "ТаблицаЗначений",
+            IndexItemKind::Type(TypeKind::Platform),
+            IndexKind::Type,
+        ));
+        store.upsert_type(IndexItem::new(
+            "Справочник.Контрагенты",
+            IndexItemKind::Type(TypeKind::Configuration),
+            IndexKind::Type,
+        ));
+        store.replace_metadata_for_kind(
+            MetadataKind::Catalog,
+            vec![IndexItem::new(
+                "Контрагенты",
+                IndexItemKind::Metadata(MetadataKind::Catalog),
+                IndexKind::Metadata,
+            )],
+        );
+        let before_id = store.snapshot_id();
+
+        store.reset_metadata_snapshot_preserving_platform_types("cfg-next", "platform-next");
+
+        let snapshot = store.snapshot();
+        assert_ne!(snapshot.id, before_id);
+        assert!(snapshot.type_index.contains_key("ТаблицаЗначений"));
+        assert!(!snapshot.type_index.contains_key("Справочник.Контрагенты"));
         assert!(snapshot.metadata_index.is_empty());
     }
 }

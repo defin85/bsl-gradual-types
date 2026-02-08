@@ -923,7 +923,10 @@ impl SystemCoordinator {
             .platform_version()
             .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
         self.intellisense_index
-            .reset_metadata_snapshot(&config_fingerprint, &platform_version);
+            .reset_metadata_snapshot_preserving_platform_types(
+                &config_fingerprint,
+                &platform_version,
+            );
 
         let mut type_items: Vec<IndexItem> = Vec::new();
         for raw_type in raw_types.iter() {

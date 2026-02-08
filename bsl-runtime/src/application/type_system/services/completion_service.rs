@@ -443,7 +443,8 @@ pub(crate) async fn get_completion_with_analysis(
             add_local_symbols_from_ir(analysis, file_content, line, column, &mut candidates, 0);
             add_symbols(&snapshot, file_uri, &mut candidates, 0, false);
         } else {
-            add_symbols(&snapshot, file_uri, &mut candidates, 0, true);
+            // Keep non-member local symbols IR-first even when analysis is unavailable.
+            add_symbols(&snapshot, file_uri, &mut candidates, 0, false);
         }
         add_module_symbols(&snapshot, &mut candidates, 1);
         add_metadata_items(&snapshot, None, &mut candidates, 2);
@@ -1623,6 +1624,10 @@ fn completion_scope_for_enclosing_node(
     node: &bsl_shared::ir::SemanticNode,
     byte_offset: u32,
 ) -> ScopeId {
+    fn in_bounds(byte_offset: u32, start: u32, end: u32) -> bool {
+        start <= byte_offset && byte_offset < end
+    }
+
     match &node.kind {
         SemanticNodeKind::FunctionDeclaration { body_scope, .. }
         | SemanticNodeKind::ProcedureDeclaration { body_scope, .. } => *body_scope,
@@ -1641,19 +1646,22 @@ fn completion_scope_for_enclosing_node(
                 .and_then(|body| body_bounds(ir_program, body));
 
             if let (Some(scope), Some((else_start, _))) = (else_scope, else_bounds) {
-                if byte_offset >= else_start {
+                if node.span.contains(byte_offset) && byte_offset >= else_start {
                     return scope;
                 }
             }
 
             if let (Some(scope), Some((then_start, then_end))) = (then_scope, then_bounds) {
-                if byte_offset >= then_start && byte_offset <= then_end {
+                if in_bounds(byte_offset, then_start, then_end) {
                     return scope;
                 }
 
                 if let Some(else_scope) = else_scope {
-                    if byte_offset > then_end {
+                    if node.span.contains(byte_offset) && byte_offset > then_end {
                         return else_scope;
+                    }
+                    if node.span.contains(byte_offset) {
+                        return node.scope_id;
                     }
                     return node.scope_id;
                 }
@@ -1664,7 +1672,11 @@ fn completion_scope_for_enclosing_node(
                 return node.scope_id;
             }
 
-            then_scope.or(else_scope).unwrap_or(node.scope_id)
+            if node.span.contains(byte_offset) {
+                return then_scope.or(else_scope).unwrap_or(node.scope_id);
+            }
+
+            node.scope_id
         }
         SemanticNodeKind::TryExcept {
             try_body,
@@ -1676,26 +1688,37 @@ fn completion_scope_for_enclosing_node(
             let except_bounds = body_bounds(ir_program, except_body);
 
             if let (Some(scope), Some((except_start, _))) = (except_scope, except_bounds) {
-                if byte_offset >= except_start {
+                if node.span.contains(byte_offset) && byte_offset >= except_start {
                     return scope;
                 }
             }
 
             if let (Some(scope), Some((try_start, try_end))) = (try_scope, try_bounds) {
-                if byte_offset >= try_start && byte_offset <= try_end {
+                if in_bounds(byte_offset, try_start, try_end) {
                     return scope;
                 }
 
                 if let Some(except_scope) = except_scope {
-                    if byte_offset > try_end {
+                    if node.span.contains(byte_offset) && byte_offset > try_end {
                         return except_scope;
                     }
+                    if node.span.contains(byte_offset) {
+                        return node.scope_id;
+                    }
+                    return node.scope_id;
                 }
 
+                if node.span.contains(byte_offset) {
+                    return scope;
+                }
                 return node.scope_id;
             }
 
-            try_scope.or(except_scope).unwrap_or(node.scope_id)
+            if node.span.contains(byte_offset) {
+                return try_scope.or(except_scope).unwrap_or(node.scope_id);
+            }
+
+            node.scope_id
         }
         SemanticNodeKind::ForLoop { variable, body }
         | SemanticNodeKind::ForEachLoop { variable, body } => resolve_loop_body_scope(
@@ -2573,6 +2596,53 @@ mod tests {
         assert_eq!(result.items.len(), COMPLETION_MAX_ITEMS);
     }
 
+    #[tokio::test]
+    async fn completion_non_member_without_ir_does_not_use_file_local_symbols() {
+        let index = IntellisenseIndexStore::new("cfg", "platform");
+        let uri = "file:///completion_non_member_no_ir_sources_test.bsl";
+
+        let mut local_from_index = IndexItem::new(
+            "ИндексЛокал",
+            IndexItemKind::Symbol(SymbolKind::Variable),
+            crate::system::IndexKind::Symbol,
+        );
+        local_from_index.scope = Some(SymbolScope::Local);
+
+        let mut module_from_index = IndexItem::new(
+            "ИндексМодуль",
+            IndexItemKind::Symbol(SymbolKind::Function),
+            crate::system::IndexKind::Symbol,
+        );
+        module_from_index.scope = Some(SymbolScope::Module);
+
+        index.replace_symbols_for_uri(uri, vec![local_from_index, module_from_index]);
+
+        let repository = Arc::new(InMemoryTypeRepository::new());
+        let metadata_lookup = TypeMetadataLookup::new(repository);
+        let content = "    Инд";
+        let column = content.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+
+        let result = get_completion(content, 0, column, Some(uri), &index, &metadata_lookup)
+            .await
+            .expect("completion ok");
+        let labels: Vec<String> = result
+            .items
+            .into_iter()
+            .map(|candidate| candidate.item.label)
+            .collect();
+
+        assert!(
+            labels.iter().any(|label| label == "ИндексМодуль"),
+            "labels: {:?}",
+            labels
+        );
+        assert!(
+            !labels.iter().any(|label| label == "ИндексЛокал"),
+            "labels: {:?}",
+            labels
+        );
+    }
+
     fn build_non_member_completion_fixture(
         content: &str,
         file_path: &str,
@@ -2728,6 +2798,48 @@ mod tests {
         );
         assert!(
             !labels.iter().any(|label| label == "ЛокалИначе"),
+            "labels: {:?}",
+            labels
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_non_member_after_if_end_does_not_leak_branch_locals() {
+        let content = concat!(
+            "Процедура Тест()\n",
+            "    Если Истина Тогда\n",
+            "        ТогдаЛокал = 1;\n",
+            "    Иначе\n",
+            "        ИначеЛокал = 2;\n",
+            "    КонецЕсли;\n",
+            "    Ло\n",
+            "КонецПроцедуры\n"
+        );
+        let file_path = "completion_lexical_after_if_end_scope_test.bsl";
+        let (index, metadata_lookup, resolver, ir_program) =
+            build_non_member_completion_fixture(content, file_path);
+
+        let query_column = "    Ло".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+        let labels = completion_labels_non_member(
+            content,
+            6,
+            query_column,
+            Some("file:///completion_lexical_after_if_end_scope_test.bsl"),
+            file_path,
+            &index,
+            &metadata_lookup,
+            resolver.as_ref(),
+            ir_program,
+        )
+        .await;
+
+        assert!(
+            !labels.iter().any(|label| label == "ТогдаЛокал"),
+            "labels: {:?}",
+            labels
+        );
+        assert!(
+            !labels.iter().any(|label| label == "ИначеЛокал"),
             "labels: {:?}",
             labels
         );
@@ -3034,6 +3146,48 @@ mod tests {
             ir_program,
         )
         .await;
+        assert!(
+            !labels.iter().any(|label| label == "ЛокалПопытка"),
+            "labels: {:?}",
+            labels
+        );
+        assert!(
+            !labels.iter().any(|label| label == "ЛокалИсключение"),
+            "labels: {:?}",
+            labels
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_non_member_after_try_end_does_not_leak_except_locals() {
+        let content = concat!(
+            "Процедура Тест()\n",
+            "    Попытка\n",
+            "        ЛокалПопытка = 1;\n",
+            "    Исключение\n",
+            "        ЛокалИсключение = 2;\n",
+            "    КонецПопытки;\n",
+            "    Ло\n",
+            "КонецПроцедуры\n"
+        );
+        let file_path = "completion_lexical_after_try_end_scope_test.bsl";
+        let (index, metadata_lookup, resolver, ir_program) =
+            build_non_member_completion_fixture(content, file_path);
+
+        let query_column = "    Ло".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+        let labels = completion_labels_non_member(
+            content,
+            6,
+            query_column,
+            Some("file:///completion_lexical_after_try_end_scope_test.bsl"),
+            file_path,
+            &index,
+            &metadata_lookup,
+            resolver.as_ref(),
+            ir_program,
+        )
+        .await;
+
         assert!(
             !labels.iter().any(|label| label == "ЛокалПопытка"),
             "labels: {:?}",

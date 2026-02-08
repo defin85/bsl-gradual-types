@@ -3,8 +3,10 @@
 //! Предоставляет fluent API для пошагового построения hover responses.
 
 use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
-use bsl_shared::domain::types::{Certainty, TypeResolution};
-use bsl_shared::formatting::normalize_user_facing_type_name;
+use bsl_shared::domain::types::{
+    Certainty, TypeResolution, FORM_DATA_OWNER_FACET_NOTE_PREFIX, FORM_DATA_SEMANTICS_NOTE,
+};
+use bsl_shared::formatting::{normalize_user_facing_type_name, DetailLevel};
 
 use super::config::{HoverFormatConfig, HoverOutputFormat};
 use super::sections;
@@ -47,7 +49,26 @@ impl<'a> HoverBuilder<'a> {
 
     /// Добавляет информацию о типе
     pub fn add_type_info(self, resolution: &TypeResolution) -> Self {
-        let type_str = type_display::format_type_string(resolution);
+        let mut type_str = type_display::format_type_string(resolution);
+        let is_form_data = resolution
+            .metadata
+            .notes
+            .iter()
+            .any(|note| note == FORM_DATA_SEMANTICS_NOTE);
+        if is_form_data {
+            if let Some(owner_label) = resolution
+                .metadata
+                .notes
+                .iter()
+                .find_map(|note| note.strip_prefix(FORM_DATA_OWNER_FACET_NOTE_PREFIX))
+            {
+                type_str = if matches!(self.config.detail_level, DetailLevel::Detailed) {
+                    format!("{} (данные формы: ДанныеФормыСтруктура)", owner_label)
+                } else {
+                    owner_label.to_string()
+                };
+            }
+        }
         self.add_section("Тип", &type_str)
     }
 

@@ -19,6 +19,7 @@
 mod certainty;
 mod compatibility;
 mod concrete;
+mod contextual_type_descriptor;
 mod facets;
 mod generics;
 mod global_functions;
@@ -35,6 +36,7 @@ mod tests;
 pub use certainty::*;
 pub use compatibility::*;
 pub use concrete::*;
+pub use contextual_type_descriptor::*;
 pub use facets::*;
 pub use generics::*;
 pub use global_functions::*;

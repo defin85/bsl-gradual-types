@@ -9,7 +9,8 @@ use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::SignatureIndex;
 use bsl_shared::domain::types::MetadataKind;
 use bsl_shared::domain::types::{
-    Certainty, ResolutionMetadata, ResolutionResult, ResolutionSource,
+    Certainty, ContextualTypeDescriptor, FacetKind, ResolutionMetadata, ResolutionResult,
+    ResolutionSource,
 };
 use bsl_shared::domain::types::{ConcreteType, TypeResolution, UncertaintyReason, WeightedType};
 use bsl_shared::domain::TypeMetadataLookup;
@@ -736,21 +737,11 @@ impl TypeInferencer {
 
         let binding_resolver = ImplicitBindingResolver::new();
         for binding in binding_resolver.bindings_for_module(&location.module_type) {
-            let resolution = match binding.type_name.as_deref() {
-                Some(type_name) => {
-                    let resolved = self.resolver.resolve_expression_sync(type_name);
-                    if resolved.is_unknown() {
-                        if self.deps.repository.find_type(type_name).is_some() {
-                            TypeResolution::explicit(type_name)
-                        } else {
-                            TypeResolution::inferred_weak(type_name)
-                        }
-                    } else {
-                        resolved
-                    }
-                }
-                None => TypeResolution::unknown(),
-            };
+            let resolution = binding
+                .descriptor
+                .as_ref()
+                .map(|descriptor| self.resolve_contextual_descriptor(descriptor))
+                .unwrap_or_else(TypeResolution::unknown);
             env.variables
                 .insert(binding.name.to_lowercase(), resolution);
         }
@@ -802,6 +793,75 @@ impl TypeInferencer {
             };
             env.variables.insert(key, resolved);
         }
+    }
+
+    fn resolve_contextual_descriptor(
+        &self,
+        descriptor: &ContextualTypeDescriptor,
+    ) -> TypeResolution {
+        match descriptor {
+            ContextualTypeDescriptor::PlatformType { type_name } => {
+                self.resolve_platform_descriptor_type(type_name)
+            }
+            ContextualTypeDescriptor::ConfigurationFacet { kind, name, facet } => {
+                self.resolve_configuration_facet_descriptor(*kind, name, *facet)
+            }
+            ContextualTypeDescriptor::FormType { .. }
+            | ContextualTypeDescriptor::FormElementsType { .. } => {
+                self.resolve_platform_descriptor_type(&descriptor.canonical_type_name())
+            }
+            ContextualTypeDescriptor::FormDataObject {
+                kind, owner_name, ..
+            } => {
+                let mut resolution = self.resolve_configuration_facet_descriptor(
+                    *kind,
+                    owner_name,
+                    FacetKind::Object,
+                );
+                for note in descriptor.resolution_metadata_notes() {
+                    if !resolution.metadata.notes.contains(&note) {
+                        resolution.metadata.notes.push(note);
+                    }
+                }
+                resolution
+            }
+        }
+    }
+
+    fn resolve_platform_descriptor_type(&self, type_name: &str) -> TypeResolution {
+        let resolved = self.resolver.resolve_expression_sync(type_name);
+        if !resolved.is_unknown() {
+            return resolved;
+        }
+
+        if self.deps.repository.find_type(type_name).is_some() {
+            TypeResolution::explicit(type_name)
+        } else {
+            TypeResolution::inferred_weak(type_name)
+        }
+    }
+
+    fn resolve_configuration_facet_descriptor(
+        &self,
+        kind: MetadataKind,
+        name: &str,
+        facet: FacetKind,
+    ) -> TypeResolution {
+        let mut resolution = TypeResolution::metadata_type(kind, name, Some(facet));
+        let metadata_type_name = format!("{}.{}", kind.to_prefix(), name);
+
+        if let Some(raw) = self.deps.repository.find_type(&metadata_type_name) {
+            resolution.available_facets = raw.facets.clone();
+            return resolution;
+        }
+
+        resolution.certainty = Certainty::InferredWeak;
+        resolution.source = ResolutionSource::Inferred;
+        if !self.metadata_lookup.is_configuration_loaded() {
+            resolution.metadata.uncertainty_reason =
+                Some(UncertaintyReason::ConfigurationNotLoaded);
+        }
+        resolution
     }
 
     fn visit_statement(&self, stmt: &Statement, env: &mut TypeEnv, index: &mut TypeIndex) {
@@ -1322,7 +1382,8 @@ mod tests {
     use bsl_shared::domain::signature_index::{MethodSignature, SignatureSource};
     use bsl_shared::domain::type_id::TypeId;
     use bsl_shared::domain::types::{
-        FacetKind, MetadataKind, PrimitiveType, RawDataSource, RawPropertyData, RawTypeData,
+        FacetKind, MetadataKind, ParameterInfo, PrimitiveType, RawDataSource, RawPropertyData,
+        RawTypeData, FORM_DATA_OWNER_FACET_NOTE_PREFIX, FORM_DATA_SEMANTICS_NOTE,
     };
     use bsl_shared::TypeRepository;
     use bsl_syntax::ParseOptions;
@@ -1422,6 +1483,72 @@ mod tests {
                 Some("ДокументМенеджер".to_string()),
                 vec![],
                 Some("ДокументОбъект.<Имя документа>".to_string()),
+                None,
+                None,
+                SignatureSource::Platform,
+                None,
+                Default::default(),
+            ),
+        );
+        repository_impl.set_signature_index(sigs.clone());
+
+        let repository =
+            repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+        let resolver = Arc::new(TypeResolver::new(repository.clone()));
+
+        Arc::new(SemanticDeps {
+            repository,
+            signature_index: sigs,
+            resolver: Some(resolver),
+            platform_signatures_loaded: true,
+        })
+    }
+
+    fn deps_with_form_attribute_to_value_signature() -> Arc<SemanticDeps> {
+        let repository_impl = Arc::new(InMemoryTypeRepository::new());
+        repository_impl
+            .load_types(vec![
+                RawTypeData {
+                    name: "Документы.Док1".to_string(),
+                    source: RawDataSource::Configuration,
+                    facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+                    kind: Some(MetadataKind::Document),
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "ДокументОбъект".to_string(),
+                    source: RawDataSource::Platform,
+                    facets: vec![FacetKind::Object],
+                    properties: vec![RawPropertyData {
+                        name: "Ссылка".to_string(),
+                        prop_type: "ДокументСсылка".to_string(),
+                        is_readonly: true,
+                    }],
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "ДокументСсылка".to_string(),
+                    source: RawDataSource::Platform,
+                    facets: vec![FacetKind::Reference],
+                    ..Default::default()
+                },
+            ])
+            .expect("load types");
+
+        let mut sigs = SignatureIndex::new();
+        sigs.add_global_function(
+            TypeId::new("FormAttributeToValue"),
+            MethodSignature::new(
+                "FormAttributeToValue".to_string(),
+                None,
+                vec![ParameterInfo {
+                    name: "ИмяРеквизита".to_string(),
+                    type_name: Some("Строка".to_string()),
+                    is_optional: false,
+                    default_value: None,
+                    description: None,
+                }],
+                Some("ДокументОбъект.Док1".to_string()),
                 None,
                 None,
                 SignatureSource::Platform,
@@ -1798,6 +1925,98 @@ mod tests {
     }
 
     #[test]
+    fn form_module_object_seed_contains_form_data_semantics_metadata_notes() {
+        let repository_impl = Arc::new(InMemoryTypeRepository::new());
+        repository_impl
+            .load_types(vec![
+                RawTypeData {
+                    name: "Документы.Док1".to_string(),
+                    source: RawDataSource::Configuration,
+                    facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+                    kind: Some(MetadataKind::Document),
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "Формы.Документы.Док1.Форма1".to_string(),
+                    source: RawDataSource::Configuration,
+                    ..Default::default()
+                },
+            ])
+            .expect("load types");
+
+        let repository =
+            repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+        let resolver = Arc::new(TypeResolver::new(repository.clone()));
+        let deps = Arc::new(SemanticDeps {
+            repository,
+            signature_index: SignatureIndex::new(),
+            resolver: Some(resolver),
+            platform_signatures_loaded: true,
+        });
+
+        let source = r#"Процедура Тест()
+    z = Объект;
+КонецПроцедуры
+"#;
+        let program = parse(source);
+        let file_path = "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl";
+        let index = build_type_index_with_path(&program, file_path, deps);
+
+        let object_offset = source
+            .find("z = Объект")
+            .map(|idx| idx + "z = ".len())
+            .expect("Объект") as u32;
+        let object = index
+            .type_at_byte_offset(object_offset)
+            .expect("type at Объект");
+
+        assert_eq!(object.type_name(), "ДокументОбъект.Док1");
+        assert_eq!(object.active_facet, Some(FacetKind::Object));
+        assert!(
+            object
+                .metadata
+                .notes
+                .iter()
+                .any(|note| note == FORM_DATA_SEMANTICS_NOTE),
+            "missing form-data semantics note: {:?}",
+            object.metadata.notes
+        );
+        assert!(
+            object
+                .metadata
+                .notes
+                .iter()
+                .any(|note| note.starts_with(FORM_DATA_OWNER_FACET_NOTE_PREFIX)),
+            "missing owner-facet note: {:?}",
+            object.metadata.notes
+        );
+    }
+
+    #[test]
+    fn form_module_object_descriptor_degrades_to_inferred_weak_without_metadata() {
+        let deps = deps_with_array_method();
+        let source = r#"Процедура Тест()
+    z = Объект;
+КонецПроцедуры
+"#;
+        let program = parse(source);
+        let file_path = "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl";
+        let index = build_type_index_with_path(&program, file_path, deps);
+
+        let object_offset = source
+            .find("z = Объект")
+            .map(|idx| idx + "z = ".len())
+            .expect("Объект") as u32;
+        let object = index
+            .type_at_byte_offset(object_offset)
+            .expect("type at Объект");
+
+        assert_eq!(object.type_name(), "ДокументОбъект.Док1");
+        assert_eq!(object.active_facet, Some(FacetKind::Object));
+        assert_eq!(object.certainty, Certainty::InferredWeak);
+    }
+
+    #[test]
     fn resolves_form_module_object_link_property_from_object_facet() {
         let repository_impl = Arc::new(InMemoryTypeRepository::new());
         repository_impl
@@ -1860,6 +2079,98 @@ mod tests {
     }
 
     #[test]
+    fn form_module_object_member_resolution_uses_form_shape_before_object_fallback() {
+        let repository_impl = Arc::new(InMemoryTypeRepository::new());
+        repository_impl
+            .load_types(vec![
+                RawTypeData {
+                    name: "Документы.Док1".to_string(),
+                    source: RawDataSource::Configuration,
+                    facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+                    kind: Some(MetadataKind::Document),
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "ДокументОбъект".to_string(),
+                    source: RawDataSource::Platform,
+                    facets: vec![FacetKind::Object],
+                    properties: vec![RawPropertyData {
+                        name: "Ссылка".to_string(),
+                        prop_type: "ДокументСсылка".to_string(),
+                        is_readonly: true,
+                    }],
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "ДокументСсылка".to_string(),
+                    source: RawDataSource::Platform,
+                    facets: vec![FacetKind::Reference],
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "Формы.Документы.Док1.Форма1".to_string(),
+                    source: RawDataSource::Configuration,
+                    properties: vec![RawPropertyData {
+                        name: "СчетФактура".to_string(),
+                        prop_type: "Строка".to_string(),
+                        is_readonly: false,
+                    }],
+                    ..Default::default()
+                },
+            ])
+            .expect("load types");
+
+        let repository =
+            repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+        let resolver = Arc::new(TypeResolver::new(repository.clone()));
+        let deps = Arc::new(SemanticDeps {
+            repository,
+            signature_index: SignatureIndex::new(),
+            resolver: Some(resolver),
+            platform_signatures_loaded: true,
+        });
+
+        let source = r#"Процедура Тест()
+    a = Объект.СчетФактура;
+    b = Объект.Ссылка;
+КонецПроцедуры
+"#;
+        let program = parse(source);
+        let file_path = "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl";
+        let index = build_type_index_with_path(&program, file_path, deps);
+
+        let attr_offset = source.find("СчетФактура").expect("СчетФактура") as u32;
+        let attr_type = index
+            .type_at_byte_offset(attr_offset)
+            .expect("type at Объект.СчетФактура");
+        assert_eq!(attr_type.type_name(), "Строка");
+
+        let link_offset = source.rfind("Ссылка").expect("Ссылка") as u32;
+        let link_type = index
+            .type_at_byte_offset(link_offset)
+            .expect("type at Объект.Ссылка");
+        assert_eq!(link_type.type_name(), "ДокументСсылка");
+    }
+
+    #[test]
+    fn form_attribute_to_value_object_keeps_object_members_available() {
+        let deps = deps_with_form_attribute_to_value_signature();
+        let source = r#"Процедура Тест()
+    x = FormAttributeToValue("Объект").Ссылка;
+КонецПроцедуры
+"#;
+        let program = parse(source);
+        let file_path = "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl";
+        let index = build_type_index_with_path(&program, file_path, deps);
+
+        let link_offset = source.rfind("Ссылка").expect("Ссылка") as u32;
+        let link_type = index
+            .type_at_byte_offset(link_offset)
+            .expect("type at FormAttributeToValue(\"Объект\").Ссылка");
+        assert_eq!(link_type.type_name(), "ДокументСсылка");
+    }
+
+    #[test]
     fn seeds_manager_module_context_for_this_object_and_object() {
         let deps = deps_with_array_method();
         let source = r#"Процедура Тест()
@@ -1907,6 +2218,51 @@ mod tests {
             .type_at_byte_offset(object_offset)
             .expect("type at Объект");
         assert_eq!(object.type_name(), "ДокументОбъект.Док1");
+    }
+
+    #[test]
+    fn seeds_catalog_object_module_context_for_hierarchical_catalogs() {
+        let repository_impl = Arc::new(InMemoryTypeRepository::new());
+        repository_impl
+            .load_types(vec![RawTypeData {
+                name: "Справочники.Иерархический".to_string(),
+                source: RawDataSource::Configuration,
+                facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+                kind: Some(MetadataKind::Catalog),
+                ..Default::default()
+            }])
+            .expect("load types");
+
+        let repository =
+            repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+        let resolver = Arc::new(TypeResolver::new(repository.clone()));
+        let deps = Arc::new(SemanticDeps {
+            repository,
+            signature_index: SignatureIndex::new(),
+            resolver: Some(resolver),
+            platform_signatures_loaded: true,
+        });
+
+        let source = r#"Процедура Тест()
+    x = ЭтотОбъект;
+    y = Объект;
+КонецПроцедуры
+"#;
+        let program = parse(source);
+        let file_path = "Catalogs/Иерархический/Ext/ObjectModule.bsl";
+        let index = build_type_index_with_path(&program, file_path, deps);
+
+        let this_object_offset = source.find("ЭтотОбъект").expect("ЭтотОбъект") as u32;
+        let this_object = index
+            .type_at_byte_offset(this_object_offset)
+            .expect("type at ЭтотОбъект");
+        assert_eq!(this_object.type_name(), "СправочникОбъект.Иерархический");
+
+        let object_offset = source.find("Объект").expect("Объект") as u32;
+        let object = index
+            .type_at_byte_offset(object_offset)
+            .expect("type at Объект");
+        assert_eq!(object.type_name(), "СправочникОбъект.Иерархический");
     }
 
     #[test]

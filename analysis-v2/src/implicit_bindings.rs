@@ -1,4 +1,4 @@
-use bsl_shared::domain::types::{FacetKind, MetadataKind};
+use bsl_shared::domain::types::{ContextualTypeDescriptor, FacetKind, MetadataKind};
 use bsl_shared::domain::{CompilerDirective, ModuleType};
 
 pub(crate) const FORM_CONTEXT_BOUND_SYMBOL_KEYS: [&str; 6] = [
@@ -13,7 +13,7 @@ pub(crate) const FORM_CONTEXT_BOUND_SYMBOL_KEYS: [&str; 6] = [
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ImplicitBinding {
     pub(crate) name: &'static str,
-    pub(crate) type_name: Option<String>,
+    pub(crate) descriptor: Option<ContextualTypeDescriptor>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,16 +37,25 @@ impl ImplicitBindingResolver {
         form_name: &str,
     ) -> Option<FormModuleTypeNames> {
         let (kind, object_name) = Self::parse_owner_kind(owner_type)?;
-        let collection = kind.display_name();
-        let object_type_prefix = kind.faceted_type_prefix(&FacetKind::Object);
+        let form_descriptor = ContextualTypeDescriptor::FormType {
+            kind,
+            owner_name: object_name.to_string(),
+            form_name: form_name.to_string(),
+        };
+        let form_object_descriptor = ContextualTypeDescriptor::FormDataObject {
+            kind,
+            owner_name: object_name.to_string(),
+            form_name: form_name.to_string(),
+        };
+        let form_elements_descriptor = ContextualTypeDescriptor::FormElementsType {
+            kind,
+            owner_name: object_name.to_string(),
+            form_name: form_name.to_string(),
+        };
         Some(FormModuleTypeNames {
-            form_type_name: format!("Формы.{}.{}.{}", collection, object_name, form_name),
-            // FormModule.Объект всегда резолвится в owner object facet.
-            form_object_type_name: format!("{}.{}", object_type_prefix, object_name),
-            form_elements_type_name: format!(
-                "ЭлементыФормы.{}.{}.{}",
-                collection, object_name, form_name
-            ),
+            form_type_name: form_descriptor.canonical_type_name(),
+            form_object_type_name: form_object_descriptor.user_facing_type_name(),
+            form_elements_type_name: form_elements_descriptor.canonical_type_name(),
         })
     }
 
@@ -56,59 +65,85 @@ impl ImplicitBindingResolver {
                 form_name,
                 owner_type,
             } => {
-                let names = self.form_module_type_names(owner_type, form_name);
+                let owner = Self::parse_owner_kind(owner_type)
+                    .map(|(kind, object_name)| (kind, object_name.to_string()));
+                let form_descriptor =
+                    owner
+                        .as_ref()
+                        .map(|(kind, object_name)| ContextualTypeDescriptor::FormType {
+                            kind: *kind,
+                            owner_name: object_name.clone(),
+                            form_name: form_name.clone(),
+                        });
+                let form_object_descriptor = owner.as_ref().map(|(kind, object_name)| {
+                    ContextualTypeDescriptor::FormDataObject {
+                        kind: *kind,
+                        owner_name: object_name.clone(),
+                        form_name: form_name.clone(),
+                    }
+                });
+                let form_elements_descriptor = owner.as_ref().map(|(kind, object_name)| {
+                    ContextualTypeDescriptor::FormElementsType {
+                        kind: *kind,
+                        owner_name: object_name.clone(),
+                        form_name: form_name.clone(),
+                    }
+                });
                 vec![
                     ImplicitBinding {
                         name: "ЭтотОбъект",
-                        type_name: names.as_ref().map(|n| n.form_type_name.clone()),
+                        descriptor: form_descriptor.clone(),
                     },
                     ImplicitBinding {
                         name: "ЭтаФорма",
-                        type_name: names.as_ref().map(|n| n.form_type_name.clone()),
+                        descriptor: form_descriptor.clone(),
                     },
                     ImplicitBinding {
                         name: "Форма",
-                        type_name: names.as_ref().map(|n| n.form_type_name.clone()),
+                        descriptor: form_descriptor,
                     },
                     ImplicitBinding {
                         name: "Объект",
-                        type_name: names.as_ref().map(|n| n.form_object_type_name.clone()),
+                        descriptor: form_object_descriptor,
                     },
                     ImplicitBinding {
                         name: "Элементы",
-                        type_name: names.as_ref().map(|n| n.form_elements_type_name.clone()),
+                        descriptor: form_elements_descriptor,
                     },
                     ImplicitBinding {
                         name: "Параметры",
-                        type_name: Some("Структура".to_string()),
+                        descriptor: Some(ContextualTypeDescriptor::PlatformType {
+                            type_name: "Структура".to_string(),
+                        }),
                     },
                 ]
             }
             ModuleType::ManagerModule { owner_type } => {
-                let manager_type_name =
-                    Self::faceted_owner_type_name(owner_type, FacetKind::Manager);
+                let manager_descriptor =
+                    Self::faceted_owner_descriptor(owner_type, FacetKind::Manager);
                 vec![
                     ImplicitBinding {
                         name: "ЭтотОбъект",
-                        type_name: manager_type_name.clone(),
+                        descriptor: manager_descriptor.clone(),
                     },
                     ImplicitBinding {
                         name: "Объект",
-                        type_name: manager_type_name,
+                        descriptor: manager_descriptor,
                     },
                 ]
             }
             ModuleType::ObjectModule { owner_type }
             | ModuleType::RecordSetModule { owner_type } => {
-                let object_type_name = Self::faceted_owner_type_name(owner_type, FacetKind::Object);
+                let object_descriptor =
+                    Self::faceted_owner_descriptor(owner_type, FacetKind::Object);
                 vec![
                     ImplicitBinding {
                         name: "ЭтотОбъект",
-                        type_name: object_type_name.clone(),
+                        descriptor: object_descriptor.clone(),
                     },
                     ImplicitBinding {
                         name: "Объект",
-                        type_name: object_type_name,
+                        descriptor: object_descriptor,
                     },
                 ]
             }
@@ -122,10 +157,16 @@ impl ImplicitBindingResolver {
         Some((kind, object_name))
     }
 
-    fn faceted_owner_type_name(owner_type: &str, facet: FacetKind) -> Option<String> {
+    fn faceted_owner_descriptor(
+        owner_type: &str,
+        facet: FacetKind,
+    ) -> Option<ContextualTypeDescriptor> {
         let (kind, object_name) = Self::parse_owner_kind(owner_type)?;
-        let prefix = kind.faceted_type_prefix(&facet);
-        Some(format!("{}.{}", prefix, object_name))
+        Some(ContextualTypeDescriptor::ConfigurationFacet {
+            kind,
+            name: object_name.to_string(),
+            facet,
+        })
     }
 }
 
@@ -145,7 +186,14 @@ mod tests {
     fn to_map(bindings: Vec<super::ImplicitBinding>) -> HashMap<String, Option<String>> {
         bindings
             .into_iter()
-            .map(|binding| (binding.name.to_string(), binding.type_name))
+            .map(|binding| {
+                (
+                    binding.name.to_string(),
+                    binding
+                        .descriptor
+                        .map(|descriptor| descriptor.user_facing_type_name()),
+                )
+            })
             .collect()
     }
 
@@ -255,8 +303,9 @@ mod tests {
             .find(|binding| binding.name == "Объект")
             .expect("Объект binding");
         let type_name = object_binding
-            .type_name
-            .as_deref()
+            .descriptor
+            .as_ref()
+            .map(|descriptor| descriptor.user_facing_type_name())
             .expect("Объект type name");
         assert!(
             !type_name.contains("ДанныеФормыОбъект"),

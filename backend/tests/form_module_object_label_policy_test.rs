@@ -1,0 +1,69 @@
+//! Regression tests for dual-layer user-facing labels of FormModule.Объект.
+
+mod support;
+
+use bsl_backend::helpers::hover_formatter::{HoverFormatConfig, HoverOutputFormat};
+use bsl_shared::formatting::DetailLevel;
+
+fn hover_for_detail_level(level: DetailLevel) -> String {
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
+    let file_path = "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl";
+    let code = concat!(
+        "Процедура Тест()\n",
+        "    x = Объект;\n",
+        "КонецПроцедуры\n",
+    );
+
+    let hover_config = HoverFormatConfig {
+        detail_level: level,
+        output_format: HoverOutputFormat::Markdown,
+        ..Default::default()
+    };
+
+    support::hover_for_code_with_config(
+        deps_bundle.as_ref(),
+        file_path,
+        code,
+        1,
+        9,
+        Some(hover_config),
+    )
+    .expect("hover should exist")
+}
+
+#[test]
+fn form_module_object_label_policy_is_owner_facet_for_compact_and_full() {
+    let compact = hover_for_detail_level(DetailLevel::Compact);
+    assert!(
+        compact.contains("ДокументОбъект.Док1"),
+        "compact hover should use owner facet label, got:\n{}",
+        compact
+    );
+    assert!(
+        !compact.contains("данные формы:"),
+        "compact hover must not include detailed form-data suffix, got:\n{}",
+        compact
+    );
+
+    let full = hover_for_detail_level(DetailLevel::Full);
+    assert!(
+        full.contains("ДокументОбъект.Док1"),
+        "full hover should use owner facet label, got:\n{}",
+        full
+    );
+    assert!(
+        !full.contains("данные формы:"),
+        "full hover must not include detailed form-data suffix, got:\n{}",
+        full
+    );
+}
+
+#[test]
+fn form_module_object_label_policy_adds_form_data_suffix_for_detailed() {
+    let detailed = hover_for_detail_level(DetailLevel::Detailed);
+    assert!(
+        detailed.contains("ДокументОбъект.Док1 (данные формы: ДанныеФормыСтруктура)"),
+        "detailed hover should include form-data semantic suffix, got:\n{}",
+        detailed
+    );
+}

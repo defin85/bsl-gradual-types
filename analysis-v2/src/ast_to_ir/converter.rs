@@ -182,28 +182,26 @@ impl AstToIrConverter {
         let bindings = binding_resolver.bindings_for_module(&location.module_type);
         if matches!(location.module_type, ModuleType::FormModule { .. }) {
             let mut seen = BTreeSet::new();
-            for binding in bindings {
+            let mut form_type_name: Option<String> = None;
+            for binding in &bindings {
                 let key = binding.name.to_lowercase();
                 if seen.insert(key) {
                     self.form_context_symbols.push(binding.name.to_string());
                 }
+                if form_type_name.is_none() {
+                    form_type_name = binding
+                        .descriptor
+                        .as_ref()
+                        .and_then(|descriptor| descriptor.form_type_name());
+                }
             }
 
-            let ModuleType::FormModule {
-                ref form_name,
-                ref owner_type,
-            } = location.module_type
-            else {
-                return;
-            };
-
-            let Some(type_names) = binding_resolver.form_module_type_names(owner_type, form_name)
-            else {
+            let Some(form_type_name) = form_type_name else {
                 return;
             };
 
             // Реквизиты формы (из синтетического типа `Формы.*`) доступны в контексте формы.
-            if let Some(form_type) = self.repository.find_type(&type_names.form_type_name) {
+            if let Some(form_type) = self.repository.find_type(&form_type_name) {
                 for prop in form_type.properties {
                     let key = prop.name.to_lowercase();
                     if FORM_CONTEXT_BOUND_SYMBOL_KEYS.contains(&key.as_str())

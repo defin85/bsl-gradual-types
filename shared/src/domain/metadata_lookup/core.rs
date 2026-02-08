@@ -6,6 +6,7 @@ use crate::domain::signature_index::MethodSignature;
 use crate::domain::types::{
     ConcreteType, FacetKind, GenericType, MetadataKind, PlatformType, RawMethodData, RawParamData,
     RawPropertyData, RawTabularSectionData, RawTypeData, ResolutionResult, TypeResolution,
+    FORM_DATA_FORM_TYPE_NOTE_PREFIX, FORM_DATA_SEMANTICS_NOTE,
 };
 
 impl TypeMetadataLookup {
@@ -247,6 +248,10 @@ impl TypeMetadataLookup {
             return enum_props;
         }
 
+        if let Some(form_data_props) = self.get_form_data_properties(resolution) {
+            return form_data_props;
+        }
+
         // Приоритет 1 - Lazy lookup через active_facet (для конфигурационных типов)
         if let Some(facet) = resolution.active_facet {
             if let Some(props) = self.get_facet_properties(resolution, facet) {
@@ -383,24 +388,25 @@ impl TypeMetadataLookup {
     /// # let _ = maybe_error;
     /// ```
     pub fn has_member(&self, resolution: &TypeResolution, member_name: &str) -> bool {
-        let raw = match self.get_raw_type(resolution) {
-            Some(r) => r,
-            None => return false,
-        };
-
-        // Проверяем методы
-        if raw
-            .methods
+        if self
+            .get_methods(resolution)
             .iter()
             .any(|m| m.name == member_name || m.english_name == member_name)
         {
             return true;
         }
 
-        // Проверяем свойства
-        if raw.properties.iter().any(|p| p.name == member_name) {
+        if self
+            .get_properties(resolution)
+            .iter()
+            .any(|p| p.name == member_name)
+        {
             return true;
         }
+
+        let Some(raw) = self.get_raw_type(resolution) else {
+            return false;
+        };
 
         // Проверяем значения перечисления
         if raw.enum_values.iter().any(|v| v == member_name) {
@@ -420,6 +426,69 @@ impl TypeMetadataLookup {
         }
 
         false
+    }
+
+    fn get_form_data_properties(
+        &self,
+        resolution: &TypeResolution,
+    ) -> Option<Vec<RawPropertyData>> {
+        if !Self::has_contextual_note(resolution, FORM_DATA_SEMANTICS_NOTE) {
+            return None;
+        }
+
+        let mut merged: Vec<RawPropertyData> = Vec::new();
+        let mut seen = std::collections::HashSet::<String>::new();
+        let mut push_unique = |prop: RawPropertyData| {
+            let key = prop.name.to_lowercase();
+            if seen.insert(key) {
+                merged.push(prop);
+            }
+        };
+
+        // 1) form shape
+        if let Some(form_type_name) =
+            Self::contextual_note_value(resolution, FORM_DATA_FORM_TYPE_NOTE_PREFIX)
+        {
+            if let Some(form_type) = self.repository.find_type(form_type_name) {
+                for prop in form_type.properties {
+                    push_unique(prop);
+                }
+            }
+        }
+
+        // 2) guaranteed applied-object members
+        if let Some(object_props) = self.get_facet_properties(resolution, FacetKind::Object) {
+            for prop in object_props {
+                push_unique(prop);
+            }
+        }
+
+        // 3) applied facet fallback
+        if let Some(facet) = resolution.active_facet {
+            if let Some(fallback_props) = self.get_facet_properties(resolution, facet) {
+                for prop in fallback_props {
+                    push_unique(prop);
+                }
+            }
+        } else if let Some(raw) = self.get_raw_type(resolution) {
+            for prop in raw.properties {
+                push_unique(prop);
+            }
+        }
+
+        Some(merged)
+    }
+
+    fn has_contextual_note(resolution: &TypeResolution, note: &str) -> bool {
+        resolution.metadata.notes.iter().any(|item| item == note)
+    }
+
+    fn contextual_note_value<'a>(resolution: &'a TypeResolution, prefix: &str) -> Option<&'a str> {
+        resolution
+            .metadata
+            .notes
+            .iter()
+            .find_map(|note| note.strip_prefix(prefix))
     }
 
     /// Получить описание типа

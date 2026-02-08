@@ -738,10 +738,15 @@ impl TypeInferencer {
         for binding in module_implicit_bindings(&location.module_type) {
             let resolution = match binding.type_name.as_deref() {
                 Some(type_name) => {
-                    if self.deps.repository.find_type(type_name).is_some() {
-                        TypeResolution::explicit(type_name)
+                    let resolved = self.resolver.resolve_expression_sync(type_name);
+                    if resolved.is_unknown() {
+                        if self.deps.repository.find_type(type_name).is_some() {
+                            TypeResolution::explicit(type_name)
+                        } else {
+                            TypeResolution::inferred_weak(type_name)
+                        }
                     } else {
-                        TypeResolution::inferred_weak(type_name)
+                        resolved
                     }
                 }
                 None => TypeResolution::unknown(),
@@ -1740,8 +1745,10 @@ mod tests {
                     ..Default::default()
                 },
                 RawTypeData {
-                    name: "ДанныеФормыОбъект.Документы.Док1".to_string(),
+                    name: "Документы.Док1".to_string(),
                     source: RawDataSource::Configuration,
+                    facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+                    kind: Some(MetadataKind::Document),
                     ..Default::default()
                 },
             ])
@@ -1760,6 +1767,7 @@ mod tests {
         let source = r#"Процедура Тест()
     x = ЭтотОбъект;
     y = Параметры;
+    z = Объект;
 КонецПроцедуры
 "#;
         let program = parse(source);
@@ -1777,6 +1785,77 @@ mod tests {
             .type_at_byte_offset(params_offset)
             .expect("type at Параметры");
         assert_eq!(params.type_name(), "Структура");
+
+        let object_offset = source
+            .find("z = Объект")
+            .map(|idx| idx + "z = ".len())
+            .expect("Объект") as u32;
+        let object = index
+            .type_at_byte_offset(object_offset)
+            .expect("type at Объект");
+        assert_eq!(object.type_name(), "ДокументОбъект.Док1");
+    }
+
+    #[test]
+    fn resolves_form_module_object_link_property_from_object_facet() {
+        let repository_impl = Arc::new(InMemoryTypeRepository::new());
+        repository_impl
+            .load_types(vec![
+                RawTypeData {
+                    name: "Документы.Док1".to_string(),
+                    source: RawDataSource::Configuration,
+                    facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+                    kind: Some(MetadataKind::Document),
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "ДокументОбъект".to_string(),
+                    source: RawDataSource::Platform,
+                    facets: vec![FacetKind::Object],
+                    properties: vec![RawPropertyData {
+                        name: "Ссылка".to_string(),
+                        prop_type: "ДокументСсылка".to_string(),
+                        is_readonly: true,
+                    }],
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "ДокументСсылка".to_string(),
+                    source: RawDataSource::Platform,
+                    facets: vec![FacetKind::Reference],
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "Формы.Документы.Док1.Форма1".to_string(),
+                    source: RawDataSource::Configuration,
+                    ..Default::default()
+                },
+            ])
+            .expect("load types");
+
+        let repository =
+            repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+        let resolver = Arc::new(TypeResolver::new(repository.clone()));
+        let deps = Arc::new(SemanticDeps {
+            repository,
+            signature_index: SignatureIndex::new(),
+            resolver: Some(resolver),
+            platform_signatures_loaded: true,
+        });
+
+        let source = r#"Процедура Тест()
+    x = Объект.Ссылка;
+КонецПроцедуры
+"#;
+        let program = parse(source);
+        let file_path = "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl";
+        let index = build_type_index_with_path(&program, file_path, deps);
+
+        let link_offset = source.find("Ссылка").expect("Ссылка") as u32;
+        let link_type = index
+            .type_at_byte_offset(link_offset)
+            .expect("type at Объект.Ссылка");
+        assert_eq!(link_type.type_name(), "ДокументСсылка");
     }
 
     #[test]

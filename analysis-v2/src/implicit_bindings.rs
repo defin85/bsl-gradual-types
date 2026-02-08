@@ -41,9 +41,10 @@ pub(crate) fn form_module_type_names(
 ) -> Option<FormModuleTypeNames> {
     let (kind, object_name) = parse_owner_kind(owner_type)?;
     let collection = kind.display_name();
+    let object_type_prefix = kind.faceted_type_prefix(&FacetKind::Object);
     Some(FormModuleTypeNames {
         form_type_name: format!("Формы.{}.{}.{}", collection, object_name, form_name),
-        form_object_type_name: format!("ДанныеФормыОбъект.{}.{}", collection, object_name),
+        form_object_type_name: format!("{}.{}", object_type_prefix, object_name),
         form_elements_type_name: format!(
             "ЭлементыФормы.{}.{}.{}",
             collection, object_name, form_name

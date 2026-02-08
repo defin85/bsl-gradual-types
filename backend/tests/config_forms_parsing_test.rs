@@ -439,17 +439,29 @@ fn test_form_synthetic_types_loaded_into_repository() {
         "Form type should have property 'Стороны'"
     );
 
-    let form_object_type = repo
-        .find_type("ДанныеФормыОбъект.Документы.ЗаказНаряды")
-        .expect("Form object type should exist in repository");
-    let works = form_object_type
+    let form_object = form_type
+        .properties
+        .iter()
+        .find(|p| p.name == "Объект")
+        .expect("Form type should have property 'Объект'");
+    assert_eq!(
+        form_object.prop_type, "ДокументОбъект.ЗаказНаряды",
+        "Form 'Объект' should point to object facet type"
+    );
+    assert!(
+        repo.find_type("ДанныеФормыОбъект.Документы.ЗаказНаряды")
+            .is_none(),
+        "Legacy form object alias should not be generated"
+    );
+
+    let works = form_type
         .properties
         .iter()
         .find(|p| p.name == "Работы")
-        .expect("Form object should have property 'Работы'");
+        .expect("Form type should have property 'Работы'");
     assert_eq!(
         works.prop_type, "ДанныеФормыКоллекция<СтрокаРаботы>",
-        "Tabular section 'Работы' should be a data forms collection"
+        "Form 'Работы' should be a data forms collection"
     );
 
     let row_type = repo

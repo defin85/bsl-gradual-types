@@ -3,7 +3,7 @@
 #![allow(clippy::doc_overindented_list_items)]
 
 use super::types::UniversalMetadataObject;
-use bsl_shared::domain::types::MetadataKind;
+use bsl_shared::domain::types::{FacetKind, MetadataKind};
 use bsl_shared::domain::types::{
     RawAttributeData, RawDataSource, RawTabularSectionData, RawTypeData,
 };
@@ -14,7 +14,7 @@ impl UniversalMetadataObject {
     /// Возвращает:
     /// - основной тип объекта метаданных (как `to_raw_type_data`)
     /// - (если есть формы) дополнительные типы:
-    ///   - `ДанныеФормыОбъект.<Коллекция>.<Объект>`
+    ///   - `Объект` внутри `Формы.*` указывает на фасет Object владельца
     ///   - `Формы.<Коллекция>.<Объект>.<Форма>` для каждой формы
     ///   - `ЭлементыФормы.<Коллекция>.<Объект>.<Форма>` для каждой формы
     ///   - типы строк табличных частей (`Строка<ИмяТЧ>`) для табличных частей объекта
@@ -38,9 +38,7 @@ impl UniversalMetadataObject {
             out.push(Self::build_tabular_row_type(ts, "Число"));
         }
 
-        // Тип данных формы объекта: "ДанныеФормыОбъект.<Коллекция>.<Объект>"
-        let form_object_type_name = format!("ДанныеФормыОбъект.{}.{}", collection, object_name);
-        out.push(self.build_form_object_type(&form_object_type_name));
+        let form_object_type_name = Self::build_form_object_type_name(kind, &object_name);
 
         // Типы формы и контейнера элементов — по каждой форме
         for form in &self.forms {
@@ -211,45 +209,12 @@ impl UniversalMetadataObject {
             .collect()
     }
 
-    fn build_form_object_type(&self, type_name: &str) -> RawTypeData {
-        let mut properties: Vec<bsl_shared::domain::types::RawPropertyData> = Vec::new();
-
-        // Реквизиты объекта метаданных
-        for attr in &self.attributes {
-            properties.push(bsl_shared::domain::types::RawPropertyData {
-                name: attr.name.clone(),
-                prop_type: attr.type_name.clone(),
-                is_readonly: false,
-            });
-        }
-
-        // Табличные части (как ДанныеФормыКоллекция<Строка...>)
-        for ts in &self.tabular_sections {
-            let row_type = format!("Строка{}", ts.name);
-            properties.push(bsl_shared::domain::types::RawPropertyData {
-                name: ts.name.clone(),
-                prop_type: format!("ДанныеФормыКоллекция<{}>", row_type),
-                is_readonly: false,
-            });
-        }
-
-        RawTypeData {
-            name: type_name.to_string(),
-            english_name: type_name.to_string(),
-            description: String::new(),
-            category: "ДанныеФормы".to_string(),
-            source: RawDataSource::Configuration,
-            methods: Vec::new(),
-            properties,
-            facets: Vec::new(),
-            kind: None,
-            attributes: self.convert_attributes(),
-            tabular_sections: Vec::new(),
-            enum_values: Vec::new(),
-            generic_info: None,
-            collection_item_type: None,
-            module_paths: None,
-        }
+    fn build_form_object_type_name(kind: MetadataKind, object_name: &str) -> String {
+        format!(
+            "{}.{}",
+            kind.faceted_type_prefix(&FacetKind::Object),
+            object_name
+        )
     }
 
     fn build_form_type(
@@ -262,7 +227,7 @@ impl UniversalMetadataObject {
     ) -> RawTypeData {
         let mut properties: Vec<bsl_shared::domain::types::RawPropertyData> = Vec::new();
 
-        // "Объект" в модуле формы — это данные формы, а не ДокументОбъект.*
+        // "Объект" в модуле формы — это applied object владельца (Object facet).
         properties.push(bsl_shared::domain::types::RawPropertyData {
             name: "Объект".to_string(),
             prop_type: form_object_type_name.to_string(),

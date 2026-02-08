@@ -11,6 +11,7 @@ use bsl_analysis_v2::{
 use bsl_backend::data::loaders::config_metadata_parser::{FormParser, UniversalMetadataObject};
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::resolver::TypeResolver;
+use bsl_shared::domain::types::{FacetKind, RawDataSource, RawPropertyData, RawTypeData};
 use bsl_shared::formatting::DetailLevel;
 
 fn workspace_root() -> PathBuf {
@@ -66,7 +67,26 @@ fn conf_big_form_module_attributes_and_elements_are_typed() {
     );
     doc.forms.push(form);
 
-    let raw_types = doc.to_raw_type_data_with_forms(None);
+    let mut raw_types = doc.to_raw_type_data_with_forms(None);
+    raw_types.extend([
+        RawTypeData {
+            name: "ДокументОбъект".to_string(),
+            source: RawDataSource::Platform,
+            facets: vec![FacetKind::Object],
+            properties: vec![RawPropertyData {
+                name: "Ссылка".to_string(),
+                prop_type: "ДокументСсылка".to_string(),
+                is_readonly: true,
+            }],
+            ..Default::default()
+        },
+        RawTypeData {
+            name: "ДокументСсылка".to_string(),
+            source: RawDataSource::Platform,
+            facets: vec![FacetKind::Reference],
+            ..Default::default()
+        },
+    ]);
     let repo: Arc<dyn TypeRepository> = Arc::new(InMemoryTypeRepository::new());
     repo.load_types(raw_types).expect("load synthetic types");
     let form_type_name = "Формы.Документы.РеализацияТоваровУслуг.ФормаДокументаОбщая";
@@ -95,6 +115,15 @@ fn conf_big_form_module_attributes_and_elements_are_typed() {
         "expected element `СчетФактураПросмотр` to be present in {} properties",
         elements_type_name
     );
+    let object_prop = form_type
+        .properties
+        .iter()
+        .find(|p| p.name == "Объект")
+        .expect("expected form property Объект to be present");
+    assert_eq!(
+        object_prop.prop_type,
+        "ДокументОбъект.РеализацияТоваровУслуг"
+    );
 
     // Минимальный код: используем реквизит формы и элемент формы.
     let file_path =
@@ -103,6 +132,7 @@ fn conf_big_form_module_attributes_and_elements_are_typed() {
         "Процедура Тест()\n",
         "    x = Элементы.СчетФактураПросмотр;\n",
         "    y = СчетФактура;\n",
+        "    z = Объект.Ссылка;\n",
         "КонецПроцедуры\n",
     );
 
@@ -134,39 +164,6 @@ fn conf_big_form_module_attributes_and_elements_are_typed() {
 
     let analysis = host.analysis();
 
-    let parsed = analysis
-        .parse_result(V2FileId(1))
-        .expect("parse_result query")
-        .expect("parse_result present");
-    let (x_property, y_ident) = parsed
-        .program
-        .statements
-        .iter()
-        .find_map(|stmt| match stmt {
-            bsl_syntax::ast::Statement::ProcedureDecl { body, .. } => {
-                let mut x_property: Option<&str> = None;
-                let mut y_ident: Option<&str> = None;
-                for s in body {
-                    if let bsl_syntax::ast::Statement::Assignment { value, .. } = s {
-                        match value {
-                            bsl_syntax::ast::Expression::PropertyAccess { property, .. } => {
-                                x_property = Some(property.as_str());
-                            }
-                            bsl_syntax::ast::Expression::Identifier { name, .. } => {
-                                y_ident = Some(name.as_str());
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                Some((x_property?, y_ident?))
-            }
-            _ => None,
-        })
-        .expect("Expected x/y assignments to be parsed");
-    assert_eq!(x_property, "СчетФактураПросмотр");
-    assert_eq!(y_ident, "СчетФактура");
-
     let diags = analysis
         .semantic_diagnostics(V2FileId(1))
         .ok()
@@ -180,6 +177,20 @@ fn conf_big_form_module_attributes_and_elements_are_typed() {
             .iter()
             .all(|d| !d.message.contains("СчетФактураПросмотр")),
         "unexpected diagnostics mentioning form element 'СчетФактураПросмотр': {:?}",
+        diags.iter().map(|d| d.message.clone()).collect::<Vec<_>>()
+    );
+    assert!(
+        diags
+            .iter()
+            .all(|d| !d.message.contains("Свойство 'Ссылка'")),
+        "unexpected diagnostics for Объект.Ссылка: {:?}",
+        diags.iter().map(|d| d.message.clone()).collect::<Vec<_>>()
+    );
+    assert!(
+        diags
+            .iter()
+            .all(|d| !d.message.contains("ДанныеФормыОбъект")),
+        "legacy alias leaked to diagnostics: {:?}",
         diags.iter().map(|d| d.message.clone()).collect::<Vec<_>>()
     );
     let x_offset = analysis
@@ -208,6 +219,22 @@ fn conf_big_form_module_attributes_and_elements_are_typed() {
         .type_at_byte_offset(V2FileId(1), y_offset)
         .expect("type_at_byte_offset query for y")
         .map(|ty| ty.type_name());
+    let z_receiver_offset = analysis
+        .utf16_position_to_byte_offset(V2FileId(1), 3, 8)
+        .expect("utf16_position_to_byte_offset query for z receiver")
+        .expect("z receiver offset present") as u32;
+    let got_z_receiver = analysis
+        .type_at_byte_offset(V2FileId(1), z_receiver_offset)
+        .expect("type_at_byte_offset query for z receiver")
+        .map(|ty| ty.type_name());
+    let z_offset = analysis
+        .utf16_position_to_byte_offset(V2FileId(1), 3, 15)
+        .expect("utf16_position_to_byte_offset query for z member")
+        .expect("z member offset present") as u32;
+    let got_z = analysis
+        .type_at_byte_offset(V2FileId(1), z_offset)
+        .expect("type_at_byte_offset query for z member")
+        .map(|ty| ty.type_name());
 
     assert_eq!(
         got_x_receiver.as_deref(),
@@ -228,5 +255,15 @@ fn conf_big_form_module_attributes_and_elements_are_typed() {
             .contains("cfg:DocumentRef."),
         "Expected `СчетФактура` to resolve as cfg:DocumentRef.*, got {:?}",
         got_y
+    );
+    assert_eq!(
+        got_z_receiver.as_deref(),
+        Some("ДокументОбъект.РеализацияТоваровУслуг"),
+        "Expected `Объект` receiver to resolve as document object facet"
+    );
+    assert_eq!(
+        got_z.as_deref(),
+        Some("ДокументСсылка"),
+        "Expected `Объект.Ссылка` to resolve as ДокументСсылка"
     );
 }

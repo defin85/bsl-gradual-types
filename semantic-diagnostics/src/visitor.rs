@@ -5,7 +5,9 @@
 
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::SignatureIndex;
-use bsl_shared::domain::types::{DiagnosticSeverity, TypeDiagnostic, UncertaintyReason};
+use bsl_shared::domain::types::{
+    Certainty, DiagnosticSeverity, TypeDiagnostic, TypeResolution, UncertaintyReason,
+};
 use bsl_shared::domain::validators::{TypeErrorKind, TypeValidator};
 use bsl_shared::domain::RuntimeExecutionContext;
 use bsl_shared::formatting::DetailLevel;
@@ -178,6 +180,33 @@ impl<'a> SemanticValidationVisitor<'a> {
             }
         }
         None
+    }
+
+    /// Graceful degradation for contextual types when configuration metadata is unavailable.
+    ///
+    /// Some descriptor-based contextual resolutions return a concrete fallback type with
+    /// `InferredWeak + ConfigurationNotLoaded`. In this state member existence checks are
+    /// not reliable and must be suppressed, unless contextual descriptor notes provide
+    /// an explicit member contract (e.g. `FormModule.Объект`).
+    fn should_skip_member_validation_for_missing_configuration(
+        type_resolution: &TypeResolution,
+    ) -> bool {
+        let missing_configuration = matches!(type_resolution.certainty, Certainty::InferredWeak)
+            && matches!(
+                type_resolution.metadata.uncertainty_reason,
+                Some(UncertaintyReason::ConfigurationNotLoaded)
+            );
+        if !missing_configuration {
+            return false;
+        }
+
+        let has_contextual_contract = type_resolution
+            .metadata
+            .notes
+            .iter()
+            .any(|note| note.starts_with("contextual:"));
+
+        !has_contextual_contract
     }
 
     /// MILESTONE 5.5: Extracts metadata collection name from MemberAccess
@@ -383,6 +412,10 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                         return;
                     }
 
+                    if Self::should_skip_member_validation_for_missing_configuration(obj_type) {
+                        return;
+                    }
+
                     // 1. Check method existence with variable_name
                     if let Some(error_kind) = self.validator.validate_method_exists_with_variable(
                         obj_type,
@@ -579,6 +612,10 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                     return;
                 }
 
+                if Self::should_skip_member_validation_for_missing_configuration(object_type) {
+                    return;
+                }
+
                 // MILESTONE 3.6 Phase 3: Pass variable name
                 if let Some(error_kind) = self.validator.validate_property_exists_with_variable(
                     object_type, // Phase 4: Direct use of TypeResolution
@@ -601,7 +638,7 @@ mod tests {
     use crate::type_hints::SemanticTypeHints;
     use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
     use bsl_shared::domain::repository::TypeRepository; // MILESTONE 3.16: Import trait for load_types
-    use bsl_shared::domain::types::FacetKind; // Phase 4: Moved from main imports (used only in tests)
+    use bsl_shared::domain::types::{Certainty, FacetKind}; // Phase 4: Moved from main imports (used only in tests)
     use bsl_shared::ir::{SemanticNode, SemanticNodeKind, Span};
 
     #[test]
@@ -836,6 +873,91 @@ mod tests {
 
         let errors = visitor.into_errors();
         assert!(errors.is_empty(), "expected graceful degradation");
+    }
+
+    #[test]
+    fn test_inferred_weak_method_validation_suppressed_when_config_not_loaded() {
+        use bsl_shared::domain::types::TypeResolution;
+        use std::sync::Arc;
+        let repository = Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
+        let metadata = TypeMetadataLookup::new(repository.clone());
+        let validator = TypeValidator::new(&metadata);
+        let resolver = TypeResolver::new(repository);
+        let signature_index = SignatureIndex::new();
+        let mut program = SemanticProgram::new();
+
+        let mut inferred = TypeResolution::explicit("ДокументОбъект.Док1");
+        inferred.certainty = Certainty::InferredWeak;
+        inferred.metadata.uncertainty_reason = Some(UncertaintyReason::ConfigurationNotLoaded);
+
+        let call_span = Span::new(10, 40);
+        program.nodes.push(SemanticNode {
+            kind: SemanticNodeKind::FunctionCall {
+                function_name: "НесуществующийМетод".to_string(),
+                object_name: Some("Объект".to_string()),
+                object_node: None,
+            },
+            span: call_span,
+            scope_id: program.symbols.root_scope,
+        });
+
+        let mut visitor =
+            SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
+        let mut hints = SemanticTypeHints::default();
+        hints.call_receiver_type_by_span.insert(call_span, inferred);
+        visitor.set_type_hints(Some(&hints));
+        let mut context = FlowContext::new(program.symbols.root_scope);
+        visitor.visit_node(&program.nodes[0], &mut context);
+
+        let errors = visitor.into_errors();
+        assert!(
+            errors.is_empty(),
+            "expected no method existence diagnostics for InferredWeak + ConfigurationNotLoaded"
+        );
+    }
+
+    #[test]
+    fn test_inferred_weak_property_validation_suppressed_when_config_not_loaded() {
+        use bsl_shared::domain::types::TypeResolution;
+        use std::sync::Arc;
+        let repository = Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
+        let metadata = TypeMetadataLookup::new(repository.clone());
+        let validator = TypeValidator::new(&metadata);
+        let resolver = TypeResolver::new(repository);
+        let signature_index = SignatureIndex::new();
+        let mut program = SemanticProgram::new();
+
+        let mut inferred = TypeResolution::explicit("ДокументОбъект.Док1");
+        inferred.certainty = Certainty::InferredWeak;
+        inferred.metadata.uncertainty_reason = Some(UncertaintyReason::ConfigurationNotLoaded);
+
+        let access_span = Span::new(5, 35);
+        program.nodes.push(SemanticNode {
+            kind: SemanticNodeKind::MemberAccess {
+                object_node: None,
+                object_name: Some("Объект".to_string()),
+                member_name: "НесуществующееСвойство".to_string(),
+                access_kind: MemberAccessKind::Property,
+            },
+            span: access_span,
+            scope_id: program.symbols.root_scope,
+        });
+
+        let mut visitor =
+            SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
+        let mut hints = SemanticTypeHints::default();
+        hints
+            .member_access_object_type_by_span
+            .insert(access_span, inferred);
+        visitor.set_type_hints(Some(&hints));
+        let mut context = FlowContext::new(program.symbols.root_scope);
+        visitor.visit_node(&program.nodes[0], &mut context);
+
+        let errors = visitor.into_errors();
+        assert!(
+            errors.is_empty(),
+            "expected no property existence diagnostics for InferredWeak + ConfigurationNotLoaded"
+        );
     }
 
     #[test]

@@ -11,6 +11,7 @@ use crate::domain::types::{DiagnosticSeverity, TypeDiagnostic};
 use crate::formatting::{normalize_user_facing_type_name, DetailLevel};
 use crate::ir::Span;
 
+use super::error_kinds::{FORM_DATA_DETAILED_SUFFIX, FORM_DATA_DIAGNOSTIC_MARKER};
 use super::TypeErrorKind;
 
 impl TypeErrorKind {
@@ -65,6 +66,29 @@ impl TypeErrorKind {
         }
     }
 
+    fn split_form_data_marker(object_type: &str) -> (&str, bool) {
+        if let Some(clean_type) = object_type.strip_suffix(FORM_DATA_DIAGNOSTIC_MARKER) {
+            (clean_type, true)
+        } else {
+            (object_type, false)
+        }
+    }
+
+    fn format_object_type_for_level(object_type: &str, detail_level: DetailLevel) -> String {
+        let (clean_type, has_form_data_marker) = Self::split_form_data_marker(object_type);
+        match (has_form_data_marker, detail_level) {
+            (true, DetailLevel::Detailed) => {
+                format!("{} ({})", clean_type, FORM_DATA_DETAILED_SUFFIX)
+            }
+            _ => clean_type.to_string(),
+        }
+    }
+
+    fn format_object_type_for_hint(object_type: &str) -> String {
+        let (clean_type, _) = Self::split_form_data_marker(object_type);
+        clean_type.to_string()
+    }
+
     /// MILESTONE 3.6 Phase 3: Brief format - error type only (without variable name)
     pub(crate) fn format_brief(&self) -> String {
         let message = match self {
@@ -85,18 +109,26 @@ impl TypeErrorKind {
                 object_type,
                 property_name,
                 ..
-            } => format!(
-                "Свойство '{}' не существует для типа '{}'",
-                property_name, object_type
-            ),
+            } => {
+                let object_type =
+                    Self::format_object_type_for_level(object_type, DetailLevel::Compact);
+                format!(
+                    "Свойство '{}' не существует для типа '{}'",
+                    property_name, object_type
+                )
+            }
             TypeErrorKind::NonExistentMethod {
                 object_type,
                 method_name,
                 ..
-            } => format!(
-                "Метод '{}' не существует для типа '{}'",
-                method_name, object_type
-            ),
+            } => {
+                let object_type =
+                    Self::format_object_type_for_level(object_type, DetailLevel::Compact);
+                format!(
+                    "Метод '{}' не существует для типа '{}'",
+                    method_name, object_type
+                )
+            }
             TypeErrorKind::SimpleTypeAsCollection {
                 type_name,
                 operation,
@@ -189,6 +221,8 @@ impl TypeErrorKind {
                 method_name,
                 variable_name,
             } => {
+                let object_type =
+                    Self::format_object_type_for_level(object_type, DetailLevel::Full);
                 if let Some(var) = variable_name {
                     format!(
                         "Метод '{}' не существует для переменной '{}' типа '{}'",
@@ -231,6 +265,8 @@ impl TypeErrorKind {
                 property_name,
                 variable_name,
             } => {
+                let object_type =
+                    Self::format_object_type_for_level(object_type, DetailLevel::Full);
                 if let Some(var) = variable_name {
                     format!(
                         "Свойство '{}' не существует для переменной '{}' типа '{}'",
@@ -261,6 +297,8 @@ impl TypeErrorKind {
                 current_context,
                 required_context,
             } => {
+                let object_type =
+                    Self::format_object_type_for_level(object_type, DetailLevel::Full);
                 if let Some(var) = variable_name {
                     format!(
                         "Метод '{}' переменной '{}' типа '{}' недоступен в контексте {:?}. Требуется: {:?}",
@@ -313,7 +351,69 @@ impl TypeErrorKind {
 
     /// MILESTONE 3.6 Phase 3: Detailed format - Standard + smart hints
     pub(crate) fn format_detailed(&self) -> String {
-        let base = self.format_standard();
+        let base = match self {
+            TypeErrorKind::NonExistentMethod {
+                object_type,
+                method_name,
+                variable_name,
+            } => {
+                let object_type =
+                    Self::format_object_type_for_level(object_type, DetailLevel::Detailed);
+                if let Some(var) = variable_name {
+                    format!(
+                        "Метод '{}' не существует для переменной '{}' типа '{}'",
+                        method_name, var, object_type
+                    )
+                } else {
+                    format!(
+                        "Метод '{}' не существует для типа '{}'",
+                        method_name, object_type
+                    )
+                }
+            }
+            TypeErrorKind::NonExistentProperty {
+                object_type,
+                property_name,
+                variable_name,
+            } => {
+                let object_type =
+                    Self::format_object_type_for_level(object_type, DetailLevel::Detailed);
+                if let Some(var) = variable_name {
+                    format!(
+                        "Свойство '{}' не существует для переменной '{}' типа '{}'",
+                        property_name, var, object_type
+                    )
+                } else {
+                    format!(
+                        "Свойство '{}' не существует для типа '{}'",
+                        property_name, object_type
+                    )
+                }
+            }
+            TypeErrorKind::MethodNotAvailableInContext {
+                method_name,
+                object_type,
+                variable_name,
+                current_context,
+                required_context,
+            } => {
+                let object_type =
+                    Self::format_object_type_for_level(object_type, DetailLevel::Detailed);
+                if let Some(var) = variable_name {
+                    format!(
+                        "Метод '{}' переменной '{}' типа '{}' недоступен в контексте {:?}. Требуется: {:?}",
+                        method_name, var, object_type, current_context, required_context
+                    )
+                } else {
+                    format!(
+                        "Метод '{}' типа '{}' недоступен в контексте {:?}. Требуется: {:?}",
+                        method_name, object_type, current_context, required_context
+                    )
+                }
+            }
+            _ => self.format_standard(),
+        };
+        let base = normalize_user_facing_type_name(&base);
         let hint = self.generate_hint();
 
         if !hint.is_empty() {
@@ -331,6 +431,7 @@ impl TypeErrorKind {
                 method_name,
                 ..
             } => {
+                let object_type = Self::format_object_type_for_hint(object_type);
                 // Simple hint without fuzzy matching
                 format!(
                     "\u{1F4A1} Подсказка: Проверьте правильность написания метода '{}' для типа '{}'. \
@@ -352,6 +453,7 @@ impl TypeErrorKind {
                 property_name,
                 ..
             } => {
+                let object_type = Self::format_object_type_for_hint(object_type);
                 format!(
                     "\u{1F4A1} Подсказка: Свойство '{}' не найдено для типа '{}'. \
                     Проверьте правильность имени свойства или используйте доступное свойство.",

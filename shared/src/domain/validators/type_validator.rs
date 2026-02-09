@@ -9,8 +9,10 @@ use crate::domain::metadata_lookup::TypeMetadataLookup;
 use crate::domain::resolver::names_equal_ignore_case;
 use crate::domain::types::{
     ConcreteType, MetadataKind, SpecialType, TypeResolution, UncertaintyReason,
+    FORM_DATA_OWNER_FACET_NOTE_PREFIX, FORM_DATA_SEMANTICS_NOTE,
 };
 
+use super::error_kinds::FORM_DATA_DIAGNOSTIC_MARKER;
 use super::TypeErrorKind;
 
 /// Валидатор типов на основе правил из статьи
@@ -312,8 +314,28 @@ impl<'a> TypeValidator<'a> {
 
     // Helper methods
 
+    fn form_data_owner_label(resolution: &TypeResolution) -> Option<String> {
+        let has_form_data_semantics = resolution
+            .metadata
+            .notes
+            .iter()
+            .any(|note| note == FORM_DATA_SEMANTICS_NOTE);
+        if !has_form_data_semantics {
+            return None;
+        }
+
+        resolution.metadata.notes.iter().find_map(|note| {
+            note.strip_prefix(FORM_DATA_OWNER_FACET_NOTE_PREFIX)
+                .map(ToString::to_string)
+        })
+    }
+
     fn resolution_to_string(resolution: &TypeResolution) -> String {
         use crate::domain::types::ResolutionResult;
+
+        if let Some(owner_label) = Self::form_data_owner_label(resolution) {
+            return format!("{}{}", owner_label, FORM_DATA_DIAGNOSTIC_MARKER);
+        }
 
         match &resolution.result {
             ResolutionResult::Concrete(concrete) => concrete.to_string(),

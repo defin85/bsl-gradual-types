@@ -27,7 +27,10 @@ fn utf16_len(text: &str) -> u32 {
     text.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32
 }
 
-fn setup_host(deps_bundle: &DepsBundleV2) -> AnalysisHostV2 {
+fn setup_host_with_detail_level(
+    deps_bundle: &DepsBundleV2,
+    diagnostics_detail_level: DetailLevel,
+) -> AnalysisHostV2 {
     let mut host = AnalysisHostV2::default();
     host.apply_change(ChangeV2::SetDepsSnapshot {
         deps_id: deps_bundle.deps_id.clone(),
@@ -35,9 +38,13 @@ fn setup_host(deps_bundle: &DepsBundleV2) -> AnalysisHostV2 {
     });
     host.apply_change(ChangeV2::SetSettingsSnapshot {
         settings_id: SettingsId::from_hash("form-module-object-dual-layer-contract"),
-        diagnostics_detail_level: DetailLevel::Full,
+        diagnostics_detail_level,
     });
     host
+}
+
+fn setup_host(deps_bundle: &DepsBundleV2) -> AnalysisHostV2 {
+    setup_host_with_detail_level(deps_bundle, DetailLevel::Full)
 }
 
 fn apply_file(
@@ -115,7 +122,9 @@ fn diagnostics_hover_and_type_at_position_follow_dual_layer_contract() {
     let non_existent_diag = diagnostics
         .iter()
         .find(|diag| diag.message.contains("НесуществующееСвойство"))
-        .unwrap_or_else(|| panic!("expected NonExistentProperty diagnostic, got: {diagnostics:#?}"));
+        .unwrap_or_else(|| {
+            panic!("expected NonExistentProperty diagnostic, got: {diagnostics:#?}")
+        });
     assert!(
         non_existent_diag.message.contains(OWNER_FACET_LABEL),
         "diagnostic should use owner facet label, got: {}",
@@ -123,6 +132,48 @@ fn diagnostics_hover_and_type_at_position_follow_dual_layer_contract() {
     );
     for diag in &diagnostics {
         assert_no_internal_or_legacy_names(&diag.message, "diagnostics");
+    }
+
+    let mut detailed_host =
+        setup_host_with_detail_level(deps_bundle.as_ref(), DetailLevel::Detailed);
+    detailed_host.apply_change(ChangeV2::SetFile {
+        file_id: V2FileId(1),
+        text: Arc::from(code.to_string()),
+        version: 1,
+        path: Arc::from(FILE_PATH.to_string()),
+    });
+    let detailed_analysis = detailed_host.analysis();
+    let detailed_diagnostics = detailed_analysis
+        .semantic_diagnostics(V2FileId(1))
+        .ok()
+        .flatten()
+        .as_deref()
+        .cloned()
+        .unwrap_or_default();
+    let detailed_non_existent_diag = detailed_diagnostics
+        .iter()
+        .find(|diag| diag.message.contains("НесуществующееСвойство"))
+        .unwrap_or_else(|| {
+            panic!(
+                "expected detailed NonExistentProperty diagnostic, got: {detailed_diagnostics:#?}"
+            )
+        });
+    assert!(
+        detailed_non_existent_diag
+            .message
+            .contains(OWNER_FACET_LABEL),
+        "detailed diagnostic should keep owner facet label, got: {}",
+        detailed_non_existent_diag.message
+    );
+    assert!(
+        detailed_non_existent_diag
+            .message
+            .contains(FORM_DATA_SUFFIX),
+        "detailed diagnostic should include explicit form-data suffix, got: {}",
+        detailed_non_existent_diag.message
+    );
+    for diag in &detailed_diagnostics {
+        assert_no_internal_or_legacy_names(&diag.message, "diagnostics(detailed)");
     }
 
     let hover_full = support::hover_for_code_with_config(
@@ -200,7 +251,8 @@ fn diagnostics_hover_and_type_at_position_follow_dual_layer_contract() {
 async fn completion_and_resolve_follow_dual_layer_contract() {
     let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
     let index_snapshot = deps_bundle.index_snapshot.clone();
-    let uri = Url::parse("file:///form_module_object_dual_layer_contract_completion.bsl").expect("uri");
+    let uri =
+        Url::parse("file:///form_module_object_dual_layer_contract_completion.bsl").expect("uri");
     let content = concat!("Процедура Тест()\n", "    Объект.\n", "КонецПроцедуры\n",);
 
     let mut host = setup_host(deps_bundle.as_ref());

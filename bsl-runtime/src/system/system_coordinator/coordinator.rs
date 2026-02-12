@@ -218,6 +218,11 @@ impl SystemCoordinator {
             .record_intellisense_v2_ir_query_latency(kind, duration);
     }
 
+    pub fn record_intellisense_v2_ir_query_cancelled(&self, kind: &str) {
+        self.observability
+            .record_intellisense_v2_ir_query_cancelled(kind);
+    }
+
     pub fn record_intellisense_v2_syntax_diagnostics_query_latency(
         &self,
         duration: std::time::Duration,

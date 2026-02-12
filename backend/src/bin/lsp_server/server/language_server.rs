@@ -1326,7 +1326,7 @@ impl LanguageServer for BslLanguageServer {
                     let parse_result = analysis.parse_result(file_id).ok().flatten();
                     let deps = analysis.deps_data().ok();
                     let ir_started = Instant::now();
-                    let ir_program = analysis.ir(file_id).ok().flatten();
+                    let ir_query = analysis.ir(file_id);
                     let ir_elapsed = ir_started.elapsed();
                     self.coordinator
                         .record_intellisense_v2_ir_query_latency("completion", ir_elapsed);
@@ -1341,6 +1341,20 @@ impl LanguageServer for BslLanguageServer {
                             );
                         }
                     }
+                    let ir_program = match ir_query {
+                        Ok(program) => program,
+                        Err(cancelled) => {
+                            self.coordinator
+                                .record_intellisense_v2_ir_query_cancelled("completion");
+                            debug!(
+                                uri = %uri,
+                                file_id = file_id.0,
+                                error = ?cancelled,
+                                "Completion v2: ir query cancelled"
+                            );
+                            None
+                        }
+                    };
 
                     if bsl_runtime::system::global_runtime_config()
                         .get_bool(bsl_runtime::system::RuntimeKey::IntellisenseV2P4Smoke)

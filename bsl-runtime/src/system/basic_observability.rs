@@ -253,6 +253,15 @@ impl BasicObservability {
             .observe_histogram(histogram_metric, duration.as_millis() as f64);
     }
 
+    pub fn record_intellisense_v2_ir_query_cancelled(&self, kind: &str) {
+        let metric = match kind {
+            "completion" => "intellisense_v2_ir_query_cancelled_total_completion",
+            "hover" => "intellisense_v2_ir_query_cancelled_total_hover",
+            _ => "intellisense_v2_ir_query_cancelled_total_other",
+        };
+        self.metrics.increment(metric);
+    }
+
     pub fn record_intellisense_v2_syntax_diagnostics_query_latency(&self, duration: Duration) {
         self.metrics
             .increment("intellisense_v2_syntax_diagnostics_query_total");

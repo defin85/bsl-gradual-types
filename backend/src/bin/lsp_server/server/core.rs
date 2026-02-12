@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::{Mutex, RwLock};
+use tokio::task;
 use tower_lsp::lsp_types::request::{
     CodeActionRequest, Formatting as DocumentFormattingRequest, InlayHintRequest, RangeFormatting,
     Request as LspRequest,
@@ -786,15 +787,117 @@ impl BslLanguageServer {
                         "diagnostics_v2 observed snapshot"
                     );
 
-                    let mut diagnostics = Vec::new();
-                    let mut was_cancelled = false;
+                    let uri_for_blocking = uri_for_task.clone();
+                    let (
+                        diagnostics,
+                        was_cancelled,
+                        parse_result_elapsed,
+                        syntax_elapsed,
+                        semantic_elapsed,
+                        syntax_cancelled_error,
+                        semantic_cancelled_error,
+                    ) = match task::spawn_blocking(move || {
+                        let mut diagnostics = Vec::new();
+                        let mut was_cancelled = false;
+                        let mut syntax_cancelled_error = None;
+                        let mut semantic_cancelled_error = None;
 
-                    let file_text = analysis.file_text(file_id).ok().flatten();
-                    let line_index = analysis.line_index(file_id).ok().flatten();
+                        let file_text = analysis.file_text(file_id).ok().flatten();
+                        let line_index = analysis.line_index(file_id).ok().flatten();
 
-                    let parse_result_started = Instant::now();
-                    let _parse_result = analysis.parse_result(file_id);
-                    let parse_result_elapsed = parse_result_started.elapsed();
+                        let parse_result_started = Instant::now();
+                        let _ = analysis.parse_result(file_id);
+                        let parse_result_elapsed = parse_result_started.elapsed();
+
+                        let syntax_started = Instant::now();
+                        let syntax_result = analysis.syntax_diagnostics(file_id);
+                        let syntax_elapsed = syntax_started.elapsed();
+                        match syntax_result {
+                            Ok(Some(syntax_errors)) => {
+                                if let (Some(text), Some(index)) =
+                                    (file_text.as_deref(), line_index.as_deref())
+                                {
+                                    diagnostics.extend(syntax_errors_to_diagnostics(
+                                        &syntax_errors,
+                                        &uri_for_blocking,
+                                        text,
+                                        index,
+                                    ));
+                                }
+                            }
+                            Ok(None) => {}
+                            Err(cancelled) => {
+                                was_cancelled = true;
+                                syntax_cancelled_error = Some(format!("{cancelled:?}"));
+                            }
+                        }
+
+                        let semantic_started = Instant::now();
+                        let semantic_result = if include_flow_sensitive {
+                            analysis.semantic_diagnostics_flow_sensitive(file_id)
+                        } else {
+                            analysis.semantic_diagnostics(file_id)
+                        };
+                        let semantic_elapsed = semantic_started.elapsed();
+                        match semantic_result {
+                            Ok(Some(semantic_errors)) => {
+                                for error in semantic_errors.iter() {
+                                    if !show_hints
+                                        && matches!(
+                                            error.severity,
+                                            bsl_shared::domain::types::DiagnosticSeverity::Hint
+                                        )
+                                    {
+                                        continue;
+                                    }
+                                    if let (Some(text), Some(index)) =
+                                        (file_text.as_deref(), line_index.as_deref())
+                                    {
+                                        diagnostics
+                                            .push(semantic_error_to_diagnostic(error, text, index));
+                                    }
+                                }
+                            }
+                            Ok(None) => {}
+                            Err(cancelled) => {
+                                was_cancelled = true;
+                                semantic_cancelled_error = Some(format!("{cancelled:?}"));
+                            }
+                        }
+
+                        (
+                            diagnostics,
+                            was_cancelled,
+                            parse_result_elapsed,
+                            syntax_elapsed,
+                            semantic_elapsed,
+                            syntax_cancelled_error,
+                            semantic_cancelled_error,
+                        )
+                    })
+                    .await
+                    {
+                        Ok(result) => result,
+                        Err(err) => {
+                            warn!(
+                                uri = %uri_for_task,
+                                file_id = file_id.0,
+                                expected_version = requested_version,
+                                error = ?err,
+                                "diagnostics_v2: spawn_blocking failed"
+                            );
+                            (
+                                Vec::new(),
+                                true,
+                                Duration::from_millis(0),
+                                Duration::from_millis(0),
+                                Duration::from_millis(0),
+                                None,
+                                None,
+                            )
+                        }
+                    };
+
                     server
                         .coordinator
                         .record_intellisense_v2_parse_result_query_latency(parse_result_elapsed);
@@ -828,9 +931,6 @@ impl BslLanguageServer {
                         }
                     }
 
-                    let syntax_started = Instant::now();
-                    let syntax_result = analysis.syntax_diagnostics(file_id);
-                    let syntax_elapsed = syntax_started.elapsed();
                     server
                         .coordinator
                         .record_intellisense_v2_syntax_diagnostics_query_latency(syntax_elapsed);
@@ -863,43 +963,19 @@ impl BslLanguageServer {
                             );
                         }
                     }
-
-                    match syntax_result {
-                        Ok(Some(syntax_errors)) => {
-                            if let (Some(text), Some(index)) =
-                                (file_text.as_deref(), line_index.as_deref())
-                            {
-                                diagnostics.extend(syntax_errors_to_diagnostics(
-                                    &syntax_errors,
-                                    &uri_for_task,
-                                    text,
-                                    index,
-                                ));
-                            }
-                        }
-                        Ok(None) => {}
-                        Err(cancelled) => {
-                            was_cancelled = true;
-                            server
-                                .coordinator
-                                .record_intellisense_v2_query_cancelled("syntax");
-                            debug!(
-                                uri = %uri_for_task,
-                                file_id = file_id.0,
-                                expected_version = requested_version,
-                                error = ?cancelled,
-                                "diagnostics_v2: syntax diagnostics cancelled"
-                            );
-                        }
+                    if let Some(cancelled_error) = syntax_cancelled_error {
+                        server
+                            .coordinator
+                            .record_intellisense_v2_query_cancelled("syntax");
+                        debug!(
+                            uri = %uri_for_task,
+                            file_id = file_id.0,
+                            expected_version = requested_version,
+                            error = %cancelled_error,
+                            "diagnostics_v2: syntax diagnostics cancelled"
+                        );
                     }
 
-                    let semantic_started = Instant::now();
-                    let semantic_result = if include_flow_sensitive {
-                        analysis.semantic_diagnostics_flow_sensitive(file_id)
-                    } else {
-                        analysis.semantic_diagnostics(file_id)
-                    };
-                    let semantic_elapsed = semantic_started.elapsed();
                     server
                         .coordinator
                         .record_intellisense_v2_semantic_diagnostics_query_latency(
@@ -934,40 +1010,17 @@ impl BslLanguageServer {
                             );
                         }
                     }
-
-                    match semantic_result {
-                        Ok(Some(semantic_errors)) => {
-                            for error in semantic_errors.iter() {
-                                if !show_hints
-                                    && matches!(
-                                        error.severity,
-                                        bsl_shared::domain::types::DiagnosticSeverity::Hint
-                                    )
-                                {
-                                    continue;
-                                }
-                                if let (Some(text), Some(index)) =
-                                    (file_text.as_deref(), line_index.as_deref())
-                                {
-                                    diagnostics
-                                        .push(semantic_error_to_diagnostic(error, text, index));
-                                }
-                            }
-                        }
-                        Ok(None) => {}
-                        Err(cancelled) => {
-                            was_cancelled = true;
-                            server
-                                .coordinator
-                                .record_intellisense_v2_query_cancelled("semantic");
-                            debug!(
-                                uri = %uri_for_task,
-                                file_id = file_id.0,
-                                expected_version = requested_version,
-                                error = ?cancelled,
-                                "diagnostics_v2: semantic diagnostics cancelled"
-                            );
-                        }
+                    if let Some(cancelled_error) = semantic_cancelled_error {
+                        server
+                            .coordinator
+                            .record_intellisense_v2_query_cancelled("semantic");
+                        debug!(
+                            uri = %uri_for_task,
+                            file_id = file_id.0,
+                            expected_version = requested_version,
+                            error = %cancelled_error,
+                            "diagnostics_v2: semantic diagnostics cancelled"
+                        );
                     }
 
                     (

@@ -38,7 +38,33 @@ function envFlag(name, defaultValue = false) {
 // Пути
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
 const EXTENSION_BIN_DIR = path.join(__dirname, '..', 'bin');
-const TARGET_PROFILE = process.env.BSL_COPY_BINARIES_PROFILE === 'debug' ? 'debug' : 'release';
+function parseProfileArg() {
+    const profileFlag = process.argv.find(arg => arg.startsWith('--profile='));
+    if (profileFlag) {
+        const value = profileFlag.split('=')[1];
+        if (value === 'debug' || value === 'release') {
+            return value;
+        }
+        log(`❌ Некорректный профиль в аргументе ${profileFlag}. Ожидается --profile=debug|release`, colors.red);
+        process.exit(1);
+    }
+
+    const profileIndex = process.argv.indexOf('--profile');
+    if (profileIndex !== -1) {
+        const value = process.argv[profileIndex + 1];
+        if (value === 'debug' || value === 'release') {
+            return value;
+        }
+        log('❌ Некорректный профиль после --profile. Ожидается debug или release', colors.red);
+        process.exit(1);
+    }
+
+    return null;
+}
+
+const profileArg = parseProfileArg();
+const envProfile = String(process.env.BSL_COPY_BINARIES_PROFILE || '').trim().toLowerCase();
+const TARGET_PROFILE = profileArg || (envProfile === 'release' ? 'release' : 'debug');
 const TARGET_PROFILE_DIR = path.join(PROJECT_ROOT, 'target', TARGET_PROFILE);
 const CACHE_DIR = path.resolve(__dirname, '..', '.cache');
 const CACHE_PATH = path.join(CACHE_DIR, `rust-binaries-${TARGET_PROFILE}.json`);

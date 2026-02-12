@@ -64,7 +64,7 @@ function parseProfileArg() {
 
 const profileArg = parseProfileArg();
 const envProfile = String(process.env.BSL_COPY_BINARIES_PROFILE || '').trim().toLowerCase();
-const TARGET_PROFILE = profileArg || (envProfile === 'release' ? 'release' : 'debug');
+const TARGET_PROFILE = profileArg || (envProfile === 'debug' ? 'debug' : 'release');
 const TARGET_PROFILE_DIR = path.join(PROJECT_ROOT, 'target', TARGET_PROFILE);
 const CACHE_DIR = path.resolve(__dirname, '..', '.cache');
 const CACHE_PATH = path.join(CACHE_DIR, `rust-binaries-${TARGET_PROFILE}.json`);

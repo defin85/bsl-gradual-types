@@ -1323,7 +1323,6 @@ impl LanguageServer for BslLanguageServer {
 
                     let file_content = analysis.file_text(file_id).ok().flatten();
                     let file_path = analysis.file_path(file_id).ok().flatten();
-                    let parse_result = analysis.parse_result(file_id).ok().flatten();
                     let deps = analysis.deps_data().ok();
                     let ir_started = Instant::now();
                     let ir_query = analysis.ir(file_id);
@@ -1354,6 +1353,12 @@ impl LanguageServer for BslLanguageServer {
                             );
                             None
                         }
+                    };
+                    // `parse_result` expensive on large modules; do it only when IR is available.
+                    let parse_result = if ir_program.is_some() {
+                        analysis.parse_result(file_id).ok().flatten()
+                    } else {
+                        None
                     };
 
                     if bsl_runtime::system::global_runtime_config()
@@ -1398,39 +1403,45 @@ impl LanguageServer for BslLanguageServer {
                         settings.enable_flow_sensitive
                     };
 
-                    let member_access_owner_type_hint = file_content.as_deref().and_then(|text| {
-                        let line_text = text.lines().nth(position.line as usize)?;
-                        let cursor_byte = bsl_backend::system::positioning::utf16_to_byte_offset(
-                            line_text,
-                            position.character,
-                        );
-                        let line_prefix = line_text.get(..cursor_byte)?;
-                        let dot_in_line = line_prefix.rfind('.')?;
-                        let receiver = line_prefix.get(..dot_in_line)?.trim_end();
-                        let (probe_byte, _) = receiver
-                            .char_indices()
-                            .rev()
-                            .find(|(_, ch)| !ch.is_whitespace())?;
-                        let probe_utf16 = bsl_backend::system::positioning::byte_offset_to_utf16(
-                            line_text, probe_byte,
-                        );
-                        let offset = analysis
-                            .utf16_position_to_byte_offset(file_id, position.line, probe_utf16)
-                            .ok()
-                            .flatten()?;
-                        let offset = offset.min(u32::MAX as usize) as u32;
-                        if include_flow_sensitive {
-                            analysis
-                                .flow_type_at_byte_offset(file_id, offset)
+                    let member_access_owner_type_hint = if ir_program.is_some() {
+                        file_content.as_deref().and_then(|text| {
+                            let line_text = text.lines().nth(position.line as usize)?;
+                            let cursor_byte =
+                                bsl_backend::system::positioning::utf16_to_byte_offset(
+                                    line_text,
+                                    position.character,
+                                );
+                            let line_prefix = line_text.get(..cursor_byte)?;
+                            let dot_in_line = line_prefix.rfind('.')?;
+                            let receiver = line_prefix.get(..dot_in_line)?.trim_end();
+                            let (probe_byte, _) = receiver
+                                .char_indices()
+                                .rev()
+                                .find(|(_, ch)| !ch.is_whitespace())?;
+                            let probe_utf16 =
+                                bsl_backend::system::positioning::byte_offset_to_utf16(
+                                    line_text, probe_byte,
+                                );
+                            let offset = analysis
+                                .utf16_position_to_byte_offset(file_id, position.line, probe_utf16)
                                 .ok()
-                                .flatten()
-                                .or_else(|| {
-                                    analysis.type_at_byte_offset(file_id, offset).ok().flatten()
-                                })
-                        } else {
-                            analysis.type_at_byte_offset(file_id, offset).ok().flatten()
-                        }
-                    });
+                                .flatten()?;
+                            let offset = offset.min(u32::MAX as usize) as u32;
+                            if include_flow_sensitive {
+                                analysis
+                                    .flow_type_at_byte_offset(file_id, offset)
+                                    .ok()
+                                    .flatten()
+                                    .or_else(|| {
+                                        analysis.type_at_byte_offset(file_id, offset).ok().flatten()
+                                    })
+                            } else {
+                                analysis.type_at_byte_offset(file_id, offset).ok().flatten()
+                            }
+                        })
+                    } else {
+                        None
+                    };
 
                     (
                         file_content,

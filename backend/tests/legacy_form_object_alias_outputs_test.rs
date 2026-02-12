@@ -214,3 +214,66 @@ async fn completion_and_resolve_do_not_expose_legacy_form_alias() {
         }
     }
 }
+
+#[tokio::test]
+async fn completion_catalog_form_module_object_includes_intrinsic_properties() {
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
+    let index_snapshot = deps_bundle.index_snapshot.clone();
+    let uri = Url::parse("file:///catalog_form_intrinsic_completion.bsl").expect("uri");
+    let file_path = "Catalogs/Спр1/Forms/ФормаЭлемента/Ext/Form/Module.bsl";
+    let content = concat!(
+        "Процедура Тест()\n",
+        "    x = Объект;\n",
+        "    Объект.\n",
+        "КонецПроцедуры\n",
+    );
+
+    let mut host = setup_host(deps_bundle.as_ref());
+    let (file_content, resolved_file_path, ir_program, parse_result) =
+        apply_file(&mut host, V2FileId(1), file_path, content);
+    let object_offset = content.find("x = Объект").expect("Объект offset") + "x = ".len();
+    let object_offset = object_offset as u32;
+    let member_access_owner_type_hint = host
+        .analysis()
+        .type_at_byte_offset(V2FileId(1), object_offset)
+        .expect("type_at_byte_offset query");
+    assert!(
+        member_access_owner_type_hint.is_some(),
+        "expected type hint for implicit Объект in catalog form module"
+    );
+
+    let response = completion_handler::handle_completion_v2(
+        file_content,
+        resolved_file_path,
+        ir_program,
+        Some(parse_result),
+        member_access_owner_type_hint,
+        deps_bundle.semantic_deps.clone(),
+        Position {
+            line: 2,
+            character: utf16_len("    Объект."),
+        },
+        &uri,
+        index_snapshot.as_ref(),
+        false,
+        false,
+    )
+    .await
+    .expect("completion response");
+
+    assert!(!response.had_error, "completion returned error");
+    let labels = completion_items(response.response)
+        .into_iter()
+        .map(|item| item.label)
+        .collect::<Vec<_>>();
+    assert!(
+        labels.iter().any(|label| label == "Ссылка"),
+        "completion should include intrinsic property Ссылка, labels={:?}",
+        labels
+    );
+    assert!(
+        labels.iter().any(|label| label == "ПометкаУдаления"),
+        "completion should include intrinsic property ПометкаУдаления, labels={:?}",
+        labels
+    );
+}

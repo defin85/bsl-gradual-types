@@ -220,6 +220,23 @@ fn test_code_location_form_module_with_ext_form_subdir() {
 }
 
 #[test]
+fn test_code_location_form_module_case_insensitive_path_components() {
+    let path = PathBuf::from("catalogs/Контрагенты/forms/ФормаЭлемента/ext/module.bsl");
+    let loc = CodeLocation::determine_from_path(&path).expect("Should parse path");
+
+    match loc.module_type {
+        ModuleType::FormModule {
+            ref form_name,
+            ref owner_type,
+        } => {
+            assert_eq!(form_name, "ФормаЭлемента");
+            assert_eq!(owner_type, "Catalog.Контрагенты");
+        }
+        _ => panic!("Expected FormModule"),
+    }
+}
+
+#[test]
 fn test_code_location_record_set_module() {
     let path = PathBuf::from("InformationRegisters/РегистрСведений/Ext/RecordSetModule.bsl");
     let loc = CodeLocation::determine_from_path(&path).expect("Should parse path");

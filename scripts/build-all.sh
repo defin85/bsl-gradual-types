@@ -3,7 +3,7 @@
 # BSL Gradual Types - Универсальный кросс-платформенный скрипт сборки
 # ============================================================================
 # Поддерживает: Linux, macOS, Windows (Git Bash, MSYS2, Cygwin, WSL)
-# Использование: ./scripts/build-all.sh [--release|--debug] [--skip-tests]
+# Использование: ./scripts/build-all.sh [--release|--debug|--fast] [--skip-tests]
 #   Дополнительно:
 #     --no-auto-version            не менять версии в package.json/Cargo.toml
 #     --force-build-timestamp      принудительно обновлять BUILD_TIMESTAMP (вызывает перекомпиляцию)
@@ -15,6 +15,7 @@
 #                                - full: --release + все workspace тесты
 #     --nextest                    использовать cargo-nextest (если установлен)
 #     --no-nextest                 не использовать cargo-nextest (всегда cargo test)
+#     --fast                       быстрый локальный цикл: debug LSP + extension без WASM/тестов
 #     (по умолчанию выполняется cargo clean раз в 2 дня)
 # ============================================================================
 
@@ -87,6 +88,7 @@ AUTO_CLEAN_DAYS=2
 CLEAN_TARGET_REASON="manual"
 USE_NEXTEST="auto" # auto|true|false
 TEST_SUITE="quick" # quick|smoke|full
+FAST_MODE=false
 
 # Если скрипт запущен без аргументов в WSL — включаем мягкую уборку по умолчанию,
 # чтобы target/ не раздувался бесконтрольно.
@@ -103,6 +105,9 @@ while [[ $# -gt 0 ]]; do
             ;;
         --release)
             BUILD_MODE="release"
+            ;;
+        --fast)
+            FAST_MODE=true
             ;;
         --skip-tests)
             SKIP_TESTS=true
@@ -132,12 +137,19 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo -e "${RED}❌ Неизвестный аргумент: $arg${NC}"
-            echo "Использование: ./build-all.sh [--release|--debug] [--skip-tests] [--no-auto-version] [--force-build-timestamp] [--clean-target] [--prune-target-days N] [--tests quick|smoke|full] [--nextest|--no-nextest]"
+            echo "Использование: ./build-all.sh [--release|--debug|--fast] [--skip-tests] [--no-auto-version] [--force-build-timestamp] [--clean-target] [--prune-target-days N] [--tests quick|smoke|full] [--nextest|--no-nextest]"
             exit 1
             ;;
     esac
     shift
 done
+
+# Fast profile: быстрый локальный цикл без release/WASM/тестов.
+if [ "$FAST_MODE" = true ]; then
+    BUILD_MODE="debug"
+    SKIP_TESTS=true
+    AUTO_VERSION=false
+fi
 
 # Политика по умолчанию: если аргументов не было, мы в WSL и пользователь явно не просил clean —
 # прореживаем старые debug-артефакты.
@@ -371,6 +383,11 @@ clean_or_prune_target() {
 # ============================================================================
 
 build_frontend_static() {
+    if [ "$FAST_MODE" = true ]; then
+        log_warning "⏭️  ЭТАП 0.5 пропущен (--fast): Web UI (trunk) не собирается"
+        return 0
+    fi
+
     log_section "ЭТАП 0.5: Сборка Web UI (target/site)"
 
     if ! command -v trunk >/dev/null 2>&1; then
@@ -393,6 +410,17 @@ build_frontend_static() {
 
 build_rust_binaries() {
     log_section "ЭТАП 1: Сборка Rust бинарников ($BUILD_MODE)"
+
+    if [ "$FAST_MODE" = true ]; then
+        log_info "\n🦀 Fast mode: сборка только LSP server (debug)..."
+        log_info "Команда: cargo build -p bsl-backend --bin bsl-lsp-server"
+        measure_time cargo build -p bsl-backend --bin bsl-lsp-server
+
+        log_success "\n✅ Rust бинарники (fast) собраны"
+        log_info "\n📦 Проверка собранных бинарников:"
+        check_file "target/debug/bsl-lsp-server${BINARY_EXT}" "LSP Server (bsl-lsp-server${BINARY_EXT})" || return 1
+        return 0
+    fi
 
     local cargo_flags=""
     if [ "$BUILD_MODE" = "release" ]; then
@@ -498,8 +526,16 @@ build_vscode_extension() {
         log_success "  ⏭️  node_modules существует, пропускаем npm install"
     fi
 
-    log_info "\n🔨 Компиляция TypeScript + сборка WASM..."
-    measure_time npm run compile
+    local compile_script="compile"
+    if [ "$FAST_MODE" = true ]; then
+        compile_script="compile:fast"
+        log_info "\n🔨 Fast mode: компиляция TypeScript без WASM..."
+    else
+        log_info "\n🔨 Компиляция TypeScript + сборка WASM..."
+    fi
+
+    # ВАЖНО: Rust уже собран на ЭТАПЕ 1. Здесь запрещаем повторный cargo build в copy-binaries.
+    measure_time env BSL_SKIP_RUST_BUILD=1 BSL_COPY_BINARIES_PROFILE="$BUILD_MODE" npm run "$compile_script"
 
     cd .. || return 1
 
@@ -657,6 +693,7 @@ main() {
 	    log_info "Платформа: $PLATFORM"
 	    log_info "Расширение бинарников: '${BINARY_EXT:-<нет>}'"
 	    log_info "Режим сборки: $BUILD_MODE"
+	    log_info "Профиль: $([ "$FAST_MODE" = true ] && echo fast || echo full)"
 	    if [ "$SKIP_TESTS" = true ]; then
 	        log_info "Тесты: пропущены"
 	    else

@@ -32,6 +32,7 @@ import {
     BslOverviewProvider,
     BslDiagnosticsProvider,
     CacheDashboardProvider,
+    ObservabilityProvider,
     HierarchicalTypeIndexProvider,
     BslActionsWebviewProvider,
     TypeDetailsWebviewProvider,
@@ -380,6 +381,17 @@ function registerSidebarProviders(context: vscode.ExtensionContext) {
         context.subscriptions.push(cacheDashboardProvider);
         outputChannel.appendLine('✅ Cache Dashboard provider registered');
 
+        // Observability provider
+        outputChannel.appendLine('📋 Creating Observability provider...');
+        const observabilityProvider = new ObservabilityProvider(outputChannel);
+        const observabilityTreeView = vscode.window.createTreeView('bslAnalyzer.observability', {
+            treeDataProvider: observabilityProvider,
+            showCollapseAll: true
+        });
+        context.subscriptions.push(observabilityTreeView);
+        context.subscriptions.push(observabilityProvider);
+        outputChannel.appendLine('✅ Observability provider registered');
+
         // Diagnostics provider  
         outputChannel.appendLine('📋 Creating Diagnostics provider...');
         const diagnosticsProvider = new BslDiagnosticsProvider();
@@ -432,6 +444,45 @@ function registerSidebarProviders(context: vscode.ExtensionContext) {
             vscode.commands.registerCommand('bslAnalyzer.refreshCacheDashboard', () => {
                 outputChannel.appendLine('🔄 Refreshing Cache Dashboard panel');
                 cacheDashboardProvider.refresh();
+            })
+        );
+
+        context.subscriptions.push(
+            vscode.commands.registerCommand('bslAnalyzer.refreshObservability', () => {
+                outputChannel.appendLine('🔄 Refreshing Observability panel');
+                observabilityProvider.refresh();
+            })
+        );
+
+        context.subscriptions.push(
+            vscode.commands.registerCommand('bslAnalyzer.toggleObservabilityAutoRefresh', async () => {
+                const config = vscode.workspace.getConfiguration('bslAnalyzer');
+                const current = config.get<boolean>('observabilityAutoRefresh', true);
+                const target = (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0)
+                    ? vscode.ConfigurationTarget.Workspace
+                    : vscode.ConfigurationTarget.Global;
+                await config.update('observabilityAutoRefresh', !current, target);
+
+                outputChannel.appendLine(
+                    `🔁 Observability auto refresh ${!current ? 'enabled' : 'disabled'} (${target === vscode.ConfigurationTarget.Workspace ? 'workspace' : 'global'} scope)`
+                );
+                observabilityProvider.refresh();
+            })
+        );
+
+        context.subscriptions.push(
+            vscode.commands.registerCommand('bslAnalyzer.toggleObservabilityCompactMode', async () => {
+                const config = vscode.workspace.getConfiguration('bslAnalyzer');
+                const current = config.get<boolean>('observabilityCompactMode', false);
+                const target = (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0)
+                    ? vscode.ConfigurationTarget.Workspace
+                    : vscode.ConfigurationTarget.Global;
+                await config.update('observabilityCompactMode', !current, target);
+
+                outputChannel.appendLine(
+                    `🧭 Observability compact mode ${!current ? 'enabled' : 'disabled'} (${target === vscode.ConfigurationTarget.Workspace ? 'workspace' : 'global'} scope)`
+                );
+                observabilityProvider.refresh();
             })
         );
 

@@ -5,9 +5,9 @@ use crate::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use crate::domain::type_id::TypeId;
 use crate::domain::types::{
     Certainty, ConcreteType, ConfigurationType, FacetKind, GenericType, MetadataKind, PlatformType,
-    RawAttributeData, RawDataSource, RawMethodData, RawParamData, RawTabularSectionData,
-    RawTypeData, ResolutionMetadata, ResolutionResult, ResolutionSource, TabularRowType,
-    TypeResolution,
+    RawAttributeData, RawDataSource, RawMethodData, RawParamData, RawPropertyData,
+    RawTabularSectionData, RawTypeData, ResolutionMetadata, ResolutionResult, ResolutionSource,
+    TabularRowType, TypeResolution, FORM_DATA_SEMANTICS_NOTE,
 };
 use std::sync::Arc;
 
@@ -898,4 +898,266 @@ fn test_get_tabular_sections_without_facet_returns_sections() {
 
     let sections = lookup.get_tabular_sections(&resolution);
     assert_eq!(sections.len(), 2);
+}
+
+#[test]
+fn test_form_data_document_link_is_guaranteed_without_platform_object_properties() {
+    let repo = Arc::new(InMemoryTypeRepository::new());
+    repo.load_types(vec![RawTypeData {
+        name: "Документы.Док1".to_string(),
+        source: RawDataSource::Configuration,
+        facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+        kind: Some(MetadataKind::Document),
+        ..Default::default()
+    }])
+    .expect("Failed to load configuration document type");
+
+    let lookup = TypeMetadataLookup::new(repo);
+    let resolution = TypeResolution {
+        certainty: Certainty::Known,
+        result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
+            kind: MetadataKind::Document,
+            name: "Док1".to_string(),
+            facet: Some(FacetKind::Object),
+            attributes: vec![],
+            tabular_sections: vec![],
+        })),
+        source: ResolutionSource::Static,
+        metadata: ResolutionMetadata {
+            notes: vec![FORM_DATA_SEMANTICS_NOTE.to_string()],
+            ..Default::default()
+        },
+        active_facet: Some(FacetKind::Object),
+        available_facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+    };
+
+    let properties = lookup.get_properties(&resolution);
+    let link = properties
+        .iter()
+        .find(|property| property.name == "Ссылка")
+        .expect("Expected intrinsic guaranteed property 'Ссылка'");
+    assert_eq!(link.prop_type, "ДокументСсылка.Док1");
+    assert!(link.is_readonly);
+
+    let deletion_mark = properties
+        .iter()
+        .find(|property| property.name == "ПометкаУдаления")
+        .expect("Expected intrinsic guaranteed property 'ПометкаУдаления'");
+    assert_eq!(deletion_mark.prop_type, "Булево");
+    assert!(deletion_mark.is_readonly);
+
+    assert_eq!(
+        lookup.get_property_origin_tag(&resolution, "Ссылка"),
+        Some(TypeMetadataLookup::intrinsic_property_origin_tag())
+    );
+    assert_eq!(
+        lookup.get_property_origin_tag(&resolution, "ПометкаУдаления"),
+        Some(TypeMetadataLookup::intrinsic_property_origin_tag())
+    );
+}
+
+#[test]
+fn test_form_data_catalog_link_is_guaranteed_without_platform_object_properties() {
+    let repo = Arc::new(InMemoryTypeRepository::new());
+    repo.load_types(vec![RawTypeData {
+        name: "Справочники.Спр1".to_string(),
+        source: RawDataSource::Configuration,
+        facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+        kind: Some(MetadataKind::Catalog),
+        ..Default::default()
+    }])
+    .expect("Failed to load configuration catalog type");
+
+    let lookup = TypeMetadataLookup::new(repo);
+    let resolution = TypeResolution {
+        certainty: Certainty::Known,
+        result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
+            kind: MetadataKind::Catalog,
+            name: "Спр1".to_string(),
+            facet: Some(FacetKind::Object),
+            attributes: vec![],
+            tabular_sections: vec![],
+        })),
+        source: ResolutionSource::Static,
+        metadata: ResolutionMetadata {
+            notes: vec![FORM_DATA_SEMANTICS_NOTE.to_string()],
+            ..Default::default()
+        },
+        active_facet: Some(FacetKind::Object),
+        available_facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+    };
+
+    let properties = lookup.get_properties(&resolution);
+    let link = properties
+        .iter()
+        .find(|property| property.name == "Ссылка")
+        .expect("Expected intrinsic guaranteed property 'Ссылка'");
+    assert_eq!(link.prop_type, "СправочникСсылка.Спр1");
+    assert!(link.is_readonly);
+
+    let deletion_mark = properties
+        .iter()
+        .find(|property| property.name == "ПометкаУдаления")
+        .expect("Expected intrinsic guaranteed property 'ПометкаУдаления'");
+    assert_eq!(deletion_mark.prop_type, "Булево");
+    assert!(deletion_mark.is_readonly);
+}
+
+#[test]
+fn test_form_data_does_not_add_link_for_kinds_without_object_facet_pair() {
+    let repo = Arc::new(InMemoryTypeRepository::new());
+    repo.load_types(vec![RawTypeData {
+        name: "Перечисления.Переч1".to_string(),
+        source: RawDataSource::Configuration,
+        facets: vec![FacetKind::Manager, FacetKind::Reference],
+        kind: Some(MetadataKind::Enum),
+        ..Default::default()
+    }])
+    .expect("Failed to load configuration enum type");
+
+    let lookup = TypeMetadataLookup::new(repo);
+    let resolution = TypeResolution {
+        certainty: Certainty::Known,
+        result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
+            kind: MetadataKind::Enum,
+            name: "Переч1".to_string(),
+            facet: Some(FacetKind::Object),
+            attributes: vec![],
+            tabular_sections: vec![],
+        })),
+        source: ResolutionSource::Static,
+        metadata: ResolutionMetadata {
+            notes: vec![FORM_DATA_SEMANTICS_NOTE.to_string()],
+            ..Default::default()
+        },
+        active_facet: Some(FacetKind::Object),
+        available_facets: vec![FacetKind::Manager, FacetKind::Reference],
+    };
+
+    let has_link = lookup
+        .get_properties(&resolution)
+        .iter()
+        .any(|property| property.name == "Ссылка");
+    assert!(
+        !has_link,
+        "Kinds without Object+Reference facet pair must not get intrinsic 'Ссылка'"
+    );
+    let has_deletion_mark = lookup
+        .get_properties(&resolution)
+        .iter()
+        .any(|property| property.name == "ПометкаУдаления");
+    assert!(
+        !has_deletion_mark,
+        "Kinds without Object+Reference facet pair must not get intrinsic 'ПометкаУдаления'"
+    );
+}
+
+#[test]
+fn test_form_data_intrinsic_properties_are_available_without_loaded_configuration() {
+    let repo = Arc::new(InMemoryTypeRepository::new());
+    let lookup = TypeMetadataLookup::new(repo);
+
+    let resolution = TypeResolution {
+        certainty: Certainty::Known,
+        result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
+            kind: MetadataKind::Document,
+            name: "Док1".to_string(),
+            facet: Some(FacetKind::Object),
+            attributes: vec![],
+            tabular_sections: vec![],
+        })),
+        source: ResolutionSource::Static,
+        metadata: ResolutionMetadata {
+            notes: vec![FORM_DATA_SEMANTICS_NOTE.to_string()],
+            ..Default::default()
+        },
+        active_facet: Some(FacetKind::Object),
+        available_facets: vec![],
+    };
+
+    let properties = lookup.get_properties(&resolution);
+    assert!(properties.iter().any(|property| property.name == "Ссылка"));
+    assert!(properties
+        .iter()
+        .any(|property| property.name == "ПометкаУдаления"));
+}
+
+#[test]
+fn test_form_data_intrinsic_properties_do_not_override_repository_properties() {
+    let repo = Arc::new(InMemoryTypeRepository::new());
+    repo.load_types(vec![
+        RawTypeData {
+            name: "Документы.Док1".to_string(),
+            source: RawDataSource::Configuration,
+            facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+            kind: Some(MetadataKind::Document),
+            ..Default::default()
+        },
+        RawTypeData {
+            name: "ДокументОбъект".to_string(),
+            source: RawDataSource::Platform,
+            facets: vec![FacetKind::Object],
+            properties: vec![RawPropertyData {
+                name: "Ссылка".to_string(),
+                prop_type: "ДокументСсылка".to_string(),
+                is_readonly: true,
+            }],
+            ..Default::default()
+        },
+    ])
+    .expect("Failed to load test types");
+
+    let lookup = TypeMetadataLookup::new(repo);
+    let resolution = TypeResolution {
+        certainty: Certainty::Known,
+        result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
+            kind: MetadataKind::Document,
+            name: "Док1".to_string(),
+            facet: Some(FacetKind::Object),
+            attributes: vec![],
+            tabular_sections: vec![],
+        })),
+        source: ResolutionSource::Static,
+        metadata: ResolutionMetadata {
+            notes: vec![FORM_DATA_SEMANTICS_NOTE.to_string()],
+            ..Default::default()
+        },
+        active_facet: Some(FacetKind::Object),
+        available_facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+    };
+
+    let link_origin = lookup.get_property_origin_tag(&resolution, "Ссылка");
+    assert_eq!(
+        link_origin,
+        Some(TypeMetadataLookup::repository_property_origin_tag())
+    );
+}
+
+#[test]
+fn test_form_data_intrinsic_properties_require_non_empty_owner_name() {
+    let repo = Arc::new(InMemoryTypeRepository::new());
+    let lookup = TypeMetadataLookup::new(repo);
+    let resolution = TypeResolution {
+        certainty: Certainty::Known,
+        result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
+            kind: MetadataKind::Document,
+            name: "".to_string(),
+            facet: Some(FacetKind::Object),
+            attributes: vec![],
+            tabular_sections: vec![],
+        })),
+        source: ResolutionSource::Static,
+        metadata: ResolutionMetadata {
+            notes: vec![FORM_DATA_SEMANTICS_NOTE.to_string()],
+            ..Default::default()
+        },
+        active_facet: Some(FacetKind::Object),
+        available_facets: vec![],
+    };
+
+    let properties = lookup.get_properties(&resolution);
+    assert!(!properties.iter().any(|property| property.name == "Ссылка"));
+    assert!(!properties
+        .iter()
+        .any(|property| property.name == "ПометкаУдаления"));
 }

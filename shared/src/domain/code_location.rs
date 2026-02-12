@@ -23,7 +23,7 @@
 //! ```
 
 use anyhow::{anyhow, Result};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// Контекст выполнения кода в 1С (из types.rs)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -136,27 +136,31 @@ impl CodeLocation {
         let path_str = path.to_string_lossy();
 
         // CommonModule: CommonModules/ИмяМодуля/Ext/Module.bsl
-        if path_str.contains("CommonModules") && path_str.ends_with("Module.bsl") {
+        if Self::contains_component_ci(path, "CommonModules")
+            && Self::ends_with_ascii_ci(path_str.as_ref(), "Module.bsl")
+        {
             return Self::parse_common_module_path(path);
         }
 
         // ObjectModule: */Ext/ObjectModule.bsl
-        if path_str.ends_with("ObjectModule.bsl") {
+        if Self::ends_with_ascii_ci(path_str.as_ref(), "ObjectModule.bsl") {
             return Self::parse_object_module_path(path);
         }
 
         // ManagerModule: */Ext/ManagerModule.bsl
-        if path_str.ends_with("ManagerModule.bsl") {
+        if Self::ends_with_ascii_ci(path_str.as_ref(), "ManagerModule.bsl") {
             return Self::parse_manager_module_path(path);
         }
 
         // FormModule: */Forms/*/Ext/Module.bsl (или */Forms/*/Ext/Form/Module.bsl)
-        if path_str.contains("Forms") && path_str.ends_with("Module.bsl") {
+        if Self::contains_component_ci(path, "Forms")
+            && Self::ends_with_ascii_ci(path_str.as_ref(), "Module.bsl")
+        {
             return Self::parse_form_module_path(path);
         }
 
         // RecordSetModule: */Ext/RecordSetModule.bsl
-        if path_str.ends_with("RecordSetModule.bsl") {
+        if Self::ends_with_ascii_ci(path_str.as_ref(), "RecordSetModule.bsl") {
             return Self::parse_record_set_module_path(path);
         }
 
@@ -239,7 +243,12 @@ impl CodeLocation {
         // Извлекаем имя формы: следующий компонент после "Forms"
         let forms_index = components
             .iter()
-            .position(|c| c.as_os_str().to_str() == Some("Forms"))
+            .position(|c| {
+                c.as_os_str()
+                    .to_str()
+                    .map(|value| value.eq_ignore_ascii_case("Forms"))
+                    .unwrap_or(false)
+            })
             .ok_or_else(|| anyhow!("Cannot find 'Forms' in path: {:?}", path))?;
 
         let form_name = components
@@ -289,9 +298,7 @@ impl CodeLocation {
         let components: Vec<_> = path.components().collect();
 
         // Ищем компонент "Ext" и берём два компонента перед ним
-        let ext_index = components
-            .iter()
-            .position(|c| c.as_os_str().to_str() == Some("Ext"))
+        let ext_index = Self::component_index_ci(&components, "Ext")
             .ok_or_else(|| anyhow!("Cannot find 'Ext' in path: {:?}", path))?;
 
         if ext_index < 2 {
@@ -308,11 +315,10 @@ impl CodeLocation {
             .to_str()
             .ok_or_else(|| anyhow!("Invalid object type in path: {:?}", path))?;
 
-        // Конвертируем множественное число в единственное
-        // "Catalogs" -> "Catalog", "Documents" -> "Document"
-        let object_type = object_type_plural.trim_end_matches('s');
-
-        Ok((object_type.to_string(), object_name.to_string()))
+        Ok((
+            Self::normalize_object_type_plural(object_type_plural),
+            object_name.to_string(),
+        ))
     }
 
     /// Извлечь информацию о типе объекта и имени из пути с формами
@@ -323,9 +329,7 @@ impl CodeLocation {
         let components: Vec<_> = path.components().collect();
 
         // Ищем компонент "Forms"
-        let forms_index = components
-            .iter()
-            .position(|c| c.as_os_str().to_str() == Some("Forms"))
+        let forms_index = Self::component_index_ci(&components, "Forms")
             .ok_or_else(|| anyhow!("Cannot find 'Forms' in path: {:?}", path))?;
 
         if forms_index < 2 {
@@ -342,9 +346,55 @@ impl CodeLocation {
             .to_str()
             .ok_or_else(|| anyhow!("Invalid object type in path: {:?}", path))?;
 
-        let object_type = object_type_plural.trim_end_matches('s');
+        Ok((
+            Self::normalize_object_type_plural(object_type_plural),
+            object_name.to_string(),
+        ))
+    }
 
-        Ok((object_type.to_string(), object_name.to_string()))
+    fn ends_with_ascii_ci(value: &str, suffix: &str) -> bool {
+        let value = value.as_bytes();
+        let suffix = suffix.as_bytes();
+        if value.len() < suffix.len() {
+            return false;
+        }
+        let start = value.len() - suffix.len();
+        value[start..].eq_ignore_ascii_case(suffix)
+    }
+
+    fn contains_component_ci(path: &Path, target: &str) -> bool {
+        path.components().any(|component| {
+            component
+                .as_os_str()
+                .to_str()
+                .map(|value| value.eq_ignore_ascii_case(target))
+                .unwrap_or(false)
+        })
+    }
+
+    fn component_index_ci(components: &[Component<'_>], target: &str) -> Option<usize> {
+        components.iter().position(|component| {
+            component
+                .as_os_str()
+                .to_str()
+                .map(|value| value.eq_ignore_ascii_case(target))
+                .unwrap_or(false)
+        })
+    }
+
+    fn normalize_object_type_plural(object_type_plural: &str) -> String {
+        match object_type_plural.to_ascii_lowercase().as_str() {
+            "catalogs" => "Catalog".to_string(),
+            "documents" => "Document".to_string(),
+            "informationregisters" => "InformationRegister".to_string(),
+            "accumulationregisters" => "AccumulationRegister".to_string(),
+            "accountingregisters" => "AccountingRegister".to_string(),
+            "calculationregisters" => "CalculationRegister".to_string(),
+            "chartsofaccounts" => "ChartOfAccounts".to_string(),
+            "chartsofcharacteristictypes" => "ChartOfCharacteristicTypes".to_string(),
+            "chartsofcalculationtypes" => "ChartOfCalculationTypes".to_string(),
+            _ => object_type_plural.trim_end_matches('s').to_string(),
+        }
     }
 
     /// Проверить, можно ли вызывать методы БД в текущем контексте
@@ -461,6 +511,23 @@ mod tests {
     #[test]
     fn test_determine_form_module_location() {
         let path = PathBuf::from("Catalogs/Контрагенты/Forms/ФормаЭлемента/Ext/Module.bsl");
+        let loc = CodeLocation::determine_from_path(&path).unwrap();
+
+        match loc.module_type {
+            ModuleType::FormModule {
+                ref form_name,
+                ref owner_type,
+            } => {
+                assert_eq!(form_name, "ФормаЭлемента");
+                assert_eq!(owner_type, "Catalog.Контрагенты");
+            }
+            _ => panic!("Expected FormModule, got {:?}", loc.module_type),
+        }
+    }
+
+    #[test]
+    fn test_determine_form_module_location_case_insensitive_path_components() {
+        let path = PathBuf::from("catalogs/Контрагенты/forms/ФормаЭлемента/ext/module.bsl");
         let loc = CodeLocation::determine_from_path(&path).unwrap();
 
         match loc.module_type {

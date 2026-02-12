@@ -953,14 +953,31 @@ fn add_properties_from_resolution(
     priority: u8,
 ) {
     let owner_type = resolution.type_name();
-    let properties = metadata_lookup.get_properties(resolution);
-    for property in properties {
+    let properties = metadata_lookup.get_properties_with_origin(resolution);
+    let mut intrinsic_count = 0usize;
+    for (property, origin) in properties {
+        let property_priority = if TypeMetadataLookup::is_intrinsic_property_origin(origin) {
+            intrinsic_count += 1;
+            priority.saturating_sub(1)
+        } else {
+            priority
+        };
+
         target.push(Candidate::new(
             CompletionItem::new(property.name, CompletionKind::Property),
-            priority,
+            property_priority,
             Some(owner_type.clone()),
             None,
         ));
+    }
+
+    if intrinsic_count > 0 {
+        tracing::debug!(
+            metric = "completion_form_data_intrinsic_candidates_total",
+            owner_type = owner_type,
+            count = intrinsic_count,
+            "Added intrinsic form-data property candidates"
+        );
     }
 }
 
@@ -2454,7 +2471,12 @@ mod tests {
         ContextRequirements, MethodSignature, SignatureIndex, SignatureSource,
     };
     use bsl_shared::domain::type_id::TypeId;
-    use bsl_shared::domain::types::{RawDataSource, RawMethodData, RawPropertyData, RawTypeData};
+    use bsl_shared::domain::types::{
+        Certainty, ConcreteType, ConfigurationType, FacetKind, MetadataKind, RawDataSource,
+        RawMethodData, RawPropertyData, RawTypeData, ResolutionMetadata, ResolutionResult,
+        ResolutionSource, TypeResolution, FORM_DATA_FORM_TYPE_NOTE_PREFIX,
+        FORM_DATA_SEMANTICS_NOTE,
+    };
     use bsl_shared::formatting::DetailLevel;
     use std::sync::Arc;
 
@@ -2521,6 +2543,79 @@ mod tests {
         let content = "Перем Значение";
         let ctx = analyze_completion_context(content, 0, content.len() as u32);
         assert!(!ctx.can_add_statements);
+    }
+
+    #[test]
+    fn add_properties_from_resolution_prioritizes_intrinsic_form_data_properties() {
+        let repository = Arc::new(InMemoryTypeRepository::new());
+        repository
+            .load_types(vec![
+                RawTypeData {
+                    name: "Документы.Док1".to_string(),
+                    source: RawDataSource::Configuration,
+                    facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+                    kind: Some(MetadataKind::Document),
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "Формы.Документы.Док1.Форма1".to_string(),
+                    source: RawDataSource::Configuration,
+                    properties: vec![RawPropertyData {
+                        name: "РеквизитФормы".to_string(),
+                        prop_type: "Строка".to_string(),
+                        is_readonly: false,
+                    }],
+                    ..Default::default()
+                },
+            ])
+            .expect("load types");
+
+        let repo: Arc<dyn TypeRepository> = repository.clone();
+        let metadata_lookup = TypeMetadataLookup::new(repo);
+        let resolution = TypeResolution {
+            certainty: Certainty::Known,
+            result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
+                kind: MetadataKind::Document,
+                name: "Док1".to_string(),
+                facet: Some(FacetKind::Object),
+                attributes: vec![],
+                tabular_sections: vec![],
+            })),
+            source: ResolutionSource::Static,
+            metadata: ResolutionMetadata {
+                notes: vec![
+                    FORM_DATA_SEMANTICS_NOTE.to_string(),
+                    format!(
+                        "{}{}",
+                        FORM_DATA_FORM_TYPE_NOTE_PREFIX, "Формы.Документы.Док1.Форма1"
+                    ),
+                ],
+                ..Default::default()
+            },
+            active_facet: Some(FacetKind::Object),
+            available_facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+        };
+
+        let mut target = Vec::new();
+        add_properties_from_resolution(&metadata_lookup, &resolution, &mut target, 1);
+
+        let link = target
+            .iter()
+            .find(|candidate| candidate.item.label == "Ссылка")
+            .expect("missing intrinsic Ссылка");
+        assert_eq!(link.source_priority, 0);
+
+        let deletion_mark = target
+            .iter()
+            .find(|candidate| candidate.item.label == "ПометкаУдаления")
+            .expect("missing intrinsic ПометкаУдаления");
+        assert_eq!(deletion_mark.source_priority, 0);
+
+        let form_attr = target
+            .iter()
+            .find(|candidate| candidate.item.label == "РеквизитФормы")
+            .expect("missing form attribute");
+        assert_eq!(form_attr.source_priority, 1);
     }
 
     #[test]

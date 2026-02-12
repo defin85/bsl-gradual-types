@@ -26,12 +26,22 @@ function log(message, color = colors.reset) {
 const isWindows = process.platform === 'win32';
 const EXE_EXT = isWindows ? '.exe' : '';
 
+function envFlag(name, defaultValue = false) {
+    const raw = process.env[name];
+    if (raw == null) {
+        return defaultValue;
+    }
+    const normalized = String(raw).trim().toLowerCase();
+    return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+}
+
 // Пути
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
 const EXTENSION_BIN_DIR = path.join(__dirname, '..', 'bin');
-const TARGET_RELEASE_DIR = path.join(PROJECT_ROOT, 'target', 'release');
+const TARGET_PROFILE = process.env.BSL_COPY_BINARIES_PROFILE === 'debug' ? 'debug' : 'release';
+const TARGET_PROFILE_DIR = path.join(PROJECT_ROOT, 'target', TARGET_PROFILE);
 const CACHE_DIR = path.resolve(__dirname, '..', '.cache');
-const CACHE_PATH = path.join(CACHE_DIR, 'rust-binaries.json');
+const CACHE_PATH = path.join(CACHE_DIR, `rust-binaries-${TARGET_PROFILE}.json`);
 
 // Конфигурация бинарников (расширение добавляется динамически)
 const BINARIES = [
@@ -118,9 +128,10 @@ function buildRustBinaries(force = false) {
     // Cargo сам решит, нужно ли пересобирать (по fingerprint'ам), поэтому безопасно вызывать build всегда.
     //
     // NOTE: бинарник `bsl-lsp-server` находится в пакете `bsl-backend`, поэтому указываем `-p bsl-backend`.
-    const buildCmd = 'cargo build -p bsl-backend --release --bin bsl-lsp-server';
+    const profileArg = TARGET_PROFILE === 'release' ? '--release' : '';
+    const buildCmd = `cargo build -p bsl-backend ${profileArg} --bin bsl-lsp-server`.replace(/\s+/g, ' ').trim();
 
-    const sourceBinaryPath = path.join(TARGET_RELEASE_DIR, `bsl-lsp-server${EXE_EXT}`);
+    const sourceBinaryPath = path.join(TARGET_PROFILE_DIR, `bsl-lsp-server${EXE_EXT}`);
 
     function shouldIncludeRustInput(relPath) {
         const normalized = relPath.replace(/\\/g, '/');
@@ -232,6 +243,7 @@ function main() {
     log('🚀 BSL Gradual Types - Синхронизация бинарников', colors.cyan);
     log('=' .repeat(60), colors.cyan);
     log(`🖥️  Платформа: ${process.platform} (${isWindows ? 'Windows' : 'Linux/macOS'})`, colors.cyan);
+    log(`🎯 Профиль бинарников: ${TARGET_PROFILE}`, colors.cyan);
 
     // Создаём директорию bin если не существует
     if (!fileExists(EXTENSION_BIN_DIR)) {
@@ -241,12 +253,18 @@ function main() {
 
     // Проверяем флаг --force
     const forceRebuild = process.argv.includes('--force');
+    const skipRustBuild = process.argv.includes('--skip-rust-build') || envFlag('BSL_SKIP_RUST_BUILD', false);
     if (forceRebuild) {
         log('⚡ Режим принудительной пересборки включён', colors.yellow);
     }
+    if (skipRustBuild) {
+        log('⏭️  Режим skip-rust-build: Rust сборка пропущена', colors.yellow);
+    }
 
     // Собираем бинарники если нужно
-    buildRustBinaries(forceRebuild);
+    if (!skipRustBuild) {
+        buildRustBinaries(forceRebuild);
+    }
 
     log('\n📋 Копирование бинарников:', colors.cyan);
 
@@ -255,7 +273,7 @@ function main() {
     let errorCount = 0;
 
     for (const binary of BINARIES) {
-        const sourcePath = path.join(TARGET_RELEASE_DIR, binary.source);
+        const sourcePath = path.join(TARGET_PROFILE_DIR, binary.source);
         const targetPath = path.join(EXTENSION_BIN_DIR, binary.target);
 
         log(`\n🔍 ${binary.name}:`, colors.cyan);

@@ -47,6 +47,18 @@ export class BslAnalyzerConfig {
         return this.getConfig().get<number>('diagnosticsDebounceMs', 250);
     }
 
+    static get observabilityAutoRefresh(): boolean {
+        return this.getConfig().get<boolean>('observabilityAutoRefresh', true);
+    }
+
+    static get observabilityRefreshMs(): number {
+        return this.getConfig().get<number>('observabilityRefreshMs', 3000);
+    }
+
+    static get observabilityCompactMode(): boolean {
+        return this.getConfig().get<boolean>('observabilityCompactMode', false);
+    }
+
     // Настройки бинарников
     static get useBundledBinaries(): boolean {
         return this.getConfig().get<boolean>('useBundledBinaries', true);
@@ -103,6 +115,9 @@ export class BslAnalyzerConfig {
             serverTcpPort: this.serverTcpPort,
             slowClientLogMs: this.slowClientLogMs,
             diagnosticsDebounceMs: this.diagnosticsDebounceMs,
+            observabilityAutoRefresh: this.observabilityAutoRefresh,
+            observabilityRefreshMs: this.observabilityRefreshMs,
+            observabilityCompactMode: this.observabilityCompactMode,
             binaryPath: this.binaryPath,
             configurationPath: this.configurationPath,
             enableRealTimeAnalysis: this.enableRealTimeAnalysis,

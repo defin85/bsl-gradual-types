@@ -2079,6 +2079,141 @@ mod tests {
     }
 
     #[test]
+    fn resolves_form_module_object_link_property_without_platform_object_properties() {
+        let repository_impl = Arc::new(InMemoryTypeRepository::new());
+        repository_impl
+            .load_types(vec![
+                RawTypeData {
+                    name: "Документы.Док1".to_string(),
+                    source: RawDataSource::Configuration,
+                    facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+                    kind: Some(MetadataKind::Document),
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "Формы.Документы.Док1.Форма1".to_string(),
+                    source: RawDataSource::Configuration,
+                    ..Default::default()
+                },
+            ])
+            .expect("load types");
+
+        let repository =
+            repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+        let resolver = Arc::new(TypeResolver::new(repository.clone()));
+        let deps = Arc::new(SemanticDeps {
+            repository,
+            signature_index: SignatureIndex::new(),
+            resolver: Some(resolver),
+            platform_signatures_loaded: true,
+        });
+
+        let source = r#"Процедура Тест()
+    x = Объект.Ссылка;
+КонецПроцедуры
+"#;
+        let program = parse(source);
+        let file_path = "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl";
+        let index = build_type_index_with_path(&program, file_path, deps);
+
+        let link_offset = source.find("Ссылка").expect("Ссылка") as u32;
+        let link_type = index
+            .type_at_byte_offset(link_offset)
+            .expect("type at Объект.Ссылка");
+        assert_eq!(link_type.type_name(), "ДокументСсылка.Док1");
+    }
+
+    #[test]
+    fn resolves_form_module_object_deletion_mark_property_without_platform_object_properties() {
+        let repository_impl = Arc::new(InMemoryTypeRepository::new());
+        repository_impl
+            .load_types(vec![
+                RawTypeData {
+                    name: "Документы.Док1".to_string(),
+                    source: RawDataSource::Configuration,
+                    facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+                    kind: Some(MetadataKind::Document),
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "Формы.Документы.Док1.Форма1".to_string(),
+                    source: RawDataSource::Configuration,
+                    ..Default::default()
+                },
+            ])
+            .expect("load types");
+
+        let repository =
+            repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+        let resolver = Arc::new(TypeResolver::new(repository.clone()));
+        let deps = Arc::new(SemanticDeps {
+            repository,
+            signature_index: SignatureIndex::new(),
+            resolver: Some(resolver),
+            platform_signatures_loaded: true,
+        });
+
+        let source = r#"Процедура Тест()
+    x = Объект.ПометкаУдаления;
+КонецПроцедуры
+"#;
+        let program = parse(source);
+        let file_path = "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl";
+        let index = build_type_index_with_path(&program, file_path, deps);
+
+        let mark_offset = source.find("ПометкаУдаления").expect("ПометкаУдаления") as u32;
+        let mark_type = index
+            .type_at_byte_offset(mark_offset)
+            .expect("type at Объект.ПометкаУдаления");
+        assert_eq!(mark_type.type_name(), "Булево");
+    }
+
+    #[test]
+    fn resolves_catalog_form_module_object_link_property_without_platform_object_properties() {
+        let repository_impl = Arc::new(InMemoryTypeRepository::new());
+        repository_impl
+            .load_types(vec![
+                RawTypeData {
+                    name: "Справочники.Спр1".to_string(),
+                    source: RawDataSource::Configuration,
+                    facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+                    kind: Some(MetadataKind::Catalog),
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "Формы.Справочники.Спр1.Форма1".to_string(),
+                    source: RawDataSource::Configuration,
+                    ..Default::default()
+                },
+            ])
+            .expect("load types");
+
+        let repository =
+            repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+        let resolver = Arc::new(TypeResolver::new(repository.clone()));
+        let deps = Arc::new(SemanticDeps {
+            repository,
+            signature_index: SignatureIndex::new(),
+            resolver: Some(resolver),
+            platform_signatures_loaded: true,
+        });
+
+        let source = r#"Процедура Тест()
+    x = Объект.Ссылка;
+КонецПроцедуры
+"#;
+        let program = parse(source);
+        let file_path = "Catalogs/Спр1/Forms/Форма1/Ext/Form/Module.bsl";
+        let index = build_type_index_with_path(&program, file_path, deps);
+
+        let link_offset = source.find("Ссылка").expect("Ссылка") as u32;
+        let link_type = index
+            .type_at_byte_offset(link_offset)
+            .expect("type at Объект.Ссылка");
+        assert_eq!(link_type.type_name(), "СправочникСсылка.Спр1");
+    }
+
+    #[test]
     fn form_module_object_member_resolution_uses_form_shape_before_object_fallback() {
         let repository_impl = Arc::new(InMemoryTypeRepository::new());
         repository_impl

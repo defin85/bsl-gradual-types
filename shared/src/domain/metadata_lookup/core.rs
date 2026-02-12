@@ -9,6 +9,30 @@ use crate::domain::types::{
     FORM_DATA_FORM_TYPE_NOTE_PREFIX, FORM_DATA_SEMANTICS_NOTE,
 };
 
+const PROPERTY_ORIGIN_REPOSITORY: &str = "repository";
+const PROPERTY_ORIGIN_INTRINSIC: &str = "intrinsic";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FormDataPropertyProvider {
+    FormShape,
+    ObjectFacet,
+    IntrinsicGuaranteed,
+    ActiveFacetFallback,
+    RawTypeFallback,
+}
+
+impl FormDataPropertyProvider {
+    fn origin_tag(self) -> &'static str {
+        match self {
+            Self::IntrinsicGuaranteed => PROPERTY_ORIGIN_INTRINSIC,
+            Self::FormShape
+            | Self::ObjectFacet
+            | Self::ActiveFacetFallback
+            | Self::RawTypeFallback => PROPERTY_ORIGIN_REPOSITORY,
+        }
+    }
+}
+
 impl TypeMetadataLookup {
     /// Получить полную RawTypeData для TypeResolution
     ///
@@ -244,18 +268,39 @@ impl TypeMetadataLookup {
     /// }
     /// ```
     pub fn get_properties(&self, resolution: &TypeResolution) -> Vec<RawPropertyData> {
+        self.get_properties_with_origin(resolution)
+            .into_iter()
+            .map(|(property, _origin)| property)
+            .collect()
+    }
+
+    /// Получить свойства вместе с тегом происхождения.
+    ///
+    /// Возможные теги:
+    /// - `repository`: свойство получено из form-shape/facet/raw metadata
+    /// - `intrinsic`: свойство добавлено intrinsic-слоем (fill-gaps)
+    pub fn get_properties_with_origin(
+        &self,
+        resolution: &TypeResolution,
+    ) -> Vec<(RawPropertyData, &'static str)> {
         if let Some(enum_props) = self.get_enum_manager_properties(resolution) {
-            return enum_props;
+            return enum_props
+                .into_iter()
+                .map(|property| (property, PROPERTY_ORIGIN_REPOSITORY))
+                .collect();
         }
 
-        if let Some(form_data_props) = self.get_form_data_properties(resolution) {
+        if let Some(form_data_props) = self.get_form_data_properties_with_origin(resolution) {
             return form_data_props;
         }
 
         // Приоритет 1 - Lazy lookup через active_facet (для конфигурационных типов)
         if let Some(facet) = resolution.active_facet {
             if let Some(props) = self.get_facet_properties(resolution, facet) {
-                return props;
+                return props
+                    .into_iter()
+                    .map(|property| (property, PROPERTY_ORIGIN_REPOSITORY))
+                    .collect();
             }
         }
 
@@ -263,6 +308,190 @@ impl TypeMetadataLookup {
         self.get_raw_type(resolution)
             .map(|raw| raw.properties)
             .unwrap_or_default()
+            .into_iter()
+            .map(|property| (property, PROPERTY_ORIGIN_REPOSITORY))
+            .collect()
+    }
+
+    /// Определить происхождение свойства для конкретного resolution.
+    pub fn get_property_origin_tag(
+        &self,
+        resolution: &TypeResolution,
+        property_name: &str,
+    ) -> Option<&'static str> {
+        self.get_properties_with_origin(resolution)
+            .into_iter()
+            .find(|(property, _origin)| property.name == property_name)
+            .map(|(_property, origin)| origin)
+    }
+
+    pub fn is_intrinsic_property_origin(origin: &str) -> bool {
+        origin == PROPERTY_ORIGIN_INTRINSIC
+    }
+
+    pub fn intrinsic_property_origin_tag() -> &'static str {
+        PROPERTY_ORIGIN_INTRINSIC
+    }
+
+    pub fn repository_property_origin_tag() -> &'static str {
+        PROPERTY_ORIGIN_REPOSITORY
+    }
+
+    fn form_data_property_provider_chain(
+        resolution: &TypeResolution,
+    ) -> Vec<FormDataPropertyProvider> {
+        let mut providers = vec![
+            FormDataPropertyProvider::FormShape,
+            FormDataPropertyProvider::ObjectFacet,
+            FormDataPropertyProvider::IntrinsicGuaranteed,
+        ];
+
+        if resolution.active_facet.is_some() {
+            providers.push(FormDataPropertyProvider::ActiveFacetFallback);
+        } else {
+            providers.push(FormDataPropertyProvider::RawTypeFallback);
+        }
+
+        providers
+    }
+
+    fn collect_form_data_properties_from_provider(
+        &self,
+        resolution: &TypeResolution,
+        provider: FormDataPropertyProvider,
+    ) -> Vec<RawPropertyData> {
+        match provider {
+            FormDataPropertyProvider::FormShape => {
+                let Some(form_type_name) =
+                    Self::contextual_note_value(resolution, FORM_DATA_FORM_TYPE_NOTE_PREFIX)
+                else {
+                    return Vec::new();
+                };
+
+                self.repository
+                    .find_type(form_type_name)
+                    .map(|form_type| form_type.properties)
+                    .unwrap_or_default()
+            }
+            FormDataPropertyProvider::ObjectFacet => self
+                .get_facet_properties(resolution, FacetKind::Object)
+                .unwrap_or_default(),
+            FormDataPropertyProvider::IntrinsicGuaranteed => {
+                Self::intrinsic_form_data_guaranteed_properties(resolution)
+            }
+            FormDataPropertyProvider::ActiveFacetFallback => {
+                let Some(facet) = resolution.active_facet else {
+                    return Vec::new();
+                };
+
+                self.get_facet_properties(resolution, facet)
+                    .unwrap_or_default()
+            }
+            FormDataPropertyProvider::RawTypeFallback => self
+                .get_raw_type(resolution)
+                .map(|raw| raw.properties)
+                .unwrap_or_default(),
+        }
+    }
+
+    fn get_form_data_properties_with_origin(
+        &self,
+        resolution: &TypeResolution,
+    ) -> Option<Vec<(RawPropertyData, &'static str)>> {
+        if !Self::has_contextual_note(resolution, FORM_DATA_SEMANTICS_NOTE) {
+            return None;
+        }
+
+        let mut merged: Vec<(RawPropertyData, &'static str)> = Vec::new();
+        let mut seen = std::collections::HashSet::<String>::new();
+        let mut push_unique = |property: RawPropertyData, origin: &'static str| {
+            let key = property.name.to_lowercase();
+            if seen.insert(key) {
+                merged.push((property, origin));
+            }
+        };
+
+        // Явная provider-chain:
+        // form shape -> object facet -> intrinsic guaranteed -> fallback.
+        for provider in Self::form_data_property_provider_chain(resolution) {
+            let origin = provider.origin_tag();
+            for property in self.collect_form_data_properties_from_provider(resolution, provider) {
+                push_unique(property, origin);
+            }
+        }
+
+        Some(merged)
+    }
+
+    fn supports_intrinsic_form_data_properties(kind: MetadataKind) -> bool {
+        // Явный whitelist. На старте поддерживаем только Document/Catalog.
+        matches!(kind, MetadataKind::Document | MetadataKind::Catalog)
+    }
+
+    fn is_intrinsic_form_data_member_name(member_name: &str) -> bool {
+        matches!(member_name, "Ссылка" | "ПометкаУдаления")
+    }
+
+    fn intrinsic_form_data_guaranteed_properties(
+        resolution: &TypeResolution,
+    ) -> Vec<RawPropertyData> {
+        let ResolutionResult::Concrete(ConcreteType::Configuration(config)) = &resolution.result
+        else {
+            return Vec::new();
+        };
+
+        if !Self::supports_intrinsic_form_data_properties(config.kind) {
+            return Vec::new();
+        }
+
+        // Гарантированные свойства добавляем только для applied-object типов,
+        // у которых есть и Object, и Reference фасеты.
+        if Self::get_platform_facet_type(config.kind, FacetKind::Object).is_none() {
+            return Vec::new();
+        }
+        let Some(reference_type_template) =
+            Self::get_platform_facet_type(config.kind, FacetKind::Reference)
+        else {
+            return Vec::new();
+        };
+
+        let object_name = config
+            .name
+            .rsplit('.')
+            .next()
+            .unwrap_or(config.name.as_str())
+            .trim();
+        if object_name.is_empty() {
+            return Vec::new();
+        }
+
+        vec![
+            RawPropertyData {
+                name: "Ссылка".to_string(),
+                prop_type: crate::domain::facet_utils::substitute_type_name(
+                    reference_type_template,
+                    object_name,
+                ),
+                is_readonly: true,
+            },
+            RawPropertyData {
+                name: "ПометкаУдаления".to_string(),
+                prop_type: "Булево".to_string(),
+                is_readonly: true,
+            },
+        ]
+    }
+
+    fn has_contextual_note(resolution: &TypeResolution, note: &str) -> bool {
+        resolution.metadata.notes.iter().any(|item| item == note)
+    }
+
+    fn contextual_note_value<'a>(resolution: &'a TypeResolution, prefix: &str) -> Option<&'a str> {
+        resolution
+            .metadata
+            .notes
+            .iter()
+            .find_map(|note| note.strip_prefix(prefix))
     }
 
     fn get_enum_manager_properties(
@@ -388,6 +617,10 @@ impl TypeMetadataLookup {
     /// # let _ = maybe_error;
     /// ```
     pub fn has_member(&self, resolution: &TypeResolution, member_name: &str) -> bool {
+        let track_intrinsic_member_metrics =
+            Self::has_contextual_note(resolution, FORM_DATA_SEMANTICS_NOTE)
+                && Self::is_intrinsic_form_data_member_name(member_name);
+
         if self
             .get_methods(resolution)
             .iter()
@@ -396,15 +629,29 @@ impl TypeMetadataLookup {
             return true;
         }
 
-        if self
-            .get_properties(resolution)
-            .iter()
-            .any(|p| p.name == member_name)
-        {
-            return true;
+        for (property, origin) in self.get_properties_with_origin(resolution) {
+            if property.name == member_name {
+                if Self::is_intrinsic_property_origin(origin) {
+                    tracing::debug!(
+                        metric = "form_data_intrinsic_member_hit_total",
+                        member = member_name,
+                        owner_type = resolution.type_name(),
+                        "Intrinsic property prevented potential unknown-member diagnostic"
+                    );
+                }
+                return true;
+            }
         }
 
         let Some(raw) = self.get_raw_type(resolution) else {
+            if track_intrinsic_member_metrics {
+                tracing::debug!(
+                    metric = "form_data_intrinsic_member_miss_total",
+                    member = member_name,
+                    owner_type = resolution.type_name(),
+                    "Intrinsic property not found for form-data contextual type"
+                );
+            }
             return false;
         };
 
@@ -425,70 +672,16 @@ impl TypeMetadataLookup {
             }
         }
 
+        if track_intrinsic_member_metrics {
+            tracing::debug!(
+                metric = "form_data_intrinsic_member_miss_total",
+                member = member_name,
+                owner_type = resolution.type_name(),
+                "Intrinsic property not found for form-data contextual type"
+            );
+        }
+
         false
-    }
-
-    fn get_form_data_properties(
-        &self,
-        resolution: &TypeResolution,
-    ) -> Option<Vec<RawPropertyData>> {
-        if !Self::has_contextual_note(resolution, FORM_DATA_SEMANTICS_NOTE) {
-            return None;
-        }
-
-        let mut merged: Vec<RawPropertyData> = Vec::new();
-        let mut seen = std::collections::HashSet::<String>::new();
-        let mut push_unique = |prop: RawPropertyData| {
-            let key = prop.name.to_lowercase();
-            if seen.insert(key) {
-                merged.push(prop);
-            }
-        };
-
-        // 1) form shape
-        if let Some(form_type_name) =
-            Self::contextual_note_value(resolution, FORM_DATA_FORM_TYPE_NOTE_PREFIX)
-        {
-            if let Some(form_type) = self.repository.find_type(form_type_name) {
-                for prop in form_type.properties {
-                    push_unique(prop);
-                }
-            }
-        }
-
-        // 2) guaranteed applied-object members
-        if let Some(object_props) = self.get_facet_properties(resolution, FacetKind::Object) {
-            for prop in object_props {
-                push_unique(prop);
-            }
-        }
-
-        // 3) applied facet fallback
-        if let Some(facet) = resolution.active_facet {
-            if let Some(fallback_props) = self.get_facet_properties(resolution, facet) {
-                for prop in fallback_props {
-                    push_unique(prop);
-                }
-            }
-        } else if let Some(raw) = self.get_raw_type(resolution) {
-            for prop in raw.properties {
-                push_unique(prop);
-            }
-        }
-
-        Some(merged)
-    }
-
-    fn has_contextual_note(resolution: &TypeResolution, note: &str) -> bool {
-        resolution.metadata.notes.iter().any(|item| item == note)
-    }
-
-    fn contextual_note_value<'a>(resolution: &'a TypeResolution, prefix: &str) -> Option<&'a str> {
-        resolution
-            .metadata
-            .notes
-            .iter()
-            .find_map(|note| note.strip_prefix(prefix))
     }
 
     /// Получить описание типа

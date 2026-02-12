@@ -2,7 +2,7 @@
     "name": "bsl-gradual-types",
     "displayName": "BSL Gradual Type System",
     "description": "Production-ready BSL (1C:Enterprise) gradual type system with flow-sensitive analysis, union types, and enhanced LSP server",
-    "version": "0.4.80",
+    "version": "0.4.82",
     "publisher": "bsl-gradual-types-team",
     "icon": "images/bsl-analyzer-logo.png",
     "engines": {
@@ -140,6 +140,26 @@
                         "description": "Debounce (мс) для пересчёта diagnostics при печати. Чем больше значение, тем реже пересчитывается синтаксис/диагностика. 0 = отключить debounce.",
                         "minimum": 0,
                         "order": 4
+                    },
+                    "bslAnalyzer.observabilityAutoRefresh": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Автообновление observability-метрик в панели Observability.",
+                        "order": 5
+                    },
+                    "bslAnalyzer.observabilityRefreshMs": {
+                        "type": "number",
+                        "default": 3000,
+                        "description": "Интервал автообновления observability-метрик (мс).",
+                        "minimum": 1000,
+                        "maximum": 60000,
+                        "order": 6
+                    },
+                    "bslAnalyzer.observabilityCompactMode": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Компактный режим панели Observability: только SLA-метрики (p95/p99 + ключевые rates).",
+                        "order": 7
                     }
                 }
             },
@@ -495,6 +515,21 @@
                 "category": "BSL Analyzer"
             },
             {
+                "command": "bslAnalyzer.refreshObservability",
+                "title": "Refresh Observability",
+                "category": "BSL Analyzer"
+            },
+            {
+                "command": "bslAnalyzer.toggleObservabilityAutoRefresh",
+                "title": "Toggle Observability Auto Refresh",
+                "category": "BSL Analyzer"
+            },
+            {
+                "command": "bslAnalyzer.toggleObservabilityCompactMode",
+                "title": "Toggle Observability Compact Mode",
+                "category": "BSL Analyzer"
+            },
+            {
                 "command": "bslAnalyzer.searchType",
                 "title": "Search BSL Type",
                 "category": "BSL Index",
@@ -626,11 +661,6 @@
                     "id": "bslAnalyzer",
                     "title": "BSL Analyzer",
                     "icon": "$(bracket)"
-                },
-                {
-                    "id": "bslAnalyzerCache",
-                    "title": "BSL Cache",
-                    "icon": "$(database)"
                 }
             ]
         },
@@ -656,12 +686,15 @@
                     "id": "bslAnalyzer.actions",
                     "name": "Quick Actions",
                     "type": "webview"
-                }
-            ],
-            "bslAnalyzerCache": [
+                },
                 {
                     "id": "bslAnalyzer.cacheDashboard",
                     "name": "Cache Dashboard",
+                    "type": "tree"
+                },
+                {
+                    "id": "bslAnalyzer.observability",
+                    "name": "Observability",
                     "type": "tree"
                 }
             ]
@@ -725,6 +758,15 @@
                 },
                 {
                     "command": "bslAnalyzer.toggleCache"
+                },
+                {
+                    "command": "bslAnalyzer.refreshObservability"
+                },
+                {
+                    "command": "bslAnalyzer.toggleObservabilityAutoRefresh"
+                },
+                {
+                    "command": "bslAnalyzer.toggleObservabilityCompactMode"
                 },
                 {
                     "command": "bslAnalyzer.searchType"
@@ -794,6 +836,21 @@
                     "group": "navigation"
                 },
                 {
+                    "command": "bslAnalyzer.refreshObservability",
+                    "when": "view == bslAnalyzer.observability",
+                    "group": "navigation"
+                },
+                {
+                    "command": "bslAnalyzer.toggleObservabilityAutoRefresh",
+                    "when": "view == bslAnalyzer.observability",
+                    "group": "navigation@1"
+                },
+                {
+                    "command": "bslAnalyzer.toggleObservabilityCompactMode",
+                    "when": "view == bslAnalyzer.observability",
+                    "group": "navigation@2"
+                },
+                {
                     "command": "bslAnalyzer.refreshTypeIndex",
                     "when": "view == bslAnalyzer.typeIndex",
                     "group": "navigation"
@@ -832,6 +889,7 @@
     "scripts": {
         "vscode:prepublish": "npm run copy-binaries && npm run package",
         "compile": "npm run copy-binaries && tsc -p . && node esbuild.js && npm run build:wasm",
+        "compile:fast": "npm run copy-binaries && tsc -p . && node esbuild.js",
         "package": "npm run copy-binaries && node esbuild.js --production && npm run build:wasm:release",
         "watch": "node esbuild.js --watch",
         "pretest": "npm run compile && npm run lint",

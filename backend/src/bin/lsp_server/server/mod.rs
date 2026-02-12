@@ -12,7 +12,7 @@ mod command_handlers;
 mod core;
 mod language_server;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
@@ -88,6 +88,7 @@ pub struct BslLanguageServer {
     pub(crate) next_file_id_v2: Arc<AtomicU32>,
     pub(crate) diagnostics_tasks_v2: Arc<Mutex<DiagnosticsTasksV2>>,
     pub(crate) latest_received_file_versions_v2: Arc<RwLock<HashMap<V2FileId, i32>>>,
+    pub(crate) completion_seen_files_v2: Arc<RwLock<HashSet<V2FileId>>>,
     pub(crate) last_deps_id_v2: Arc<RwLock<Option<DepsSnapshotId>>>,
     pub(crate) last_settings_id_v2: Arc<RwLock<Option<SettingsId>>>,
 }

@@ -1160,8 +1160,19 @@ impl LanguageServer for BslLanguageServer {
 
         let started = Instant::now();
         let snippet_support = *self.completion_snippet_support.read().await;
+        let mut completion_outcome: Option<&'static str> = None;
         let completion = {
             let file_id = self.get_or_create_file_id_v2(&uri).await;
+            let first_completion_for_file = {
+                let mut seen = self.completion_seen_files_v2.write().await;
+                seen.insert(file_id)
+            };
+            self.coordinator
+                .record_intellisense_v2_completion_temperature(if first_completion_for_file {
+                    "first"
+                } else {
+                    "warm"
+                });
             self.sync_v2_globals().await;
 
             let expected_version = self
@@ -1234,6 +1245,7 @@ impl LanguageServer for BslLanguageServer {
             }
 
             if !ready {
+                completion_outcome = Some("wait_not_ready");
                 empty()
             } else {
                 let (
@@ -1435,7 +1447,22 @@ impl LanguageServer for BslLanguageServer {
                         )
                         .await
                     }
-                    _ => empty(),
+                    (None, _, _, _) => {
+                        completion_outcome = Some("missing_file_content");
+                        empty()
+                    }
+                    (Some(_), None, _, _) => {
+                        completion_outcome = Some("missing_file_path");
+                        empty()
+                    }
+                    (Some(_), Some(_), None, _) => {
+                        completion_outcome = Some("missing_deps");
+                        empty()
+                    }
+                    (Some(_), Some(_), Some(_), None) => {
+                        completion_outcome = Some("missing_ir");
+                        empty()
+                    }
                 }
             }
         };
@@ -1446,11 +1473,18 @@ impl LanguageServer for BslLanguageServer {
             if result.had_error {
                 self.coordinator.record_completion_error();
             }
-            if let CompletionResponse::List(list) = &result.response {
-                if list.is_incomplete {
-                    self.coordinator.record_completion_incomplete();
+
+            let items_count = match &result.response {
+                CompletionResponse::List(list) => {
+                    if list.is_incomplete {
+                        self.coordinator.record_completion_incomplete();
+                    }
+                    list.items.len()
                 }
-            }
+                CompletionResponse::Array(items) => items.len(),
+            };
+            self.coordinator
+                .record_intellisense_v2_completion_items_count(items_count);
 
             if let Some(stats) = &result.stats {
                 self.coordinator
@@ -1481,6 +1515,21 @@ impl LanguageServer for BslLanguageServer {
                     );
                 }
             }
+
+            if completion_outcome.is_none() {
+                completion_outcome = Some(if result.had_error {
+                    "handler_error"
+                } else if items_count == 0 {
+                    "ok_empty"
+                } else {
+                    "ok_non_empty"
+                });
+            }
+        }
+
+        if let Some(outcome) = completion_outcome {
+            self.coordinator
+                .record_intellisense_v2_completion_outcome(outcome);
         }
 
         Ok(completion.map(|result| result.response))

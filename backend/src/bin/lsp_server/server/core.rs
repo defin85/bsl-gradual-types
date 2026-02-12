@@ -92,8 +92,11 @@ impl BslLanguageServer {
             settings_id: initial_settings_id.clone(),
             diagnostics_detail_level: default_diagnostics_detail_level,
         });
-        let analysis_v2 =
-            AnalysisV2Runtime::new(analysis_host_v2, initial_deps_bundle.index_snapshot.clone());
+        let analysis_v2 = AnalysisV2Runtime::new(
+            analysis_host_v2,
+            initial_deps_bundle.index_snapshot.clone(),
+            Some(coordinator.clone()),
+        );
 
         Self {
             client,
@@ -113,6 +116,7 @@ impl BslLanguageServer {
             next_file_id_v2: Arc::new(std::sync::atomic::AtomicU32::new(1)),
             diagnostics_tasks_v2: Arc::new(Mutex::new(HashMap::new())),
             latest_received_file_versions_v2: Arc::new(RwLock::new(HashMap::new())),
+            completion_seen_files_v2: Arc::new(RwLock::new(std::collections::HashSet::new())),
             last_deps_id_v2: Arc::new(RwLock::new(Some(initial_deps_id))),
             last_settings_id_v2: Arc::new(RwLock::new(Some(initial_settings_id))),
         }
@@ -788,6 +792,42 @@ impl BslLanguageServer {
                     let file_text = analysis.file_text(file_id).ok().flatten();
                     let line_index = analysis.line_index(file_id).ok().flatten();
 
+                    let parse_result_started = Instant::now();
+                    let _parse_result = analysis.parse_result(file_id);
+                    let parse_result_elapsed = parse_result_started.elapsed();
+                    server
+                        .coordinator
+                        .record_intellisense_v2_parse_result_query_latency(parse_result_elapsed);
+                    if let Some(threshold) = super::intellisense_v2_slow_client_log_threshold() {
+                        if parse_result_elapsed >= threshold {
+                            server
+                                .client
+                                .log_message(
+                                    MessageType::INFO,
+                                    format!(
+                                        "[perf] diagnostics_v2 parse_result: parse_ms={} uri={} file_id={} expected_version={}",
+                                        parse_result_elapsed.as_millis(),
+                                        uri_for_task,
+                                        file_id.0,
+                                        requested_version
+                                    ),
+                                )
+                                .await;
+                        }
+                    }
+                    if let Some(threshold) = super::intellisense_v2_slow_query_warn_threshold() {
+                        if parse_result_elapsed >= threshold {
+                            warn!(
+                                uri = %uri_for_task,
+                                file_id = file_id.0,
+                                expected_version = requested_version,
+                                parse_result_ms = parse_result_elapsed.as_millis(),
+                                threshold_ms = threshold.as_millis(),
+                                "diagnostics_v2: parse_result query is slow"
+                            );
+                        }
+                    }
+
                     let syntax_started = Instant::now();
                     let syntax_result = analysis.syntax_diagnostics(file_id);
                     let syntax_elapsed = syntax_started.elapsed();
@@ -840,6 +880,9 @@ impl BslLanguageServer {
                         Ok(None) => {}
                         Err(cancelled) => {
                             was_cancelled = true;
+                            server
+                                .coordinator
+                                .record_intellisense_v2_query_cancelled("syntax");
                             debug!(
                                 uri = %uri_for_task,
                                 file_id = file_id.0,
@@ -914,6 +957,9 @@ impl BslLanguageServer {
                         Ok(None) => {}
                         Err(cancelled) => {
                             was_cancelled = true;
+                            server
+                                .coordinator
+                                .record_intellisense_v2_query_cancelled("semantic");
                             debug!(
                                 uri = %uri_for_task,
                                 file_id = file_id.0,

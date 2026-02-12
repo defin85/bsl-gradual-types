@@ -164,6 +164,21 @@ impl SystemCoordinator {
         self.observability.record_completion_incomplete();
     }
 
+    pub fn record_intellisense_v2_completion_outcome(&self, outcome: &str) {
+        self.observability
+            .record_intellisense_v2_completion_outcome(outcome);
+    }
+
+    pub fn record_intellisense_v2_completion_items_count(&self, items_count: usize) {
+        self.observability
+            .record_intellisense_v2_completion_items_count(items_count);
+    }
+
+    pub fn record_intellisense_v2_completion_temperature(&self, state: &str) {
+        self.observability
+            .record_intellisense_v2_completion_temperature(state);
+    }
+
     pub fn observability_metrics(&self) -> Value {
         self.observability.get_metrics().export_metrics()
     }
@@ -217,6 +232,34 @@ impl SystemCoordinator {
     ) {
         self.observability
             .record_intellisense_v2_semantic_diagnostics_query_latency(duration);
+    }
+
+    pub fn record_intellisense_v2_parse_result_query_latency(&self, duration: std::time::Duration) {
+        self.observability
+            .record_intellisense_v2_parse_result_query_latency(duration);
+    }
+
+    pub fn record_intellisense_v2_query_cancelled(&self, kind: &str) {
+        self.observability
+            .record_intellisense_v2_query_cancelled(kind);
+    }
+
+    pub fn record_intellisense_v2_runtime_queue_wait_latency(
+        &self,
+        kind: &str,
+        duration: std::time::Duration,
+    ) {
+        self.observability
+            .record_intellisense_v2_runtime_queue_wait_latency(kind, duration);
+    }
+
+    pub fn record_intellisense_v2_runtime_exec_latency(
+        &self,
+        kind: &str,
+        duration: std::time::Duration,
+    ) {
+        self.observability
+            .record_intellisense_v2_runtime_exec_latency(kind, duration);
     }
 
     pub fn record_intellisense_v2_deps_update_build_latency(&self, duration: std::time::Duration) {

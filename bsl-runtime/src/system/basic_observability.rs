@@ -144,6 +144,36 @@ impl BasicObservability {
         self.metrics.increment("completion_incomplete_total");
     }
 
+    pub fn record_intellisense_v2_completion_outcome(&self, outcome: &str) {
+        let metric = match outcome {
+            "wait_not_ready" => "intellisense_v2_completion_result_total_wait_not_ready",
+            "missing_file_content" => {
+                "intellisense_v2_completion_result_total_missing_file_content"
+            }
+            "missing_file_path" => "intellisense_v2_completion_result_total_missing_file_path",
+            "missing_deps" => "intellisense_v2_completion_result_total_missing_deps",
+            "missing_ir" => "intellisense_v2_completion_result_total_missing_ir",
+            "handler_error" => "intellisense_v2_completion_result_total_handler_error",
+            "ok_empty" => "intellisense_v2_completion_result_total_ok_empty",
+            "ok_non_empty" => "intellisense_v2_completion_result_total_ok_non_empty",
+            _ => "intellisense_v2_completion_result_total_other",
+        };
+        self.metrics.increment(metric);
+    }
+
+    pub fn record_intellisense_v2_completion_items_count(&self, items_count: usize) {
+        self.metrics
+            .observe_histogram("intellisense_v2_completion_items_count", items_count as f64);
+    }
+
+    pub fn record_intellisense_v2_completion_temperature(&self, state: &str) {
+        let metric = match state {
+            "first" => "intellisense_v2_completion_first_for_file_total",
+            _ => "intellisense_v2_completion_warm_for_file_total",
+        };
+        self.metrics.increment(metric);
+    }
+
     pub fn record_intellisense_v2_wait_for_file_version(&self, kind: &str, duration: Duration) {
         let (total_metric, histogram_metric) = match kind {
             "completion" => (
@@ -239,6 +269,70 @@ impl BasicObservability {
             "intellisense_v2_semantic_diagnostics_query_ms",
             duration.as_millis() as f64,
         );
+    }
+
+    pub fn record_intellisense_v2_parse_result_query_latency(&self, duration: Duration) {
+        self.metrics
+            .increment("intellisense_v2_parse_result_query_total");
+        self.metrics.observe_histogram(
+            "intellisense_v2_parse_result_query_ms",
+            duration.as_millis() as f64,
+        );
+    }
+
+    pub fn record_intellisense_v2_query_cancelled(&self, kind: &str) {
+        let metric = match kind {
+            "syntax" => "intellisense_v2_query_cancelled_total_syntax",
+            "semantic" => "intellisense_v2_query_cancelled_total_semantic",
+            _ => "intellisense_v2_query_cancelled_total_other",
+        };
+        self.metrics.increment(metric);
+    }
+
+    pub fn record_intellisense_v2_runtime_queue_wait_latency(
+        &self,
+        kind: &str,
+        duration: Duration,
+    ) {
+        let (total_metric, histogram_metric) = match kind {
+            "snapshot_with_deps" => (
+                "intellisense_v2_runtime_snapshot_with_deps_queue_wait_total",
+                "intellisense_v2_runtime_snapshot_with_deps_queue_wait_ms",
+            ),
+            "wait_for_file_version" => (
+                "intellisense_v2_runtime_wait_for_file_version_queue_wait_total",
+                "intellisense_v2_runtime_wait_for_file_version_queue_wait_ms",
+            ),
+            _ => (
+                "intellisense_v2_runtime_other_queue_wait_total",
+                "intellisense_v2_runtime_other_queue_wait_ms",
+            ),
+        };
+
+        self.metrics.increment(total_metric);
+        self.metrics
+            .observe_histogram(histogram_metric, duration.as_millis() as f64);
+    }
+
+    pub fn record_intellisense_v2_runtime_exec_latency(&self, kind: &str, duration: Duration) {
+        let (total_metric, histogram_metric) = match kind {
+            "snapshot_with_deps" => (
+                "intellisense_v2_runtime_snapshot_with_deps_exec_total",
+                "intellisense_v2_runtime_snapshot_with_deps_exec_ms",
+            ),
+            "wait_for_file_version" => (
+                "intellisense_v2_runtime_wait_for_file_version_exec_total",
+                "intellisense_v2_runtime_wait_for_file_version_exec_ms",
+            ),
+            _ => (
+                "intellisense_v2_runtime_other_exec_total",
+                "intellisense_v2_runtime_other_exec_ms",
+            ),
+        };
+
+        self.metrics.increment(total_metric);
+        self.metrics
+            .observe_histogram(histogram_metric, duration.as_millis() as f64);
     }
 
     pub fn record_intellisense_v2_deps_update_build_latency(&self, duration: Duration) {

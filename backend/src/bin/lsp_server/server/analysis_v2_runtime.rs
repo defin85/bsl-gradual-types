@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use tokio::sync::oneshot;
 use tracing::warn;
 
 use bsl_analysis_v2::{AnalysisHostV2, AnalysisV2, Change, DepsSnapshotId, FileId, SemanticDeps};
-use bsl_backend::system::{IndexSnapshot, IndexSnapshotId};
+use bsl_backend::system::{IndexSnapshot, IndexSnapshotId, SystemCoordinator};
 
 #[derive(Clone)]
 pub(crate) struct AnalysisV2Runtime {
@@ -32,9 +33,11 @@ enum Command {
         reply: oneshot::Sender<AnalysisV2>,
     },
     GetSnapshotWithDeps {
+        enqueued_at: Instant,
         reply: oneshot::Sender<(AnalysisV2, Arc<IndexSnapshot>, DepsSnapshotId)>,
     },
     WaitForFileVersion {
+        enqueued_at: Instant,
         file_id: FileId,
         min_version: i32,
         reply: oneshot::Sender<bool>,
@@ -49,6 +52,7 @@ impl AnalysisV2Runtime {
     pub(crate) fn new(
         initial_host: AnalysisHostV2,
         initial_index_snapshot: Arc<IndexSnapshot>,
+        observability: Option<Arc<SystemCoordinator>>,
     ) -> Self {
         let (tx, rx) = std::sync::mpsc::channel::<Command>();
 
@@ -59,27 +63,41 @@ impl AnalysisV2Runtime {
                 let mut current_deps_id = host.deps_id();
                 let mut index_snapshot = initial_index_snapshot;
                 let mut applied_file_versions: HashMap<FileId, i32> = HashMap::new();
-                let mut waiters: HashMap<FileId, Vec<(i32, oneshot::Sender<bool>)>> =
-                    HashMap::new();
+                let mut waiters: HashMap<FileId, Vec<PendingWaiter>> = HashMap::new();
 
                 let wake_waiters_for_file =
                     |file_id: FileId,
                      current_version: Option<i32>,
-                     waiters: &mut HashMap<FileId, Vec<(i32, oneshot::Sender<bool>)>>| {
+                     waiters: &mut HashMap<FileId, Vec<PendingWaiter>>,
+                     observability: &Option<Arc<SystemCoordinator>>| {
                         let Some(pending) = waiters.remove(&file_id) else {
                             return;
                         };
 
                         let mut still_waiting = Vec::new();
-                        for (min_version, reply) in pending {
+                        for waiter in pending {
                             match current_version {
                                 None => {
-                                    let _ = reply.send(false);
+                                    let exec_elapsed = waiter.started_waiting_at.elapsed();
+                                    if let Some(coordinator) = observability {
+                                        coordinator.record_intellisense_v2_runtime_exec_latency(
+                                            "wait_for_file_version",
+                                            exec_elapsed,
+                                        );
+                                    }
+                                    let _ = waiter.reply.send(false);
                                 }
-                                Some(version) if version >= min_version => {
-                                    let _ = reply.send(true);
+                                Some(version) if version >= waiter.min_version => {
+                                    let exec_elapsed = waiter.started_waiting_at.elapsed();
+                                    if let Some(coordinator) = observability {
+                                        coordinator.record_intellisense_v2_runtime_exec_latency(
+                                            "wait_for_file_version",
+                                            exec_elapsed,
+                                        );
+                                    }
+                                    let _ = waiter.reply.send(true);
                                 }
-                                Some(_) => still_waiting.push((min_version, reply)),
+                                Some(_) => still_waiting.push(waiter),
                             }
                         }
 
@@ -115,7 +133,12 @@ impl AnalysisV2Runtime {
 
                             for file_id in changed_files {
                                 let version = applied_file_versions.get(&file_id).copied();
-                                wake_waiters_for_file(file_id, version, &mut waiters);
+                                wake_waiters_for_file(
+                                    file_id,
+                                    version,
+                                    &mut waiters,
+                                    &observability,
+                                );
                             }
                         }
                         Command::ApplyDepsBundle {
@@ -132,30 +155,77 @@ impl AnalysisV2Runtime {
                         Command::GetSnapshot { reply } => {
                             let _ = reply.send(host.snapshot());
                         }
-                        Command::GetSnapshotWithDeps { reply } => {
-                            let _ = reply.send((
+                        Command::GetSnapshotWithDeps { enqueued_at, reply } => {
+                            let queue_wait_elapsed = enqueued_at.elapsed();
+                            if let Some(coordinator) = &observability {
+                                coordinator.record_intellisense_v2_runtime_queue_wait_latency(
+                                    "snapshot_with_deps",
+                                    queue_wait_elapsed,
+                                );
+                            }
+
+                            let exec_started = Instant::now();
+                            let response = (
                                 host.snapshot(),
                                 index_snapshot.clone(),
                                 current_deps_id.clone(),
-                            ));
+                            );
+                            let exec_elapsed = exec_started.elapsed();
+                            if let Some(coordinator) = &observability {
+                                coordinator.record_intellisense_v2_runtime_exec_latency(
+                                    "snapshot_with_deps",
+                                    exec_elapsed,
+                                );
+                            }
+                            let _ = reply.send(response);
                         }
                         Command::WaitForFileVersion {
+                            enqueued_at,
                             file_id,
                             min_version,
                             reply,
-                        } => match applied_file_versions.get(&file_id).copied() {
-                            Some(version) if version >= min_version => {
-                                let _ = reply.send(true);
+                        } => {
+                            let queue_wait_elapsed = enqueued_at.elapsed();
+                            if let Some(coordinator) = &observability {
+                                coordinator.record_intellisense_v2_runtime_queue_wait_latency(
+                                    "wait_for_file_version",
+                                    queue_wait_elapsed,
+                                );
                             }
-                            _ => {
-                                waiters.entry(file_id).or_default().push((min_version, reply));
+
+                            match applied_file_versions.get(&file_id).copied() {
+                                Some(version) if version >= min_version => {
+                                    let exec_started = Instant::now();
+                                    let _ = reply.send(true);
+                                    let exec_elapsed = exec_started.elapsed();
+                                    if let Some(coordinator) = &observability {
+                                        coordinator.record_intellisense_v2_runtime_exec_latency(
+                                            "wait_for_file_version",
+                                            exec_elapsed,
+                                        );
+                                    }
+                                }
+                                _ => {
+                                    waiters.entry(file_id).or_default().push(PendingWaiter {
+                                        min_version,
+                                        reply,
+                                        started_waiting_at: Instant::now(),
+                                    });
+                                }
                             }
-                        },
+                        }
                         #[cfg(test)]
                         Command::Shutdown { ack } => {
                             for (_file_id, pending) in waiters.drain() {
-                                for (_min_version, waiter) in pending {
-                                    let _ = waiter.send(false);
+                                for waiter in pending {
+                                    let exec_elapsed = waiter.started_waiting_at.elapsed();
+                                    if let Some(coordinator) = &observability {
+                                        coordinator.record_intellisense_v2_runtime_exec_latency(
+                                            "wait_for_file_version",
+                                            exec_elapsed,
+                                        );
+                                    }
+                                    let _ = waiter.reply.send(false);
                                 }
                             }
                             let _ = ack.send(());
@@ -238,7 +308,10 @@ impl AnalysisV2Runtime {
         if self
             .inner
             .tx
-            .send(Command::GetSnapshotWithDeps { reply })
+            .send(Command::GetSnapshotWithDeps {
+                enqueued_at: Instant::now(),
+                reply,
+            })
             .is_err()
         {
             warn!(
@@ -270,6 +343,7 @@ impl AnalysisV2Runtime {
             .inner
             .tx
             .send(Command::WaitForFileVersion {
+                enqueued_at: Instant::now(),
                 file_id,
                 min_version,
                 reply,
@@ -295,6 +369,12 @@ impl AnalysisV2Runtime {
     }
 }
 
+struct PendingWaiter {
+    min_version: i32,
+    reply: oneshot::Sender<bool>,
+    started_waiting_at: Instant,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,6 +389,7 @@ mod tests {
         let runtime = AnalysisV2Runtime::new(
             AnalysisHostV2::default(),
             Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p7"))),
+            None,
         );
         let file_id = FileId(1);
 
@@ -338,6 +419,7 @@ mod tests {
         let runtime = AnalysisV2Runtime::new(
             AnalysisHostV2::default(),
             Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p7"))),
+            None,
         );
         let file_id = FileId(1);
 
@@ -383,7 +465,7 @@ mod tests {
             deps: deps_old,
         });
 
-        let runtime = AnalysisV2Runtime::new(host, make_index_snapshot("index_old"));
+        let runtime = AnalysisV2Runtime::new(host, make_index_snapshot("index_old"), None);
 
         {
             let (analysis, index_snapshot, deps_id) = runtime.snapshot_with_deps().await;
@@ -446,7 +528,7 @@ mod tests {
             deps: deps_old,
         });
 
-        let runtime = AnalysisV2Runtime::new(host, make_index_snapshot("index_old"));
+        let runtime = AnalysisV2Runtime::new(host, make_index_snapshot("index_old"), None);
 
         let deps_new = make_deps();
         let deps_id_new = DepsSnapshotId::from_hash("deps_new");

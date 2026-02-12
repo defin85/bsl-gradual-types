@@ -16,6 +16,32 @@ pub struct SearchResult {
     pub certainty: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct QuickActionsTypeRepositorySnapshot {
+    pub total_types: usize,
+    pub platform_types: usize,
+    pub configuration_types: usize,
+    pub status: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct QuickActionsDiagnosticsSnapshot {
+    pub total: usize,
+    pub errors: usize,
+    pub warnings: usize,
+    pub infos: usize,
+    pub hints: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct QuickActionsSidebarSnapshot {
+    pub type_repository: QuickActionsTypeRepositorySnapshot,
+    pub diagnostics: QuickActionsDiagnosticsSnapshot,
+}
+
 /// Action button configuration
 #[derive(Clone, Debug)]
 struct ActionButton {
@@ -36,7 +62,7 @@ impl ActionButton {
         ActionButton {
             icon: "🔍",
             title: "Типы платформы",
-            subtitle: "3927 типов",
+            subtitle: "Live counts from TypeRepository",
             action: "buildIndex",
         },
         ActionButton {
@@ -61,6 +87,8 @@ pub fn QuickActionsPanel(
     search_results: ReadSignal<Vec<SearchResult>>,
     /// Searching state
     is_searching: ReadSignal<bool>,
+    /// Unified sidebar snapshot from extension
+    sidebar_snapshot: ReadSignal<Option<QuickActionsSidebarSnapshot>>,
 ) -> impl IntoView {
     let (search_query, set_search_query) = signal(String::new());
 
@@ -90,6 +118,41 @@ pub fn QuickActionsPanel(
     view! {
         <div class="bg-vscode-bg text-vscode-fg p-4 min-h-screen">
             <h1 class="text-xl font-bold mb-4">"BSL Quick Actions"</h1>
+
+            <Show when=move || sidebar_snapshot.get().is_some()>
+                <div class="mb-4 p-3 rounded bg-vscode-input-bg border border-vscode-fg/10 text-sm">
+                    {move || {
+                        if let Some(snapshot) = sidebar_snapshot.get() {
+                            let repo = &snapshot.type_repository;
+                            let diag = &snapshot.diagnostics;
+                            if repo.status == "live" {
+                                format!(
+                                    "TypeRepository: {} (Platform {}, Config {}) | Diagnostics: {} (E{} W{} I{} H{})",
+                                    repo.total_types,
+                                    repo.platform_types,
+                                    repo.configuration_types,
+                                    diag.total,
+                                    diag.errors,
+                                    diag.warnings,
+                                    diag.infos,
+                                    diag.hints
+                                )
+                            } else {
+                                format!(
+                                    "TypeRepository: n/a | Diagnostics: {} (E{} W{} I{} H{})",
+                                    diag.total,
+                                    diag.errors,
+                                    diag.warnings,
+                                    diag.infos,
+                                    diag.hints
+                                )
+                            }
+                        } else {
+                            String::new()
+                        }
+                    }}
+                </div>
+            </Show>
 
             // Search input section
             <div class="mb-6 relative">
@@ -147,14 +210,39 @@ pub fn QuickActionsPanel(
                     each=|| ActionButton::ACTIONS
                     key=|action| action.action
                     children=move |action: ActionButton| {
+                        let action_id = action.action.to_string();
+                        let action_command = action.action;
+                        let static_subtitle = action.subtitle.to_string();
                         view! {
                             <button
-                                on:click=move |_| handle_action(action.action)
+                                on:click=move |_| handle_action(action_command)
                                 class="p-4 bg-vscode-button-bg hover:bg-vscode-button-hover text-vscode-button-fg rounded-lg transition-colors"
                             >
                                 <span class="text-2xl mb-2 block">{action.icon}</span>
                                 <p class="font-medium">{action.title}</p>
-                                <p class="text-xs text-vscode-fg/60 mt-1">{action.subtitle}</p>
+                                <p class="text-xs text-vscode-fg/60 mt-1">
+                                    {move || {
+                                        if action_id == "buildIndex" {
+                                            if let Some(snapshot) = sidebar_snapshot.get() {
+                                                let repo = snapshot.type_repository;
+                                                if repo.status == "live" {
+                                                    format!(
+                                                        "Platform {} / Config {} / Total {}",
+                                                        repo.platform_types,
+                                                        repo.configuration_types,
+                                                        repo.total_types
+                                                    )
+                                                } else {
+                                                    "TypeRepository: n/a".to_string()
+                                                }
+                                            } else {
+                                                "TypeRepository: n/a".to_string()
+                                            }
+                                        } else {
+                                            static_subtitle.clone()
+                                        }
+                                    }}
+                                </p>
                             </button>
                         }
                     }

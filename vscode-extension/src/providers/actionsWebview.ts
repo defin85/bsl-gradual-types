@@ -2,12 +2,30 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { searchTypes } from '../lsp/customRequests';
 import { logger } from '../lsp/logger';
+import { getSidebarSnapshot, invalidateSidebarSnapshot } from './sidebarSnapshot';
+
+interface QuickActionsSidebarSnapshotData {
+    typeRepository: {
+        totalTypes: number;
+        platformTypes: number;
+        configurationTypes: number;
+        status: 'live' | 'n/a';
+    };
+    diagnostics: {
+        total: number;
+        errors: number;
+        warnings: number;
+        infos: number;
+        hints: number;
+    };
+}
 
 /**
  * WebView провайдер для панели быстрых действий
  */
 export class BslActionsWebviewProvider implements vscode.WebviewViewProvider {
     private outputChannel?: vscode.OutputChannel;
+    private currentWebviewView: vscode.WebviewView | undefined;
 
     constructor(
         private readonly extensionUri: vscode.Uri,
@@ -18,6 +36,7 @@ export class BslActionsWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     resolveWebviewView(webviewView: vscode.WebviewView): void {
+        this.currentWebviewView = webviewView;
         webviewView.webview.options = {
             enableScripts: true,
             localResourceRoots: [
@@ -28,6 +47,7 @@ export class BslActionsWebviewProvider implements vscode.WebviewViewProvider {
         };
 
         webviewView.webview.html = this.getWebviewContent(webviewView.webview);
+        const disposables: vscode.Disposable[] = [];
 
         webviewView.webview.onDidReceiveMessage(async (message) => {
             // ✅ Валидация структуры сообщения
@@ -47,10 +67,13 @@ export class BslActionsWebviewProvider implements vscode.WebviewViewProvider {
                 case 'ready':
                     // Quick Actions initialized
                     logger.debug('Quick Actions webview ready');
+                    await this.postSidebarSnapshot(webviewView);
                     break;
 
                 case 'executeAction':
                     await this.handleAction(message.data);
+                    invalidateSidebarSnapshot();
+                    await this.postSidebarSnapshot(webviewView);
                     break;
 
                 case 'searchTypes':
@@ -62,7 +85,29 @@ export class BslActionsWebviewProvider implements vscode.WebviewViewProvider {
                         'bslAnalyzer.showTypeDetails',
                         message.data  // Type name sent in data field from Leptos
                     );
+                    await this.postSidebarSnapshot(webviewView);
                     break;
+            }
+        });
+
+        disposables.push(vscode.languages.onDidChangeDiagnostics(() => {
+            invalidateSidebarSnapshot();
+            void this.postSidebarSnapshot(webviewView);
+        }));
+        disposables.push(vscode.workspace.onDidChangeConfiguration((e) => {
+            if (
+                e.affectsConfiguration('bslAnalyzer.configurationPath')
+                || e.affectsConfiguration('bslAnalyzer.platformVersion')
+                || e.affectsConfiguration('bslAnalyzer.platformDocsArchive')
+            ) {
+                invalidateSidebarSnapshot();
+                void this.postSidebarSnapshot(webviewView);
+            }
+        }));
+        webviewView.onDidDispose(() => {
+            this.currentWebviewView = undefined;
+            for (const disposable of disposables) {
+                disposable.dispose();
             }
         });
     }
@@ -140,6 +185,31 @@ export class BslActionsWebviewProvider implements vscode.WebviewViewProvider {
                 data: [],
             });
         }
+    }
+
+    async refreshSidebarSnapshot(): Promise<void> {
+        if (!this.currentWebviewView) {
+            return;
+        }
+        invalidateSidebarSnapshot();
+        await this.postSidebarSnapshot(this.currentWebviewView);
+    }
+
+    private async postSidebarSnapshot(webviewView: vscode.WebviewView): Promise<void> {
+        const snapshot = await getSidebarSnapshot();
+        const payload: QuickActionsSidebarSnapshotData = {
+            typeRepository: {
+                totalTypes: snapshot.typeRepository.totalTypes,
+                platformTypes: snapshot.typeRepository.platformTypes,
+                configurationTypes: snapshot.typeRepository.configurationTypes,
+                status: snapshot.typeRepository.status,
+            },
+            diagnostics: snapshot.diagnostics,
+        };
+        await webviewView.webview.postMessage({
+            type: 'sidebarSnapshot',
+            data: payload,
+        });
     }
 
     private getWebviewContent(webview: vscode.Webview): string {

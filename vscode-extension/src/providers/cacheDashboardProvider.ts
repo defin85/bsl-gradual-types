@@ -1,8 +1,7 @@
 import * as vscode from 'vscode';
 import { BslOverviewItem } from './items';
-import { BslAnalyzerConfig } from '../config/configHelper';
-import { getCacheStats, CacheStatsResponse } from '../lsp/customRequests';
 import { progressEmitter } from '../lsp/progress';
+import { getSidebarSnapshot, invalidateSidebarSnapshot, SidebarCacheSnapshot } from './sidebarSnapshot';
 
 type CacheSection =
     | 'cache-status'
@@ -18,10 +17,6 @@ export class CacheDashboardProvider implements vscode.TreeDataProvider<BslOvervi
         this._onDidChangeTreeData.event;
 
     private outputChannel: vscode.OutputChannel;
-    private cachedStats: CacheStatsResponse | null = null;
-    private lastFetchAt = 0;
-    private inflight: Promise<CacheStatsResponse | null> | null = null;
-    private readonly ttlMs = 3000;
     private disposables: vscode.Disposable[] = [];
 
     constructor(outputChannel: vscode.OutputChannel) {
@@ -44,8 +39,7 @@ export class CacheDashboardProvider implements vscode.TreeDataProvider<BslOvervi
     }
 
     refresh(): void {
-        this.cachedStats = null;
-        this.lastFetchAt = 0;
+        invalidateSidebarSnapshot();
         this._onDidChangeTreeData.fire();
     }
 
@@ -82,10 +76,11 @@ export class CacheDashboardProvider implements vscode.TreeDataProvider<BslOvervi
     }
 
     private async getStatusItems(): Promise<BslOverviewItem[]> {
-        const stats = await this.loadStats();
-        if (!stats) {
-            return this.missingConfigItems();
+        const cache = await this.loadCacheSnapshot();
+        if (!cache.stats) {
+            return this.missingConfigItems(cache.reason);
         }
+        const stats = cache.stats;
 
         const enabled = stats.cache_enabled ? 'Enabled' : 'Disabled';
         const envDisabled = stats.env_disabled ? 'Yes' : 'No';
@@ -100,10 +95,11 @@ export class CacheDashboardProvider implements vscode.TreeDataProvider<BslOvervi
     }
 
     private async getMetricsItems(): Promise<BslOverviewItem[]> {
-        const stats = await this.loadStats();
-        if (!stats) {
-            return this.missingConfigItems();
+        const cache = await this.loadCacheSnapshot();
+        if (!cache.stats) {
+            return this.missingConfigItems(cache.reason);
         }
+        const stats = cache.stats;
 
         const runtime = stats.disk.runtime;
         const total = runtime.hit_count + runtime.miss_count;
@@ -145,10 +141,11 @@ export class CacheDashboardProvider implements vscode.TreeDataProvider<BslOvervi
     }
 
     private async getTimingItems(): Promise<BslOverviewItem[]> {
-        const stats = await this.loadStats();
-        if (!stats) {
-            return this.missingConfigItems();
+        const cache = await this.loadCacheSnapshot();
+        if (!cache.stats) {
+            return this.missingConfigItems(cache.reason);
         }
+        const stats = cache.stats;
 
         const runtime = stats.disk.runtime;
         return [
@@ -164,10 +161,11 @@ export class CacheDashboardProvider implements vscode.TreeDataProvider<BslOvervi
     }
 
     private async getSizeItems(): Promise<BslOverviewItem[]> {
-        const stats = await this.loadStats();
-        if (!stats) {
-            return this.missingConfigItems();
+        const cache = await this.loadCacheSnapshot();
+        if (!cache.stats) {
+            return this.missingConfigItems(cache.reason);
         }
+        const stats = cache.stats;
 
         return [
             new BslOverviewItem(
@@ -186,10 +184,11 @@ export class CacheDashboardProvider implements vscode.TreeDataProvider<BslOvervi
     }
 
     private async getActionItems(): Promise<BslOverviewItem[]> {
-        const stats = await this.loadStats();
-        if (!stats) {
-            return this.missingConfigItems();
+        const cache = await this.loadCacheSnapshot();
+        if (!cache.stats) {
+            return this.missingConfigItems(cache.reason);
         }
+        const stats = cache.stats;
 
         const items: BslOverviewItem[] = [];
 
@@ -225,40 +224,35 @@ export class CacheDashboardProvider implements vscode.TreeDataProvider<BslOvervi
         return items;
     }
 
-    private async loadStats(): Promise<CacheStatsResponse | null> {
-        const configPath = BslAnalyzerConfig.configurationPath;
-        if (!configPath) {
-            return null;
+    private async loadCacheSnapshot(): Promise<SidebarCacheSnapshot> {
+        try {
+            const snapshot = await getSidebarSnapshot();
+            return snapshot.cache;
+        } catch (error) {
+            this.outputChannel.appendLine(`[Cache Dashboard] Failed to load sidebar snapshot: ${error}`);
+            return {
+                status: 'n/a',
+                reason: 'lsp_unavailable',
+                stats: null,
+            };
         }
-
-        const now = Date.now();
-        if (this.cachedStats && now - this.lastFetchAt < this.ttlMs) {
-            return this.cachedStats;
-        }
-
-        if (!this.inflight) {
-            this.inflight = getCacheStats(configPath)
-                .catch((error) => {
-                    this.outputChannel.appendLine(`[Cache Dashboard] Failed to load stats: ${error}`);
-                    return null;
-                })
-                .finally(() => {
-                    this.inflight = null;
-                });
-        }
-
-        const result = await this.inflight;
-        if (result) {
-            this.cachedStats = result;
-            this.lastFetchAt = now;
-        }
-        return result;
     }
 
-    private missingConfigItems(): BslOverviewItem[] {
-        const missing = new BslOverviewItem('Configuration path not set', vscode.TreeItemCollapsibleState.None);
+    private missingConfigItems(reason?: SidebarCacheSnapshot['reason']): BslOverviewItem[] {
+        const message = this.messageForUnavailableReason(reason);
+        const missing = new BslOverviewItem(message, vscode.TreeItemCollapsibleState.None);
         missing.iconPath = new vscode.ThemeIcon('warning');
         return [missing];
+    }
+
+    private messageForUnavailableReason(reason?: SidebarCacheSnapshot['reason']): string {
+        if (reason === 'configuration_path_missing') {
+            return 'Configuration path not set';
+        }
+        if (reason === 'lsp_unavailable') {
+            return 'Cache metrics unavailable (LSP/cache stats not ready)';
+        }
+        return 'Cache metrics unavailable';
     }
 
     dispose(): void {

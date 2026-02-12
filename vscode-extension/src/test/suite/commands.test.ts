@@ -44,7 +44,8 @@ suite('Commands Test Suite', () => {
             'bslAnalyzer.refreshOverview',
             'bslAnalyzer.refreshCacheDashboard',
             'bslAnalyzer.refreshDiagnostics',
-            'bslAnalyzer.refreshTypeRepository'
+            'bslAnalyzer.refreshTypeRepository',
+            'bslAnalyzer.goToDiagnostic',
         ];
         
         const commands = await vscode.commands.getCommands();

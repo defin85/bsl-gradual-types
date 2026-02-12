@@ -3,24 +3,40 @@ import { BslOverviewItem } from './items';
 import { progressEmitter, getCurrentProgress } from '../lsp/progress';
 import { getServerVersion, isClientRunning } from '../lsp/client';
 import { BslAnalyzerConfig } from '../config/configHelper';
-import { getTypeRepositoryStats, getWorkspaceStats } from '../lsp/customRequests';
+import { getSidebarSnapshot, invalidateSidebarSnapshot } from './sidebarSnapshot';
 
 /**
  * Провайдер для дерева обзора BSL Analyzer
  */
-export class BslOverviewProvider implements vscode.TreeDataProvider<BslOverviewItem> {
+export class BslOverviewProvider implements vscode.TreeDataProvider<BslOverviewItem>, vscode.Disposable {
     private _onDidChangeTreeData: vscode.EventEmitter<BslOverviewItem | undefined | null | void> = new vscode.EventEmitter<BslOverviewItem | undefined | null | void>();
     readonly onDidChangeTreeData: vscode.Event<BslOverviewItem | undefined | null | void> = this._onDidChangeTreeData.event;
 
     private outputChannel: vscode.OutputChannel;
+    private readonly disposables: vscode.Disposable[] = [];
 
     constructor(outputChannel: vscode.OutputChannel) {
         this.outputChannel = outputChannel;
         
         // Подписываемся на изменения прогресса индексации
-        progressEmitter.event(() => {
+        this.disposables.push(progressEmitter.event(() => {
+            invalidateSidebarSnapshot();
             this.refresh();
-        });
+        }));
+        this.disposables.push(vscode.languages.onDidChangeDiagnostics(() => {
+            invalidateSidebarSnapshot();
+            this.refresh();
+        }));
+        this.disposables.push(vscode.workspace.onDidChangeConfiguration((e) => {
+            if (
+                e.affectsConfiguration('bslAnalyzer.configurationPath')
+                || e.affectsConfiguration('bslAnalyzer.platformVersion')
+                || e.affectsConfiguration('bslAnalyzer.platformDocsArchive')
+            ) {
+                invalidateSidebarSnapshot();
+                this.refresh();
+            }
+        }));
     }
 
     refresh(): void {
@@ -54,12 +70,11 @@ export class BslOverviewProvider implements vscode.TreeDataProvider<BslOverviewI
     }
 
     private async getWorkspaceItems(): Promise<BslOverviewItem[]> {
-        const stats = await getWorkspaceStats();
-        const repoStats = await getTypeRepositoryStats();
-        const fileCount = stats ? stats.bslFiles : 0;
-        const issuesCount = stats ? stats.diagnostics : 0;
-        const lastAnalysis = repoStats?.lastUpdateTime
-            ? formatUpdateTime(repoStats.lastUpdateTime)
+        const snapshot = await getSidebarSnapshot();
+        const fileCount = snapshot.workspace.bslFiles;
+        const issuesCount = snapshot.diagnostics.total;
+        const lastAnalysis = snapshot.typeRepository.lastUpdateTime
+            ? formatUpdateTime(snapshot.typeRepository.lastUpdateTime)
             : 'Never';
 
         const workspaceItems = [
@@ -71,9 +86,9 @@ export class BslOverviewProvider implements vscode.TreeDataProvider<BslOverviewI
         // Добавляем информацию об индексации если она активна
         const progress = getCurrentProgress();
         if (progress.isIndexing) {
-            const progressIcon = '$(loading~spin)';
-            const progressText = `${progressIcon} ${progress.currentStep} (${progress.progress}%)`;
+            const progressText = `Indexing: ${progress.currentStep} (${progress.progress}%)`;
             const progressItem = new BslOverviewItem(progressText, vscode.TreeItemCollapsibleState.None, 'indexing-progress');
+            progressItem.iconPath = new vscode.ThemeIcon('sync~spin');
             progressItem.tooltip = `${progress.currentStep}\nProgress: ${progress.progress}%`;
             workspaceItems.unshift(progressItem); // Добавляем в начало
         }
@@ -83,21 +98,25 @@ export class BslOverviewProvider implements vscode.TreeDataProvider<BslOverviewI
 
     private async getServerItems(): Promise<BslOverviewItem[]> {
         // Проверка статуса LSP сервера
-        const serverStatus = isClientRunning() ? 'Running' : 'Stopped';
-        const statusIcon = isClientRunning() ? '$(check)' : '$(error)';
-        const statusColor = isClientRunning() ? '✅' : '⚠️';
-
-        const repoStats = await getTypeRepositoryStats();
-        const totalTypes = repoStats?.totalTypes ?? 0;
-        const platformTypes = repoStats?.platformTypes ?? 0;
-        const configTypes = repoStats?.configurationTypes ?? 0;
+        const isRunning = isClientRunning();
+        const serverStatus = isRunning ? 'Running' : 'Stopped';
+        const snapshot = await getSidebarSnapshot();
+        const totalTypes = snapshot.typeRepository.totalTypes;
+        const platformTypes = snapshot.typeRepository.platformTypes;
+        const configTypes = snapshot.typeRepository.configurationTypes;
         const platformVersion = BslAnalyzerConfig.platformVersion || 'Unknown';
         const lspVersion = getServerVersion() || 'Unknown';
+        const statusItem = new BslOverviewItem(`Status: ${serverStatus}`, vscode.TreeItemCollapsibleState.None, 'status');
+        statusItem.iconPath = new vscode.ThemeIcon(isRunning ? 'check' : 'error');
+
+        const typeRepositoryText = snapshot.typeRepository.status === 'live'
+            ? `TypeRepository: ${totalTypes} (Platform ${platformTypes}, Config ${configTypes})`
+            : 'TypeRepository: n/a';
 
         return [
-            new BslOverviewItem(`${statusIcon} Status: ${serverStatus}`, vscode.TreeItemCollapsibleState.None, 'status'),
+            statusItem,
             new BslOverviewItem(
-                `TypeRepository: ${totalTypes} (Platform ${platformTypes}, Config ${configTypes})`,
+                typeRepositoryText,
                 vscode.TreeItemCollapsibleState.None,
                 'index-count'
             ),
@@ -116,6 +135,13 @@ export class BslOverviewProvider implements vscode.TreeDataProvider<BslOverviewI
             new BslOverviewItem(`Real-time Analysis: ${realTimeEnabled}`, vscode.TreeItemCollapsibleState.None, 'real-time'),
             new BslOverviewItem(`Metrics: ${metricsEnabled}`, vscode.TreeItemCollapsibleState.None, 'metrics')
         ]);
+    }
+
+    dispose(): void {
+        for (const disposable of this.disposables) {
+            disposable.dispose();
+        }
+        this.disposables.length = 0;
     }
 }
 

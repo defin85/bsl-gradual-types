@@ -39,7 +39,8 @@ suite('Extension Test Suite', () => {
             'bslAnalyzer.refreshOverview',
             'bslAnalyzer.refreshCacheDashboard',
             'bslAnalyzer.refreshDiagnostics',
-            'bslAnalyzer.refreshTypeRepository'
+            'bslAnalyzer.refreshTypeRepository',
+            'bslAnalyzer.goToDiagnostic',
         ];
 
         return vscode.commands.getCommands(true).then((allCommands) => {

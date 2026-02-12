@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { HierarchicalTypeItem } from './typeModels';
 import { TypeTreeBuilder } from './typeTreeBuilder';
 import { progressEmitter } from '../lsp/progress';
+import { getSidebarSnapshot } from './sidebarSnapshot';
 
 // Re-export for backward compatibility
 export { HierarchicalTypeItem } from './typeModels';
@@ -76,11 +77,18 @@ export class HierarchicalTypeIndexProvider implements vscode.TreeDataProvider<Hi
             `HierarchicalTypeIndexProvider: Building categories, found ${this.treeBuilder.categoriesCount} categories`
         );
         const items: HierarchicalTypeItem[] = [];
+        const snapshot = await getSidebarSnapshot();
+        const platformTypesCount = snapshot.typeRepository.status === 'live'
+            ? snapshot.typeRepository.platformTypes
+            : this.treeBuilder.platformTypesCount;
+        const configTypesCount = snapshot.typeRepository.status === 'live'
+            ? snapshot.typeRepository.configurationTypes
+            : this.treeBuilder.configTypesCount;
 
         // Platform types group
-        if (this.treeBuilder.platformTypesCount > 0) {
+        if (platformTypesCount > 0) {
             const platformGroup = new HierarchicalTypeItem(
-                `🏗️ Platform 1C (${this.treeBuilder.platformTypesCount})`,
+                `🏗️ Platform 1C (${platformTypesCount})`,
                 vscode.TreeItemCollapsibleState.Collapsed,
                 'Platform types from syntax helper',
                 'platform-group'
@@ -89,9 +97,9 @@ export class HierarchicalTypeIndexProvider implements vscode.TreeDataProvider<Hi
         }
 
         // Configuration types group
-        if (this.treeBuilder.configTypesCount > 0) {
+        if (configTypesCount > 0) {
             const configGroup = new HierarchicalTypeItem(
-                `📁 Configuration (${this.treeBuilder.configTypesCount})`,
+                `📁 Configuration (${configTypesCount})`,
                 vscode.TreeItemCollapsibleState.Collapsed,
                 'Types from configuration metadata',
                 'config-group'

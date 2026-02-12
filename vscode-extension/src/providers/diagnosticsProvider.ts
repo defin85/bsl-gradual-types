@@ -1,21 +1,29 @@
 import * as vscode from 'vscode';
 import { BslDiagnosticItem } from './items';
+import { getSidebarSnapshot, invalidateSidebarSnapshot, SidebarDiagnosticEntry } from './sidebarSnapshot';
 
 /**
  * Провайдер для дерева диагностики BSL
  */
-export class BslDiagnosticsProvider implements vscode.TreeDataProvider<BslDiagnosticItem> {
+export class BslDiagnosticsProvider implements vscode.TreeDataProvider<BslDiagnosticItem>, vscode.Disposable {
     private _onDidChangeTreeData: vscode.EventEmitter<BslDiagnosticItem | undefined | null | void> = new vscode.EventEmitter<BslDiagnosticItem | undefined | null | void>();
     readonly onDidChangeTreeData: vscode.Event<BslDiagnosticItem | undefined | null | void> = this._onDidChangeTreeData.event;
 
-    private diagnostics: vscode.Diagnostic[] = [];
+    private readonly disposables: vscode.Disposable[] = [];
+
+    constructor() {
+        this.disposables.push(vscode.languages.onDidChangeDiagnostics(() => {
+            invalidateSidebarSnapshot();
+            this.refresh();
+        }));
+    }
 
     refresh(): void {
         this._onDidChangeTreeData.fire();
     }
 
-    updateDiagnostics(diagnostics: vscode.Diagnostic[]) {
-        this.diagnostics = diagnostics;
+    updateDiagnostics(_diagnostics: vscode.Diagnostic[]) {
+        // Kept for backward compatibility with older call sites.
         this.refresh();
     }
 
@@ -24,12 +32,19 @@ export class BslDiagnosticsProvider implements vscode.TreeDataProvider<BslDiagno
     }
 
     getChildren(element?: BslDiagnosticItem): Thenable<BslDiagnosticItem[]> {
+        return this.getChildrenFromSnapshot(element);
+    }
+
+    private async getChildrenFromSnapshot(element?: BslDiagnosticItem): Promise<BslDiagnosticItem[]> {
+        const snapshot = await getSidebarSnapshot();
+        const diagnostics = snapshot.diagnosticsSnapshot.entries;
+
         if (!element) {
             // Root items - группировка по severity
-            const errors = this.diagnostics.filter(d => d.severity === vscode.DiagnosticSeverity.Error);
-            const warnings = this.diagnostics.filter(d => d.severity === vscode.DiagnosticSeverity.Warning);
-            const infos = this.diagnostics.filter(d => d.severity === vscode.DiagnosticSeverity.Information);
-            const hints = this.diagnostics.filter(d => d.severity === vscode.DiagnosticSeverity.Hint);
+            const errors = diagnostics.filter(d => d.diagnostic.severity === vscode.DiagnosticSeverity.Error);
+            const warnings = diagnostics.filter(d => d.diagnostic.severity === vscode.DiagnosticSeverity.Warning);
+            const infos = diagnostics.filter(d => d.diagnostic.severity === vscode.DiagnosticSeverity.Information);
+            const hints = diagnostics.filter(d => d.diagnostic.severity === vscode.DiagnosticSeverity.Hint);
 
             const items: BslDiagnosticItem[] = [];
             
@@ -77,52 +92,57 @@ export class BslDiagnosticsProvider implements vscode.TreeDataProvider<BslDiagno
                 ));
             }
 
-            return Promise.resolve(items);
+            return items;
         } else {
             // Child items - конкретные диагностики
-            let relevantDiagnostics: vscode.Diagnostic[] = [];
+            let relevantDiagnostics: SidebarDiagnosticEntry[] = [];
             
             switch (element.contextValue) {
                 case 'errors':
-                    relevantDiagnostics = this.diagnostics.filter(d => d.severity === vscode.DiagnosticSeverity.Error);
+                    relevantDiagnostics = diagnostics.filter(d => d.diagnostic.severity === vscode.DiagnosticSeverity.Error);
                     break;
                 case 'warnings':
-                    relevantDiagnostics = this.diagnostics.filter(d => d.severity === vscode.DiagnosticSeverity.Warning);
+                    relevantDiagnostics = diagnostics.filter(d => d.diagnostic.severity === vscode.DiagnosticSeverity.Warning);
                     break;
                 case 'infos':
-                    relevantDiagnostics = this.diagnostics.filter(d => d.severity === vscode.DiagnosticSeverity.Information);
+                    relevantDiagnostics = diagnostics.filter(d => d.diagnostic.severity === vscode.DiagnosticSeverity.Information);
                     break;
                 case 'hints':
-                    relevantDiagnostics = this.diagnostics.filter(d => d.severity === vscode.DiagnosticSeverity.Hint);
+                    relevantDiagnostics = diagnostics.filter(d => d.diagnostic.severity === vscode.DiagnosticSeverity.Hint);
                     break;
             }
 
-            const items = relevantDiagnostics.map(d => {
+            return relevantDiagnostics.map(({ uri, diagnostic }) => {
                 const item = new BslDiagnosticItem(
-                    d.message,
+                    diagnostic.message,
                     vscode.TreeItemCollapsibleState.None,
                     'diagnostic',
-                    d.severity
+                    diagnostic.severity
                 );
                 
                 // Добавляем информацию о позиции
-                if (d.range) {
-                    item.description = `Line ${d.range.start.line + 1}`;
+                if (diagnostic.range) {
+                    item.description = `${uri.fsPath.split(/[\\\\/]/).pop() ?? uri.fsPath}:${diagnostic.range.start.line + 1}`;
                 }
                 
                 // Добавляем команду для перехода к проблеме
-                if (d.source) {
+                if (diagnostic.range) {
                     item.command = {
                         command: 'bslAnalyzer.goToDiagnostic',
                         title: 'Go to Issue',
-                        arguments: [d]
+                        arguments: [uri, diagnostic]
                     };
                 }
                 
                 return item;
             });
-
-            return Promise.resolve(items);
         }
+    }
+
+    dispose(): void {
+        for (const disposable of this.disposables) {
+            disposable.dispose();
+        }
+        this.disposables.length = 0;
     }
 }

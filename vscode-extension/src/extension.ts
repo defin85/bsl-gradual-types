@@ -37,6 +37,7 @@ import {
     BslActionsWebviewProvider,
     TypeDetailsWebviewProvider,
 } from './providers';
+import { invalidateSidebarSnapshot } from './providers/sidebarSnapshot';
 // Webview функции не используются напрямую в extension.ts
 // Они используются в модуле commands
 import { registerCommands as registerAllCommands, initializeCommands } from './commands';
@@ -368,6 +369,7 @@ function registerSidebarProviders(context: vscode.ExtensionContext) {
             showCollapseAll: true
         });
         context.subscriptions.push(overviewTreeView);
+        context.subscriptions.push(overviewProvider);
         outputChannel.appendLine('✅ Overview provider registered');
 
         // Cache Dashboard provider
@@ -400,6 +402,7 @@ function registerSidebarProviders(context: vscode.ExtensionContext) {
             showCollapseAll: true
         });
         context.subscriptions.push(diagnosticsTreeView);
+        context.subscriptions.push(diagnosticsProvider);
         outputChannel.appendLine('✅ Diagnostics provider registered');
 
         // Type Repository provider - показывает типы из LSP Server TypeRepository
@@ -418,7 +421,7 @@ function registerSidebarProviders(context: vscode.ExtensionContext) {
 
         // Quick Actions webview provider
         outputChannel.appendLine('📋 Creating Quick Actions webview provider...');
-        const actionsProvider = new BslActionsWebviewProvider(context.extensionUri);
+        const actionsProvider = new BslActionsWebviewProvider(context.extensionUri, undefined, outputChannel);
         const webviewProvider = vscode.window.registerWebviewViewProvider('bslAnalyzer.actions', actionsProvider);
         context.subscriptions.push(webviewProvider);
         outputChannel.appendLine('✅ Quick Actions webview provider registered');
@@ -431,18 +434,32 @@ function registerSidebarProviders(context: vscode.ExtensionContext) {
                 typeDetailsProvider.showTypeDetails(typeName);
             })
         );
+        context.subscriptions.push(
+            vscode.commands.registerCommand('bslAnalyzer.goToDiagnostic', async (uri: vscode.Uri, diagnostic: vscode.Diagnostic) => {
+                if (!uri || !diagnostic?.range) {
+                    return;
+                }
+                const document = await vscode.workspace.openTextDocument(uri);
+                const editor = await vscode.window.showTextDocument(document, { preview: false });
+                editor.selection = new vscode.Selection(diagnostic.range.start, diagnostic.range.end);
+                editor.revealRange(diagnostic.range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+            })
+        );
         outputChannel.appendLine("✅ Type Details modal provider registered");
         // Register refresh commands
         context.subscriptions.push(
             vscode.commands.registerCommand('bslAnalyzer.refreshOverview', () => {
                 outputChannel.appendLine('🔄 Refreshing Overview panel');
+                invalidateSidebarSnapshot();
                 overviewProvider.refresh();
+                void actionsProvider.refreshSidebarSnapshot();
             })
         );
 
         context.subscriptions.push(
             vscode.commands.registerCommand('bslAnalyzer.refreshCacheDashboard', () => {
                 outputChannel.appendLine('🔄 Refreshing Cache Dashboard panel');
+                invalidateSidebarSnapshot();
                 cacheDashboardProvider.refresh();
             })
         );
@@ -489,14 +506,18 @@ function registerSidebarProviders(context: vscode.ExtensionContext) {
         context.subscriptions.push(
             vscode.commands.registerCommand('bslAnalyzer.refreshDiagnostics', () => {
                 outputChannel.appendLine('🔄 Refreshing Diagnostics panel');
+                invalidateSidebarSnapshot();
                 diagnosticsProvider.refresh();
+                void actionsProvider.refreshSidebarSnapshot();
             })
         );
 
         context.subscriptions.push(
             vscode.commands.registerCommand('bslAnalyzer.refreshTypeRepository', () => {
                 outputChannel.appendLine('🔄 Refreshing Type Repository panel');
+                invalidateSidebarSnapshot();
                 typeIndexProvider.refresh();
+                void actionsProvider.refreshSidebarSnapshot();
             })
         );
 

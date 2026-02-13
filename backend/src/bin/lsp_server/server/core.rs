@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::{Mutex, RwLock};
-use tokio::task;
 use tower_lsp::lsp_types::request::{
     CodeActionRequest, Formatting as DocumentFormattingRequest, InlayHintRequest, RangeFormatting,
     Request as LspRequest,
@@ -796,7 +795,7 @@ impl BslLanguageServer {
                         semantic_elapsed,
                         syntax_cancelled_error,
                         semantic_cancelled_error,
-                    ) = match task::spawn_blocking(move || {
+                    ) = match bsl_runtime::application::spawn_bounded_blocking(move || {
                         let mut diagnostics = Vec::new();
                         let mut was_cancelled = false;
                         let mut syntax_cancelled_error = None;
@@ -805,9 +804,17 @@ impl BslLanguageServer {
                         let file_text = analysis.file_text(file_id).ok().flatten();
                         let line_index = analysis.line_index(file_id).ok().flatten();
 
-                        let parse_result_started = Instant::now();
-                        let _ = analysis.parse_result(file_id);
-                        let parse_result_elapsed = parse_result_started.elapsed();
+                        let parse_result_elapsed =
+                            if bsl_runtime::application::should_query_parse_result(
+                                bsl_runtime::application::SemanticOperation::Diagnostics,
+                                false,
+                            ) {
+                                let parse_result_started = Instant::now();
+                                let _ = analysis.parse_result(file_id);
+                                parse_result_started.elapsed()
+                            } else {
+                                std::time::Duration::ZERO
+                            };
 
                         let syntax_started = Instant::now();
                         let syntax_result = analysis.syntax_diagnostics(file_id);
@@ -898,36 +905,42 @@ impl BslLanguageServer {
                         }
                     };
 
-                    server
-                        .coordinator
-                        .record_intellisense_v2_parse_result_query_latency(parse_result_elapsed);
-                    if let Some(threshold) = super::intellisense_v2_slow_client_log_threshold() {
-                        if parse_result_elapsed >= threshold {
-                            server
-                                .client
-                                .log_message(
-                                    MessageType::INFO,
-                                    format!(
-                                        "[perf] diagnostics_v2 parse_result: parse_ms={} uri={} file_id={} expected_version={}",
-                                        parse_result_elapsed.as_millis(),
-                                        uri_for_task,
-                                        file_id.0,
-                                        requested_version
-                                    ),
-                                )
-                                .await;
-                        }
-                    }
-                    if let Some(threshold) = super::intellisense_v2_slow_query_warn_threshold() {
-                        if parse_result_elapsed >= threshold {
-                            warn!(
-                                uri = %uri_for_task,
-                                file_id = file_id.0,
-                                expected_version = requested_version,
-                                parse_result_ms = parse_result_elapsed.as_millis(),
-                                threshold_ms = threshold.as_millis(),
-                                "diagnostics_v2: parse_result query is slow"
+                    if parse_result_elapsed > std::time::Duration::ZERO {
+                        server
+                            .coordinator
+                            .record_intellisense_v2_parse_result_query_latency(
+                                parse_result_elapsed,
                             );
+                        if let Some(threshold) = super::intellisense_v2_slow_client_log_threshold()
+                        {
+                            if parse_result_elapsed >= threshold {
+                                server
+                                    .client
+                                    .log_message(
+                                        MessageType::INFO,
+                                        format!(
+                                            "[perf] diagnostics_v2 parse_result: parse_ms={} uri={} file_id={} expected_version={}",
+                                            parse_result_elapsed.as_millis(),
+                                            uri_for_task,
+                                            file_id.0,
+                                            requested_version
+                                        ),
+                                    )
+                                    .await;
+                            }
+                        }
+                        if let Some(threshold) = super::intellisense_v2_slow_query_warn_threshold()
+                        {
+                            if parse_result_elapsed >= threshold {
+                                warn!(
+                                    uri = %uri_for_task,
+                                    file_id = file_id.0,
+                                    expected_version = requested_version,
+                                    parse_result_ms = parse_result_elapsed.as_millis(),
+                                    threshold_ms = threshold.as_millis(),
+                                    "diagnostics_v2: parse_result query is slow"
+                                );
+                            }
                         }
                     }
 
@@ -1192,6 +1205,81 @@ mod tests {
     };
     use tower_lsp::LanguageServer;
     use tower_lsp::LspService;
+
+    const UNIFIED_STAGE_COUNTER_KEYS: &[&str] = &[
+        "intellisense_v2_runtime_wait_for_file_version_queue_wait_total",
+        "intellisense_v2_runtime_wait_for_file_version_exec_total",
+        "intellisense_v2_runtime_snapshot_with_deps_queue_wait_total",
+        "intellisense_v2_runtime_snapshot_with_deps_exec_total",
+        "intellisense_v2_wait_for_file_version_diagnostics_total",
+        "intellisense_v2_snapshot_diagnostics_total",
+        "intellisense_v2_ir_query_other_total",
+        "intellisense_v2_syntax_diagnostics_query_total",
+        "intellisense_v2_semantic_diagnostics_query_total",
+        "intellisense_v2_parse_result_query_total",
+        "intellisense_v2_ir_query_cancelled_total_other",
+        "intellisense_v2_query_cancelled_total_syntax",
+        "intellisense_v2_query_cancelled_total_semantic",
+    ];
+
+    const UNIFIED_STAGE_HISTOGRAM_KEYS: &[&str] = &[
+        "intellisense_v2_runtime_wait_for_file_version_queue_wait_ms",
+        "intellisense_v2_runtime_wait_for_file_version_exec_ms",
+        "intellisense_v2_runtime_snapshot_with_deps_queue_wait_ms",
+        "intellisense_v2_runtime_snapshot_with_deps_exec_ms",
+        "intellisense_v2_wait_for_file_version_diagnostics_ms",
+        "intellisense_v2_snapshot_diagnostics_ms",
+        "intellisense_v2_ir_query_other_ms",
+        "intellisense_v2_syntax_diagnostics_query_ms",
+        "intellisense_v2_semantic_diagnostics_query_ms",
+        "intellisense_v2_parse_result_query_ms",
+    ];
+
+    fn seed_unified_intellisense_v2_stage_metrics(coordinator: &SystemCoordinator) {
+        let sample = std::time::Duration::from_millis(3);
+        coordinator
+            .record_intellisense_v2_runtime_queue_wait_latency("wait_for_file_version", sample);
+        coordinator.record_intellisense_v2_runtime_exec_latency("wait_for_file_version", sample);
+        coordinator.record_intellisense_v2_runtime_queue_wait_latency("snapshot_with_deps", sample);
+        coordinator.record_intellisense_v2_runtime_exec_latency("snapshot_with_deps", sample);
+        coordinator.record_intellisense_v2_wait_for_file_version("diagnostics", sample);
+        coordinator.record_intellisense_v2_snapshot_latency("diagnostics", sample);
+        coordinator.record_intellisense_v2_ir_query_latency("other", sample);
+        coordinator.record_intellisense_v2_syntax_diagnostics_query_latency(sample);
+        coordinator.record_intellisense_v2_semantic_diagnostics_query_latency(sample);
+        coordinator.record_intellisense_v2_parse_result_query_latency(sample);
+        coordinator.record_intellisense_v2_ir_query_cancelled("other");
+        coordinator.record_intellisense_v2_query_cancelled("syntax");
+        coordinator.record_intellisense_v2_query_cancelled("semantic");
+    }
+
+    fn assert_unified_intellisense_v2_stage_contract(payload: &serde_json::Value) {
+        let metrics = payload.get("metrics").expect("metrics field");
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        let histograms = metrics
+            .get("histograms")
+            .and_then(|value| value.as_object())
+            .expect("metrics.histograms object");
+
+        for key in UNIFIED_STAGE_COUNTER_KEYS {
+            assert!(
+                counters.contains_key(*key),
+                "missing counter key {key}, got keys={:?}",
+                counters.keys().collect::<Vec<_>>()
+            );
+        }
+
+        for key in UNIFIED_STAGE_HISTOGRAM_KEYS {
+            assert!(
+                histograms.contains_key(*key),
+                "missing histogram key {key}, got keys={:?}",
+                histograms.keys().collect::<Vec<_>>()
+            );
+        }
+    }
 
     #[tokio::test]
     async fn p6_fast_did_change_series_publish_diagnostics_is_monotonic() {
@@ -3787,6 +3875,77 @@ mod tests {
             actions.iter().any(|action| matches!(action, CodeActionOrCommand::CodeAction(action) if action.kind.as_ref() == Some(&tower_lsp::lsp_types::CodeActionKind::REFACTOR_EXTRACT))),
             "expected refactor.extract action"
         );
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
+    async fn p22_get_observability_metrics_exposes_unified_stage_contract() {
+        let coordinator = Arc::new(SystemCoordinator::new());
+        seed_unified_intellisense_v2_stage_metrics(coordinator.as_ref());
+
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            move |client| BslLanguageServer::new(client, coordinator.clone())
+        })
+        .finish();
+
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        let initialize_params = InitializeParams {
+            capabilities: ClientCapabilities::default(),
+            ..Default::default()
+        };
+        let initialize = Request::build("initialize")
+            .id(1)
+            .params(serde_json::to_value(initialize_params).expect("InitializeParams"))
+            .finish();
+        let initialize_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialize)
+            .await
+            .expect("initialize request");
+        assert!(
+            initialize_response.is_some(),
+            "initialize should return a response"
+        );
+
+        let initialized = Request::build("initialized")
+            .params(serde_json::to_value(InitializedParams {}).expect("InitializedParams"))
+            .finish();
+        let initialized_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialized)
+            .await
+            .expect("initialized notification");
+        assert!(
+            initialized_response.is_none(),
+            "initialized is a notification"
+        );
+
+        let execute = Request::build("workspace/executeCommand")
+            .id(2)
+            .params(serde_json::json!({
+                "command": "bsl.getObservabilityMetrics",
+                "arguments": [],
+            }))
+            .finish();
+        let execute_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(execute)
+            .await
+            .expect("workspace/executeCommand request")
+            .expect("workspace/executeCommand response");
+
+        let value = serde_json::to_value(&execute_response).expect("serialize response");
+        let result = value.get("result").cloned().expect("result field");
+        assert_unified_intellisense_v2_stage_contract(&result);
 
         drain_task.abort();
     }

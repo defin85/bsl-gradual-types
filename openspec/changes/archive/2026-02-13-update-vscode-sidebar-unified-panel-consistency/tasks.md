@@ -17,4 +17,4 @@
 
 ## 4. Validation
 - [x] 4.1 `openspec validate update-vscode-sidebar-unified-panel-consistency --strict --no-interactive`
-- [ ] 4.2 Review change с владельцами VS Code extension и LSP custom requests.
+- [x] 4.2 Review change с владельцами VS Code extension и LSP custom requests.

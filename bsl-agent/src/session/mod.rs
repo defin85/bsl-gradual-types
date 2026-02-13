@@ -1,9 +1,11 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
+use std::time::Instant;
 
-use bsl_analysis_v2::{AnalysisHostV2, Change, FileId, SettingsId};
+use bsl_analysis_v2::{FileId, SettingsId};
 use bsl_runtime::application::type_system::web_api_service;
+use bsl_runtime::application::{ExecutionSettings, IntellisenseV2Facade};
 use bsl_runtime::data::loaders::progress::ProgressUpdate;
 use bsl_runtime::data::loaders::ConfigurationDiscovery;
 use bsl_runtime::system::runtime_config::{global_runtime_config, RuntimeKey};
@@ -1364,7 +1366,16 @@ impl SessionManager {
     ) -> Result<BslDiagnosticsResponse, rmcp::ErrorData> {
         let uuid = parse_session_id(&params.session_id)?;
         let flow_sensitive_enabled = params.include_flow_sensitive;
-        let (roots, hot_set, overlays, analysis_revision, deps_id, deps) = {
+        let (
+            roots,
+            hot_set,
+            overlays,
+            analysis_revision,
+            deps_id,
+            deps,
+            index_snapshot,
+            coordinator,
+        ) = {
             let sessions = self.sessions.read().await;
             let session = sessions
                 .get(&uuid)
@@ -1379,6 +1390,8 @@ impl SessionManager {
                 session.analysis_revision,
                 startup.deps_bundle_v2.deps_id.clone(),
                 startup.deps_bundle_v2.semantic_deps.clone(),
+                startup.deps_bundle_v2.index_snapshot.clone(),
+                startup.coordinator.clone(),
             )
         };
 
@@ -1390,31 +1403,30 @@ impl SessionManager {
         let mut total_read_bytes = 0u64;
 
         for file in files {
-            let snapshot = match load_document_snapshot(&file, &overlays)? {
+            let doc_snapshot = match load_document_snapshot(&file, &overlays)? {
                 Some(snapshot) => snapshot,
                 None => continue,
             };
 
-            total_read_bytes = total_read_bytes.saturating_add(snapshot.text.len() as u64);
+            total_read_bytes = total_read_bytes.saturating_add(doc_snapshot.text.len() as u64);
             if total_read_bytes > MAX_TOTAL_READ_BYTES {
                 truncated = true;
                 break;
             }
 
-            let mut host = bsl_analysis_v2::AnalysisHostV2::default();
-            host.apply_change(bsl_analysis_v2::Change::SetDepsSnapshot {
-                deps_id: deps_id.clone(),
-                deps: deps.clone(),
-            });
-            apply_settings_snapshot_v2(&mut host, DetailLevel::Full);
-            host.apply_change(bsl_analysis_v2::Change::SetFile {
-                file_id: bsl_analysis_v2::FileId(1),
-                text: Arc::from(snapshot.text),
-                version: snapshot.version,
-                path: Arc::from(snapshot.abs_path.to_string_lossy().to_string()),
-            });
+            let snapshot_started = Instant::now();
+            let semantic_snapshot = build_ephemeral_snapshot_v2(
+                deps_id.clone(),
+                deps.clone(),
+                index_snapshot.clone(),
+                Arc::from(doc_snapshot.text),
+                doc_snapshot.version,
+                Arc::from(doc_snapshot.abs_path.to_string_lossy().to_string()),
+                DetailLevel::Full,
+            );
+            record_snapshot_latency(coordinator.as_ref(), "diagnostics", snapshot_started);
 
-            let analysis = host.analysis();
+            let analysis = semantic_snapshot.analysis;
             let Some(code) = analysis
                 .file_text(bsl_analysis_v2::FileId(1))
                 .ok()
@@ -1429,18 +1441,18 @@ impl SessionManager {
             else {
                 continue;
             };
-            let file_diags = if flow_sensitive_enabled {
-                analysis
-                    .semantic_diagnostics_flow_sensitive(bsl_analysis_v2::FileId(1))
-                    .ok()
-                    .flatten()
+            let semantic_started = Instant::now();
+            let file_diags_result = if flow_sensitive_enabled {
+                analysis.semantic_diagnostics_flow_sensitive(bsl_analysis_v2::FileId(1))
             } else {
-                analysis
-                    .semantic_diagnostics(bsl_analysis_v2::FileId(1))
-                    .ok()
-                    .flatten()
+                analysis.semantic_diagnostics(bsl_analysis_v2::FileId(1))
             };
-            let Some(file_diags) = file_diags else {
+            record_semantic_diagnostics_query_metrics(
+                coordinator.as_ref(),
+                semantic_started,
+                &file_diags_result,
+            );
+            let Some(file_diags) = file_diags_result.ok().flatten() else {
                 continue;
             };
 
@@ -1481,8 +1493,8 @@ impl SessionManager {
                 diagnostics.push(facade.diagnostic(
                     analysis_revision,
                     DocumentRefDto {
-                        root_id: snapshot.file.root_id.clone(),
-                        path: snapshot.file.path.clone(),
+                        root_id: doc_snapshot.file.root_id.clone(),
+                        path: doc_snapshot.file.path.clone(),
                     },
                     range,
                     severity,
@@ -1528,7 +1540,7 @@ impl SessionManager {
             });
         }
 
-        let (roots, analysis_revision, deps_id, deps) = {
+        let (roots, analysis_revision, deps_id, deps, index_snapshot, coordinator) = {
             let sessions = self.sessions.read().await;
             let session = sessions
                 .get(&uuid)
@@ -1541,6 +1553,8 @@ impl SessionManager {
                 session.analysis_revision,
                 startup.deps_bundle_v2.deps_id.clone(),
                 startup.deps_bundle_v2.semantic_deps.clone(),
+                startup.deps_bundle_v2.index_snapshot.clone(),
+                startup.coordinator.clone(),
             )
         };
 
@@ -1561,22 +1575,23 @@ impl SessionManager {
                 break;
             }
 
-            let mut host = AnalysisHostV2::default();
-            host.apply_change(Change::SetDepsSnapshot {
-                deps_id: deps_id.clone(),
-                deps: deps.clone(),
-            });
-            apply_settings_snapshot_v2(&mut host, DetailLevel::Full);
-            host.apply_change(Change::SetFile {
-                file_id: FileId(1),
-                text: Arc::from(text),
-                version: 0,
-                path: Arc::from(file.abs_path.to_string_lossy().to_string()),
-            });
+            let snapshot_started = Instant::now();
+            let snapshot = build_ephemeral_snapshot_v2(
+                deps_id.clone(),
+                deps.clone(),
+                index_snapshot.clone(),
+                Arc::from(text),
+                0,
+                Arc::from(file.abs_path.to_string_lossy().to_string()),
+                DetailLevel::Full,
+            );
+            record_snapshot_latency(coordinator.as_ref(), "other", snapshot_started);
 
-            let analysis = host.analysis();
-            let program = analysis.ir(FileId(1)).ok().flatten();
-            let Some(program) = program else {
+            let analysis = snapshot.analysis;
+            let ir_started = Instant::now();
+            let program_result = analysis.ir(FileId(1));
+            record_ir_query_metrics(coordinator.as_ref(), "other", ir_started, &program_result);
+            let Some(program) = program_result.ok().flatten() else {
                 continue;
             };
             let Some(code) = analysis.file_text(FileId(1)).ok().flatten() else {
@@ -1677,7 +1692,7 @@ impl SessionManager {
     ) -> Result<BslTypeAtPositionResponse, rmcp::ErrorData> {
         let uuid = parse_session_id(&params.session_id)?;
         let flow_sensitive_enabled = params.include_flow_sensitive;
-        let (analysis_revision, roots, overlays, deps_id, deps, index_snapshot) = {
+        let (analysis_revision, roots, overlays, deps_id, deps, index_snapshot, coordinator) = {
             let sessions = self.sessions.read().await;
             let session = sessions
                 .get(&uuid)
@@ -1692,6 +1707,7 @@ impl SessionManager {
                 startup.deps_bundle_v2.deps_id.clone(),
                 startup.deps_bundle_v2.semantic_deps.clone(),
                 startup.deps_bundle_v2.index_snapshot.clone(),
+                startup.coordinator.clone(),
             )
         };
 
@@ -1701,22 +1717,23 @@ impl SessionManager {
             select_effective_text(&params.file, &file_key, &overlays, &root_path, &abs_path)?;
         let version = select_effective_version(&params.file, &file_key, &overlays);
 
-        let mut host = AnalysisHostV2::default();
-        host.apply_change(Change::SetDepsSnapshot {
-            deps_id: deps_id.clone(),
-            deps: deps.clone(),
-        });
-        apply_settings_snapshot_v2(&mut host, DetailLevel::Full);
-        host.apply_change(Change::SetFile {
-            file_id: FileId(1),
-            text: Arc::from(text),
+        let snapshot_started = Instant::now();
+        let snapshot = build_ephemeral_snapshot_v2(
+            deps_id.clone(),
+            deps.clone(),
+            index_snapshot.clone(),
+            Arc::from(text),
             version,
-            path: Arc::from(abs_path.to_string_lossy().to_string()),
-        });
+            Arc::from(abs_path.to_string_lossy().to_string()),
+            DetailLevel::Full,
+        );
+        record_snapshot_latency(coordinator.as_ref(), "other", snapshot_started);
 
-        let analysis = host.analysis();
-        let program = analysis.ir(FileId(1)).ok().flatten();
-        let Some(program) = program else {
+        let analysis = snapshot.analysis;
+        let ir_started = Instant::now();
+        let program_result = analysis.ir(FileId(1));
+        record_ir_query_metrics(coordinator.as_ref(), "other", ir_started, &program_result);
+        let Some(program) = program_result.ok().flatten() else {
             return Ok(BslTypeAtPositionResponse {
                 analysis_revision,
                 flow_sensitive_enabled,
@@ -1755,7 +1772,7 @@ impl SessionManager {
             range: span_to_range_with_analysis(&analysis, FileId(1), node.span),
         });
 
-        let _ = index_snapshot.id.as_str();
+        let _ = snapshot.index_snapshot.id.as_str();
 
         Ok(BslTypeAtPositionResponse {
             analysis_revision,
@@ -1772,7 +1789,7 @@ impl SessionManager {
     ) -> Result<BslMembersResponse, rmcp::ErrorData> {
         let uuid = parse_session_id(&params.session_id)?;
         let flow_sensitive_enabled = params.include_flow_sensitive;
-        let (analysis_revision, roots, overlays, deps_id, deps, index_snapshot) = {
+        let (analysis_revision, roots, overlays, deps_id, deps, index_snapshot, coordinator) = {
             let sessions = self.sessions.read().await;
             let session = sessions
                 .get(&uuid)
@@ -1787,6 +1804,7 @@ impl SessionManager {
                 startup.deps_bundle_v2.deps_id.clone(),
                 startup.deps_bundle_v2.semantic_deps.clone(),
                 startup.deps_bundle_v2.index_snapshot.clone(),
+                startup.coordinator.clone(),
             )
         };
 
@@ -1796,22 +1814,38 @@ impl SessionManager {
             select_effective_text(&params.file, &file_key, &overlays, &root_path, &abs_path)?;
         let version = select_effective_version(&params.file, &file_key, &overlays);
 
-        let mut host = AnalysisHostV2::default();
-        host.apply_change(Change::SetDepsSnapshot {
-            deps_id: deps_id.clone(),
-            deps: deps.clone(),
-        });
-        apply_settings_snapshot_v2(&mut host, DetailLevel::Full);
-        host.apply_change(Change::SetFile {
-            file_id: FileId(1),
-            text: Arc::from(text.clone()),
+        let snapshot_started = Instant::now();
+        let snapshot = build_ephemeral_snapshot_v2(
+            deps_id.clone(),
+            deps.clone(),
+            index_snapshot.clone(),
+            Arc::from(text.clone()),
             version,
-            path: Arc::from(abs_path.to_string_lossy().to_string()),
-        });
+            Arc::from(abs_path.to_string_lossy().to_string()),
+            DetailLevel::Full,
+        );
+        record_snapshot_latency(coordinator.as_ref(), "other", snapshot_started);
 
-        let analysis = host.analysis();
-        let program = analysis.ir(FileId(1)).ok().flatten();
-        let parse_result = analysis.parse_result(FileId(1)).ok().flatten();
+        let analysis = snapshot.analysis;
+        let ir_started = Instant::now();
+        let program_result = analysis.ir(FileId(1));
+        record_ir_query_metrics(coordinator.as_ref(), "other", ir_started, &program_result);
+        let program = program_result.ok().flatten();
+        let parse_result = if bsl_runtime::application::should_query_parse_result(
+            bsl_runtime::application::SemanticOperation::Members,
+            program.is_some(),
+        ) {
+            let parse_started = Instant::now();
+            let parse_result_query = analysis.parse_result(FileId(1));
+            record_parse_result_query_metrics(
+                coordinator.as_ref(),
+                parse_started,
+                &parse_result_query,
+            );
+            parse_result_query.ok().flatten()
+        } else {
+            None
+        };
         let Some(program) = program else {
             return Ok(BslMembersResponse {
                 analysis_revision,
@@ -1849,7 +1883,7 @@ impl SessionManager {
             params.position.line,
             params.position.character,
             None,
-            index_snapshot.as_ref(),
+            snapshot.index_snapshot.as_ref(),
             &metadata_lookup,
             abs_path.to_string_lossy().as_ref(),
             resolver.as_ref(),
@@ -1941,7 +1975,7 @@ impl SessionManager {
             ));
         };
 
-        let (analysis_revision, roots, overlays, deps_id, deps) = {
+        let (analysis_revision, roots, overlays, deps_id, deps, index_snapshot, coordinator) = {
             let sessions = self.sessions.read().await;
             let session = sessions
                 .get(&uuid)
@@ -1955,6 +1989,8 @@ impl SessionManager {
                 session.documents.overlays.clone(),
                 startup.deps_bundle_v2.deps_id.clone(),
                 startup.deps_bundle_v2.semantic_deps.clone(),
+                startup.deps_bundle_v2.index_snapshot.clone(),
+                startup.coordinator.clone(),
             )
         };
 
@@ -1963,22 +1999,23 @@ impl SessionManager {
         let text = select_effective_text(&file, &file_key, &overlays, &root_path, &abs_path)?;
         let version = select_effective_version(&file, &file_key, &overlays);
 
-        let mut host = AnalysisHostV2::default();
-        host.apply_change(Change::SetDepsSnapshot {
-            deps_id: deps_id.clone(),
-            deps: deps.clone(),
-        });
-        apply_settings_snapshot_v2(&mut host, DetailLevel::Full);
-        host.apply_change(Change::SetFile {
-            file_id: FileId(1),
-            text: Arc::from(text),
+        let snapshot_started = Instant::now();
+        let snapshot = build_ephemeral_snapshot_v2(
+            deps_id.clone(),
+            deps.clone(),
+            index_snapshot,
+            Arc::from(text),
             version,
-            path: Arc::from(abs_path.to_string_lossy().to_string()),
-        });
+            Arc::from(abs_path.to_string_lossy().to_string()),
+            DetailLevel::Full,
+        );
+        record_snapshot_latency(coordinator.as_ref(), "other", snapshot_started);
 
-        let analysis = host.analysis();
-        let program = analysis.ir(FileId(1)).ok().flatten();
-        let Some(program) = program else {
+        let analysis = snapshot.analysis;
+        let ir_started = Instant::now();
+        let program_result = analysis.ir(FileId(1));
+        record_ir_query_metrics(coordinator.as_ref(), "other", ir_started, &program_result);
+        let Some(program) = program_result.ok().flatten() else {
             return Ok(BslDefinitionResponse {
                 analysis_revision,
                 location: None,
@@ -2053,7 +2090,7 @@ impl SessionManager {
         params: BslReferencesParams,
     ) -> Result<BslReferencesResponse, rmcp::ErrorData> {
         let uuid = parse_session_id(&params.session_id)?;
-        let (roots, analysis_revision, deps_id, deps, symbol) = {
+        let (roots, analysis_revision, deps_id, deps, index_snapshot, symbol, coordinator) = {
             let sessions = self.sessions.read().await;
             let session = sessions
                 .get(&uuid)
@@ -2071,7 +2108,9 @@ impl SessionManager {
                 session.analysis_revision,
                 startup.deps_bundle_v2.deps_id.clone(),
                 startup.deps_bundle_v2.semantic_deps.clone(),
+                startup.deps_bundle_v2.index_snapshot.clone(),
                 symbol,
+                startup.coordinator.clone(),
             )
         };
 
@@ -2100,22 +2139,23 @@ impl SessionManager {
                 break;
             }
 
-            let mut host = AnalysisHostV2::default();
-            host.apply_change(Change::SetDepsSnapshot {
-                deps_id: deps_id.clone(),
-                deps: deps.clone(),
-            });
-            apply_settings_snapshot_v2(&mut host, DetailLevel::Full);
-            host.apply_change(Change::SetFile {
-                file_id: FileId(1),
-                text: Arc::from(text),
-                version: 0,
-                path: Arc::from(file.abs_path.to_string_lossy().to_string()),
-            });
+            let snapshot_started = Instant::now();
+            let snapshot = build_ephemeral_snapshot_v2(
+                deps_id.clone(),
+                deps.clone(),
+                index_snapshot.clone(),
+                Arc::from(text),
+                0,
+                Arc::from(file.abs_path.to_string_lossy().to_string()),
+                DetailLevel::Full,
+            );
+            record_snapshot_latency(coordinator.as_ref(), "other", snapshot_started);
 
-            let analysis = host.analysis();
-            let program = analysis.ir(FileId(1)).ok().flatten();
-            let Some(program) = program else {
+            let analysis = snapshot.analysis;
+            let ir_started = Instant::now();
+            let program_result = analysis.ir(FileId(1));
+            record_ir_query_metrics(coordinator.as_ref(), "other", ir_started, &program_result);
+            let Some(program) = program_result.ok().flatten() else {
                 continue;
             };
             let Some(code) = analysis.file_text(FileId(1)).ok().flatten() else {
@@ -2306,20 +2346,16 @@ impl SessionManager {
 
                 if params.include.types {
                     let version = select_effective_version(&file, &file_key, &overlays);
-                    let mut host = AnalysisHostV2::default();
-                    host.apply_change(Change::SetDepsSnapshot {
-                        deps_id: deps_id.clone(),
-                        deps: deps.clone(),
-                    });
-                    apply_settings_snapshot_v2(&mut host, DetailLevel::Full);
-                    host.apply_change(Change::SetFile {
-                        file_id: FileId(1),
-                        text: Arc::from(source_text),
+                    let semantic_snapshot = build_ephemeral_snapshot_v2(
+                        deps_id.clone(),
+                        deps.clone(),
+                        index_snapshot.clone(),
+                        Arc::from(source_text.clone()),
                         version,
-                        path: Arc::from(abs_path.to_string_lossy().to_string()),
-                    });
-
-                    let analysis = host.analysis();
+                        Arc::from(abs_path.to_string_lossy().to_string()),
+                        DetailLevel::Full,
+                    );
+                    let analysis = semantic_snapshot.analysis;
                     let program = analysis.ir(FileId(1)).ok().flatten();
                     if let Some(program) = program {
                         let _ = program;
@@ -3379,15 +3415,78 @@ fn select_effective_version(
         .unwrap_or(0)
 }
 
-fn apply_settings_snapshot_v2(host: &mut AnalysisHostV2, diagnostics_detail_level: DetailLevel) {
-    host.apply_change(Change::SetSettingsSnapshot {
-        settings_id: SettingsId::from_hash(format!(
-            "bsl-agent;schema={};diagnostics.detail_level={:?}",
-            bsl_analysis_v2::SETTINGS_SCHEMA_VERSION,
-            diagnostics_detail_level
-        )),
-        diagnostics_detail_level,
-    });
+fn settings_id_v2(diagnostics_detail_level: DetailLevel) -> SettingsId {
+    SettingsId::from_hash(format!(
+        "bsl-agent;schema={};diagnostics.detail_level={:?}",
+        bsl_analysis_v2::SETTINGS_SCHEMA_VERSION,
+        diagnostics_detail_level
+    ))
+}
+
+fn record_snapshot_latency(
+    coordinator: &bsl_runtime::system::SystemCoordinator,
+    kind: &str,
+    started_at: Instant,
+) {
+    coordinator.record_intellisense_v2_snapshot_latency(kind, started_at.elapsed());
+}
+
+fn record_ir_query_metrics<T, E>(
+    coordinator: &bsl_runtime::system::SystemCoordinator,
+    kind: &str,
+    started_at: Instant,
+    result: &Result<Option<T>, E>,
+) {
+    coordinator.record_intellisense_v2_ir_query_latency(kind, started_at.elapsed());
+    if result.is_err() {
+        coordinator.record_intellisense_v2_ir_query_cancelled(kind);
+    }
+}
+
+fn record_parse_result_query_metrics<T, E>(
+    coordinator: &bsl_runtime::system::SystemCoordinator,
+    started_at: Instant,
+    result: &Result<Option<T>, E>,
+) {
+    coordinator.record_intellisense_v2_parse_result_query_latency(started_at.elapsed());
+    if result.is_err() {
+        coordinator.record_intellisense_v2_query_cancelled("other");
+    }
+}
+
+fn record_semantic_diagnostics_query_metrics<T, E>(
+    coordinator: &bsl_runtime::system::SystemCoordinator,
+    started_at: Instant,
+    result: &Result<Option<T>, E>,
+) {
+    coordinator.record_intellisense_v2_semantic_diagnostics_query_latency(started_at.elapsed());
+    if result.is_err() {
+        coordinator.record_intellisense_v2_query_cancelled("semantic");
+    }
+}
+
+fn build_ephemeral_snapshot_v2(
+    deps_id: bsl_analysis_v2::DepsSnapshotId,
+    deps: Arc<bsl_analysis_v2::SemanticDeps>,
+    index_snapshot: Arc<bsl_runtime::system::IndexSnapshot>,
+    text: Arc<str>,
+    version: i32,
+    path: Arc<str>,
+    diagnostics_detail_level: DetailLevel,
+) -> bsl_runtime::application::SemanticSnapshot {
+    IntellisenseV2Facade::ephemeral_snapshot(
+        deps_id,
+        deps,
+        index_snapshot,
+        ExecutionSettings {
+            settings_id: settings_id_v2(diagnostics_detail_level),
+            diagnostics_detail_level,
+        },
+        FileId(1),
+        text,
+        version,
+        path,
+    )
 }
 
 fn span_to_range_with_index(
@@ -3753,6 +3852,49 @@ mod tests {
     use crate::types::JobStateDto;
     use std::sync::Arc;
 
+    const UNIFIED_STAGE_COUNTER_KEYS: &[&str] = &[
+        "intellisense_v2_snapshot_diagnostics_total",
+        "intellisense_v2_semantic_diagnostics_query_total",
+        "intellisense_v2_snapshot_other_total",
+        "intellisense_v2_ir_query_other_total",
+        "intellisense_v2_parse_result_query_total",
+    ];
+
+    const UNIFIED_STAGE_HISTOGRAM_KEYS: &[&str] = &[
+        "intellisense_v2_snapshot_diagnostics_ms",
+        "intellisense_v2_semantic_diagnostics_query_ms",
+        "intellisense_v2_snapshot_other_ms",
+        "intellisense_v2_ir_query_other_ms",
+        "intellisense_v2_parse_result_query_ms",
+    ];
+
+    fn assert_unified_intellisense_v2_stage_contract(metrics: &serde_json::Value) {
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        let histograms = metrics
+            .get("histograms")
+            .and_then(|value| value.as_object())
+            .expect("metrics.histograms object");
+
+        for key in UNIFIED_STAGE_COUNTER_KEYS {
+            assert!(
+                counters.contains_key(*key),
+                "missing counter key {key}, got keys={:?}",
+                counters.keys().collect::<Vec<_>>()
+            );
+        }
+
+        for key in UNIFIED_STAGE_HISTOGRAM_KEYS {
+            assert!(
+                histograms.contains_key(*key),
+                "missing histogram key {key}, got keys={:?}",
+                histograms.keys().collect::<Vec<_>>()
+            );
+        }
+    }
+
     async fn wait_startup(job_manager: &JobManager, open: &WorkspaceOpenResponse) {
         let job_id = open
             .startup_job_id
@@ -3817,6 +3959,82 @@ mod tests {
             "unexpected error message: {}",
             err.message
         );
+    }
+
+    #[tokio::test]
+    async fn observability_metrics_exposes_unified_stage_contract_for_ready_session() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let module_path = temp.path().join("Module.bsl");
+        std::fs::write(
+            &module_path,
+            "Процедура Тест()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.\nКонецПроцедуры\n",
+        )
+        .expect("write module");
+        let manager = Arc::new(SessionManager::new());
+        let job_manager = Arc::new(JobManager::new());
+
+        let open = manager
+            .open(
+                WorkspaceOpenParams {
+                    roots: vec![temp.path().to_string_lossy().to_string()],
+                    platform_docs_archive: None,
+                    platform_version: None,
+                    configuration_path: None,
+                    mode: None,
+                },
+                Arc::clone(&job_manager),
+            )
+            .await
+            .expect("open");
+        wait_startup(&job_manager, &open).await;
+
+        let _diagnostics = manager
+            .bsl_diagnostics(BslDiagnosticsParams {
+                session_id: open.session_id.clone(),
+                scope: WorkspaceScope::Tagged(WorkspaceScopeTagged::Project),
+                limit: 200,
+                include_impact: false,
+                include_coverage: false,
+                include_flow_sensitive: false,
+            })
+            .await
+            .expect("bsl_diagnostics");
+
+        let _members = manager
+            .bsl_members(BslMembersParams {
+                session_id: open.session_id.clone(),
+                file: FileRef {
+                    doc: DocumentRef::Path(module_path.to_string_lossy().to_string()),
+                    text: None,
+                    version: None,
+                },
+                position: Position {
+                    line: 2,
+                    character: 13,
+                },
+                limit: 50,
+                include_flow_sensitive: false,
+            })
+            .await
+            .expect("bsl_members");
+
+        let session_uuid = Uuid::parse_str(&open.session_id).expect("session uuid");
+        let coordinator = {
+            let sessions = manager.sessions.read().await;
+            sessions
+                .get(&session_uuid)
+                .and_then(|session| session.startup.as_ref())
+                .expect("ready startup")
+                .coordinator
+                .clone()
+        };
+
+        let metrics = manager
+            .observability_metrics_get(&open.session_id)
+            .await
+            .expect("workspace_get_observability_metrics");
+        assert_eq!(metrics.metrics, coordinator.observability_metrics());
+        assert_unified_intellisense_v2_stage_contract(&metrics.metrics);
     }
 
     #[tokio::test]

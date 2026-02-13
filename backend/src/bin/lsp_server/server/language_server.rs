@@ -1327,6 +1327,7 @@ impl LanguageServer for BslLanguageServer {
                     let ir_started = Instant::now();
                     let ir_query = analysis.ir(file_id);
                     let ir_elapsed = ir_started.elapsed();
+                    let ir_outcome = bsl_runtime::application::classify_optional_query(&ir_query);
                     self.coordinator
                         .record_intellisense_v2_ir_query_latency("completion", ir_elapsed);
                     if let Some(threshold) = super::intellisense_v2_slow_query_warn_threshold() {
@@ -1345,6 +1346,9 @@ impl LanguageServer for BslLanguageServer {
                         Err(cancelled) => {
                             self.coordinator
                                 .record_intellisense_v2_ir_query_cancelled("completion");
+                            if completion_outcome.is_none() {
+                                completion_outcome = Some(ir_outcome.as_str());
+                            }
                             debug!(
                                 uri = %uri,
                                 file_id = file_id.0,
@@ -1354,8 +1358,10 @@ impl LanguageServer for BslLanguageServer {
                             None
                         }
                     };
-                    // `parse_result` expensive on large modules; do it only when IR is available.
-                    let parse_result = if ir_program.is_some() {
+                    let parse_result = if bsl_runtime::application::should_query_parse_result(
+                        bsl_runtime::application::SemanticOperation::Completion,
+                        ir_program.is_some(),
+                    ) {
                         analysis.parse_result(file_id).ok().flatten()
                     } else {
                         None
@@ -1473,19 +1479,19 @@ impl LanguageServer for BslLanguageServer {
                         .await
                     }
                     (None, _, _, _) => {
-                        completion_outcome = Some("missing_file_content");
+                        completion_outcome.get_or_insert("missing_file_content");
                         empty()
                     }
                     (Some(_), None, _, _) => {
-                        completion_outcome = Some("missing_file_path");
+                        completion_outcome.get_or_insert("missing_file_path");
                         empty()
                     }
                     (Some(_), Some(_), None, _) => {
-                        completion_outcome = Some("missing_deps");
+                        completion_outcome.get_or_insert("missing_deps");
                         empty()
                     }
                     (Some(_), Some(_), Some(_), None) => {
-                        completion_outcome = Some("missing_ir");
+                        completion_outcome.get_or_insert("missing_ir");
                         empty()
                     }
                 }

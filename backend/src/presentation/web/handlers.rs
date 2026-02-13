@@ -7,7 +7,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Json},
 };
-use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, FileId as V2FileId, SettingsId};
+use bsl_analysis_v2::{FileId as V2FileId, SettingsId};
 use bsl_line_index::LineIndex;
 use serde::Deserialize;
 use serde_json::json;
@@ -18,6 +18,7 @@ use tokio::sync::RwLock;
 
 use crate::application::get_hover_info_with_semantic_program;
 use crate::application::type_system::web_api_service;
+use crate::application::{ExecutionSettings, IntellisenseV2Facade};
 use crate::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter, HoverOutputFormat};
 use crate::system::{
     startup_v2, DepsBundleV2, EffectiveStartupInputs, StartupInputs, SystemCoordinator,
@@ -85,6 +86,27 @@ fn compute_settings_id_v2(diagnostics_detail_level: DetailLevel) -> SettingsId {
         diagnostics_detail_level
     );
     SettingsId::from_hash(blake3::hash(payload.as_bytes()).to_hex().to_string())
+}
+
+fn build_ephemeral_web_snapshot(
+    deps_bundle: &DepsBundleV2,
+    code: Arc<str>,
+    path: Arc<str>,
+) -> crate::application::SemanticSnapshot {
+    let diagnostics_detail_level = DetailLevel::Full;
+    IntellisenseV2Facade::ephemeral_snapshot(
+        deps_bundle.deps_id.clone(),
+        deps_bundle.semantic_deps.clone(),
+        deps_bundle.index_snapshot.clone(),
+        ExecutionSettings {
+            settings_id: compute_settings_id_v2(diagnostics_detail_level),
+            diagnostics_detail_level,
+        },
+        V2FileId(1),
+        code,
+        0,
+        path,
+    )
 }
 
 fn validation_error_type(message: &str) -> &'static str {
@@ -323,28 +345,16 @@ pub async fn validate_code(
     let deps_bundle = state.deps_bundle_v2.read().await.clone();
     let code = payload.code.clone();
     let include_flow_sensitive = payload.include_flow_sensitive;
-    let validation_result =
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<ValidationErrorDto>> {
-            let mut host = AnalysisHostV2::default();
-            host.apply_change(ChangeV2::SetDepsSnapshot {
-                deps_id: deps_bundle.deps_id.clone(),
-                deps: deps_bundle.semantic_deps.clone(),
-            });
-            let diagnostics_detail_level = DetailLevel::Full;
-            host.apply_change(ChangeV2::SetSettingsSnapshot {
-                settings_id: compute_settings_id_v2(diagnostics_detail_level),
-                diagnostics_detail_level,
-            });
+    let validation_result = crate::application::spawn_bounded_blocking(
+        move || -> anyhow::Result<Vec<ValidationErrorDto>> {
             let code_arc: Arc<str> = Arc::from(code);
             let line_index = LineIndex::new(code_arc.as_ref());
-            host.apply_change(ChangeV2::SetFile {
-                file_id: V2FileId(1),
-                text: code_arc.clone(),
-                version: 0,
-                path: Arc::from("<semantic_validation>"),
-            });
-
-            let analysis = host.analysis();
+            let snapshot = build_ephemeral_web_snapshot(
+                deps_bundle.as_ref(),
+                code_arc.clone(),
+                Arc::from("<semantic_validation>"),
+            );
+            let analysis = snapshot.analysis;
             let diagnostics = if include_flow_sensitive {
                 analysis
                     .semantic_diagnostics_flow_sensitive(V2FileId(1))
@@ -362,8 +372,9 @@ pub async fn validate_code(
                 code_arc.as_ref(),
                 &line_index,
             ))
-        })
-        .await;
+        },
+    )
+    .await;
 
     match validation_result {
         Ok(Ok(errors)) => {
@@ -412,61 +423,50 @@ pub async fn get_hover(
     let syntax_helper_path = state.syntax_helper_path.clone();
     let include_flow_sensitive = req.include_flow_sensitive;
 
-    let hover_result = tokio::task::spawn_blocking(move || -> anyhow::Result<Option<String>> {
-        let mut host = AnalysisHostV2::default();
-        host.apply_change(ChangeV2::SetDepsSnapshot {
-            deps_id: deps_bundle.deps_id.clone(),
-            deps: deps_bundle.semantic_deps.clone(),
-        });
-        let diagnostics_detail_level = DetailLevel::Full;
-        host.apply_change(ChangeV2::SetSettingsSnapshot {
-            settings_id: compute_settings_id_v2(diagnostics_detail_level),
-            diagnostics_detail_level,
-        });
-        host.apply_change(ChangeV2::SetFile {
-            file_id: V2FileId(1),
-            text: Arc::from(code),
-            version: 0,
-            path: Arc::from("hover_request.bsl"),
-        });
+    let hover_result =
+        crate::application::spawn_bounded_blocking(move || -> anyhow::Result<Option<String>> {
+            let snapshot = build_ephemeral_web_snapshot(
+                deps_bundle.as_ref(),
+                Arc::from(code),
+                Arc::from("hover_request.bsl"),
+            );
+            let analysis = snapshot.analysis;
+            let file_content = analysis
+                .file_text(V2FileId(1))
+                .map_err(|_| anyhow::anyhow!("file_text cancelled"))?
+                .ok_or_else(|| anyhow::anyhow!("file_text unavailable"))?;
+            let ir_program = analysis
+                .ir(V2FileId(1))
+                .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
+                .ok_or_else(|| anyhow::anyhow!("ir unavailable"))?;
 
-        let analysis = host.analysis();
-        let file_content = analysis
-            .file_text(V2FileId(1))
-            .map_err(|_| anyhow::anyhow!("file_text cancelled"))?
-            .ok_or_else(|| anyhow::anyhow!("file_text unavailable"))?;
-        let ir_program = analysis
-            .ir(V2FileId(1))
-            .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
-            .ok_or_else(|| anyhow::anyhow!("ir unavailable"))?;
+            let deps = deps_bundle.semantic_deps.clone();
+            let resolver = deps_resolver(&deps);
+            let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
+            let hover_formatter = HoverFormatter::new(
+                HoverFormatConfig {
+                    syntax_helper_path,
+                    output_format: HoverOutputFormat::Markdown,
+                    ..Default::default()
+                },
+                metadata_lookup.clone(),
+            );
 
-        let deps = deps_bundle.semantic_deps.clone();
-        let resolver = deps_resolver(&deps);
-        let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
-        let hover_formatter = HoverFormatter::new(
-            HoverFormatConfig {
-                syntax_helper_path,
-                output_format: HoverOutputFormat::Markdown,
-                ..Default::default()
-            },
-            metadata_lookup.clone(),
-        );
-
-        Ok(get_hover_info_with_semantic_program(
-            &analysis,
-            V2FileId(1),
-            file_content.as_ref(),
-            line,
-            column,
-            include_flow_sensitive,
-            &metadata_lookup,
-            &hover_formatter,
-            None,
-            resolver.as_ref(),
-            ir_program,
-        ))
-    })
-    .await;
+            Ok(get_hover_info_with_semantic_program(
+                &analysis,
+                V2FileId(1),
+                file_content.as_ref(),
+                line,
+                column,
+                include_flow_sensitive,
+                &metadata_lookup,
+                &hover_formatter,
+                None,
+                resolver.as_ref(),
+                ir_program,
+            ))
+        })
+        .await;
 
     match hover_result {
         Ok(Ok(hover_text)) => {
@@ -510,28 +510,16 @@ pub async fn get_diagnostics(
     let code = payload.code.clone();
     let include_flow_sensitive = payload.include_flow_sensitive;
 
-    let diagnostics_result = tokio::task::spawn_blocking(
+    let diagnostics_result = crate::application::spawn_bounded_blocking(
         move || -> anyhow::Result<(Vec<SyntaxErrorDto>, Vec<SemanticErrorDto>)> {
-            let mut host = AnalysisHostV2::default();
-            host.apply_change(ChangeV2::SetDepsSnapshot {
-                deps_id: deps_bundle.deps_id.clone(),
-                deps: deps_bundle.semantic_deps.clone(),
-            });
-            let diagnostics_detail_level = DetailLevel::Full;
-            host.apply_change(ChangeV2::SetSettingsSnapshot {
-                settings_id: compute_settings_id_v2(diagnostics_detail_level),
-                diagnostics_detail_level,
-            });
             let code_arc: Arc<str> = Arc::from(code);
             let line_index = LineIndex::new(code_arc.as_ref());
-            host.apply_change(ChangeV2::SetFile {
-                file_id: V2FileId(1),
-                text: code_arc.clone(),
-                version: 0,
-                path: Arc::from("<semantic_validation>"),
-            });
-
-            let analysis = host.analysis();
+            let snapshot = build_ephemeral_web_snapshot(
+                deps_bundle.as_ref(),
+                code_arc.clone(),
+                Arc::from("<semantic_validation>"),
+            );
+            let analysis = snapshot.analysis;
             let syntax = analysis
                 .syntax_diagnostics(V2FileId(1))
                 .map_err(|_| anyhow::anyhow!("syntax diagnostics cancelled"))?
@@ -627,33 +615,21 @@ pub async fn get_diagnostics_debug(
     let include_flow_sensitive = payload.include_flow_sensitive;
 
     let diagnostics_result =
-        tokio::task::spawn_blocking(move || -> anyhow::Result<serde_json::Value> {
+        crate::application::spawn_bounded_blocking(move || -> anyhow::Result<serde_json::Value> {
             let mut debug_info = serde_json::json!({
                 "steps": [],
                 "resolver_available": false,
                 "property_accesses": []
             });
 
-            let mut host = AnalysisHostV2::default();
-            host.apply_change(ChangeV2::SetDepsSnapshot {
-                deps_id: deps_bundle.deps_id.clone(),
-                deps: deps_bundle.semantic_deps.clone(),
-            });
-            let diagnostics_detail_level = DetailLevel::Full;
-            host.apply_change(ChangeV2::SetSettingsSnapshot {
-                settings_id: compute_settings_id_v2(diagnostics_detail_level),
-                diagnostics_detail_level,
-            });
             let code_arc: Arc<str> = Arc::from(code);
             let line_index = LineIndex::new(code_arc.as_ref());
-            host.apply_change(ChangeV2::SetFile {
-                file_id: V2FileId(1),
-                text: code_arc.clone(),
-                version: 0,
-                path: Arc::from("<debug_validation>"),
-            });
-
-            let analysis = host.analysis();
+            let snapshot = build_ephemeral_web_snapshot(
+                deps_bundle.as_ref(),
+                code_arc.clone(),
+                Arc::from("<debug_validation>"),
+            );
+            let analysis = snapshot.analysis;
             let syntax = analysis
                 .syntax_diagnostics(V2FileId(1))
                 .map_err(|_| anyhow::anyhow!("syntax diagnostics cancelled"))?
@@ -829,68 +805,57 @@ pub async fn get_enhanced_hover(
     let syntax_helper_path = state.syntax_helper_path.clone();
     let include_flow_sensitive = req.include_flow_sensitive;
 
-    let hover_result = tokio::task::spawn_blocking(move || -> anyhow::Result<Option<String>> {
-        let mut host = AnalysisHostV2::default();
-        host.apply_change(ChangeV2::SetDepsSnapshot {
-            deps_id: deps_bundle.deps_id.clone(),
-            deps: deps_bundle.semantic_deps.clone(),
-        });
-        let diagnostics_detail_level = DetailLevel::Full;
-        host.apply_change(ChangeV2::SetSettingsSnapshot {
-            settings_id: compute_settings_id_v2(diagnostics_detail_level),
-            diagnostics_detail_level,
-        });
-        host.apply_change(ChangeV2::SetFile {
-            file_id: V2FileId(1),
-            text: Arc::from(code),
-            version: 0,
-            path: Arc::from("hover_request.bsl"),
-        });
+    let hover_result =
+        crate::application::spawn_bounded_blocking(move || -> anyhow::Result<Option<String>> {
+            let snapshot = build_ephemeral_web_snapshot(
+                deps_bundle.as_ref(),
+                Arc::from(code),
+                Arc::from("hover_request.bsl"),
+            );
+            let analysis = snapshot.analysis;
+            let file_content = analysis
+                .file_text(V2FileId(1))
+                .map_err(|_| anyhow::anyhow!("file_text cancelled"))?
+                .ok_or_else(|| anyhow::anyhow!("file_text unavailable"))?;
+            let ir_program = analysis
+                .ir(V2FileId(1))
+                .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
+                .ok_or_else(|| anyhow::anyhow!("ir unavailable"))?;
 
-        let analysis = host.analysis();
-        let file_content = analysis
-            .file_text(V2FileId(1))
-            .map_err(|_| anyhow::anyhow!("file_text cancelled"))?
-            .ok_or_else(|| anyhow::anyhow!("file_text unavailable"))?;
-        let ir_program = analysis
-            .ir(V2FileId(1))
-            .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
-            .ok_or_else(|| anyhow::anyhow!("ir unavailable"))?;
+            let deps = deps_bundle.semantic_deps.clone();
+            let resolver = deps_resolver(&deps);
+            let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
+            let hover_formatter = HoverFormatter::new(
+                HoverFormatConfig {
+                    syntax_helper_path: syntax_helper_path.clone(),
+                    output_format: HoverOutputFormat::Markdown,
+                    ..Default::default()
+                },
+                metadata_lookup.clone(),
+            );
 
-        let deps = deps_bundle.semantic_deps.clone();
-        let resolver = deps_resolver(&deps);
-        let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
-        let hover_formatter = HoverFormatter::new(
-            HoverFormatConfig {
-                syntax_helper_path: syntax_helper_path.clone(),
+            let hover_config = HoverFormatConfig {
+                detail_level,
+                syntax_helper_path,
                 output_format: HoverOutputFormat::Markdown,
                 ..Default::default()
-            },
-            metadata_lookup.clone(),
-        );
+            };
 
-        let hover_config = HoverFormatConfig {
-            detail_level,
-            syntax_helper_path,
-            output_format: HoverOutputFormat::Markdown,
-            ..Default::default()
-        };
-
-        Ok(get_hover_info_with_semantic_program(
-            &analysis,
-            V2FileId(1),
-            file_content.as_ref(),
-            line,
-            column,
-            include_flow_sensitive,
-            &metadata_lookup,
-            &hover_formatter,
-            Some(hover_config),
-            resolver.as_ref(),
-            ir_program,
-        ))
-    })
-    .await;
+            Ok(get_hover_info_with_semantic_program(
+                &analysis,
+                V2FileId(1),
+                file_content.as_ref(),
+                line,
+                column,
+                include_flow_sensitive,
+                &metadata_lookup,
+                &hover_formatter,
+                Some(hover_config),
+                resolver.as_ref(),
+                ir_program,
+            ))
+        })
+        .await;
 
     match hover_result {
         Ok(Ok(hover_text)) => {
@@ -971,28 +936,16 @@ pub async fn get_semantic_tree(
     let include_call_graph = req.include_call_graph;
     let include_flow_sensitive = req.include_flow_sensitive;
 
-    let tree_result = tokio::task::spawn_blocking(
+    let tree_result = crate::application::spawn_bounded_blocking(
         move || -> anyhow::Result<bsl_shared::api::semantic_dtos::SemanticTreeDto> {
-            let mut host = AnalysisHostV2::default();
-            host.apply_change(ChangeV2::SetDepsSnapshot {
-                deps_id: deps_bundle.deps_id.clone(),
-                deps: deps_bundle.semantic_deps.clone(),
-            });
-            let diagnostics_detail_level = DetailLevel::Full;
-            host.apply_change(ChangeV2::SetSettingsSnapshot {
-                settings_id: compute_settings_id_v2(diagnostics_detail_level),
-                diagnostics_detail_level,
-            });
             let code_arc: Arc<str> = Arc::from(code);
             let line_index = LineIndex::new(code_arc.as_ref());
-            host.apply_change(ChangeV2::SetFile {
-                file_id: V2FileId(1),
-                text: code_arc.clone(),
-                version: 0,
-                path: Arc::from(file_path.clone()),
-            });
-
-            let analysis = host.analysis();
+            let snapshot = build_ephemeral_web_snapshot(
+                deps_bundle.as_ref(),
+                code_arc.clone(),
+                Arc::from(file_path.clone()),
+            );
+            let analysis = snapshot.analysis;
             let ir_program = analysis
                 .ir(V2FileId(1))
                 .map_err(|_| anyhow::anyhow!("ir query cancelled"))?

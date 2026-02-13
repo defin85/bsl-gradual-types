@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use bsl_runtime::system::runtime_config::{global_runtime_config, RuntimeKey};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{Notify, RwLock};
+use tokio::sync::{Notify, RwLock, Semaphore};
 use uuid::Uuid;
 
 use crate::state::{now_unix_secs, state_root, write_atomic};
@@ -176,6 +176,7 @@ impl JobStore {
 pub struct JobManager {
     store: Option<Arc<JobStore>>,
     jobs: Arc<RwLock<HashMap<Uuid, Arc<JobEntry>>>>,
+    concurrency_limiter: Arc<Semaphore>,
 }
 
 #[derive(Clone)]
@@ -219,6 +220,12 @@ impl JobContext {
 }
 
 impl JobManager {
+    fn default_concurrency_limit() -> usize {
+        std::thread::available_parallelism()
+            .map(|parallelism| parallelism.get().max(2))
+            .unwrap_or(4)
+    }
+
     pub fn new() -> Self {
         let store = JobStore::new().map(Arc::new);
         let mut map = HashMap::new();
@@ -258,6 +265,7 @@ impl JobManager {
         Self {
             store,
             jobs: Arc::new(RwLock::new(map)),
+            concurrency_limiter: Arc::new(Semaphore::new(Self::default_concurrency_limit())),
         }
     }
 
@@ -265,6 +273,7 @@ impl JobManager {
         Self {
             store: None,
             jobs: Arc::new(RwLock::new(HashMap::new())),
+            concurrency_limiter: Arc::new(Semaphore::new(Self::default_concurrency_limit())),
         }
     }
 
@@ -299,6 +308,7 @@ impl JobManager {
 
         let store = self.store.clone();
         let jobs = self.jobs.clone();
+        let concurrency_limiter = Arc::clone(&self.concurrency_limiter);
         let job_id_str = job_id.to_string();
         let job_id_str_for_cleanup = job_id_str.clone();
         let ctx = JobContext {
@@ -308,6 +318,11 @@ impl JobManager {
         };
 
         tokio::spawn(async move {
+            let _permit = concurrency_limiter
+                .acquire_owned()
+                .await
+                .expect("job concurrency limiter closed");
+
             if entry.canceled.load(Ordering::Relaxed) {
                 {
                     let mut job = entry.job.write().await;

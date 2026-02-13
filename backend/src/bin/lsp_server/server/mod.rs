@@ -102,25 +102,17 @@ pub(crate) struct DiagnosticsTaskV2 {
 type DiagnosticsTasksV2 = HashMap<V2FileId, DiagnosticsTaskV2>;
 
 pub(crate) fn intellisense_v2_slow_wait_warn_threshold() -> Option<Duration> {
-    bsl_runtime::system::global_runtime_config()
-        .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2SlowWaitWarnMs)
-        .map(Duration::from_millis)
+    bsl_runtime::application::RuntimePerfKnobs::from_runtime_config().slow_wait_warn_threshold
 }
 
 pub(crate) fn intellisense_v2_slow_snapshot_warn_threshold() -> Option<Duration> {
-    bsl_runtime::system::global_runtime_config()
-        .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2SlowSnapshotWarnMs)
-        .map(Duration::from_millis)
+    bsl_runtime::application::RuntimePerfKnobs::from_runtime_config().slow_snapshot_warn_threshold
 }
 
 pub(crate) fn intellisense_v2_slow_query_warn_threshold() -> Option<Duration> {
-    bsl_runtime::system::global_runtime_config()
-        .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2SlowQueryWarnMs)
-        .map(Duration::from_millis)
+    bsl_runtime::application::RuntimePerfKnobs::from_runtime_config().slow_query_warn_threshold
 }
 
 pub(crate) fn intellisense_v2_slow_client_log_threshold() -> Option<Duration> {
-    bsl_runtime::system::global_runtime_config()
-        .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2SlowClientLogMs)
-        .map(Duration::from_millis)
+    bsl_runtime::application::RuntimePerfKnobs::from_runtime_config().slow_client_log_threshold
 }

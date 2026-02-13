@@ -27,7 +27,8 @@ use super::completion_target::extract_completion_target_for_member_access;
 use super::flow_sensitive::narrow_type_for_variable_at;
 use crate::system::keyword_index::DEFAULT_KEYWORDS;
 use crate::system::{
-    IndexItemKind, IndexSnapshot, IntellisenseIndexStore, LineIndex, SymbolScope, TypeKind,
+    IndexItemKind, IndexSnapshot, IntellisenseIndexStore, LineIndex, SymbolKind, SymbolScope,
+    TypeKind,
 };
 
 pub trait IndexSnapshotSource: Sync {
@@ -443,8 +444,8 @@ pub(crate) async fn get_completion_with_analysis(
             add_local_symbols_from_ir(analysis, file_content, line, column, &mut candidates, 0);
             add_symbols(&snapshot, file_uri, &mut candidates, 0, false);
         } else {
-            // Keep non-member local symbols IR-first even when analysis is unavailable.
-            add_symbols(&snapshot, file_uri, &mut candidates, 0, false);
+            // In fallback mode keep local candidates from the file-bound index.
+            add_symbols(&snapshot, file_uri, &mut candidates, 0, true);
         }
         add_module_symbols(&snapshot, &mut candidates, 1);
         add_metadata_items(&snapshot, None, &mut candidates, 2);
@@ -2167,8 +2168,17 @@ fn add_symbols(
     };
 
     for item in items.iter() {
-        if !include_local && matches!(item.scope, Some(SymbolScope::Local)) {
-            continue;
+        if matches!(item.scope, Some(SymbolScope::Local)) {
+            if !include_local {
+                continue;
+            }
+            let allow_unbound_local_routine = matches!(
+                item.kind,
+                IndexItemKind::Symbol(SymbolKind::Function | SymbolKind::Procedure)
+            );
+            if item.uri.as_deref() != Some(uri) && !allow_unbound_local_routine {
+                continue;
+            }
         }
         let kind = completion_kind_from_index_item(item);
         target.push(Candidate::new(

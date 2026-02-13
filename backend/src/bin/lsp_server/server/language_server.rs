@@ -19,7 +19,6 @@ use tower_lsp::LanguageServer;
 use tracing::{debug, error, info, warn};
 
 use bsl_backend::data::loaders::progress::{IndexingPhase, ProgressUpdate};
-use bsl_backend::system::fs_utils::read_bsl_file;
 use bsl_backend::system::{startup_v2, StartupInputs};
 use bsl_shared::api::semantic_dtos::{GetSemanticHtmlRequest, GetSemanticTreeRequest};
 
@@ -1750,36 +1749,45 @@ impl LanguageServer for BslLanguageServer {
             return Ok(None);
         }
 
-        let file_id = self.get_or_create_file_id_v2(&uri).await;
         self.sync_v2_globals().await;
-
-        let expected_version = self
-            .latest_received_file_versions_v2
-            .read()
-            .await
-            .get(&file_id)
-            .copied();
-        let ok = if let Some(expected_version) = expected_version {
-            self.analysis_v2
-                .wait_for_file_version(file_id, expected_version)
-                .await
-        } else {
-            self.analysis_v2.wait_for_file_version(file_id, 0).await
+        let file_id = self.get_or_create_file_id_v2(&uri).await;
+        let include_flow_sensitive = {
+            let guard = self.settings.read().await;
+            guard.enable_flow_sensitive
         };
-        if !ok {
+        let prepared = self
+            .prepare_lsp_stateful_operation_v2(
+                &uri,
+                file_id,
+                bsl_runtime::application::SemanticOperation::TypeAtPosition,
+                include_flow_sensitive,
+            )
+            .await;
+        let (context, prepared, _expected_version) = match prepared {
+            Ok(values) => values,
+            Err(outcome) => {
+                debug!(
+                    uri = %uri,
+                    file_id = file_id.0,
+                    outcome = outcome.as_str(),
+                    "Inlay hints v2: stateful operation not ready"
+                );
+                return Ok(None);
+            }
+        };
+        let analysis = prepared.snapshot.analysis;
+        let Some(file_content) = analysis.file_text(file_id).ok().flatten() else {
             return Ok(None);
-        }
-
-        let (analysis, file_content, ir_program) = {
-            let (analysis, _index_snapshot, _deps_id) = self.analysis_v2.snapshot_with_deps().await;
-            let file_content = analysis.file_text(file_id).ok().flatten();
-            let ir_program = analysis.ir(file_id).ok().flatten();
-            (analysis, file_content, ir_program)
         };
-
-        let Some(file_content) = file_content else {
-            return Ok(None);
-        };
+        let ir_program = bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
+            &context,
+            bsl_runtime::application::ObservabilityStage::IrQuery,
+            &analysis,
+            Some(self.coordinator.as_ref()),
+            |analysis| analysis.ir(file_id),
+        )
+        .ok()
+        .flatten();
         let Some(ir_program) = ir_program else {
             return Ok(None);
         };
@@ -1829,36 +1837,45 @@ impl LanguageServer for BslLanguageServer {
             return Ok(None);
         }
 
-        let file_id = self.get_or_create_file_id_v2(&uri).await;
         self.sync_v2_globals().await;
-
-        let expected_version = self
-            .latest_received_file_versions_v2
-            .read()
-            .await
-            .get(&file_id)
-            .copied();
-        let ok = if let Some(expected_version) = expected_version {
-            self.analysis_v2
-                .wait_for_file_version(file_id, expected_version)
-                .await
-        } else {
-            self.analysis_v2.wait_for_file_version(file_id, 0).await
+        let file_id = self.get_or_create_file_id_v2(&uri).await;
+        let include_flow_sensitive = {
+            let guard = self.settings.read().await;
+            guard.enable_flow_sensitive
         };
-        if !ok {
+        let prepared = self
+            .prepare_lsp_stateful_operation_v2(
+                &uri,
+                file_id,
+                bsl_runtime::application::SemanticOperation::TypeAtPosition,
+                include_flow_sensitive,
+            )
+            .await;
+        let (context, prepared, _expected_version) = match prepared {
+            Ok(values) => values,
+            Err(outcome) => {
+                debug!(
+                    uri = %uri,
+                    file_id = file_id.0,
+                    outcome = outcome.as_str(),
+                    "Code actions v2: stateful operation not ready"
+                );
+                return Ok(None);
+            }
+        };
+        let analysis = prepared.snapshot.analysis;
+        let Some(file_content) = analysis.file_text(file_id).ok().flatten() else {
             return Ok(None);
-        }
-
-        let (analysis, file_content, ir_program) = {
-            let (analysis, _index_snapshot, _deps_id) = self.analysis_v2.snapshot_with_deps().await;
-            let file_content = analysis.file_text(file_id).ok().flatten();
-            let ir_program = analysis.ir(file_id).ok().flatten();
-            (analysis, file_content, ir_program)
         };
-
-        let Some(file_content) = file_content else {
-            return Ok(None);
-        };
+        let ir_program = bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
+            &context,
+            bsl_runtime::application::ObservabilityStage::IrQuery,
+            &analysis,
+            Some(self.coordinator.as_ref()),
+            |analysis| analysis.ir(file_id),
+        )
+        .ok()
+        .flatten();
         let Some(ir_program) = ir_program else {
             return Ok(None);
         };
@@ -2271,55 +2288,27 @@ impl LanguageServer for BslLanguageServer {
 
                 self.sync_v2_globals().await;
                 let file_id = self.get_or_create_file_id_v2(&uri).await;
-
-                let expected_version = self
-                    .latest_received_file_versions_v2
-                    .read()
-                    .await
-                    .get(&file_id)
-                    .copied();
-
-                let ok = if let Some(expected_version) = expected_version {
-                    self.analysis_v2
-                        .wait_for_file_version(file_id, expected_version)
-                        .await
-                } else {
-                    let path = match uri.to_file_path() {
-                        Ok(path) => path.to_string_lossy().to_string(),
-                        Err(_) => uri.to_string(),
-                    };
-                    let file_content = match uri.to_file_path() {
-                        Ok(path) => match read_bsl_file(&path) {
-                            Ok(content) => Some(content),
-                            Err(e) => {
-                                error!("Failed to read file for getSemanticHtml: {}", e);
-                                None
-                            }
-                        },
-                        Err(_) => None,
-                    };
-
-                    match file_content {
-                        Some(file_content) => {
-                            self.analysis_v2.apply_changes(vec![
-                                bsl_analysis_v2::Change::SetFile {
-                                    file_id,
-                                    text: Arc::from(file_content),
-                                    version: 0,
-                                    path: Arc::from(path),
-                                },
-                            ]);
-                            self.analysis_v2.wait_for_file_version(file_id, 0).await
-                        }
-                        None => false,
+                let prepared = self
+                    .prepare_lsp_stateful_operation_v2(
+                        &uri,
+                        file_id,
+                        bsl_runtime::application::SemanticOperation::SymbolSearch,
+                        false,
+                    )
+                    .await;
+                let (context, prepared, _expected_version) = match prepared {
+                    Ok(values) => values,
+                    Err(outcome) => {
+                        warn!(
+                            uri = %uri,
+                            file_id = file_id.0,
+                            outcome = outcome.as_str(),
+                            "getSemanticHtml: stateful operation not ready"
+                        );
+                        return Err(tower_lsp::jsonrpc::Error::internal_error());
                     }
                 };
-
-                if !ok {
-                    return Err(tower_lsp::jsonrpc::Error::internal_error());
-                }
-
-                let analysis = self.analysis_v2.snapshot().await;
+                let analysis = prepared.snapshot.analysis;
                 let file_text = analysis
                     .file_text(file_id)
                     .ok()
@@ -2330,8 +2319,14 @@ impl LanguageServer for BslLanguageServer {
                     .ok()
                     .flatten()
                     .ok_or_else(tower_lsp::jsonrpc::Error::internal_error)?;
-                let ir_program = analysis
-                    .ir(file_id)
+                let ir_program =
+                    bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
+                        &context,
+                        bsl_runtime::application::ObservabilityStage::IrQuery,
+                        &analysis,
+                        Some(self.coordinator.as_ref()),
+                        |analysis| analysis.ir(file_id),
+                    )
                     .ok()
                     .flatten()
                     .ok_or_else(tower_lsp::jsonrpc::Error::internal_error)?;
@@ -2374,55 +2369,35 @@ impl LanguageServer for BslLanguageServer {
 
                 self.sync_v2_globals().await;
                 let file_id = self.get_or_create_file_id_v2(&uri).await;
-
-                let expected_version = self
-                    .latest_received_file_versions_v2
-                    .read()
-                    .await
-                    .get(&file_id)
-                    .copied();
-
-                let ok = if let Some(expected_version) = expected_version {
-                    self.analysis_v2
-                        .wait_for_file_version(file_id, expected_version)
-                        .await
-                } else {
-                    let path = match uri.to_file_path() {
-                        Ok(path) => path.to_string_lossy().to_string(),
-                        Err(_) => uri.to_string(),
-                    };
-                    let file_content = match uri.to_file_path() {
-                        Ok(path) => match read_bsl_file(&path) {
-                            Ok(content) => Some(content),
-                            Err(e) => {
-                                error!("Failed to read file for getSemanticTree: {}", e);
-                                None
-                            }
-                        },
-                        Err(_) => None,
-                    };
-
-                    match file_content {
-                        Some(file_content) => {
-                            self.analysis_v2.apply_changes(vec![
-                                bsl_analysis_v2::Change::SetFile {
-                                    file_id,
-                                    text: Arc::from(file_content),
-                                    version: 0,
-                                    path: Arc::from(path),
-                                },
-                            ]);
-                            self.analysis_v2.wait_for_file_version(file_id, 0).await
-                        }
-                        None => false,
+                let enable_flow_sensitive = {
+                    let settings = self.settings.read().await;
+                    settings.enable_flow_sensitive
+                };
+                let include_flow_sensitive = effective_include_flow_sensitive(
+                    request.include_flow_sensitive,
+                    enable_flow_sensitive,
+                );
+                let prepared = self
+                    .prepare_lsp_stateful_operation_v2(
+                        &uri,
+                        file_id,
+                        bsl_runtime::application::SemanticOperation::SymbolSearch,
+                        include_flow_sensitive,
+                    )
+                    .await;
+                let (context, prepared, _expected_version) = match prepared {
+                    Ok(values) => values,
+                    Err(outcome) => {
+                        warn!(
+                            uri = %uri,
+                            file_id = file_id.0,
+                            outcome = outcome.as_str(),
+                            "getSemanticTree: stateful operation not ready"
+                        );
+                        return Err(tower_lsp::jsonrpc::Error::internal_error());
                     }
                 };
-
-                if !ok {
-                    return Err(tower_lsp::jsonrpc::Error::internal_error());
-                }
-
-                let analysis = self.analysis_v2.snapshot().await;
+                let analysis = prepared.snapshot.analysis;
                 let file_text = analysis
                     .file_text(file_id)
                     .ok()
@@ -2433,20 +2408,17 @@ impl LanguageServer for BslLanguageServer {
                     .ok()
                     .flatten()
                     .ok_or_else(tower_lsp::jsonrpc::Error::internal_error)?;
-                let ir_program = analysis
-                    .ir(file_id)
+                let ir_program =
+                    bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
+                        &context,
+                        bsl_runtime::application::ObservabilityStage::IrQuery,
+                        &analysis,
+                        Some(self.coordinator.as_ref()),
+                        |analysis| analysis.ir(file_id),
+                    )
                     .ok()
                     .flatten()
                     .ok_or_else(tower_lsp::jsonrpc::Error::internal_error)?;
-
-                let enable_flow_sensitive = {
-                    let settings = self.settings.read().await;
-                    settings.enable_flow_sensitive
-                };
-                let include_flow_sensitive = effective_include_flow_sensitive(
-                    request.include_flow_sensitive,
-                    enable_flow_sensitive,
-                );
 
                 let result = semantic_tree_from_ir(
                     ir_program.as_ref(),

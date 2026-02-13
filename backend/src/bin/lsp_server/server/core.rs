@@ -486,12 +486,13 @@ impl BslLanguageServer {
             }
             _ => bsl_runtime::application::CancellationPolicy::RespectClientAbort,
         };
+        let expected_deps_id = self.last_deps_id_v2.read().await.clone();
 
         bsl_runtime::application::ExecutionContext {
             operation,
             file_id,
             min_file_version,
-            expected_deps_id: None,
+            expected_deps_id,
             flow_sensitive,
             settings: bsl_runtime::application::ExecutionSettings {
                 settings_id,

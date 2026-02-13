@@ -413,6 +413,23 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                     }
 
                     if Self::should_skip_member_validation_for_missing_configuration(obj_type) {
+                        // Even without loaded configuration metadata we can still enforce
+                        // directive-based context restrictions for well-known server-only methods.
+                        if let Some(error_kind) = validate_method_call_context(
+                            &self.current_execution_context,
+                            self.signature_index,
+                            &obj_type.type_name(),
+                            function_name,
+                            object_name.clone(),
+                            node.span,
+                        ) {
+                            let diagnostic = error_kind.to_diagnostic_with_severity(
+                                node.span,
+                                self.detail_level,
+                                DiagnosticSeverity::Warning,
+                            );
+                            self.errors.push(diagnostic);
+                        }
                         return;
                     }
 

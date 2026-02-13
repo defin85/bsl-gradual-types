@@ -4,9 +4,15 @@
 mod support;
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 
 use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, FileId as V2FileId, SettingsId};
+use bsl_backend::application::{
+    CancellationPolicy, ExecutionContext, ExecutionSettings, IntellisenseV2Facade,
+    ObservabilityStage, SemanticOperation,
+};
+use bsl_backend::system::{IndexSnapshot, IndexSnapshotId};
 use bsl_shared::formatting::DetailLevel;
 
 fn workspace_root() -> PathBuf {
@@ -42,8 +48,64 @@ fn handle_missing_conf_big_fixture(reason: &str) {
     eprintln!("skipping conf_big perf regression guard: {reason}");
 }
 
-#[test]
-fn conf_big_module_cold_warm_perf_regression() {
+async fn measure_shared_facade_semantic_triplet(
+    runtime: &IntellisenseV2Facade,
+    file_id: V2FileId,
+    deps_id: bsl_analysis_v2::DepsSnapshotId,
+    settings_id: SettingsId,
+) -> std::time::Duration {
+    let context = ExecutionContext {
+        operation: SemanticOperation::Members,
+        file_id,
+        min_file_version: None,
+        expected_deps_id: Some(deps_id),
+        flow_sensitive: false,
+        settings: ExecutionSettings {
+            settings_id,
+            diagnostics_detail_level: DetailLevel::Full,
+        },
+        cancellation: CancellationPolicy::BestEffort,
+    };
+
+    let started = Instant::now();
+    let prepared = runtime
+        .prepare_stateful_operation(&context, None)
+        .await
+        .expect("prepare_stateful_operation");
+    let analysis = prepared.snapshot.analysis;
+
+    let ir_query = IntellisenseV2Facade::run_optional_query(
+        &context,
+        ObservabilityStage::IrQuery,
+        &analysis,
+        None,
+        |analysis| analysis.ir(file_id),
+    )
+    .expect("ir query");
+
+    let _ = IntellisenseV2Facade::run_parse_result_query(
+        &context,
+        &analysis,
+        ir_query.is_some(),
+        None,
+        |analysis| analysis.parse_result(file_id),
+    )
+    .expect("parse_result query");
+
+    let _ = IntellisenseV2Facade::run_optional_query(
+        &context,
+        ObservabilityStage::SemanticDiagnosticsQuery,
+        &analysis,
+        None,
+        |analysis| analysis.semantic_diagnostics(file_id),
+    )
+    .expect("semantic diagnostics query");
+
+    started.elapsed()
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn conf_big_module_cold_warm_perf_regression() {
     let Some(root) = conf_big_root() else {
         handle_missing_conf_big_fixture(
             "examples/conf_big fixture is missing (Configuration.xml not found)",
@@ -70,6 +132,7 @@ fn conf_big_module_cold_warm_perf_regression() {
     let code = std::fs::read_to_string(&module_path).expect("read conf_big module");
     let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
     let file_id = V2FileId(1);
+    let settings_id = SettingsId::from_hash("perf-regression");
 
     let mut host = AnalysisHostV2::default();
     host.apply_change(ChangeV2::SetDepsSnapshot {
@@ -77,7 +140,7 @@ fn conf_big_module_cold_warm_perf_regression() {
         deps: deps_bundle.semantic_deps.clone(),
     });
     host.apply_change(ChangeV2::SetSettingsSnapshot {
-        settings_id: SettingsId::from_hash("perf-regression"),
+        settings_id: settings_id.clone(),
         diagnostics_detail_level: DetailLevel::Full,
     });
     host.apply_change(ChangeV2::SetFile {
@@ -87,27 +150,28 @@ fn conf_big_module_cold_warm_perf_regression() {
         path: module_rel.to_string_lossy().to_string().into(),
     });
 
-    let analysis = host.analysis();
+    let runtime = IntellisenseV2Facade::new(
+        host,
+        Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash(
+            "perf-regression",
+        ))),
+        None,
+    );
 
-    let cold_start = Instant::now();
-    let _ = analysis.ir(file_id).expect("cold ir query");
-    let _ = analysis
-        .parse_result(file_id)
-        .expect("cold parse_result query");
-    let _ = analysis
-        .semantic_diagnostics(file_id)
-        .expect("cold semantic diagnostics query");
-    let cold_elapsed = cold_start.elapsed();
-
-    let warm_start = Instant::now();
-    let _ = analysis.ir(file_id).expect("warm ir query");
-    let _ = analysis
-        .parse_result(file_id)
-        .expect("warm parse_result query");
-    let _ = analysis
-        .semantic_diagnostics(file_id)
-        .expect("warm semantic diagnostics query");
-    let warm_elapsed = warm_start.elapsed();
+    let cold_elapsed = measure_shared_facade_semantic_triplet(
+        &runtime,
+        file_id,
+        deps_bundle.deps_id.clone(),
+        settings_id.clone(),
+    )
+    .await;
+    let warm_elapsed = measure_shared_facade_semantic_triplet(
+        &runtime,
+        file_id,
+        deps_bundle.deps_id.clone(),
+        settings_id,
+    )
+    .await;
 
     println!(
         "conf_big module perf: cold={}ms warm={}ms path={}",

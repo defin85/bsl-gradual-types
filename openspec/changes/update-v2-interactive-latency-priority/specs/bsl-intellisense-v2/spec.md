@@ -8,7 +8,12 @@
   - `version_gap <= intellisense_v2_interactive_max_stale_version_gap` (дефолт `1`);
   - `stale_age_ms <= intellisense_v2_interactive_max_stale_age_ms` (дефолт `1000ms`).
 
-Stale fallback MUST использовать snapshot, согласованный по `deps_id` и `settings_id` с текущим запросом. Если подходящего stale snapshot нет, система MUST вернуть ответ без блокировки на дальнейшее ожидание latest.
+Runtime knobs MUST валидироваться и приводиться к допустимым диапазонам:
+- `intellisense_v2_interactive_wait_budget_ms` в диапазон `[10, 2000]`;
+- `intellisense_v2_interactive_max_stale_version_gap` в диапазон `[0, 10]`;
+- `intellisense_v2_interactive_max_stale_age_ms` в диапазон `[0, 10000]`.
+
+Stale fallback MUST использовать snapshot, согласованный по `deps_id` и `settings_id` с текущим запросом. Snapshot с несовпадающими `deps_id` или `settings_id` MUST NOT быть использован как stale fallback. Если подходящего stale snapshot нет, система MUST вернуть ответ без блокировки на дальнейшее ожидание latest.
 
 Система MUST явно сигнализировать stale-serving в observability.
 
@@ -27,6 +32,13 @@ Stale fallback MUST использовать snapshot, согласованны�
 - **THEN** сервер не блокируется дольше wait budget
 - **AND** сервер не использует просроченный stale snapshot
 - **AND** сервер возвращает пустой/частичный результат без ошибки протокола
+
+#### Scenario: Stale snapshot отклоняется из-за несовпадения deps/settings
+- **GIVEN** requested версия ещё не готова
+- **AND** доступен stale snapshot того же `file_id`, но с другим `deps_id` или `settings_id`
+- **WHEN** IDE запрашивает `signatureHelp`
+- **THEN** такой stale snapshot не используется
+- **AND** сервер завершает обработку в пределах wait budget без stale ответа с несовместимой ревизией
 
 ### Requirement: Diagnostics publish остаётся strict latest-version и monotonic по ревизии (MUST)
 Система MUST публиковать `diagnostics` только для актуальной requested version документа.
@@ -53,6 +65,10 @@ Stale fallback MUST использовать snapshot, согласованны�
 - `syntax_diagnostics`
 - `ir`
 
+Followers MUST получать тот же терминальный outcome, что и leader (`success`, `empty`, `error`, `cancelled`) для данного flight.
+
+Система MUST NOT выполнять автоматический повтор внутри того же flight при `error/cancelled`; новый flight может быть создан только новым входящим запросом на тот же ключ после завершения предыдущего.
+
 #### Scenario: Параллельные completion и diagnostics делят один parse_result
 - **GIVEN** два конкурентных запроса требуют `parse_result` для одного и того же ключа ревизии
 - **WHEN** оба запроса обрабатываются одновременно
@@ -66,12 +82,22 @@ Stale fallback MUST использовать snapshot, согласованны�
 - **THEN** лидерное вычисление не прерывается из-за отмены follower
 - **AND** запись in-flight singleflight очищается после завершения leader (success/error/cancel)
 
+#### Scenario: Ошибка leader распространяется на followers без auto-retry в том же flight
+- **GIVEN** для singleflight-ключа запущен leader
+- **AND** к flight подключены followers
+- **WHEN** leader завершается с ошибкой
+- **THEN** followers получают тот же ошибочный outcome этого flight
+- **AND** внутри текущего flight не запускается повторное вычисление
+- **AND** новый leader может появиться только на следующий входящий запрос после очистки in-flight записи
+
 ### Requirement: CPU планирование отделяет interactive и background бюджеты с fairness-гарантией (MUST)
 Система MUST планировать CPU-bound semantic работу так, чтобы background diagnostics не могли полностью занять вычислительную емкость, необходимую для интерактивных операций.
 
 При общем числе permits `>= 2` система MUST резервировать как минимум:
 - `1` permit для interactive-класса;
 - `1` permit для background-класса.
+
+Если одна из очередей пуста, система MAY временно давать её свободные permits другой очереди (borrow). При возвращении конкуренции между классами система MUST восстановить гарантированный минимум permits для каждого класса.
 
 #### Scenario: Background diagnostics не вызывает starvation интерактивного пути
 - **GIVEN** в системе выполняется серия background diagnostics задач
@@ -85,12 +111,19 @@ Stale fallback MUST использовать snapshot, согласованны�
 - **THEN** diagnostics получает background permit и выполняет прогресс
 - **AND** система не уходит в полное starvation diagnostics
 
+#### Scenario: Borrow permits повышает throughput без потери fairness
+- **GIVEN** background-очередь пуста, а interactive-очередь содержит задачи
+- **WHEN** доступные background permits временно заимствуются interactive-классом
+- **THEN** общая пропускная способность растёт за счёт borrow
+- **AND** при появлении background-задач минимум `1` permit возвращается background-классу
+
 ### Requirement: Observability контракт отражает stale/singleflight/priority поведение фиксированными ключами (MUST)
 Система MUST предоставлять в observability snapshot следующие ключи метрик:
 
 Counter keys:
 - `intellisense_v2_interactive_wait_budget_exhausted_total`
 - `intellisense_v2_interactive_stale_served_total`
+- `intellisense_v2_interactive_knob_clamped_total`
 - `intellisense_v2_singleflight_leader_total`
 - `intellisense_v2_singleflight_shared_total`
 - `intellisense_v2_runtime_queue_wait_interactive_total`
@@ -110,3 +143,15 @@ Histogram keys:
 - **WHEN** запрашивается snapshot observability
 - **THEN** snapshot содержит обязательные stale/singleflight ключи
 - **AND** snapshot содержит queue/exec метрики в разрезе `interactive` и `background`
+
+### Requirement: Interactive latency quality gate фиксирует warm-path SLO (MUST)
+Система MUST удовлетворять интерактивным latency SLO на warm-path профиле `examples/conf_big` при предзагруженных deps/settings:
+- `p95(intellisense_v2_wait_for_file_version_completion_ms) <= intellisense_v2_interactive_wait_budget_ms + 20ms`;
+- `p95(completion_duration_ms) <= 1500ms`.
+
+SLO MUST проверяться автоматизированным perf smoke-тестом не менее чем на `50` последовательных completion-запросах в рамках одной сессии.
+
+#### Scenario: Warm-path SLO выдерживается после включения latency-priority policy
+- **GIVEN** сервис работает в warm состоянии на `examples/conf_big`
+- **WHEN** выполняется perf smoke из 50 последовательных completion-запросов
+- **THEN** `p95` wait-for-version и `p95` completion-duration укладываются в заявленные SLO

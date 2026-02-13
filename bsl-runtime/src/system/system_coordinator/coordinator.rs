@@ -244,6 +244,54 @@ impl SystemCoordinator {
             .record_intellisense_v2_parse_result_query_latency(duration);
     }
 
+    pub fn record_intellisense_v2_interactive_wait_budget_exhausted(&self) {
+        self.observability
+            .record_intellisense_v2_interactive_wait_budget_exhausted();
+    }
+
+    pub fn record_intellisense_v2_interactive_stale_served(&self) {
+        self.observability
+            .record_intellisense_v2_interactive_stale_served();
+    }
+
+    pub fn record_intellisense_v2_interactive_knob_clamped(&self) {
+        self.observability
+            .record_intellisense_v2_interactive_knob_clamped();
+    }
+
+    pub fn record_intellisense_v2_singleflight_leader(&self) {
+        self.observability
+            .record_intellisense_v2_singleflight_leader();
+    }
+
+    pub fn record_intellisense_v2_singleflight_shared(&self) {
+        self.observability
+            .record_intellisense_v2_singleflight_shared();
+    }
+
+    pub fn record_intellisense_v2_singleflight_wait_latency(&self, duration: std::time::Duration) {
+        self.observability
+            .record_intellisense_v2_singleflight_wait_latency(duration);
+    }
+
+    pub fn record_intellisense_v2_runtime_queue_wait_class_latency(
+        &self,
+        class: &str,
+        duration: std::time::Duration,
+    ) {
+        self.observability
+            .record_intellisense_v2_runtime_queue_wait_class_latency(class, duration);
+    }
+
+    pub fn record_intellisense_v2_runtime_exec_class_latency(
+        &self,
+        class: &str,
+        duration: std::time::Duration,
+    ) {
+        self.observability
+            .record_intellisense_v2_runtime_exec_class_latency(class, duration);
+    }
+
     pub fn record_intellisense_v2_query_cancelled(&self, kind: &str) {
         self.observability
             .record_intellisense_v2_query_cancelled(kind);

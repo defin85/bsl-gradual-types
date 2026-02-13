@@ -52,6 +52,10 @@
   - `intellisense_v2_interactive_wait_budget_ms` (default `120`);
   - `intellisense_v2_interactive_max_stale_version_gap` (default `1`);
   - `intellisense_v2_interactive_max_stale_age_ms` (default `1000`).
+- Значения runtime knobs валидируются/clamp в диапазоны:
+  - wait budget: `[10, 2000]`;
+  - max stale version gap: `[0, 10]`;
+  - max stale age: `[0, 10000]`.
 
 ## Proposed Architecture
 
@@ -63,6 +67,8 @@
 - stale fallback разрешён только если snapshot проходит ограничения по `version_gap` и `stale_age_ms`;
 - stale fallback должен быть согласован по `deps_id` и `settings_id`;
 - если подходящего stale snapshot нет, операция завершается без дальнейшего блокирующего ожидания latest.
+
+Snapshot с mismatched `deps_id/settings_id` не допускается в stale fallback.
 
 Результат stale-serving и факт исчерпания wait budget отражаются в observability.
 
@@ -77,12 +83,15 @@ Lifecycle singleflight:
 - `followers` получают shared-результат лидера;
 - отмена одного follower не отменяет leader, если leader уже исполняется;
 - in-flight запись обязана удаляться после завершения leader (success/error/cancel), чтобы не было зависших ключей.
+- при ошибке leader followers получают тот же терминальный outcome текущего flight;
+- auto-retry внутри того же flight не выполняется.
 
 ### 3) Priority-aware CPU scheduling
 - Интерактивный и background пути используют раздельные классы permits.
 - При total permits `>= 2` резервируются минимум `1` interactive permit и `1` background permit.
 - Background diagnostics не могут занять всю емкость blocking-пула.
 - Interactive поток не должен полностью starvation background-диагностики.
+- При пустой очереди одного класса свободные permits могут временно заимствоваться другим классом (borrow), но при конкуренции минимум guarantees восстанавливаются.
 
 ### 4) Observability contract expansion
 Нужны метрики для:
@@ -94,6 +103,7 @@ Lifecycle singleflight:
 Контракт фиксирует обязательные ключи:
 - `intellisense_v2_interactive_wait_budget_exhausted_total`
 - `intellisense_v2_interactive_stale_served_total`
+- `intellisense_v2_interactive_knob_clamped_total`
 - `intellisense_v2_singleflight_leader_total`
 - `intellisense_v2_singleflight_shared_total`
 - `intellisense_v2_singleflight_wait_ms`
@@ -117,6 +127,10 @@ Lifecycle singleflight:
 - Fairness:
   - under load interactive получает слот без ожидания завершения background очереди;
   - diagnostics продолжает прогрессировать при высокой interactive-нагрузке.
+- SLO gate:
+  - warm-path perf smoke на `examples/conf_big` (50 completion-запросов) валидирует:
+    - `p95(wait_for_file_version_completion_ms) <= wait_budget + 20ms`;
+    - `p95(completion_duration_ms) <= 1500ms`.
 - Regression:
   - cold/warm perf smoke на `examples/conf_big` с проверкой улучшения интерактивных latency хвостов.
   - проверка наличия новых observability метрик и их согласованности.

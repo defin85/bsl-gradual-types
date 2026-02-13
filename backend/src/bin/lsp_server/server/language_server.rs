@@ -913,12 +913,12 @@ impl LanguageServer for BslLanguageServer {
             return Ok(None);
         };
         let parse_result_query =
-            bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query(
+            bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query_singleflight(
                 &context,
                 &analysis,
                 true,
                 Some(self.coordinator.as_ref()),
-                |analysis| analysis.parse_result(file_id),
+                file_id,
             );
         let Some(parse_result) = parse_result_query.ok().flatten() else {
             return Ok(None);
@@ -957,12 +957,12 @@ impl LanguageServer for BslLanguageServer {
             return Ok(None);
         };
         let parse_result_query =
-            bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query(
+            bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query_singleflight(
                 &context,
                 &analysis,
                 true,
                 Some(self.coordinator.as_ref()),
-                |analysis| analysis.parse_result(file_id),
+                file_id,
             );
         let Some(parse_result) = parse_result_query.ok().flatten() else {
             return Ok(None);
@@ -1005,12 +1005,12 @@ impl LanguageServer for BslLanguageServer {
             return Ok(None);
         };
         let parse_result_query =
-            bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query(
+            bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query_singleflight(
                 &context,
                 &analysis,
                 true,
                 Some(self.coordinator.as_ref()),
-                |analysis| analysis.parse_result(file_id),
+                file_id,
             );
         let Some(parse_result) = parse_result_query.ok().flatten() else {
             return Ok(None);
@@ -1044,12 +1044,12 @@ impl LanguageServer for BslLanguageServer {
             return Ok(None);
         };
         let parse_result_query =
-            bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query(
+            bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query_singleflight(
                 &context,
                 &analysis,
                 true,
                 Some(self.coordinator.as_ref()),
-                |analysis| analysis.parse_result(file_id),
+                file_id,
             );
         let Some(parse_result) = parse_result_query.ok().flatten() else {
             return Ok(None);
@@ -1124,12 +1124,12 @@ impl LanguageServer for BslLanguageServer {
                 continue;
             };
             let parse_result_query =
-                bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query(
+                bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query_singleflight(
                     &context,
                     &analysis,
                     true,
                     Some(self.coordinator.as_ref()),
-                    |analysis| analysis.parse_result(file_id),
+                    file_id,
                 );
             let Some(parse_result) = parse_result_query.ok().flatten() else {
                 continue;
@@ -1313,12 +1313,11 @@ impl LanguageServer for BslLanguageServer {
                         let deps = analysis.deps_data().ok();
                         let ir_started = Instant::now();
                         let ir_query =
-                            bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
+                            bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight(
                                 &context,
-                                bsl_runtime::application::ObservabilityStage::IrQuery,
                                 &analysis,
                                 Some(self.coordinator.as_ref()),
-                                |analysis| analysis.ir(file_id),
+                                file_id,
                             );
                         let ir_elapsed = ir_started.elapsed();
                         let ir_outcome =
@@ -1351,12 +1350,12 @@ impl LanguageServer for BslLanguageServer {
                             }
                         };
                         let parse_result =
-                            bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query(
+                            bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query_singleflight(
                                 &context,
                                 &analysis,
                                 ir_program.is_some(),
                                 Some(self.coordinator.as_ref()),
-                                |analysis| analysis.parse_result(file_id),
+                                file_id,
                             )
                             .ok()
                             .flatten();
@@ -1685,12 +1684,11 @@ impl LanguageServer for BslLanguageServer {
                 let deps = analysis.deps_data().ok();
                 let ir_started = Instant::now();
                 let ir_program =
-                    bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
+                    bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight(
                         &context,
-                        bsl_runtime::application::ObservabilityStage::IrQuery,
                         &analysis,
                         Some(self.coordinator.as_ref()),
-                        |analysis| analysis.ir(file_id),
+                        file_id,
                     )
                     .ok()
                     .flatten();
@@ -1779,12 +1777,11 @@ impl LanguageServer for BslLanguageServer {
         let Some(file_content) = analysis.file_text(file_id).ok().flatten() else {
             return Ok(None);
         };
-        let ir_program = bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
+        let ir_program = bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight(
             &context,
-            bsl_runtime::application::ObservabilityStage::IrQuery,
             &analysis,
             Some(self.coordinator.as_ref()),
-            |analysis| analysis.ir(file_id),
+            file_id,
         )
         .ok()
         .flatten();
@@ -1867,12 +1864,11 @@ impl LanguageServer for BslLanguageServer {
         let Some(file_content) = analysis.file_text(file_id).ok().flatten() else {
             return Ok(None);
         };
-        let ir_program = bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
+        let ir_program = bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight(
             &context,
-            bsl_runtime::application::ObservabilityStage::IrQuery,
             &analysis,
             Some(self.coordinator.as_ref()),
-            |analysis| analysis.ir(file_id),
+            file_id,
         )
         .ok()
         .flatten();
@@ -1995,12 +1991,11 @@ impl LanguageServer for BslLanguageServer {
                 let deps = analysis.deps_data().ok();
                 let ir_started = Instant::now();
                 let ir_program =
-                    bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
+                    bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight(
                         &context,
-                        bsl_runtime::application::ObservabilityStage::IrQuery,
                         &analysis,
                         Some(self.coordinator.as_ref()),
-                        |analysis| analysis.ir(file_id),
+                        file_id,
                     )
                     .ok()
                     .flatten();
@@ -2320,12 +2315,11 @@ impl LanguageServer for BslLanguageServer {
                     .flatten()
                     .ok_or_else(tower_lsp::jsonrpc::Error::internal_error)?;
                 let ir_program =
-                    bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
+                    bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight(
                         &context,
-                        bsl_runtime::application::ObservabilityStage::IrQuery,
                         &analysis,
                         Some(self.coordinator.as_ref()),
-                        |analysis| analysis.ir(file_id),
+                        file_id,
                     )
                     .ok()
                     .flatten()
@@ -2409,12 +2403,11 @@ impl LanguageServer for BslLanguageServer {
                     .flatten()
                     .ok_or_else(tower_lsp::jsonrpc::Error::internal_error)?;
                 let ir_program =
-                    bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
+                    bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight(
                         &context,
-                        bsl_runtime::application::ObservabilityStage::IrQuery,
                         &analysis,
                         Some(self.coordinator.as_ref()),
-                        |analysis| analysis.ir(file_id),
+                        file_id,
                     )
                     .ok()
                     .flatten()

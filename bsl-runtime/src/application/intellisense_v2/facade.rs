@@ -1,8 +1,10 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, OnceLock};
 use std::time::{Duration, Instant};
 
-use super::policy::should_query_parse_result;
+use super::policy::{
+    interactive_freshness_knobs, should_query_parse_result, InteractiveFreshnessKnobs,
+};
 use tokio::sync::oneshot;
 use tracing::warn;
 
@@ -10,7 +12,9 @@ use crate::system::{IndexSnapshot, IndexSnapshotId, SystemCoordinator};
 use bsl_analysis_v2::{
     AnalysisHostV2, AnalysisV2, Change, DepsSnapshotId, FileId, SemanticDeps, SettingsId,
 };
+use bsl_shared::domain::types::ParseError;
 use bsl_shared::formatting::DetailLevel;
+use bsl_shared::ir::SemanticProgram;
 
 /// Canonical semantic operations expected from IntelliSense v2 adapters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -43,6 +47,15 @@ impl SemanticOperation {
             SemanticOperation::SymbolSearch => "symbol_search",
             SemanticOperation::References => "references",
         }
+    }
+}
+
+fn runtime_work_class_for_operation(operation: SemanticOperation) -> &'static str {
+    match operation {
+        SemanticOperation::Completion
+        | SemanticOperation::Hover
+        | SemanticOperation::SignatureHelp => "interactive",
+        _ => "background",
     }
 }
 
@@ -141,6 +154,15 @@ pub struct PreparedOperationSnapshot {
     pub snapshot: SemanticSnapshot,
     pub wait_elapsed: Option<Duration>,
     pub snapshot_elapsed: Duration,
+    pub wait_budget_exhausted: bool,
+    pub stale_served: bool,
+    pub observed_file_version: Option<i32>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct FileRevisionState {
+    pub version: i32,
+    pub updated_at: Instant,
 }
 
 #[derive(Clone)]
@@ -177,11 +199,73 @@ enum Command {
         min_version: i32,
         reply: oneshot::Sender<bool>,
     },
+    GetFileRevisionState {
+        file_id: FileId,
+        reply: oneshot::Sender<Option<FileRevisionState>>,
+    },
     #[cfg(test)]
     Shutdown {
         ack: oneshot::Sender<()>,
     },
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum SingleflightQueryKind {
+    ParseResult,
+    SyntaxDiagnostics,
+    Ir,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct SingleflightRevisionKey {
+    file_id: FileId,
+    file_version: i32,
+    deps_id: DepsSnapshotId,
+    settings_id: SettingsId,
+    query_kind: SingleflightQueryKind,
+}
+
+struct SingleflightFlight<T> {
+    state: std::sync::Mutex<SingleflightFlightState<T>>,
+    cv: Condvar,
+}
+
+impl<T> SingleflightFlight<T> {
+    fn new() -> Self {
+        Self {
+            state: std::sync::Mutex::new(SingleflightFlightState {
+                in_progress: true,
+                terminal_outcome: None,
+            }),
+            cv: Condvar::new(),
+        }
+    }
+}
+
+struct SingleflightFlightState<T> {
+    in_progress: bool,
+    terminal_outcome: Option<SingleflightTerminalOutcome<T>>,
+}
+
+#[derive(Clone)]
+enum SingleflightTerminalOutcome<T> {
+    Success(Option<T>),
+    Error(SingleflightQueryError),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SingleflightQueryError {
+    Cancelled,
+}
+
+type SingleflightMap<T> =
+    std::sync::Mutex<HashMap<SingleflightRevisionKey, Arc<SingleflightFlight<T>>>>;
+
+static PARSE_RESULT_FLIGHTS: OnceLock<SingleflightMap<Arc<bsl_syntax::ast::ParseResult>>> =
+    OnceLock::new();
+static SYNTAX_DIAGNOSTICS_FLIGHTS: OnceLock<SingleflightMap<Arc<Vec<ParseError>>>> =
+    OnceLock::new();
+static IR_FLIGHTS: OnceLock<SingleflightMap<Arc<SemanticProgram>>> = OnceLock::new();
 
 impl IntellisenseV2Facade {
     pub fn new(
@@ -197,7 +281,8 @@ impl IntellisenseV2Facade {
                 let mut host = initial_host;
                 let mut current_deps_id = host.deps_id();
                 let mut index_snapshot = initial_index_snapshot;
-                let mut applied_file_versions: HashMap<FileId, i32> = HashMap::new();
+                let mut applied_file_revisions: HashMap<FileId, FileRevisionState> =
+                    HashMap::new();
                 let mut waiters: HashMap<FileId, Vec<PendingWaiter>> = HashMap::new();
 
                 let wake_waiters_for_file =
@@ -249,11 +334,17 @@ impl IntellisenseV2Facade {
                             for change in changes {
                                 match &change {
                                     Change::SetFile { file_id, version, .. } => {
-                                        applied_file_versions.insert(*file_id, *version);
+                                        applied_file_revisions.insert(
+                                            *file_id,
+                                            FileRevisionState {
+                                                version: *version,
+                                                updated_at: Instant::now(),
+                                            },
+                                        );
                                         changed_files.push(*file_id);
                                     }
                                     Change::RemoveFile { file_id } => {
-                                        applied_file_versions.remove(file_id);
+                                        applied_file_revisions.remove(file_id);
                                         changed_files.push(*file_id);
                                     }
                                     Change::SetDepsSnapshot { .. } => {
@@ -267,7 +358,9 @@ impl IntellisenseV2Facade {
                             }
 
                             for file_id in changed_files {
-                                let version = applied_file_versions.get(&file_id).copied();
+                                let version = applied_file_revisions
+                                    .get(&file_id)
+                                    .map(|state| state.version);
                                 wake_waiters_for_file(
                                     file_id,
                                     version,
@@ -328,7 +421,7 @@ impl IntellisenseV2Facade {
                                 );
                             }
 
-                            match applied_file_versions.get(&file_id).copied() {
+                            match applied_file_revisions.get(&file_id).map(|state| state.version) {
                                 Some(version) if version >= min_version => {
                                     let exec_started = Instant::now();
                                     let _ = reply.send(true);
@@ -348,6 +441,9 @@ impl IntellisenseV2Facade {
                                     });
                                 }
                             }
+                        }
+                        Command::GetFileRevisionState { file_id, reply } => {
+                            let _ = reply.send(applied_file_revisions.get(&file_id).copied());
                         }
                         #[cfg(test)]
                         Command::Shutdown { ack } => {
@@ -489,11 +585,32 @@ impl IntellisenseV2Facade {
         context: &ExecutionContext,
         observability: Option<&SystemCoordinator>,
     ) -> Result<PreparedOperationSnapshot, SemanticOutcome> {
+        let interactive_knobs = interactive_freshness_knobs(context.operation, observability);
+        let mut wait_budget_exhausted = false;
+        let mut stale_served = false;
+
         let wait_elapsed = if let Some(min_file_version) = context.min_file_version {
             let started = Instant::now();
-            let wait_ok = self
-                .wait_for_file_version(context.file_id, min_file_version)
-                .await;
+            let wait_ok = if let Some(knobs) = interactive_knobs {
+                match tokio::time::timeout(
+                    knobs.wait_budget,
+                    self.wait_for_file_version(context.file_id, min_file_version),
+                )
+                .await
+                {
+                    Ok(wait_ok) => wait_ok,
+                    Err(_) => {
+                        wait_budget_exhausted = true;
+                        if let Some(coordinator) = observability {
+                            coordinator.record_intellisense_v2_interactive_wait_budget_exhausted();
+                        }
+                        true
+                    }
+                }
+            } else {
+                self.wait_for_file_version(context.file_id, min_file_version)
+                    .await
+            };
             let elapsed = started.elapsed();
             if let Some(coordinator) = observability {
                 coordinator.record_intellisense_v2_wait_for_file_version(
@@ -517,11 +634,49 @@ impl IntellisenseV2Facade {
                 context.operation.as_str(),
                 snapshot_elapsed,
             );
+            coordinator.record_intellisense_v2_runtime_queue_wait_class_latency(
+                runtime_work_class_for_operation(context.operation),
+                wait_elapsed.unwrap_or(Duration::ZERO),
+            );
+            coordinator.record_intellisense_v2_runtime_exec_class_latency(
+                runtime_work_class_for_operation(context.operation),
+                snapshot_elapsed,
+            );
         }
 
         if let Some(expected_deps_id) = context.expected_deps_id.as_ref() {
             if expected_deps_id != &deps_id {
                 return Err(SemanticOutcome::MissingDeps);
+            }
+        }
+
+        let observed_file_version = analysis.file_version(context.file_id).ok().flatten();
+        let observed_settings_id = analysis.settings_id().ok();
+        if let (Some(min_file_version), Some(knobs)) = (context.min_file_version, interactive_knobs)
+        {
+            if wait_budget_exhausted {
+                if observed_settings_id.as_ref() != Some(&context.settings.settings_id) {
+                    return Err(SemanticOutcome::StaleVersion);
+                }
+                if let Some(observed_version) = observed_file_version {
+                    if observed_version < min_file_version {
+                        self.validate_stale_fallback(
+                            context.file_id,
+                            min_file_version,
+                            observed_version,
+                            knobs,
+                        )
+                        .await?;
+                        stale_served = true;
+                        if let Some(coordinator) = observability {
+                            coordinator.record_intellisense_v2_interactive_stale_served();
+                        }
+                    }
+                } else {
+                    return Err(SemanticOutcome::StaleVersion);
+                }
+            } else if observed_file_version.is_some_and(|version| version < min_file_version) {
+                return Err(SemanticOutcome::StaleVersion);
             }
         }
 
@@ -533,7 +688,35 @@ impl IntellisenseV2Facade {
             },
             wait_elapsed,
             snapshot_elapsed,
+            wait_budget_exhausted,
+            stale_served,
+            observed_file_version,
         })
+    }
+
+    async fn validate_stale_fallback(
+        &self,
+        file_id: FileId,
+        requested_version: i32,
+        observed_version: i32,
+        knobs: InteractiveFreshnessKnobs,
+    ) -> Result<(), SemanticOutcome> {
+        let version_gap = requested_version.saturating_sub(observed_version);
+        if version_gap > knobs.max_stale_version_gap {
+            return Err(SemanticOutcome::StaleVersion);
+        }
+
+        let Some(revision_state) = self.file_revision_state(file_id).await else {
+            return Err(SemanticOutcome::StaleVersion);
+        };
+        if revision_state.version != observed_version {
+            return Err(SemanticOutcome::StaleVersion);
+        }
+        if revision_state.updated_at.elapsed() > knobs.max_stale_age {
+            return Err(SemanticOutcome::StaleVersion);
+        }
+
+        Ok(())
     }
 
     /// Canonical ephemeral operation preparation for one-shot adapters:
@@ -577,6 +760,9 @@ impl IntellisenseV2Facade {
             snapshot,
             wait_elapsed: None,
             snapshot_elapsed,
+            wait_budget_exhausted: false,
+            stale_served: false,
+            observed_file_version: Some(file_version),
         })
     }
 
@@ -667,6 +853,193 @@ impl IntellisenseV2Facade {
         )
     }
 
+    pub fn run_ir_query_singleflight(
+        context: &ExecutionContext,
+        analysis: &AnalysisV2,
+        observability: Option<&SystemCoordinator>,
+        file_id: FileId,
+    ) -> Result<Option<Arc<SemanticProgram>>, SingleflightQueryError> {
+        let key = Self::singleflight_revision_key(analysis, file_id, SingleflightQueryKind::Ir);
+        Self::run_optional_query(
+            context,
+            ObservabilityStage::IrQuery,
+            analysis,
+            observability,
+            |_analysis| {
+                if let Some(key) = key {
+                    Self::run_singleflight_query(&IR_FLIGHTS, key, observability, || {
+                        analysis
+                            .ir(file_id)
+                            .map_err(|_| SingleflightQueryError::Cancelled)
+                    })
+                } else {
+                    analysis
+                        .ir(file_id)
+                        .map_err(|_| SingleflightQueryError::Cancelled)
+                }
+            },
+        )
+    }
+
+    pub fn run_parse_result_query_singleflight(
+        context: &ExecutionContext,
+        analysis: &AnalysisV2,
+        ir_available: bool,
+        observability: Option<&SystemCoordinator>,
+        file_id: FileId,
+    ) -> Result<Option<Arc<bsl_syntax::ast::ParseResult>>, SingleflightQueryError> {
+        if !should_query_parse_result(context.operation, ir_available) {
+            return Ok(None);
+        }
+        let key =
+            Self::singleflight_revision_key(analysis, file_id, SingleflightQueryKind::ParseResult);
+        Self::run_optional_query(
+            context,
+            ObservabilityStage::ParseResultQuery,
+            analysis,
+            observability,
+            |_analysis| {
+                if let Some(key) = key {
+                    Self::run_singleflight_query(&PARSE_RESULT_FLIGHTS, key, observability, || {
+                        analysis
+                            .parse_result(file_id)
+                            .map_err(|_| SingleflightQueryError::Cancelled)
+                    })
+                } else {
+                    analysis
+                        .parse_result(file_id)
+                        .map_err(|_| SingleflightQueryError::Cancelled)
+                }
+            },
+        )
+    }
+
+    pub fn run_syntax_diagnostics_query_singleflight(
+        context: &ExecutionContext,
+        analysis: &AnalysisV2,
+        observability: Option<&SystemCoordinator>,
+        file_id: FileId,
+    ) -> Result<Option<Arc<Vec<ParseError>>>, SingleflightQueryError> {
+        let key = Self::singleflight_revision_key(
+            analysis,
+            file_id,
+            SingleflightQueryKind::SyntaxDiagnostics,
+        );
+        Self::run_optional_query(
+            context,
+            ObservabilityStage::SyntaxDiagnosticsQuery,
+            analysis,
+            observability,
+            |_analysis| {
+                if let Some(key) = key {
+                    Self::run_singleflight_query(
+                        &SYNTAX_DIAGNOSTICS_FLIGHTS,
+                        key,
+                        observability,
+                        || {
+                            analysis
+                                .syntax_diagnostics(file_id)
+                                .map_err(|_| SingleflightQueryError::Cancelled)
+                        },
+                    )
+                } else {
+                    analysis
+                        .syntax_diagnostics(file_id)
+                        .map_err(|_| SingleflightQueryError::Cancelled)
+                }
+            },
+        )
+    }
+
+    fn singleflight_revision_key(
+        analysis: &AnalysisV2,
+        file_id: FileId,
+        query_kind: SingleflightQueryKind,
+    ) -> Option<SingleflightRevisionKey> {
+        let file_version = analysis.file_version(file_id).ok().flatten()?;
+        let deps_id = analysis.deps_id().ok()?;
+        let settings_id = analysis.settings_id().ok()?;
+        Some(SingleflightRevisionKey {
+            file_id,
+            file_version,
+            deps_id,
+            settings_id,
+            query_kind,
+        })
+    }
+
+    fn run_singleflight_query<T>(
+        flights: &OnceLock<SingleflightMap<T>>,
+        key: SingleflightRevisionKey,
+        observability: Option<&SystemCoordinator>,
+        query: impl FnOnce() -> Result<Option<T>, SingleflightQueryError>,
+    ) -> Result<Option<T>, SingleflightQueryError>
+    where
+        T: Clone,
+    {
+        let flights = flights.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+        let (flight, is_leader) = {
+            let mut guard = flights
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(existing) = guard.get(&key) {
+                (existing.clone(), false)
+            } else {
+                let created = Arc::new(SingleflightFlight::new());
+                guard.insert(key.clone(), created.clone());
+                (created, true)
+            }
+        };
+
+        if is_leader {
+            if let Some(coordinator) = observability {
+                coordinator.record_intellisense_v2_singleflight_leader();
+            }
+            let result = query();
+            {
+                let mut state = flight
+                    .state
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                state.terminal_outcome = Some(match &result {
+                    Ok(value) => SingleflightTerminalOutcome::Success(value.clone()),
+                    Err(err) => SingleflightTerminalOutcome::Error(*err),
+                });
+                state.in_progress = false;
+            }
+            flight.cv.notify_all();
+            let mut guard = flights
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            guard.remove(&key);
+            result
+        } else {
+            if let Some(coordinator) = observability {
+                coordinator.record_intellisense_v2_singleflight_shared();
+            }
+            let wait_started = Instant::now();
+            let mut state = flight
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            while state.in_progress {
+                state = flight
+                    .cv
+                    .wait(state)
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+            }
+            if let Some(coordinator) = observability {
+                coordinator
+                    .record_intellisense_v2_singleflight_wait_latency(wait_started.elapsed());
+            }
+            match state.terminal_outcome.clone() {
+                Some(SingleflightTerminalOutcome::Success(shared)) => Ok(shared),
+                Some(SingleflightTerminalOutcome::Error(err)) => Err(err),
+                None => Err(SingleflightQueryError::Cancelled),
+            }
+        }
+    }
+
     /// One-shot helper for ephemeral adapters (e.g. web handlers).
     /// Builds a semantic snapshot without creating a long-lived writer-thread runtime.
     pub fn ephemeral_snapshot(
@@ -721,6 +1094,28 @@ impl IntellisenseV2Facade {
         rx.await.unwrap_or(false)
     }
 
+    pub async fn file_revision_state(&self, file_id: FileId) -> Option<FileRevisionState> {
+        let (reply, rx) = oneshot::channel::<Option<FileRevisionState>>();
+        if self
+            .inner
+            .tx
+            .send(Command::GetFileRevisionState { file_id, reply })
+            .is_err()
+        {
+            warn!(
+                "analysis_v2_runtime: failed to send GetFileRevisionState (writer thread is gone)"
+            );
+            return None;
+        }
+        match rx.await {
+            Ok(state) => state,
+            Err(_) => {
+                warn!("analysis_v2_runtime: GetFileRevisionState response cancelled");
+                None
+            }
+        }
+    }
+
     #[cfg(test)]
     pub(crate) async fn shutdown_for_test(&self) {
         let (ack, rx) = oneshot::channel::<()>();
@@ -743,6 +1138,7 @@ struct PendingWaiter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use tokio::time::{timeout, Duration};
 
@@ -1032,6 +1428,191 @@ mod tests {
         runtime.shutdown_for_test().await;
     }
 
+    #[tokio::test]
+    async fn interactive_prepare_timeout_serves_stale_when_gap_within_default() {
+        let coordinator = SystemCoordinator::new();
+        let runtime = IntellisenseV2Facade::new(
+            AnalysisHostV2::default(),
+            Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p9"))),
+            None,
+        );
+        let file_id = FileId(10);
+        let settings_id = SettingsId::from_hash("settings");
+
+        runtime.apply_changes(vec![
+            Change::SetSettingsSnapshot {
+                settings_id: settings_id.clone(),
+                diagnostics_detail_level: DetailLevel::Full,
+            },
+            Change::SetFile {
+                file_id,
+                text: Arc::from("x = 1;"),
+                version: 4,
+                path: Arc::from("stale_ok.bsl"),
+            },
+        ]);
+
+        let context = ExecutionContext {
+            operation: SemanticOperation::Completion,
+            file_id,
+            min_file_version: Some(5),
+            expected_deps_id: None,
+            flow_sensitive: false,
+            settings: ExecutionSettings {
+                settings_id: settings_id.clone(),
+                diagnostics_detail_level: DetailLevel::Full,
+            },
+            cancellation: CancellationPolicy::BestEffort,
+        };
+
+        let prepared = runtime
+            .prepare_stateful_operation(&context, Some(&coordinator))
+            .await
+            .expect("interactive fallback should serve stale snapshot");
+        assert!(
+            prepared.wait_budget_exhausted,
+            "expected bounded wait timeout for interactive path"
+        );
+        assert!(
+            prepared.stale_served,
+            "expected stale fallback to be served"
+        );
+        assert_eq!(prepared.observed_file_version, Some(4));
+        assert!(
+            prepared
+                .wait_elapsed
+                .is_some_and(|elapsed| elapsed >= Duration::from_millis(90)),
+            "wait elapsed should reflect bounded wait timeout"
+        );
+
+        let metrics = coordinator.observability_metrics();
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        let histograms = metrics
+            .get("histograms")
+            .and_then(|value| value.as_object())
+            .expect("metrics.histograms object");
+        assert!(
+            counters.contains_key("intellisense_v2_interactive_wait_budget_exhausted_total"),
+            "wait budget exhausted metric should be recorded"
+        );
+        assert!(
+            counters.contains_key("intellisense_v2_interactive_stale_served_total"),
+            "stale served metric should be recorded"
+        );
+        assert!(
+            counters.contains_key("intellisense_v2_runtime_queue_wait_interactive_total"),
+            "interactive queue-class counter should be recorded"
+        );
+        assert!(
+            counters.contains_key("intellisense_v2_runtime_exec_interactive_total"),
+            "interactive exec-class counter should be recorded"
+        );
+        assert!(
+            histograms.contains_key("intellisense_v2_runtime_queue_wait_interactive_ms"),
+            "interactive queue-class histogram should be recorded"
+        );
+        assert!(
+            histograms.contains_key("intellisense_v2_runtime_exec_interactive_ms"),
+            "interactive exec-class histogram should be recorded"
+        );
+
+        runtime.shutdown_for_test().await;
+    }
+
+    #[tokio::test]
+    async fn interactive_prepare_timeout_rejects_stale_when_gap_exceeds_default() {
+        let runtime = IntellisenseV2Facade::new(
+            AnalysisHostV2::default(),
+            Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p9"))),
+            None,
+        );
+        let file_id = FileId(11);
+        let settings_id = SettingsId::from_hash("settings");
+
+        runtime.apply_changes(vec![
+            Change::SetSettingsSnapshot {
+                settings_id: settings_id.clone(),
+                diagnostics_detail_level: DetailLevel::Full,
+            },
+            Change::SetFile {
+                file_id,
+                text: Arc::from("x = 1;"),
+                version: 2,
+                path: Arc::from("stale_reject.bsl"),
+            },
+        ]);
+
+        let context = ExecutionContext {
+            operation: SemanticOperation::Hover,
+            file_id,
+            min_file_version: Some(5),
+            expected_deps_id: None,
+            flow_sensitive: false,
+            settings: ExecutionSettings {
+                settings_id: settings_id.clone(),
+                diagnostics_detail_level: DetailLevel::Full,
+            },
+            cancellation: CancellationPolicy::BestEffort,
+        };
+
+        let result = runtime.prepare_stateful_operation(&context, None).await;
+        assert!(
+            matches!(result, Err(SemanticOutcome::StaleVersion)),
+            "gap > 1 should reject stale fallback under default policy"
+        );
+
+        runtime.shutdown_for_test().await;
+    }
+
+    #[tokio::test]
+    async fn interactive_prepare_timeout_rejects_stale_on_settings_mismatch() {
+        let runtime = IntellisenseV2Facade::new(
+            AnalysisHostV2::default(),
+            Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p9"))),
+            None,
+        );
+        let file_id = FileId(12);
+        let stale_settings_id = SettingsId::from_hash("settings_old");
+        let requested_settings_id = SettingsId::from_hash("settings_new");
+
+        runtime.apply_changes(vec![
+            Change::SetSettingsSnapshot {
+                settings_id: stale_settings_id,
+                diagnostics_detail_level: DetailLevel::Full,
+            },
+            Change::SetFile {
+                file_id,
+                text: Arc::from("x = 1;"),
+                version: 4,
+                path: Arc::from("stale_mismatch.bsl"),
+            },
+        ]);
+
+        let context = ExecutionContext {
+            operation: SemanticOperation::SignatureHelp,
+            file_id,
+            min_file_version: Some(5),
+            expected_deps_id: None,
+            flow_sensitive: false,
+            settings: ExecutionSettings {
+                settings_id: requested_settings_id,
+                diagnostics_detail_level: DetailLevel::Full,
+            },
+            cancellation: CancellationPolicy::BestEffort,
+        };
+
+        let result = runtime.prepare_stateful_operation(&context, None).await;
+        assert!(
+            matches!(result, Err(SemanticOutcome::StaleVersion)),
+            "settings mismatch must reject stale fallback"
+        );
+
+        runtime.shutdown_for_test().await;
+    }
+
     #[test]
     fn run_parse_result_query_skips_when_policy_disallows_it() {
         let analysis = AnalysisHostV2::default().snapshot();
@@ -1198,6 +1779,188 @@ mod tests {
         assert_eq!(
             cancelled, 0,
             "ignore policy should suppress cancelled counters"
+        );
+    }
+
+    #[test]
+    fn singleflight_runs_leader_once_and_shares_result() {
+        static TEST_FLIGHTS: OnceLock<SingleflightMap<Arc<String>>> = OnceLock::new();
+        let key = SingleflightRevisionKey {
+            file_id: FileId(777),
+            file_version: 10,
+            deps_id: DepsSnapshotId::from_hash("deps"),
+            settings_id: SettingsId::from_hash("settings"),
+            query_kind: SingleflightQueryKind::Ir,
+        };
+        let calls = Arc::new(AtomicUsize::new(0));
+
+        let first_calls = calls.clone();
+        let first_key = key.clone();
+        let first = std::thread::spawn(move || {
+            IntellisenseV2Facade::run_singleflight_query(&TEST_FLIGHTS, first_key, None, || {
+                first_calls.fetch_add(1, Ordering::SeqCst);
+                std::thread::sleep(std::time::Duration::from_millis(60));
+                Ok(Some(Arc::new(String::from("shared"))))
+            })
+        });
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+
+        let second_calls = calls.clone();
+        let second = std::thread::spawn(move || {
+            IntellisenseV2Facade::run_singleflight_query(&TEST_FLIGHTS, key, None, || {
+                second_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(Some(Arc::new(String::from("second"))))
+            })
+        });
+
+        let first_result = first.join().expect("first thread join").expect("first ok");
+        let second_result = second
+            .join()
+            .expect("second thread join")
+            .expect("second ok");
+
+        assert_eq!(
+            first_result.as_ref().map(|value| value.as_str()),
+            Some("shared")
+        );
+        assert_eq!(
+            second_result.as_ref().map(|value| value.as_str()),
+            Some("shared")
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn singleflight_propagates_leader_cancel_without_retry_and_cleans_up() {
+        static TEST_FLIGHTS: OnceLock<SingleflightMap<Arc<String>>> = OnceLock::new();
+        let key = SingleflightRevisionKey {
+            file_id: FileId(778),
+            file_version: 10,
+            deps_id: DepsSnapshotId::from_hash("deps"),
+            settings_id: SettingsId::from_hash("settings"),
+            query_kind: SingleflightQueryKind::ParseResult,
+        };
+        let calls = Arc::new(AtomicUsize::new(0));
+
+        let first_calls = calls.clone();
+        let first_key = key.clone();
+        let first = std::thread::spawn(move || {
+            IntellisenseV2Facade::run_singleflight_query(&TEST_FLIGHTS, first_key, None, || {
+                first_calls.fetch_add(1, Ordering::SeqCst);
+                std::thread::sleep(std::time::Duration::from_millis(60));
+                Err(SingleflightQueryError::Cancelled)
+            })
+        });
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+
+        let second_calls = calls.clone();
+        let second_key = key.clone();
+        let second = std::thread::spawn(move || {
+            IntellisenseV2Facade::run_singleflight_query(&TEST_FLIGHTS, second_key, None, || {
+                second_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(Some(Arc::new(String::from("unexpected-retry"))))
+            })
+        });
+
+        let first_result = first.join().expect("first thread join");
+        let second_result = second.join().expect("second thread join");
+        assert!(first_result.is_err(), "leader must fail");
+        assert!(
+            second_result.is_err(),
+            "follower must receive leader cancel"
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "follower must not trigger retry inside the same flight"
+        );
+
+        let map = TEST_FLIGHTS
+            .get()
+            .expect("test singleflight map should be initialized");
+        let inflight_len = map
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .len();
+        assert_eq!(inflight_len, 0, "flight entry must be cleaned up");
+
+        let rerun_calls = calls.clone();
+        let rerun = IntellisenseV2Facade::run_singleflight_query(&TEST_FLIGHTS, key, None, || {
+            rerun_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(Some(Arc::new(String::from("after-cleanup"))))
+        })
+        .expect("new request after cleanup should run as new leader");
+        assert_eq!(rerun.as_deref().map(String::as_str), Some("after-cleanup"));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn singleflight_records_leader_shared_and_wait_metrics() {
+        static TEST_FLIGHTS: OnceLock<SingleflightMap<Arc<String>>> = OnceLock::new();
+        let key = SingleflightRevisionKey {
+            file_id: FileId(779),
+            file_version: 10,
+            deps_id: DepsSnapshotId::from_hash("deps"),
+            settings_id: SettingsId::from_hash("settings"),
+            query_kind: SingleflightQueryKind::SyntaxDiagnostics,
+        };
+        let coordinator = Arc::new(SystemCoordinator::new());
+
+        let first_coordinator = coordinator.clone();
+        let first_key = key.clone();
+        let first = std::thread::spawn(move || {
+            IntellisenseV2Facade::run_singleflight_query(
+                &TEST_FLIGHTS,
+                first_key,
+                Some(first_coordinator.as_ref()),
+                || {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    Ok(Some(Arc::new(String::from("shared"))))
+                },
+            )
+        });
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+
+        let second_coordinator = coordinator.clone();
+        let second = std::thread::spawn(move || {
+            IntellisenseV2Facade::run_singleflight_query(
+                &TEST_FLIGHTS,
+                key,
+                Some(second_coordinator.as_ref()),
+                || Ok(Some(Arc::new(String::from("second")))),
+            )
+        });
+
+        let _ = first.join().expect("first thread join").expect("first ok");
+        let _ = second
+            .join()
+            .expect("second thread join")
+            .expect("second ok");
+
+        let metrics = coordinator.observability_metrics();
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        let histograms = metrics
+            .get("histograms")
+            .and_then(|value| value.as_object())
+            .expect("metrics.histograms object");
+
+        assert!(
+            counters.contains_key("intellisense_v2_singleflight_leader_total"),
+            "singleflight leader counter should be recorded"
+        );
+        assert!(
+            counters.contains_key("intellisense_v2_singleflight_shared_total"),
+            "singleflight shared counter should be recorded"
+        );
+        assert!(
+            histograms.contains_key("intellisense_v2_singleflight_wait_ms"),
+            "singleflight wait histogram should be recorded"
         );
     }
 

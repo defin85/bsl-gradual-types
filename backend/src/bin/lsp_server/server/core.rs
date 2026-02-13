@@ -917,12 +917,15 @@ impl BslLanguageServer {
                         parse_result_cancelled_error,
                         syntax_cancelled_error,
                         semantic_cancelled_error,
-                    ) = match bsl_runtime::application::spawn_bounded_blocking(move || {
-                        let mut diagnostics = Vec::new();
-                        let mut was_cancelled = false;
-                        let mut parse_result_cancelled_error = None;
-                        let mut syntax_cancelled_error = None;
-                        let mut semantic_cancelled_error = None;
+                    ) = match bsl_runtime::application::spawn_bounded_blocking_with_class_observed(
+                        bsl_runtime::application::CpuWorkClass::Background,
+                        Some(server.coordinator.as_ref()),
+                        move || {
+                            let mut diagnostics = Vec::new();
+                            let mut was_cancelled = false;
+                            let mut parse_result_cancelled_error = None;
+                            let mut syntax_cancelled_error = None;
+                            let mut semantic_cancelled_error = None;
 
                         let file_text = analysis.file_text(file_id).ok().flatten();
                         let line_index = analysis.line_index(file_id).ok().flatten();
@@ -933,12 +936,12 @@ impl BslLanguageServer {
                         ) {
                             let parse_result_started = Instant::now();
                             let parse_result_query =
-                                bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query(
+                                bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query_singleflight(
                                     &context_for_blocking,
                                     &analysis,
                                     false,
                                     Some(coordinator_for_blocking.as_ref()),
-                                    |analysis| analysis.parse_result(file_id),
+                                    file_id,
                                 );
                             if let Err(cancelled) = parse_result_query {
                                 was_cancelled = true;
@@ -951,12 +954,11 @@ impl BslLanguageServer {
 
                         let syntax_started = Instant::now();
                         let syntax_result =
-                            bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
+                            bsl_runtime::application::IntellisenseV2Facade::run_syntax_diagnostics_query_singleflight(
                                 &context_for_blocking,
-                                bsl_runtime::application::ObservabilityStage::SyntaxDiagnosticsQuery,
                                 &analysis,
                                 Some(coordinator_for_blocking.as_ref()),
-                                |analysis| analysis.syntax_diagnostics(file_id),
+                                file_id,
                             );
                         let syntax_elapsed = syntax_started.elapsed();
                         match syntax_result {
@@ -1021,17 +1023,18 @@ impl BslLanguageServer {
                             }
                         }
 
-                        (
-                            diagnostics,
-                            was_cancelled,
-                            parse_result_elapsed,
-                            syntax_elapsed,
-                            semantic_elapsed,
-                            parse_result_cancelled_error,
-                            syntax_cancelled_error,
-                            semantic_cancelled_error,
-                        )
-                    })
+                            (
+                                diagnostics,
+                                was_cancelled,
+                                parse_result_elapsed,
+                                syntax_elapsed,
+                                semantic_elapsed,
+                                parse_result_cancelled_error,
+                                syntax_cancelled_error,
+                                semantic_cancelled_error,
+                            )
+                        },
+                    )
                     .await
                     {
                         Ok(result) => result,
@@ -1377,6 +1380,15 @@ mod tests {
         "intellisense_v2_ir_query_cancelled_total_other",
         "intellisense_v2_query_cancelled_total_syntax",
         "intellisense_v2_query_cancelled_total_semantic",
+        "intellisense_v2_interactive_wait_budget_exhausted_total",
+        "intellisense_v2_interactive_stale_served_total",
+        "intellisense_v2_interactive_knob_clamped_total",
+        "intellisense_v2_singleflight_leader_total",
+        "intellisense_v2_singleflight_shared_total",
+        "intellisense_v2_runtime_queue_wait_interactive_total",
+        "intellisense_v2_runtime_queue_wait_background_total",
+        "intellisense_v2_runtime_exec_interactive_total",
+        "intellisense_v2_runtime_exec_background_total",
     ];
 
     const UNIFIED_STAGE_HISTOGRAM_KEYS: &[&str] = &[
@@ -1390,6 +1402,11 @@ mod tests {
         "intellisense_v2_syntax_diagnostics_query_ms",
         "intellisense_v2_semantic_diagnostics_query_ms",
         "intellisense_v2_parse_result_query_ms",
+        "intellisense_v2_singleflight_wait_ms",
+        "intellisense_v2_runtime_queue_wait_interactive_ms",
+        "intellisense_v2_runtime_queue_wait_background_ms",
+        "intellisense_v2_runtime_exec_interactive_ms",
+        "intellisense_v2_runtime_exec_background_ms",
     ];
 
     fn seed_unified_intellisense_v2_stage_metrics(coordinator: &SystemCoordinator) {
@@ -1408,6 +1425,16 @@ mod tests {
         coordinator.record_intellisense_v2_ir_query_cancelled("other");
         coordinator.record_intellisense_v2_query_cancelled("syntax");
         coordinator.record_intellisense_v2_query_cancelled("semantic");
+        coordinator.record_intellisense_v2_interactive_wait_budget_exhausted();
+        coordinator.record_intellisense_v2_interactive_stale_served();
+        coordinator.record_intellisense_v2_interactive_knob_clamped();
+        coordinator.record_intellisense_v2_singleflight_leader();
+        coordinator.record_intellisense_v2_singleflight_shared();
+        coordinator.record_intellisense_v2_singleflight_wait_latency(sample);
+        coordinator.record_intellisense_v2_runtime_queue_wait_class_latency("interactive", sample);
+        coordinator.record_intellisense_v2_runtime_queue_wait_class_latency("background", sample);
+        coordinator.record_intellisense_v2_runtime_exec_class_latency("interactive", sample);
+        coordinator.record_intellisense_v2_runtime_exec_class_latency("background", sample);
     }
 
     fn assert_unified_intellisense_v2_stage_contract(payload: &serde_json::Value) {
@@ -1551,6 +1578,7 @@ mod tests {
     ) -> Vec<NormalizedSemanticDiagnostic> {
         let mut normalized: Vec<NormalizedSemanticDiagnostic> = diagnostics
             .iter()
+            .filter(|diagnostic| diagnostic.source.as_deref() == Some("bsl-analysis-v2"))
             .map(|diagnostic| {
                 let severity = match diagnostic.severity {
                     Some(tower_lsp::lsp_types::DiagnosticSeverity::ERROR) => "error",
@@ -5272,5 +5300,164 @@ mod tests {
             web_hover_text.contains(&mcp_type_name),
             "Web hover/type_at_position drift detected: expected '{mcp_type_name}' in hover text, got '{web_hover_text}'"
         );
+    }
+
+    #[tokio::test]
+    async fn p26_interactive_warm_path_completion_slo_smoke_conf_big() {
+        fn conf_big_root() -> Option<std::path::PathBuf> {
+            let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .expect("workspace root")
+                .to_path_buf();
+            let candidates = [
+                workspace_root.join("examples").join("conf_big"),
+                std::path::PathBuf::from("examples/conf_big"),
+                std::path::PathBuf::from("../examples/conf_big"),
+            ];
+            candidates
+                .into_iter()
+                .find(|path| path.join("Configuration.xml").exists())
+        }
+
+        let Some(root) = conf_big_root() else {
+            if std::env::var_os("CI").is_some() {
+                panic!("examples/conf_big fixture is missing");
+            }
+            eprintln!("skipping p26 warm-path SLO smoke: examples/conf_big fixture is missing");
+            return;
+        };
+
+        let module_rel = std::path::PathBuf::from("Documents")
+            .join("РеализацияТоваровУслуг")
+            .join("Forms")
+            .join("ФормаДокументаОбщая")
+            .join("Ext")
+            .join("Form")
+            .join("Module.bsl");
+        let module_path = root.join(&module_rel);
+        if !module_path.exists() {
+            if std::env::var_os("CI").is_some() {
+                panic!(
+                    "conf_big module fixture is missing: {}",
+                    module_path.display()
+                );
+            }
+            eprintln!(
+                "skipping p26 warm-path SLO smoke: module fixture is missing: {}",
+                module_path.display()
+            );
+            return;
+        }
+
+        let module_text = std::fs::read_to_string(&module_path).expect("read conf_big module");
+        let coordinator = Arc::new(SystemCoordinator::new());
+        let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+            Arc::new(std::sync::Mutex::new(None));
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            let server_holder = server_holder.clone();
+            move |client| {
+                let server = BslLanguageServer::new(client, coordinator.clone());
+                *server_holder.lock().expect("server holder lock") = Some(server.clone());
+                server
+            }
+        })
+        .finish();
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        initialize_lsp_service(&mut service).await;
+
+        let uri = Url::parse("file:///conf_big_perf_module.bsl").expect("uri");
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: module_text,
+            },
+        };
+        let did_open_req = Request::build("textDocument/didOpen")
+            .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+            .finish();
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+
+        let server = server_holder
+            .lock()
+            .expect("server holder lock")
+            .clone()
+            .expect("server must be created");
+        for _ in 0..50_u64 {
+            let completion = server
+                .completion(CompletionParams {
+                    text_document_position: TextDocumentPositionParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        position: Position::new(0, 0),
+                    },
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                    partial_result_params: PartialResultParams::default(),
+                    context: None,
+                })
+                .await
+                .expect("completion request");
+            assert!(completion.is_some(), "completion response expected");
+        }
+
+        let metrics = coordinator.observability_metrics();
+        let histograms = metrics
+            .get("histograms")
+            .and_then(|value| value.as_object())
+            .expect("metrics.histograms object");
+
+        let wait_hist = histograms
+            .get("intellisense_v2_wait_for_file_version_completion_ms")
+            .or_else(|| histograms.get("intellisense_v2_wait_for_file_version_other_ms"))
+            .and_then(|value| value.as_object());
+        let completion_hist = histograms
+            .get("completion_duration_ms")
+            .and_then(|value| value.as_object())
+            .expect("completion duration histogram");
+
+        let completion_count = completion_hist
+            .get("count")
+            .and_then(|value| value.as_u64())
+            .expect("completion count");
+        assert!(
+            completion_count >= 50,
+            "expected at least 50 completion duration samples, got {completion_count}"
+        );
+
+        let wait_p95 = wait_hist
+            .and_then(|hist| hist.get("p95"))
+            .and_then(|value| value.as_f64().or_else(|| value.as_u64().map(|v| v as f64)))
+            .unwrap_or(0.0);
+        let completion_p95 = completion_hist
+            .get("p95")
+            .and_then(|value| value.as_f64().or_else(|| value.as_u64().map(|v| v as f64)))
+            .expect("completion p95");
+        let wait_budget_ms = bsl_runtime::system::global_runtime_config()
+            .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
+            .unwrap_or(120)
+            .clamp(10, 2000) as f64;
+
+        assert!(
+            wait_p95 <= wait_budget_ms + 20.0,
+            "warm-path wait p95 regression: wait_p95={}ms budget={}ms",
+            wait_p95,
+            wait_budget_ms
+        );
+        assert!(
+            completion_p95 <= 1500.0,
+            "warm-path completion p95 regression: completion_p95={}ms > 1500ms",
+            completion_p95
+        );
+
+        drain_task.abort();
     }
 }

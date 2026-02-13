@@ -289,6 +289,78 @@ impl BasicObservability {
         );
     }
 
+    pub fn record_intellisense_v2_interactive_wait_budget_exhausted(&self) {
+        self.metrics
+            .increment("intellisense_v2_interactive_wait_budget_exhausted_total");
+    }
+
+    pub fn record_intellisense_v2_interactive_stale_served(&self) {
+        self.metrics
+            .increment("intellisense_v2_interactive_stale_served_total");
+    }
+
+    pub fn record_intellisense_v2_interactive_knob_clamped(&self) {
+        self.metrics
+            .increment("intellisense_v2_interactive_knob_clamped_total");
+    }
+
+    pub fn record_intellisense_v2_singleflight_leader(&self) {
+        self.metrics
+            .increment("intellisense_v2_singleflight_leader_total");
+    }
+
+    pub fn record_intellisense_v2_singleflight_shared(&self) {
+        self.metrics
+            .increment("intellisense_v2_singleflight_shared_total");
+    }
+
+    pub fn record_intellisense_v2_singleflight_wait_latency(&self, duration: Duration) {
+        self.metrics.observe_histogram(
+            "intellisense_v2_singleflight_wait_ms",
+            duration.as_millis() as f64,
+        );
+    }
+
+    pub fn record_intellisense_v2_runtime_queue_wait_class_latency(
+        &self,
+        class: &str,
+        duration: Duration,
+    ) {
+        let (total_metric, histogram_metric) = match class {
+            "background" => (
+                "intellisense_v2_runtime_queue_wait_background_total",
+                "intellisense_v2_runtime_queue_wait_background_ms",
+            ),
+            _ => (
+                "intellisense_v2_runtime_queue_wait_interactive_total",
+                "intellisense_v2_runtime_queue_wait_interactive_ms",
+            ),
+        };
+        self.metrics.increment(total_metric);
+        self.metrics
+            .observe_histogram(histogram_metric, duration.as_millis() as f64);
+    }
+
+    pub fn record_intellisense_v2_runtime_exec_class_latency(
+        &self,
+        class: &str,
+        duration: Duration,
+    ) {
+        let (total_metric, histogram_metric) = match class {
+            "background" => (
+                "intellisense_v2_runtime_exec_background_total",
+                "intellisense_v2_runtime_exec_background_ms",
+            ),
+            _ => (
+                "intellisense_v2_runtime_exec_interactive_total",
+                "intellisense_v2_runtime_exec_interactive_ms",
+            ),
+        };
+        self.metrics.increment(total_metric);
+        self.metrics
+            .observe_histogram(histogram_metric, duration.as_millis() as f64);
+    }
+
     pub fn record_intellisense_v2_query_cancelled(&self, kind: &str) {
         let metric = match kind {
             "syntax" => "intellisense_v2_query_cancelled_total_syntax",

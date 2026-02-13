@@ -1,0 +1,86 @@
+# LSP v2 Latency Policy
+
+## Purpose
+
+Этот документ фиксирует рабочую политику latency/freshness для `IntelliSense v2` в LSP и связанные runtime knobs/метрики.
+
+## Operation Classes
+
+- `interactive`: `completion`, `hover`, `signatureHelp`
+- `background`: `diagnostics` и остальные неинтерактивные операции
+
+## Interactive Freshness Policy
+
+Для `interactive` операций используется bounded wait + controlled stale fallback:
+
+1. Сначала выполняется ожидание `min_file_version`.
+2. Ожидание ограничено `intellisense_v2_interactive_wait_budget_ms` (default `120ms`, clamp `[10, 2000]`).
+3. Если бюджет ожидания исчерпан, stale snapshot разрешён только при выполнении всех условий:
+   - `version_gap <= intellisense_v2_interactive_max_stale_version_gap` (default `1`, clamp `[0, 10]`);
+   - `stale_age <= intellisense_v2_interactive_max_stale_age_ms` (default `1000ms`, clamp `[0, 10000]`);
+   - `deps_id` совпадает с ожидаемым;
+   - `settings_id` совпадает с ожидаемым.
+4. Если подходящего stale snapshot нет, операция завершается без дальнейшего блокирующего ожидания latest.
+
+## Diagnostics Freshness Policy
+
+`diagnostics` остаётся strict-latest:
+
+- publish происходит только для актуальных `file_version + deps_id + settings_id`;
+- stale результаты не публикуются и не могут перезаписать более новую ревизию.
+
+## Singleflight Policy
+
+Для дорогих revision-bound query используется singleflight по ключу:
+
+`(file_id, file_version, deps_id, settings_id, query_kind)`
+
+`query_kind`:
+
+- `parse_result`
+- `syntax_diagnostics`
+- `ir`
+
+Правила:
+
+- один leader на ключ;
+- followers получают терминальный outcome leader;
+- внутри текущего flight нет auto-retry при error/cancel;
+- in-flight запись очищается после завершения leader.
+
+## CPU Budgeting Policy
+
+Для blocking CPU-path используются классы budget:
+
+- минимум 1 permit зарезервирован под `interactive`;
+- минимум 1 permit зарезервирован под `background` (если total permits >= 2);
+- при пустой очереди противоположного класса разрешён borrow;
+- при конкуренции fairness восстанавливается.
+
+## Runtime Knobs
+
+- `BSL_INTELLISENSE_V2_INTERACTIVE_WAIT_BUDGET_MS`
+- `BSL_INTELLISENSE_V2_INTERACTIVE_MAX_STALE_VERSION_GAP`
+- `BSL_INTELLISENSE_V2_INTERACTIVE_MAX_STALE_AGE_MS`
+
+## Observability Contract (required keys)
+
+Counters:
+
+- `intellisense_v2_interactive_wait_budget_exhausted_total`
+- `intellisense_v2_interactive_stale_served_total`
+- `intellisense_v2_interactive_knob_clamped_total`
+- `intellisense_v2_singleflight_leader_total`
+- `intellisense_v2_singleflight_shared_total`
+- `intellisense_v2_runtime_queue_wait_interactive_total`
+- `intellisense_v2_runtime_queue_wait_background_total`
+- `intellisense_v2_runtime_exec_interactive_total`
+- `intellisense_v2_runtime_exec_background_total`
+
+Histograms:
+
+- `intellisense_v2_singleflight_wait_ms`
+- `intellisense_v2_runtime_queue_wait_interactive_ms`
+- `intellisense_v2_runtime_queue_wait_background_ms`
+- `intellisense_v2_runtime_exec_interactive_ms`
+- `intellisense_v2_runtime_exec_background_ms`

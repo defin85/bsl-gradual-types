@@ -1308,179 +1308,232 @@ impl LanguageServer for BslLanguageServer {
                         observed_point,
                     );
 
-                        let file_content = analysis.file_text(file_id).ok().flatten();
-                        let file_path = analysis.file_path(file_id).ok().flatten();
-                        let deps = analysis.deps_data().ok();
-                        let ir_started = Instant::now();
-                        let ir_query =
-                            bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight(
-                                &context,
-                                &analysis,
+                        let context_for_query = context.clone();
+                        let coordinator_for_query = self.coordinator.clone();
+                        let uri_for_query = uri.clone();
+                        let observed_deps_id_for_query = observed_deps_id.clone();
+                        let query_result =
+                            bsl_runtime::application::spawn_bounded_blocking_with_class_observed(
+                                bsl_runtime::application::CpuWorkClass::Interactive,
                                 Some(self.coordinator.as_ref()),
-                                file_id,
-                            );
-                        let ir_elapsed = ir_started.elapsed();
-                        let ir_outcome =
-                            bsl_runtime::application::classify_optional_query(&ir_query);
-                        if let Some(threshold) = super::intellisense_v2_slow_query_warn_threshold()
-                        {
-                            if ir_elapsed >= threshold {
+                                move || {
+                                    let file_content = analysis.file_text(file_id).ok().flatten();
+                                    let file_path = analysis.file_path(file_id).ok().flatten();
+                                    let deps = analysis.deps_data().ok();
+
+                                    let ir_started = Instant::now();
+                                    let ir_query =
+                                        bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight(
+                                            &context_for_query,
+                                            &analysis,
+                                            Some(coordinator_for_query.as_ref()),
+                                            file_id,
+                                        );
+                                    let ir_elapsed = ir_started.elapsed();
+                                    let ir_outcome =
+                                        bsl_runtime::application::classify_optional_query(&ir_query);
+                                    if let Some(threshold) =
+                                        super::intellisense_v2_slow_query_warn_threshold()
+                                    {
+                                        if ir_elapsed >= threshold {
+                                            warn!(
+                                                uri = %uri_for_query,
+                                                file_id = file_id.0,
+                                                ir_ms = ir_elapsed.as_millis(),
+                                                threshold_ms = threshold.as_millis(),
+                                                "Completion v2: ir query is slow"
+                                            );
+                                        }
+                                    }
+
+                                    let (ir_program, ir_cancelled_after_retry) = match ir_query {
+                                        Ok(program) => (program, false),
+                                        Err(first_cancelled) => {
+                                            // One fast retry mitigates transient cancellation races between
+                                            // rapid didChange updates and completion query execution.
+                                            let retry_started = Instant::now();
+                                            let ir_retry =
+                                                bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight(
+                                                    &context_for_query,
+                                                    &analysis,
+                                                    Some(coordinator_for_query.as_ref()),
+                                                    file_id,
+                                                );
+                                            let retry_elapsed = retry_started.elapsed();
+                                            if let Some(threshold) =
+                                                super::intellisense_v2_slow_query_warn_threshold()
+                                            {
+                                                if retry_elapsed >= threshold {
+                                                    warn!(
+                                                        uri = %uri_for_query,
+                                                        file_id = file_id.0,
+                                                        ir_retry_ms = retry_elapsed.as_millis(),
+                                                        threshold_ms = threshold.as_millis(),
+                                                        "Completion v2: ir retry query is slow"
+                                                    );
+                                                }
+                                            }
+                                            match ir_retry {
+                                                Ok(program) => {
+                                                    debug!(
+                                                        uri = %uri_for_query,
+                                                        file_id = file_id.0,
+                                                        "Completion v2: recovered from transient ir cancellation via retry"
+                                                    );
+                                                    (program, false)
+                                                }
+                                                Err(retry_cancelled) => {
+                                                    debug!(
+                                                        uri = %uri_for_query,
+                                                        file_id = file_id.0,
+                                                        first_error = ?first_cancelled,
+                                                        retry_error = ?retry_cancelled,
+                                                        ir_outcome = ir_outcome.as_str(),
+                                                        "Completion v2: ir query cancelled after retry"
+                                                    );
+                                                    (None, true)
+                                                }
+                                            }
+                                        }
+                                    };
+                                    let parse_result =
+                                        bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query_singleflight(
+                                            &context_for_query,
+                                            &analysis,
+                                            ir_program.is_some(),
+                                            Some(coordinator_for_query.as_ref()),
+                                            file_id,
+                                        )
+                                        .ok()
+                                        .flatten();
+
+                                    if bsl_runtime::system::global_runtime_config()
+                                        .get_bool(
+                                            bsl_runtime::system::RuntimeKey::IntellisenseV2P4Smoke,
+                                        )
+                                        .unwrap_or(false)
+                                    {
+                                        match ir_program.as_ref() {
+                                            Some(program) => debug!(
+                                                "Completion v2 ir: uri={}, file_id={}, deps_id={:?}, nodes={}",
+                                                uri_for_query,
+                                                file_id.0,
+                                                observed_deps_id_for_query.as_ref().map(|v| v.as_str()),
+                                                program.nodes.len()
+                                            ),
+                                            None => debug!(
+                                                "Completion v2 ir: uri={}, file_id={} (unavailable)",
+                                                uri_for_query, file_id.0
+                                            ),
+                                        }
+                                    }
+
+                                    if bsl_runtime::system::global_runtime_config()
+                                        .get_bool(
+                                            bsl_runtime::system::RuntimeKey::IntellisenseV2P3Smoke,
+                                        )
+                                        .unwrap_or(false)
+                                    {
+                                        match parse_result.as_ref() {
+                                            Some(parsed) => debug!(
+                                                "Completion v2 parse_result: uri={}, file_id={}, syntax_errors={}",
+                                                uri_for_query,
+                                                file_id.0,
+                                                parsed.syntax_errors.len()
+                                            ),
+                                            None => debug!(
+                                                "Completion v2 parse_result: uri={}, file_id={} (unavailable)",
+                                                uri_for_query, file_id.0
+                                            ),
+                                        }
+                                    }
+
+                                    let member_access_owner_type_hint = if ir_program.is_some() {
+                                        file_content.as_deref().and_then(|text| {
+                                            let line_text = text.lines().nth(position.line as usize)?;
+                                            let cursor_byte =
+                                                bsl_backend::system::positioning::utf16_to_byte_offset(
+                                                    line_text,
+                                                    position.character,
+                                                );
+                                            let line_prefix = line_text.get(..cursor_byte)?;
+                                            let dot_in_line = line_prefix.rfind('.')?;
+                                            let receiver = line_prefix.get(..dot_in_line)?.trim_end();
+                                            let (probe_byte, _) = receiver
+                                                .char_indices()
+                                                .rev()
+                                                .find(|(_, ch)| !ch.is_whitespace())?;
+                                            let probe_utf16 =
+                                                bsl_backend::system::positioning::byte_offset_to_utf16(
+                                                    line_text, probe_byte,
+                                                );
+                                            let offset = analysis
+                                                .utf16_position_to_byte_offset(
+                                                    file_id,
+                                                    position.line,
+                                                    probe_utf16,
+                                                )
+                                                .ok()
+                                                .flatten()?;
+                                            let offset = offset.min(u32::MAX as usize) as u32;
+                                            if include_flow_sensitive {
+                                                analysis
+                                                    .flow_type_at_byte_offset(file_id, offset)
+                                                    .ok()
+                                                    .flatten()
+                                                    .or_else(|| {
+                                                        analysis
+                                                            .type_at_byte_offset(file_id, offset)
+                                                            .ok()
+                                                            .flatten()
+                                                    })
+                                            } else {
+                                                analysis
+                                                    .type_at_byte_offset(file_id, offset)
+                                                    .ok()
+                                                    .flatten()
+                                            }
+                                        })
+                                    } else {
+                                        None
+                                    };
+
+                                    (
+                                        file_content,
+                                        file_path,
+                                        parse_result,
+                                        member_access_owner_type_hint,
+                                        deps,
+                                        ir_program,
+                                        ir_cancelled_after_retry,
+                                    )
+                                },
+                            )
+                            .await;
+
+                        let (
+                            file_content,
+                            file_path,
+                            parse_result,
+                            member_access_owner_type_hint,
+                            deps,
+                            ir_program,
+                            ir_cancelled_after_retry,
+                        ) = match query_result {
+                            Ok(result) => result,
+                            Err(join_error) => {
                                 warn!(
                                     uri = %uri,
                                     file_id = file_id.0,
-                                    ir_ms = ir_elapsed.as_millis(),
-                                    threshold_ms = threshold.as_millis(),
-                                    "Completion v2: ir query is slow"
+                                    error = %join_error,
+                                    "Completion v2: interactive query task failed"
                                 );
-                            }
-                        }
-                        let ir_program = match ir_query {
-                            Ok(program) => program,
-                            Err(first_cancelled) => {
-                                // One fast retry mitigates transient cancellation races between
-                                // rapid didChange updates and completion query execution.
-                                let retry_started = Instant::now();
-                                let ir_retry =
-                                    bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight(
-                                        &context,
-                                        &analysis,
-                                        Some(self.coordinator.as_ref()),
-                                        file_id,
-                                    );
-                                let retry_elapsed = retry_started.elapsed();
-                                if let Some(threshold) =
-                                    super::intellisense_v2_slow_query_warn_threshold()
-                                {
-                                    if retry_elapsed >= threshold {
-                                        warn!(
-                                            uri = %uri,
-                                            file_id = file_id.0,
-                                            ir_retry_ms = retry_elapsed.as_millis(),
-                                            threshold_ms = threshold.as_millis(),
-                                            "Completion v2: ir retry query is slow"
-                                        );
-                                    }
-                                }
-                                match ir_retry {
-                                    Ok(program) => {
-                                        debug!(
-                                            uri = %uri,
-                                            file_id = file_id.0,
-                                            "Completion v2: recovered from transient ir cancellation via retry"
-                                        );
-                                        program
-                                    }
-                                    Err(retry_cancelled) => {
-                                        if completion_outcome.is_none() {
-                                            completion_outcome = Some("cancelled");
-                                        }
-                                        debug!(
-                                            uri = %uri,
-                                            file_id = file_id.0,
-                                            first_error = ?first_cancelled,
-                                            retry_error = ?retry_cancelled,
-                                            ir_outcome = ir_outcome.as_str(),
-                                            "Completion v2: ir query cancelled after retry"
-                                        );
-                                        None
-                                    }
-                                }
+                                (None, None, None, None, None, None, true)
                             }
                         };
-                        let parse_result =
-                            bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query_singleflight(
-                                &context,
-                                &analysis,
-                                ir_program.is_some(),
-                                Some(self.coordinator.as_ref()),
-                                file_id,
-                            )
-                            .ok()
-                            .flatten();
-
-                        if bsl_runtime::system::global_runtime_config()
-                            .get_bool(bsl_runtime::system::RuntimeKey::IntellisenseV2P4Smoke)
-                            .unwrap_or(false)
-                        {
-                            match ir_program.as_ref() {
-                                Some(program) => debug!(
-                                    "Completion v2 ir: uri={}, file_id={}, deps_id={:?}, nodes={}",
-                                    uri,
-                                    file_id.0,
-                                    observed_deps_id.as_ref().map(|v| v.as_str()),
-                                    program.nodes.len()
-                                ),
-                                None => debug!(
-                                    "Completion v2 ir: uri={}, file_id={} (unavailable)",
-                                    uri, file_id.0
-                                ),
-                            }
+                        if ir_cancelled_after_retry && completion_outcome.is_none() {
+                            completion_outcome = Some("cancelled");
                         }
-
-                        if bsl_runtime::system::global_runtime_config()
-                            .get_bool(bsl_runtime::system::RuntimeKey::IntellisenseV2P3Smoke)
-                            .unwrap_or(false)
-                        {
-                            match parse_result.as_ref() {
-                                Some(parsed) => debug!(
-                                "Completion v2 parse_result: uri={}, file_id={}, syntax_errors={}",
-                                uri,
-                                file_id.0,
-                                parsed.syntax_errors.len()
-                            ),
-                                None => debug!(
-                                    "Completion v2 parse_result: uri={}, file_id={} (unavailable)",
-                                    uri, file_id.0
-                                ),
-                            }
-                        }
-
-                        let member_access_owner_type_hint = if ir_program.is_some() {
-                            file_content.as_deref().and_then(|text| {
-                                let line_text = text.lines().nth(position.line as usize)?;
-                                let cursor_byte =
-                                    bsl_backend::system::positioning::utf16_to_byte_offset(
-                                        line_text,
-                                        position.character,
-                                    );
-                                let line_prefix = line_text.get(..cursor_byte)?;
-                                let dot_in_line = line_prefix.rfind('.')?;
-                                let receiver = line_prefix.get(..dot_in_line)?.trim_end();
-                                let (probe_byte, _) = receiver
-                                    .char_indices()
-                                    .rev()
-                                    .find(|(_, ch)| !ch.is_whitespace())?;
-                                let probe_utf16 =
-                                    bsl_backend::system::positioning::byte_offset_to_utf16(
-                                        line_text, probe_byte,
-                                    );
-                                let offset = analysis
-                                    .utf16_position_to_byte_offset(
-                                        file_id,
-                                        position.line,
-                                        probe_utf16,
-                                    )
-                                    .ok()
-                                    .flatten()?;
-                                let offset = offset.min(u32::MAX as usize) as u32;
-                                if include_flow_sensitive {
-                                    analysis
-                                        .flow_type_at_byte_offset(file_id, offset)
-                                        .ok()
-                                        .flatten()
-                                        .or_else(|| {
-                                            analysis
-                                                .type_at_byte_offset(file_id, offset)
-                                                .ok()
-                                                .flatten()
-                                        })
-                                } else {
-                                    analysis.type_at_byte_offset(file_id, offset).ok().flatten()
-                                }
-                            })
-                        } else {
-                            None
-                        };
 
                         (
                             file_content,

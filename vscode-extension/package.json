@@ -2,7 +2,7 @@
     "name": "bsl-gradual-types",
     "displayName": "BSL Gradual Type System",
     "description": "Production-ready BSL (1C:Enterprise) gradual type system with flow-sensitive analysis, union types, and enhanced LSP server",
-    "version": "0.4.85",
+    "version": "0.4.86",
     "publisher": "bsl-gradual-types-team",
     "icon": "images/bsl-analyzer-logo.png",
     "engines": {
@@ -870,7 +870,7 @@
     "scripts": {
         "vscode:prepublish": "npm run package",
         "compile": "npm run copy-binaries:release:skip-build && tsc -p . && node esbuild.js && npm run build:wasm",
-        "compile:debug": "npm run copy-binaries:debug:skip-build && tsc -p . && node esbuild.js && npm run build:wasm",
+        "compile:debug": "npm run copy-binaries:release:skip-build && tsc -p . && node esbuild.js && npm run build:wasm",
         "compile:fast": "npm run copy-binaries:release:skip-build && tsc -p . && node esbuild.js",
         "package": "npm run copy-binaries:release && node esbuild.js --production && npm run build:wasm:release",
         "watch": "node esbuild.js --watch",

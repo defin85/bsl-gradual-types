@@ -1,11 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
-use std::time::Instant;
 
 use bsl_analysis_v2::{FileId, SettingsId};
 use bsl_runtime::application::type_system::web_api_service;
-use bsl_runtime::application::{ExecutionSettings, IntellisenseV2Facade};
+use bsl_runtime::application::{
+    CancellationPolicy, ExecutionContext, ExecutionSettings, IntellisenseV2Facade,
+    ObservabilityStage, PreparedOperationSnapshot, SemanticOperation,
+};
 use bsl_runtime::data::loaders::progress::ProgressUpdate;
 use bsl_runtime::data::loaders::ConfigurationDiscovery;
 use bsl_runtime::system::runtime_config::{global_runtime_config, RuntimeKey};
@@ -1414,8 +1416,9 @@ impl SessionManager {
                 break;
             }
 
-            let snapshot_started = Instant::now();
-            let semantic_snapshot = build_ephemeral_snapshot_v2(
+            let (context, prepared) = match prepare_ephemeral_mcp_operation(
+                SemanticOperation::Diagnostics,
+                flow_sensitive_enabled,
                 deps_id.clone(),
                 deps.clone(),
                 index_snapshot.clone(),
@@ -1423,10 +1426,13 @@ impl SessionManager {
                 doc_snapshot.version,
                 Arc::from(doc_snapshot.abs_path.to_string_lossy().to_string()),
                 DetailLevel::Full,
-            );
-            record_snapshot_latency(coordinator.as_ref(), "diagnostics", snapshot_started);
+                coordinator.as_ref(),
+            ) {
+                Ok(values) => values,
+                Err(_) => continue,
+            };
 
-            let analysis = semantic_snapshot.analysis;
+            let analysis = prepared.snapshot.analysis;
             let Some(code) = analysis
                 .file_text(bsl_analysis_v2::FileId(1))
                 .ok()
@@ -1441,18 +1447,26 @@ impl SessionManager {
             else {
                 continue;
             };
-            let semantic_started = Instant::now();
-            let file_diags_result = if flow_sensitive_enabled {
-                analysis.semantic_diagnostics_flow_sensitive(bsl_analysis_v2::FileId(1))
+            let file_diags_query = if flow_sensitive_enabled {
+                IntellisenseV2Facade::run_optional_query(
+                    &context,
+                    ObservabilityStage::SemanticDiagnosticsQuery,
+                    &analysis,
+                    Some(coordinator.as_ref()),
+                    |analysis| {
+                        analysis.semantic_diagnostics_flow_sensitive(bsl_analysis_v2::FileId(1))
+                    },
+                )
             } else {
-                analysis.semantic_diagnostics(bsl_analysis_v2::FileId(1))
+                IntellisenseV2Facade::run_optional_query(
+                    &context,
+                    ObservabilityStage::SemanticDiagnosticsQuery,
+                    &analysis,
+                    Some(coordinator.as_ref()),
+                    |analysis| analysis.semantic_diagnostics(bsl_analysis_v2::FileId(1)),
+                )
             };
-            record_semantic_diagnostics_query_metrics(
-                coordinator.as_ref(),
-                semantic_started,
-                &file_diags_result,
-            );
-            let Some(file_diags) = file_diags_result.ok().flatten() else {
+            let Some(file_diags) = file_diags_query.ok().flatten() else {
                 continue;
             };
 
@@ -1575,79 +1589,118 @@ impl SessionManager {
                 break;
             }
 
-            let snapshot_started = Instant::now();
-            let snapshot = build_ephemeral_snapshot_v2(
-                deps_id.clone(),
-                deps.clone(),
-                index_snapshot.clone(),
-                Arc::from(text),
-                0,
-                Arc::from(file.abs_path.to_string_lossy().to_string()),
-                DetailLevel::Full,
-            );
-            record_snapshot_latency(coordinator.as_ref(), "other", snapshot_started);
-
-            let analysis = snapshot.analysis;
-            let ir_started = Instant::now();
-            let program_result = analysis.ir(FileId(1));
-            record_ir_query_metrics(coordinator.as_ref(), "other", ir_started, &program_result);
-            let Some(program) = program_result.ok().flatten() else {
-                continue;
-            };
-            let Some(code) = analysis.file_text(FileId(1)).ok().flatten() else {
-                continue;
-            };
-            let Some(line_index) = analysis.line_index(FileId(1)).ok().flatten() else {
-                continue;
-            };
-
-            for node in program.nodes.iter() {
-                let (kind, name) = match &node.kind {
-                    bsl_shared::ir::SemanticNodeKind::FunctionDeclaration { name, .. } => {
-                        ("function", name.as_str())
-                    }
-                    bsl_shared::ir::SemanticNodeKind::ProcedureDeclaration { name, .. } => {
-                        ("procedure", name.as_str())
-                    }
-                    _ => continue,
-                };
-
-                if !name.to_lowercase().contains(&query_lower) {
-                    continue;
-                }
-
-                if symbols.len() >= params.limit as usize {
-                    truncated = true;
-                    break;
-                }
-
-                let range = span_to_range_with_index(code.as_ref(), line_index.as_ref(), node.span);
-                let file_ref = DocumentRefDto {
-                    root_id: file.root_id.clone(),
-                    path: file.rel_path.clone(),
-                };
-                let document_id = ids::document_id(&file_ref.root_id, &file_ref.path);
-                let symbol_id = ids::stable_id_hex(&[
-                    ids::IdPart::U64(analysis_revision),
-                    ids::IdPart::Str(&document_id),
-                    ids::IdPart::Str(kind),
-                    ids::IdPart::U32(range.start.line),
-                    ids::IdPart::U32(range.start.character),
-                    ids::IdPart::U32(range.end.line),
-                    ids::IdPart::U32(range.end.character),
-                    ids::IdPart::Str(name),
-                ]);
-
-                symbols.push(SymbolDto {
-                    symbol_id: symbol_id.clone(),
-                    name: name.to_string(),
-                    kind: kind.to_string(),
-                    file: file_ref,
-                    range,
-                });
+            let remaining = params.limit as usize - symbols.len();
+            if remaining == 0 {
+                truncated = true;
+                break;
             }
 
-            if truncated {
+            let deps_local = deps.clone();
+            let index_snapshot_local = index_snapshot.clone();
+            let coordinator_local = coordinator.clone();
+            let deps_id_local = deps_id.clone();
+            let file_root_id = file.root_id.clone();
+            let file_rel_path = file.rel_path.clone();
+            let file_abs_path = file.abs_path.to_string_lossy().to_string();
+            let query_lower = query_lower.clone();
+            let analysis_revision_local = analysis_revision;
+
+            let file_symbols = bsl_runtime::application::spawn_bounded_blocking(
+                move || -> Result<Vec<SymbolDto>, rmcp::ErrorData> {
+                    let (context, prepared) = match prepare_ephemeral_mcp_operation(
+                        SemanticOperation::SymbolSearch,
+                        false,
+                        deps_id_local,
+                        deps_local,
+                        index_snapshot_local,
+                        Arc::from(text),
+                        0,
+                        Arc::from(file_abs_path),
+                        DetailLevel::Full,
+                        coordinator_local.as_ref(),
+                    ) {
+                        Ok(values) => values,
+                        Err(_) => return Ok(Vec::new()),
+                    };
+
+                    let analysis = prepared.snapshot.analysis;
+                    let program_query = IntellisenseV2Facade::run_optional_query(
+                        &context,
+                        ObservabilityStage::IrQuery,
+                        &analysis,
+                        Some(coordinator_local.as_ref()),
+                        |analysis| analysis.ir(FileId(1)),
+                    );
+                    let Some(program) = program_query.ok().flatten() else {
+                        return Ok(Vec::new());
+                    };
+                    let Some(code) = analysis.file_text(FileId(1)).ok().flatten() else {
+                        return Ok(Vec::new());
+                    };
+                    let Some(line_index) = analysis.line_index(FileId(1)).ok().flatten() else {
+                        return Ok(Vec::new());
+                    };
+
+                    let mut out = Vec::new();
+                    for node in program.nodes.iter() {
+                        let (kind, name) = match &node.kind {
+                            bsl_shared::ir::SemanticNodeKind::FunctionDeclaration {
+                                name, ..
+                            } => ("function", name.as_str()),
+                            bsl_shared::ir::SemanticNodeKind::ProcedureDeclaration {
+                                name, ..
+                            } => ("procedure", name.as_str()),
+                            _ => continue,
+                        };
+
+                        if !name.to_lowercase().contains(&query_lower) {
+                            continue;
+                        }
+
+                        if out.len() >= remaining {
+                            break;
+                        }
+
+                        let range =
+                            span_to_range_with_index(code.as_ref(), line_index.as_ref(), node.span);
+                        let file_ref = DocumentRefDto {
+                            root_id: file_root_id.clone(),
+                            path: file_rel_path.clone(),
+                        };
+                        let document_id = ids::document_id(&file_ref.root_id, &file_ref.path);
+                        let symbol_id = ids::stable_id_hex(&[
+                            ids::IdPart::U64(analysis_revision_local),
+                            ids::IdPart::Str(&document_id),
+                            ids::IdPart::Str(kind),
+                            ids::IdPart::U32(range.start.line),
+                            ids::IdPart::U32(range.start.character),
+                            ids::IdPart::U32(range.end.line),
+                            ids::IdPart::U32(range.end.character),
+                            ids::IdPart::Str(name),
+                        ]);
+
+                        out.push(SymbolDto {
+                            symbol_id,
+                            name: name.to_string(),
+                            kind: kind.to_string(),
+                            file: file_ref,
+                            range,
+                        });
+                    }
+                    Ok(out)
+                },
+            )
+            .await
+            .map_err(|err| {
+                rmcp::ErrorData::internal_error(
+                    format!("symbol_search worker task join failed: {err}"),
+                    None,
+                )
+            })??;
+
+            symbols.extend(file_symbols);
+            if symbols.len() >= params.limit as usize {
+                truncated = true;
                 break;
             }
         }
@@ -1717,8 +1770,9 @@ impl SessionManager {
             select_effective_text(&params.file, &file_key, &overlays, &root_path, &abs_path)?;
         let version = select_effective_version(&params.file, &file_key, &overlays);
 
-        let snapshot_started = Instant::now();
-        let snapshot = build_ephemeral_snapshot_v2(
+        let (context, prepared) = match prepare_ephemeral_mcp_operation(
+            SemanticOperation::TypeAtPosition,
+            flow_sensitive_enabled,
             deps_id.clone(),
             deps.clone(),
             index_snapshot.clone(),
@@ -1726,14 +1780,29 @@ impl SessionManager {
             version,
             Arc::from(abs_path.to_string_lossy().to_string()),
             DetailLevel::Full,
-        );
-        record_snapshot_latency(coordinator.as_ref(), "other", snapshot_started);
+            coordinator.as_ref(),
+        ) {
+            Ok(values) => values,
+            Err(_) => {
+                return Ok(BslTypeAtPositionResponse {
+                    analysis_revision,
+                    flow_sensitive_enabled,
+                    type_info: None,
+                    node: None,
+                    warnings: vec!["IR not available".to_string()],
+                });
+            }
+        };
 
-        let analysis = snapshot.analysis;
-        let ir_started = Instant::now();
-        let program_result = analysis.ir(FileId(1));
-        record_ir_query_metrics(coordinator.as_ref(), "other", ir_started, &program_result);
-        let Some(program) = program_result.ok().flatten() else {
+        let analysis = prepared.snapshot.analysis;
+        let program_query = IntellisenseV2Facade::run_optional_query(
+            &context,
+            ObservabilityStage::IrQuery,
+            &analysis,
+            Some(coordinator.as_ref()),
+            |analysis| analysis.ir(FileId(1)),
+        );
+        let Some(program) = program_query.ok().flatten() else {
             return Ok(BslTypeAtPositionResponse {
                 analysis_revision,
                 flow_sensitive_enabled,
@@ -1771,8 +1840,6 @@ impl SessionManager {
             kind: format!("{:?}", node.kind),
             range: span_to_range_with_analysis(&analysis, FileId(1), node.span),
         });
-
-        let _ = snapshot.index_snapshot.id.as_str();
 
         Ok(BslTypeAtPositionResponse {
             analysis_revision,
@@ -1814,8 +1881,9 @@ impl SessionManager {
             select_effective_text(&params.file, &file_key, &overlays, &root_path, &abs_path)?;
         let version = select_effective_version(&params.file, &file_key, &overlays);
 
-        let snapshot_started = Instant::now();
-        let snapshot = build_ephemeral_snapshot_v2(
+        let (context, prepared) = match prepare_ephemeral_mcp_operation(
+            SemanticOperation::Members,
+            flow_sensitive_enabled,
             deps_id.clone(),
             deps.clone(),
             index_snapshot.clone(),
@@ -1823,29 +1891,42 @@ impl SessionManager {
             version,
             Arc::from(abs_path.to_string_lossy().to_string()),
             DetailLevel::Full,
-        );
-        record_snapshot_latency(coordinator.as_ref(), "other", snapshot_started);
-
-        let analysis = snapshot.analysis;
-        let ir_started = Instant::now();
-        let program_result = analysis.ir(FileId(1));
-        record_ir_query_metrics(coordinator.as_ref(), "other", ir_started, &program_result);
-        let program = program_result.ok().flatten();
-        let parse_result = if bsl_runtime::application::should_query_parse_result(
-            bsl_runtime::application::SemanticOperation::Members,
-            program.is_some(),
+            coordinator.as_ref(),
         ) {
-            let parse_started = Instant::now();
-            let parse_result_query = analysis.parse_result(FileId(1));
-            record_parse_result_query_metrics(
-                coordinator.as_ref(),
-                parse_started,
-                &parse_result_query,
-            );
-            parse_result_query.ok().flatten()
-        } else {
-            None
+            Ok(values) => values,
+            Err(_) => {
+                return Ok(BslMembersResponse {
+                    analysis_revision,
+                    flow_sensitive_enabled,
+                    members: Vec::new(),
+                    truncated: false,
+                });
+            }
         };
+
+        let bsl_runtime::application::SemanticSnapshot {
+            analysis,
+            index_snapshot,
+            ..
+        } = prepared.snapshot;
+        let program = IntellisenseV2Facade::run_optional_query(
+            &context,
+            ObservabilityStage::IrQuery,
+            &analysis,
+            Some(coordinator.as_ref()),
+            |analysis| analysis.ir(FileId(1)),
+        )
+        .ok()
+        .flatten();
+        let parse_result = IntellisenseV2Facade::run_parse_result_query(
+            &context,
+            &analysis,
+            program.is_some(),
+            Some(coordinator.as_ref()),
+            |analysis| analysis.parse_result(FileId(1)),
+        )
+        .ok()
+        .flatten();
         let Some(program) = program else {
             return Ok(BslMembersResponse {
                 analysis_revision,
@@ -1883,7 +1964,7 @@ impl SessionManager {
             params.position.line,
             params.position.character,
             None,
-            snapshot.index_snapshot.as_ref(),
+            index_snapshot.as_ref(),
             &metadata_lookup,
             abs_path.to_string_lossy().as_ref(),
             resolver.as_ref(),
@@ -1999,8 +2080,9 @@ impl SessionManager {
         let text = select_effective_text(&file, &file_key, &overlays, &root_path, &abs_path)?;
         let version = select_effective_version(&file, &file_key, &overlays);
 
-        let snapshot_started = Instant::now();
-        let snapshot = build_ephemeral_snapshot_v2(
+        let (context, prepared) = match prepare_ephemeral_mcp_operation(
+            SemanticOperation::Definition,
+            false,
             deps_id.clone(),
             deps.clone(),
             index_snapshot,
@@ -2008,14 +2090,27 @@ impl SessionManager {
             version,
             Arc::from(abs_path.to_string_lossy().to_string()),
             DetailLevel::Full,
-        );
-        record_snapshot_latency(coordinator.as_ref(), "other", snapshot_started);
+            coordinator.as_ref(),
+        ) {
+            Ok(values) => values,
+            Err(_) => {
+                return Ok(BslDefinitionResponse {
+                    analysis_revision,
+                    location: None,
+                    snippet: None,
+                });
+            }
+        };
 
-        let analysis = snapshot.analysis;
-        let ir_started = Instant::now();
-        let program_result = analysis.ir(FileId(1));
-        record_ir_query_metrics(coordinator.as_ref(), "other", ir_started, &program_result);
-        let Some(program) = program_result.ok().flatten() else {
+        let analysis = prepared.snapshot.analysis;
+        let program_query = IntellisenseV2Facade::run_optional_query(
+            &context,
+            ObservabilityStage::IrQuery,
+            &analysis,
+            Some(coordinator.as_ref()),
+            |analysis| analysis.ir(FileId(1)),
+        );
+        let Some(program) = program_query.ok().flatten() else {
             return Ok(BslDefinitionResponse {
                 analysis_revision,
                 location: None,
@@ -2139,63 +2234,104 @@ impl SessionManager {
                 break;
             }
 
-            let snapshot_started = Instant::now();
-            let snapshot = build_ephemeral_snapshot_v2(
-                deps_id.clone(),
-                deps.clone(),
-                index_snapshot.clone(),
-                Arc::from(text),
-                0,
-                Arc::from(file.abs_path.to_string_lossy().to_string()),
-                DetailLevel::Full,
-            );
-            record_snapshot_latency(coordinator.as_ref(), "other", snapshot_started);
-
-            let analysis = snapshot.analysis;
-            let ir_started = Instant::now();
-            let program_result = analysis.ir(FileId(1));
-            record_ir_query_metrics(coordinator.as_ref(), "other", ir_started, &program_result);
-            let Some(program) = program_result.ok().flatten() else {
-                continue;
-            };
-            let Some(code) = analysis.file_text(FileId(1)).ok().flatten() else {
-                continue;
-            };
-            let Some(line_index) = analysis.line_index(FileId(1)).ok().flatten() else {
-                continue;
-            };
-
-            for node in program.nodes.iter() {
-                let bsl_shared::ir::SemanticNodeKind::FunctionCall {
-                    function_name,
-                    object_name,
-                    object_node,
-                    ..
-                } = &node.kind
-                else {
-                    continue;
-                };
-                if object_name.is_some() || object_node.is_some() {
-                    continue;
-                }
-                if !function_name.eq_ignore_ascii_case(&symbol.name) {
-                    continue;
-                }
-                if references.len() >= params.limit as usize {
-                    truncated = true;
-                    break;
-                }
-
-                references.push(ReferenceDto {
-                    file: DocumentRefDto {
-                        root_id: file.root_id.clone(),
-                        path: file.rel_path.clone(),
-                    },
-                    range: span_to_range_with_index(code.as_ref(), line_index.as_ref(), node.span),
-                });
+            let remaining = params.limit as usize - references.len();
+            if remaining == 0 {
+                truncated = true;
+                break;
             }
 
-            if truncated {
+            let deps_local = deps.clone();
+            let index_snapshot_local = index_snapshot.clone();
+            let coordinator_local = coordinator.clone();
+            let deps_id_local = deps_id.clone();
+            let file_root_id = file.root_id.clone();
+            let file_rel_path = file.rel_path.clone();
+            let file_abs_path = file.abs_path.to_string_lossy().to_string();
+            let symbol_name = symbol.name.clone();
+
+            let file_references = bsl_runtime::application::spawn_bounded_blocking(
+                move || -> Result<Vec<ReferenceDto>, rmcp::ErrorData> {
+                    let (context, prepared) = match prepare_ephemeral_mcp_operation(
+                        SemanticOperation::References,
+                        false,
+                        deps_id_local,
+                        deps_local,
+                        index_snapshot_local,
+                        Arc::from(text),
+                        0,
+                        Arc::from(file_abs_path),
+                        DetailLevel::Full,
+                        coordinator_local.as_ref(),
+                    ) {
+                        Ok(values) => values,
+                        Err(_) => return Ok(Vec::new()),
+                    };
+
+                    let analysis = prepared.snapshot.analysis;
+                    let program_query = IntellisenseV2Facade::run_optional_query(
+                        &context,
+                        ObservabilityStage::IrQuery,
+                        &analysis,
+                        Some(coordinator_local.as_ref()),
+                        |analysis| analysis.ir(FileId(1)),
+                    );
+                    let Some(program) = program_query.ok().flatten() else {
+                        return Ok(Vec::new());
+                    };
+                    let Some(code) = analysis.file_text(FileId(1)).ok().flatten() else {
+                        return Ok(Vec::new());
+                    };
+                    let Some(line_index) = analysis.line_index(FileId(1)).ok().flatten() else {
+                        return Ok(Vec::new());
+                    };
+
+                    let mut out = Vec::new();
+                    for node in program.nodes.iter() {
+                        let bsl_shared::ir::SemanticNodeKind::FunctionCall {
+                            function_name,
+                            object_name,
+                            object_node,
+                            ..
+                        } = &node.kind
+                        else {
+                            continue;
+                        };
+                        if object_name.is_some() || object_node.is_some() {
+                            continue;
+                        }
+                        if !function_name.eq_ignore_ascii_case(&symbol_name) {
+                            continue;
+                        }
+                        if out.len() >= remaining {
+                            break;
+                        }
+
+                        out.push(ReferenceDto {
+                            file: DocumentRefDto {
+                                root_id: file_root_id.clone(),
+                                path: file_rel_path.clone(),
+                            },
+                            range: span_to_range_with_index(
+                                code.as_ref(),
+                                line_index.as_ref(),
+                                node.span,
+                            ),
+                        });
+                    }
+                    Ok(out)
+                },
+            )
+            .await
+            .map_err(|err| {
+                rmcp::ErrorData::internal_error(
+                    format!("references worker task join failed: {err}"),
+                    None,
+                )
+            })??;
+
+            references.extend(file_references);
+            if references.len() >= params.limit as usize {
+                truncated = true;
                 break;
             }
         }
@@ -2219,7 +2355,17 @@ impl SessionManager {
         params: ContextPackParams,
     ) -> Result<ContextPackResponse, rmcp::ErrorData> {
         let uuid = parse_session_id(&params.session_id)?;
-        let (analysis_revision, roots, overlays, _hot_set, settings, deps_id, deps, index_snapshot) = {
+        let (
+            analysis_revision,
+            roots,
+            overlays,
+            _hot_set,
+            settings,
+            deps_id,
+            deps,
+            index_snapshot,
+            coordinator,
+        ) = {
             let sessions = self.sessions.read().await;
             let session = sessions
                 .get(&uuid)
@@ -2236,6 +2382,7 @@ impl SessionManager {
                 startup.deps_bundle_v2.deps_id.clone(),
                 startup.deps_bundle_v2.semantic_deps.clone(),
                 startup.deps_bundle_v2.index_snapshot.clone(),
+                startup.coordinator.clone(),
             )
         };
 
@@ -2346,7 +2493,9 @@ impl SessionManager {
 
                 if params.include.types {
                     let version = select_effective_version(&file, &file_key, &overlays);
-                    let semantic_snapshot = build_ephemeral_snapshot_v2(
+                    if let Ok((context, prepared)) = prepare_ephemeral_mcp_operation(
+                        SemanticOperation::TypeAtPosition,
+                        false,
                         deps_id.clone(),
                         deps.clone(),
                         index_snapshot.clone(),
@@ -2354,20 +2503,33 @@ impl SessionManager {
                         version,
                         Arc::from(abs_path.to_string_lossy().to_string()),
                         DetailLevel::Full,
-                    );
-                    let analysis = semantic_snapshot.analysis;
-                    let program = analysis.ir(FileId(1)).ok().flatten();
-                    if let Some(program) = program {
-                        let _ = program;
-                        if let Some(type_info) = type_at_utf16_position(
+                        coordinator.as_ref(),
+                    ) {
+                        let analysis = prepared.snapshot.analysis;
+                        let program = IntellisenseV2Facade::run_optional_query(
+                            &context,
+                            ObservabilityStage::IrQuery,
                             &analysis,
-                            FileId(1),
-                            position.line,
-                            position.character,
-                            false,
-                        ) {
-                            text.push_line(&format!("type_at_position: {}", type_info.type_name()));
-                            text.push_line("");
+                            Some(coordinator.as_ref()),
+                            |analysis| analysis.ir(FileId(1)),
+                        )
+                        .ok()
+                        .flatten();
+                        if let Some(program) = program {
+                            let _ = program;
+                            if let Some(type_info) = type_at_utf16_position(
+                                &analysis,
+                                FileId(1),
+                                position.line,
+                                position.character,
+                                false,
+                            ) {
+                                text.push_line(&format!(
+                                    "type_at_position: {}",
+                                    type_info.type_name()
+                                ));
+                                text.push_line("");
+                            }
                         }
                     }
                 }
@@ -3423,49 +3585,9 @@ fn settings_id_v2(diagnostics_detail_level: DetailLevel) -> SettingsId {
     ))
 }
 
-fn record_snapshot_latency(
-    coordinator: &bsl_runtime::system::SystemCoordinator,
-    kind: &str,
-    started_at: Instant,
-) {
-    coordinator.record_intellisense_v2_snapshot_latency(kind, started_at.elapsed());
-}
-
-fn record_ir_query_metrics<T, E>(
-    coordinator: &bsl_runtime::system::SystemCoordinator,
-    kind: &str,
-    started_at: Instant,
-    result: &Result<Option<T>, E>,
-) {
-    coordinator.record_intellisense_v2_ir_query_latency(kind, started_at.elapsed());
-    if result.is_err() {
-        coordinator.record_intellisense_v2_ir_query_cancelled(kind);
-    }
-}
-
-fn record_parse_result_query_metrics<T, E>(
-    coordinator: &bsl_runtime::system::SystemCoordinator,
-    started_at: Instant,
-    result: &Result<Option<T>, E>,
-) {
-    coordinator.record_intellisense_v2_parse_result_query_latency(started_at.elapsed());
-    if result.is_err() {
-        coordinator.record_intellisense_v2_query_cancelled("other");
-    }
-}
-
-fn record_semantic_diagnostics_query_metrics<T, E>(
-    coordinator: &bsl_runtime::system::SystemCoordinator,
-    started_at: Instant,
-    result: &Result<Option<T>, E>,
-) {
-    coordinator.record_intellisense_v2_semantic_diagnostics_query_latency(started_at.elapsed());
-    if result.is_err() {
-        coordinator.record_intellisense_v2_query_cancelled("semantic");
-    }
-}
-
-fn build_ephemeral_snapshot_v2(
+fn prepare_ephemeral_mcp_operation(
+    operation: SemanticOperation,
+    flow_sensitive: bool,
     deps_id: bsl_analysis_v2::DepsSnapshotId,
     deps: Arc<bsl_analysis_v2::SemanticDeps>,
     index_snapshot: Arc<bsl_runtime::system::IndexSnapshot>,
@@ -3473,20 +3595,34 @@ fn build_ephemeral_snapshot_v2(
     version: i32,
     path: Arc<str>,
     diagnostics_detail_level: DetailLevel,
-) -> bsl_runtime::application::SemanticSnapshot {
-    IntellisenseV2Facade::ephemeral_snapshot(
-        deps_id,
-        deps,
-        index_snapshot,
-        ExecutionSettings {
+    coordinator: &bsl_runtime::system::SystemCoordinator,
+) -> Result<(ExecutionContext, PreparedOperationSnapshot), bsl_runtime::application::SemanticOutcome>
+{
+    let context = ExecutionContext {
+        operation,
+        file_id: FileId(1),
+        min_file_version: Some(version),
+        expected_deps_id: Some(deps_id.clone()),
+        flow_sensitive,
+        settings: ExecutionSettings {
             settings_id: settings_id_v2(diagnostics_detail_level),
             diagnostics_detail_level,
         },
-        FileId(1),
+        cancellation: CancellationPolicy::BestEffort,
+    };
+
+    let prepared = IntellisenseV2Facade::prepare_ephemeral_operation(
+        &context,
+        deps_id,
+        deps,
+        index_snapshot,
         text,
         version,
         path,
-    )
+        Some(coordinator),
+    )?;
+
+    Ok((context, prepared))
 }
 
 fn span_to_range_with_index(
@@ -3844,10 +3980,10 @@ mod tests {
     use super::*;
     use crate::jobs::JobManager;
     use crate::server::types::{
-        BslDiagnosticsParams, BslMembersParams, BslTypeAtPositionParams, CanonicalDocumentRef,
-        ContextExpandParams, ContextFocus, ContextInclude, ContextPackParams, DocumentRef, FileRef,
-        Position, WorkspaceDocumentsSetFile, WorkspaceOpenParams, WorkspaceScope,
-        WorkspaceScopeTagged,
+        BslDiagnosticsParams, BslMembersParams, BslReferencesParams, BslSymbolSearchParams,
+        BslTypeAtPositionParams, CanonicalDocumentRef, ContextExpandParams, ContextFocus,
+        ContextInclude, ContextPackParams, DocumentRef, FileRef, Position,
+        WorkspaceDocumentsSetFile, WorkspaceOpenParams, WorkspaceScope, WorkspaceScopeTagged,
     };
     use crate::types::JobStateDto;
     use std::sync::Arc;
@@ -3893,6 +4029,95 @@ mod tests {
                 histograms.keys().collect::<Vec<_>>()
             );
         }
+    }
+
+    #[test]
+    fn observability_cancellation_counters_follow_unified_stage_contract() {
+        let coordinator = bsl_runtime::system::SystemCoordinator::new();
+        let analysis = bsl_analysis_v2::AnalysisHostV2::default().snapshot();
+        let context = ExecutionContext {
+            operation: SemanticOperation::Members,
+            file_id: FileId(1),
+            min_file_version: None,
+            expected_deps_id: None,
+            flow_sensitive: false,
+            settings: ExecutionSettings {
+                settings_id: SettingsId::from_hash("tests"),
+                diagnostics_detail_level: DetailLevel::Full,
+            },
+            cancellation: CancellationPolicy::BestEffort,
+        };
+
+        let _ = IntellisenseV2Facade::run_optional_query(
+            &context,
+            ObservabilityStage::IrQuery,
+            &analysis,
+            Some(&coordinator),
+            |_analysis| Err::<Option<()>, ()>(()),
+        );
+        let _ = IntellisenseV2Facade::run_optional_query(
+            &context,
+            ObservabilityStage::SyntaxDiagnosticsQuery,
+            &analysis,
+            Some(&coordinator),
+            |_analysis| Err::<Option<()>, ()>(()),
+        );
+        let _ = IntellisenseV2Facade::run_optional_query(
+            &context,
+            ObservabilityStage::SemanticDiagnosticsQuery,
+            &analysis,
+            Some(&coordinator),
+            |_analysis| Err::<Option<()>, ()>(()),
+        );
+        let _ = IntellisenseV2Facade::run_parse_result_query(
+            &context,
+            &analysis,
+            true,
+            Some(&coordinator),
+            |_analysis| Err::<Option<()>, ()>(()),
+        );
+
+        let metrics = coordinator.observability_metrics();
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+
+        for key in [
+            "intellisense_v2_ir_query_cancelled_total_other",
+            "intellisense_v2_query_cancelled_total_syntax",
+            "intellisense_v2_query_cancelled_total_semantic",
+            "intellisense_v2_query_cancelled_total_other",
+        ] {
+            assert!(
+                counters
+                    .get(key)
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(0)
+                    > 0,
+                "expected positive cancelled counter for key {key}, counters={counters:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn optional_query_outcome_classification_is_shared() {
+        let success = Ok::<Option<()>, ()>(Some(()));
+        let empty = Ok::<Option<()>, ()>(None);
+        let cancelled = Err::<Option<()>, ()>(());
+
+        assert_eq!(
+            bsl_runtime::application::classify_optional_query(&success),
+            bsl_runtime::application::SemanticOutcome::Success
+        );
+        assert_eq!(
+            bsl_runtime::application::classify_optional_query(&empty),
+            bsl_runtime::application::SemanticOutcome::Empty
+        );
+        assert_eq!(
+            bsl_runtime::application::classify_optional_query(&cancelled),
+            bsl_runtime::application::SemanticOutcome::Cancelled
+        );
     }
 
     async fn wait_startup(job_manager: &JobManager, open: &WorkspaceOpenResponse) {
@@ -4366,6 +4591,62 @@ mod tests {
             .await
             .expect("members flow");
         assert!(members_flow.flow_sensitive_enabled);
+    }
+
+    #[tokio::test]
+    async fn symbol_search_and_references_work_via_bounded_blocking_workers() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let module_path = temp.path().join("Module.bsl");
+        std::fs::write(
+            &module_path,
+            "Процедура ТестBoundedBlocking()\nКонецПроцедуры\nПроцедура Вызов()\n    ТестBoundedBlocking();\nКонецПроцедуры\n",
+        )
+        .expect("write module");
+
+        let job_manager = Arc::new(JobManager::new());
+        let manager = Arc::new(SessionManager::new());
+        let open = manager
+            .open(
+                WorkspaceOpenParams {
+                    roots: vec![temp.path().to_string_lossy().to_string()],
+                    platform_docs_archive: None,
+                    platform_version: None,
+                    configuration_path: None,
+                    mode: None,
+                },
+                Arc::clone(&job_manager),
+            )
+            .await
+            .expect("open");
+        wait_startup(job_manager.as_ref(), &open).await;
+
+        let search = manager
+            .bsl_symbol_search(BslSymbolSearchParams {
+                session_id: open.session_id.clone(),
+                query: "ТестBoundedBlocking".to_string(),
+                limit: 20,
+            })
+            .await
+            .expect("symbol_search");
+        assert!(
+            !search.symbols.is_empty(),
+            "expected non-empty symbol search results"
+        );
+        let symbol_id = search.symbols[0].symbol_id.clone();
+
+        let refs = manager
+            .bsl_references(BslReferencesParams {
+                session_id: open.session_id.clone(),
+                symbol_id,
+                limit: 50,
+                include_snippets: false,
+            })
+            .await
+            .expect("references");
+        assert!(
+            refs.count > 0,
+            "expected at least one reference in the source module"
+        );
     }
 
     #[test]

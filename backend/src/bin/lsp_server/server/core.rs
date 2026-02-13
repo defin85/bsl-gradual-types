@@ -1321,7 +1321,8 @@ mod tests {
     use axum::http::{header, Request as AxumRequest};
     use bsl_agent::jobs::JobManager;
     use bsl_agent::server::types::{
-        BslDiagnosticsParams, BslMembersParams, DocumentRef as McpDocumentRef,
+        BslDefinitionParams, BslDiagnosticsParams, BslMembersParams, BslReferencesParams,
+        BslSymbolSearchParams, BslTypeAtPositionParams, DocumentRef as McpDocumentRef,
         FileRef as McpFileRef, Position as McpPosition, WorkspaceOpenParams, WorkspaceScope,
         WorkspaceScopeTagged,
     };
@@ -1340,15 +1341,17 @@ mod tests {
     use tower_lsp::jsonrpc::Request;
     use tower_lsp::lsp_types::{
         ClientCapabilities, CodeActionContext, CodeActionOrCommand, CodeActionParams,
-        CompletionParams, DidChangeConfigurationParams, DidChangeTextDocumentParams,
-        DidOpenTextDocumentParams, DocumentFormattingParams, DocumentRangeFormattingParams,
-        DocumentSymbolParams, DocumentSymbolResponse, FormattingOptions, InitializeParams,
-        InitializedParams, InlayHint, InlayHintLabel, InlayHintParams, Location,
-        PartialResultParams, Position, PrepareRenameResponse, PublishDiagnosticsParams, Range,
-        ReferenceContext, ReferenceParams, RenameParams, SymbolInformation, SymbolKind,
-        TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
-        TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
-        WorkspaceEdit, WorkspaceSymbolParams,
+        CompletionItemKind, CompletionParams, CompletionResponse, DidChangeConfigurationParams,
+        DidChangeTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams,
+        DocumentRangeFormattingParams, DocumentSymbolParams, DocumentSymbolResponse,
+        FormattingOptions, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents,
+        HoverParams, InitializeParams, InitializedParams, InlayHint, InlayHintLabel,
+        InlayHintParams, Location, MarkedString, PartialResultParams, Position,
+        PrepareRenameResponse, PublishDiagnosticsParams, Range, ReferenceContext, ReferenceParams,
+        RenameParams, SymbolInformation, SymbolKind, TextDocumentContentChangeEvent,
+        TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
+        VersionedTextDocumentIdentifier, WorkDoneProgressParams, WorkspaceEdit,
+        WorkspaceSymbolParams,
     };
     use tower_lsp::LanguageServer;
     use tower_lsp::LspService;
@@ -1626,6 +1629,165 @@ mod tests {
         normalized.sort();
         normalized.dedup();
         normalized
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+    struct NormalizedSymbol {
+        name: String,
+        start_line: u32,
+        start_character: u32,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+    struct NormalizedPoint {
+        start_line: u32,
+        start_character: u32,
+    }
+
+    fn normalize_lsp_member_labels(response: &CompletionResponse) -> Vec<String> {
+        let items = match response {
+            CompletionResponse::Array(items) => items.as_slice(),
+            CompletionResponse::List(list) => list.items.as_slice(),
+        };
+        let mut out: Vec<String> = items
+            .iter()
+            .filter(|item| {
+                matches!(
+                    item.kind,
+                    Some(CompletionItemKind::METHOD)
+                        | Some(CompletionItemKind::PROPERTY)
+                        | Some(CompletionItemKind::FIELD)
+                        | Some(CompletionItemKind::FUNCTION)
+                        | Some(CompletionItemKind::CONSTRUCTOR)
+                )
+            })
+            .map(|item| item.label.clone())
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+
+    fn normalize_mcp_member_labels(members: &[bsl_agent::types::MemberDto]) -> Vec<String> {
+        let mut out: Vec<String> = members.iter().map(|member| member.name.clone()).collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+
+    fn normalize_lsp_workspace_symbols(symbols: &[SymbolInformation]) -> Vec<NormalizedSymbol> {
+        let mut out: Vec<NormalizedSymbol> = symbols
+            .iter()
+            .map(|symbol| NormalizedSymbol {
+                name: symbol.name.clone(),
+                start_line: symbol.location.range.start.line,
+                start_character: symbol.location.range.start.character,
+            })
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+
+    fn normalize_mcp_workspace_symbols(
+        symbols: &[bsl_agent::types::SymbolDto],
+    ) -> Vec<NormalizedSymbol> {
+        let mut out: Vec<NormalizedSymbol> = symbols
+            .iter()
+            .map(|symbol| NormalizedSymbol {
+                name: symbol.name.clone(),
+                start_line: symbol.range.start.line,
+                start_character: symbol.range.start.character,
+            })
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+
+    fn normalize_lsp_locations(locations: &[Location]) -> Vec<NormalizedPoint> {
+        let mut out: Vec<NormalizedPoint> = locations
+            .iter()
+            .map(|location| NormalizedPoint {
+                start_line: location.range.start.line,
+                start_character: location.range.start.character,
+            })
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+
+    fn normalize_mcp_references(
+        references: &[bsl_agent::types::ReferenceDto],
+    ) -> Vec<NormalizedPoint> {
+        let mut out: Vec<NormalizedPoint> = references
+            .iter()
+            .map(|reference| NormalizedPoint {
+                start_line: reference.range.start.line,
+                start_character: reference.range.start.character,
+            })
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+
+    fn normalize_lsp_definition(response: Option<GotoDefinitionResponse>) -> Vec<NormalizedPoint> {
+        let mut out: Vec<NormalizedPoint> = match response {
+            Some(GotoDefinitionResponse::Scalar(location)) => vec![NormalizedPoint {
+                start_line: location.range.start.line,
+                start_character: location.range.start.character,
+            }],
+            Some(GotoDefinitionResponse::Array(locations)) => locations
+                .into_iter()
+                .map(|location| NormalizedPoint {
+                    start_line: location.range.start.line,
+                    start_character: location.range.start.character,
+                })
+                .collect(),
+            Some(GotoDefinitionResponse::Link(links)) => links
+                .into_iter()
+                .map(|link| NormalizedPoint {
+                    start_line: link.target_range.start.line,
+                    start_character: link.target_range.start.character,
+                })
+                .collect(),
+            None => Vec::new(),
+        };
+        out.sort();
+        out.dedup();
+        out
+    }
+
+    fn normalize_mcp_definition(
+        location: Option<&bsl_agent::types::LocationDto>,
+    ) -> Vec<NormalizedPoint> {
+        let mut out = location
+            .map(|location| {
+                vec![NormalizedPoint {
+                    start_line: location.range.start.line,
+                    start_character: location.range.start.character,
+                }]
+            })
+            .unwrap_or_default();
+        out.sort();
+        out.dedup();
+        out
+    }
+
+    fn extract_hover_text(hover: Hover) -> Option<String> {
+        match hover.contents {
+            HoverContents::Scalar(marked) => match marked {
+                MarkedString::String(value) => Some(value),
+                MarkedString::LanguageString(value) => Some(value.value),
+            },
+            HoverContents::Array(values) => values.into_iter().find_map(|value| match value {
+                MarkedString::String(value) => Some(value),
+                MarkedString::LanguageString(value) => Some(value.value),
+            }),
+            HoverContents::Markup(value) => Some(value.value),
+        }
     }
 
     fn metrics_root(payload: &serde_json::Value) -> &serde_json::Value {
@@ -4685,5 +4847,423 @@ mod tests {
                 "MCP stage {stage} has no positive counters"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn p25_cross_interface_semantic_parity_lsp_web_mcp_core_tools() {
+        const TOOLS_FIXTURE: &str = "Процедура Foo() Экспорт\nКонецПроцедуры\n\nПроцедура Bar()\n    Arr = Новый Массив;\n    Arr.Добавить(1);\n    Foo();\nКонецПроцедуры\n";
+        const TARGET_SYMBOL: &str = "Foo";
+        const TYPE_LINE: u32 = 5;
+        const TYPE_CHARACTER: u32 = 5;
+        const MEMBERS_LINE: u32 = 5;
+        const MEMBERS_CHARACTER: u32 = 7;
+        const SYMBOL_CALL_LINE: u32 = 6;
+        const SYMBOL_CALL_CHARACTER: u32 = 5;
+
+        let lsp_coordinator = Arc::new(SystemCoordinator::new());
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = lsp_coordinator.clone();
+            move |client| BslLanguageServer::new(client, coordinator.clone())
+        })
+        .finish();
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        initialize_lsp_service(&mut service).await;
+
+        let lsp_uri = Url::parse("file:///Module.bsl").expect("lsp uri");
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: lsp_uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: TOOLS_FIXTURE.to_string(),
+            },
+        };
+        let did_open_req = Request::build("textDocument/didOpen")
+            .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+            .finish();
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+
+        let completion_params = CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: lsp_uri.clone(),
+                },
+                position: Position {
+                    line: MEMBERS_LINE,
+                    character: MEMBERS_CHARACTER,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        };
+        let completion_req = Request::build("textDocument/completion")
+            .id(2)
+            .params(serde_json::to_value(completion_params).expect("CompletionParams"))
+            .finish();
+        let completion_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(completion_req)
+            .await
+            .expect("completion request")
+            .expect("completion response");
+        let completion_value =
+            serde_json::to_value(&completion_response).expect("serialize response");
+        let completion_result = completion_value
+            .get("result")
+            .cloned()
+            .expect("result field");
+        let lsp_completion: Option<CompletionResponse> =
+            serde_json::from_value(completion_result).expect("parse completion result");
+        let lsp_completion = lsp_completion.expect("completion result present");
+        let lsp_members = normalize_lsp_member_labels(&lsp_completion);
+
+        let symbol_req = Request::build("workspace/symbol")
+            .id(3)
+            .params(
+                serde_json::to_value(WorkspaceSymbolParams {
+                    query: TARGET_SYMBOL.to_string(),
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                    partial_result_params: PartialResultParams::default(),
+                })
+                .expect("WorkspaceSymbolParams"),
+            )
+            .finish();
+        let symbol_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(symbol_req)
+            .await
+            .expect("workspace/symbol request")
+            .expect("workspace/symbol response");
+        let symbol_value = serde_json::to_value(&symbol_response).expect("serialize response");
+        let symbol_result = symbol_value.get("result").cloned().expect("result field");
+        let lsp_symbols: Option<Vec<SymbolInformation>> =
+            serde_json::from_value(symbol_result).expect("parse symbol result");
+        let lsp_symbols = lsp_symbols.expect("symbol result present");
+        let lsp_symbols = normalize_lsp_workspace_symbols(&lsp_symbols);
+        assert!(
+            !lsp_symbols.is_empty(),
+            "expected non-empty LSP symbol_search result"
+        );
+
+        let definition_req = Request::build("textDocument/definition")
+            .id(4)
+            .params(
+                serde_json::to_value(GotoDefinitionParams {
+                    text_document_position_params: TextDocumentPositionParams {
+                        text_document: TextDocumentIdentifier {
+                            uri: lsp_uri.clone(),
+                        },
+                        position: Position {
+                            line: SYMBOL_CALL_LINE,
+                            character: SYMBOL_CALL_CHARACTER,
+                        },
+                    },
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                    partial_result_params: PartialResultParams::default(),
+                })
+                .expect("GotoDefinitionParams"),
+            )
+            .finish();
+        let definition_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(definition_req)
+            .await
+            .expect("textDocument/definition request")
+            .expect("textDocument/definition response");
+        let definition_value =
+            serde_json::to_value(&definition_response).expect("serialize response");
+        let definition_result = definition_value
+            .get("result")
+            .cloned()
+            .expect("result field");
+        let lsp_definition: Option<GotoDefinitionResponse> =
+            serde_json::from_value(definition_result).expect("parse definition result");
+        let lsp_definition = normalize_lsp_definition(lsp_definition);
+        assert!(
+            !lsp_definition.is_empty(),
+            "expected non-empty LSP definition result"
+        );
+
+        let references_req = Request::build("textDocument/references")
+            .id(5)
+            .params(
+                serde_json::to_value(ReferenceParams {
+                    text_document_position: TextDocumentPositionParams {
+                        text_document: TextDocumentIdentifier {
+                            uri: lsp_uri.clone(),
+                        },
+                        position: Position {
+                            line: SYMBOL_CALL_LINE,
+                            character: SYMBOL_CALL_CHARACTER,
+                        },
+                    },
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                    partial_result_params: PartialResultParams::default(),
+                    context: ReferenceContext {
+                        include_declaration: false,
+                    },
+                })
+                .expect("ReferenceParams"),
+            )
+            .finish();
+        let references_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(references_req)
+            .await
+            .expect("textDocument/references request")
+            .expect("textDocument/references response");
+        let references_value =
+            serde_json::to_value(&references_response).expect("serialize response");
+        let references_result = references_value
+            .get("result")
+            .cloned()
+            .expect("result field");
+        let lsp_references: Option<Vec<Location>> =
+            serde_json::from_value(references_result).expect("parse references result");
+        let lsp_references = normalize_lsp_locations(&lsp_references.unwrap_or_default());
+        assert!(
+            !lsp_references.is_empty(),
+            "expected non-empty LSP references result"
+        );
+
+        let hover_req = Request::build("textDocument/hover")
+            .id(6)
+            .params(
+                serde_json::to_value(HoverParams {
+                    text_document_position_params: TextDocumentPositionParams {
+                        text_document: TextDocumentIdentifier {
+                            uri: lsp_uri.clone(),
+                        },
+                        position: Position {
+                            line: TYPE_LINE,
+                            character: TYPE_CHARACTER,
+                        },
+                    },
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                })
+                .expect("HoverParams"),
+            )
+            .finish();
+        let hover_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(hover_req)
+            .await
+            .expect("textDocument/hover request")
+            .expect("textDocument/hover response");
+        let hover_value = serde_json::to_value(&hover_response).expect("serialize response");
+        let hover_result = hover_value.get("result").cloned().expect("result field");
+        let lsp_hover: Option<Hover> = serde_json::from_value(hover_result).expect("parse hover");
+        let lsp_hover_text = lsp_hover
+            .and_then(extract_hover_text)
+            .unwrap_or_else(|| String::from(""));
+        assert!(
+            !lsp_hover_text.is_empty(),
+            "expected non-empty LSP hover response at type position"
+        );
+        drain_task.abort();
+
+        // Web currently exposes hover/diagnostics for semantic parity, while MCP-only tools below
+        // are validated via LSP/MCP pairs.
+        let app = create_router(build_web_test_state(), "backend/static", true);
+        let web_hover_response = app
+            .oneshot(
+                AxumRequest::post("/api/hover")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(axum::body::Body::from(
+                        serde_json::json!({
+                            "code": TOOLS_FIXTURE,
+                            "line": TYPE_LINE,
+                            "column": TYPE_CHARACTER
+                        })
+                        .to_string(),
+                    ))
+                    .expect("web hover request"),
+            )
+            .await
+            .expect("web hover response");
+        assert!(
+            web_hover_response.status().is_success(),
+            "unexpected web hover status: {}",
+            web_hover_response.status()
+        );
+        let web_hover_body = axum::body::to_bytes(web_hover_response.into_body(), usize::MAX)
+            .await
+            .expect("web hover body");
+        let web_hover_payload: serde_json::Value =
+            serde_json::from_slice(&web_hover_body).expect("web hover payload");
+        let web_hover_text = web_hover_payload
+            .get("hover")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            !web_hover_text.is_empty(),
+            "expected non-empty Web hover text, payload={web_hover_payload}"
+        );
+
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let module_path = temp.path().join("Module.bsl");
+        std::fs::write(&module_path, TOOLS_FIXTURE).expect("write module");
+        let mcp_manager = Arc::new(SessionManager::new());
+        let mcp_job_manager = Arc::new(JobManager::new());
+        let open = mcp_manager
+            .open(
+                WorkspaceOpenParams {
+                    roots: vec![temp.path().to_string_lossy().to_string()],
+                    platform_docs_archive: None,
+                    platform_version: None,
+                    configuration_path: None,
+                    mode: None,
+                },
+                mcp_job_manager.clone(),
+            )
+            .await
+            .expect("mcp workspace open");
+        wait_mcp_startup(mcp_job_manager.as_ref(), open.startup_job_id.as_deref()).await;
+
+        let mcp_type = mcp_manager
+            .bsl_type_at_position(BslTypeAtPositionParams {
+                session_id: open.session_id.clone(),
+                file: McpFileRef {
+                    doc: McpDocumentRef::Path(module_path.to_string_lossy().to_string()),
+                    text: None,
+                    version: None,
+                },
+                position: McpPosition {
+                    line: TYPE_LINE,
+                    character: TYPE_CHARACTER,
+                },
+                include_flow_sensitive: false,
+            })
+            .await
+            .expect("mcp type_at_position");
+        assert!(
+            mcp_type.warnings.is_empty(),
+            "mcp type_at_position returned warnings: {:?}",
+            mcp_type.warnings
+        );
+        let mcp_type_name = mcp_type
+            .type_info
+            .as_ref()
+            .map(|type_info| type_info.name.clone())
+            .expect("mcp type_at_position type_info");
+
+        let mcp_members = mcp_manager
+            .bsl_members(BslMembersParams {
+                session_id: open.session_id.clone(),
+                file: McpFileRef {
+                    doc: McpDocumentRef::Path(module_path.to_string_lossy().to_string()),
+                    text: None,
+                    version: None,
+                },
+                position: McpPosition {
+                    line: MEMBERS_LINE,
+                    character: MEMBERS_CHARACTER,
+                },
+                limit: 100,
+                include_flow_sensitive: false,
+            })
+            .await
+            .expect("mcp members");
+        let mcp_members = normalize_mcp_member_labels(&mcp_members.members);
+
+        let mcp_symbol_search = mcp_manager
+            .bsl_symbol_search(BslSymbolSearchParams {
+                session_id: open.session_id.clone(),
+                query: TARGET_SYMBOL.to_string(),
+                limit: 20,
+            })
+            .await
+            .expect("mcp symbol_search");
+        let mcp_symbols = normalize_mcp_workspace_symbols(&mcp_symbol_search.symbols);
+        assert!(
+            !mcp_symbols.is_empty(),
+            "expected non-empty MCP symbol_search result"
+        );
+        let mcp_target_symbol_id = mcp_symbol_search
+            .symbols
+            .iter()
+            .find(|symbol| symbol.name == TARGET_SYMBOL)
+            .map(|symbol| symbol.symbol_id.clone())
+            .expect("mcp target symbol id");
+
+        let mcp_references = mcp_manager
+            .bsl_references(BslReferencesParams {
+                session_id: open.session_id.clone(),
+                symbol_id: mcp_target_symbol_id,
+                limit: 50,
+                include_snippets: false,
+            })
+            .await
+            .expect("mcp references");
+        let mcp_references = normalize_mcp_references(&mcp_references.references);
+        assert!(
+            !mcp_references.is_empty(),
+            "expected non-empty MCP references result"
+        );
+
+        let mcp_definition = mcp_manager
+            .bsl_definition(BslDefinitionParams {
+                session_id: open.session_id,
+                symbol_id: None,
+                file: Some(McpFileRef {
+                    doc: McpDocumentRef::Path(module_path.to_string_lossy().to_string()),
+                    text: None,
+                    version: None,
+                }),
+                position: Some(McpPosition {
+                    line: SYMBOL_CALL_LINE,
+                    character: SYMBOL_CALL_CHARACTER,
+                }),
+            })
+            .await
+            .expect("mcp definition");
+        let mcp_definition = normalize_mcp_definition(mcp_definition.location.as_ref());
+        assert!(
+            !mcp_definition.is_empty(),
+            "expected non-empty MCP definition result"
+        );
+
+        assert_eq!(lsp_members, mcp_members, "LSP/MCP members drift detected");
+        assert_eq!(
+            lsp_symbols, mcp_symbols,
+            "LSP/MCP symbol_search drift detected"
+        );
+        assert_eq!(
+            lsp_references, mcp_references,
+            "LSP/MCP references drift detected"
+        );
+        assert_eq!(
+            lsp_definition, mcp_definition,
+            "LSP/MCP definition drift detected"
+        );
+
+        assert!(
+            lsp_hover_text.contains(&mcp_type_name),
+            "LSP hover/type_at_position drift detected: expected '{mcp_type_name}' in hover text, got '{lsp_hover_text}'"
+        );
+        assert!(
+            web_hover_text.contains(&mcp_type_name),
+            "Web hover/type_at_position drift detected: expected '{mcp_type_name}' in hover text, got '{web_hover_text}'"
+        );
     }
 }

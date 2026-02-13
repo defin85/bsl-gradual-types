@@ -35,10 +35,19 @@ fn performance_limit_ms(debug_ms: u128, release_ms: u128) -> u128 {
     }
 }
 
+fn handle_missing_conf_big_fixture(reason: &str) {
+    if std::env::var_os("CI").is_some() {
+        panic!("{reason}");
+    }
+    eprintln!("skipping conf_big perf regression guard: {reason}");
+}
+
 #[test]
 fn conf_big_module_cold_warm_perf_regression() {
     let Some(root) = conf_big_root() else {
-        // Repo may be provided without examples/conf_big.
+        handle_missing_conf_big_fixture(
+            "examples/conf_big fixture is missing (Configuration.xml not found)",
+        );
         return;
     };
 
@@ -51,6 +60,10 @@ fn conf_big_module_cold_warm_perf_regression() {
         .join("Module.bsl");
     let module_path = root.join(&module_rel);
     if !module_path.exists() {
+        handle_missing_conf_big_fixture(&format!(
+            "module fixture is missing: {}",
+            module_path.display()
+        ));
         return;
     }
 

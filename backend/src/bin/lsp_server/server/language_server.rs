@@ -897,27 +897,31 @@ impl LanguageServer for BslLanguageServer {
             return Ok(None);
         };
 
-        let expected_version = self
-            .latest_received_file_versions_v2
-            .read()
-            .await
-            .get(&file_id)
-            .copied();
-        if let Some(expected_version) = expected_version {
-            let ok = self
-                .analysis_v2
-                .wait_for_file_version(file_id, expected_version)
-                .await;
-            if !ok {
-                return Ok(None);
-            }
-        }
-
-        let analysis = self.analysis_v2.snapshot().await;
+        let prepared = self
+            .prepare_lsp_stateful_operation_v2(
+                &uri,
+                file_id,
+                bsl_runtime::application::SemanticOperation::DocumentSymbol,
+                false,
+            )
+            .await;
+        let (context, prepared, _expected_version) = match prepared {
+            Ok(values) => values,
+            Err(_) => return Ok(None),
+        };
+        let analysis = prepared.snapshot.analysis;
         let Some(file_content) = analysis.file_text(file_id).ok().flatten() else {
             return Ok(None);
         };
-        let Some(parse_result) = analysis.parse_result(file_id).ok().flatten() else {
+        let parse_result_query =
+            bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query(
+                &context,
+                &analysis,
+                true,
+                Some(self.coordinator.as_ref()),
+                |analysis| analysis.parse_result(file_id),
+            );
+        let Some(parse_result) = parse_result_query.ok().flatten() else {
             return Ok(None);
         };
 
@@ -937,27 +941,31 @@ impl LanguageServer for BslLanguageServer {
             return Ok(None);
         };
 
-        let expected_version = self
-            .latest_received_file_versions_v2
-            .read()
-            .await
-            .get(&file_id)
-            .copied();
-        if let Some(expected_version) = expected_version {
-            let ok = self
-                .analysis_v2
-                .wait_for_file_version(file_id, expected_version)
-                .await;
-            if !ok {
-                return Ok(None);
-            }
-        }
-
-        let analysis = self.analysis_v2.snapshot().await;
+        let prepared = self
+            .prepare_lsp_stateful_operation_v2(
+                &uri,
+                file_id,
+                bsl_runtime::application::SemanticOperation::References,
+                false,
+            )
+            .await;
+        let (context, prepared, _expected_version) = match prepared {
+            Ok(values) => values,
+            Err(_) => return Ok(None),
+        };
+        let analysis = prepared.snapshot.analysis;
         let Some(file_content) = analysis.file_text(file_id).ok().flatten() else {
             return Ok(None);
         };
-        let Some(parse_result) = analysis.parse_result(file_id).ok().flatten() else {
+        let parse_result_query =
+            bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query(
+                &context,
+                &analysis,
+                true,
+                Some(self.coordinator.as_ref()),
+                |analysis| analysis.parse_result(file_id),
+            );
+        let Some(parse_result) = parse_result_query.ok().flatten() else {
             return Ok(None);
         };
 
@@ -981,27 +989,31 @@ impl LanguageServer for BslLanguageServer {
             return Ok(None);
         };
 
-        let expected_version = self
-            .latest_received_file_versions_v2
-            .read()
-            .await
-            .get(&file_id)
-            .copied();
-        if let Some(expected_version) = expected_version {
-            let ok = self
-                .analysis_v2
-                .wait_for_file_version(file_id, expected_version)
-                .await;
-            if !ok {
-                return Ok(None);
-            }
-        }
-
-        let analysis = self.analysis_v2.snapshot().await;
+        let prepared = self
+            .prepare_lsp_stateful_operation_v2(
+                &uri,
+                file_id,
+                bsl_runtime::application::SemanticOperation::Rename,
+                false,
+            )
+            .await;
+        let (context, prepared, _expected_version) = match prepared {
+            Ok(values) => values,
+            Err(_) => return Ok(None),
+        };
+        let analysis = prepared.snapshot.analysis;
         let Some(file_content) = analysis.file_text(file_id).ok().flatten() else {
             return Ok(None);
         };
-        let Some(parse_result) = analysis.parse_result(file_id).ok().flatten() else {
+        let parse_result_query =
+            bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query(
+                &context,
+                &analysis,
+                true,
+                Some(self.coordinator.as_ref()),
+                |analysis| analysis.parse_result(file_id),
+            );
+        let Some(parse_result) = parse_result_query.ok().flatten() else {
             return Ok(None);
         };
 
@@ -1016,27 +1028,31 @@ impl LanguageServer for BslLanguageServer {
             return Ok(None);
         };
 
-        let expected_version = self
-            .latest_received_file_versions_v2
-            .read()
-            .await
-            .get(&file_id)
-            .copied();
-        if let Some(expected_version) = expected_version {
-            let ok = self
-                .analysis_v2
-                .wait_for_file_version(file_id, expected_version)
-                .await;
-            if !ok {
-                return Ok(None);
-            }
-        }
-
-        let analysis = self.analysis_v2.snapshot().await;
+        let prepared = self
+            .prepare_lsp_stateful_operation_v2(
+                &uri,
+                file_id,
+                bsl_runtime::application::SemanticOperation::Rename,
+                false,
+            )
+            .await;
+        let (context, prepared, _expected_version) = match prepared {
+            Ok(values) => values,
+            Err(_) => return Ok(None),
+        };
+        let analysis = prepared.snapshot.analysis;
         let Some(file_content) = analysis.file_text(file_id).ok().flatten() else {
             return Ok(None);
         };
-        let Some(parse_result) = analysis.parse_result(file_id).ok().flatten() else {
+        let parse_result_query =
+            bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query(
+                &context,
+                &analysis,
+                true,
+                Some(self.coordinator.as_ref()),
+                |analysis| analysis.parse_result(file_id),
+            );
+        let Some(parse_result) = parse_result_query.ok().flatten() else {
             return Ok(None);
         };
 
@@ -1062,31 +1078,15 @@ impl LanguageServer for BslLanguageServer {
 
         self.sync_v2_globals().await;
 
-        let open_versions: Vec<(bsl_analysis_v2::FileId, i32)> = self
+        let open_file_ids: Vec<bsl_analysis_v2::FileId> = self
             .latest_received_file_versions_v2
             .read()
             .await
             .iter()
-            .map(|(file_id, version)| (*file_id, *version))
+            .map(|(file_id, _version)| *file_id)
             .collect();
 
-        if open_versions.is_empty() {
-            return Ok(Some(Vec::new()));
-        }
-
-        let mut ready_file_ids = Vec::<bsl_analysis_v2::FileId>::new();
-        for (file_id, expected_version) in &open_versions {
-            let ok = self
-                .analysis_v2
-                .wait_for_file_version(*file_id, *expected_version)
-                .await;
-            if !ok {
-                continue;
-            }
-            ready_file_ids.push(*file_id);
-        }
-
-        if ready_file_ids.is_empty() {
+        if open_file_ids.is_empty() {
             return Ok(Some(Vec::new()));
         }
 
@@ -1103,21 +1103,41 @@ impl LanguageServer for BslLanguageServer {
             }
         }
 
-        let analysis = self.analysis_v2.snapshot().await;
         let mut out: Vec<SymbolInformation> = Vec::new();
-        for file_id in ready_file_ids {
-            let Some(uri) = file_id_to_uri.get(&file_id) else {
+        for file_id in open_file_ids {
+            let Some(uri) = file_id_to_uri.get(&file_id).cloned() else {
                 continue;
             };
+            let prepared = self
+                .prepare_lsp_stateful_operation_v2(
+                    &uri,
+                    file_id,
+                    bsl_runtime::application::SemanticOperation::SymbolSearch,
+                    false,
+                )
+                .await;
+            let (context, prepared, _expected_version) = match prepared {
+                Ok(values) => values,
+                Err(_) => continue,
+            };
+            let analysis = prepared.snapshot.analysis;
             let Some(file_content) = analysis.file_text(file_id).ok().flatten() else {
                 continue;
             };
-            let Some(parse_result) = analysis.parse_result(file_id).ok().flatten() else {
+            let parse_result_query =
+                bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query(
+                    &context,
+                    &analysis,
+                    true,
+                    Some(self.coordinator.as_ref()),
+                    |analysis| analysis.parse_result(file_id),
+                );
+            let Some(parse_result) = parse_result_query.ok().flatten() else {
                 continue;
             };
             out.extend(build_workspace_symbols(
                 &query,
-                uri,
+                &uri,
                 &file_content,
                 &parse_result,
             ));

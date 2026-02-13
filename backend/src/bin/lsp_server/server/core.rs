@@ -480,6 +480,12 @@ impl BslLanguageServer {
             .await
             .clone()
             .unwrap_or_else(|| compute_settings_id_v2(&settings));
+        let cancellation = match operation {
+            bsl_runtime::application::SemanticOperation::Diagnostics => {
+                bsl_runtime::application::CancellationPolicy::BestEffort
+            }
+            _ => bsl_runtime::application::CancellationPolicy::RespectClientAbort,
+        };
 
         bsl_runtime::application::ExecutionContext {
             operation,
@@ -493,7 +499,7 @@ impl BslLanguageServer {
                     &settings.diagnostics.detail_level,
                 ),
             },
-            cancellation: bsl_runtime::application::CancellationPolicy::BestEffort,
+            cancellation,
         }
     }
 

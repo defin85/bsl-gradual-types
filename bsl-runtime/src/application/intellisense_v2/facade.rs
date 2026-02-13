@@ -19,6 +19,8 @@ pub enum SemanticOperation {
     Hover,
     SignatureHelp,
     Definition,
+    DocumentSymbol,
+    Rename,
     Diagnostics,
     Members,
     TypeAtPosition,
@@ -33,6 +35,8 @@ impl SemanticOperation {
             SemanticOperation::Hover => "hover",
             SemanticOperation::SignatureHelp => "signature_help",
             SemanticOperation::Definition => "definition",
+            SemanticOperation::DocumentSymbol => "document_symbol",
+            SemanticOperation::Rename => "rename",
             SemanticOperation::Diagnostics => "diagnostics",
             SemanticOperation::Members => "members",
             SemanticOperation::TypeAtPosition => "type_at_position",
@@ -588,8 +592,18 @@ impl IntellisenseV2Facade {
         F: FnOnce(&AnalysisV2) -> Result<Option<T>, E>,
     {
         let started = Instant::now();
-        let result = query(analysis);
+        let raw_result = query(analysis);
         let elapsed = started.elapsed();
+        let query_cancelled = raw_result.is_err();
+        let report_cancelled =
+            query_cancelled && !matches!(context.cancellation, CancellationPolicy::Ignore);
+        let result = match raw_result {
+            Ok(value) => Ok(value),
+            Err(err) => match context.cancellation {
+                CancellationPolicy::RespectClientAbort => Err(err),
+                CancellationPolicy::BestEffort | CancellationPolicy::Ignore => Ok(None),
+            },
+        };
 
         if let Some(coordinator) = observability {
             match stage {
@@ -598,26 +612,26 @@ impl IntellisenseV2Facade {
                         context.operation.as_str(),
                         elapsed,
                     );
-                    if result.is_err() {
+                    if report_cancelled {
                         coordinator
                             .record_intellisense_v2_ir_query_cancelled(context.operation.as_str());
                     }
                 }
                 ObservabilityStage::SyntaxDiagnosticsQuery => {
                     coordinator.record_intellisense_v2_syntax_diagnostics_query_latency(elapsed);
-                    if result.is_err() {
+                    if report_cancelled {
                         coordinator.record_intellisense_v2_query_cancelled("syntax");
                     }
                 }
                 ObservabilityStage::SemanticDiagnosticsQuery => {
                     coordinator.record_intellisense_v2_semantic_diagnostics_query_latency(elapsed);
-                    if result.is_err() {
+                    if report_cancelled {
                         coordinator.record_intellisense_v2_query_cancelled("semantic");
                     }
                 }
                 ObservabilityStage::ParseResultQuery => {
                     coordinator.record_intellisense_v2_parse_result_query_latency(elapsed);
-                    if result.is_err() {
+                    if report_cancelled {
                         coordinator.record_intellisense_v2_query_cancelled("other");
                     }
                 }
@@ -938,6 +952,11 @@ mod tests {
         assert_eq!(SemanticOperation::Hover.as_str(), "hover");
         assert_eq!(SemanticOperation::SignatureHelp.as_str(), "signature_help");
         assert_eq!(SemanticOperation::Definition.as_str(), "definition");
+        assert_eq!(
+            SemanticOperation::DocumentSymbol.as_str(),
+            "document_symbol"
+        );
+        assert_eq!(SemanticOperation::Rename.as_str(), "rename");
         assert_eq!(SemanticOperation::Diagnostics.as_str(), "diagnostics");
         assert_eq!(SemanticOperation::Members.as_str(), "members");
         assert_eq!(
@@ -1092,6 +1111,93 @@ mod tests {
         assert!(
             histograms.contains_key("intellisense_v2_ir_query_completion_ms"),
             "IR histogram should be recorded for completion"
+        );
+    }
+
+    #[test]
+    fn run_optional_query_best_effort_downgrades_cancellation_to_empty() {
+        let coordinator = SystemCoordinator::new();
+        let analysis = AnalysisHostV2::default().snapshot();
+        let context = ExecutionContext {
+            operation: SemanticOperation::Members,
+            file_id: FileId(1),
+            min_file_version: None,
+            expected_deps_id: None,
+            flow_sensitive: false,
+            settings: ExecutionSettings {
+                settings_id: SettingsId::from_hash("settings"),
+                diagnostics_detail_level: DetailLevel::Full,
+            },
+            cancellation: CancellationPolicy::BestEffort,
+        };
+
+        let result = IntellisenseV2Facade::run_optional_query(
+            &context,
+            ObservabilityStage::IrQuery,
+            &analysis,
+            Some(&coordinator),
+            |_analysis| Err::<Option<()>, ()>(()),
+        )
+        .expect("best effort should downgrade cancellation");
+        assert!(
+            result.is_none(),
+            "best effort cancellation must return empty"
+        );
+
+        let metrics = coordinator.observability_metrics();
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        let cancelled = counters
+            .get("intellisense_v2_ir_query_cancelled_total_other")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0);
+        assert!(
+            cancelled > 0,
+            "best effort should still expose cancelled counters"
+        );
+    }
+
+    #[test]
+    fn run_optional_query_ignore_drops_cancellation_counters() {
+        let coordinator = SystemCoordinator::new();
+        let analysis = AnalysisHostV2::default().snapshot();
+        let context = ExecutionContext {
+            operation: SemanticOperation::Members,
+            file_id: FileId(1),
+            min_file_version: None,
+            expected_deps_id: None,
+            flow_sensitive: false,
+            settings: ExecutionSettings {
+                settings_id: SettingsId::from_hash("settings"),
+                diagnostics_detail_level: DetailLevel::Full,
+            },
+            cancellation: CancellationPolicy::Ignore,
+        };
+
+        let result = IntellisenseV2Facade::run_optional_query(
+            &context,
+            ObservabilityStage::IrQuery,
+            &analysis,
+            Some(&coordinator),
+            |_analysis| Err::<Option<()>, ()>(()),
+        )
+        .expect("ignore policy should drop cancellation error");
+        assert!(result.is_none(), "ignore policy must return empty result");
+
+        let metrics = coordinator.observability_metrics();
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        let cancelled = counters
+            .get("intellisense_v2_ir_query_cancelled_total_other")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0);
+        assert_eq!(
+            cancelled, 0,
+            "ignore policy should suppress cancelled counters"
         );
     }
 

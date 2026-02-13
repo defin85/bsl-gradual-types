@@ -35,13 +35,15 @@ fn read_duration(key: RuntimeKey) -> Option<Duration> {
 pub fn should_query_parse_result(operation: SemanticOperation, ir_available: bool) -> bool {
     match operation {
         SemanticOperation::Completion | SemanticOperation::Members => ir_available,
+        SemanticOperation::DocumentSymbol
+        | SemanticOperation::Rename
+        | SemanticOperation::SymbolSearch
+        | SemanticOperation::References => true,
         SemanticOperation::Hover
         | SemanticOperation::SignatureHelp
         | SemanticOperation::Definition
         | SemanticOperation::Diagnostics
-        | SemanticOperation::TypeAtPosition
-        | SemanticOperation::SymbolSearch
-        | SemanticOperation::References => false,
+        | SemanticOperation::TypeAtPosition => false,
     }
 }
 

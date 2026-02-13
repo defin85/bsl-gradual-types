@@ -1175,13 +1175,6 @@ impl LanguageServer for BslLanguageServer {
                 });
             self.sync_v2_globals().await;
 
-            let expected_version = self
-                .latest_received_file_versions_v2
-                .read()
-                .await
-                .get(&file_id)
-                .copied();
-
             let empty = || {
                 Some(crate::handlers::CompletionResponseWithStats {
                     response: CompletionResponse::List(CompletionList {
@@ -1193,93 +1186,64 @@ impl LanguageServer for BslLanguageServer {
                 })
             };
 
-            let wait_started = Instant::now();
-            let ready = if let Some(expected_version) = expected_version {
-                self.analysis_v2
-                    .wait_for_file_version(file_id, expected_version)
-                    .await
-            } else {
-                let path = match uri.to_file_path() {
-                    Ok(path) => path.to_string_lossy().to_string(),
-                    Err(_) => uri.to_string(),
-                };
-                let file_content = match uri.to_file_path() {
-                    Ok(path) => match read_bsl_file(&path) {
-                        Ok(content) => Some(content),
-                        Err(e) => {
-                            error!("Failed to read file for completion: {}", e);
-                            None
-                        }
-                    },
-                    Err(_) => None,
-                };
-                match file_content {
-                    Some(file_content) => {
-                        self.analysis_v2
-                            .apply_changes(vec![bsl_analysis_v2::Change::SetFile {
-                                file_id,
-                                text: Arc::from(file_content),
-                                version: 0,
-                                path: Arc::from(path),
-                            }]);
-
-                        self.analysis_v2.wait_for_file_version(file_id, 0).await
-                    }
-                    None => false,
-                }
+            let include_flow_sensitive = {
+                let settings = self.settings.read().await;
+                settings.enable_flow_sensitive
             };
-            let wait_elapsed = wait_started.elapsed();
-            self.coordinator
-                .record_intellisense_v2_wait_for_file_version("completion", wait_elapsed);
-            if let Some(threshold) = super::intellisense_v2_slow_wait_warn_threshold() {
-                if wait_elapsed >= threshold {
-                    warn!(
-                        uri = %uri,
-                        file_id = file_id.0,
-                        expected_version = expected_version.unwrap_or(0),
-                        wait_ms = wait_elapsed.as_millis(),
-                        threshold_ms = threshold.as_millis(),
-                        "Completion v2: wait_for_file_version is slow"
-                    );
-                }
-            }
 
-            if !ready {
-                completion_outcome = Some("wait_not_ready");
-                empty()
-            } else {
-                let (
-                    file_content,
-                    file_path,
-                    parse_result,
-                    member_access_owner_type_hint,
-                    deps,
-                    ir_program,
-                    index_snapshot,
+            let prepared = self
+                .prepare_lsp_stateful_operation_v2(
+                    &uri,
+                    file_id,
+                    bsl_runtime::application::SemanticOperation::Completion,
                     include_flow_sensitive,
-                ) = {
-                    let snapshot_started = Instant::now();
-                    let (analysis, index_snapshot, deps_id) =
-                        self.analysis_v2.snapshot_with_deps().await;
-                    let snapshot_elapsed = snapshot_started.elapsed();
-                    self.coordinator
-                        .record_intellisense_v2_snapshot_latency("completion", snapshot_elapsed);
+                )
+                .await;
+
+            match prepared {
+                Ok((context, prepared, expected_version)) => {
+                    if let Some(wait_elapsed) = prepared.wait_elapsed {
+                        if let Some(threshold) = super::intellisense_v2_slow_wait_warn_threshold() {
+                            if wait_elapsed >= threshold {
+                                warn!(
+                                    uri = %uri,
+                                    file_id = file_id.0,
+                                    expected_version,
+                                    wait_ms = wait_elapsed.as_millis(),
+                                    threshold_ms = threshold.as_millis(),
+                                    "Completion v2: wait_for_file_version is slow"
+                                );
+                            }
+                        }
+                    }
                     if let Some(threshold) = super::intellisense_v2_slow_snapshot_warn_threshold() {
-                        if snapshot_elapsed >= threshold {
+                        if prepared.snapshot_elapsed >= threshold {
                             warn!(
                                 uri = %uri,
                                 file_id = file_id.0,
-                                snapshot_ms = snapshot_elapsed.as_millis(),
+                                snapshot_ms = prepared.snapshot_elapsed.as_millis(),
                                 threshold_ms = threshold.as_millis(),
                                 "Completion v2: snapshot acquisition is slow"
                             );
                         }
                     }
 
-                    let observed_file_version = analysis.file_version(file_id).ok().flatten();
-                    let observed_deps_id = Some(deps_id);
-                    let observed_settings_id = analysis.settings_id().ok();
-                    debug!(
+                    let (
+                        file_content,
+                        file_path,
+                        parse_result,
+                        member_access_owner_type_hint,
+                        deps,
+                        ir_program,
+                        index_snapshot,
+                    ) = {
+                        let analysis = prepared.snapshot.analysis;
+                        let index_snapshot = prepared.snapshot.index_snapshot;
+
+                        let observed_file_version = analysis.file_version(file_id).ok().flatten();
+                        let observed_deps_id = Some(prepared.snapshot.deps_id);
+                        let observed_settings_id = analysis.settings_id().ok();
+                        debug!(
                         "Completion v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}, index_snapshot_id={}",
                         uri,
                         file_id.0,
@@ -1288,30 +1252,34 @@ impl LanguageServer for BslLanguageServer {
                         observed_settings_id.as_ref().map(|v| v.as_str()),
                         index_snapshot.id.as_str(),
                     );
-                    match analysis.file_text_len(file_id) {
-                        Ok(Some(len)) => debug!(
-                            "Completion v2 (salsa) active: uri={}, file_id={}, text_len={}",
-                            uri, file_id.0, len
-                        ),
-                        Ok(None) => debug!(
-                            "Completion v2 (salsa) active: uri={}, file_id={} (file not found)",
-                            uri, file_id.0
-                        ),
-                        Err(_) => debug!(
-                            "Completion v2 (salsa) cancelled: uri={}, file_id={}",
-                            uri, file_id.0
-                        ),
-                    }
+                        match analysis.file_text_len(file_id) {
+                            Ok(Some(len)) => debug!(
+                                "Completion v2 (salsa) active: uri={}, file_id={}, text_len={}",
+                                uri, file_id.0, len
+                            ),
+                            Ok(None) => debug!(
+                                "Completion v2 (salsa) active: uri={}, file_id={} (file not found)",
+                                uri, file_id.0
+                            ),
+                            Err(_) => debug!(
+                                "Completion v2 (salsa) cancelled: uri={}, file_id={}",
+                                uri, file_id.0
+                            ),
+                        }
 
-                    let observed_byte_offset = analysis
-                        .utf16_position_to_byte_offset(file_id, position.line, position.character)
-                        .ok()
-                        .flatten();
-                    let observed_point = analysis
-                        .utf16_position_to_point(file_id, position.line, position.character)
-                        .ok()
-                        .flatten();
-                    debug!(
+                        let observed_byte_offset = analysis
+                            .utf16_position_to_byte_offset(
+                                file_id,
+                                position.line,
+                                position.character,
+                            )
+                            .ok()
+                            .flatten();
+                        let observed_point = analysis
+                            .utf16_position_to_point(file_id, position.line, position.character)
+                            .ok()
+                            .flatten();
+                        debug!(
                         "Completion v2 positioning: uri={}, file_id={}, lsp=({}:{}) -> byte_offset={:?}, point={:?}",
                         uri,
                         file_id.0,
@@ -1321,179 +1289,198 @@ impl LanguageServer for BslLanguageServer {
                         observed_point,
                     );
 
-                    let file_content = analysis.file_text(file_id).ok().flatten();
-                    let file_path = analysis.file_path(file_id).ok().flatten();
-                    let deps = analysis.deps_data().ok();
-                    let ir_started = Instant::now();
-                    let ir_query = analysis.ir(file_id);
-                    let ir_elapsed = ir_started.elapsed();
-                    let ir_outcome = bsl_runtime::application::classify_optional_query(&ir_query);
-                    self.coordinator
-                        .record_intellisense_v2_ir_query_latency("completion", ir_elapsed);
-                    if let Some(threshold) = super::intellisense_v2_slow_query_warn_threshold() {
-                        if ir_elapsed >= threshold {
-                            warn!(
-                                uri = %uri,
-                                file_id = file_id.0,
-                                ir_ms = ir_elapsed.as_millis(),
-                                threshold_ms = threshold.as_millis(),
-                                "Completion v2: ir query is slow"
+                        let file_content = analysis.file_text(file_id).ok().flatten();
+                        let file_path = analysis.file_path(file_id).ok().flatten();
+                        let deps = analysis.deps_data().ok();
+                        let ir_started = Instant::now();
+                        let ir_query =
+                            bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
+                                &context,
+                                bsl_runtime::application::ObservabilityStage::IrQuery,
+                                &analysis,
+                                Some(self.coordinator.as_ref()),
+                                |analysis| analysis.ir(file_id),
                             );
-                        }
-                    }
-                    let ir_program = match ir_query {
-                        Ok(program) => program,
-                        Err(cancelled) => {
-                            self.coordinator
-                                .record_intellisense_v2_ir_query_cancelled("completion");
-                            if completion_outcome.is_none() {
-                                completion_outcome = Some(ir_outcome.as_str());
+                        let ir_elapsed = ir_started.elapsed();
+                        let ir_outcome =
+                            bsl_runtime::application::classify_optional_query(&ir_query);
+                        if let Some(threshold) = super::intellisense_v2_slow_query_warn_threshold()
+                        {
+                            if ir_elapsed >= threshold {
+                                warn!(
+                                    uri = %uri,
+                                    file_id = file_id.0,
+                                    ir_ms = ir_elapsed.as_millis(),
+                                    threshold_ms = threshold.as_millis(),
+                                    "Completion v2: ir query is slow"
+                                );
                             }
-                            debug!(
-                                uri = %uri,
-                                file_id = file_id.0,
-                                error = ?cancelled,
-                                "Completion v2: ir query cancelled"
-                            );
-                            None
                         }
-                    };
-                    let parse_result = if bsl_runtime::application::should_query_parse_result(
-                        bsl_runtime::application::SemanticOperation::Completion,
-                        ir_program.is_some(),
-                    ) {
-                        analysis.parse_result(file_id).ok().flatten()
-                    } else {
-                        None
-                    };
+                        let ir_program = match ir_query {
+                            Ok(program) => program,
+                            Err(cancelled) => {
+                                if completion_outcome.is_none() {
+                                    completion_outcome = Some(ir_outcome.as_str());
+                                }
+                                debug!(
+                                    uri = %uri,
+                                    file_id = file_id.0,
+                                    error = ?cancelled,
+                                    "Completion v2: ir query cancelled"
+                                );
+                                None
+                            }
+                        };
+                        let parse_result =
+                            bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query(
+                                &context,
+                                &analysis,
+                                ir_program.is_some(),
+                                Some(self.coordinator.as_ref()),
+                                |analysis| analysis.parse_result(file_id),
+                            )
+                            .ok()
+                            .flatten();
 
-                    if bsl_runtime::system::global_runtime_config()
-                        .get_bool(bsl_runtime::system::RuntimeKey::IntellisenseV2P4Smoke)
-                        .unwrap_or(false)
-                    {
-                        match ir_program.as_ref() {
-                            Some(program) => debug!(
-                                "Completion v2 ir: uri={}, file_id={}, deps_id={:?}, nodes={}",
-                                uri,
-                                file_id.0,
-                                observed_deps_id.as_ref().map(|v| v.as_str()),
-                                program.nodes.len()
-                            ),
-                            None => debug!(
-                                "Completion v2 ir: uri={}, file_id={} (unavailable)",
-                                uri, file_id.0
-                            ),
+                        if bsl_runtime::system::global_runtime_config()
+                            .get_bool(bsl_runtime::system::RuntimeKey::IntellisenseV2P4Smoke)
+                            .unwrap_or(false)
+                        {
+                            match ir_program.as_ref() {
+                                Some(program) => debug!(
+                                    "Completion v2 ir: uri={}, file_id={}, deps_id={:?}, nodes={}",
+                                    uri,
+                                    file_id.0,
+                                    observed_deps_id.as_ref().map(|v| v.as_str()),
+                                    program.nodes.len()
+                                ),
+                                None => debug!(
+                                    "Completion v2 ir: uri={}, file_id={} (unavailable)",
+                                    uri, file_id.0
+                                ),
+                            }
                         }
-                    }
 
-                    if bsl_runtime::system::global_runtime_config()
-                        .get_bool(bsl_runtime::system::RuntimeKey::IntellisenseV2P3Smoke)
-                        .unwrap_or(false)
-                    {
-                        match parse_result.as_ref() {
-                            Some(parsed) => debug!(
+                        if bsl_runtime::system::global_runtime_config()
+                            .get_bool(bsl_runtime::system::RuntimeKey::IntellisenseV2P3Smoke)
+                            .unwrap_or(false)
+                        {
+                            match parse_result.as_ref() {
+                                Some(parsed) => debug!(
                                 "Completion v2 parse_result: uri={}, file_id={}, syntax_errors={}",
                                 uri,
                                 file_id.0,
                                 parsed.syntax_errors.len()
                             ),
-                            None => debug!(
-                                "Completion v2 parse_result: uri={}, file_id={} (unavailable)",
-                                uri, file_id.0
-                            ),
-                        }
-                    }
-
-                    let include_flow_sensitive = {
-                        let settings = self.settings.read().await;
-                        settings.enable_flow_sensitive
-                    };
-
-                    let member_access_owner_type_hint = if ir_program.is_some() {
-                        file_content.as_deref().and_then(|text| {
-                            let line_text = text.lines().nth(position.line as usize)?;
-                            let cursor_byte =
-                                bsl_backend::system::positioning::utf16_to_byte_offset(
-                                    line_text,
-                                    position.character,
-                                );
-                            let line_prefix = line_text.get(..cursor_byte)?;
-                            let dot_in_line = line_prefix.rfind('.')?;
-                            let receiver = line_prefix.get(..dot_in_line)?.trim_end();
-                            let (probe_byte, _) = receiver
-                                .char_indices()
-                                .rev()
-                                .find(|(_, ch)| !ch.is_whitespace())?;
-                            let probe_utf16 =
-                                bsl_backend::system::positioning::byte_offset_to_utf16(
-                                    line_text, probe_byte,
-                                );
-                            let offset = analysis
-                                .utf16_position_to_byte_offset(file_id, position.line, probe_utf16)
-                                .ok()
-                                .flatten()?;
-                            let offset = offset.min(u32::MAX as usize) as u32;
-                            if include_flow_sensitive {
-                                analysis
-                                    .flow_type_at_byte_offset(file_id, offset)
-                                    .ok()
-                                    .flatten()
-                                    .or_else(|| {
-                                        analysis.type_at_byte_offset(file_id, offset).ok().flatten()
-                                    })
-                            } else {
-                                analysis.type_at_byte_offset(file_id, offset).ok().flatten()
+                                None => debug!(
+                                    "Completion v2 parse_result: uri={}, file_id={} (unavailable)",
+                                    uri, file_id.0
+                                ),
                             }
-                        })
-                    } else {
-                        None
-                    };
+                        }
 
-                    (
-                        file_content,
-                        file_path,
-                        parse_result,
-                        member_access_owner_type_hint,
-                        deps,
-                        ir_program,
-                        index_snapshot,
-                        include_flow_sensitive,
-                    )
-                };
+                        let member_access_owner_type_hint = if ir_program.is_some() {
+                            file_content.as_deref().and_then(|text| {
+                                let line_text = text.lines().nth(position.line as usize)?;
+                                let cursor_byte =
+                                    bsl_backend::system::positioning::utf16_to_byte_offset(
+                                        line_text,
+                                        position.character,
+                                    );
+                                let line_prefix = line_text.get(..cursor_byte)?;
+                                let dot_in_line = line_prefix.rfind('.')?;
+                                let receiver = line_prefix.get(..dot_in_line)?.trim_end();
+                                let (probe_byte, _) = receiver
+                                    .char_indices()
+                                    .rev()
+                                    .find(|(_, ch)| !ch.is_whitespace())?;
+                                let probe_utf16 =
+                                    bsl_backend::system::positioning::byte_offset_to_utf16(
+                                        line_text, probe_byte,
+                                    );
+                                let offset = analysis
+                                    .utf16_position_to_byte_offset(
+                                        file_id,
+                                        position.line,
+                                        probe_utf16,
+                                    )
+                                    .ok()
+                                    .flatten()?;
+                                let offset = offset.min(u32::MAX as usize) as u32;
+                                if include_flow_sensitive {
+                                    analysis
+                                        .flow_type_at_byte_offset(file_id, offset)
+                                        .ok()
+                                        .flatten()
+                                        .or_else(|| {
+                                            analysis
+                                                .type_at_byte_offset(file_id, offset)
+                                                .ok()
+                                                .flatten()
+                                        })
+                                } else {
+                                    analysis.type_at_byte_offset(file_id, offset).ok().flatten()
+                                }
+                            })
+                        } else {
+                            None
+                        };
 
-                match (file_content, file_path, deps, ir_program) {
-                    (Some(file_content), Some(file_path), Some(deps), Some(ir_program)) => {
-                        crate::handlers::handle_completion_v2(
+                        (
                             file_content,
                             file_path,
-                            ir_program,
                             parse_result,
                             member_access_owner_type_hint,
                             deps,
-                            position,
-                            &uri,
-                            index_snapshot.as_ref(),
-                            snippet_support,
-                            include_flow_sensitive,
+                            ir_program,
+                            index_snapshot,
                         )
-                        .await
+                    };
+
+                    match (file_content, file_path, deps, ir_program) {
+                        (Some(file_content), Some(file_path), Some(deps), Some(ir_program)) => {
+                            crate::handlers::handle_completion_v2(
+                                file_content,
+                                file_path,
+                                ir_program,
+                                parse_result,
+                                member_access_owner_type_hint,
+                                deps,
+                                position,
+                                &uri,
+                                index_snapshot.as_ref(),
+                                snippet_support,
+                                include_flow_sensitive,
+                            )
+                            .await
+                        }
+                        (None, _, _, _) => {
+                            completion_outcome.get_or_insert("missing_file_content");
+                            empty()
+                        }
+                        (Some(_), None, _, _) => {
+                            completion_outcome.get_or_insert("missing_file_path");
+                            empty()
+                        }
+                        (Some(_), Some(_), None, _) => {
+                            completion_outcome.get_or_insert("missing_deps");
+                            empty()
+                        }
+                        (Some(_), Some(_), Some(_), None) => {
+                            completion_outcome.get_or_insert("missing_ir");
+                            empty()
+                        }
                     }
-                    (None, _, _, _) => {
-                        completion_outcome.get_or_insert("missing_file_content");
-                        empty()
-                    }
-                    (Some(_), None, _, _) => {
-                        completion_outcome.get_or_insert("missing_file_path");
-                        empty()
-                    }
-                    (Some(_), Some(_), None, _) => {
-                        completion_outcome.get_or_insert("missing_deps");
-                        empty()
-                    }
-                    (Some(_), Some(_), Some(_), None) => {
-                        completion_outcome.get_or_insert("missing_ir");
-                        empty()
-                    }
+                }
+                Err(outcome) => {
+                    completion_outcome = Some("wait_not_ready");
+                    debug!(
+                        uri = %uri,
+                        file_id = file_id.0,
+                        outcome = outcome.as_str(),
+                        "Completion v2: stateful operation not ready"
+                    );
+                    empty()
                 }
             }
         };
@@ -1589,87 +1576,62 @@ impl LanguageServer for BslLanguageServer {
             let file_id = self.get_or_create_file_id_v2(&uri).await;
             self.sync_v2_globals().await;
 
-            let expected_version = self
-                .latest_received_file_versions_v2
-                .read()
-                .await
-                .get(&file_id)
-                .copied();
-
-            let wait_started = Instant::now();
-            let ok = if let Some(expected_version) = expected_version {
-                self.analysis_v2
-                    .wait_for_file_version(file_id, expected_version)
-                    .await
-            } else {
-                let path = match uri.to_file_path() {
-                    Ok(path) => path.to_string_lossy().to_string(),
-                    Err(_) => uri.to_string(),
-                };
-                let file_content = match uri.to_file_path() {
-                    Ok(path) => match read_bsl_file(&path) {
-                        Ok(content) => Some(content),
-                        Err(e) => {
-                            error!("Failed to read file for hover: {}", e);
-                            None
-                        }
-                    },
-                    Err(_) => None,
-                };
-                match file_content {
-                    Some(file_content) => {
-                        self.analysis_v2
-                            .apply_changes(vec![bsl_analysis_v2::Change::SetFile {
-                                file_id,
-                                text: Arc::from(file_content),
-                                version: 0,
-                                path: Arc::from(path),
-                            }]);
-
-                        self.analysis_v2.wait_for_file_version(file_id, 0).await
-                    }
-                    None => false,
-                }
+            let include_flow_sensitive = {
+                let settings = self.settings.read().await;
+                settings.enable_flow_sensitive
             };
-            let wait_elapsed = wait_started.elapsed();
-            self.coordinator
-                .record_intellisense_v2_wait_for_file_version("hover", wait_elapsed);
-            if let Some(threshold) = super::intellisense_v2_slow_wait_warn_threshold() {
-                if wait_elapsed >= threshold {
-                    warn!(
+            let prepared = self
+                .prepare_lsp_stateful_operation_v2(
+                    &uri,
+                    file_id,
+                    bsl_runtime::application::SemanticOperation::Hover,
+                    include_flow_sensitive,
+                )
+                .await;
+            let (context, prepared, expected_version) = match prepared {
+                Ok(values) => values,
+                Err(outcome) => {
+                    debug!(
                         uri = %uri,
                         file_id = file_id.0,
-                        expected_version = expected_version.unwrap_or(0),
-                        wait_ms = wait_elapsed.as_millis(),
-                        threshold_ms = threshold.as_millis(),
-                        "Hover v2: wait_for_file_version is slow"
+                        outcome = outcome.as_str(),
+                        "Hover v2: stateful operation not ready"
                     );
+                    return Ok(None);
                 }
-            }
-            if !ok {
-                return Ok(None);
-            }
+            };
 
-            let (analysis, file_content, file_path, deps, ir_program) = {
-                let snapshot_started = Instant::now();
-                let (analysis, index_snapshot, deps_id) =
-                    self.analysis_v2.snapshot_with_deps().await;
-                let snapshot_elapsed = snapshot_started.elapsed();
-                self.coordinator
-                    .record_intellisense_v2_snapshot_latency("hover", snapshot_elapsed);
-                if let Some(threshold) = super::intellisense_v2_slow_snapshot_warn_threshold() {
-                    if snapshot_elapsed >= threshold {
+            if let Some(wait_elapsed) = prepared.wait_elapsed {
+                if let Some(threshold) = super::intellisense_v2_slow_wait_warn_threshold() {
+                    if wait_elapsed >= threshold {
                         warn!(
                             uri = %uri,
                             file_id = file_id.0,
-                            snapshot_ms = snapshot_elapsed.as_millis(),
+                            expected_version,
+                            wait_ms = wait_elapsed.as_millis(),
                             threshold_ms = threshold.as_millis(),
-                            "Hover v2: snapshot acquisition is slow"
+                            "Hover v2: wait_for_file_version is slow"
                         );
                     }
                 }
+            }
+            if let Some(threshold) = super::intellisense_v2_slow_snapshot_warn_threshold() {
+                if prepared.snapshot_elapsed >= threshold {
+                    warn!(
+                        uri = %uri,
+                        file_id = file_id.0,
+                        snapshot_ms = prepared.snapshot_elapsed.as_millis(),
+                        threshold_ms = threshold.as_millis(),
+                        "Hover v2: snapshot acquisition is slow"
+                    );
+                }
+            }
+
+            let (analysis, file_content, file_path, deps, ir_program) = {
+                let analysis = prepared.snapshot.analysis;
+                let index_snapshot = prepared.snapshot.index_snapshot;
+                let observed_deps_id = Some(prepared.snapshot.deps_id);
                 let observed_file_version = analysis.file_version(file_id).ok().flatten();
-                let observed_deps_id = Some(deps_id);
                 let observed_settings_id = analysis.settings_id().ok();
                 debug!(
                     "Hover v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}, index_snapshot_id={}",
@@ -1703,10 +1665,17 @@ impl LanguageServer for BslLanguageServer {
                 let file_path = analysis.file_path(file_id).ok().flatten();
                 let deps = analysis.deps_data().ok();
                 let ir_started = Instant::now();
-                let ir_program = analysis.ir(file_id).ok().flatten();
+                let ir_program =
+                    bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
+                        &context,
+                        bsl_runtime::application::ObservabilityStage::IrQuery,
+                        &analysis,
+                        Some(self.coordinator.as_ref()),
+                        |analysis| analysis.ir(file_id),
+                    )
+                    .ok()
+                    .flatten();
                 let ir_elapsed = ir_started.elapsed();
-                self.coordinator
-                    .record_intellisense_v2_ir_query_latency("hover", ir_elapsed);
                 if let Some(threshold) = super::intellisense_v2_slow_query_warn_threshold() {
                     if ir_elapsed >= threshold {
                         warn!(
@@ -1723,7 +1692,6 @@ impl LanguageServer for BslLanguageServer {
             };
 
             let settings = self.settings.read().await;
-            let include_flow_sensitive = settings.enable_flow_sensitive;
             let result = match (file_content, file_path, deps, ir_program) {
                 (Some(file_content), Some(file_path), Some(deps), Some(ir_program)) => {
                     handle_hover_v2(
@@ -1911,65 +1879,54 @@ impl LanguageServer for BslLanguageServer {
             let file_id = self.get_or_create_file_id_v2(&uri).await;
             self.sync_v2_globals().await;
 
-            let expected_version = self
-                .latest_received_file_versions_v2
-                .read()
-                .await
-                .get(&file_id)
-                .copied();
-
-            let wait_started = Instant::now();
-            let ok = if let Some(expected_version) = expected_version {
-                self.analysis_v2
-                    .wait_for_file_version(file_id, expected_version)
-                    .await
-            } else {
-                let path = match uri.to_file_path() {
-                    Ok(path) => path.to_string_lossy().to_string(),
-                    Err(_) => uri.to_string(),
-                };
-                let file_content = match uri.to_file_path() {
-                    Ok(path) => match read_bsl_file(&path) {
-                        Ok(content) => Some(content),
-                        Err(e) => {
-                            error!("Failed to read file for definition: {}", e);
-                            None
-                        }
-                    },
-                    Err(_) => None,
-                };
-                match file_content {
-                    Some(file_content) => {
-                        self.analysis_v2
-                            .apply_changes(vec![bsl_analysis_v2::Change::SetFile {
-                                file_id,
-                                text: Arc::from(file_content),
-                                version: 0,
-                                path: Arc::from(path),
-                            }]);
-
-                        self.analysis_v2.wait_for_file_version(file_id, 0).await
-                    }
-                    None => false,
+            let include_flow_sensitive = {
+                let settings = self.settings.read().await;
+                settings.enable_flow_sensitive
+            };
+            let prepared = self
+                .prepare_lsp_stateful_operation_v2(
+                    &uri,
+                    file_id,
+                    bsl_runtime::application::SemanticOperation::Definition,
+                    include_flow_sensitive,
+                )
+                .await;
+            let (context, prepared, expected_version) = match prepared {
+                Ok(values) => values,
+                Err(outcome) => {
+                    debug!(
+                        uri = %uri,
+                        file_id = file_id.0,
+                        outcome = outcome.as_str(),
+                        "Definition v2: stateful operation not ready"
+                    );
+                    return Ok(None);
                 }
             };
-            let wait_elapsed = wait_started.elapsed();
-            self.coordinator
-                .record_intellisense_v2_wait_for_file_version("definition", wait_elapsed);
-            if let Some(threshold) = super::intellisense_v2_slow_wait_warn_threshold() {
-                if wait_elapsed >= threshold {
+            if let Some(wait_elapsed) = prepared.wait_elapsed {
+                if let Some(threshold) = super::intellisense_v2_slow_wait_warn_threshold() {
+                    if wait_elapsed >= threshold {
+                        warn!(
+                            uri = %uri,
+                            file_id = file_id.0,
+                            expected_version,
+                            wait_ms = wait_elapsed.as_millis(),
+                            threshold_ms = threshold.as_millis(),
+                            "Definition v2: wait_for_file_version is slow"
+                        );
+                    }
+                }
+            }
+            if let Some(threshold) = super::intellisense_v2_slow_snapshot_warn_threshold() {
+                if prepared.snapshot_elapsed >= threshold {
                     warn!(
                         uri = %uri,
                         file_id = file_id.0,
-                        expected_version = expected_version.unwrap_or(0),
-                        wait_ms = wait_elapsed.as_millis(),
+                        snapshot_ms = prepared.snapshot_elapsed.as_millis(),
                         threshold_ms = threshold.as_millis(),
-                        "Definition v2: wait_for_file_version is slow"
+                        "Definition v2: snapshot acquisition is slow"
                     );
                 }
-            }
-            if !ok {
-                return Ok(None);
             }
 
             let (
@@ -1980,26 +1937,11 @@ impl LanguageServer for BslLanguageServer {
                 deps,
                 ir_program,
             ) = {
-                let snapshot_started = Instant::now();
-                let (analysis, index_snapshot, deps_id) =
-                    self.analysis_v2.snapshot_with_deps().await;
-                let snapshot_elapsed = snapshot_started.elapsed();
-                self.coordinator
-                    .record_intellisense_v2_snapshot_latency("definition", snapshot_elapsed);
-                if let Some(threshold) = super::intellisense_v2_slow_snapshot_warn_threshold() {
-                    if snapshot_elapsed >= threshold {
-                        warn!(
-                            uri = %uri,
-                            file_id = file_id.0,
-                            snapshot_ms = snapshot_elapsed.as_millis(),
-                            threshold_ms = threshold.as_millis(),
-                            "Definition v2: snapshot acquisition is slow"
-                        );
-                    }
-                }
+                let analysis = prepared.snapshot.analysis;
+                let index_snapshot = prepared.snapshot.index_snapshot;
 
                 let observed_file_version = analysis.file_version(file_id).ok().flatten();
-                let observed_deps_id = Some(deps_id);
+                let observed_deps_id = Some(prepared.snapshot.deps_id);
                 let observed_settings_id = analysis.settings_id().ok();
                 debug!(
                     "Definition v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}, index_snapshot_id={}",
@@ -2015,10 +1957,17 @@ impl LanguageServer for BslLanguageServer {
                 let file_path = analysis.file_path(file_id).ok().flatten();
                 let deps = analysis.deps_data().ok();
                 let ir_started = Instant::now();
-                let ir_program = analysis.ir(file_id).ok().flatten();
+                let ir_program =
+                    bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
+                        &context,
+                        bsl_runtime::application::ObservabilityStage::IrQuery,
+                        &analysis,
+                        Some(self.coordinator.as_ref()),
+                        |analysis| analysis.ir(file_id),
+                    )
+                    .ok()
+                    .flatten();
                 let ir_elapsed = ir_started.elapsed();
-                self.coordinator
-                    .record_intellisense_v2_ir_query_latency("definition", ir_elapsed);
                 if let Some(threshold) = super::intellisense_v2_slow_query_warn_threshold() {
                     if ir_elapsed >= threshold {
                         warn!(
@@ -2030,11 +1979,6 @@ impl LanguageServer for BslLanguageServer {
                         );
                     }
                 }
-
-                let include_flow_sensitive = {
-                    let settings = self.settings.read().await;
-                    settings.enable_flow_sensitive
-                };
 
                 let type_at_position_hint = {
                     let offset = analysis
@@ -2136,88 +2080,61 @@ impl LanguageServer for BslLanguageServer {
             let file_id = self.get_or_create_file_id_v2(&uri).await;
             self.sync_v2_globals().await;
 
-            let expected_version = self
-                .latest_received_file_versions_v2
-                .read()
-                .await
-                .get(&file_id)
-                .copied();
-
-            let wait_started = Instant::now();
-            let ok = if let Some(expected_version) = expected_version {
-                self.analysis_v2
-                    .wait_for_file_version(file_id, expected_version)
-                    .await
-            } else {
-                let path = match uri.to_file_path() {
-                    Ok(path) => path.to_string_lossy().to_string(),
-                    Err(_) => uri.to_string(),
-                };
-                let file_content = match uri.to_file_path() {
-                    Ok(path) => match read_bsl_file(&path) {
-                        Ok(content) => Some(content),
-                        Err(e) => {
-                            error!("Failed to read file for signatureHelp: {}", e);
-                            None
-                        }
-                    },
-                    Err(_) => None,
-                };
-
-                match file_content {
-                    Some(file_content) => {
-                        self.analysis_v2
-                            .apply_changes(vec![bsl_analysis_v2::Change::SetFile {
-                                file_id,
-                                text: Arc::from(file_content),
-                                version: 0,
-                                path: Arc::from(path),
-                            }]);
-
-                        self.analysis_v2.wait_for_file_version(file_id, 0).await
-                    }
-                    None => false,
-                }
+            let include_flow_sensitive = {
+                let settings = self.settings.read().await;
+                settings.enable_flow_sensitive
             };
-            let wait_elapsed = wait_started.elapsed();
-            self.coordinator
-                .record_intellisense_v2_wait_for_file_version("signature_help", wait_elapsed);
-            if let Some(threshold) = super::intellisense_v2_slow_wait_warn_threshold() {
-                if wait_elapsed >= threshold {
-                    warn!(
+            let prepared = self
+                .prepare_lsp_stateful_operation_v2(
+                    &uri,
+                    file_id,
+                    bsl_runtime::application::SemanticOperation::SignatureHelp,
+                    include_flow_sensitive,
+                )
+                .await;
+            let (_context, prepared, expected_version) = match prepared {
+                Ok(values) => values,
+                Err(outcome) => {
+                    debug!(
                         uri = %uri,
                         file_id = file_id.0,
-                        expected_version = expected_version.unwrap_or(0),
-                        wait_ms = wait_elapsed.as_millis(),
-                        threshold_ms = threshold.as_millis(),
-                        "SignatureHelp v2: wait_for_file_version is slow"
+                        outcome = outcome.as_str(),
+                        "SignatureHelp v2: stateful operation not ready"
                     );
+                    return Ok(None);
                 }
-            }
-            if !ok {
-                return Ok(None);
-            }
-
-            let (file_content, deps, receiver_type_hint) = {
-                let snapshot_started = Instant::now();
-                let (analysis, index_snapshot, deps_id) =
-                    self.analysis_v2.snapshot_with_deps().await;
-                let snapshot_elapsed = snapshot_started.elapsed();
-                self.coordinator
-                    .record_intellisense_v2_snapshot_latency("signature_help", snapshot_elapsed);
-                if let Some(threshold) = super::intellisense_v2_slow_snapshot_warn_threshold() {
-                    if snapshot_elapsed >= threshold {
+            };
+            if let Some(wait_elapsed) = prepared.wait_elapsed {
+                if let Some(threshold) = super::intellisense_v2_slow_wait_warn_threshold() {
+                    if wait_elapsed >= threshold {
                         warn!(
                             uri = %uri,
                             file_id = file_id.0,
-                            snapshot_ms = snapshot_elapsed.as_millis(),
+                            expected_version,
+                            wait_ms = wait_elapsed.as_millis(),
                             threshold_ms = threshold.as_millis(),
-                            "SignatureHelp v2: snapshot acquisition is slow"
+                            "SignatureHelp v2: wait_for_file_version is slow"
                         );
                     }
                 }
+            }
+            if let Some(threshold) = super::intellisense_v2_slow_snapshot_warn_threshold() {
+                if prepared.snapshot_elapsed >= threshold {
+                    warn!(
+                        uri = %uri,
+                        file_id = file_id.0,
+                        snapshot_ms = prepared.snapshot_elapsed.as_millis(),
+                        threshold_ms = threshold.as_millis(),
+                        "SignatureHelp v2: snapshot acquisition is slow"
+                    );
+                }
+            }
+
+            let (file_content, deps, receiver_type_hint) = {
+                let analysis = prepared.snapshot.analysis;
+                let index_snapshot = prepared.snapshot.index_snapshot;
                 let observed_file_version = analysis.file_version(file_id).ok().flatten();
-                let observed_deps_id = Some(deps_id);
+                let observed_deps_id = Some(prepared.snapshot.deps_id);
                 let observed_settings_id = analysis.settings_id().ok();
                 debug!(
                     "SignatureHelp v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}, index_snapshot_id={}",
@@ -2249,11 +2166,6 @@ impl LanguageServer for BslLanguageServer {
 
                 let file_content = analysis.file_text(file_id).ok().flatten();
                 let deps = analysis.deps_data().ok();
-
-                let include_flow_sensitive = {
-                    let settings = self.settings.read().await;
-                    settings.enable_flow_sensitive
-                };
 
                 let receiver_type_hint = file_content.as_ref().and_then(|text| {
                     let query = bsl_backend::application::type_system::signature_help_query(

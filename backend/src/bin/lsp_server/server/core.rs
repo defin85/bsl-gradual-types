@@ -17,6 +17,7 @@ use tower_lsp::Client;
 use tracing::{debug, info, warn};
 
 use bsl_analysis_v2::{AnalysisHostV2, DepsSnapshotId, FileId as V2FileId, SettingsId};
+use bsl_backend::system::fs_utils::read_bsl_file;
 use bsl_backend::system::{
     build_deps_bundle_v2, DepsBundleV2, DepsBundleV2Meta, SystemCoordinator,
 };
@@ -465,6 +466,110 @@ impl BslLanguageServer {
         self.file_key_to_file_id_v2.read().await.get(&key).copied()
     }
 
+    pub(crate) async fn build_execution_context_v2(
+        &self,
+        operation: bsl_runtime::application::SemanticOperation,
+        file_id: V2FileId,
+        min_file_version: Option<i32>,
+        flow_sensitive: bool,
+    ) -> bsl_runtime::application::ExecutionContext {
+        let settings = self.settings.read().await.clone();
+        let settings_id = self
+            .last_settings_id_v2
+            .read()
+            .await
+            .clone()
+            .unwrap_or_else(|| compute_settings_id_v2(&settings));
+
+        bsl_runtime::application::ExecutionContext {
+            operation,
+            file_id,
+            min_file_version,
+            expected_deps_id: None,
+            flow_sensitive,
+            settings: bsl_runtime::application::ExecutionSettings {
+                settings_id,
+                diagnostics_detail_level: bsl_shared::formatting::DetailLevel::parse(
+                    &settings.diagnostics.detail_level,
+                ),
+            },
+            cancellation: bsl_runtime::application::CancellationPolicy::BestEffort,
+        }
+    }
+
+    pub(crate) async fn prepare_lsp_stateful_operation_v2(
+        &self,
+        uri: &Url,
+        file_id: V2FileId,
+        operation: bsl_runtime::application::SemanticOperation,
+        flow_sensitive: bool,
+    ) -> Result<
+        (
+            bsl_runtime::application::ExecutionContext,
+            bsl_runtime::application::PreparedOperationSnapshot,
+            i32,
+        ),
+        bsl_runtime::application::SemanticOutcome,
+    > {
+        let min_file_version = match self
+            .latest_received_file_versions_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied()
+        {
+            Some(version) => version,
+            None => {
+                let path = match uri.to_file_path() {
+                    Ok(path) => path,
+                    Err(_) => {
+                        warn!(
+                            uri = %uri,
+                            file_id = file_id.0,
+                            operation = operation.as_str(),
+                            "IntelliSense v2: missing local file path for fallback load"
+                        );
+                        return Err(bsl_runtime::application::SemanticOutcome::StaleVersion);
+                    }
+                };
+
+                let file_content = match read_bsl_file(&path) {
+                    Ok(content) => content,
+                    Err(err) => {
+                        warn!(
+                            uri = %uri,
+                            file_id = file_id.0,
+                            operation = operation.as_str(),
+                            error = %err,
+                            "IntelliSense v2: failed to read file for fallback load"
+                        );
+                        return Err(bsl_runtime::application::SemanticOutcome::StaleVersion);
+                    }
+                };
+
+                let path_string = path.to_string_lossy().to_string();
+                self.analysis_v2
+                    .apply_changes(vec![bsl_analysis_v2::Change::SetFile {
+                        file_id,
+                        text: Arc::from(file_content),
+                        version: 0,
+                        path: Arc::from(path_string),
+                    }]);
+                0
+            }
+        };
+
+        let context = self
+            .build_execution_context_v2(operation, file_id, Some(min_file_version), flow_sensitive)
+            .await;
+        let prepared = self
+            .analysis_v2
+            .prepare_stateful_operation(&context, Some(self.coordinator.as_ref()))
+            .await?;
+
+        Ok((context, prepared, min_file_version))
+    }
+
     pub(crate) async fn sync_v2_globals(&self) {
         let settings = self.settings.read().await.clone();
         let settings_id = compute_settings_id_v2(&settings);
@@ -664,53 +769,63 @@ impl BslLanguageServer {
                     continue;
                 }
 
-                let wait_started = Instant::now();
-                let wait_ok = server
-                    .analysis_v2
-                    .wait_for_file_version(file_id, requested_version)
+                let context = server
+                    .build_execution_context_v2(
+                        bsl_runtime::application::SemanticOperation::Diagnostics,
+                        file_id,
+                        Some(requested_version),
+                        include_flow_sensitive,
+                    )
                     .await;
-                let wait_elapsed = wait_started.elapsed();
-                server
-                    .coordinator
-                    .record_intellisense_v2_wait_for_file_version("diagnostics", wait_elapsed);
-                if let Some(threshold) = super::intellisense_v2_slow_client_log_threshold() {
-                    if wait_elapsed >= threshold {
-                        server
-                            .client
-                            .log_message(
-                                MessageType::INFO,
-                                format!(
-                                    "[perf] diagnostics_v2 wait_for_file_version: wait_ms={} uri={} file_id={} expected_version={}",
-                                    wait_elapsed.as_millis(),
-                                    uri_for_task,
-                                    file_id.0,
-                                    requested_version
-                                ),
-                            )
-                            .await;
-                    }
-                }
-                if let Some(threshold) = super::intellisense_v2_slow_wait_warn_threshold() {
-                    if wait_elapsed >= threshold {
-                        warn!(
+                let prepared = match server
+                    .analysis_v2
+                    .prepare_stateful_operation(&context, Some(server.coordinator.as_ref()))
+                    .await
+                {
+                    Ok(prepared) => prepared,
+                    Err(outcome) => {
+                        debug!(
                             uri = %uri_for_task,
                             file_id = file_id.0,
                             expected_version = requested_version,
-                            wait_ms = wait_elapsed.as_millis(),
-                            threshold_ms = threshold.as_millis(),
-                            "diagnostics_v2: wait_for_file_version is slow"
+                            outcome = outcome.as_str(),
+                            "diagnostics_v2: skip publish (stateful operation not ready)"
                         );
+                        break;
                     }
-                }
+                };
 
-                if !wait_ok {
-                    debug!(
-                        uri = %uri_for_task,
-                        file_id = file_id.0,
-                        expected_version = requested_version,
-                        "diagnostics_v2: skip publish (wait_for_file_version failed)"
-                    );
-                    break;
+                let wait_elapsed = prepared.wait_elapsed.unwrap_or(Duration::ZERO);
+                if wait_elapsed > Duration::ZERO {
+                    if let Some(threshold) = super::intellisense_v2_slow_client_log_threshold() {
+                        if wait_elapsed >= threshold {
+                            server
+                                .client
+                                .log_message(
+                                    MessageType::INFO,
+                                    format!(
+                                        "[perf] diagnostics_v2 wait_for_file_version: wait_ms={} uri={} file_id={} expected_version={}",
+                                        wait_elapsed.as_millis(),
+                                        uri_for_task,
+                                        file_id.0,
+                                        requested_version
+                                    ),
+                                )
+                                .await;
+                        }
+                    }
+                    if let Some(threshold) = super::intellisense_v2_slow_wait_warn_threshold() {
+                        if wait_elapsed >= threshold {
+                            warn!(
+                                uri = %uri_for_task,
+                                file_id = file_id.0,
+                                expected_version = requested_version,
+                                wait_ms = wait_elapsed.as_millis(),
+                                threshold_ms = threshold.as_millis(),
+                                "diagnostics_v2: wait_for_file_version is slow"
+                            );
+                        }
+                    }
                 }
 
                 // If a newer version is requested, skip work for the stale one before snapshot.
@@ -732,13 +847,10 @@ impl BslLanguageServer {
                     observed_index_snapshot_id,
                     was_cancelled,
                 ) = {
-                    let snapshot_started = Instant::now();
-                    let (analysis, index_snapshot, deps_id) =
-                        server.analysis_v2.snapshot_with_deps().await;
-                    let snapshot_elapsed = snapshot_started.elapsed();
-                    server
-                        .coordinator
-                        .record_intellisense_v2_snapshot_latency("diagnostics", snapshot_elapsed);
+                    let analysis = prepared.snapshot.analysis;
+                    let index_snapshot = prepared.snapshot.index_snapshot;
+                    let deps_id = prepared.snapshot.deps_id;
+                    let snapshot_elapsed = prepared.snapshot_elapsed;
                     if let Some(threshold) = super::intellisense_v2_slow_client_log_threshold() {
                         if snapshot_elapsed >= threshold {
                             server
@@ -787,37 +899,58 @@ impl BslLanguageServer {
                     );
 
                     let uri_for_blocking = uri_for_task.clone();
+                    let coordinator_for_blocking = server.coordinator.clone();
+                    let context_for_blocking = context.clone();
                     let (
                         diagnostics,
                         was_cancelled,
                         parse_result_elapsed,
                         syntax_elapsed,
                         semantic_elapsed,
+                        parse_result_cancelled_error,
                         syntax_cancelled_error,
                         semantic_cancelled_error,
                     ) = match bsl_runtime::application::spawn_bounded_blocking(move || {
                         let mut diagnostics = Vec::new();
                         let mut was_cancelled = false;
+                        let mut parse_result_cancelled_error = None;
                         let mut syntax_cancelled_error = None;
                         let mut semantic_cancelled_error = None;
 
                         let file_text = analysis.file_text(file_id).ok().flatten();
                         let line_index = analysis.line_index(file_id).ok().flatten();
 
-                        let parse_result_elapsed =
-                            if bsl_runtime::application::should_query_parse_result(
-                                bsl_runtime::application::SemanticOperation::Diagnostics,
-                                false,
-                            ) {
-                                let parse_result_started = Instant::now();
-                                let _ = analysis.parse_result(file_id);
-                                parse_result_started.elapsed()
-                            } else {
-                                std::time::Duration::ZERO
-                            };
+                        let parse_result_elapsed = if bsl_runtime::application::should_query_parse_result(
+                            context_for_blocking.operation,
+                            false,
+                        ) {
+                            let parse_result_started = Instant::now();
+                            let parse_result_query =
+                                bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query(
+                                    &context_for_blocking,
+                                    &analysis,
+                                    false,
+                                    Some(coordinator_for_blocking.as_ref()),
+                                    |analysis| analysis.parse_result(file_id),
+                                );
+                            if let Err(cancelled) = parse_result_query {
+                                was_cancelled = true;
+                                parse_result_cancelled_error = Some(format!("{cancelled:?}"));
+                            }
+                            parse_result_started.elapsed()
+                        } else {
+                            std::time::Duration::ZERO
+                        };
 
                         let syntax_started = Instant::now();
-                        let syntax_result = analysis.syntax_diagnostics(file_id);
+                        let syntax_result =
+                            bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
+                                &context_for_blocking,
+                                bsl_runtime::application::ObservabilityStage::SyntaxDiagnosticsQuery,
+                                &analysis,
+                                Some(coordinator_for_blocking.as_ref()),
+                                |analysis| analysis.syntax_diagnostics(file_id),
+                            );
                         let syntax_elapsed = syntax_started.elapsed();
                         match syntax_result {
                             Ok(Some(syntax_errors)) => {
@@ -840,11 +973,20 @@ impl BslLanguageServer {
                         }
 
                         let semantic_started = Instant::now();
-                        let semantic_result = if include_flow_sensitive {
-                            analysis.semantic_diagnostics_flow_sensitive(file_id)
-                        } else {
-                            analysis.semantic_diagnostics(file_id)
-                        };
+                        let semantic_result =
+                            bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
+                                &context_for_blocking,
+                                bsl_runtime::application::ObservabilityStage::SemanticDiagnosticsQuery,
+                                &analysis,
+                                Some(coordinator_for_blocking.as_ref()),
+                                |analysis| {
+                                    if include_flow_sensitive {
+                                        analysis.semantic_diagnostics_flow_sensitive(file_id)
+                                    } else {
+                                        analysis.semantic_diagnostics(file_id)
+                                    }
+                                },
+                            );
                         let semantic_elapsed = semantic_started.elapsed();
                         match semantic_result {
                             Ok(Some(semantic_errors)) => {
@@ -878,6 +1020,7 @@ impl BslLanguageServer {
                             parse_result_elapsed,
                             syntax_elapsed,
                             semantic_elapsed,
+                            parse_result_cancelled_error,
                             syntax_cancelled_error,
                             semantic_cancelled_error,
                         )
@@ -901,16 +1044,12 @@ impl BslLanguageServer {
                                 Duration::from_millis(0),
                                 None,
                                 None,
+                                None,
                             )
                         }
                     };
 
                     if parse_result_elapsed > std::time::Duration::ZERO {
-                        server
-                            .coordinator
-                            .record_intellisense_v2_parse_result_query_latency(
-                                parse_result_elapsed,
-                            );
                         if let Some(threshold) = super::intellisense_v2_slow_client_log_threshold()
                         {
                             if parse_result_elapsed >= threshold {
@@ -943,10 +1082,16 @@ impl BslLanguageServer {
                             }
                         }
                     }
+                    if let Some(cancelled_error) = parse_result_cancelled_error {
+                        debug!(
+                            uri = %uri_for_task,
+                            file_id = file_id.0,
+                            expected_version = requested_version,
+                            error = %cancelled_error,
+                            "diagnostics_v2: parse_result query cancelled"
+                        );
+                    }
 
-                    server
-                        .coordinator
-                        .record_intellisense_v2_syntax_diagnostics_query_latency(syntax_elapsed);
                     if let Some(threshold) = super::intellisense_v2_slow_client_log_threshold() {
                         if syntax_elapsed >= threshold {
                             server
@@ -977,9 +1122,6 @@ impl BslLanguageServer {
                         }
                     }
                     if let Some(cancelled_error) = syntax_cancelled_error {
-                        server
-                            .coordinator
-                            .record_intellisense_v2_query_cancelled("syntax");
                         debug!(
                             uri = %uri_for_task,
                             file_id = file_id.0,
@@ -989,11 +1131,6 @@ impl BslLanguageServer {
                         );
                     }
 
-                    server
-                        .coordinator
-                        .record_intellisense_v2_semantic_diagnostics_query_latency(
-                            semantic_elapsed,
-                        );
                     if let Some(threshold) = super::intellisense_v2_slow_client_log_threshold() {
                         if semantic_elapsed >= threshold {
                             server
@@ -1024,9 +1161,6 @@ impl BslLanguageServer {
                         }
                     }
                     if let Some(cancelled_error) = semantic_cancelled_error {
-                        server
-                            .coordinator
-                            .record_intellisense_v2_query_cancelled("semantic");
                         debug!(
                             uri = %uri_for_task,
                             file_id = file_id.0,
@@ -1184,10 +1318,23 @@ fn compute_settings_id_v2(settings: &BslSettings) -> SettingsId {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::http::{header, Request as AxumRequest};
+    use bsl_agent::jobs::JobManager;
+    use bsl_agent::server::types::{
+        BslDiagnosticsParams, BslMembersParams, DocumentRef as McpDocumentRef,
+        FileRef as McpFileRef, Position as McpPosition, WorkspaceOpenParams, WorkspaceScope,
+        WorkspaceScopeTagged,
+    };
+    use bsl_agent::session::SessionManager;
+    use bsl_agent::types::JobStateDto;
+    use bsl_backend::presentation::web::{create_router, AppState};
     use bsl_backend::system::{
-        IndexItem, IndexItemKind, IndexKind, IndexSnapshot, IndexSnapshotId, TypeKind,
+        build_deps_bundle_v2, EffectiveStartupInputs, IndexItem, IndexItemKind, IndexKind,
+        IndexSnapshot, IndexSnapshotId, TypeKind,
     };
     use futures::StreamExt;
+    use std::collections::BTreeSet;
+    use tokio::sync::mpsc::UnboundedReceiver;
     use tower::Service;
     use tower::ServiceExt;
     use tower_lsp::jsonrpc::Request;
@@ -1197,10 +1344,10 @@ mod tests {
         DidOpenTextDocumentParams, DocumentFormattingParams, DocumentRangeFormattingParams,
         DocumentSymbolParams, DocumentSymbolResponse, FormattingOptions, InitializeParams,
         InitializedParams, InlayHint, InlayHintLabel, InlayHintParams, Location,
-        PartialResultParams, Position, PrepareRenameResponse, Range, ReferenceContext,
-        ReferenceParams, RenameParams, SymbolInformation, SymbolKind,
+        PartialResultParams, Position, PrepareRenameResponse, PublishDiagnosticsParams, Range,
+        ReferenceContext, ReferenceParams, RenameParams, SymbolInformation, SymbolKind,
         TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
-        TextDocumentPositionParams, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
+        TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
         WorkspaceEdit, WorkspaceSymbolParams,
     };
     use tower_lsp::LanguageServer;
@@ -1279,6 +1426,279 @@ mod tests {
                 histograms.keys().collect::<Vec<_>>()
             );
         }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+    struct NormalizedSemanticDiagnostic {
+        message: String,
+        severity: String,
+        start_line: u32,
+        start_character: u32,
+        end_line: u32,
+        end_character: u32,
+    }
+
+    async fn initialize_lsp_service(service: &mut LspService<BslLanguageServer>) {
+        let initialize_params = InitializeParams {
+            capabilities: ClientCapabilities::default(),
+            ..Default::default()
+        };
+        let initialize = Request::build("initialize")
+            .id(1)
+            .params(serde_json::to_value(initialize_params).expect("InitializeParams"))
+            .finish();
+        let initialize_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialize)
+            .await
+            .expect("initialize request");
+        assert!(
+            initialize_response.is_some(),
+            "initialize should return a response"
+        );
+
+        let initialized = Request::build("initialized")
+            .params(serde_json::to_value(InitializedParams {}).expect("InitializedParams"))
+            .finish();
+        let initialized_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialized)
+            .await
+            .expect("initialized notification");
+        assert!(
+            initialized_response.is_none(),
+            "initialized is a notification"
+        );
+    }
+
+    async fn wait_lsp_publish_diagnostics(
+        receiver: &mut UnboundedReceiver<PublishDiagnosticsParams>,
+        uri: &Url,
+    ) -> Vec<tower_lsp::lsp_types::Diagnostic> {
+        let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(5);
+        let mut last_for_uri: Option<Vec<tower_lsp::lsp_types::Diagnostic>> = None;
+        loop {
+            let now = tokio::time::Instant::now();
+            if now >= deadline {
+                break;
+            }
+            match tokio::time::timeout_at(deadline, receiver.recv()).await {
+                Ok(Some(params)) if params.uri == *uri => {
+                    let diagnostics = params.diagnostics;
+                    if !diagnostics.is_empty() {
+                        return diagnostics;
+                    }
+                    last_for_uri = Some(diagnostics);
+                }
+                Ok(Some(_)) => {}
+                Ok(None) => break,
+                Err(_) => break,
+            }
+        }
+        last_for_uri.unwrap_or_default()
+    }
+
+    fn build_web_test_state() -> AppState {
+        let coordinator = Arc::new(SystemCoordinator::new());
+        coordinator
+            .start_with_paths_blocking(None, None, None, None)
+            .expect("startup");
+        let deps_bundle_v2 =
+            build_deps_bundle_v2(coordinator.as_ref(), None, None).expect("deps bundle v2");
+
+        AppState {
+            deps_bundle_v2: Arc::new(tokio::sync::RwLock::new(Arc::new(deps_bundle_v2))),
+            system_coordinator: coordinator,
+            syntax_helper_path: None,
+            startup_inputs: Arc::new(tokio::sync::RwLock::new(EffectiveStartupInputs {
+                syntax_helper_path: None,
+                configuration_path: None,
+                platform_version: None,
+                cache_enabled: true,
+                strict_fingerprint: false,
+            })),
+        }
+    }
+
+    async fn wait_mcp_startup(job_manager: &JobManager, startup_job_id: Option<&str>) {
+        let job_id = startup_job_id.expect("startup_job_id missing");
+        loop {
+            let status = job_manager.wait(job_id, 60_000).await.expect("job_wait");
+            match status.state {
+                JobStateDto::Succeeded => break,
+                JobStateDto::Queued | JobStateDto::Running => continue,
+                other => panic!("startup job ended unexpectedly: {}", other.as_str()),
+            }
+        }
+    }
+
+    fn normalize_lsp_semantic_diagnostics(
+        diagnostics: &[tower_lsp::lsp_types::Diagnostic],
+    ) -> Vec<NormalizedSemanticDiagnostic> {
+        let mut normalized: Vec<NormalizedSemanticDiagnostic> = diagnostics
+            .iter()
+            .map(|diagnostic| {
+                let severity = match diagnostic.severity {
+                    Some(tower_lsp::lsp_types::DiagnosticSeverity::ERROR) => "error",
+                    Some(tower_lsp::lsp_types::DiagnosticSeverity::WARNING) => "warning",
+                    Some(tower_lsp::lsp_types::DiagnosticSeverity::INFORMATION) => "info",
+                    Some(tower_lsp::lsp_types::DiagnosticSeverity::HINT) => "hint",
+                    Some(_) | None => "info",
+                };
+                NormalizedSemanticDiagnostic {
+                    message: diagnostic.message.clone(),
+                    severity: severity.to_string(),
+                    start_line: diagnostic.range.start.line,
+                    start_character: diagnostic.range.start.character,
+                    end_line: diagnostic.range.end.line,
+                    end_character: diagnostic.range.end.character,
+                }
+            })
+            .collect();
+        normalized.sort();
+        normalized.dedup();
+        normalized
+    }
+
+    fn normalize_web_semantic_diagnostics(
+        payload: &serde_json::Value,
+    ) -> Vec<NormalizedSemanticDiagnostic> {
+        fn read_u32(diagnostic: &serde_json::Value, key: &str, fallback: Option<&str>) -> u32 {
+            diagnostic
+                .get(key)
+                .or_else(|| fallback.and_then(|alt| diagnostic.get(alt)))
+                .and_then(|value| value.as_u64())
+                .unwrap_or_default() as u32
+        }
+
+        let mut normalized: Vec<NormalizedSemanticDiagnostic> = payload
+            .get("semanticErrors")
+            .and_then(|value| value.as_array())
+            .into_iter()
+            .flatten()
+            .map(|diagnostic| NormalizedSemanticDiagnostic {
+                message: diagnostic
+                    .get("message")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                severity: diagnostic
+                    .get("severity")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("info")
+                    .to_lowercase(),
+                start_line: read_u32(diagnostic, "line", None),
+                start_character: read_u32(diagnostic, "column", None),
+                end_line: read_u32(diagnostic, "endLine", Some("end_line")),
+                end_character: read_u32(diagnostic, "endColumn", Some("end_column")),
+            })
+            .collect();
+        normalized.sort();
+        normalized.dedup();
+        normalized
+    }
+
+    fn normalize_mcp_semantic_diagnostics(
+        diagnostics: &[bsl_agent::semantic::dto::DiagnosticDto],
+    ) -> Vec<NormalizedSemanticDiagnostic> {
+        let mut normalized: Vec<NormalizedSemanticDiagnostic> = diagnostics
+            .iter()
+            .map(|diagnostic| {
+                let severity = match diagnostic.severity {
+                    bsl_agent::semantic::dto::DiagnosticSeverityDto::Error => "error",
+                    bsl_agent::semantic::dto::DiagnosticSeverityDto::Warning => "warning",
+                    bsl_agent::semantic::dto::DiagnosticSeverityDto::Info => "info",
+                };
+                NormalizedSemanticDiagnostic {
+                    message: diagnostic.message.clone(),
+                    severity: severity.to_string(),
+                    start_line: diagnostic.range.start.line,
+                    start_character: diagnostic.range.start.character,
+                    end_line: diagnostic.range.end.line,
+                    end_character: diagnostic.range.end.character,
+                }
+            })
+            .collect();
+        normalized.sort();
+        normalized.dedup();
+        normalized
+    }
+
+    fn metrics_root(payload: &serde_json::Value) -> &serde_json::Value {
+        payload.get("metrics").unwrap_or(payload)
+    }
+
+    fn stage_from_metric_key(key: &str) -> Option<&'static str> {
+        if !key.starts_with("intellisense_v2_") {
+            return None;
+        }
+        if key.contains("runtime_wait_for_file_version") || key.contains("wait_for_file_version_") {
+            return Some("runtime_wait_for_file_version");
+        }
+        if key.contains("runtime_snapshot_with_deps") || key.contains("snapshot_") {
+            return Some("runtime_snapshot_with_deps");
+        }
+        if key.contains("semantic_diagnostics_query") {
+            return Some("semantic_diagnostics_query");
+        }
+        if key.contains("syntax_diagnostics_query") {
+            return Some("syntax_diagnostics_query");
+        }
+        if key.contains("parse_result_query") {
+            return Some("parse_result_query");
+        }
+        if key.contains("ir_query_") {
+            return Some("ir_query");
+        }
+        None
+    }
+
+    fn collect_observed_stages(payload: &serde_json::Value) -> BTreeSet<&'static str> {
+        let metrics = metrics_root(payload);
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        let histograms = metrics
+            .get("histograms")
+            .and_then(|value| value.as_object())
+            .expect("metrics.histograms object");
+
+        let mut stages = BTreeSet::new();
+        for key in counters.keys().chain(histograms.keys()) {
+            if let Some(stage) = stage_from_metric_key(key.as_str()) {
+                stages.insert(stage);
+            }
+        }
+        stages
+    }
+
+    fn metric_number(value: &serde_json::Value) -> f64 {
+        if let Some(number) = value.as_f64() {
+            return number;
+        }
+        if let Some(number) = value.as_u64() {
+            return number as f64;
+        }
+        if let Some(number) = value.as_i64() {
+            return number as f64;
+        }
+        0.0
+    }
+
+    fn has_positive_counter_for_stage(payload: &serde_json::Value, stage: &str) -> bool {
+        let metrics = metrics_root(payload);
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        counters.iter().any(|(key, value)| {
+            stage_from_metric_key(key.as_str()) == Some(stage) && metric_number(value) > 0.0
+        })
     }
 
     #[tokio::test]
@@ -3948,5 +4368,322 @@ mod tests {
         assert_unified_intellisense_v2_stage_contract(&result);
 
         drain_task.abort();
+    }
+
+    #[tokio::test]
+    async fn p23_cross_interface_semantic_parity_lsp_web_mcp_diagnostics() {
+        const PARITY_FIXTURE: &str = "Процедура Тест()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.НесуществующийМетод();\nКонецПроцедуры\n";
+
+        let lsp_coordinator = Arc::new(SystemCoordinator::new());
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = lsp_coordinator.clone();
+            move |client| BslLanguageServer::new(client, coordinator.clone())
+        })
+        .finish();
+        let (published_tx, mut published_rx) =
+            tokio::sync::mpsc::unbounded_channel::<PublishDiagnosticsParams>();
+        let drain_task = tokio::spawn(async move {
+            while let Some(req) = socket.next().await {
+                if req.method() != "textDocument/publishDiagnostics" {
+                    continue;
+                }
+                let Some(params) = req.params().cloned() else {
+                    continue;
+                };
+                let Ok(parsed) = serde_json::from_value::<
+                    tower_lsp::lsp_types::PublishDiagnosticsParams,
+                >(params) else {
+                    continue;
+                };
+                let _ = published_tx.send(parsed);
+            }
+        });
+
+        initialize_lsp_service(&mut service).await;
+        let lsp_uri = Url::parse("file:///parity_fixture.bsl").expect("lsp uri");
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: lsp_uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: PARITY_FIXTURE.to_string(),
+            },
+        };
+        let did_open_req = Request::build("textDocument/didOpen")
+            .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+            .finish();
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+        let lsp_diagnostics = wait_lsp_publish_diagnostics(&mut published_rx, &lsp_uri).await;
+        let lsp_normalized = normalize_lsp_semantic_diagnostics(&lsp_diagnostics);
+        assert!(
+            !lsp_normalized.is_empty(),
+            "expected non-empty LSP diagnostics"
+        );
+        drain_task.abort();
+
+        let app = create_router(build_web_test_state(), "backend/static", true);
+        let web_response = app
+            .oneshot(
+                AxumRequest::post("/api/diagnostics")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(axum::body::Body::from(
+                        serde_json::json!({ "code": PARITY_FIXTURE }).to_string(),
+                    ))
+                    .expect("web diagnostics request"),
+            )
+            .await
+            .expect("web diagnostics response");
+        assert!(
+            web_response.status().is_success(),
+            "unexpected web status: {}",
+            web_response.status()
+        );
+        let web_body = axum::body::to_bytes(web_response.into_body(), usize::MAX)
+            .await
+            .expect("web body");
+        let web_payload: serde_json::Value =
+            serde_json::from_slice(&web_body).expect("web diagnostics payload");
+        let web_normalized = normalize_web_semantic_diagnostics(&web_payload);
+        assert!(
+            !web_normalized.is_empty(),
+            "expected non-empty Web diagnostics, payload={web_payload}"
+        );
+
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let module_path = temp.path().join("Module.bsl");
+        std::fs::write(&module_path, PARITY_FIXTURE).expect("write module");
+        let mcp_manager = Arc::new(SessionManager::new());
+        let mcp_job_manager = Arc::new(JobManager::new());
+        let open = mcp_manager
+            .open(
+                WorkspaceOpenParams {
+                    roots: vec![temp.path().to_string_lossy().to_string()],
+                    platform_docs_archive: None,
+                    platform_version: None,
+                    configuration_path: None,
+                    mode: None,
+                },
+                mcp_job_manager.clone(),
+            )
+            .await
+            .expect("mcp workspace open");
+        wait_mcp_startup(mcp_job_manager.as_ref(), open.startup_job_id.as_deref()).await;
+        let mcp_diagnostics = mcp_manager
+            .bsl_diagnostics(BslDiagnosticsParams {
+                session_id: open.session_id,
+                scope: WorkspaceScope::Tagged(WorkspaceScopeTagged::Project),
+                limit: 200,
+                include_impact: false,
+                include_coverage: false,
+                include_flow_sensitive: false,
+            })
+            .await
+            .expect("mcp diagnostics");
+        let mcp_normalized = normalize_mcp_semantic_diagnostics(&mcp_diagnostics.diagnostics);
+        assert!(
+            !mcp_normalized.is_empty(),
+            "expected non-empty MCP diagnostics"
+        );
+
+        assert_eq!(
+            lsp_normalized, web_normalized,
+            "LSP/Web semantic diagnostics drift detected"
+        );
+        assert_eq!(
+            lsp_normalized, mcp_normalized,
+            "LSP/MCP semantic diagnostics drift detected"
+        );
+    }
+
+    #[tokio::test]
+    async fn p24_real_scenario_observability_stage_parity_lsp_vs_mcp() {
+        const OBSERVABILITY_FIXTURE: &str =
+            "Процедура Тест()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.\nКонецПроцедуры\n";
+
+        let lsp_coordinator = Arc::new(SystemCoordinator::new());
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = lsp_coordinator.clone();
+            move |client| BslLanguageServer::new(client, coordinator.clone())
+        })
+        .finish();
+        let (published_tx, mut published_rx) =
+            tokio::sync::mpsc::unbounded_channel::<PublishDiagnosticsParams>();
+        let drain_task = tokio::spawn(async move {
+            while let Some(req) = socket.next().await {
+                if req.method() != "textDocument/publishDiagnostics" {
+                    continue;
+                }
+                let Some(params) = req.params().cloned() else {
+                    continue;
+                };
+                let Ok(parsed) = serde_json::from_value::<
+                    tower_lsp::lsp_types::PublishDiagnosticsParams,
+                >(params) else {
+                    continue;
+                };
+                let _ = published_tx.send(parsed);
+            }
+        });
+
+        initialize_lsp_service(&mut service).await;
+
+        let uri = Url::parse("file:///observability_fixture.bsl").expect("lsp uri");
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: OBSERVABILITY_FIXTURE.to_string(),
+            },
+        };
+        let did_open_req = Request::build("textDocument/didOpen")
+            .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+            .finish();
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+        let _ = wait_lsp_publish_diagnostics(&mut published_rx, &uri).await;
+
+        let completion = CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position::new(2, 13),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        };
+        let completion_req = Request::build("textDocument/completion")
+            .id(2)
+            .params(serde_json::to_value(completion).expect("CompletionParams"))
+            .finish();
+        let completion_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(completion_req)
+            .await
+            .expect("completion request");
+        assert!(
+            completion_response.is_some(),
+            "completion should return a response"
+        );
+
+        let execute = Request::build("workspace/executeCommand")
+            .id(3)
+            .params(serde_json::json!({
+                "command": "bsl.getObservabilityMetrics",
+                "arguments": [],
+            }))
+            .finish();
+        let execute_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(execute)
+            .await
+            .expect("workspace/executeCommand request")
+            .expect("workspace/executeCommand response");
+        let lsp_metrics_payload =
+            serde_json::to_value(&execute_response).expect("serialize execute response");
+        let lsp_metrics_payload = lsp_metrics_payload
+            .get("result")
+            .cloned()
+            .expect("execute result field");
+        drain_task.abort();
+
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let module_path = temp.path().join("Module.bsl");
+        std::fs::write(&module_path, OBSERVABILITY_FIXTURE).expect("write module");
+        let mcp_manager = Arc::new(SessionManager::new());
+        let mcp_job_manager = Arc::new(JobManager::new());
+        let open = mcp_manager
+            .open(
+                WorkspaceOpenParams {
+                    roots: vec![temp.path().to_string_lossy().to_string()],
+                    platform_docs_archive: None,
+                    platform_version: None,
+                    configuration_path: None,
+                    mode: None,
+                },
+                mcp_job_manager.clone(),
+            )
+            .await
+            .expect("mcp workspace open");
+        wait_mcp_startup(mcp_job_manager.as_ref(), open.startup_job_id.as_deref()).await;
+
+        let _diagnostics = mcp_manager
+            .bsl_diagnostics(BslDiagnosticsParams {
+                session_id: open.session_id.clone(),
+                scope: WorkspaceScope::Tagged(WorkspaceScopeTagged::Project),
+                limit: 200,
+                include_impact: false,
+                include_coverage: false,
+                include_flow_sensitive: false,
+            })
+            .await
+            .expect("mcp diagnostics");
+        let _members = mcp_manager
+            .bsl_members(BslMembersParams {
+                session_id: open.session_id.clone(),
+                file: McpFileRef {
+                    doc: McpDocumentRef::Path(module_path.to_string_lossy().to_string()),
+                    text: None,
+                    version: None,
+                },
+                position: McpPosition {
+                    line: 2,
+                    character: 13,
+                },
+                limit: 50,
+                include_flow_sensitive: false,
+            })
+            .await
+            .expect("mcp members");
+        let mcp_metrics_payload = mcp_manager
+            .observability_metrics_get(&open.session_id)
+            .await
+            .expect("mcp observability")
+            .metrics;
+
+        let lsp_stages = collect_observed_stages(&lsp_metrics_payload);
+        let mcp_stages = collect_observed_stages(&mcp_metrics_payload);
+        let required_stages = [
+            "runtime_snapshot_with_deps",
+            "semantic_diagnostics_query",
+            "ir_query",
+            "parse_result_query",
+        ];
+
+        for stage in required_stages {
+            assert!(
+                lsp_stages.contains(stage),
+                "LSP metrics missing required stage {stage}, stages={lsp_stages:?}"
+            );
+            assert!(
+                mcp_stages.contains(stage),
+                "MCP metrics missing required stage {stage}, stages={mcp_stages:?}"
+            );
+            assert!(
+                has_positive_counter_for_stage(&lsp_metrics_payload, stage),
+                "LSP stage {stage} has no positive counters"
+            );
+            assert!(
+                has_positive_counter_for_stage(&mcp_metrics_payload, stage),
+                "MCP stage {stage} has no positive counters"
+            );
+        }
     }
 }

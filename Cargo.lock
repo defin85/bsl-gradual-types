@@ -443,6 +443,7 @@ dependencies = [
  "axum",
  "bincode",
  "blake3",
+ "bsl-agent",
  "bsl-analysis-v2",
  "bsl-diagnostics",
  "bsl-line-index",

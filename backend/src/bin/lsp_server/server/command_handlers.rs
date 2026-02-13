@@ -17,7 +17,6 @@ use crate::types::{
     GetCurrentContextParams, IncrementalUpdateParams, IncrementalUpdateResponse,
     ObservabilityMetricsResponse, WorkspaceStatsResponse,
 };
-use bsl_backend::system::fs_utils::read_bsl_file;
 
 use super::BslLanguageServer;
 
@@ -38,58 +37,51 @@ impl BslLanguageServer {
 
         self.sync_v2_globals().await;
         let file_id = self.get_or_create_file_id_v2(&uri).await;
-
-        let expected_version = self
-            .latest_received_file_versions_v2
-            .read()
-            .await
-            .get(&file_id)
-            .copied();
-
-        let ok = if let Some(expected_version) = expected_version {
-            self.analysis_v2
-                .wait_for_file_version(file_id, expected_version)
-                .await
-        } else {
-            let path = match uri.to_file_path() {
-                Ok(path) => path.to_string_lossy().to_string(),
-                Err(_) => uri.to_string(),
-            };
-
-            let file_content = match uri.to_file_path() {
-                Ok(path) => match read_bsl_file(&path) {
-                    Ok(content) => Some(content),
-                    Err(err) => {
-                        warn!("Failed to read file for getCurrentContext: {}", err);
-                        None
-                    }
-                },
-                Err(_) => None,
-            };
-
-            match file_content {
-                Some(file_content) => {
-                    self.analysis_v2
-                        .apply_changes(vec![bsl_analysis_v2::Change::SetFile {
-                            file_id,
-                            text: std::sync::Arc::from(file_content),
-                            version: 0,
-                            path: std::sync::Arc::from(path),
-                        }]);
-                    self.analysis_v2.wait_for_file_version(file_id, 0).await
-                }
-                None => false,
+        let include_flow_sensitive = {
+            let settings = self.settings.read().await;
+            settings.enable_flow_sensitive
+        };
+        let prepared = self
+            .prepare_lsp_stateful_operation_v2(
+                &uri,
+                file_id,
+                bsl_runtime::application::SemanticOperation::TypeAtPosition,
+                include_flow_sensitive,
+            )
+            .await;
+        let (context, prepared, _expected_version) = match prepared {
+            Ok(values) => values,
+            Err(outcome) => {
+                warn!(
+                    uri = %uri,
+                    file_id = file_id.0,
+                    outcome = outcome.as_str(),
+                    "getCurrentContext: stateful operation not ready"
+                );
+                return Ok(CurrentContextResponse::empty());
             }
         };
 
-        if !ok {
-            return Ok(CurrentContextResponse::empty());
-        }
-
-        let analysis = self.analysis_v2.snapshot().await;
-        let ir_program = match analysis.ir(file_id).ok().flatten() {
-            Some(ir_program) => ir_program,
-            None => return Ok(CurrentContextResponse::empty()),
+        let analysis = prepared.snapshot.analysis;
+        let ir_query = bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
+            &context,
+            bsl_runtime::application::ObservabilityStage::IrQuery,
+            &analysis,
+            Some(self.coordinator.as_ref()),
+            |analysis| analysis.ir(file_id),
+        );
+        let ir_program = match ir_query {
+            Ok(Some(ir_program)) => ir_program,
+            Ok(None) => return Ok(CurrentContextResponse::empty()),
+            Err(cancelled) => {
+                warn!(
+                    uri = %uri,
+                    file_id = file_id.0,
+                    error = ?cancelled,
+                    "getCurrentContext: IR query cancelled"
+                );
+                return Ok(CurrentContextResponse::empty());
+            }
         };
 
         let (Some(file_text), Some(line_index)) = (

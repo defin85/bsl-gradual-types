@@ -11,7 +11,8 @@ pub use bsl_shared::domain::CompletionItem;
 pub use intellisense_v2::{
     classify_optional_query, should_query_parse_result, spawn_bounded_blocking, CancellationPolicy,
     ExecutionContext, ExecutionSettings, IntellisenseV2Facade, ObservabilityMetricKind,
-    ObservabilityStage, RuntimePerfKnobs, SemanticOperation, SemanticOutcome, SemanticSnapshot,
+    ObservabilityStage, PreparedOperationSnapshot, RuntimePerfKnobs, SemanticOperation,
+    SemanticOutcome, SemanticSnapshot,
 };
 pub use type_system::get_completion_with_semantic_program;
 pub use type_system::get_completion_with_semantic_program_snapshot;

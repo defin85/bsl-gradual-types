@@ -7,8 +7,8 @@ mod policy;
 
 pub use facade::{
     CancellationPolicy, ExecutionContext, ExecutionSettings, IntellisenseV2Facade,
-    ObservabilityMetricKind, ObservabilityStage, SemanticOperation, SemanticOutcome,
-    SemanticSnapshot,
+    ObservabilityMetricKind, ObservabilityStage, PreparedOperationSnapshot, SemanticOperation,
+    SemanticOutcome, SemanticSnapshot,
 };
 pub use policy::{
     classify_optional_query, should_query_parse_result, spawn_bounded_blocking, RuntimePerfKnobs,

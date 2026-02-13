@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
+use super::policy::should_query_parse_result;
 use tokio::sync::oneshot;
 use tracing::warn;
 
@@ -129,6 +130,13 @@ pub struct SemanticSnapshot {
     pub analysis: AnalysisV2,
     pub index_snapshot: Arc<IndexSnapshot>,
     pub deps_id: DepsSnapshotId,
+}
+
+/// Prepared operation state after canonical wait/snapshot sequencing.
+pub struct PreparedOperationSnapshot {
+    pub snapshot: SemanticSnapshot,
+    pub wait_elapsed: Option<Duration>,
+    pub snapshot_elapsed: Duration,
 }
 
 #[derive(Clone)]
@@ -470,6 +478,181 @@ impl IntellisenseV2Facade {
         }
     }
 
+    /// Canonical stateful operation preparation for adapters:
+    /// wait-for-version -> snapshot-with-deps -> deps guard check.
+    pub async fn prepare_stateful_operation(
+        &self,
+        context: &ExecutionContext,
+        observability: Option<&SystemCoordinator>,
+    ) -> Result<PreparedOperationSnapshot, SemanticOutcome> {
+        let wait_elapsed = if let Some(min_file_version) = context.min_file_version {
+            let started = Instant::now();
+            let wait_ok = self
+                .wait_for_file_version(context.file_id, min_file_version)
+                .await;
+            let elapsed = started.elapsed();
+            if let Some(coordinator) = observability {
+                coordinator.record_intellisense_v2_wait_for_file_version(
+                    context.operation.as_str(),
+                    elapsed,
+                );
+            }
+            if !wait_ok {
+                return Err(SemanticOutcome::StaleVersion);
+            }
+            Some(elapsed)
+        } else {
+            None
+        };
+
+        let snapshot_started = Instant::now();
+        let (analysis, index_snapshot, deps_id) = self.snapshot_with_deps().await;
+        let snapshot_elapsed = snapshot_started.elapsed();
+        if let Some(coordinator) = observability {
+            coordinator.record_intellisense_v2_snapshot_latency(
+                context.operation.as_str(),
+                snapshot_elapsed,
+            );
+        }
+
+        if let Some(expected_deps_id) = context.expected_deps_id.as_ref() {
+            if expected_deps_id != &deps_id {
+                return Err(SemanticOutcome::MissingDeps);
+            }
+        }
+
+        Ok(PreparedOperationSnapshot {
+            snapshot: SemanticSnapshot {
+                analysis,
+                index_snapshot,
+                deps_id,
+            },
+            wait_elapsed,
+            snapshot_elapsed,
+        })
+    }
+
+    /// Canonical ephemeral operation preparation for one-shot adapters:
+    /// snapshot build -> deps guard check.
+    pub fn prepare_ephemeral_operation(
+        context: &ExecutionContext,
+        deps_id: DepsSnapshotId,
+        deps: Arc<SemanticDeps>,
+        index_snapshot: Arc<IndexSnapshot>,
+        file_text: Arc<str>,
+        file_version: i32,
+        file_path: Arc<str>,
+        observability: Option<&SystemCoordinator>,
+    ) -> Result<PreparedOperationSnapshot, SemanticOutcome> {
+        let snapshot_started = Instant::now();
+        let snapshot = Self::ephemeral_snapshot(
+            deps_id,
+            deps,
+            index_snapshot,
+            context.settings.clone(),
+            context.file_id,
+            file_text,
+            file_version,
+            file_path,
+        );
+        let snapshot_elapsed = snapshot_started.elapsed();
+        if let Some(coordinator) = observability {
+            coordinator.record_intellisense_v2_snapshot_latency(
+                context.operation.as_str(),
+                snapshot_elapsed,
+            );
+        }
+
+        if let Some(expected_deps_id) = context.expected_deps_id.as_ref() {
+            if expected_deps_id != &snapshot.deps_id {
+                return Err(SemanticOutcome::MissingDeps);
+            }
+        }
+
+        Ok(PreparedOperationSnapshot {
+            snapshot,
+            wait_elapsed: None,
+            snapshot_elapsed,
+        })
+    }
+
+    /// Run an optional semantic query with shared stage-level observability hooks.
+    pub fn run_optional_query<T, E, F>(
+        context: &ExecutionContext,
+        stage: ObservabilityStage,
+        analysis: &AnalysisV2,
+        observability: Option<&SystemCoordinator>,
+        query: F,
+    ) -> Result<Option<T>, E>
+    where
+        F: FnOnce(&AnalysisV2) -> Result<Option<T>, E>,
+    {
+        let started = Instant::now();
+        let result = query(analysis);
+        let elapsed = started.elapsed();
+
+        if let Some(coordinator) = observability {
+            match stage {
+                ObservabilityStage::IrQuery => {
+                    coordinator.record_intellisense_v2_ir_query_latency(
+                        context.operation.as_str(),
+                        elapsed,
+                    );
+                    if result.is_err() {
+                        coordinator
+                            .record_intellisense_v2_ir_query_cancelled(context.operation.as_str());
+                    }
+                }
+                ObservabilityStage::SyntaxDiagnosticsQuery => {
+                    coordinator.record_intellisense_v2_syntax_diagnostics_query_latency(elapsed);
+                    if result.is_err() {
+                        coordinator.record_intellisense_v2_query_cancelled("syntax");
+                    }
+                }
+                ObservabilityStage::SemanticDiagnosticsQuery => {
+                    coordinator.record_intellisense_v2_semantic_diagnostics_query_latency(elapsed);
+                    if result.is_err() {
+                        coordinator.record_intellisense_v2_query_cancelled("semantic");
+                    }
+                }
+                ObservabilityStage::ParseResultQuery => {
+                    coordinator.record_intellisense_v2_parse_result_query_latency(elapsed);
+                    if result.is_err() {
+                        coordinator.record_intellisense_v2_query_cancelled("other");
+                    }
+                }
+                ObservabilityStage::RuntimeQueueWait
+                | ObservabilityStage::RuntimeWaitForFileVersion
+                | ObservabilityStage::RuntimeSnapshotWithDeps => {}
+            }
+        }
+
+        result
+    }
+
+    /// Run parse_result according to centralized lazy policy and shared stage hooks.
+    pub fn run_parse_result_query<T, E, F>(
+        context: &ExecutionContext,
+        analysis: &AnalysisV2,
+        ir_available: bool,
+        observability: Option<&SystemCoordinator>,
+        query: F,
+    ) -> Result<Option<T>, E>
+    where
+        F: FnOnce(&AnalysisV2) -> Result<Option<T>, E>,
+    {
+        if !should_query_parse_result(context.operation, ir_available) {
+            return Ok(None);
+        }
+        Self::run_optional_query(
+            context,
+            ObservabilityStage::ParseResultQuery,
+            analysis,
+            observability,
+            query,
+        )
+    }
+
     /// One-shot helper for ephemeral adapters (e.g. web handlers).
     /// Builds a semantic snapshot without creating a long-lived writer-thread runtime.
     pub fn ephemeral_snapshot(
@@ -798,6 +981,118 @@ mod tests {
         assert_eq!(SemanticOutcome::Error.as_str(), "error");
         assert_eq!(SemanticOutcome::StaleVersion.as_str(), "stale_version");
         assert_eq!(SemanticOutcome::MissingDeps.as_str(), "missing_deps");
+    }
+
+    #[tokio::test]
+    async fn stateful_prepare_operation_returns_missing_deps_on_mismatch() {
+        let mut host = AnalysisHostV2::default();
+        let deps_old = make_deps();
+        let deps_id_old = DepsSnapshotId::from_hash("deps_old");
+        host.apply_change(Change::SetDepsSnapshot {
+            deps_id: deps_id_old,
+            deps: deps_old,
+        });
+        let runtime = IntellisenseV2Facade::new(host, make_index_snapshot("index"), None);
+
+        let context = ExecutionContext {
+            operation: SemanticOperation::Hover,
+            file_id: FileId(1),
+            min_file_version: None,
+            expected_deps_id: Some(DepsSnapshotId::from_hash("deps_expected")),
+            flow_sensitive: false,
+            settings: ExecutionSettings {
+                settings_id: SettingsId::from_hash("settings"),
+                diagnostics_detail_level: DetailLevel::Full,
+            },
+            cancellation: CancellationPolicy::BestEffort,
+        };
+
+        let result = runtime.prepare_stateful_operation(&context, None).await;
+        assert!(matches!(result, Err(SemanticOutcome::MissingDeps)));
+
+        runtime.shutdown_for_test().await;
+    }
+
+    #[test]
+    fn run_parse_result_query_skips_when_policy_disallows_it() {
+        let analysis = AnalysisHostV2::default().snapshot();
+        let context = ExecutionContext {
+            operation: SemanticOperation::Diagnostics,
+            file_id: FileId(1),
+            min_file_version: None,
+            expected_deps_id: None,
+            flow_sensitive: false,
+            settings: ExecutionSettings {
+                settings_id: SettingsId::from_hash("settings"),
+                diagnostics_detail_level: DetailLevel::Full,
+            },
+            cancellation: CancellationPolicy::BestEffort,
+        };
+
+        let mut called = false;
+        let result = IntellisenseV2Facade::run_parse_result_query(
+            &context,
+            &analysis,
+            false,
+            None,
+            |_analysis| {
+                called = true;
+                Ok::<Option<()>, ()>(None)
+            },
+        )
+        .expect("query should not fail");
+
+        assert!(result.is_none(), "parse_result should be skipped by policy");
+        assert!(
+            !called,
+            "query closure must not be called when policy skips"
+        );
+    }
+
+    #[test]
+    fn run_optional_query_records_ir_metrics() {
+        let coordinator = SystemCoordinator::new();
+        let analysis = AnalysisHostV2::default().snapshot();
+        let context = ExecutionContext {
+            operation: SemanticOperation::Completion,
+            file_id: FileId(1),
+            min_file_version: None,
+            expected_deps_id: None,
+            flow_sensitive: false,
+            settings: ExecutionSettings {
+                settings_id: SettingsId::from_hash("settings"),
+                diagnostics_detail_level: DetailLevel::Full,
+            },
+            cancellation: CancellationPolicy::BestEffort,
+        };
+
+        let _ = IntellisenseV2Facade::run_optional_query(
+            &context,
+            ObservabilityStage::IrQuery,
+            &analysis,
+            Some(&coordinator),
+            |_analysis| Ok::<Option<()>, ()>(None),
+        )
+        .expect("query should succeed");
+
+        let metrics = coordinator.observability_metrics();
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        let histograms = metrics
+            .get("histograms")
+            .and_then(|value| value.as_object())
+            .expect("metrics.histograms object");
+
+        assert!(
+            counters.contains_key("intellisense_v2_ir_query_completion_total"),
+            "IR counter should be recorded for completion"
+        );
+        assert!(
+            histograms.contains_key("intellisense_v2_ir_query_completion_ms"),
+            "IR histogram should be recorded for completion"
+        );
     }
 
     #[tokio::test]

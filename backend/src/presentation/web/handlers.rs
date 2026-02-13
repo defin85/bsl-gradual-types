@@ -18,7 +18,10 @@ use tokio::sync::RwLock;
 
 use crate::application::get_hover_info_with_semantic_program;
 use crate::application::type_system::web_api_service;
-use crate::application::{ExecutionSettings, IntellisenseV2Facade};
+use crate::application::{
+    CancellationPolicy, ExecutionContext, ExecutionSettings, IntellisenseV2Facade,
+    ObservabilityStage, PreparedOperationSnapshot, SemanticOperation,
+};
 use crate::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter, HoverOutputFormat};
 use crate::system::{
     startup_v2, DepsBundleV2, EffectiveStartupInputs, StartupInputs, SystemCoordinator,
@@ -88,25 +91,39 @@ fn compute_settings_id_v2(diagnostics_detail_level: DetailLevel) -> SettingsId {
     SettingsId::from_hash(blake3::hash(payload.as_bytes()).to_hex().to_string())
 }
 
-fn build_ephemeral_web_snapshot(
+fn prepare_ephemeral_web_operation(
     deps_bundle: &DepsBundleV2,
+    coordinator: &SystemCoordinator,
+    operation: SemanticOperation,
+    diagnostics_detail_level: DetailLevel,
+    include_flow_sensitive: bool,
     code: Arc<str>,
     path: Arc<str>,
-) -> crate::application::SemanticSnapshot {
-    let diagnostics_detail_level = DetailLevel::Full;
-    IntellisenseV2Facade::ephemeral_snapshot(
-        deps_bundle.deps_id.clone(),
-        deps_bundle.semantic_deps.clone(),
-        deps_bundle.index_snapshot.clone(),
-        ExecutionSettings {
+) -> anyhow::Result<(ExecutionContext, PreparedOperationSnapshot)> {
+    let context = ExecutionContext {
+        operation,
+        file_id: V2FileId(1),
+        min_file_version: Some(0),
+        expected_deps_id: Some(deps_bundle.deps_id.clone()),
+        flow_sensitive: include_flow_sensitive,
+        settings: ExecutionSettings {
             settings_id: compute_settings_id_v2(diagnostics_detail_level),
             diagnostics_detail_level,
         },
-        V2FileId(1),
+        cancellation: CancellationPolicy::BestEffort,
+    };
+    let prepared = IntellisenseV2Facade::prepare_ephemeral_operation(
+        &context,
+        deps_bundle.deps_id.clone(),
+        deps_bundle.semantic_deps.clone(),
+        deps_bundle.index_snapshot.clone(),
         code,
         0,
         path,
+        Some(coordinator),
     )
+    .map_err(|outcome| anyhow::anyhow!("ephemeral operation failed: {}", outcome.as_str()))?;
+    Ok((context, prepared))
 }
 
 fn validation_error_type(message: &str) -> &'static str {
@@ -343,28 +360,43 @@ pub async fn validate_code(
     }
 
     let deps_bundle = state.deps_bundle_v2.read().await.clone();
+    let coordinator = state.system_coordinator.clone();
     let code = payload.code.clone();
     let include_flow_sensitive = payload.include_flow_sensitive;
     let validation_result = crate::application::spawn_bounded_blocking(
         move || -> anyhow::Result<Vec<ValidationErrorDto>> {
             let code_arc: Arc<str> = Arc::from(code);
             let line_index = LineIndex::new(code_arc.as_ref());
-            let snapshot = build_ephemeral_web_snapshot(
+            let (context, prepared) = prepare_ephemeral_web_operation(
                 deps_bundle.as_ref(),
+                coordinator.as_ref(),
+                SemanticOperation::Diagnostics,
+                DetailLevel::Full,
+                include_flow_sensitive,
                 code_arc.clone(),
                 Arc::from("<semantic_validation>"),
-            );
-            let analysis = snapshot.analysis;
+            )?;
+            let analysis = prepared.snapshot.analysis;
             let diagnostics = if include_flow_sensitive {
-                analysis
-                    .semantic_diagnostics_flow_sensitive(V2FileId(1))
-                    .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
-                    .unwrap_or_else(|| Arc::new(Vec::new()))
+                IntellisenseV2Facade::run_optional_query(
+                    &context,
+                    ObservabilityStage::SemanticDiagnosticsQuery,
+                    &analysis,
+                    Some(coordinator.as_ref()),
+                    |analysis| analysis.semantic_diagnostics_flow_sensitive(V2FileId(1)),
+                )
+                .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
+                .unwrap_or_else(|| Arc::new(Vec::new()))
             } else {
-                analysis
-                    .semantic_diagnostics(V2FileId(1))
-                    .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
-                    .unwrap_or_else(|| Arc::new(Vec::new()))
+                IntellisenseV2Facade::run_optional_query(
+                    &context,
+                    ObservabilityStage::SemanticDiagnosticsQuery,
+                    &analysis,
+                    Some(coordinator.as_ref()),
+                    |analysis| analysis.semantic_diagnostics(V2FileId(1)),
+                )
+                .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
+                .unwrap_or_else(|| Arc::new(Vec::new()))
             };
 
             Ok(type_diagnostics_to_validation_errors(
@@ -417,6 +449,7 @@ pub async fn get_hover(
     }
 
     let deps_bundle = state.deps_bundle_v2.read().await.clone();
+    let coordinator = state.system_coordinator.clone();
     let code = req.code.clone();
     let line = req.line;
     let column = req.column;
@@ -425,20 +458,29 @@ pub async fn get_hover(
 
     let hover_result =
         crate::application::spawn_bounded_blocking(move || -> anyhow::Result<Option<String>> {
-            let snapshot = build_ephemeral_web_snapshot(
+            let (context, prepared) = prepare_ephemeral_web_operation(
                 deps_bundle.as_ref(),
+                coordinator.as_ref(),
+                SemanticOperation::Hover,
+                DetailLevel::Full,
+                include_flow_sensitive,
                 Arc::from(code),
                 Arc::from("hover_request.bsl"),
-            );
-            let analysis = snapshot.analysis;
+            )?;
+            let analysis = prepared.snapshot.analysis;
             let file_content = analysis
                 .file_text(V2FileId(1))
                 .map_err(|_| anyhow::anyhow!("file_text cancelled"))?
                 .ok_or_else(|| anyhow::anyhow!("file_text unavailable"))?;
-            let ir_program = analysis
-                .ir(V2FileId(1))
-                .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
-                .ok_or_else(|| anyhow::anyhow!("ir unavailable"))?;
+            let ir_program = IntellisenseV2Facade::run_optional_query(
+                &context,
+                ObservabilityStage::IrQuery,
+                &analysis,
+                Some(coordinator.as_ref()),
+                |analysis| analysis.ir(V2FileId(1)),
+            )
+            .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
+            .ok_or_else(|| anyhow::anyhow!("ir unavailable"))?;
 
             let deps = deps_bundle.semantic_deps.clone();
             let resolver = deps_resolver(&deps);
@@ -507,6 +549,7 @@ pub async fn get_diagnostics(
     }
 
     let deps_bundle = state.deps_bundle_v2.read().await.clone();
+    let coordinator = state.system_coordinator.clone();
     let code = payload.code.clone();
     let include_flow_sensitive = payload.include_flow_sensitive;
 
@@ -514,16 +557,25 @@ pub async fn get_diagnostics(
         move || -> anyhow::Result<(Vec<SyntaxErrorDto>, Vec<SemanticErrorDto>)> {
             let code_arc: Arc<str> = Arc::from(code);
             let line_index = LineIndex::new(code_arc.as_ref());
-            let snapshot = build_ephemeral_web_snapshot(
+            let (context, prepared) = prepare_ephemeral_web_operation(
                 deps_bundle.as_ref(),
+                coordinator.as_ref(),
+                SemanticOperation::Diagnostics,
+                DetailLevel::Full,
+                include_flow_sensitive,
                 code_arc.clone(),
                 Arc::from("<semantic_validation>"),
-            );
-            let analysis = snapshot.analysis;
-            let syntax = analysis
-                .syntax_diagnostics(V2FileId(1))
-                .map_err(|_| anyhow::anyhow!("syntax diagnostics cancelled"))?
-                .unwrap_or_else(|| Arc::new(Vec::new()));
+            )?;
+            let analysis = prepared.snapshot.analysis;
+            let syntax = IntellisenseV2Facade::run_optional_query(
+                &context,
+                ObservabilityStage::SyntaxDiagnosticsQuery,
+                &analysis,
+                Some(coordinator.as_ref()),
+                |analysis| analysis.syntax_diagnostics(V2FileId(1)),
+            )
+            .map_err(|_| anyhow::anyhow!("syntax diagnostics cancelled"))?
+            .unwrap_or_else(|| Arc::new(Vec::new()));
 
             let syntax_errors: Vec<SyntaxErrorDto> = syntax
                 .iter()
@@ -543,15 +595,25 @@ pub async fn get_diagnostics(
             }
 
             let diagnostics = if include_flow_sensitive {
-                analysis
-                    .semantic_diagnostics_flow_sensitive(V2FileId(1))
-                    .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
-                    .unwrap_or_else(|| Arc::new(Vec::new()))
+                IntellisenseV2Facade::run_optional_query(
+                    &context,
+                    ObservabilityStage::SemanticDiagnosticsQuery,
+                    &analysis,
+                    Some(coordinator.as_ref()),
+                    |analysis| analysis.semantic_diagnostics_flow_sensitive(V2FileId(1)),
+                )
+                .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
+                .unwrap_or_else(|| Arc::new(Vec::new()))
             } else {
-                analysis
-                    .semantic_diagnostics(V2FileId(1))
-                    .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
-                    .unwrap_or_else(|| Arc::new(Vec::new()))
+                IntellisenseV2Facade::run_optional_query(
+                    &context,
+                    ObservabilityStage::SemanticDiagnosticsQuery,
+                    &analysis,
+                    Some(coordinator.as_ref()),
+                    |analysis| analysis.semantic_diagnostics(V2FileId(1)),
+                )
+                .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
+                .unwrap_or_else(|| Arc::new(Vec::new()))
             };
 
             let semantic_errors: Vec<SemanticErrorDto> = diagnostics
@@ -611,6 +673,7 @@ pub async fn get_diagnostics_debug(
     }
 
     let deps_bundle = state.deps_bundle_v2.read().await.clone();
+    let coordinator = state.system_coordinator.clone();
     let code = payload.code.clone();
     let include_flow_sensitive = payload.include_flow_sensitive;
 
@@ -624,16 +687,25 @@ pub async fn get_diagnostics_debug(
 
             let code_arc: Arc<str> = Arc::from(code);
             let line_index = LineIndex::new(code_arc.as_ref());
-            let snapshot = build_ephemeral_web_snapshot(
+            let (context, prepared) = prepare_ephemeral_web_operation(
                 deps_bundle.as_ref(),
+                coordinator.as_ref(),
+                SemanticOperation::Diagnostics,
+                DetailLevel::Full,
+                include_flow_sensitive,
                 code_arc.clone(),
                 Arc::from("<debug_validation>"),
-            );
-            let analysis = snapshot.analysis;
-            let syntax = analysis
-                .syntax_diagnostics(V2FileId(1))
-                .map_err(|_| anyhow::anyhow!("syntax diagnostics cancelled"))?
-                .unwrap_or_else(|| Arc::new(Vec::new()));
+            )?;
+            let analysis = prepared.snapshot.analysis;
+            let syntax = IntellisenseV2Facade::run_optional_query(
+                &context,
+                ObservabilityStage::SyntaxDiagnosticsQuery,
+                &analysis,
+                Some(coordinator.as_ref()),
+                |analysis| analysis.syntax_diagnostics(V2FileId(1)),
+            )
+            .map_err(|_| anyhow::anyhow!("syntax diagnostics cancelled"))?
+            .unwrap_or_else(|| Arc::new(Vec::new()));
 
             let steps = debug_info["steps"]
                 .as_array_mut()
@@ -670,10 +742,15 @@ pub async fn get_diagnostics_debug(
 
             debug_info["resolver_available"] = serde_json::json!(true);
 
-            let ir = analysis
-                .ir(V2FileId(1))
-                .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
-                .ok_or_else(|| anyhow::anyhow!("ir unavailable"))?;
+            let ir = IntellisenseV2Facade::run_optional_query(
+                &context,
+                ObservabilityStage::IrQuery,
+                &analysis,
+                Some(coordinator.as_ref()),
+                |analysis| analysis.ir(V2FileId(1)),
+            )
+            .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
+            .ok_or_else(|| anyhow::anyhow!("ir unavailable"))?;
 
             let steps = debug_info["steps"]
                 .as_array_mut()
@@ -690,15 +767,25 @@ pub async fn get_diagnostics_debug(
             });
 
             let diagnostics = if include_flow_sensitive {
-                analysis
-                    .semantic_diagnostics_flow_sensitive(V2FileId(1))
-                    .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
-                    .unwrap_or_else(|| Arc::new(Vec::new()))
+                IntellisenseV2Facade::run_optional_query(
+                    &context,
+                    ObservabilityStage::SemanticDiagnosticsQuery,
+                    &analysis,
+                    Some(coordinator.as_ref()),
+                    |analysis| analysis.semantic_diagnostics_flow_sensitive(V2FileId(1)),
+                )
+                .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
+                .unwrap_or_else(|| Arc::new(Vec::new()))
             } else {
-                analysis
-                    .semantic_diagnostics(V2FileId(1))
-                    .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
-                    .unwrap_or_else(|| Arc::new(Vec::new()))
+                IntellisenseV2Facade::run_optional_query(
+                    &context,
+                    ObservabilityStage::SemanticDiagnosticsQuery,
+                    &analysis,
+                    Some(coordinator.as_ref()),
+                    |analysis| analysis.semantic_diagnostics(V2FileId(1)),
+                )
+                .map_err(|_| anyhow::anyhow!("semantic diagnostics cancelled"))?
+                .unwrap_or_else(|| Arc::new(Vec::new()))
             };
 
             let errors = diagnostics.as_ref();
@@ -799,6 +886,7 @@ pub async fn get_enhanced_hover(
     let detail_level = DetailLevel::parse(&req.detail_level);
 
     let deps_bundle = state.deps_bundle_v2.read().await.clone();
+    let coordinator = state.system_coordinator.clone();
     let code = req.code.clone();
     let line = req.line;
     let column = req.column;
@@ -807,20 +895,29 @@ pub async fn get_enhanced_hover(
 
     let hover_result =
         crate::application::spawn_bounded_blocking(move || -> anyhow::Result<Option<String>> {
-            let snapshot = build_ephemeral_web_snapshot(
+            let (context, prepared) = prepare_ephemeral_web_operation(
                 deps_bundle.as_ref(),
+                coordinator.as_ref(),
+                SemanticOperation::Hover,
+                DetailLevel::Full,
+                include_flow_sensitive,
                 Arc::from(code),
                 Arc::from("hover_request.bsl"),
-            );
-            let analysis = snapshot.analysis;
+            )?;
+            let analysis = prepared.snapshot.analysis;
             let file_content = analysis
                 .file_text(V2FileId(1))
                 .map_err(|_| anyhow::anyhow!("file_text cancelled"))?
                 .ok_or_else(|| anyhow::anyhow!("file_text unavailable"))?;
-            let ir_program = analysis
-                .ir(V2FileId(1))
-                .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
-                .ok_or_else(|| anyhow::anyhow!("ir unavailable"))?;
+            let ir_program = IntellisenseV2Facade::run_optional_query(
+                &context,
+                ObservabilityStage::IrQuery,
+                &analysis,
+                Some(coordinator.as_ref()),
+                |analysis| analysis.ir(V2FileId(1)),
+            )
+            .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
+            .ok_or_else(|| anyhow::anyhow!("ir unavailable"))?;
 
             let deps = deps_bundle.semantic_deps.clone();
             let resolver = deps_resolver(&deps);
@@ -930,6 +1027,7 @@ pub async fn get_semantic_tree(
     }
 
     let deps_bundle = state.deps_bundle_v2.read().await.clone();
+    let coordinator = state.system_coordinator.clone();
     let code = req.code.clone();
     let file_path = req.file_path.clone();
     let compact = req.compact;
@@ -940,16 +1038,25 @@ pub async fn get_semantic_tree(
         move || -> anyhow::Result<bsl_shared::api::semantic_dtos::SemanticTreeDto> {
             let code_arc: Arc<str> = Arc::from(code);
             let line_index = LineIndex::new(code_arc.as_ref());
-            let snapshot = build_ephemeral_web_snapshot(
+            let (context, prepared) = prepare_ephemeral_web_operation(
                 deps_bundle.as_ref(),
+                coordinator.as_ref(),
+                SemanticOperation::SymbolSearch,
+                DetailLevel::Full,
+                include_flow_sensitive,
                 code_arc.clone(),
                 Arc::from(file_path.clone()),
-            );
-            let analysis = snapshot.analysis;
-            let ir_program = analysis
-                .ir(V2FileId(1))
-                .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
-                .ok_or_else(|| anyhow::anyhow!("ir unavailable"))?;
+            )?;
+            let analysis = prepared.snapshot.analysis;
+            let ir_program = IntellisenseV2Facade::run_optional_query(
+                &context,
+                ObservabilityStage::IrQuery,
+                &analysis,
+                Some(coordinator.as_ref()),
+                |analysis| analysis.ir(V2FileId(1)),
+            )
+            .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
+            .ok_or_else(|| anyhow::anyhow!("ir unavailable"))?;
 
             let dto = if compact {
                 ir_program.to_compact_dto(code_arc.as_ref(), &line_index)

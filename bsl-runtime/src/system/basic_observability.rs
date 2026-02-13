@@ -43,13 +43,67 @@ pub struct ComponentHealth {
     pub details: Option<String>,
 }
 
+const UNIFIED_INTELLISENSE_V2_COUNTER_KEYS: &[&str] = &[
+    "intellisense_v2_runtime_wait_for_file_version_queue_wait_total",
+    "intellisense_v2_runtime_wait_for_file_version_exec_total",
+    "intellisense_v2_runtime_snapshot_with_deps_queue_wait_total",
+    "intellisense_v2_runtime_snapshot_with_deps_exec_total",
+    "intellisense_v2_wait_for_file_version_diagnostics_total",
+    "intellisense_v2_snapshot_diagnostics_total",
+    "intellisense_v2_ir_query_other_total",
+    "intellisense_v2_syntax_diagnostics_query_total",
+    "intellisense_v2_semantic_diagnostics_query_total",
+    "intellisense_v2_parse_result_query_total",
+    "intellisense_v2_ir_query_cancelled_total_other",
+    "intellisense_v2_query_cancelled_total_syntax",
+    "intellisense_v2_query_cancelled_total_semantic",
+    "intellisense_v2_interactive_wait_budget_exhausted_total",
+    "intellisense_v2_interactive_stale_served_total",
+    "intellisense_v2_interactive_knob_clamped_total",
+    "intellisense_v2_singleflight_leader_total",
+    "intellisense_v2_singleflight_shared_total",
+    "intellisense_v2_runtime_queue_wait_interactive_total",
+    "intellisense_v2_runtime_queue_wait_background_total",
+    "intellisense_v2_runtime_exec_interactive_total",
+    "intellisense_v2_runtime_exec_background_total",
+];
+
+const UNIFIED_INTELLISENSE_V2_HISTOGRAM_KEYS: &[&str] = &[
+    "intellisense_v2_runtime_wait_for_file_version_queue_wait_ms",
+    "intellisense_v2_runtime_wait_for_file_version_exec_ms",
+    "intellisense_v2_runtime_snapshot_with_deps_queue_wait_ms",
+    "intellisense_v2_runtime_snapshot_with_deps_exec_ms",
+    "intellisense_v2_wait_for_file_version_diagnostics_ms",
+    "intellisense_v2_snapshot_diagnostics_ms",
+    "intellisense_v2_ir_query_other_ms",
+    "intellisense_v2_syntax_diagnostics_query_ms",
+    "intellisense_v2_semantic_diagnostics_query_ms",
+    "intellisense_v2_parse_result_query_ms",
+    "intellisense_v2_singleflight_wait_ms",
+    "intellisense_v2_runtime_queue_wait_interactive_ms",
+    "intellisense_v2_runtime_queue_wait_background_ms",
+    "intellisense_v2_runtime_exec_interactive_ms",
+    "intellisense_v2_runtime_exec_background_ms",
+];
+
 impl Default for BasicObservability {
     fn default() -> Self {
+        let metrics = SimpleMetrics::new();
+        register_unified_intellisense_v2_contract_metrics(&metrics);
         Self {
             logger: StructuredLogger::new(),
-            metrics: SimpleMetrics::new(),
+            metrics,
             start_time: Instant::now(),
         }
+    }
+}
+
+fn register_unified_intellisense_v2_contract_metrics(metrics: &SimpleMetrics) {
+    for key in UNIFIED_INTELLISENSE_V2_COUNTER_KEYS {
+        metrics.register_counter(key);
+    }
+    for key in UNIFIED_INTELLISENSE_V2_HISTOGRAM_KEYS {
+        metrics.register_histogram(key);
     }
 }
 
@@ -549,6 +603,12 @@ impl SimpleMetrics {
         }
     }
 
+    fn register_counter(&self, metric: &str) {
+        if let Ok(mut counters) = self.counters.lock() {
+            counters.entry(metric.to_string()).or_insert(0);
+        }
+    }
+
     fn observe(&self, metric: &str, value: f64) {
         if let Ok(mut gauges) = self.gauges.lock() {
             gauges.insert(metric.to_string(), value);
@@ -565,6 +625,12 @@ impl SimpleMetrics {
                 let overflow = values.len() - MAX_SAMPLES;
                 values.drain(0..overflow);
             }
+        }
+    }
+
+    fn register_histogram(&self, metric: &str) {
+        if let Ok(mut histograms) = self.histograms.lock() {
+            histograms.entry(metric.to_string()).or_default();
         }
     }
 
@@ -615,6 +681,15 @@ impl SimpleMetrics {
         let mut histogram_stats = HashMap::new();
         for (name, mut values) in histograms {
             if values.is_empty() {
+                histogram_stats.insert(
+                    name,
+                    json!({
+                        "count": 0,
+                        "p50": 0.0,
+                        "p95": 0.0,
+                        "p99": 0.0
+                    }),
+                );
                 continue;
             }
             values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));

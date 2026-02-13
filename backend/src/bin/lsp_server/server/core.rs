@@ -1409,34 +1409,6 @@ mod tests {
         "intellisense_v2_runtime_exec_background_ms",
     ];
 
-    fn seed_unified_intellisense_v2_stage_metrics(coordinator: &SystemCoordinator) {
-        let sample = std::time::Duration::from_millis(3);
-        coordinator
-            .record_intellisense_v2_runtime_queue_wait_latency("wait_for_file_version", sample);
-        coordinator.record_intellisense_v2_runtime_exec_latency("wait_for_file_version", sample);
-        coordinator.record_intellisense_v2_runtime_queue_wait_latency("snapshot_with_deps", sample);
-        coordinator.record_intellisense_v2_runtime_exec_latency("snapshot_with_deps", sample);
-        coordinator.record_intellisense_v2_wait_for_file_version("diagnostics", sample);
-        coordinator.record_intellisense_v2_snapshot_latency("diagnostics", sample);
-        coordinator.record_intellisense_v2_ir_query_latency("other", sample);
-        coordinator.record_intellisense_v2_syntax_diagnostics_query_latency(sample);
-        coordinator.record_intellisense_v2_semantic_diagnostics_query_latency(sample);
-        coordinator.record_intellisense_v2_parse_result_query_latency(sample);
-        coordinator.record_intellisense_v2_ir_query_cancelled("other");
-        coordinator.record_intellisense_v2_query_cancelled("syntax");
-        coordinator.record_intellisense_v2_query_cancelled("semantic");
-        coordinator.record_intellisense_v2_interactive_wait_budget_exhausted();
-        coordinator.record_intellisense_v2_interactive_stale_served();
-        coordinator.record_intellisense_v2_interactive_knob_clamped();
-        coordinator.record_intellisense_v2_singleflight_leader();
-        coordinator.record_intellisense_v2_singleflight_shared();
-        coordinator.record_intellisense_v2_singleflight_wait_latency(sample);
-        coordinator.record_intellisense_v2_runtime_queue_wait_class_latency("interactive", sample);
-        coordinator.record_intellisense_v2_runtime_queue_wait_class_latency("background", sample);
-        coordinator.record_intellisense_v2_runtime_exec_class_latency("interactive", sample);
-        coordinator.record_intellisense_v2_runtime_exec_class_latency("background", sample);
-    }
-
     fn assert_unified_intellisense_v2_stage_contract(payload: &serde_json::Value) {
         let metrics = payload.get("metrics").expect("metrics field");
         let counters = metrics
@@ -4499,7 +4471,6 @@ mod tests {
     #[tokio::test]
     async fn p22_get_observability_metrics_exposes_unified_stage_contract() {
         let coordinator = Arc::new(SystemCoordinator::new());
-        seed_unified_intellisense_v2_stage_metrics(coordinator.as_ref());
 
         let (mut service, mut socket) = LspService::build({
             let coordinator = coordinator.clone();

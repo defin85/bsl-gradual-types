@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, Condvar, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -655,6 +656,12 @@ impl IntellisenseV2Facade {
         if let (Some(min_file_version), Some(knobs)) = (context.min_file_version, interactive_knobs)
         {
             if wait_budget_exhausted {
+                let Some(expected_deps_id) = context.expected_deps_id.as_ref() else {
+                    return Err(SemanticOutcome::StaleVersion);
+                };
+                if expected_deps_id != &deps_id {
+                    return Err(SemanticOutcome::StaleVersion);
+                }
                 if observed_settings_id.as_ref() != Some(&context.settings.settings_id) {
                     return Err(SemanticOutcome::StaleVersion);
                 }
@@ -995,7 +1002,10 @@ impl IntellisenseV2Facade {
             if let Some(coordinator) = observability {
                 coordinator.record_intellisense_v2_singleflight_leader();
             }
-            let result = query();
+            let result = match catch_unwind(AssertUnwindSafe(query)) {
+                Ok(result) => result,
+                Err(_panic_payload) => Err(SingleflightQueryError::Cancelled),
+            };
             {
                 let mut state = flight
                     .state
@@ -1431,32 +1441,37 @@ mod tests {
     #[tokio::test]
     async fn interactive_prepare_timeout_serves_stale_when_gap_within_default() {
         let coordinator = SystemCoordinator::new();
+        let file_id = FileId(10);
+        let deps_id = DepsSnapshotId::from_hash("deps_stale_ok");
+        let settings_id = SettingsId::from_hash("settings");
+
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(Change::SetDepsSnapshot {
+            deps_id: deps_id.clone(),
+            deps: make_deps(),
+        });
+        host.apply_change(Change::SetSettingsSnapshot {
+            settings_id: settings_id.clone(),
+            diagnostics_detail_level: DetailLevel::Full,
+        });
         let runtime = IntellisenseV2Facade::new(
-            AnalysisHostV2::default(),
+            host,
             Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p9"))),
             None,
         );
-        let file_id = FileId(10);
-        let settings_id = SettingsId::from_hash("settings");
-
-        runtime.apply_changes(vec![
-            Change::SetSettingsSnapshot {
-                settings_id: settings_id.clone(),
-                diagnostics_detail_level: DetailLevel::Full,
-            },
-            Change::SetFile {
-                file_id,
-                text: Arc::from("x = 1;"),
-                version: 4,
-                path: Arc::from("stale_ok.bsl"),
-            },
-        ]);
+        runtime.apply_changes(vec![Change::SetFile {
+            file_id,
+            text: Arc::from("x = 1;"),
+            version: 4,
+            path: Arc::from("stale_ok.bsl"),
+        }]);
+        let _ = runtime.snapshot().await;
 
         let context = ExecutionContext {
             operation: SemanticOperation::Completion,
             file_id,
             min_file_version: Some(5),
-            expected_deps_id: None,
+            expected_deps_id: Some(deps_id),
             flow_sensitive: false,
             settings: ExecutionSettings {
                 settings_id: settings_id.clone(),
@@ -1524,32 +1539,37 @@ mod tests {
 
     #[tokio::test]
     async fn interactive_prepare_timeout_rejects_stale_when_gap_exceeds_default() {
+        let file_id = FileId(11);
+        let deps_id = DepsSnapshotId::from_hash("deps_stale_reject");
+        let settings_id = SettingsId::from_hash("settings");
+
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(Change::SetDepsSnapshot {
+            deps_id: deps_id.clone(),
+            deps: make_deps(),
+        });
+        host.apply_change(Change::SetSettingsSnapshot {
+            settings_id: settings_id.clone(),
+            diagnostics_detail_level: DetailLevel::Full,
+        });
         let runtime = IntellisenseV2Facade::new(
-            AnalysisHostV2::default(),
+            host,
             Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p9"))),
             None,
         );
-        let file_id = FileId(11);
-        let settings_id = SettingsId::from_hash("settings");
-
-        runtime.apply_changes(vec![
-            Change::SetSettingsSnapshot {
-                settings_id: settings_id.clone(),
-                diagnostics_detail_level: DetailLevel::Full,
-            },
-            Change::SetFile {
-                file_id,
-                text: Arc::from("x = 1;"),
-                version: 2,
-                path: Arc::from("stale_reject.bsl"),
-            },
-        ]);
+        runtime.apply_changes(vec![Change::SetFile {
+            file_id,
+            text: Arc::from("x = 1;"),
+            version: 2,
+            path: Arc::from("stale_reject.bsl"),
+        }]);
+        let _ = runtime.snapshot().await;
 
         let context = ExecutionContext {
             operation: SemanticOperation::Hover,
             file_id,
             min_file_version: Some(5),
-            expected_deps_id: None,
+            expected_deps_id: Some(deps_id),
             flow_sensitive: false,
             settings: ExecutionSettings {
                 settings_id: settings_id.clone(),
@@ -1569,33 +1589,38 @@ mod tests {
 
     #[tokio::test]
     async fn interactive_prepare_timeout_rejects_stale_on_settings_mismatch() {
-        let runtime = IntellisenseV2Facade::new(
-            AnalysisHostV2::default(),
-            Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p9"))),
-            None,
-        );
         let file_id = FileId(12);
+        let deps_id = DepsSnapshotId::from_hash("deps_stale_mismatch");
         let stale_settings_id = SettingsId::from_hash("settings_old");
         let requested_settings_id = SettingsId::from_hash("settings_new");
 
-        runtime.apply_changes(vec![
-            Change::SetSettingsSnapshot {
-                settings_id: stale_settings_id,
-                diagnostics_detail_level: DetailLevel::Full,
-            },
-            Change::SetFile {
-                file_id,
-                text: Arc::from("x = 1;"),
-                version: 4,
-                path: Arc::from("stale_mismatch.bsl"),
-            },
-        ]);
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(Change::SetDepsSnapshot {
+            deps_id: deps_id.clone(),
+            deps: make_deps(),
+        });
+        host.apply_change(Change::SetSettingsSnapshot {
+            settings_id: stale_settings_id,
+            diagnostics_detail_level: DetailLevel::Full,
+        });
+        let runtime = IntellisenseV2Facade::new(
+            host,
+            Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p9"))),
+            None,
+        );
+        runtime.apply_changes(vec![Change::SetFile {
+            file_id,
+            text: Arc::from("x = 1;"),
+            version: 4,
+            path: Arc::from("stale_mismatch.bsl"),
+        }]);
+        let _ = runtime.snapshot().await;
 
         let context = ExecutionContext {
             operation: SemanticOperation::SignatureHelp,
             file_id,
             min_file_version: Some(5),
-            expected_deps_id: None,
+            expected_deps_id: Some(deps_id),
             flow_sensitive: false,
             settings: ExecutionSettings {
                 settings_id: requested_settings_id,
@@ -1613,11 +1638,56 @@ mod tests {
         runtime.shutdown_for_test().await;
     }
 
+    #[tokio::test]
+    async fn interactive_prepare_timeout_rejects_stale_without_expected_deps() {
+        let runtime = IntellisenseV2Facade::new(
+            AnalysisHostV2::default(),
+            Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p9"))),
+            None,
+        );
+        let file_id = FileId(13);
+        let settings_id = SettingsId::from_hash("settings");
+
+        runtime.apply_changes(vec![
+            Change::SetSettingsSnapshot {
+                settings_id: settings_id.clone(),
+                diagnostics_detail_level: DetailLevel::Full,
+            },
+            Change::SetFile {
+                file_id,
+                text: Arc::from("x = 1;"),
+                version: 4,
+                path: Arc::from("stale_no_expected_deps.bsl"),
+            },
+        ]);
+
+        let context = ExecutionContext {
+            operation: SemanticOperation::Completion,
+            file_id,
+            min_file_version: Some(5),
+            expected_deps_id: None,
+            flow_sensitive: false,
+            settings: ExecutionSettings {
+                settings_id,
+                diagnostics_detail_level: DetailLevel::Full,
+            },
+            cancellation: CancellationPolicy::BestEffort,
+        };
+
+        let result = runtime.prepare_stateful_operation(&context, None).await;
+        assert!(
+            matches!(result, Err(SemanticOutcome::StaleVersion)),
+            "stale fallback must be rejected when expected deps snapshot is unknown"
+        );
+
+        runtime.shutdown_for_test().await;
+    }
+
     #[test]
     fn run_parse_result_query_skips_when_policy_disallows_it() {
         let analysis = AnalysisHostV2::default().snapshot();
         let context = ExecutionContext {
-            operation: SemanticOperation::Diagnostics,
+            operation: SemanticOperation::Hover,
             file_id: FileId(1),
             min_file_version: None,
             expected_deps_id: None,
@@ -1894,6 +1964,57 @@ mod tests {
         .expect("new request after cleanup should run as new leader");
         assert_eq!(rerun.as_deref().map(String::as_str), Some("after-cleanup"));
         assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn singleflight_leader_panic_is_downgraded_and_cleans_up() {
+        static TEST_FLIGHTS: OnceLock<SingleflightMap<Arc<String>>> = OnceLock::new();
+        let key = SingleflightRevisionKey {
+            file_id: FileId(780),
+            file_version: 10,
+            deps_id: DepsSnapshotId::from_hash("deps"),
+            settings_id: SettingsId::from_hash("settings"),
+            query_kind: SingleflightQueryKind::SyntaxDiagnostics,
+        };
+
+        let first_key = key.clone();
+        let first = std::thread::spawn(move || {
+            IntellisenseV2Facade::run_singleflight_query(&TEST_FLIGHTS, first_key, None, || {
+                std::thread::sleep(std::time::Duration::from_millis(60));
+                panic!("leader panic must not leak in-flight entry")
+            })
+        });
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+
+        let second = std::thread::spawn(move || {
+            IntellisenseV2Facade::run_singleflight_query(&TEST_FLIGHTS, key, None, || {
+                Ok(Some(Arc::new(String::from("unexpected-after-panic"))))
+            })
+        });
+
+        let first_result = first.join().expect("first thread join");
+        let second_result = second.join().expect("second thread join");
+        assert!(
+            matches!(first_result, Err(SingleflightQueryError::Cancelled)),
+            "leader panic must be exposed as cancelled outcome"
+        );
+        assert!(
+            matches!(second_result, Err(SingleflightQueryError::Cancelled)),
+            "follower must receive terminal leader outcome when panic happens"
+        );
+
+        let map = TEST_FLIGHTS
+            .get()
+            .expect("test singleflight map should be initialized");
+        let inflight_len = map
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .len();
+        assert_eq!(
+            inflight_len, 0,
+            "singleflight key must be cleaned up after panic"
+        );
     }
 
     #[test]

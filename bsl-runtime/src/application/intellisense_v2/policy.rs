@@ -125,11 +125,11 @@ pub fn should_query_parse_result(operation: SemanticOperation, ir_available: boo
         SemanticOperation::DocumentSymbol
         | SemanticOperation::Rename
         | SemanticOperation::SymbolSearch
-        | SemanticOperation::References => true,
+        | SemanticOperation::References
+        | SemanticOperation::Diagnostics => true,
         SemanticOperation::Hover
         | SemanticOperation::SignatureHelp
         | SemanticOperation::Definition
-        | SemanticOperation::Diagnostics
         | SemanticOperation::TypeAtPosition => false,
     }
 }
@@ -321,6 +321,18 @@ mod tests {
     use std::sync::Mutex;
     use tokio::sync::oneshot;
     use tokio::time::timeout;
+
+    #[test]
+    fn parse_result_policy_keeps_diagnostics_enabled() {
+        assert!(
+            should_query_parse_result(SemanticOperation::Diagnostics, false),
+            "diagnostics must keep parse_result query enabled for singleflight sharing"
+        );
+        assert!(
+            !should_query_parse_result(SemanticOperation::Completion, false),
+            "completion parse_result remains gated by IR availability"
+        );
+    }
 
     struct EnvVarGuard {
         key: &'static str,

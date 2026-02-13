@@ -1336,17 +1336,55 @@ impl LanguageServer for BslLanguageServer {
                         }
                         let ir_program = match ir_query {
                             Ok(program) => program,
-                            Err(cancelled) => {
-                                if completion_outcome.is_none() {
-                                    completion_outcome = Some(ir_outcome.as_str());
+                            Err(first_cancelled) => {
+                                // One fast retry mitigates transient cancellation races between
+                                // rapid didChange updates and completion query execution.
+                                let retry_started = Instant::now();
+                                let ir_retry =
+                                    bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight(
+                                        &context,
+                                        &analysis,
+                                        Some(self.coordinator.as_ref()),
+                                        file_id,
+                                    );
+                                let retry_elapsed = retry_started.elapsed();
+                                if let Some(threshold) =
+                                    super::intellisense_v2_slow_query_warn_threshold()
+                                {
+                                    if retry_elapsed >= threshold {
+                                        warn!(
+                                            uri = %uri,
+                                            file_id = file_id.0,
+                                            ir_retry_ms = retry_elapsed.as_millis(),
+                                            threshold_ms = threshold.as_millis(),
+                                            "Completion v2: ir retry query is slow"
+                                        );
+                                    }
                                 }
-                                debug!(
-                                    uri = %uri,
-                                    file_id = file_id.0,
-                                    error = ?cancelled,
-                                    "Completion v2: ir query cancelled"
-                                );
-                                None
+                                match ir_retry {
+                                    Ok(program) => {
+                                        debug!(
+                                            uri = %uri,
+                                            file_id = file_id.0,
+                                            "Completion v2: recovered from transient ir cancellation via retry"
+                                        );
+                                        program
+                                    }
+                                    Err(retry_cancelled) => {
+                                        if completion_outcome.is_none() {
+                                            completion_outcome = Some("cancelled");
+                                        }
+                                        debug!(
+                                            uri = %uri,
+                                            file_id = file_id.0,
+                                            first_error = ?first_cancelled,
+                                            retry_error = ?retry_cancelled,
+                                            ir_outcome = ir_outcome.as_str(),
+                                            "Completion v2: ir query cancelled after retry"
+                                        );
+                                        None
+                                    }
+                                }
                             }
                         };
                         let parse_result =

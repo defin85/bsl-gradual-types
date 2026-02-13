@@ -207,6 +207,7 @@ impl BasicObservability {
             "missing_file_path" => "intellisense_v2_completion_result_total_missing_file_path",
             "missing_deps" => "intellisense_v2_completion_result_total_missing_deps",
             "missing_ir" => "intellisense_v2_completion_result_total_missing_ir",
+            "cancelled" => "intellisense_v2_completion_result_total_cancelled",
             "handler_error" => "intellisense_v2_completion_result_total_handler_error",
             "ok_empty" => "intellisense_v2_completion_result_total_ok_empty",
             "ok_non_empty" => "intellisense_v2_completion_result_total_ok_non_empty",

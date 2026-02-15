@@ -1221,6 +1221,7 @@ impl LanguageServer for BslLanguageServer {
 
             match prepared {
                 Ok((context, prepared, expected_version)) => {
+                    let force_incomplete_due_stale = prepared.stale_served;
                     if let Some(wait_elapsed) = prepared.wait_elapsed {
                         if let Some(threshold) = super::intellisense_v2_slow_wait_warn_threshold() {
                             if wait_elapsed >= threshold {
@@ -1546,7 +1547,8 @@ impl LanguageServer for BslLanguageServer {
                         )
                     };
 
-                    match (file_content, file_path, deps, ir_program) {
+                    let mut completion_response = match (file_content, file_path, deps, ir_program)
+                    {
                         (Some(file_content), Some(file_path), Some(deps), Some(ir_program)) => {
                             crate::handlers::handle_completion_v2(
                                 file_content,
@@ -1579,7 +1581,15 @@ impl LanguageServer for BslLanguageServer {
                             completion_outcome.get_or_insert("missing_ir");
                             empty()
                         }
+                    };
+                    if force_incomplete_due_stale {
+                        if let Some(response) = completion_response.as_mut() {
+                            if let CompletionResponse::List(list) = &mut response.response {
+                                list.is_incomplete = true;
+                            }
+                        }
                     }
+                    completion_response
                 }
                 Err(outcome) => {
                     completion_outcome = Some("wait_not_ready");

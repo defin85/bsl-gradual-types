@@ -656,30 +656,57 @@ impl IntellisenseV2Facade {
         if let (Some(min_file_version), Some(knobs)) = (context.min_file_version, interactive_knobs)
         {
             if wait_budget_exhausted {
+                let completion_fallback_metric_enabled =
+                    matches!(context.operation, SemanticOperation::Completion);
+                let record_completion_fallback_unavailable = || {
+                    if completion_fallback_metric_enabled {
+                        if let Some(coordinator) = observability {
+                            coordinator.record_intellisense_v2_completion_fallback_unavailable();
+                        }
+                    }
+                };
+
                 let Some(expected_deps_id) = context.expected_deps_id.as_ref() else {
+                    record_completion_fallback_unavailable();
                     return Err(SemanticOutcome::StaleVersion);
                 };
                 if expected_deps_id != &deps_id {
+                    record_completion_fallback_unavailable();
                     return Err(SemanticOutcome::StaleVersion);
                 }
                 if observed_settings_id.as_ref() != Some(&context.settings.settings_id) {
+                    record_completion_fallback_unavailable();
                     return Err(SemanticOutcome::StaleVersion);
                 }
                 if let Some(observed_version) = observed_file_version {
                     if observed_version < min_file_version {
-                        self.validate_stale_fallback(
-                            context.file_id,
-                            min_file_version,
-                            observed_version,
-                            knobs,
-                        )
-                        .await?;
+                        let lag_versions = min_file_version.saturating_sub(observed_version);
+                        if let Some(coordinator) = observability {
+                            coordinator.record_intellisense_v2_revision_lag(lag_versions);
+                        }
+
+                        if let Err(outcome) = self
+                            .validate_stale_fallback(
+                                context.file_id,
+                                min_file_version,
+                                observed_version,
+                                knobs,
+                            )
+                            .await
+                        {
+                            record_completion_fallback_unavailable();
+                            return Err(outcome);
+                        }
                         stale_served = true;
                         if let Some(coordinator) = observability {
                             coordinator.record_intellisense_v2_interactive_stale_served();
+                            if completion_fallback_metric_enabled {
+                                coordinator.record_intellisense_v2_completion_stale_fallback();
+                            }
                         }
                     }
                 } else {
+                    record_completion_fallback_unavailable();
                     return Err(SemanticOutcome::StaleVersion);
                 }
             } else if observed_file_version.is_some_and(|version| version < min_file_version) {
@@ -1526,6 +1553,14 @@ mod tests {
             "interactive exec-class counter should be recorded"
         );
         assert!(
+            counters.contains_key("intellisense_v2_completion_stale_fallback_total"),
+            "completion stale-fallback counter should be recorded"
+        );
+        assert!(
+            counters.contains_key("intellisense_v2_revision_lag_sample_total"),
+            "revision lag counter should be recorded"
+        );
+        assert!(
             histograms.contains_key("intellisense_v2_runtime_queue_wait_interactive_ms"),
             "interactive queue-class histogram should be recorded"
         );
@@ -1533,12 +1568,17 @@ mod tests {
             histograms.contains_key("intellisense_v2_runtime_exec_interactive_ms"),
             "interactive exec-class histogram should be recorded"
         );
+        assert!(
+            histograms.contains_key("intellisense_v2_revision_lag_versions"),
+            "revision lag histogram should be recorded"
+        );
 
         runtime.shutdown_for_test().await;
     }
 
     #[tokio::test]
     async fn interactive_prepare_timeout_rejects_stale_when_gap_exceeds_default() {
+        let coordinator = SystemCoordinator::new();
         let file_id = FileId(11);
         let deps_id = DepsSnapshotId::from_hash("deps_stale_reject");
         let settings_id = SettingsId::from_hash("settings");
@@ -1566,7 +1606,7 @@ mod tests {
         let _ = runtime.snapshot().await;
 
         let context = ExecutionContext {
-            operation: SemanticOperation::Hover,
+            operation: SemanticOperation::Completion,
             file_id,
             min_file_version: Some(5),
             expected_deps_id: Some(deps_id),
@@ -1578,10 +1618,34 @@ mod tests {
             cancellation: CancellationPolicy::BestEffort,
         };
 
-        let result = runtime.prepare_stateful_operation(&context, None).await;
+        let result = runtime
+            .prepare_stateful_operation(&context, Some(&coordinator))
+            .await;
         assert!(
             matches!(result, Err(SemanticOutcome::StaleVersion)),
             "gap > 1 should reject stale fallback under default policy"
+        );
+
+        let metrics = coordinator.observability_metrics();
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        let histograms = metrics
+            .get("histograms")
+            .and_then(|value| value.as_object())
+            .expect("metrics.histograms object");
+        assert!(
+            counters.contains_key("intellisense_v2_completion_fallback_unavailable_total"),
+            "completion fallback-unavailable counter should be recorded"
+        );
+        assert!(
+            counters.contains_key("intellisense_v2_revision_lag_sample_total"),
+            "revision lag counter should be recorded"
+        );
+        assert!(
+            histograms.contains_key("intellisense_v2_revision_lag_versions"),
+            "revision lag histogram should be recorded"
         );
 
         runtime.shutdown_for_test().await;

@@ -66,6 +66,9 @@ const UNIFIED_INTELLISENSE_V2_COUNTER_KEYS: &[&str] = &[
     "intellisense_v2_runtime_queue_wait_background_total",
     "intellisense_v2_runtime_exec_interactive_total",
     "intellisense_v2_runtime_exec_background_total",
+    "intellisense_v2_completion_stale_fallback_total",
+    "intellisense_v2_completion_fallback_unavailable_total",
+    "intellisense_v2_revision_lag_sample_total",
 ];
 
 const UNIFIED_INTELLISENSE_V2_HISTOGRAM_KEYS: &[&str] = &[
@@ -84,6 +87,7 @@ const UNIFIED_INTELLISENSE_V2_HISTOGRAM_KEYS: &[&str] = &[
     "intellisense_v2_runtime_queue_wait_background_ms",
     "intellisense_v2_runtime_exec_interactive_ms",
     "intellisense_v2_runtime_exec_background_ms",
+    "intellisense_v2_revision_lag_versions",
 ];
 
 impl Default for BasicObservability {
@@ -357,6 +361,24 @@ impl BasicObservability {
     pub fn record_intellisense_v2_interactive_knob_clamped(&self) {
         self.metrics
             .increment("intellisense_v2_interactive_knob_clamped_total");
+    }
+
+    pub fn record_intellisense_v2_completion_stale_fallback(&self) {
+        self.metrics
+            .increment("intellisense_v2_completion_stale_fallback_total");
+    }
+
+    pub fn record_intellisense_v2_completion_fallback_unavailable(&self) {
+        self.metrics
+            .increment("intellisense_v2_completion_fallback_unavailable_total");
+    }
+
+    pub fn record_intellisense_v2_revision_lag(&self, lag_versions: i32) {
+        let lag_versions = lag_versions.max(0) as f64;
+        self.metrics
+            .increment("intellisense_v2_revision_lag_sample_total");
+        self.metrics
+            .observe_histogram("intellisense_v2_revision_lag_versions", lag_versions);
     }
 
     pub fn record_intellisense_v2_singleflight_leader(&self) {

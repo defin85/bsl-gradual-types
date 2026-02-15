@@ -259,6 +259,21 @@ impl SystemCoordinator {
             .record_intellisense_v2_interactive_knob_clamped();
     }
 
+    pub fn record_intellisense_v2_completion_stale_fallback(&self) {
+        self.observability
+            .record_intellisense_v2_completion_stale_fallback();
+    }
+
+    pub fn record_intellisense_v2_completion_fallback_unavailable(&self) {
+        self.observability
+            .record_intellisense_v2_completion_fallback_unavailable();
+    }
+
+    pub fn record_intellisense_v2_revision_lag(&self, lag_versions: i32) {
+        self.observability
+            .record_intellisense_v2_revision_lag(lag_versions);
+    }
+
     pub fn record_intellisense_v2_singleflight_leader(&self) {
         self.observability
             .record_intellisense_v2_singleflight_leader();

@@ -1389,6 +1389,9 @@ mod tests {
         "intellisense_v2_runtime_queue_wait_background_total",
         "intellisense_v2_runtime_exec_interactive_total",
         "intellisense_v2_runtime_exec_background_total",
+        "intellisense_v2_completion_stale_fallback_total",
+        "intellisense_v2_completion_fallback_unavailable_total",
+        "intellisense_v2_revision_lag_sample_total",
     ];
 
     const UNIFIED_STAGE_HISTOGRAM_KEYS: &[&str] = &[
@@ -1407,6 +1410,7 @@ mod tests {
         "intellisense_v2_runtime_queue_wait_background_ms",
         "intellisense_v2_runtime_exec_interactive_ms",
         "intellisense_v2_runtime_exec_background_ms",
+        "intellisense_v2_revision_lag_versions",
     ];
 
     fn assert_unified_intellisense_v2_stage_contract(payload: &serde_json::Value) {
@@ -2191,6 +2195,118 @@ mod tests {
         assert!(
             completion_response.is_some(),
             "completion should return a response"
+        );
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
+    async fn p7_first_completion_after_received_advance_uses_stale_non_empty_result() {
+        const STALE_FIXTURE: &str =
+            "Процедура Тест()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.\nКонецПроцедуры\n";
+
+        let coordinator = Arc::new(SystemCoordinator::new());
+        let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+            Arc::new(std::sync::Mutex::new(None));
+
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            let server_holder = server_holder.clone();
+            move |client| {
+                let server = BslLanguageServer::new(client, coordinator.clone());
+                *server_holder.lock().expect("server holder lock") = Some(server.clone());
+                server
+            }
+        })
+        .finish();
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        initialize_lsp_service(&mut service).await;
+
+        let uri = Url::parse("file:///test_p7_stale_completion.bsl").expect("test uri");
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: STALE_FIXTURE.to_string(),
+            },
+        };
+        let did_open_req = Request::build("textDocument/didOpen")
+            .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+            .finish();
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+
+        let server = server_holder
+            .lock()
+            .expect("server holder lock")
+            .clone()
+            .expect("server must be created");
+        server
+            .deps_update_v2("p7_stale_completion_setup", None, None)
+            .await;
+        server.sync_v2_globals().await;
+
+        let file_id = server.get_or_create_file_id_v2(&uri).await;
+        {
+            let mut versions = server.latest_received_file_versions_v2.write().await;
+            // Simulate the window right after didChange was received but before runtime apply.
+            versions.insert(file_id, 2);
+        }
+
+        let completion = server
+            .completion(CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: Position::new(2, 13),
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: None,
+            })
+            .await
+            .expect("completion request")
+            .expect("completion response");
+
+        match completion {
+            CompletionResponse::List(list) => {
+                assert!(
+                    list.is_incomplete,
+                    "stale fallback completion must be marked isIncomplete=true"
+                );
+                assert!(
+                    !list.items.is_empty(),
+                    "first completion after received-version advance must not be empty"
+                );
+            }
+            CompletionResponse::Array(items) => {
+                assert!(
+                    !items.is_empty(),
+                    "first completion after received-version advance must not be empty"
+                );
+                panic!("completion fallback must return CompletionList with isIncomplete=true");
+            }
+        }
+
+        let metrics = coordinator.observability_metrics();
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        let stale_fallback_total = counters
+            .get("intellisense_v2_completion_stale_fallback_total")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0);
+        assert!(
+            stale_fallback_total > 0,
+            "expected stale fallback counter to be incremented"
         );
 
         drain_task.abort();
@@ -5381,6 +5497,10 @@ mod tests {
         }
 
         let metrics = coordinator.observability_metrics();
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
         let histograms = metrics
             .get("histograms")
             .and_then(|value| value.as_object())
@@ -5427,6 +5547,27 @@ mod tests {
             completion_p95 <= 1500.0,
             "warm-path completion p95 regression: completion_p95={}ms > 1500ms",
             completion_p95
+        );
+        let completion_total = counters
+            .get("completion_total")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0);
+        assert!(
+            completion_total >= 50,
+            "expected completion_total >= 50, got {completion_total}"
+        );
+        let completion_cancelled_total = counters
+            .get("intellisense_v2_completion_result_total_cancelled")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0);
+        let completion_cancelled_rate =
+            completion_cancelled_total as f64 / completion_total.max(1) as f64;
+        assert!(
+            completion_cancelled_rate <= 0.10,
+            "warm-path completion cancel-rate regression: cancelled={} total={} rate={:.3}",
+            completion_cancelled_total,
+            completion_total,
+            completion_cancelled_rate
         );
 
         drain_task.abort();

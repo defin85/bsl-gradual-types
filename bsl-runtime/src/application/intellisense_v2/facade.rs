@@ -1618,12 +1618,27 @@ mod tests {
             cancellation: CancellationPolicy::BestEffort,
         };
 
+        let wait_budget_ms = crate::system::global_runtime_config()
+            .get_u64(crate::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
+            .unwrap_or(120);
+        let started = Instant::now();
         let result = runtime
             .prepare_stateful_operation(&context, Some(&coordinator))
             .await;
+        let elapsed = started.elapsed();
         assert!(
             matches!(result, Err(SemanticOutcome::StaleVersion)),
             "gap > 1 should reject stale fallback under default policy"
+        );
+        let min_expected = Duration::from_millis(wait_budget_ms.saturating_sub(30));
+        let max_expected = Duration::from_millis(wait_budget_ms.saturating_add(300));
+        assert!(
+            elapsed >= min_expected,
+            "stale reject should spend wait budget before fail (elapsed={elapsed:?}, budget_ms={wait_budget_ms})"
+        );
+        assert!(
+            elapsed <= max_expected,
+            "stale reject should stay bounded near wait budget (elapsed={elapsed:?}, budget_ms={wait_budget_ms})"
         );
 
         let metrics = coordinator.observability_metrics();
@@ -1693,10 +1708,25 @@ mod tests {
             cancellation: CancellationPolicy::BestEffort,
         };
 
+        let wait_budget_ms = crate::system::global_runtime_config()
+            .get_u64(crate::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
+            .unwrap_or(120);
+        let started = Instant::now();
         let result = runtime.prepare_stateful_operation(&context, None).await;
+        let elapsed = started.elapsed();
         assert!(
             matches!(result, Err(SemanticOutcome::StaleVersion)),
             "settings mismatch must reject stale fallback"
+        );
+        let min_expected = Duration::from_millis(wait_budget_ms.saturating_sub(30));
+        let max_expected = Duration::from_millis(wait_budget_ms.saturating_add(300));
+        assert!(
+            elapsed >= min_expected,
+            "settings-mismatch reject should spend wait budget before fail (elapsed={elapsed:?}, budget_ms={wait_budget_ms})"
+        );
+        assert!(
+            elapsed <= max_expected,
+            "settings-mismatch reject should stay bounded near wait budget (elapsed={elapsed:?}, budget_ms={wait_budget_ms})"
         );
 
         runtime.shutdown_for_test().await;

@@ -118,6 +118,7 @@ impl BslLanguageServer {
             diagnostics_tasks_v2: Arc::new(Mutex::new(HashMap::new())),
             latest_received_file_versions_v2: Arc::new(RwLock::new(HashMap::new())),
             completion_seen_files_v2: Arc::new(RwLock::new(std::collections::HashSet::new())),
+            completion_stale_fallback_cache_v2: Arc::new(RwLock::new(HashMap::new())),
             last_deps_id_v2: Arc::new(RwLock::new(Some(initial_deps_id))),
             last_settings_id_v2: Arc::new(RwLock::new(Some(initial_settings_id))),
         }
@@ -2244,6 +2245,29 @@ mod tests {
             .expect("didOpen notification");
         assert!(did_open_response.is_none(), "didOpen is a notification");
 
+        let did_change = DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: uri.clone(),
+                version: 2,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                range: None,
+                range_length: None,
+                text: STALE_FIXTURE.to_string(),
+            }],
+        };
+        let did_change_req = Request::build("textDocument/didChange")
+            .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+            .finish();
+        let did_change_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_change_req)
+            .await
+            .expect("didChange notification");
+        assert!(did_change_response.is_none(), "didChange is a notification");
+
         let server = server_holder
             .lock()
             .expect("server holder lock")
@@ -2257,8 +2281,8 @@ mod tests {
         let file_id = server.get_or_create_file_id_v2(&uri).await;
         {
             let mut versions = server.latest_received_file_versions_v2.write().await;
-            // Simulate the window right after didChange was received but before runtime apply.
-            versions.insert(file_id, 2);
+            // Simulate the window right after the next didChange was received but before runtime apply.
+            versions.insert(file_id, 3);
         }
 
         let completion = server

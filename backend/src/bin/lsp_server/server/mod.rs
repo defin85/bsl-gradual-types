@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
+use tower_lsp::lsp_types::CompletionItem;
 use tower_lsp::Client;
 
 use bsl_analysis_v2::{DepsSnapshotId, FileId as V2FileId, SettingsId};
@@ -64,6 +65,14 @@ pub(crate) struct CodeActionsCapabilityState {
     pub desired_enabled: bool,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct CompletionStaleFallbackCacheEntryV2 {
+    pub deps_id: DepsSnapshotId,
+    pub settings_id: SettingsId,
+    pub file_version: i32,
+    pub items: Vec<CompletionItem>,
+}
+
 /// BSL Language Server backend - CLEAN ARCHITECTURE
 #[derive(Clone)]
 pub struct BslLanguageServer {
@@ -89,6 +98,8 @@ pub struct BslLanguageServer {
     pub(crate) diagnostics_tasks_v2: Arc<Mutex<DiagnosticsTasksV2>>,
     pub(crate) latest_received_file_versions_v2: Arc<RwLock<HashMap<V2FileId, i32>>>,
     pub(crate) completion_seen_files_v2: Arc<RwLock<HashSet<V2FileId>>>,
+    pub(crate) completion_stale_fallback_cache_v2:
+        Arc<RwLock<HashMap<V2FileId, CompletionStaleFallbackCacheEntryV2>>>,
     pub(crate) last_deps_id_v2: Arc<RwLock<Option<DepsSnapshotId>>>,
     pub(crate) last_settings_id_v2: Arc<RwLock<Option<SettingsId>>>,
 }

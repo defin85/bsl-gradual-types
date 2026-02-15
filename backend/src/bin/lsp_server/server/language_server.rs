@@ -40,7 +40,7 @@ use crate::progress::log_progress_to_file;
 use crate::progress_bridge::{LspWorkDoneReporter, ProgressReporter};
 use crate::types::{GetCurrentContextParams, ServerStatus, ServerStatusParams};
 
-use super::BslLanguageServer;
+use super::{BslLanguageServer, CompletionStaleFallbackCacheEntryV2};
 
 fn effective_include_flow_sensitive(
     request_override: Option<bool>,
@@ -785,6 +785,10 @@ impl LanguageServer for BslLanguageServer {
                 .write()
                 .await
                 .remove(&file_id);
+            self.completion_stale_fallback_cache_v2
+                .write()
+                .await
+                .remove(&file_id);
             self.analysis_v2
                 .apply_changes(vec![bsl_analysis_v2::Change::RemoveFile { file_id }]);
         }
@@ -1204,6 +1208,14 @@ impl LanguageServer for BslLanguageServer {
                     had_error: false,
                 })
             };
+            let extract_non_empty_items =
+                |response: &crate::handlers::CompletionResponseWithStats| match &response.response {
+                    CompletionResponse::List(list) if !list.items.is_empty() => {
+                        Some(list.items.clone())
+                    }
+                    CompletionResponse::Array(items) if !items.is_empty() => Some(items.clone()),
+                    _ => None,
+                };
 
             let include_flow_sensitive = {
                 let settings = self.settings.read().await;
@@ -1256,21 +1268,24 @@ impl LanguageServer for BslLanguageServer {
                         deps,
                         ir_program,
                         index_snapshot,
+                        observed_deps_id,
+                        observed_settings_id,
+                        observed_file_version,
                     ) = {
                         let analysis = prepared.snapshot.analysis;
                         let index_snapshot = prepared.snapshot.index_snapshot;
 
                         let observed_file_version = analysis.file_version(file_id).ok().flatten();
-                        let observed_deps_id = Some(prepared.snapshot.deps_id);
+                        let observed_deps_id = prepared.snapshot.deps_id;
                         let observed_settings_id = analysis.settings_id().ok();
                         debug!(
                         "Completion v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}, index_snapshot_id={}",
-                        uri,
-                        file_id.0,
-                        observed_file_version,
-                        observed_deps_id.as_ref().map(|v| v.as_str()),
-                        observed_settings_id.as_ref().map(|v| v.as_str()),
-                        index_snapshot.id.as_str(),
+                            uri,
+                            file_id.0,
+                            observed_file_version,
+                            Some(observed_deps_id.as_str()),
+                            observed_settings_id.as_ref().map(|v| v.as_str()),
+                            index_snapshot.id.as_str(),
                     );
                         match analysis.file_text_len(file_id) {
                             Ok(Some(len)) => debug!(
@@ -1419,7 +1434,7 @@ impl LanguageServer for BslLanguageServer {
                                                 "Completion v2 ir: uri={}, file_id={}, deps_id={:?}, nodes={}",
                                                 uri_for_query,
                                                 file_id.0,
-                                                observed_deps_id_for_query.as_ref().map(|v| v.as_str()),
+                                                Some(observed_deps_id_for_query.as_str()),
                                                 program.nodes.len()
                                             ),
                                             None => debug!(
@@ -1544,6 +1559,9 @@ impl LanguageServer for BslLanguageServer {
                             deps,
                             ir_program,
                             index_snapshot,
+                            observed_deps_id,
+                            observed_settings_id,
+                            observed_file_version,
                         )
                     };
 
@@ -1578,8 +1596,48 @@ impl LanguageServer for BslLanguageServer {
                             empty()
                         }
                         (Some(_), Some(_), Some(_), None) => {
-                            completion_outcome.get_or_insert("missing_ir");
-                            empty()
+                            if force_incomplete_due_stale {
+                                let stale_cached_items =
+                                    match (observed_settings_id.as_ref(), observed_file_version) {
+                                        (Some(settings_id), Some(file_version)) => {
+                                            let cache = self
+                                                .completion_stale_fallback_cache_v2
+                                                .read()
+                                                .await;
+                                            cache.get(&file_id).and_then(|entry| {
+                                                let compatible = entry.deps_id == observed_deps_id
+                                                    && entry.settings_id == *settings_id
+                                                    && entry.file_version == file_version
+                                                    && !entry.items.is_empty();
+                                                if compatible {
+                                                    Some(entry.items.clone())
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                        }
+                                        _ => None,
+                                    };
+
+                                if let Some(items) = stale_cached_items {
+                                    Some(crate::handlers::CompletionResponseWithStats {
+                                        response: CompletionResponse::List(CompletionList {
+                                            is_incomplete: true,
+                                            items,
+                                        }),
+                                        stats: None,
+                                        had_error: false,
+                                    })
+                                } else {
+                                    completion_outcome.get_or_insert("missing_ir");
+                                    self.coordinator
+                                        .record_intellisense_v2_completion_fallback_unavailable();
+                                    empty()
+                                }
+                            } else {
+                                completion_outcome.get_or_insert("missing_ir");
+                                empty()
+                            }
                         }
                     };
                     if force_incomplete_due_stale {
@@ -1588,6 +1646,26 @@ impl LanguageServer for BslLanguageServer {
                                 list.is_incomplete = true;
                             }
                         }
+                    }
+                    if let (Some(settings_id), Some(file_version), Some(response_items)) = (
+                        observed_settings_id.clone(),
+                        observed_file_version,
+                        completion_response
+                            .as_ref()
+                            .and_then(extract_non_empty_items),
+                    ) {
+                        self.completion_stale_fallback_cache_v2
+                            .write()
+                            .await
+                            .insert(
+                                file_id,
+                                CompletionStaleFallbackCacheEntryV2 {
+                                    deps_id: observed_deps_id,
+                                    settings_id,
+                                    file_version,
+                                    items: response_items,
+                                },
+                            );
                     }
                     completion_response
                 }

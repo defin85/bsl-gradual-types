@@ -342,8 +342,8 @@ impl TypeMetadataLookup {
     ) -> Vec<FormDataPropertyProvider> {
         let mut providers = vec![
             FormDataPropertyProvider::FormShape,
-            FormDataPropertyProvider::ObjectFacet,
             FormDataPropertyProvider::IntrinsicGuaranteed,
+            FormDataPropertyProvider::ObjectFacet,
         ];
 
         if resolution.active_facet.is_some() {
@@ -403,16 +403,26 @@ impl TypeMetadataLookup {
         }
 
         let mut merged: Vec<(RawPropertyData, &'static str)> = Vec::new();
-        let mut seen = std::collections::HashSet::<String>::new();
+        let mut seen_positions = std::collections::HashMap::<String, usize>::new();
         let mut push_unique = |property: RawPropertyData, origin: &'static str| {
             let key = property.name.to_lowercase();
-            if seen.insert(key) {
-                merged.push((property, origin));
+            if let Some(existing_idx) = seen_positions.get(&key).copied() {
+                let existing_origin = merged[existing_idx].1;
+                // Intrinsic слой additive-only: если позже приходит repository member
+                // (facet/raw), он должен победить intrinsic в том же слоте.
+                if existing_origin == PROPERTY_ORIGIN_INTRINSIC
+                    && origin == PROPERTY_ORIGIN_REPOSITORY
+                {
+                    merged[existing_idx] = (property, origin);
+                }
+                return;
             }
+            seen_positions.insert(key, merged.len());
+            merged.push((property, origin));
         };
 
         // Явная provider-chain:
-        // form shape -> object facet -> intrinsic guaranteed -> fallback.
+        // form shape -> intrinsic guaranteed -> object facet -> fallback.
         for provider in Self::form_data_property_provider_chain(resolution) {
             let origin = provider.origin_tag();
             for property in self.collect_form_data_properties_from_provider(resolution, provider) {

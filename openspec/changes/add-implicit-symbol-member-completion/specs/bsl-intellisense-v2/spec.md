@@ -21,7 +21,8 @@
 ### Requirement: Member completion для implicit symbols включает свойства и методы (MUST)
 Система MUST возвращать в member completion для implicit symbols и свойства, и методы, полученные через descriptor/facet-aware lookup.
 
-Система MUST классифицировать items детерминированно по kind (`property`/`method`) и выполнять case-insensitive дедупликацию.
+Система MUST классифицировать items детерминированно по kind (`property`/`method`) и выполнять case-insensitive дедупликацию по canonical key.
+Canonical key MUST включать semantic owner identity и scope, чтобы кандидаты из разных owner-контекстов не схлопывались в один item без явного правила объединения.
 
 #### Scenario: `ЭтотОбъект.` возвращает свойства и методы object facet
 - **GIVEN** код в модуле объекта документа использует `ЭтотОбъект.`
@@ -33,9 +34,14 @@
 Для `FormModule.Объект` система MUST формировать members в порядке:
 1. form shape members,
 2. intrinsic supplement (whitelist),
-3. applied object facet members.
+3. applied object facet members,
+4. fallback members (если применимо).
 
 Intrinsic supplement MUST быть additive-only и MUST NOT переопределять/удалять members из facet metadata.
+Система MUST разделять collection order и precedence policy:
+- collection order определяет порядок формирования/показа;
+- precedence policy определяет победителя при конфликте одноимённых members.
+При конфликте intrinsic vs repository/facet members MUST выигрывать repository/facet member независимо от order обхода.
 
 #### Scenario: `Объект.` в форме документа объединяет shape, intrinsic и facet members
 - **GIVEN** модуль формы документа и курсор на `Объект.`
@@ -43,6 +49,12 @@ Intrinsic supplement MUST быть additive-only и MUST NOT переопред�
 - **THEN** completion включает реквизиты формы из form shape
 - **AND** completion включает гарантированные intrinsic properties (минимум: `Ссылка`, `ПометкаУдаления`)
 - **AND** completion включает методы applied object facet (например, `Записать`)
+
+#### Scenario: Конфликт intrinsic и facet member имени не ломает precedence
+- **GIVEN** для `FormModule.Объект` существует одноимённый member в intrinsic и repository/facet источнике
+- **WHEN** IDE формирует member completion
+- **THEN** в выдаче используется repository/facet версия member
+- **AND** intrinsic версия не переопределяет repository/facet metadata
 
 ### Requirement: Completion для implicit symbols согласован с v2 type snapshot consumers (MUST)
 Система MUST использовать тот же owner resolution результат для completion, hover, type-at-position и semantic member validation в рамках одного snapshot/revision.
@@ -60,3 +72,14 @@ Intrinsic supplement MUST быть additive-only и MUST NOT переопред�
 - **GIVEN** курсор находится внутри процедуры `&НаСервереБезКонтекста`
 - **WHEN** IDE запрашивает non-member completion
 - **THEN** completion не содержит context-bound symbols, такие как `ЭтотОбъект` и `Объект`
+
+### Requirement: Completion output остаётся bounded и детерминированным в интерактивном режиме (MUST)
+Система MUST ограничивать количество возвращаемых completion items фиксированным limit.
+Если после ranking/dedup кандидатов больше лимита, система MUST выставлять `isIncomplete = true`.
+При одинаковом snapshot/revision порядок выдачи MUST быть детерминированным.
+
+#### Scenario: Количество кандидатов превышает limit
+- **GIVEN** completion контекст, где количество кандидатов превышает системный limit
+- **WHEN** IDE запрашивает completion
+- **THEN** сервер возвращает не более limit items
+- **AND** `isIncomplete` установлен в `true`

@@ -7,7 +7,7 @@ use crate::domain::types::{
     Certainty, ConcreteType, ConfigurationType, FacetKind, GenericType, MetadataKind, PlatformType,
     RawAttributeData, RawDataSource, RawMethodData, RawParamData, RawPropertyData,
     RawTabularSectionData, RawTypeData, ResolutionMetadata, ResolutionResult, ResolutionSource,
-    TabularRowType, TypeResolution, FORM_DATA_SEMANTICS_NOTE,
+    TabularRowType, TypeResolution, FORM_DATA_FORM_TYPE_NOTE_PREFIX, FORM_DATA_SEMANTICS_NOTE,
 };
 use std::sync::Arc;
 
@@ -1080,6 +1080,97 @@ fn test_form_data_intrinsic_properties_are_available_without_loaded_configuratio
     assert!(properties
         .iter()
         .any(|property| property.name == "ПометкаУдаления"));
+}
+
+#[test]
+fn test_form_data_provider_chain_orders_shape_then_intrinsic_then_facet() {
+    let repo = Arc::new(InMemoryTypeRepository::new());
+    repo.load_types(vec![
+        RawTypeData {
+            name: "Документы.Док1".to_string(),
+            source: RawDataSource::Configuration,
+            facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+            kind: Some(MetadataKind::Document),
+            ..Default::default()
+        },
+        RawTypeData {
+            name: "Формы.Документы.Док1.Форма1".to_string(),
+            source: RawDataSource::Configuration,
+            properties: vec![RawPropertyData {
+                name: "РеквизитФормы".to_string(),
+                prop_type: "Строка".to_string(),
+                is_readonly: false,
+            }],
+            ..Default::default()
+        },
+        RawTypeData {
+            name: "ДокументОбъект".to_string(),
+            source: RawDataSource::Platform,
+            facets: vec![FacetKind::Object],
+            properties: vec![RawPropertyData {
+                name: "ФацетСвойство".to_string(),
+                prop_type: "Число".to_string(),
+                is_readonly: false,
+            }],
+            ..Default::default()
+        },
+    ])
+    .expect("Failed to load test types");
+
+    let lookup = TypeMetadataLookup::new(repo);
+    let resolution = TypeResolution {
+        certainty: Certainty::Known,
+        result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
+            kind: MetadataKind::Document,
+            name: "Док1".to_string(),
+            facet: Some(FacetKind::Object),
+            attributes: vec![],
+            tabular_sections: vec![],
+        })),
+        source: ResolutionSource::Static,
+        metadata: ResolutionMetadata {
+            notes: vec![
+                FORM_DATA_SEMANTICS_NOTE.to_string(),
+                format!(
+                    "{}{}",
+                    FORM_DATA_FORM_TYPE_NOTE_PREFIX, "Формы.Документы.Док1.Форма1"
+                ),
+            ],
+            ..Default::default()
+        },
+        active_facet: Some(FacetKind::Object),
+        available_facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+    };
+
+    let properties = lookup.get_properties_with_origin(&resolution);
+    let labels: Vec<&str> = properties
+        .iter()
+        .map(|(property, _origin)| property.name.as_str())
+        .collect();
+
+    let form_attr_idx = labels
+        .iter()
+        .position(|name| *name == "РеквизитФормы")
+        .expect("missing form-shape property");
+    let intrinsic_link_idx = labels
+        .iter()
+        .position(|name| *name == "Ссылка")
+        .expect("missing intrinsic property Ссылка");
+    let facet_prop_idx = labels
+        .iter()
+        .position(|name| *name == "ФацетСвойство")
+        .expect("missing object facet property");
+
+    assert!(
+        form_attr_idx < intrinsic_link_idx,
+        "shape property must appear before intrinsic properties, labels={:?}",
+        labels
+    );
+    assert!(
+        intrinsic_link_idx < facet_prop_idx,
+        "intrinsic properties must appear before facet properties, labels={:?}",
+        labels
+    );
 }
 
 #[test]

@@ -318,9 +318,14 @@ fn dedup_key(candidate: &RankedCandidate) -> String {
         .scope
         .map(|scope| format!("{:?}", scope))
         .unwrap_or_else(|| "none".to_string());
+    let owner = candidate
+        .owner_type
+        .as_deref()
+        .map(|owner| owner.to_lowercase())
+        .unwrap_or_else(|| "none".to_string());
     format!(
-        "{}|{:?}|{}",
-        candidate.label_lower, candidate.item.kind, scope
+        "{}|{:?}|{}|{}",
+        candidate.label_lower, candidate.item.kind, scope, owner
     )
 }
 
@@ -784,7 +789,7 @@ mod tests {
     }
 
     #[test]
-    fn dedup_key_differs_by_scope_and_kind() {
+    fn dedup_key_differs_by_scope_kind_and_owner() {
         let base = ranked(
             "abc",
             CompletionKind::Function,
@@ -809,9 +814,51 @@ mod tests {
             None,
             0.5,
         );
+        let diff_owner = ranked(
+            "abc",
+            CompletionKind::Function,
+            1,
+            Some(SymbolScope::Local),
+            Some("Owner"),
+            0.5,
+        );
 
         assert_ne!(dedup_key(&base), dedup_key(&diff_scope));
         assert_ne!(dedup_key(&base), dedup_key(&diff_kind));
+        assert_ne!(dedup_key(&base), dedup_key(&diff_owner));
+    }
+
+    #[test]
+    fn rank_keeps_candidates_with_different_owner_types() {
+        let ctx = CompletionContext {
+            current_word: "a".to_string(),
+            member_access: true,
+            member_base: None,
+            trigger_char: Some('.'),
+            can_add_statements: true,
+            expects_type: false,
+            can_add_functions: true,
+        };
+
+        let candidates = vec![
+            candidate(
+                "abc",
+                CompletionKind::Property,
+                1,
+                Some(SymbolScope::Global),
+                Some("TypeA"),
+            ),
+            candidate(
+                "abc",
+                CompletionKind::Property,
+                1,
+                Some(SymbolScope::Global),
+                Some("TypeB"),
+            ),
+        ];
+
+        let ranked = rank_candidates(candidates, &ctx);
+        assert_eq!(ranked.candidates.len(), 2);
     }
 
     #[test]

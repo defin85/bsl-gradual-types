@@ -2629,6 +2629,95 @@ mod tests {
     }
 
     #[test]
+    fn form_data_member_completion_includes_shape_intrinsic_and_facet_methods() {
+        let repository = Arc::new(InMemoryTypeRepository::new());
+        repository
+            .load_types(vec![
+                RawTypeData {
+                    name: "Документы.Док1".to_string(),
+                    source: RawDataSource::Configuration,
+                    facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+                    kind: Some(MetadataKind::Document),
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "Формы.Документы.Док1.Форма1".to_string(),
+                    source: RawDataSource::Configuration,
+                    properties: vec![RawPropertyData {
+                        name: "РеквизитФормы".to_string(),
+                        prop_type: "Строка".to_string(),
+                        is_readonly: false,
+                    }],
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "ДокументОбъект".to_string(),
+                    source: RawDataSource::Platform,
+                    facets: vec![FacetKind::Object],
+                    methods: vec![RawMethodData {
+                        name: "Записать".to_string(),
+                        return_type: "Булево".to_string(),
+                        ..Default::default()
+                    }],
+                    properties: vec![RawPropertyData {
+                        name: "ФацетСвойство".to_string(),
+                        prop_type: "Число".to_string(),
+                        is_readonly: false,
+                    }],
+                    ..Default::default()
+                },
+            ])
+            .expect("load types");
+
+        let repo: Arc<dyn TypeRepository> = repository.clone();
+        let metadata_lookup = TypeMetadataLookup::new(repo);
+        let resolution = TypeResolution {
+            certainty: Certainty::Known,
+            result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
+                kind: MetadataKind::Document,
+                name: "Док1".to_string(),
+                facet: Some(FacetKind::Object),
+                attributes: vec![],
+                tabular_sections: vec![],
+            })),
+            source: ResolutionSource::Static,
+            metadata: ResolutionMetadata {
+                notes: vec![
+                    FORM_DATA_SEMANTICS_NOTE.to_string(),
+                    format!(
+                        "{}{}",
+                        FORM_DATA_FORM_TYPE_NOTE_PREFIX, "Формы.Документы.Док1.Форма1"
+                    ),
+                ],
+                ..Default::default()
+            },
+            active_facet: Some(FacetKind::Object),
+            available_facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+        };
+
+        let mut target = Vec::new();
+        add_methods_from_resolution(&metadata_lookup, &resolution, &mut target, 0);
+        add_properties_from_resolution(&metadata_lookup, &resolution, &mut target, 1);
+
+        assert!(target.iter().any(|candidate| {
+            matches!(candidate.item.kind, CompletionKind::Method)
+                && candidate.item.label == "Записать"
+        }));
+        assert!(target.iter().any(|candidate| {
+            matches!(candidate.item.kind, CompletionKind::Property)
+                && candidate.item.label == "РеквизитФормы"
+        }));
+        assert!(target.iter().any(|candidate| {
+            matches!(candidate.item.kind, CompletionKind::Property)
+                && candidate.item.label == "Ссылка"
+        }));
+        assert!(target.iter().any(|candidate| {
+            matches!(candidate.item.kind, CompletionKind::Property)
+                && candidate.item.label == "ПометкаУдаления"
+        }));
+    }
+
+    #[test]
     fn completion_context_expects_type_flags() {
         let content = "Перем Значение: ";
         let ctx = analyze_completion_context(content, 0, content.len() as u32);

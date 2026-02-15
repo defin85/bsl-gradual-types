@@ -602,7 +602,7 @@ Adapter-local reimplementation этих политик MUST NOT использо
 
 ### Requirement: LSP interactive операции v2 используют latency-priority freshness policy с явными лимитами (MUST)
 Для `completion`, `hover`, `signatureHelp` система MUST применять latency-priority policy:
-- сначала пытаться обслужить `requested file version`;
+- сначала пытаться обслужить `requested file version` по фактически `applied_version`;
 - ждать не дольше `intellisense_v2_interactive_wait_budget_ms` (дефолт `120ms`, если ключ не задан);
 - после исчерпания wait budget допускать stale fallback только на snapshot того же `file_id`, который удовлетворяет обоим ограничениям:
   - `version_gap <= intellisense_v2_interactive_max_stale_version_gap` (дефолт `1`);
@@ -613,32 +613,29 @@ Runtime knobs MUST валидироваться и приводиться к д�
 - `intellisense_v2_interactive_max_stale_version_gap` в диапазон `[0, 10]`;
 - `intellisense_v2_interactive_max_stale_age_ms` в диапазон `[0, 10000]`.
 
-Stale fallback MUST использовать snapshot, согласованный по `deps_id` и `settings_id` с текущим запросом. Snapshot с несовпадающими `deps_id` или `settings_id` MUST NOT быть использован как stale fallback. Если подходящего stale snapshot нет, система MUST вернуть ответ без блокировки на дальнейшее ожидание latest.
+Stale fallback MUST использовать snapshot, согласованный по `deps_id` и `settings_id` с текущим запросом. Snapshot с несовпадающими `deps_id` или `settings_id` MUST NOT быть использован как stale fallback.
+
+Дополнительно для completion:
+- при timeout/cancel на latest-path и наличии допустимого stale snapshot система MUST возвращать stale completion как частичный ответ (`isIncomplete=true`);
+- при timeout/cancel и отсутствии допустимого stale snapshot система MUST завершать запрос быстро (без блокировки сверх wait budget) и MAY вернуть empty/partial ответ;
+- completion MUST NOT деградировать в "пусто" исключительно из-за transient latest cancel, если доступен допустимый stale snapshot.
 
 Система MUST явно сигнализировать stale-serving в observability.
 
-#### Scenario: Completion не блокируется до окончания долгого diagnostics
-- **GIVEN** для файла уже доступен snapshot версии `V`
-- **AND** пользователь редактирует файл до версии `V+1`, и `syntax_diagnostics` для `V+1` выполняется долго
-- **WHEN** IDE запрашивает `completion` для `V+1`
-- **THEN** сервер завершает ожидание latest не позднее configured wait budget
-- **AND** ответ использует latest доступный snapshot (включая controlled stale fallback, если `V+1` ещё недоступна и stale snapshot удовлетворяет лимитам)
-- **AND** observability фиксирует факт stale-serving
+#### Scenario: Первый completion после правки отдаёт частичный stale ответ
+- **GIVEN** пользователь ввёл новую строку и `received_version=V+1`, но `applied_version=V`
+- **AND** latest-path запрос для `V+1` не завершился в wait budget
+- **WHEN** IDE запрашивает completion
+- **THEN** сервер возвращает stale-compatible completion по версии `V`
+- **AND** ответ помечен `isIncomplete=true`
+- **AND** запрос завершается без ожидания секундного хвоста
 
 #### Scenario: Нет подходящего stale snapshot
-- **GIVEN** requested версия ещё не готова
-- **AND** последний доступный snapshot превышает допустимый `version_gap` или `stale_age_ms`
-- **WHEN** IDE запрашивает `hover`
+- **GIVEN** requested версия ещё не ready по `applied_version`
+- **AND** последний snapshot превышает допустимый `version_gap` или `stale_age_ms`, либо несовместим по `deps_id/settings_id`
+- **WHEN** IDE запрашивает hover/signatureHelp/completion
 - **THEN** сервер не блокируется дольше wait budget
-- **AND** сервер не использует просроченный stale snapshot
-- **AND** сервер возвращает пустой/частичный результат без ошибки протокола
-
-#### Scenario: Stale snapshot отклоняется из-за несовпадения deps/settings
-- **GIVEN** requested версия ещё не готова
-- **AND** доступен stale snapshot того же `file_id`, но с другим `deps_id` или `settings_id`
-- **WHEN** IDE запрашивает `signatureHelp`
-- **THEN** такой stale snapshot не используется
-- **AND** сервер завершает обработку в пределах wait budget без stale ответа с несовместимой ревизией
+- **AND** сервер не использует несовместимый stale snapshot
 
 ### Requirement: Diagnostics publish остаётся strict latest-version и monotonic по ревизии (MUST)
 Система MUST публиковать `diagnostics` только для актуальной requested version документа.
@@ -691,34 +688,32 @@ Followers MUST получать тот же терминальный outcome, ч
 - **AND** новый leader может появиться только на следующий входящий запрос после очистки in-flight записи
 
 ### Requirement: CPU планирование отделяет interactive и background бюджеты с fairness-гарантией (MUST)
-Система MUST планировать CPU-bound semantic работу так, чтобы background diagnostics не могли полностью занять вычислительную емкость, необходимую для интерактивных операций.
+Система MUST планировать CPU-bound semantic работу так, чтобы background diagnostics не могли полностью занять вычислительную ёмкость, необходимую для интерактивных операций.
 
 При общем числе permits `>= 2` система MUST резервировать как минимум:
 - `1` permit для interactive-класса;
 - `1` permit для background-класса.
 
-Если одна из очередей пуста, система MAY временно давать её свободные permits другой очереди (borrow). При возвращении конкуренции между классами система MUST восстановить гарантированный минимум permits для каждого класса.
+Система MUST приоритизировать control-path orchestration операции (apply changes, wait-for-version coordination) относительно тяжёлых query-path задач.
 
-#### Scenario: Background diagnostics не вызывает starvation интерактивного пути
-- **GIVEN** в системе выполняется серия background diagnostics задач
-- **WHEN** поступает интерактивный `hover` или `completion` запрос
-- **THEN** интерактивный запрос получает вычислительный слот без ожидания завершения всех background задач
-- **AND** интерактивный latency путь не блокируется из-за полного захвата permits background-потоком
+Background-класс MUST NOT заимствовать interactive reserve при наличии interactive waiters.
+Interactive-класс MAY заимствовать background reserve только когда background queue пуста и это не нарушает гарантированный минимум background-прогресса.
 
-#### Scenario: Interactive нагрузка не блокирует diagnostics полностью
-- **GIVEN** в системе идёт непрерывный поток interactive-запросов
-- **WHEN** запланирован diagnostics для того же процесса
-- **THEN** diagnostics получает background permit и выполняет прогресс
-- **AND** система не уходит в полное starvation diagnostics
+#### Scenario: Background load не вытесняет interactive waiters
+- **GIVEN** в системе идёт интенсивный поток background diagnostics/query задач
+- **AND** есть ожидающий интерактивный completion/hover запрос
+- **WHEN** планировщик выбирает следующую задачу
+- **THEN** интерактивный запрос получает слот без ожидания завершения всего background хвоста
+- **AND** background не забирает interactive reserve при наличии interactive waiters
 
-#### Scenario: Borrow permits повышает throughput без потери fairness
-- **GIVEN** background-очередь пуста, а interactive-очередь содержит задачи
-- **WHEN** доступные background permits временно заимствуются interactive-классом
-- **THEN** общая пропускная способность растёт за счёт borrow
-- **AND** при появлении background-задач минимум `1` permit возвращается background-классу
+#### Scenario: Background сохраняет прогресс под interactive нагрузкой
+- **GIVEN** идёт непрерывный поток interactive запросов
+- **WHEN** запланирован diagnostics task
+- **THEN** diagnostics получает минимум background-прогресс
+- **AND** система не уходит в starvation diagnostics
 
 ### Requirement: Observability контракт отражает stale/singleflight/priority поведение фиксированными ключами (MUST)
-Система MUST предоставлять в observability snapshot следующие ключи метрик:
+Система MUST предоставлять в observability snapshot следующие ключи метрик.
 
 Counter keys:
 - `intellisense_v2_interactive_wait_budget_exhausted_total`
@@ -730,6 +725,9 @@ Counter keys:
 - `intellisense_v2_runtime_queue_wait_background_total`
 - `intellisense_v2_runtime_exec_interactive_total`
 - `intellisense_v2_runtime_exec_background_total`
+- `intellisense_v2_completion_stale_fallback_total`
+- `intellisense_v2_completion_fallback_unavailable_total`
+- `intellisense_v2_revision_lag_sample_total`
 
 Histogram keys:
 - `intellisense_v2_singleflight_wait_ms`
@@ -737,22 +735,40 @@ Histogram keys:
 - `intellisense_v2_runtime_queue_wait_background_ms`
 - `intellisense_v2_runtime_exec_interactive_ms`
 - `intellisense_v2_runtime_exec_background_ms`
+- `intellisense_v2_revision_lag_versions`
 
-#### Scenario: Метрики показывают причину ускорения интерактивного ответа
-- **GIVEN** интерактивный запрос обслужен через stale fallback и shared singleflight
+#### Scenario: Метрики показывают lag и fallback причину
+- **GIVEN** completion обслуживается через stale fallback из-за отставания applied revision
 - **WHEN** запрашивается snapshot observability
-- **THEN** snapshot содержит обязательные stale/singleflight ключи
-- **AND** snapshot содержит queue/exec метрики в разрезе `interactive` и `background`
+- **THEN** snapshot содержит обязательные stale/fallback/lag ключи
+- **AND** `revision_lag_versions` и fallback counters отражают факт lag-driven ответа
 
 ### Requirement: Interactive latency quality gate фиксирует warm-path SLO (MUST)
 Система MUST удовлетворять интерактивным latency SLO на warm-path профиле `examples/conf_big` при предзагруженных deps/settings:
 - `p95(intellisense_v2_wait_for_file_version_completion_ms) <= intellisense_v2_interactive_wait_budget_ms + 20ms`;
 - `p95(completion_duration_ms) <= 1500ms`.
 
-SLO MUST проверяться автоматизированным perf smoke-тестом не менее чем на `50` последовательных completion-запросах в рамках одной сессии.
+Дополнительно warm-path quality gate MUST проверять устойчивость completion outcomes:
+- `completion_cancelled_rate <= 0.10`, где `completion_cancelled_rate = intellisense_v2_completion_result_total_cancelled / completion_total`;
+- тестовый прогон MUST включать не менее `50` последовательных completion-запросов в рамках одной сессии.
 
-#### Scenario: Warm-path SLO выдерживается после включения latency-priority policy
+#### Scenario: Warm-path SLO и cancel-rate выдерживаются после latency fix
 - **GIVEN** сервис работает в warm состоянии на `examples/conf_big`
 - **WHEN** выполняется perf smoke из 50 последовательных completion-запросов
 - **THEN** `p95` wait-for-version и `p95` completion-duration укладываются в заявленные SLO
+- **AND** `completion_cancelled_rate` не превышает 10%
+
+### Requirement: LSP runtime отслеживает received и applied ревизии файла раздельно (MUST)
+Система MUST вести для каждого открытого `file_id` две независимые ревизии:
+- `received_version`: последняя версия, полученная transport-слоем из `didOpen/didChange`;
+- `applied_version`: последняя версия, реально применённая runtime writer path к semantic snapshot.
+
+Latency-critical orchestration для interactive операций MUST использовать `applied_version` как критерий фактической готовности snapshot. `received_version` MUST NOT считаться эквивалентом готовности semantic состояния.
+
+#### Scenario: Received версия опережает applied версию
+- **GIVEN** сервер получил `didChange` до версии `V+1`
+- **AND** runtime ещё применил только версию `V`
+- **WHEN** интерактивный completion запрошен для `V+1`
+- **THEN** состояние рассматривается как "latest ещё не applied"
+- **AND** orchestration использует bounded wait/stale policy, а не assumes-ready по received версии
 

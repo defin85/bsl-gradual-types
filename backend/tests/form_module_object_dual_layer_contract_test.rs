@@ -15,7 +15,9 @@ use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, FileId as V2FileId, Se
 use bsl_backend::helpers::hover_formatter::{HoverFormatConfig, HoverOutputFormat};
 use bsl_backend::system::DepsBundleV2;
 use bsl_shared::formatting::DetailLevel;
-use tower_lsp::lsp_types::{CompletionItem, CompletionResponse, Documentation, Position, Url};
+use tower_lsp::lsp_types::{
+    CompletionItem, CompletionItemKind, CompletionResponse, Documentation, Position, Url,
+};
 
 const FILE_PATH: &str = "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl";
 const OWNER_FACET_LABEL: &str = "ДокументОбъект.Док1";
@@ -306,4 +308,91 @@ async fn completion_and_resolve_follow_dual_layer_contract() {
             assert_no_internal_or_legacy_names(&doc, "completion docs");
         }
     }
+}
+
+#[tokio::test]
+async fn completion_selected_member_does_not_trigger_false_nonexistent_property() {
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
+    let index_snapshot = deps_bundle.index_snapshot.clone();
+    let uri =
+        Url::parse("file:///form_module_object_completion_diagnostics_guard.bsl").expect("uri");
+    let completion_content = concat!(
+        "Процедура Тест()\n",
+        "    x = Объект;\n",
+        "    Объект.\n",
+        "КонецПроцедуры\n",
+    );
+
+    let mut host = setup_host(deps_bundle.as_ref());
+    let (file_content, resolved_file_path, ir_program, parse_result) =
+        apply_file(&mut host, V2FileId(1), FILE_PATH, completion_content);
+    let object_offset = completion_content
+        .find("x = Объект")
+        .expect("Объект offset in completion guard")
+        + "x = ".len();
+    let member_access_owner_type_hint = host
+        .analysis()
+        .type_at_byte_offset(V2FileId(1), object_offset as u32)
+        .expect("type_at_byte_offset query");
+    assert!(
+        member_access_owner_type_hint.is_some(),
+        "expected type hint for FormModule.Объект member completion guard"
+    );
+
+    let response = completion_handler::handle_completion_v2(
+        file_content,
+        resolved_file_path,
+        ir_program,
+        Some(parse_result),
+        member_access_owner_type_hint,
+        deps_bundle.semantic_deps.clone(),
+        Position {
+            line: 2,
+            character: utf16_len("    Объект."),
+        },
+        &uri,
+        index_snapshot.as_ref(),
+        false,
+        false,
+    )
+    .await
+    .expect("completion response");
+    assert!(!response.had_error, "completion returned error");
+
+    let completion_items = completion_items(response.response);
+    let labels = completion_items
+        .iter()
+        .map(|item| item.label.clone())
+        .collect::<Vec<_>>();
+    let selected_member = completion_items
+        .into_iter()
+        .find(|item| {
+            matches!(
+                item.kind,
+                Some(CompletionItemKind::PROPERTY) | Some(CompletionItemKind::FIELD)
+            )
+        })
+        .map(|item| item.label)
+        .expect("completion must include at least one property/field for FormModule.Объект");
+
+    let selected_code = format!(
+        "Процедура Тест()\n    Проверка = Объект.{};\nКонецПроцедуры\n",
+        selected_member
+    );
+    let diagnostics =
+        support::semantic_diagnostics_for_code(deps_bundle.as_ref(), FILE_PATH, &selected_code);
+
+    let has_false_nonexistent_property = diagnostics.iter().any(|diag| {
+        let msg = diag.message.as_str();
+        msg.contains(&selected_member)
+            && (msg.contains("Свойство") || msg.contains("Метод"))
+            && (msg.contains("не существует") || msg.contains("не найден"))
+    });
+    assert!(
+        !has_false_nonexistent_property,
+        "completion-selected member '{}' produced false unknown-member diagnostic: {:?}, completion_labels={:?}",
+        selected_member,
+        diagnostics,
+        labels
+    );
 }

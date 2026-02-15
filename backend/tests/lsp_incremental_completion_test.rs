@@ -558,3 +558,139 @@ async fn m8_lsp_completion_manager_module_suggests_implicit_object_symbols() {
         labels
     );
 }
+
+#[tokio::test]
+async fn m8_lsp_completion_object_module_suggests_implicit_object_symbols() {
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
+    let index_snapshot = deps_bundle.index_snapshot.clone();
+
+    let uri = Url::parse("file:///m8_object_implicit_completion.bsl").expect("uri");
+    let module_path = "Documents/Док1/Ext/ObjectModule.bsl";
+    let file_id = V2FileId(1);
+
+    let mut host = setup_host(deps_bundle.as_ref());
+
+    let content_this = concat!("Процедура Тест()\n", "    Этот\n", "КонецПроцедуры\n",);
+    let (file_content, resolved_file_path, ir_program, parse_result) =
+        apply_file(&mut host, file_id, 1, module_path, content_this);
+    let response = completion_handler::handle_completion_v2(
+        file_content,
+        resolved_file_path,
+        ir_program,
+        Some(parse_result),
+        None,
+        deps_bundle.semantic_deps.clone(),
+        Position {
+            line: 1,
+            character: utf16_len("    Этот"),
+        },
+        &uri,
+        index_snapshot.as_ref(),
+        false,
+        false,
+    )
+    .await
+    .expect("completion response");
+    let labels = completion_labels(response.response);
+    assert!(
+        labels.iter().any(|label| label == "ЭтотОбъект"),
+        "completion should include ЭтотОбъект in object module, labels={:?}",
+        labels
+    );
+
+    let content_object = concat!("Процедура Тест()\n", "    Об\n", "КонецПроцедуры\n",);
+    let (file_content, resolved_file_path, ir_program, parse_result) =
+        apply_file(&mut host, file_id, 2, module_path, content_object);
+    let response = completion_handler::handle_completion_v2(
+        file_content,
+        resolved_file_path,
+        ir_program,
+        Some(parse_result),
+        None,
+        deps_bundle.semantic_deps.clone(),
+        Position {
+            line: 1,
+            character: utf16_len("    Об"),
+        },
+        &uri,
+        index_snapshot.as_ref(),
+        false,
+        false,
+    )
+    .await
+    .expect("completion response");
+    let labels = completion_labels(response.response);
+    assert!(
+        labels.iter().any(|label| label == "Объект"),
+        "completion should include Объект in object module, labels={:?}",
+        labels
+    );
+}
+
+#[tokio::test]
+async fn m8_lsp_completion_recordset_module_suggests_implicit_object_symbols() {
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
+    let index_snapshot = deps_bundle.index_snapshot.clone();
+
+    let uri = Url::parse("file:///m8_recordset_implicit_completion.bsl").expect("uri");
+    let module_path = "InformationRegisters/Регистр1/Ext/RecordSetModule.bsl";
+    let file_id = V2FileId(1);
+
+    let mut host = setup_host(deps_bundle.as_ref());
+
+    let content_this = concat!("Процедура Тест()\n", "    Этот\n", "КонецПроцедуры\n",);
+    let (file_content, resolved_file_path, ir_program, parse_result) =
+        apply_file(&mut host, file_id, 1, module_path, content_this);
+    let response = completion_handler::handle_completion_v2(
+        file_content,
+        resolved_file_path,
+        ir_program,
+        Some(parse_result),
+        None,
+        deps_bundle.semantic_deps.clone(),
+        Position {
+            line: 1,
+            character: utf16_len("    Этот"),
+        },
+        &uri,
+        index_snapshot.as_ref(),
+        false,
+        false,
+    )
+    .await
+    .expect("completion response");
+    let labels = completion_labels(response.response);
+    assert!(
+        labels.iter().any(|label| label == "ЭтотОбъект"),
+        "completion should include ЭтотОбъект in recordset module, labels={:?}",
+        labels
+    );
+
+    let content_object = concat!("Процедура Тест()\n", "    Об\n", "КонецПроцедуры\n",);
+    let (file_content, resolved_file_path, ir_program, parse_result) =
+        apply_file(&mut host, file_id, 2, module_path, content_object);
+    let response = completion_handler::handle_completion_v2(
+        file_content,
+        resolved_file_path,
+        ir_program,
+        Some(parse_result),
+        None,
+        deps_bundle.semantic_deps.clone(),
+        Position {
+            line: 1,
+            character: utf16_len("    Об"),
+        },
+        &uri,
+        index_snapshot.as_ref(),
+        false,
+        false,
+    )
+    .await
+    .expect("completion response");
+    let labels = completion_labels(response.response);
+    assert!(
+        labels.iter().any(|label| label == "Объект"),
+        "completion should include Объект in recordset module, labels={:?}",
+        labels
+    );
+}

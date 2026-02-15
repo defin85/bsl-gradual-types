@@ -956,10 +956,16 @@ fn add_properties_from_resolution(
     let owner_type = resolution.type_name();
     let properties = metadata_lookup.get_properties_with_origin(resolution);
     let mut intrinsic_count = 0usize;
+    let mut saw_intrinsic = false;
     for (property, origin) in properties {
         let property_priority = if TypeMetadataLookup::is_intrinsic_property_origin(origin) {
             intrinsic_count += 1;
-            priority.saturating_sub(1)
+            saw_intrinsic = true;
+            // Для form-data pipeline сохраняем provider order в source_priority:
+            // shape/repository-before-intrinsic -> intrinsic -> facet/fallback-repository.
+            priority.saturating_add(1)
+        } else if saw_intrinsic {
+            priority.saturating_add(2)
         } else {
             priority
         };
@@ -2556,7 +2562,7 @@ mod tests {
     }
 
     #[test]
-    fn add_properties_from_resolution_prioritizes_intrinsic_form_data_properties() {
+    fn add_properties_from_resolution_preserves_form_data_provider_order_priorities() {
         let repository = Arc::new(InMemoryTypeRepository::new());
         repository
             .load_types(vec![
@@ -2573,6 +2579,17 @@ mod tests {
                     properties: vec![RawPropertyData {
                         name: "РеквизитФормы".to_string(),
                         prop_type: "Строка".to_string(),
+                        is_readonly: false,
+                    }],
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "ДокументОбъект".to_string(),
+                    source: RawDataSource::Platform,
+                    facets: vec![FacetKind::Object],
+                    properties: vec![RawPropertyData {
+                        name: "ФацетСвойство".to_string(),
+                        prop_type: "Число".to_string(),
                         is_readonly: false,
                     }],
                     ..Default::default()
@@ -2613,19 +2630,25 @@ mod tests {
             .iter()
             .find(|candidate| candidate.item.label == "Ссылка")
             .expect("missing intrinsic Ссылка");
-        assert_eq!(link.source_priority, 0);
+        assert_eq!(link.source_priority, 2);
 
         let deletion_mark = target
             .iter()
             .find(|candidate| candidate.item.label == "ПометкаУдаления")
             .expect("missing intrinsic ПометкаУдаления");
-        assert_eq!(deletion_mark.source_priority, 0);
+        assert_eq!(deletion_mark.source_priority, 2);
 
         let form_attr = target
             .iter()
             .find(|candidate| candidate.item.label == "РеквизитФормы")
             .expect("missing form attribute");
         assert_eq!(form_attr.source_priority, 1);
+
+        let facet_prop = target
+            .iter()
+            .find(|candidate| candidate.item.label == "ФацетСвойство")
+            .expect("missing facet property");
+        assert_eq!(facet_prop.source_priority, 3);
     }
 
     #[test]

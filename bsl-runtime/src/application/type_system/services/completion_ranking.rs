@@ -364,6 +364,21 @@ fn merge_sources(left: &[u8], right: &[u8]) -> Vec<u8> {
 }
 
 fn stable_order(a: &RankedCandidate, b: &RankedCandidate) -> std::cmp::Ordering {
+    if a.signals.member_access && b.signals.member_access {
+        return a
+            .source_priority
+            .cmp(&b.source_priority)
+            .then_with(|| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .then_with(|| a.label_lower.cmp(&b.label_lower))
+            .then_with(|| kind_rank(a.item.kind).cmp(&kind_rank(b.item.kind)))
+            .then_with(|| scope_rank(a.scope).cmp(&scope_rank(b.scope)))
+            .then_with(|| a.owner_type.cmp(&b.owner_type));
+    }
+
     b.score
         .partial_cmp(&a.score)
         .unwrap_or(std::cmp::Ordering::Equal)
@@ -885,6 +900,31 @@ mod tests {
             None,
             0.5,
         );
+
+        assert_eq!(stable_order(&a, &b), Ordering::Less);
+    }
+
+    #[test]
+    fn stable_order_for_member_access_prefers_source_priority_over_score() {
+        let mut a = ranked(
+            "abc",
+            CompletionKind::Property,
+            1,
+            Some(SymbolScope::Global),
+            Some("TypeA"),
+            0.3,
+        );
+        a.signals.member_access = true;
+
+        let mut b = ranked(
+            "abc",
+            CompletionKind::Property,
+            2,
+            Some(SymbolScope::Global),
+            Some("TypeA"),
+            0.9,
+        );
+        b.signals.member_access = true;
 
         assert_eq!(stable_order(&a, &b), Ordering::Less);
     }

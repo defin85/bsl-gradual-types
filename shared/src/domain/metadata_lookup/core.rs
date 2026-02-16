@@ -6,7 +6,7 @@ use crate::domain::signature_index::MethodSignature;
 use crate::domain::types::{
     ConcreteType, FacetKind, GenericType, MetadataKind, PlatformType, RawMethodData, RawParamData,
     RawPropertyData, RawTabularSectionData, RawTypeData, ResolutionResult, TypeResolution,
-    FORM_DATA_FORM_TYPE_NOTE_PREFIX, FORM_DATA_SEMANTICS_NOTE,
+    FORM_DATA_CANONICAL_TYPE_NAME, FORM_DATA_FORM_TYPE_NOTE_PREFIX, FORM_DATA_SEMANTICS_NOTE,
 };
 
 const PROPERTY_ORIGIN_REPOSITORY: &str = "repository";
@@ -106,9 +106,48 @@ impl TypeMetadataLookup {
             }
         }
 
+        if let Some(form_data_methods) = self.get_form_data_methods(resolution) {
+            return form_data_methods;
+        }
+
         // Приоритет 1 - Lazy lookup через active_facet (для конфигурационных типов)
         if let Some(facet) = resolution.active_facet {
-            if let Some(facet_methods) = self.get_facet_methods(resolution, facet) {
+            if let Some(mut facet_methods) = self.get_facet_methods(resolution, facet) {
+                let mut seen = facet_methods
+                    .iter()
+                    .map(|method| method.name.to_lowercase())
+                    .collect::<std::collections::HashSet<_>>();
+                let mut merged_owner_types = std::collections::HashSet::<String>::new();
+
+                let mut merge_owner_signatures = |owner_type: String| {
+                    let owner_key = owner_type.trim().to_lowercase();
+                    if owner_key.is_empty() || !merged_owner_types.insert(owner_key) {
+                        return;
+                    }
+                    for method in self
+                        .repository
+                        .get_methods_from_signature_index(&owner_type)
+                        .into_iter()
+                        .map(Self::method_signature_to_raw)
+                    {
+                        let key = method.name.to_lowercase();
+                        if seen.insert(key) {
+                            facet_methods.push(method);
+                        }
+                    }
+                };
+
+                // Экспортные методы модулей индексируются по concrete facet-типу
+                // (например, "РегистрСведенийМенеджер.<Имя>"). Этот key должен
+                // участвовать в merge первым.
+                merge_owner_signatures(resolution.type_name());
+                if let Some(owner_type) = self.normalize_type_name(resolution) {
+                    merge_owner_signatures(owner_type);
+                }
+                if let Some(owner_type) = self.extract_type_name(resolution) {
+                    merge_owner_signatures(owner_type);
+                }
+
                 return facet_methods;
             }
         }
@@ -212,6 +251,50 @@ impl TypeMetadataLookup {
         }
 
         vec![]
+    }
+
+    fn get_form_data_methods(&self, resolution: &TypeResolution) -> Option<Vec<RawMethodData>> {
+        if !Self::has_contextual_note(resolution, FORM_DATA_SEMANTICS_NOTE) {
+            return None;
+        }
+
+        let mut methods: Vec<RawMethodData> = Vec::new();
+        let mut seen_positions = std::collections::HashMap::<String, usize>::new();
+        let mut push_unique = |method: RawMethodData| {
+            let key = method.name.to_lowercase();
+            if seen_positions.contains_key(&key) {
+                return;
+            }
+            seen_positions.insert(key, methods.len());
+            methods.push(method);
+        };
+
+        if let Some(form_type_name) =
+            Self::contextual_note_value(resolution, FORM_DATA_FORM_TYPE_NOTE_PREFIX)
+        {
+            if let Some(form_type) = self.repository.find_type(form_type_name) {
+                for method in form_type.methods {
+                    push_unique(method);
+                }
+            }
+        }
+
+        for method in self
+            .repository
+            .get_methods_from_signature_index(FORM_DATA_CANONICAL_TYPE_NAME)
+            .into_iter()
+            .map(Self::method_signature_to_raw)
+        {
+            push_unique(method);
+        }
+
+        if let Some(form_data_type) = self.repository.find_type(FORM_DATA_CANONICAL_TYPE_NAME) {
+            for method in form_data_type.methods {
+                push_unique(method);
+            }
+        }
+
+        Some(methods)
     }
 
     /// Найти сигнатуру метода/функции для вызова (глобальной или объектной)

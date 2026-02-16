@@ -366,17 +366,18 @@ fn merge_sources(left: &[u8], right: &[u8]) -> Vec<u8> {
 fn stable_order(a: &RankedCandidate, b: &RankedCandidate) -> std::cmp::Ordering {
     if a.signals.member_access && b.signals.member_access {
         return a
-            .source_priority
-            .cmp(&b.source_priority)
+            .label_lower
+            .cmp(&b.label_lower)
+            .then_with(|| a.item.label.cmp(&b.item.label))
+            .then_with(|| kind_rank(a.item.kind).cmp(&kind_rank(b.item.kind)))
+            .then_with(|| scope_rank(a.scope).cmp(&scope_rank(b.scope)))
+            .then_with(|| a.owner_type.cmp(&b.owner_type))
+            .then_with(|| a.source_priority.cmp(&b.source_priority))
             .then_with(|| {
                 b.score
                     .partial_cmp(&a.score)
                     .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .then_with(|| a.label_lower.cmp(&b.label_lower))
-            .then_with(|| kind_rank(a.item.kind).cmp(&kind_rank(b.item.kind)))
-            .then_with(|| scope_rank(a.scope).cmp(&scope_rank(b.scope)))
-            .then_with(|| a.owner_type.cmp(&b.owner_type));
+            });
     }
 
     b.score
@@ -905,28 +906,90 @@ mod tests {
     }
 
     #[test]
-    fn stable_order_for_member_access_prefers_source_priority_over_score() {
+    fn stable_order_for_member_access_prefers_alphabetical_label_over_source_and_score() {
         let mut a = ranked(
-            "abc",
+            "zeta",
             CompletionKind::Property,
             1,
             Some(SymbolScope::Global),
             Some("TypeA"),
-            0.3,
+            0.9,
         );
         a.signals.member_access = true;
 
         let mut b = ranked(
-            "abc",
+            "alpha",
             CompletionKind::Property,
             2,
             Some(SymbolScope::Global),
             Some("TypeA"),
-            0.9,
+            0.3,
         );
         b.signals.member_access = true;
 
-        assert_eq!(stable_order(&a, &b), Ordering::Less);
+        assert_eq!(stable_order(&a, &b), Ordering::Greater);
+    }
+
+    #[test]
+    fn stable_order_for_member_access_uses_original_case_as_tie_break() {
+        let mut a = ranked(
+            "Apple",
+            CompletionKind::Property,
+            1,
+            Some(SymbolScope::Global),
+            Some("TypeA"),
+            0.5,
+        );
+        a.signals.member_access = true;
+
+        let mut b = ranked(
+            "apple",
+            CompletionKind::Property,
+            1,
+            Some(SymbolScope::Global),
+            Some("TypeA"),
+            0.5,
+        );
+        b.signals.member_access = true;
+
+        assert_eq!(stable_order(&a, &b), a.item.label.cmp(&b.item.label));
+    }
+
+    #[test]
+    fn rank_member_access_orders_labels_alphabetically_after_merge() {
+        let ctx = ctx("", true);
+        let candidates = vec![
+            candidate(
+                "zeta",
+                CompletionKind::Property,
+                0,
+                Some(SymbolScope::Global),
+                Some("TypeA"),
+            ),
+            candidate(
+                "alpha",
+                CompletionKind::Property,
+                3,
+                Some(SymbolScope::Global),
+                Some("TypeA"),
+            ),
+            candidate(
+                "Beta",
+                CompletionKind::Property,
+                2,
+                Some(SymbolScope::Global),
+                Some("TypeA"),
+            ),
+        ];
+
+        let ranked = rank_candidates(candidates, &ctx);
+        let labels: Vec<&str> = ranked
+            .candidates
+            .iter()
+            .map(|candidate| candidate.item.label.as_str())
+            .collect();
+
+        assert_eq!(labels, vec!["alpha", "Beta", "zeta"]);
     }
 
     #[test]

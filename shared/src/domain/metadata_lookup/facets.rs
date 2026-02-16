@@ -10,6 +10,34 @@ use crate::domain::types::{
 };
 
 impl TypeMetadataLookup {
+    fn is_register_object_facet(kind: MetadataKind, facet: FacetKind) -> bool {
+        matches!(
+            (kind, facet),
+            (MetadataKind::InformationRegister, FacetKind::Object)
+                | (MetadataKind::AccumulationRegister, FacetKind::Object)
+                | (MetadataKind::AccountingRegister, FacetKind::Object)
+                | (MetadataKind::CalculationRegister, FacetKind::Object)
+        )
+    }
+
+    fn append_recordset_intrinsic_properties(properties: &mut Vec<RawPropertyData>) {
+        let mut push_if_missing = |name: &str, prop_type: &str, is_readonly: bool| {
+            if properties.iter().any(|property| property.name == name) {
+                return;
+            }
+            properties.push(RawPropertyData {
+                name: name.to_string(),
+                prop_type: prop_type.to_string(),
+                is_readonly,
+            });
+        };
+
+        // Дополняем gap в data-source: для RecordSetModule эти системные members
+        // должны быть доступны даже если их нет в platform/config metadata.
+        push_if_missing("ОбменДанными", "ОбменДанными", false);
+        push_if_missing("ДополнительныеСвойства", "Структура", false);
+    }
+
     /// Определяет имя платформенного типа на основе вида метаданных и активного фасета
     ///
     /// # Mapping таблица:
@@ -64,7 +92,7 @@ impl TypeMetadataLookup {
             (InformationRegister, Manager) => {
                 Some("РегистрСведенийМенеджер.<Имя регистра сведений>")
             }
-            (InformationRegister, Collection) => {
+            (InformationRegister, Object) | (InformationRegister, Collection) => {
                 Some("РегистрСведенийНаборЗаписей.<Имя регистра сведений>")
             }
             (InformationRegister, Selection) => {
@@ -75,11 +103,31 @@ impl TypeMetadataLookup {
             (AccumulationRegister, Manager) => {
                 Some("РегистрНакопленияМенеджер.<Имя регистра накопления>")
             }
-            (AccumulationRegister, Collection) => {
+            (AccumulationRegister, Object) | (AccumulationRegister, Collection) => {
                 Some("РегистрНакопленияНаборЗаписей.<Имя регистра накопления>")
             }
             (AccumulationRegister, Selection) => {
                 Some("РегистрНакопленияВыборка.<Имя регистра накопления>")
+            }
+
+            // Accounting Registers mapping
+            (AccountingRegister, Manager) => {
+                Some("РегистрБухгалтерииМенеджер.<Имя регистра бухгалтерии>")
+            }
+            (AccountingRegister, Object) | (AccountingRegister, Collection) => {
+                Some("РегистрБухгалтерииНаборЗаписей.<Имя регистра бухгалтерии>")
+            }
+            (AccountingRegister, Selection) => {
+                Some("РегистрБухгалтерииВыборка.<Имя регистра бухгалтерии>")
+            }
+
+            // Calculation Registers mapping
+            (CalculationRegister, Manager) => Some("РегистрРасчетаМенеджер.<Имя регистра расчета>"),
+            (CalculationRegister, Object) | (CalculationRegister, Collection) => {
+                Some("РегистрРасчетаНаборЗаписей.<Имя регистра расчета>")
+            }
+            (CalculationRegister, Selection) => {
+                Some("РегистрРасчетаВыборка.<Имя регистра расчета>")
             }
 
             // Неподдерживаемые комбинации
@@ -318,6 +366,12 @@ impl TypeMetadataLookup {
                         });
                     }
                 }
+            }
+        }
+
+        if let Some(kind) = self.extract_metadata_kind(resolution) {
+            if Self::is_register_object_facet(kind, facet) {
+                Self::append_recordset_intrinsic_properties(&mut combined_properties);
             }
         }
 

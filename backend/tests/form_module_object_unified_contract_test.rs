@@ -9,17 +9,26 @@ pub mod position;
 #[path = "../src/bin/lsp_server/handlers/completion.rs"]
 mod completion_handler;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, FileId as V2FileId, SettingsId};
 use bsl_backend::helpers::hover_formatter::{HoverFormatConfig, HoverOutputFormat};
 use bsl_backend::system::DepsBundleV2;
+use bsl_shared::domain::types::{
+    FacetKind, MetadataKind, RawDataSource, RawPropertyData, RawTypeData,
+};
 use bsl_shared::formatting::DetailLevel;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionResponse, Documentation, Position, Url,
 };
 
 const FILE_PATH: &str = "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl";
+const OBJECT_MODULE_FILE_PATH: &str = "Documents/ЗаказНаряды/Ext/ObjectModule.bsl";
+const RECORDSET_MODULE_FILE_PATH: &str =
+    "InformationRegisters/ТестовыйРегистрСведений/Ext/RecordSetModule.bsl";
+const CHARTS_OF_ACCOUNTS_MANAGER_FILE_PATH: &str =
+    "ChartsOfAccounts/Хозрасчетный/Ext/ManagerModule.bsl";
 const FORM_DATA_LABEL: &str = "ДанныеФормыСтруктура";
 const LEGACY_ALIAS: &str = "ДанныеФормыОбъект";
 const INTERNAL_DESCRIPTOR_MARKER: &str = "contextual:";
@@ -38,7 +47,7 @@ fn setup_host_with_detail_level(
         deps: deps_bundle.semantic_deps.clone(),
     });
     host.apply_change(ChangeV2::SetSettingsSnapshot {
-        settings_id: SettingsId::from_hash("form-module-object-dual-layer-contract"),
+        settings_id: SettingsId::from_hash("form-module-object-unified-contract"),
         diagnostics_detail_level,
     });
     host
@@ -46,6 +55,53 @@ fn setup_host_with_detail_level(
 
 fn setup_host(deps_bundle: &DepsBundleV2) -> AnalysisHostV2 {
     setup_host_with_detail_level(deps_bundle, DetailLevel::Full)
+}
+
+fn deps_bundle_v2_with_conf_fixture() -> Arc<DepsBundleV2> {
+    let backend_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = backend_root.parent().expect("workspace root");
+    let syntax_helper = workspace_root.join("examples").join("syntax_helper");
+    let config_root = workspace_root
+        .join("examples")
+        .join("conf")
+        .join("conf_test");
+
+    assert!(
+        syntax_helper.exists(),
+        "syntax helper path does not exist: {}",
+        syntax_helper.display()
+    );
+    assert!(
+        config_root.exists(),
+        "conf fixture path does not exist: {}",
+        config_root.display()
+    );
+
+    support::deps_bundle_v2_for_paths(
+        Some(syntax_helper.as_path()),
+        Some(config_root.as_path()),
+        Some("8.3.25"),
+    )
+}
+
+fn inject_predefined_chart_of_accounts_type(deps_bundle: &DepsBundleV2) {
+    deps_bundle
+        .semantic_deps
+        .repository
+        .upsert_types(vec![RawTypeData {
+            name: "ПланыСчетов.Хозрасчетный".to_string(),
+            english_name: "ChartOfAccounts.Хозрасчетный".to_string(),
+            source: RawDataSource::Configuration,
+            kind: Some(MetadataKind::ChartOfAccounts),
+            facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+            properties: vec![RawPropertyData {
+                name: "ГотоваяПродукция".to_string(),
+                prop_type: "__predefined_manager__:ПланСчетовСсылка.Хозрасчетный".to_string(),
+                is_readonly: true,
+            }],
+            ..Default::default()
+        }])
+        .expect("Failed to inject chart of accounts predefined fixture type");
 }
 
 fn apply_file(
@@ -110,7 +166,7 @@ fn assert_no_internal_or_legacy_names(value: &str, channel: &str) {
 }
 
 #[test]
-fn diagnostics_hover_and_type_at_position_follow_dual_layer_contract() {
+fn diagnostics_hover_and_type_at_position_follow_unified_form_contract() {
     let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
     let code = concat!(
         "Процедура Тест()\n",
@@ -252,11 +308,11 @@ fn diagnostics_hover_and_type_at_position_follow_dual_layer_contract() {
 }
 
 #[tokio::test]
-async fn completion_and_resolve_follow_dual_layer_contract() {
+async fn completion_and_resolve_follow_unified_form_contract() {
     let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
     let index_snapshot = deps_bundle.index_snapshot.clone();
     let uri =
-        Url::parse("file:///form_module_object_dual_layer_contract_completion.bsl").expect("uri");
+        Url::parse("file:///form_module_object_unified_contract_completion.bsl").expect("uri");
     let content = concat!("Процедура Тест()\n", "    Объект.\n", "КонецПроцедуры\n",);
 
     let mut host = setup_host(deps_bundle.as_ref());
@@ -285,6 +341,12 @@ async fn completion_and_resolve_follow_dual_layer_contract() {
     assert!(!response.had_error, "completion returned error");
     let items = completion_items(response.response);
     assert!(!items.is_empty(), "expected completion items");
+    assert!(
+        !items
+            .iter()
+            .any(|item| item.label == "ПолучитьСсылкуНового"),
+        "FormModule.Объект completion must not expose applied object-facet method ПолучитьСсылкуНового"
+    );
 
     for item in items.iter().take(40) {
         assert_no_internal_or_legacy_names(&item.label, "completion label");
@@ -310,6 +372,258 @@ async fn completion_and_resolve_follow_dual_layer_contract() {
             assert_no_internal_or_legacy_names(&doc, "completion docs");
         }
     }
+}
+
+#[test]
+fn owner_member_fallback_is_applied_only_outside_form_module() {
+    let form_deps_bundle = support::deps_bundle_v2_with_syntax_helper();
+    let applied_deps_bundle = deps_bundle_v2_with_conf_fixture();
+
+    let has_undeclared = |diagnostics: &[bsl_shared::domain::types::TypeDiagnostic],
+                          identifier: &str| {
+        diagnostics.iter().any(|diag| {
+            diag.message.contains("Необъявленная переменная") && diag.message.contains(identifier)
+        })
+    };
+    let messages = |diagnostics: &[bsl_shared::domain::types::TypeDiagnostic]| {
+        diagnostics
+            .iter()
+            .map(|diag| diag.message.clone())
+            .collect::<Vec<_>>()
+    };
+
+    let form_code = concat!(
+        "Процедура Тест()\n",
+        "    Проверка = ЗначениеЗаполнено(ДополнительныеСвойства);\n",
+        "КонецПроцедуры\n",
+    );
+    let form_diagnostics =
+        support::semantic_diagnostics_for_code(form_deps_bundle.as_ref(), FILE_PATH, form_code);
+    assert!(
+        has_undeclared(&form_diagnostics, "ДополнительныеСвойства"),
+        "FormModule must stay strict for bare owner members, diagnostics={:?}",
+        messages(&form_diagnostics)
+    );
+
+    let object_code = concat!(
+        "Процедура Тест()\n",
+        "    Проверка = НомерЗаказ;\n",
+        "КонецПроцедуры\n",
+    );
+    let object_diagnostics = support::semantic_diagnostics_for_code(
+        applied_deps_bundle.as_ref(),
+        OBJECT_MODULE_FILE_PATH,
+        object_code,
+    );
+    assert!(
+        !has_undeclared(&object_diagnostics, "НомерЗаказ"),
+        "ObjectModule must resolve bare owner members via fallback, diagnostics={:?}",
+        messages(&object_diagnostics)
+    );
+
+    let recordset_code = concat!(
+        "Процедура Тест()\n",
+        "    Проверка1 = ТестовыйРесурс;\n",
+        "    Проверка2 = ТестовыйРеквизит;\n",
+        "    Проверка3 = ТестовоеИзмерение;\n",
+        "КонецПроцедуры\n",
+    );
+    let recordset_diagnostics = support::semantic_diagnostics_for_code(
+        applied_deps_bundle.as_ref(),
+        RECORDSET_MODULE_FILE_PATH,
+        recordset_code,
+    );
+    assert!(
+        !has_undeclared(&recordset_diagnostics, "ТестовыйРесурс"),
+        "RecordSetModule must resolve bare owner member ТестовыйРесурс, diagnostics={:?}",
+        messages(&recordset_diagnostics)
+    );
+    assert!(
+        !has_undeclared(&recordset_diagnostics, "ТестовыйРеквизит"),
+        "RecordSetModule must resolve bare owner member ТестовыйРеквизит, diagnostics={:?}",
+        messages(&recordset_diagnostics)
+    );
+    assert!(
+        !has_undeclared(&recordset_diagnostics, "ТестовоеИзмерение"),
+        "RecordSetModule must resolve bare owner member ТестовоеИзмерение, diagnostics={:?}",
+        messages(&recordset_diagnostics)
+    );
+}
+
+#[test]
+fn recordset_module_resolves_system_members_and_manager_path_call() {
+    let deps_bundle = deps_bundle_v2_with_conf_fixture();
+    let owner_type = "РегистрСведенийМенеджер.ТестовыйРегистрСведений";
+    let manager_method = "ВладелецБезопасногоХранилища";
+
+    deps_bundle
+        .semantic_deps
+        .repository
+        .add_config_method_signature(
+            owner_type,
+            bsl_shared::domain::signature_index::MethodSignature::new(
+                manager_method.to_string(),
+                Some(owner_type.to_string()),
+                vec![],
+                Some("Булево".to_string()),
+                None,
+                None,
+                bsl_shared::domain::signature_index::SignatureSource::Configuration,
+                None,
+                bsl_shared::domain::signature_index::ContextRequirements::ServerOnly,
+            ),
+        );
+
+    let code = concat!(
+        "Процедура Тест()\n",
+        "    Проверка1 = ОбменДанными.Загрузка;\n",
+        "    Проверка2 = ДополнительныеСвойства.Свойство(\"Ключ\");\n",
+        "    Проверка3 = РегистрыСведений.ТестовыйРегистрСведений.ВладелецБезопасногоХранилища();\n",
+        "КонецПроцедуры\n",
+    );
+    let diagnostics = support::semantic_diagnostics_for_code(
+        deps_bundle.as_ref(),
+        RECORDSET_MODULE_FILE_PATH,
+        code,
+    );
+    let messages = diagnostics
+        .iter()
+        .map(|diag| diag.message.clone())
+        .collect::<Vec<_>>();
+
+    let has_undeclared = |identifier: &str| {
+        diagnostics.iter().any(|diag| {
+            diag.message.contains("Необъявленная переменная") && diag.message.contains(identifier)
+        })
+    };
+    assert!(
+        !has_undeclared("ОбменДанными"),
+        "RecordSetModule must resolve bare owner member ОбменДанными, diagnostics={:?}",
+        messages
+    );
+    assert!(
+        !has_undeclared("ДополнительныеСвойства"),
+        "RecordSetModule must resolve bare owner member ДополнительныеСвойства, diagnostics={:?}",
+        messages
+    );
+
+    let has_manager_path_call_error = diagnostics.iter().any(|diag| {
+        diag.message.contains(manager_method)
+            && (diag
+                .message
+                .contains("Неопределенная процедура или функция")
+                || diag.message.contains("не существует")
+                || diag.message.contains("не найден"))
+    });
+    assert!(
+        !has_manager_path_call_error,
+        "RecordSetModule manager path-call should resolve exported method, diagnostics={:?}",
+        messages
+    );
+}
+
+#[tokio::test]
+async fn manager_predefined_member_resolves_and_is_visible_in_hover_completion() {
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
+    inject_predefined_chart_of_accounts_type(deps_bundle.as_ref());
+
+    let diagnostics_code = concat!(
+        "Процедура Тест()\n",
+        "    Счет = ПланыСчетов.Хозрасчетный.ГотоваяПродукция;\n",
+        "КонецПроцедуры\n",
+    );
+    let diagnostics = support::semantic_diagnostics_for_code(
+        deps_bundle.as_ref(),
+        CHARTS_OF_ACCOUNTS_MANAGER_FILE_PATH,
+        diagnostics_code,
+    );
+    let diagnostic_messages = diagnostics
+        .iter()
+        .map(|diag| diag.message.clone())
+        .collect::<Vec<_>>();
+    let has_predefined_resolution_error = diagnostics.iter().any(|diag| {
+        diag.message.contains("ГотоваяПродукция")
+            && (diag.message.contains("Необъявленная переменная")
+                || diag
+                    .message
+                    .contains("Неопределенная процедура или функция")
+                || diag.message.contains("не существует")
+                || diag.message.contains("не найден"))
+    });
+    assert!(
+        !has_predefined_resolution_error,
+        "Predefined manager member path must resolve without diagnostics, diagnostics={:?}",
+        diagnostic_messages
+    );
+
+    let hover = support::hover_for_code(
+        deps_bundle.as_ref(),
+        CHARTS_OF_ACCOUNTS_MANAGER_FILE_PATH,
+        diagnostics_code,
+        1,
+        utf16_len("    Счет = ПланыСчетов.Хозрасчетный.ГотоваяПродук"),
+    )
+    .expect("hover text for predefined manager member");
+    assert!(
+        hover.contains("ГотоваяПродукция"),
+        "hover must mention predefined member name, hover={}",
+        hover
+    );
+    assert!(
+        hover.contains("ПланСчетовСсылка.Хозрасчетный"),
+        "hover must expose decoded predefined member type, hover={}",
+        hover
+    );
+    assert!(
+        !hover.contains("__predefined_manager__:"),
+        "hover must not leak internal predefined marker, hover={}",
+        hover
+    );
+
+    let index_snapshot = deps_bundle.index_snapshot.clone();
+    let uri = Url::parse("file:///manager_predefined_completion.bsl").expect("uri");
+    let completion_content = concat!(
+        "Процедура Тест()\n",
+        "    ПланыСчетов.Хозрасчетный.\n",
+        "КонецПроцедуры\n",
+    );
+    let mut host = setup_host(deps_bundle.as_ref());
+    let (file_content, resolved_file_path, ir_program, parse_result) = apply_file(
+        &mut host,
+        V2FileId(1),
+        CHARTS_OF_ACCOUNTS_MANAGER_FILE_PATH,
+        completion_content,
+    );
+
+    let response = completion_handler::handle_completion_v2(
+        file_content,
+        resolved_file_path,
+        ir_program,
+        Some(parse_result),
+        None,
+        deps_bundle.semantic_deps.clone(),
+        Position {
+            line: 1,
+            character: utf16_len("    ПланыСчетов.Хозрасчетный."),
+        },
+        &uri,
+        index_snapshot.as_ref(),
+        false,
+        false,
+    )
+    .await
+    .expect("completion response");
+    assert!(!response.had_error, "completion returned error");
+    let items = completion_items(response.response);
+    let labels = items
+        .iter()
+        .map(|item| item.label.clone())
+        .collect::<Vec<_>>();
+    assert!(
+        labels.iter().any(|label| label == "ГотоваяПродукция"),
+        "completion must include predefined manager member, labels={:?}",
+        labels
+    );
 }
 
 #[tokio::test]

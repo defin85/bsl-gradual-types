@@ -703,6 +703,188 @@ fn test_get_methods_prefers_signature_index() {
 }
 
 #[test]
+fn test_get_methods_merges_manager_facet_with_owner_specific_signatures() {
+    use crate::domain::signature_index::{ContextRequirements, MethodSignature, SignatureSource};
+
+    let resolution = TypeResolution::metadata_type(
+        MetadataKind::InformationRegister,
+        "ТестРегистр",
+        Some(FacetKind::Manager),
+    );
+    let owner_type_name = resolution.type_name();
+
+    let repo = Arc::new(InMemoryTypeRepository::new());
+    repo.load_types(vec![RawTypeData {
+        name: "РегистрСведенийМенеджер".to_string(),
+        english_name: "InformationRegisterManager".to_string(),
+        description: "Менеджер регистра сведений".to_string(),
+        category: "Регистры сведений".to_string(),
+        source: RawDataSource::Platform,
+        methods: vec![RawMethodData {
+            name: "СтандартныйМетод".to_string(),
+            english_name: String::new(),
+            return_type: "Булево".to_string(),
+            params: vec![],
+            description: None,
+            is_deprecated: false,
+            is_constructor: false,
+            context_requirements: None,
+            return_facet: None,
+        }],
+        properties: vec![],
+        facets: vec![FacetKind::Manager],
+        kind: None,
+        attributes: vec![],
+        tabular_sections: vec![],
+        enum_values: vec![],
+        generic_info: None,
+        collection_item_type: None,
+        module_paths: None,
+    }])
+    .expect("Failed to load manager platform type");
+
+    repo.populate_signature_index(|index| {
+        let exported = MethodSignature::new(
+            "СервисПодключен".to_string(),
+            Some(owner_type_name.clone()),
+            vec![],
+            Some("Булево".to_string()),
+            None,
+            None,
+            SignatureSource::Configuration,
+            None,
+            ContextRequirements::ServerOnly,
+        );
+        index.add_config_method(TypeId::new(&owner_type_name), exported);
+    });
+
+    let lookup = TypeMetadataLookup::new(repo);
+
+    let methods = lookup.get_methods(&resolution);
+    let names: Vec<&str> = methods.iter().map(|method| method.name.as_str()).collect();
+
+    assert!(
+        names.iter().any(|name| *name == "СтандартныйМетод"),
+        "facet methods should remain available, methods={:?}",
+        names
+    );
+    assert!(
+        names.iter().any(|name| *name == "СервисПодключен"),
+        "owner-specific exported methods should be merged, methods={:?}",
+        names
+    );
+}
+
+#[test]
+fn test_information_register_object_facet_uses_recordset_platform_members() {
+    let repo = Arc::new(InMemoryTypeRepository::new());
+    repo.load_types(vec![RawTypeData {
+        name: "РегистрСведенийНаборЗаписей".to_string(),
+        english_name: "InformationRegisterRecordSet".to_string(),
+        description: "Набор записей регистра сведений".to_string(),
+        category: "Регистры сведений".to_string(),
+        source: RawDataSource::Platform,
+        methods: vec![RawMethodData {
+            name: "Записать".to_string(),
+            english_name: String::new(),
+            return_type: String::new(),
+            params: vec![],
+            description: None,
+            is_deprecated: false,
+            is_constructor: false,
+            context_requirements: None,
+            return_facet: None,
+        }],
+        properties: vec![RawPropertyData {
+            name: "ОбменДанными".to_string(),
+            prop_type: "ОбменДанными".to_string(),
+            is_readonly: false,
+        }],
+        facets: vec![FacetKind::Collection],
+        kind: None,
+        attributes: vec![],
+        tabular_sections: vec![],
+        enum_values: vec![],
+        generic_info: None,
+        collection_item_type: None,
+        module_paths: None,
+    }])
+    .expect("Failed to load recordset platform type");
+
+    let lookup = TypeMetadataLookup::new(repo);
+    let resolution = TypeResolution::metadata_type(
+        MetadataKind::InformationRegister,
+        "Регистр1",
+        Some(FacetKind::Object),
+    );
+
+    let methods = lookup.get_methods(&resolution);
+    let properties = lookup.get_properties(&resolution);
+
+    assert!(
+        methods.iter().any(|method| method.name == "Записать"),
+        "object facet for information registers should expose recordset methods, methods={:?}",
+        methods.iter().map(|m| m.name.as_str()).collect::<Vec<_>>()
+    );
+    assert!(
+        properties
+            .iter()
+            .any(|property| property.name == "ОбменДанными"),
+        "object facet for information registers should expose recordset properties, properties={:?}",
+        properties
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_information_register_object_facet_adds_intrinsic_system_properties_when_missing() {
+    let repo = Arc::new(InMemoryTypeRepository::new());
+    repo.load_types(vec![RawTypeData {
+        name: "РегистрыСведений.Регистр1".to_string(),
+        english_name: "InformationRegisters.Register1".to_string(),
+        description: "Тестовый регистр сведений".to_string(),
+        category: "Регистры сведений".to_string(),
+        source: RawDataSource::Configuration,
+        methods: vec![],
+        properties: vec![],
+        facets: vec![FacetKind::Manager, FacetKind::Object],
+        kind: Some(MetadataKind::InformationRegister),
+        attributes: vec![],
+        tabular_sections: vec![],
+        enum_values: vec![],
+        generic_info: None,
+        collection_item_type: None,
+        module_paths: None,
+    }])
+    .expect("Failed to load information register metadata type");
+
+    let lookup = TypeMetadataLookup::new(repo);
+    let resolution = TypeResolution::metadata_type(
+        MetadataKind::InformationRegister,
+        "Регистр1",
+        Some(FacetKind::Object),
+    );
+    let properties = lookup.get_properties(&resolution);
+    let names: Vec<&str> = properties
+        .iter()
+        .map(|property| property.name.as_str())
+        .collect();
+
+    assert!(
+        names.iter().any(|name| *name == "ОбменДанными"),
+        "recordset object facet must include intrinsic property ОбменДанными, properties={:?}",
+        names
+    );
+    assert!(
+        names.iter().any(|name| *name == "ДополнительныеСвойства"),
+        "recordset object facet must include intrinsic property ДополнительныеСвойства, properties={:?}",
+        names
+    );
+}
+
+#[test]
 fn test_get_methods_fallback_to_raw_when_no_signature_index() {
     let repo = Arc::new(InMemoryTypeRepository::new());
 
@@ -1180,6 +1362,114 @@ fn test_form_data_provider_chain_orders_shape_then_intrinsic_then_raw_type() {
         labels.iter().all(|name| *name != "ФацетСвойство"),
         "object facet fallback must not participate in form-data chain, labels={:?}",
         labels
+    );
+}
+
+#[test]
+fn test_form_data_methods_do_not_use_object_facet_fallback() {
+    let repo = Arc::new(InMemoryTypeRepository::new());
+    repo.load_types(vec![
+        RawTypeData {
+            name: "Документы.Док1".to_string(),
+            source: RawDataSource::Configuration,
+            facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+            kind: Some(MetadataKind::Document),
+            ..Default::default()
+        },
+        RawTypeData {
+            name: "Формы.Документы.Док1.Форма1".to_string(),
+            source: RawDataSource::Configuration,
+            methods: vec![RawMethodData {
+                name: "МетодФормы".to_string(),
+                english_name: String::new(),
+                return_type: "Булево".to_string(),
+                params: vec![],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
+            }],
+            ..Default::default()
+        },
+        RawTypeData {
+            name: "ДанныеФормыСтруктура".to_string(),
+            source: RawDataSource::Platform,
+            methods: vec![RawMethodData {
+                name: "МетодДанныхФормы".to_string(),
+                english_name: String::new(),
+                return_type: "Булево".to_string(),
+                params: vec![],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
+            }],
+            ..Default::default()
+        },
+        RawTypeData {
+            name: "ДокументОбъект".to_string(),
+            source: RawDataSource::Platform,
+            facets: vec![FacetKind::Object],
+            methods: vec![RawMethodData {
+                name: "ФацетМетод".to_string(),
+                english_name: String::new(),
+                return_type: "Булево".to_string(),
+                params: vec![],
+                description: None,
+                is_deprecated: false,
+                is_constructor: false,
+                context_requirements: None,
+                return_facet: None,
+            }],
+            ..Default::default()
+        },
+    ])
+    .expect("Failed to load test types");
+
+    let lookup = TypeMetadataLookup::new(repo);
+    let resolution = TypeResolution {
+        certainty: Certainty::Known,
+        result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
+            kind: MetadataKind::Document,
+            name: "Док1".to_string(),
+            facet: Some(FacetKind::Object),
+            attributes: vec![],
+            tabular_sections: vec![],
+        })),
+        source: ResolutionSource::Static,
+        metadata: ResolutionMetadata {
+            notes: vec![
+                FORM_DATA_SEMANTICS_NOTE.to_string(),
+                format!(
+                    "{}{}",
+                    FORM_DATA_FORM_TYPE_NOTE_PREFIX, "Формы.Документы.Док1.Форма1"
+                ),
+            ],
+            ..Default::default()
+        },
+        active_facet: Some(FacetKind::Object),
+        available_facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+    };
+
+    let methods = lookup.get_methods(&resolution);
+    let method_names: Vec<&str> = methods.iter().map(|method| method.name.as_str()).collect();
+
+    assert!(
+        method_names.iter().any(|name| *name == "МетодФормы"),
+        "form-shape methods must participate in form-data chain, methods={:?}",
+        method_names
+    );
+    assert!(
+        method_names.iter().any(|name| *name == "МетодДанныхФормы"),
+        "form-data canonical methods must participate in form-data chain, methods={:?}",
+        method_names
+    );
+    assert!(
+        method_names.iter().all(|name| *name != "ФацетМетод"),
+        "object facet fallback must not participate in form-data methods chain, methods={:?}",
+        method_names
     );
 }
 

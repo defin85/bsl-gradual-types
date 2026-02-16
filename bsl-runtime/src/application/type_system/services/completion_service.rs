@@ -944,10 +944,13 @@ fn with_sort_text(
 ) -> CompletionItem {
     let score_rank = ((1.0 - score).clamp(0.0, 1.0) * 1000.0) as u32;
     // Primary key is alphabetical label for predictable UX in editors.
-    // Keep source/score as stable tie-breakers for deterministic ordering.
+    // Keep original case/source/score as stable tie-breakers for deterministic ordering.
     item.sort_text = Some(format!(
-        "{}-{:02}-{:04}",
-        label_lower, source_priority, score_rank
+        "{}-{}-{:02}-{:04}",
+        label_lower,
+        item.label.as_str(),
+        source_priority,
+        score_rank
     ));
     item
 }
@@ -2670,6 +2673,15 @@ mod tests {
         let input = "0123456789";
         let trimmed = trim_to_window(input, 4);
         assert_eq!(trimmed, "6789");
+    }
+
+    #[test]
+    fn with_sort_text_uses_original_label_as_case_tie_break() {
+        let item = CompletionItem::new("Apple".to_string(), CompletionKind::Property);
+        let with_sort = with_sort_text(item, 0.5, 1, "apple");
+        let sort_text = with_sort.sort_text.expect("sort_text should be set");
+
+        assert_eq!(sort_text, "apple-Apple-01-0500");
     }
 
     #[test]

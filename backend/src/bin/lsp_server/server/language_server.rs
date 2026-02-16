@@ -1473,6 +1473,17 @@ impl LanguageServer for BslLanguageServer {
                                                     position.character,
                                                 );
                                             let line_prefix = line_text.get(..cursor_byte)?;
+                                            // Some clients place cursor exactly on '.' when requesting completion.
+                                            // Include that char into prefix so owner hint can still be resolved.
+                                            let line_prefix = if line_text
+                                                .get(cursor_byte..)
+                                                .and_then(|tail| tail.chars().next())
+                                                == Some('.')
+                                            {
+                                                line_text.get(..cursor_byte + 1).unwrap_or(line_prefix)
+                                            } else {
+                                                line_prefix
+                                            };
                                             let dot_in_line = line_prefix.rfind('.')?;
                                             let receiver = line_prefix.get(..dot_in_line)?.trim_end();
                                             let (probe_byte, _) = receiver

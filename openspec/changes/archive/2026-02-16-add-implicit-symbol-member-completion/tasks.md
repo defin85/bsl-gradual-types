@@ -23,5 +23,5 @@
 
 ## 4. Validation
 - [x] 4.1 `openspec validate add-implicit-symbol-member-completion --strict --no-interactive`
-- [ ] 4.2 Review change с владельцами `analysis-v2` и `completion_service`.
-- [ ] 4.3 Проверить regression matrix и зафиксировать baseline/after latency метрики для интерактивных completion-сценариев.
+- [x] 4.2 Review change с владельцами `analysis-v2` и `completion_service`.
+- [x] 4.3 Проверить regression matrix и зафиксировать baseline/after latency метрики для интерактивных completion-сценариев.

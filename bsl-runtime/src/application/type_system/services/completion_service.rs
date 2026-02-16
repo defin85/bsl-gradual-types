@@ -4,16 +4,18 @@
 
 use anyhow::Result;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, Span};
 
+use bsl_shared::domain::code_location::{CodeLocation, ModuleType};
 use bsl_shared::domain::metadata_constants::get_collection_kind;
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::SignatureIndex;
 use bsl_shared::domain::types::{
-    ConcreteType, FacetKind, MetadataKind, ResolutionResult, SpecialType,
+    ConcreteType, ContextualTypeDescriptor, FacetKind, MetadataKind, ResolutionResult, SpecialType,
 };
 use bsl_shared::domain::{CompletionItem, CompletionKind, TypeMetadataLookup, TypeResolution};
 use bsl_shared::ir::{ScopeId, ScopeKind, SemanticNodeKind, SemanticProgram};
@@ -572,18 +574,34 @@ pub fn analyze_completion_context(content: &str, line: u32, column: u32) -> Comp
     let line_index = line as usize;
 
     // Get current line and prefix
-    let (_current_line, line_prefix_raw) = if line_index < lines.len() {
+    let (_current_line, line_prefix_raw, cursor_char) = if line_index < lines.len() {
         let line_content = lines[line_index];
         // Convert UTF-16 offset -> UTF-8 byte offset
         let column_index = utf16_to_byte_offset(line_content, column);
-        (line_content, &line_content[..column_index])
+        let line_prefix_raw = line_content.get(..column_index).unwrap_or(line_content);
+        let cursor_char = line_content
+            .get(column_index..)
+            .and_then(|tail| tail.chars().next());
+        (line_content, line_prefix_raw, cursor_char)
     } else {
-        ("", "")
+        ("", "", None)
     };
 
     let in_string_or_comment = is_in_string_or_comment(line_prefix_raw);
 
-    let line_prefix = trim_to_window(line_prefix_raw, CONTEXT_WINDOW_CHARS);
+    // Some clients request completion with cursor positioned on '.' itself.
+    // Treat this as member-access context to avoid falling back to keyword completion.
+    let effective_prefix_raw = if !in_string_or_comment {
+        if let Some(cursor_char) = cursor_char.filter(|ch| *ch == '.' || *ch == '(') {
+            format!("{line_prefix_raw}{cursor_char}")
+        } else {
+            line_prefix_raw.to_string()
+        }
+    } else {
+        line_prefix_raw.to_string()
+    };
+
+    let line_prefix = trim_to_window(&effective_prefix_raw, CONTEXT_WINDOW_CHARS);
     let line_trimmed = line_prefix.trim_end();
 
     let trigger_char = (!in_string_or_comment)
@@ -600,7 +618,10 @@ pub fn analyze_completion_context(content: &str, line: u32, column: u32) -> Comp
     let member_access = !in_string_or_comment && is_member_access_context(line_trimmed);
 
     // Extract current word
-    let current_word = extract_word_at_position(content, line, column).unwrap_or_default();
+    let mut current_word = extract_word_at_position(content, line, column).unwrap_or_default();
+    if member_access && line_trimmed.ends_with('.') {
+        current_word.clear();
+    }
 
     CompletionContext {
         current_word,
@@ -922,9 +943,11 @@ fn with_sort_text(
     label_lower: &str,
 ) -> CompletionItem {
     let score_rank = ((1.0 - score).clamp(0.0, 1.0) * 1000.0) as u32;
+    // Primary key is alphabetical label for predictable UX in editors.
+    // Keep source/score as stable tie-breakers for deterministic ordering.
     item.sort_text = Some(format!(
-        "{:04}-{:02}-{}",
-        score_rank, source_priority, label_lower
+        "{}-{:02}-{:04}",
+        label_lower, source_priority, score_rank
     ));
     item
 }
@@ -1016,6 +1039,15 @@ fn resolve_member_owner_type_sync(
     let scope_position = resolve_completion_scope_position(ir_program, file_content, line, column)?;
     let byte_offset = scope_position.byte_offset;
     let scope_rank = &scope_position.scope_rank;
+
+    if let Some(resolution) = resolve_implicit_member_owner_type_from_module_context(
+        ctx,
+        ir_program,
+        &scope_position,
+        base_name,
+    ) {
+        return Some(resolution);
+    }
 
     #[derive(Debug)]
     struct BestInit {
@@ -1163,6 +1195,141 @@ fn resolve_member_owner_type_sync(
     }
 
     resolved.filter(|t| !t.is_unknown())
+}
+
+fn parse_owner_kind(owner_type: &str) -> Option<(MetadataKind, &str)> {
+    let (xml_kind, object_name) = owner_type.split_once('.')?;
+    let kind = MetadataKind::from_xml_tag(xml_kind)?;
+    Some((kind, object_name))
+}
+
+fn resolve_type_from_contextual_descriptor(
+    resolver: Option<&TypeResolver>,
+    descriptor: &ContextualTypeDescriptor,
+) -> TypeResolution {
+    match descriptor {
+        ContextualTypeDescriptor::PlatformType { type_name } => {
+            resolve_type_from_string(resolver, type_name)
+        }
+        ContextualTypeDescriptor::ConfigurationFacet { kind, name, facet } => {
+            TypeResolution::metadata_type(*kind, name, Some(*facet))
+        }
+        ContextualTypeDescriptor::FormType { .. }
+        | ContextualTypeDescriptor::FormElementsType { .. } => {
+            resolve_type_from_string(resolver, &descriptor.canonical_type_name())
+        }
+        ContextualTypeDescriptor::FormDataObject {
+            kind, owner_name, ..
+        } => {
+            let mut resolution =
+                TypeResolution::metadata_type(*kind, owner_name, Some(FacetKind::Object));
+            for note in descriptor.resolution_metadata_notes() {
+                if !resolution.metadata.notes.contains(&note) {
+                    resolution.metadata.notes.push(note);
+                }
+            }
+            resolution
+        }
+    }
+}
+
+fn resolve_implicit_member_owner_type_from_module_context(
+    ctx: &CompletionAnalysisContext<'_>,
+    ir_program: &SemanticProgram,
+    scope_position: &CompletionScopePosition,
+    base_name: &str,
+) -> Option<TypeResolution> {
+    if !is_implicit_context_symbol(base_name) {
+        return None;
+    }
+
+    let base_lower = base_name.to_lowercase();
+    let mut current_scope = Some(scope_position.scope_id);
+    let mut visible = false;
+    while let Some(scope_id) = current_scope {
+        let Some(scope) = ir_program.get_scope(scope_id) else {
+            break;
+        };
+        if scope
+            .variables
+            .keys()
+            .any(|name| name.to_lowercase() == base_lower)
+        {
+            visible = true;
+            break;
+        }
+        current_scope = scope.parent;
+    }
+
+    if !visible {
+        return None;
+    }
+
+    let location = CodeLocation::determine_from_path(Path::new(ctx.file_path)).ok()?;
+
+    let descriptor = match location.module_type {
+        ModuleType::FormModule {
+            form_name,
+            owner_type,
+        } => {
+            let (kind, owner_name) = parse_owner_kind(&owner_type)?;
+            let owner_name = owner_name.to_string();
+
+            match base_lower.as_str() {
+                "этотобъект" | "этаформа" | "форма" => {
+                    ContextualTypeDescriptor::FormType {
+                        kind,
+                        owner_name,
+                        form_name,
+                    }
+                }
+                "объект" => ContextualTypeDescriptor::FormDataObject {
+                    kind,
+                    owner_name,
+                    form_name,
+                },
+                "элементы" => ContextualTypeDescriptor::FormElementsType {
+                    kind,
+                    owner_name,
+                    form_name,
+                },
+                "параметры" => ContextualTypeDescriptor::PlatformType {
+                    type_name: "Структура".to_string(),
+                },
+                _ => return None,
+            }
+        }
+        ModuleType::ManagerModule { owner_type } => {
+            if !matches!(base_lower.as_str(), "этотобъект" | "объект") {
+                return None;
+            }
+            let (kind, owner_name) = parse_owner_kind(&owner_type)?;
+            ContextualTypeDescriptor::ConfigurationFacet {
+                kind,
+                name: owner_name.to_string(),
+                facet: FacetKind::Manager,
+            }
+        }
+        ModuleType::ObjectModule { owner_type } | ModuleType::RecordSetModule { owner_type } => {
+            if !matches!(base_lower.as_str(), "этотобъект" | "объект") {
+                return None;
+            }
+            let (kind, owner_name) = parse_owner_kind(&owner_type)?;
+            ContextualTypeDescriptor::ConfigurationFacet {
+                kind,
+                name: owner_name.to_string(),
+                facet: FacetKind::Object,
+            }
+        }
+        _ => return None,
+    };
+
+    let resolution = resolve_type_from_contextual_descriptor(Some(ctx.resolver), &descriptor);
+    if resolution.is_unknown() || resolution.is_dynamic() {
+        None
+    } else {
+        Some(resolution)
+    }
 }
 
 fn resolve_receiver_types_from_expression(
@@ -1581,6 +1748,7 @@ fn dedup_resolutions(resolutions: Vec<TypeResolution>) -> Vec<TypeResolution> {
 #[derive(Debug, Clone)]
 struct CompletionScopePosition {
     byte_offset: u32,
+    scope_id: ScopeId,
     scope_rank: HashMap<ScopeId, usize>,
 }
 
@@ -1842,6 +2010,7 @@ fn resolve_completion_scope_position(
 
     Some(CompletionScopePosition {
         byte_offset,
+        scope_id,
         scope_rank,
     })
 }
@@ -2529,6 +2698,21 @@ mod tests {
         assert!(ctx.member_access);
         assert_eq!(ctx.member_base.as_deref(), Some("Объект"));
         assert_eq!(ctx.trigger_char, Some('.'));
+    }
+
+    #[test]
+    fn completion_context_detects_member_access_when_cursor_is_on_dot() {
+        let content = "Объект.";
+        let (line, column) = utf16_column(content, ".");
+        let ctx = analyze_completion_context(content, line, column);
+
+        assert!(ctx.member_access);
+        assert_eq!(ctx.member_base.as_deref(), Some("Объект"));
+        assert_eq!(ctx.trigger_char, Some('.'));
+        assert!(
+            ctx.current_word.is_empty(),
+            "cursor-on-dot should not keep previous identifier as prefix"
+        );
     }
 
     #[test]
@@ -3600,6 +3784,121 @@ mod tests {
         );
         assert!(
             labels.contains(&"Количество".to_string()),
+            "labels: {:?}",
+            labels
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_resolves_implicit_form_object_member_access_without_hint() {
+        let repository = Arc::new(InMemoryTypeRepository::new());
+        repository
+            .load_types(vec![
+                RawTypeData {
+                    name: "Документы.Док1".to_string(),
+                    source: RawDataSource::Configuration,
+                    facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+                    kind: Some(MetadataKind::Document),
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "Формы.Документы.Док1.Форма1".to_string(),
+                    source: RawDataSource::Configuration,
+                    properties: vec![RawPropertyData {
+                        name: "РеквизитФормы".to_string(),
+                        prop_type: "Строка".to_string(),
+                        is_readonly: false,
+                    }],
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "ДокументОбъект".to_string(),
+                    source: RawDataSource::Platform,
+                    facets: vec![FacetKind::Object],
+                    methods: vec![RawMethodData {
+                        name: "Записать".to_string(),
+                        return_type: "Булево".to_string(),
+                        ..Default::default()
+                    }],
+                    properties: vec![RawPropertyData {
+                        name: "ФацетСвойство".to_string(),
+                        prop_type: "Число".to_string(),
+                        is_readonly: false,
+                    }],
+                    ..Default::default()
+                },
+            ])
+            .expect("load types");
+
+        let repo: Arc<dyn bsl_shared::domain::repository::TypeRepository> = repository.clone();
+        let resolver = Arc::new(TypeResolver::new(repo.clone()));
+        let metadata_lookup = TypeMetadataLookup::new(repo.clone());
+        let index = IntellisenseIndexStore::new("cfg", "platform");
+
+        let content = concat!("Процедура Тест()\n", "    Объект.\n", "КонецПроцедуры\n");
+        let file_path = "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl";
+        let line = 1;
+        // Cursor is positioned on '.' (not after it) to emulate editor behavior.
+        let column = "    Объект".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+
+        let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+            signature_index: repo.get_signature_index_clone(),
+            resolver: Some(resolver.clone()),
+            repository: repo.clone(),
+            platform_signatures_loaded: false,
+        });
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(ChangeV2::SetDepsSnapshot {
+            deps_id: DepsSnapshotId::from_hash("test"),
+            deps,
+        });
+        host.apply_change(ChangeV2::SetSettingsSnapshot {
+            settings_id: SettingsId::from_hash("test"),
+            diagnostics_detail_level: DetailLevel::Full,
+        });
+        host.apply_change(ChangeV2::SetFile {
+            file_id: V2FileId(1),
+            text: Arc::from(content.to_string()),
+            version: 0,
+            path: Arc::from(file_path),
+        });
+        let analysis = host.analysis();
+        let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
+
+        let ctx = CompletionAnalysisContext {
+            ir_program: Some(ir_program),
+            resolver: resolver.as_ref(),
+            file_path,
+            parse_result: None,
+            member_access_owner_type_hint: None,
+            include_flow_sensitive: false,
+        };
+
+        let result = get_completion_with_analysis(
+            content,
+            line,
+            column,
+            Some("file:///completion_form_module_implicit_owner_test.bsl"),
+            &index,
+            &metadata_lookup,
+            Some(&ctx),
+        )
+        .await
+        .expect("completion ok");
+
+        let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
+        assert!(
+            labels.contains(&"Записать".to_string()),
+            "labels: {:?}",
+            labels
+        );
+        assert!(
+            labels.contains(&"Ссылка".to_string()),
+            "labels: {:?}",
+            labels
+        );
+        assert!(
+            labels.contains(&"ПометкаУдаления".to_string()),
             "labels: {:?}",
             labels
         );

@@ -263,9 +263,88 @@ mod tests {
 
         assert!(result.contains("показано 10 из 20"));
         assert!(result.contains("Метод0"));
-        assert!(result.contains("Метод9"));
-        assert!(!result.contains("Метод10"));
+        assert!(result.contains("Метод10"));
+        assert!(!result.contains("Метод19"));
         assert!(result.contains("... и ещё 10 методов"));
+    }
+
+    #[test]
+    fn test_methods_sorted_alphabetically_in_hover() {
+        use bsl_shared::domain::types::{FacetKind, RawDataSource, RawTypeData};
+
+        let repo = Arc::new(InMemoryTypeRepository::new());
+        repo.load_types(vec![RawTypeData {
+            name: "ТестовыйТип".to_string(),
+            english_name: "TestType".to_string(),
+            description: "Тип для тестирования".to_string(),
+            category: "Test".to_string(),
+            source: RawDataSource::Platform,
+            methods: vec![
+                RawMethodData {
+                    name: "Яблоко".to_string(),
+                    english_name: "Apple".to_string(),
+                    return_type: "Строка".to_string(),
+                    params: vec![],
+                    description: None,
+                    is_deprecated: false,
+                    is_constructor: false,
+                    context_requirements: None,
+                    return_facet: None,
+                },
+                RawMethodData {
+                    name: "Абрикос".to_string(),
+                    english_name: "Apricot".to_string(),
+                    return_type: "Строка".to_string(),
+                    params: vec![],
+                    description: None,
+                    is_deprecated: false,
+                    is_constructor: false,
+                    context_requirements: None,
+                    return_facet: None,
+                },
+                RawMethodData {
+                    name: "Банан".to_string(),
+                    english_name: "Banana".to_string(),
+                    return_type: "Строка".to_string(),
+                    params: vec![],
+                    description: None,
+                    is_deprecated: false,
+                    is_constructor: false,
+                    context_requirements: None,
+                    return_facet: None,
+                },
+            ],
+            properties: vec![],
+            facets: vec![FacetKind::Object],
+            kind: None,
+            attributes: vec![],
+            tabular_sections: vec![],
+            enum_values: vec![],
+            generic_info: None,
+            collection_item_type: None,
+            module_paths: None,
+        }])
+        .expect("load types");
+
+        let metadata_lookup = TypeMetadataLookup::new(repo);
+        let config = HoverFormatConfig {
+            detail_level: DetailLevel::Full,
+            max_methods: 10,
+            ..Default::default()
+        };
+        let resolution = create_test_resolution();
+
+        let result = HoverBuilder::new(&config)
+            .add_methods(&resolution, &metadata_lookup)
+            .build();
+
+        let idx_apricot = result.find("Абрикос").expect("Абрикос");
+        let idx_banana = result.find("Банан").expect("Банан");
+        let idx_apple = result.find("Яблоко").expect("Яблоко");
+        assert!(
+            idx_apricot < idx_banana && idx_banana < idx_apple,
+            "methods should be alphabetically sorted, result={result}"
+        );
     }
 
     #[test]
@@ -290,6 +369,100 @@ mod tests {
         assert!(result.contains("Свойство4"));
         assert!(!result.contains("Свойство5"));
         assert!(result.contains("... и ещё 5 свойств"));
+    }
+
+    #[test]
+    fn test_properties_sorted_alphabetically_in_hover() {
+        use bsl_shared::domain::types::{FacetKind, RawDataSource, RawTypeData};
+
+        let repo = Arc::new(InMemoryTypeRepository::new());
+        repo.load_types(vec![RawTypeData {
+            name: "ТестовыйТип".to_string(),
+            english_name: "TestType".to_string(),
+            description: "Тип для тестирования".to_string(),
+            category: "Test".to_string(),
+            source: RawDataSource::Platform,
+            methods: vec![],
+            properties: vec![
+                RawPropertyData {
+                    name: "Яблоко".to_string(),
+                    prop_type: "Строка".to_string(),
+                    is_readonly: false,
+                },
+                RawPropertyData {
+                    name: "Абрикос".to_string(),
+                    prop_type: "Строка".to_string(),
+                    is_readonly: false,
+                },
+                RawPropertyData {
+                    name: "Банан".to_string(),
+                    prop_type: "Строка".to_string(),
+                    is_readonly: false,
+                },
+            ],
+            facets: vec![FacetKind::Object],
+            kind: None,
+            attributes: vec![],
+            tabular_sections: vec![],
+            enum_values: vec![],
+            generic_info: None,
+            collection_item_type: None,
+            module_paths: None,
+        }])
+        .expect("load types");
+
+        let metadata_lookup = TypeMetadataLookup::new(repo);
+        let config = HoverFormatConfig {
+            detail_level: DetailLevel::Detailed,
+            max_properties: 10,
+            ..Default::default()
+        };
+        let resolution = create_test_resolution();
+
+        let result = HoverBuilder::new(&config)
+            .add_properties(&resolution, &metadata_lookup)
+            .build();
+
+        let idx_apricot = result.find("Абрикос").expect("Абрикос");
+        let idx_banana = result.find("Банан").expect("Банан");
+        let idx_apple = result.find("Яблоко").expect("Яблоко");
+        assert!(
+            idx_apricot < idx_banana && idx_banana < idx_apple,
+            "properties should be alphabetically sorted, result={result}"
+        );
+    }
+
+    #[test]
+    fn test_available_facets_sorted_alphabetically_in_hover() {
+        use bsl_shared::domain::types::FacetKind;
+
+        let config = HoverFormatConfig {
+            detail_level: DetailLevel::Detailed,
+            ..Default::default()
+        };
+
+        let resolution = TypeResolution {
+            result: ResolutionResult::Concrete(ConcreteType::Platform(PlatformType {
+                name: "ТестовыйТип".to_string(),
+            })),
+            certainty: Certainty::Known,
+            source: ResolutionSource::Static,
+            metadata: ResolutionMetadata::default(),
+            active_facet: Some(FacetKind::Object),
+            available_facets: vec![
+                FacetKind::Selection,
+                FacetKind::Reference,
+                FacetKind::Manager,
+                FacetKind::Object,
+            ],
+        };
+
+        let result = HoverBuilder::new(&config)
+            .add_facet_info(&resolution)
+            .build();
+
+        assert!(result.contains("**Фасет:** Объект"));
+        assert!(result.contains("**Доступные фасеты:** Выборка, Менеджер, Объект, Ссылка"));
     }
 
     // === MILESTONE 3.16: Тесты для format_unknown_metadata_object ===
@@ -641,6 +814,13 @@ mod tests {
         assert!(result.contains("Материалы"));
         assert!(result.contains("2 колонок"));
         assert!(result.contains("1 колонок"));
+
+        let idx_materials = result.find("Материалы").expect("Материалы");
+        let idx_works = result.find("Работы").expect("Работы");
+        assert!(
+            idx_materials < idx_works,
+            "tabular sections should be alphabetically sorted, result={result}"
+        );
     }
 
     #[test]

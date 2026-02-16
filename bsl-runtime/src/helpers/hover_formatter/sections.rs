@@ -14,7 +14,13 @@ pub fn format_methods_section(
     resolution: &TypeResolution,
     metadata_lookup: &TypeMetadataLookup,
 ) -> Option<String> {
-    let methods = metadata_lookup.get_methods(resolution);
+    let mut methods = metadata_lookup.get_methods(resolution);
+    methods.sort_by(|left, right| {
+        left.name
+            .to_lowercase()
+            .cmp(&right.name.to_lowercase())
+            .then_with(|| left.name.cmp(&right.name))
+    });
 
     if methods.is_empty() {
         // Проверяем - если это тип-коллекция без методов, показываем warning
@@ -179,7 +185,13 @@ pub fn format_properties_section(
     resolution: &TypeResolution,
     metadata_lookup: &TypeMetadataLookup,
 ) -> Option<String> {
-    let properties = metadata_lookup.get_properties(resolution);
+    let mut properties = metadata_lookup.get_properties(resolution);
+    properties.sort_by(|left, right| {
+        left.name
+            .to_lowercase()
+            .cmp(&right.name.to_lowercase())
+            .then_with(|| left.name.cmp(&right.name))
+    });
 
     if properties.is_empty() {
         return None;
@@ -231,7 +243,13 @@ pub fn format_tabular_sections_section(
         return None;
     }
 
-    let sections = metadata_lookup.get_tabular_sections(resolution);
+    let mut sections = metadata_lookup.get_tabular_sections(resolution);
+    sections.sort_by(|left, right| {
+        left.name
+            .to_lowercase()
+            .cmp(&right.name.to_lowercase())
+            .then_with(|| left.name.cmp(&right.name))
+    });
 
     if sections.is_empty() {
         return None;
@@ -296,24 +314,31 @@ pub fn format_facet_info(
 
     // Показать доступные фасеты для данного типа
     if !resolution.available_facets.is_empty() {
-        let facets_list = resolution
+        let mut facets_list = resolution
             .available_facets
             .iter()
             .map(|f| match f {
-                bsl_shared::domain::types::FacetKind::Manager => "Менеджер",
-                bsl_shared::domain::types::FacetKind::Object => "Объект",
-                bsl_shared::domain::types::FacetKind::Reference => "Ссылка",
-                bsl_shared::domain::types::FacetKind::Selection => "Выборка",
-                bsl_shared::domain::types::FacetKind::List => "Список",
-                bsl_shared::domain::types::FacetKind::Metadata => "Метаданные",
-                bsl_shared::domain::types::FacetKind::Constructor => "Конструктор",
-                bsl_shared::domain::types::FacetKind::Collection => "Коллекция",
-                bsl_shared::domain::types::FacetKind::Singleton => "Одиночный",
+                bsl_shared::domain::types::FacetKind::Manager => "Менеджер".to_string(),
+                bsl_shared::domain::types::FacetKind::Object => "Объект".to_string(),
+                bsl_shared::domain::types::FacetKind::Reference => "Ссылка".to_string(),
+                bsl_shared::domain::types::FacetKind::Selection => "Выборка".to_string(),
+                bsl_shared::domain::types::FacetKind::List => "Список".to_string(),
+                bsl_shared::domain::types::FacetKind::Metadata => "Метаданные".to_string(),
+                bsl_shared::domain::types::FacetKind::Constructor => "Конструктор".to_string(),
+                bsl_shared::domain::types::FacetKind::Collection => "Коллекция".to_string(),
+                bsl_shared::domain::types::FacetKind::Singleton => "Одиночный".to_string(),
             })
-            .collect::<Vec<_>>()
-            .join(", ");
+            .collect::<Vec<_>>();
+        facets_list.sort_by(|left, right| {
+            left.to_lowercase()
+                .cmp(&right.to_lowercase())
+                .then_with(|| left.cmp(right))
+        });
 
-        result.push_str(&format!("\n\n**Доступные фасеты:** {}", facets_list));
+        result.push_str(&format!(
+            "\n\n**Доступные фасеты:** {}",
+            facets_list.join(", ")
+        ));
     }
 
     Some(result)

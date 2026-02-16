@@ -1,4 +1,4 @@
-//! Контрактные проверки dual-layer policy для `FormModule.Объект`
+//! Контрактные проверки strict form-data policy для `FormModule.Объект`
 //! на user-facing каналах: diagnostics, hover, completion, type-at-position.
 
 mod support;
@@ -20,8 +20,7 @@ use tower_lsp::lsp_types::{
 };
 
 const FILE_PATH: &str = "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl";
-const OWNER_FACET_LABEL: &str = "ДокументОбъект.Док1";
-const FORM_DATA_SUFFIX: &str = "данные формы: ДанныеФормыСтруктура";
+const FORM_DATA_LABEL: &str = "ДанныеФормыСтруктура";
 const LEGACY_ALIAS: &str = "ДанныеФормыОбъект";
 const INTERNAL_DESCRIPTOR_MARKER: &str = "contextual:";
 
@@ -128,8 +127,13 @@ fn diagnostics_hover_and_type_at_position_follow_dual_layer_contract() {
             panic!("expected NonExistentProperty diagnostic, got: {diagnostics:#?}")
         });
     assert!(
-        non_existent_diag.message.contains(OWNER_FACET_LABEL),
-        "diagnostic should use owner facet label, got: {}",
+        non_existent_diag.message.contains(FORM_DATA_LABEL),
+        "diagnostic should use form-data label, got: {}",
+        non_existent_diag.message
+    );
+    assert!(
+        !non_existent_diag.message.contains("ДокументОбъект."),
+        "diagnostic should not contain owner-facet label, got: {}",
         non_existent_diag.message
     );
     for diag in &diagnostics {
@@ -161,17 +165,15 @@ fn diagnostics_hover_and_type_at_position_follow_dual_layer_contract() {
             )
         });
     assert!(
-        detailed_non_existent_diag
-            .message
-            .contains(OWNER_FACET_LABEL),
-        "detailed diagnostic should keep owner facet label, got: {}",
+        detailed_non_existent_diag.message.contains(FORM_DATA_LABEL),
+        "detailed diagnostic should keep form-data label, got: {}",
         detailed_non_existent_diag.message
     );
     assert!(
-        detailed_non_existent_diag
+        !detailed_non_existent_diag
             .message
-            .contains(FORM_DATA_SUFFIX),
-        "detailed diagnostic should include explicit form-data suffix, got: {}",
+            .contains("ДокументОбъект."),
+        "detailed diagnostic should not contain owner-facet label, got: {}",
         detailed_non_existent_diag.message
     );
     for diag in &detailed_diagnostics {
@@ -192,13 +194,13 @@ fn diagnostics_hover_and_type_at_position_follow_dual_layer_contract() {
     )
     .expect("hover full text");
     assert!(
-        hover_full.contains(OWNER_FACET_LABEL),
-        "full hover should include owner facet label, got:\n{}",
+        hover_full.contains(FORM_DATA_LABEL),
+        "full hover should include form-data label, got:\n{}",
         hover_full
     );
     assert!(
-        !hover_full.contains(FORM_DATA_SUFFIX),
-        "full hover must not include detailed form-data suffix, got:\n{}",
+        !hover_full.contains("ДокументОбъект."),
+        "full hover must not include owner-facet label, got:\n{}",
         hover_full
     );
     assert_no_internal_or_legacy_names(&hover_full, "hover(full)");
@@ -217,13 +219,13 @@ fn diagnostics_hover_and_type_at_position_follow_dual_layer_contract() {
     )
     .expect("hover detailed text");
     assert!(
-        hover_detailed.contains(OWNER_FACET_LABEL),
-        "detailed hover should keep owner facet label, got:\n{}",
+        hover_detailed.contains(FORM_DATA_LABEL),
+        "detailed hover should keep form-data label, got:\n{}",
         hover_detailed
     );
     assert!(
-        hover_detailed.contains(FORM_DATA_SUFFIX),
-        "detailed hover should include explicit form-data suffix, got:\n{}",
+        !hover_detailed.contains("ДокументОбъект."),
+        "detailed hover should not include owner-facet label, got:\n{}",
         hover_detailed
     );
     assert_no_internal_or_legacy_names(&hover_detailed, "hover(detailed)");
@@ -240,11 +242,11 @@ fn diagnostics_hover_and_type_at_position_follow_dual_layer_contract() {
     let object_type = analysis
         .type_at_byte_offset(V2FileId(1), object_offset)
         .expect("type_at_byte_offset query")
-        .map(|ty| ty.type_name())
+        .map(|ty| bsl_shared::formatting::user_facing_resolution_type_name(&ty))
         .expect("type at Объект");
     assert_eq!(
-        object_type, OWNER_FACET_LABEL,
-        "type-at-position should use owner facet label"
+        object_type, FORM_DATA_LABEL,
+        "type-at-position should use form-data label"
     );
     assert_no_internal_or_legacy_names(&object_type, "type-at-position");
 }

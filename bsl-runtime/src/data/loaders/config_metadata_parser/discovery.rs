@@ -516,6 +516,8 @@ impl ConfigurationDiscovery {
                         metadata.object_module_path = object_mod;
                         metadata.manager_module_path = manager_mod;
                         metadata.record_set_module_path = record_set_mod;
+                        metadata.predefined_items =
+                            forms_discovery.discover_predefined_items(&folder_name, object_name);
 
                         if metadata.object_module_path.is_some()
                             || metadata.manager_module_path.is_some()
@@ -528,6 +530,14 @@ impl ConfigurationDiscovery {
                                 metadata.object_module_path.is_some(),
                                 metadata.manager_module_path.is_some(),
                                 metadata.record_set_module_path.is_some()
+                            );
+                        }
+                        if !metadata.predefined_items.is_empty() {
+                            tracing::trace!(
+                                "      🧩 Обнаружено {} предопределённых элементов для {}.{}",
+                                metadata.predefined_items.len(),
+                                object_type,
+                                object_name
                             );
                         }
 
@@ -908,6 +918,35 @@ impl ConfigurationDiscovery {
             Some(module_path)
         } else {
             None
+        }
+    }
+
+    /// Обнаруживает предопределённые элементы из `Ext/Predefined.xml`
+    pub fn discover_predefined_items(
+        &self,
+        object_type: &str, // "Catalogs", "ChartsOfAccounts", ...
+        object_name: &str, // имя объекта метаданных
+    ) -> Vec<String> {
+        let predefined_xml = self
+            .base_path
+            .join(object_type)
+            .join(object_name)
+            .join("Ext")
+            .join("Predefined.xml");
+
+        if !predefined_xml.exists() {
+            return Vec::new();
+        }
+
+        match UniversalMetadataParser::parse_predefined_items(&predefined_xml) {
+            Ok(items) => items,
+            Err(e) => {
+                warn!(
+                    "⚠️ Failed to parse predefined items for {}.{}: {}",
+                    object_type, object_name, e
+                );
+                Vec::new()
+            }
         }
     }
 

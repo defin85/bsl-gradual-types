@@ -1,7 +1,6 @@
 use crate::types::{
     ContextualTypeDescriptor, FacetKind, MetadataKind, FORM_DATA_CANONICAL_TYPE_NAME,
-    FORM_DATA_ELEMENTS_TYPE_NOTE_PREFIX, FORM_DATA_FORM_TYPE_NOTE_PREFIX,
-    FORM_DATA_OWNER_FACET_NOTE_PREFIX, FORM_DATA_SEMANTICS_NOTE,
+    FORM_DATA_ELEMENTS_TYPE_NOTE_PREFIX, FORM_DATA_FORM_TYPE_NOTE_PREFIX, FORM_DATA_SEMANTICS_NOTE,
 };
 
 #[test]
@@ -42,7 +41,7 @@ fn form_descriptor_builds_synthetic_form_and_elements_type_names() {
 }
 
 #[test]
-fn form_data_descriptor_separates_canonical_and_user_facing_layers() {
+fn form_data_descriptor_uses_canonical_name_for_user_facing_layer() {
     let descriptor = ContextualTypeDescriptor::FormDataObject {
         kind: MetadataKind::Document,
         owner_name: "Док1".to_string(),
@@ -53,11 +52,14 @@ fn form_data_descriptor_separates_canonical_and_user_facing_layers() {
         descriptor.canonical_type_name(),
         FORM_DATA_CANONICAL_TYPE_NAME
     );
-    assert_eq!(descriptor.user_facing_type_name(), "ДокументОбъект.Док1");
+    assert_eq!(
+        descriptor.user_facing_type_name(),
+        FORM_DATA_CANONICAL_TYPE_NAME
+    );
 }
 
 #[test]
-fn form_data_descriptor_emits_resolution_notes_for_dual_layer_contract() {
+fn form_data_descriptor_emits_resolution_notes_for_form_data_contract() {
     let descriptor = ContextualTypeDescriptor::FormDataObject {
         kind: MetadataKind::Document,
         owner_name: "Док1".to_string(),
@@ -68,13 +70,6 @@ fn form_data_descriptor_emits_resolution_notes_for_dual_layer_contract() {
     assert!(
         notes.iter().any(|n| n == FORM_DATA_SEMANTICS_NOTE),
         "missing form-data semantics marker: {:?}",
-        notes
-    );
-    assert!(
-        notes
-            .iter()
-            .any(|n| n == "contextual:form_data_owner_facet=ДокументОбъект.Док1"),
-        "missing owner facet label note: {:?}",
         notes
     );
     assert!(
@@ -92,9 +87,6 @@ fn form_data_descriptor_emits_resolution_notes_for_dual_layer_contract() {
         notes
     );
 
-    assert!(notes
-        .iter()
-        .any(|n| n.starts_with(FORM_DATA_OWNER_FACET_NOTE_PREFIX)));
     assert!(notes
         .iter()
         .any(|n| n.starts_with(FORM_DATA_FORM_TYPE_NOTE_PREFIX)));

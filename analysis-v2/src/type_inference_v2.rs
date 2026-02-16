@@ -61,6 +61,7 @@ impl TypeIndex {
 struct TypeEnv {
     variables: HashMap<String, TypeResolution>,
     local_function_summaries: Arc<HashMap<String, LocalFunctionSummary>>,
+    module_type: Option<ModuleType>,
 }
 
 impl Default for TypeEnv {
@@ -68,6 +69,7 @@ impl Default for TypeEnv {
         Self {
             variables: HashMap::new(),
             local_function_summaries: Arc::new(HashMap::new()),
+            module_type: None,
         }
     }
 }
@@ -734,6 +736,7 @@ impl TypeInferencer {
         let Ok(location) = CodeLocation::determine_from_path(path) else {
             return;
         };
+        env.module_type = Some(location.module_type.clone());
 
         let binding_resolver = ImplicitBindingResolver::new();
         for binding in binding_resolver.bindings_for_module(&location.module_type) {
@@ -1140,6 +1143,10 @@ impl TypeInferencer {
             return TypeResolution::metadata_type(MetadataKind::CommonModule, name, None);
         }
 
+        if let Some(resolved) = self.infer_applied_owner_member_identifier(name, &name_lower, env) {
+            return resolved;
+        }
+
         TypeResolution::undeclared_variable(name)
     }
 
@@ -1179,29 +1186,10 @@ impl TypeInferencer {
         }
 
         let property_key = property.to_lowercase();
-        let properties = self.metadata_lookup.get_properties(object_type);
-        let properties = if properties.is_empty() {
-            self.deps
-                .repository
-                .find_type(&object_type.type_name())
-                .map(|t| t.properties)
-                .unwrap_or_default()
-        } else {
-            properties
-        };
-        if let Some(prop) = properties
-            .into_iter()
-            .find(|p| p.name.to_lowercase() == property_key)
+        if let Some(resolved) =
+            self.resolve_property_type_by_name(object_type, property_key.as_str())
         {
-            if let Some(resolved) = self.try_resolve_configuration_type(&prop.prop_type) {
-                return resolved;
-            }
-            if self.deps.repository.find_type(&prop.prop_type).is_some() {
-                return self.resolver.resolve_expression_sync(&prop.prop_type);
-            }
-            // Типы свойств из metadata (в т.ч. синтетические UI-типы форм вроде "ГруппаФормы")
-            // должны возвращаться даже если их документация не загружена в repository.
-            return TypeResolution::inferred(&prop.prop_type);
+            return resolved;
         }
 
         TypeResolution::unknown()
@@ -1337,6 +1325,67 @@ impl TypeInferencer {
         }
         None
     }
+
+    fn infer_applied_owner_member_identifier(
+        &self,
+        name: &str,
+        name_lower: &str,
+        env: &TypeEnv,
+    ) -> Option<TypeResolution> {
+        let Some(module_type) = env.module_type.as_ref() else {
+            return None;
+        };
+
+        if !matches!(
+            module_type,
+            ModuleType::ObjectModule { .. } | ModuleType::RecordSetModule { .. }
+        ) {
+            return None;
+        }
+
+        let owner_resolution = env
+            .variables
+            .get("этотобъект")
+            .or_else(|| env.variables.get("объект"))?;
+        let resolved = self.resolve_property_type_by_name(owner_resolution, name_lower)?;
+        tracing::debug!(
+            metric = "applied_owner_member_identifier_fallback_hit_total",
+            identifier = name,
+            owner_type = owner_resolution.type_name(),
+            "Resolved bare identifier via applied owner member fallback"
+        );
+        Some(resolved)
+    }
+
+    fn resolve_property_type_by_name(
+        &self,
+        object_type: &TypeResolution,
+        property_key: &str,
+    ) -> Option<TypeResolution> {
+        let properties = self.metadata_lookup.get_properties(object_type);
+        let properties = if properties.is_empty() {
+            self.deps
+                .repository
+                .find_type(&object_type.type_name())
+                .map(|t| t.properties)
+                .unwrap_or_default()
+        } else {
+            properties
+        };
+        let prop = properties
+            .into_iter()
+            .find(|p| p.name.to_lowercase() == property_key)?;
+
+        if let Some(resolved) = self.try_resolve_configuration_type(&prop.prop_type) {
+            return Some(resolved);
+        }
+        if self.deps.repository.find_type(&prop.prop_type).is_some() {
+            return Some(self.resolver.resolve_expression_sync(&prop.prop_type));
+        }
+        // Типы свойств из metadata (в т.ч. синтетические UI-типы форм вроде "ГруппаФормы")
+        // должны возвращаться даже если их документация не загружена в repository.
+        Some(TypeResolution::inferred(&prop.prop_type))
+    }
 }
 
 fn expr_span(expr: &Expression) -> bsl_shared::ir::Span {
@@ -1383,7 +1432,7 @@ mod tests {
     use bsl_shared::domain::type_id::TypeId;
     use bsl_shared::domain::types::{
         FacetKind, MetadataKind, ParameterInfo, PrimitiveType, RawDataSource, RawPropertyData,
-        RawTypeData, FORM_DATA_OWNER_FACET_NOTE_PREFIX, FORM_DATA_SEMANTICS_NOTE,
+        RawTypeData, FORM_DATA_SEMANTICS_NOTE,
     };
     use bsl_shared::TypeRepository;
     use bsl_syntax::ParseOptions;
@@ -1981,15 +2030,6 @@ mod tests {
             "missing form-data semantics note: {:?}",
             object.metadata.notes
         );
-        assert!(
-            object
-                .metadata
-                .notes
-                .iter()
-                .any(|note| note.starts_with(FORM_DATA_OWNER_FACET_NOTE_PREFIX)),
-            "missing owner-facet note: {:?}",
-            object.metadata.notes
-        );
     }
 
     #[test]
@@ -2075,7 +2115,7 @@ mod tests {
         let link_type = index
             .type_at_byte_offset(link_offset)
             .expect("type at Объект.Ссылка");
-        assert_eq!(link_type.type_name(), "ДокументСсылка");
+        assert_eq!(link_type.type_name(), "ДокументСсылка.Док1");
     }
 
     #[test]
@@ -2284,7 +2324,7 @@ mod tests {
         let link_type = index
             .type_at_byte_offset(link_offset)
             .expect("type at Объект.Ссылка");
-        assert_eq!(link_type.type_name(), "ДокументСсылка");
+        assert_eq!(link_type.type_name(), "ДокументСсылка.Док1");
     }
 
     #[test]
@@ -2448,6 +2488,153 @@ mod tests {
             this_object.is_undeclared_variable(),
             Some("ЭтотОбъект"),
             "expected ЭтотОбъект to be undeclared in *БезКонтекста"
+        );
+    }
+
+    #[test]
+    fn object_module_bare_identifier_resolves_owner_member_before_undeclared() {
+        let repository_impl = Arc::new(InMemoryTypeRepository::new());
+        repository_impl
+            .load_types(vec![RawTypeData {
+                name: "Документы.Док1".to_string(),
+                source: RawDataSource::Configuration,
+                facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+                kind: Some(MetadataKind::Document),
+                properties: vec![RawPropertyData {
+                    name: "ДоговорКонтрагента".to_string(),
+                    prop_type: "Строка".to_string(),
+                    is_readonly: false,
+                }],
+                ..Default::default()
+            }])
+            .expect("load types");
+        let repository =
+            repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+        let resolver = Arc::new(TypeResolver::new(repository.clone()));
+        let deps = Arc::new(SemanticDeps {
+            repository,
+            signature_index: SignatureIndex::new(),
+            resolver: Some(resolver),
+            platform_signatures_loaded: true,
+        });
+
+        let source = r#"Процедура Тест()
+    x = ДоговорКонтрагента;
+КонецПроцедуры
+"#;
+        let program = parse(source);
+        let file_path = "Documents/Док1/Ext/ObjectModule.bsl";
+        let index = build_type_index_with_path(&program, file_path, deps);
+
+        let offset = source.find("ДоговорКонтрагента").expect("identifier") as u32;
+        let resolved = index
+            .type_at_byte_offset(offset)
+            .expect("type at owner member identifier");
+        assert!(
+            resolved.is_undeclared_variable().is_none(),
+            "owner member must resolve before undeclared: {:?}",
+            resolved
+        );
+        assert_eq!(resolved.type_name(), "Строка");
+    }
+
+    #[test]
+    fn recordset_module_bare_identifier_resolves_owner_member_before_undeclared() {
+        let repository_impl = Arc::new(InMemoryTypeRepository::new());
+        repository_impl
+            .load_types(vec![RawTypeData {
+                name: "РегистрыСведений.Регистр1".to_string(),
+                source: RawDataSource::Configuration,
+                facets: vec![FacetKind::Manager, FacetKind::Object],
+                kind: Some(MetadataKind::InformationRegister),
+                properties: vec![RawPropertyData {
+                    name: "ОбменДанными".to_string(),
+                    prop_type: "Булево".to_string(),
+                    is_readonly: false,
+                }],
+                ..Default::default()
+            }])
+            .expect("load types");
+        let repository =
+            repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+        let resolver = Arc::new(TypeResolver::new(repository.clone()));
+        let deps = Arc::new(SemanticDeps {
+            repository,
+            signature_index: SignatureIndex::new(),
+            resolver: Some(resolver),
+            platform_signatures_loaded: true,
+        });
+
+        let source = r#"Процедура Тест()
+    x = ОбменДанными;
+КонецПроцедуры
+"#;
+        let program = parse(source);
+        let file_path = "InformationRegisters/Регистр1/Ext/RecordSetModule.bsl";
+        let index = build_type_index_with_path(&program, file_path, deps);
+
+        let offset = source.find("ОбменДанными").expect("identifier") as u32;
+        let resolved = index
+            .type_at_byte_offset(offset)
+            .expect("type at owner member identifier");
+        assert!(
+            resolved.is_undeclared_variable().is_none(),
+            "recordset owner member must resolve before undeclared: {:?}",
+            resolved
+        );
+        assert_eq!(resolved.type_name(), "Булево");
+    }
+
+    #[test]
+    fn form_module_bare_identifier_does_not_use_applied_owner_fallback() {
+        let repository_impl = Arc::new(InMemoryTypeRepository::new());
+        repository_impl
+            .load_types(vec![
+                RawTypeData {
+                    name: "Документы.Док1".to_string(),
+                    source: RawDataSource::Configuration,
+                    facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+                    kind: Some(MetadataKind::Document),
+                    properties: vec![RawPropertyData {
+                        name: "ДоговорКонтрагента".to_string(),
+                        prop_type: "Строка".to_string(),
+                        is_readonly: false,
+                    }],
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "Формы.Документы.Док1.Форма1".to_string(),
+                    source: RawDataSource::Configuration,
+                    ..Default::default()
+                },
+            ])
+            .expect("load types");
+        let repository =
+            repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+        let resolver = Arc::new(TypeResolver::new(repository.clone()));
+        let deps = Arc::new(SemanticDeps {
+            repository,
+            signature_index: SignatureIndex::new(),
+            resolver: Some(resolver),
+            platform_signatures_loaded: true,
+        });
+
+        let source = r#"Процедура Тест()
+    x = ДоговорКонтрагента;
+КонецПроцедуры
+"#;
+        let program = parse(source);
+        let file_path = "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl";
+        let index = build_type_index_with_path(&program, file_path, deps);
+
+        let offset = source.find("ДоговорКонтрагента").expect("identifier") as u32;
+        let resolved = index
+            .type_at_byte_offset(offset)
+            .expect("type at bare identifier");
+        assert_eq!(
+            resolved.is_undeclared_variable(),
+            Some("ДоговорКонтрагента"),
+            "FormModule must stay strict and not use applied owner fallback"
         );
     }
 }

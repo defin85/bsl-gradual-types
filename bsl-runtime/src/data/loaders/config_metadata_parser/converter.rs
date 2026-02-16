@@ -3,10 +3,13 @@
 #![allow(clippy::doc_overindented_list_items)]
 
 use super::types::UniversalMetadataObject;
+use bsl_shared::domain::facet_utils;
 use bsl_shared::domain::types::{FacetKind, MetadataKind};
 use bsl_shared::domain::types::{
-    RawAttributeData, RawDataSource, RawTabularSectionData, RawTypeData,
+    RawAttributeData, RawDataSource, RawPropertyData, RawTabularSectionData, RawTypeData,
 };
+
+const PREDEFINED_MANAGER_PROP_TYPE_PREFIX: &str = "__predefined_manager__:";
 
 impl UniversalMetadataObject {
     /// Конвертирует UniversalMetadataObject в набор RawTypeData, включая синтетические типы форм
@@ -83,6 +86,8 @@ impl UniversalMetadataObject {
     pub fn to_raw_type_data(&self, prefix: Option<&str>) -> RawTypeData {
         let type_name = self.get_full_type_name(prefix);
         let module_paths = self.build_module_paths();
+        let mut properties = self.convert_attributes_to_properties();
+        properties.extend(self.convert_predefined_items_to_marker_properties(prefix));
 
         RawTypeData {
             name: type_name.clone(),
@@ -91,7 +96,7 @@ impl UniversalMetadataObject {
             category: self.get_category(),
             source: RawDataSource::Configuration,
             methods: Vec::new(), // Методы извлекаются отдельно из модулей
-            properties: self.convert_attributes_to_properties(),
+            properties,
             facets: self.facets.clone(),
             kind: self.object_type,
             attributes: self.convert_attributes(),
@@ -178,6 +183,58 @@ impl UniversalMetadataObject {
                 is_readonly: false, // TODO: определить из метаданных
             })
             .collect()
+    }
+
+    fn predefined_manager_reference_type(kind: MetadataKind, object_name: &str) -> Option<String> {
+        let template = match kind {
+            MetadataKind::Catalog => "СправочникСсылка.<Имя справочника>",
+            MetadataKind::ChartOfAccounts => "ПланСчетовСсылка.<Имя плана счетов>",
+            MetadataKind::ChartOfCharacteristicTypes => {
+                "ПланВидовХарактеристикСсылка.<Имя плана видов характеристик>"
+            }
+            MetadataKind::ChartOfCalculationTypes => {
+                "ПланВидовРасчетаСсылка.<Имя плана видов расчета>"
+            }
+            _ => return None,
+        };
+
+        Some(facet_utils::substitute_type_name(template, object_name))
+    }
+
+    fn convert_predefined_items_to_marker_properties(
+        &self,
+        prefix: Option<&str>,
+    ) -> Vec<RawPropertyData> {
+        let Some(kind) = self.object_type else {
+            return Vec::new();
+        };
+        if self.predefined_items.is_empty() {
+            return Vec::new();
+        }
+
+        let object_name = Self::apply_prefix(prefix, &self.name);
+        let Some(reference_type) = Self::predefined_manager_reference_type(kind, &object_name)
+        else {
+            return Vec::new();
+        };
+
+        let mut out = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for name in &self.predefined_items {
+            if name.trim().is_empty() {
+                continue;
+            }
+            let key = name.to_lowercase();
+            if !seen.insert(key) {
+                continue;
+            }
+            out.push(RawPropertyData {
+                name: name.clone(),
+                prop_type: format!("{PREDEFINED_MANAGER_PROP_TYPE_PREFIX}{reference_type}"),
+                is_readonly: true,
+            });
+        }
+        out
     }
 
     /// Конвертировать атрибуты в RawAttributeData
@@ -489,6 +546,38 @@ mod tests {
         assert_eq!(raw_type.attributes.len(), 1);
         assert_eq!(raw_type.attributes[0].name, "ИНН");
         assert_eq!(raw_type.facets.len(), 5); // Manager, Object, Reference, Selection, List
+    }
+
+    #[test]
+    fn test_convert_chart_of_accounts_predefined_items_to_manager_marker_properties() {
+        let mut obj = UniversalMetadataObject::new(
+            "ChartOfAccounts".to_string(),
+            "Хозрасчетный".to_string(),
+            "12345678-1234-1234-1234-123456789012".to_string(),
+        );
+        obj.predefined_items = vec![
+            "ГотоваяПродукция".to_string(),
+            "Товары".to_string(),
+            "ГотоваяПродукция".to_string(), // duplicate
+        ];
+
+        let raw_type = obj.to_raw_type_data(None);
+        let predefined_props: Vec<_> = raw_type
+            .properties
+            .iter()
+            .filter(|p| p.prop_type.starts_with(PREDEFINED_MANAGER_PROP_TYPE_PREFIX))
+            .collect();
+
+        assert_eq!(predefined_props.len(), 2);
+        assert!(predefined_props
+            .iter()
+            .any(|p| p.name == "ГотоваяПродукция"));
+        assert!(predefined_props.iter().any(|p| p.name == "Товары"));
+        assert!(predefined_props.iter().all(|p| p.is_readonly));
+        assert!(predefined_props.iter().all(|p| {
+            p.prop_type
+                == format!("{PREDEFINED_MANAGER_PROP_TYPE_PREFIX}ПланСчетовСсылка.Хозрасчетный")
+        }));
     }
 
     #[test]

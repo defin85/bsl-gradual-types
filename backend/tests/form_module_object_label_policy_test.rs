@@ -1,4 +1,4 @@
-//! Regression tests for dual-layer user-facing labels of FormModule.Объект.
+//! Regression tests for strict form-data user-facing labels of FormModule.Объект.
 
 mod support;
 
@@ -32,38 +32,43 @@ fn hover_for_detail_level(level: DetailLevel) -> String {
 }
 
 #[test]
-fn form_module_object_label_policy_is_owner_facet_for_compact_and_full() {
+fn form_module_object_label_policy_is_form_data_for_compact_and_full() {
     let compact = hover_for_detail_level(DetailLevel::Compact);
     assert!(
-        compact.contains("ДокументОбъект.Док1"),
-        "compact hover should use owner facet label, got:\n{}",
+        compact.contains("ДанныеФормыСтруктура"),
+        "compact hover should use form-data label, got:\n{}",
         compact
     );
     assert!(
-        !compact.contains("данные формы:"),
-        "compact hover must not include detailed form-data suffix, got:\n{}",
+        !compact.contains("ДокументОбъект."),
+        "compact hover must not leak owner-facet label, got:\n{}",
         compact
     );
 
     let full = hover_for_detail_level(DetailLevel::Full);
     assert!(
-        full.contains("ДокументОбъект.Док1"),
-        "full hover should use owner facet label, got:\n{}",
+        full.contains("ДанныеФормыСтруктура"),
+        "full hover should use form-data label, got:\n{}",
         full
     );
     assert!(
-        !full.contains("данные формы:"),
-        "full hover must not include detailed form-data suffix, got:\n{}",
+        !full.contains("ДокументОбъект."),
+        "full hover must not leak owner-facet label, got:\n{}",
         full
     );
 }
 
 #[test]
-fn form_module_object_label_policy_adds_form_data_suffix_for_detailed() {
+fn form_module_object_label_policy_is_form_data_for_detailed() {
     let detailed = hover_for_detail_level(DetailLevel::Detailed);
     assert!(
-        detailed.contains("ДокументОбъект.Док1 (данные формы: ДанныеФормыСтруктура)"),
-        "detailed hover should include form-data semantic suffix, got:\n{}",
+        detailed.contains("ДанныеФормыСтруктура"),
+        "detailed hover should use form-data label, got:\n{}",
+        detailed
+    );
+    assert!(
+        !detailed.contains("ДокументОбъект."),
+        "detailed hover must not leak owner-facet label, got:\n{}",
         detailed
     );
 }

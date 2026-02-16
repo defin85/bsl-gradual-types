@@ -39,7 +39,7 @@ fn type_name_at_assignment_rhs(
     analysis
         .type_at_byte_offset(V2FileId(1), offset)
         .expect("type_at_byte_offset query")
-        .map(|ty| ty.type_name())
+        .map(|ty| bsl_shared::formatting::user_facing_resolution_type_name(&ty))
         .expect("type at assignment rhs")
 }
 
@@ -60,7 +60,7 @@ fn implicit_object_bindings_are_contextual_across_module_types() {
             form_code,
             "form_object = ",
         ),
-        "ДокументОбъект.Док1"
+        "ДанныеФормыСтруктура"
     );
     assert_eq!(
         type_name_at_assignment_rhs(

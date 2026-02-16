@@ -11,7 +11,6 @@ use crate::domain::types::{DiagnosticSeverity, TypeDiagnostic};
 use crate::formatting::{normalize_user_facing_type_name, DetailLevel};
 use crate::ir::Span;
 
-use super::error_kinds::{FORM_DATA_DETAILED_SUFFIX, FORM_DATA_DIAGNOSTIC_MARKER};
 use super::TypeErrorKind;
 
 impl TypeErrorKind {
@@ -66,27 +65,13 @@ impl TypeErrorKind {
         }
     }
 
-    fn split_form_data_marker(object_type: &str) -> (&str, bool) {
-        if let Some(clean_type) = object_type.strip_suffix(FORM_DATA_DIAGNOSTIC_MARKER) {
-            (clean_type, true)
-        } else {
-            (object_type, false)
-        }
-    }
-
     fn format_object_type_for_level(object_type: &str, detail_level: DetailLevel) -> String {
-        let (clean_type, has_form_data_marker) = Self::split_form_data_marker(object_type);
-        match (has_form_data_marker, detail_level) {
-            (true, DetailLevel::Detailed) => {
-                format!("{} ({})", clean_type, FORM_DATA_DETAILED_SUFFIX)
-            }
-            _ => clean_type.to_string(),
-        }
+        let _ = detail_level;
+        object_type.to_string()
     }
 
     fn format_object_type_for_hint(object_type: &str) -> String {
-        let (clean_type, _) = Self::split_form_data_marker(object_type);
-        clean_type.to_string()
+        object_type.to_string()
     }
 
     /// MILESTONE 3.6 Phase 3: Brief format - error type only (without variable name)

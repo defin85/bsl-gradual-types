@@ -200,7 +200,7 @@ fn conf_big_form_module_attributes_and_elements_are_typed() {
     let got_x = analysis
         .type_at_byte_offset(V2FileId(1), x_offset)
         .expect("type_at_byte_offset query for x")
-        .map(|ty| ty.type_name());
+        .map(|ty| bsl_shared::formatting::user_facing_resolution_type_name(&ty));
 
     let x_receiver_offset = analysis
         .utf16_position_to_byte_offset(V2FileId(1), 1, 8)
@@ -209,7 +209,7 @@ fn conf_big_form_module_attributes_and_elements_are_typed() {
     let got_x_receiver = analysis
         .type_at_byte_offset(V2FileId(1), x_receiver_offset)
         .expect("type_at_byte_offset query for x receiver")
-        .map(|ty| ty.type_name());
+        .map(|ty| bsl_shared::formatting::user_facing_resolution_type_name(&ty));
 
     let y_offset = analysis
         .utf16_position_to_byte_offset(V2FileId(1), 2, 8)
@@ -218,7 +218,7 @@ fn conf_big_form_module_attributes_and_elements_are_typed() {
     let got_y = analysis
         .type_at_byte_offset(V2FileId(1), y_offset)
         .expect("type_at_byte_offset query for y")
-        .map(|ty| ty.type_name());
+        .map(|ty| bsl_shared::formatting::user_facing_resolution_type_name(&ty));
     let z_receiver_offset = analysis
         .utf16_position_to_byte_offset(V2FileId(1), 3, 8)
         .expect("utf16_position_to_byte_offset query for z receiver")
@@ -226,7 +226,7 @@ fn conf_big_form_module_attributes_and_elements_are_typed() {
     let got_z_receiver = analysis
         .type_at_byte_offset(V2FileId(1), z_receiver_offset)
         .expect("type_at_byte_offset query for z receiver")
-        .map(|ty| ty.type_name());
+        .map(|ty| bsl_shared::formatting::user_facing_resolution_type_name(&ty));
     let z_offset = analysis
         .utf16_position_to_byte_offset(V2FileId(1), 3, 15)
         .expect("utf16_position_to_byte_offset query for z member")
@@ -234,7 +234,7 @@ fn conf_big_form_module_attributes_and_elements_are_typed() {
     let got_z = analysis
         .type_at_byte_offset(V2FileId(1), z_offset)
         .expect("type_at_byte_offset query for z member")
-        .map(|ty| ty.type_name());
+        .map(|ty| bsl_shared::formatting::user_facing_resolution_type_name(&ty));
 
     assert_eq!(
         got_x_receiver.as_deref(),
@@ -258,12 +258,12 @@ fn conf_big_form_module_attributes_and_elements_are_typed() {
     );
     assert_eq!(
         got_z_receiver.as_deref(),
-        Some("ДокументОбъект.РеализацияТоваровУслуг"),
-        "Expected `Объект` receiver to resolve as document object facet"
+        Some("ДанныеФормыСтруктура"),
+        "Expected `Объект` receiver to resolve as strict form-data type"
     );
     assert_eq!(
         got_z.as_deref(),
-        Some("ДокументСсылка"),
-        "Expected `Объект.Ссылка` to resolve as ДокументСсылка"
+        Some("ДокументСсылка.РеализацияТоваровУслуг"),
+        "Expected `Объект.Ссылка` to resolve as typed document reference"
     );
 }

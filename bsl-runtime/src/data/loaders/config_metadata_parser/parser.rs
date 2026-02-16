@@ -6,6 +6,7 @@ use super::types::{
 };
 use quick_xml::events::Event;
 use quick_xml::Reader;
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
@@ -381,6 +382,64 @@ impl UniversalMetadataParser {
 
         Ok(props)
     }
+
+    /// Парсит список предопределённых элементов из `Ext/Predefined.xml`
+    ///
+    /// Извлекает имена `Item` по тегам `Name` (и `PredefinedDataName` как fallback),
+    /// поддерживая вложенные `ChildItems`.
+    pub fn parse_predefined_items(predefined_xml_path: &Path) -> Result<Vec<String>> {
+        let content = fs::read_to_string(predefined_xml_path)?;
+        let mut reader = Reader::from_str(&content);
+        reader.trim_text(true);
+
+        let mut buf = Vec::new();
+        let mut item_depth = 0usize;
+        let mut current_element = String::new();
+        let mut items = Vec::new();
+        let mut seen = HashSet::new();
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(e)) => {
+                    let tag_name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                    if tag_name == "Item" {
+                        item_depth += 1;
+                    }
+                    current_element = tag_name;
+                }
+                Ok(Event::Text(e)) => {
+                    if item_depth == 0 {
+                        continue;
+                    }
+                    if !matches!(current_element.as_str(), "Name" | "PredefinedDataName") {
+                        continue;
+                    }
+
+                    let text = e.unescape()?.trim().to_string();
+                    if text.is_empty() {
+                        continue;
+                    }
+                    let key = text.to_lowercase();
+                    if seen.insert(key) {
+                        items.push(text);
+                    }
+                }
+                Ok(Event::End(e)) => {
+                    let tag_name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                    if tag_name == "Item" {
+                        item_depth = item_depth.saturating_sub(1);
+                    }
+                    current_element.clear();
+                }
+                Ok(Event::Eof) => break,
+                Err(e) => return Err(Box::new(e)),
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        Ok(items)
+    }
 }
 
 #[cfg(test)]
@@ -421,5 +480,31 @@ mod tests {
         assert_eq!(parsed.enum_values.len(), 2);
         assert!(parsed.enum_values.contains(&"Первое".to_string()));
         assert!(parsed.enum_values.contains(&"Второе".to_string()));
+    }
+
+    #[test]
+    fn parses_predefined_items_from_xml_with_nested_items() {
+        let xml = r#"
+<?xml version="1.0" encoding="UTF-8"?>
+<PredefinedData xmlns="http://v8.1c.ru/8.3/xcf/predef">
+    <Item id="root">
+        <Name>Корень</Name>
+        <ChildItems>
+            <Item id="child-1">
+                <Name>Потомок1</Name>
+            </Item>
+            <Item id="child-2">
+                <PredefinedDataName>Потомок2</PredefinedDataName>
+            </Item>
+        </ChildItems>
+    </Item>
+</PredefinedData>
+"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let items = UniversalMetadataParser::parse_predefined_items(file.path()).unwrap();
+        assert_eq!(items, vec!["Корень", "Потомок1", "Потомок2"]);
     }
 }

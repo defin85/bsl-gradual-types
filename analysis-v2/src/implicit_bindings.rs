@@ -220,7 +220,7 @@ mod tests {
         );
         assert_eq!(
             map.get("Объект").and_then(Clone::clone).as_deref(),
-            Some("ДокументОбъект.Док1")
+            Some("ДанныеФормыСтруктура")
         );
         assert_eq!(
             map.get("Элементы").and_then(Clone::clone).as_deref(),
@@ -312,6 +312,6 @@ mod tests {
             "legacy alias leaked into form object binding: {}",
             type_name
         );
-        assert_eq!(type_name, "ДокументОбъект.Док1");
+        assert_eq!(type_name, "ДанныеФормыСтруктура");
     }
 }

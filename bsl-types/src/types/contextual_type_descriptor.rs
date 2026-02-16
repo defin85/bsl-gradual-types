@@ -10,8 +10,6 @@ use super::{FacetKind, MetadataKind};
 pub const FORM_DATA_CANONICAL_TYPE_NAME: &str = "ДанныеФормыСтруктура";
 /// Metadata note marker for form-data semantics.
 pub const FORM_DATA_SEMANTICS_NOTE: &str = "contextual:form_data_semantics";
-/// Metadata note prefix with owner facet user-facing label.
-pub const FORM_DATA_OWNER_FACET_NOTE_PREFIX: &str = "contextual:form_data_owner_facet=";
 /// Metadata note prefix with resolved synthetic form type name.
 pub const FORM_DATA_FORM_TYPE_NOTE_PREFIX: &str = "contextual:form_data_form_type=";
 /// Metadata note prefix with resolved synthetic form-elements type name.
@@ -42,8 +40,7 @@ pub enum ContextualTypeDescriptor {
     },
     /// Form-data object descriptor for `FormModule.Объект`.
     ///
-    /// Canonical semantics stays form-data (`ДанныеФормыСтруктура`),
-    /// while user-facing label is owner object facet.
+    /// Canonical semantics and user-facing label are form-data (`ДанныеФормыСтруктура`).
     FormDataObject {
         kind: MetadataKind,
         owner_name: String,
@@ -81,12 +78,7 @@ impl ContextualTypeDescriptor {
     /// User-facing label for compact/standard representation.
     pub fn user_facing_type_name(&self) -> String {
         match self {
-            Self::FormDataObject {
-                kind, owner_name, ..
-            } => {
-                let object_prefix = kind.faceted_type_prefix(&FacetKind::Object);
-                format!("{}.{}", object_prefix, owner_name)
-            }
+            Self::FormDataObject { .. } => FORM_DATA_CANONICAL_TYPE_NAME.to_string(),
             _ => self.canonical_type_name(),
         }
     }
@@ -96,11 +88,6 @@ impl ContextualTypeDescriptor {
         match self {
             Self::FormDataObject { .. } => {
                 let mut notes = vec![FORM_DATA_SEMANTICS_NOTE.to_string()];
-                notes.push(format!(
-                    "{}{}",
-                    FORM_DATA_OWNER_FACET_NOTE_PREFIX,
-                    self.user_facing_type_name()
-                ));
                 if let Some(form_type_name) = self.form_type_name() {
                     notes.push(format!(
                         "{}{}",

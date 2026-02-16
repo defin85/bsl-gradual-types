@@ -6,7 +6,7 @@
 use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
 use bsl_shared::domain::signature_index::MethodSignature;
 use bsl_shared::domain::types::{Certainty, ConcreteType, ResolutionResult, TypeResolution};
-use bsl_shared::formatting::DetailLevel;
+use bsl_shared::formatting::{user_facing_resolution_type_name, DetailLevel};
 
 use super::builder::HoverBuilder;
 use super::config::{HoverFormatConfig, HoverOutputFormat};
@@ -174,7 +174,10 @@ impl HoverFormatter {
         match self.config.detail_level {
             DetailLevel::Compact => HoverBuilder::new(&self.config)
                 .add_header("Свойство", &display_name)
-                .add_section("Владелец", &owner_resolution.type_name())
+                .add_section(
+                    "Владелец",
+                    &user_facing_resolution_type_name(owner_resolution),
+                )
                 .add_section("Только чтение", readonly_str)
                 .add_type_info(property_resolution)
                 .add_certainty(&property_resolution.certainty)
@@ -183,7 +186,10 @@ impl HoverFormatter {
                 let description = self.metadata_lookup.get_description(property_resolution);
                 let mut builder = HoverBuilder::new(&self.config)
                     .add_header("Свойство", &display_name)
-                    .add_section("Владелец", &owner_resolution.type_name())
+                    .add_section(
+                        "Владелец",
+                        &user_facing_resolution_type_name(owner_resolution),
+                    )
                     .add_section("Только чтение", readonly_str)
                     .add_type_info(property_resolution)
                     .add_certainty(&property_resolution.certainty)

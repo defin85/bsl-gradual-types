@@ -1083,7 +1083,7 @@ fn test_form_data_intrinsic_properties_are_available_without_loaded_configuratio
 }
 
 #[test]
-fn test_form_data_provider_chain_orders_shape_then_intrinsic_then_facet() {
+fn test_form_data_provider_chain_orders_shape_then_intrinsic_then_raw_type() {
     let repo = Arc::new(InMemoryTypeRepository::new());
     repo.load_types(vec![
         RawTypeData {
@@ -1091,6 +1091,11 @@ fn test_form_data_provider_chain_orders_shape_then_intrinsic_then_facet() {
             source: RawDataSource::Configuration,
             facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
             kind: Some(MetadataKind::Document),
+            properties: vec![RawPropertyData {
+                name: "СвойствоМетаданных".to_string(),
+                prop_type: "Число".to_string(),
+                is_readonly: false,
+            }],
             ..Default::default()
         },
         RawTypeData {
@@ -1156,10 +1161,10 @@ fn test_form_data_provider_chain_orders_shape_then_intrinsic_then_facet() {
         .iter()
         .position(|name| *name == "Ссылка")
         .expect("missing intrinsic property Ссылка");
-    let facet_prop_idx = labels
+    let metadata_prop_idx = labels
         .iter()
-        .position(|name| *name == "ФацетСвойство")
-        .expect("missing object facet property");
+        .position(|name| *name == "СвойствоМетаданных")
+        .expect("missing raw type metadata property");
 
     assert!(
         form_attr_idx < intrinsic_link_idx,
@@ -1167,8 +1172,13 @@ fn test_form_data_provider_chain_orders_shape_then_intrinsic_then_facet() {
         labels
     );
     assert!(
-        intrinsic_link_idx < facet_prop_idx,
-        "intrinsic properties must appear before facet properties, labels={:?}",
+        intrinsic_link_idx < metadata_prop_idx,
+        "intrinsic properties must appear before raw metadata properties, labels={:?}",
+        labels
+    );
+    assert!(
+        labels.iter().all(|name| *name != "ФацетСвойство"),
+        "object facet fallback must not participate in form-data chain, labels={:?}",
         labels
     );
 }
@@ -1176,26 +1186,18 @@ fn test_form_data_provider_chain_orders_shape_then_intrinsic_then_facet() {
 #[test]
 fn test_form_data_intrinsic_properties_do_not_override_repository_properties() {
     let repo = Arc::new(InMemoryTypeRepository::new());
-    repo.load_types(vec![
-        RawTypeData {
-            name: "Документы.Док1".to_string(),
-            source: RawDataSource::Configuration,
-            facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
-            kind: Some(MetadataKind::Document),
-            ..Default::default()
-        },
-        RawTypeData {
-            name: "ДокументОбъект".to_string(),
-            source: RawDataSource::Platform,
-            facets: vec![FacetKind::Object],
-            properties: vec![RawPropertyData {
-                name: "Ссылка".to_string(),
-                prop_type: "ДокументСсылка".to_string(),
-                is_readonly: true,
-            }],
-            ..Default::default()
-        },
-    ])
+    repo.load_types(vec![RawTypeData {
+        name: "Документы.Док1".to_string(),
+        source: RawDataSource::Configuration,
+        facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+        kind: Some(MetadataKind::Document),
+        properties: vec![RawPropertyData {
+            name: "Ссылка".to_string(),
+            prop_type: "ДокументСсылка".to_string(),
+            is_readonly: true,
+        }],
+        ..Default::default()
+    }])
     .expect("Failed to load test types");
 
     let lookup = TypeMetadataLookup::new(repo);
@@ -1251,4 +1253,116 @@ fn test_form_data_intrinsic_properties_require_non_empty_owner_name() {
     assert!(!properties
         .iter()
         .any(|property| property.name == "ПометкаУдаления"));
+}
+
+#[test]
+fn test_manager_facet_includes_predefined_marker_properties() {
+    let repo = Arc::new(InMemoryTypeRepository::new());
+    repo.load_types(vec![RawTypeData {
+        name: "ПланыСчетов.Хозрасчетный".to_string(),
+        source: RawDataSource::Configuration,
+        facets: vec![
+            FacetKind::Manager,
+            FacetKind::Object,
+            FacetKind::Reference,
+            FacetKind::Selection,
+        ],
+        kind: Some(MetadataKind::ChartOfAccounts),
+        properties: vec![
+            RawPropertyData {
+                name: "ГотоваяПродукция".to_string(),
+                prop_type: "__predefined_manager__:ПланСчетовСсылка.Хозрасчетный".to_string(),
+                is_readonly: true,
+            },
+            RawPropertyData {
+                name: "Код".to_string(),
+                prop_type: "Строка".to_string(),
+                is_readonly: false,
+            },
+        ],
+        ..Default::default()
+    }])
+    .expect("Failed to load test types");
+
+    let lookup = TypeMetadataLookup::new(repo);
+    let resolution = TypeResolution {
+        certainty: Certainty::Known,
+        result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
+            kind: MetadataKind::ChartOfAccounts,
+            name: "Хозрасчетный".to_string(),
+            facet: Some(FacetKind::Manager),
+            attributes: vec![],
+            tabular_sections: vec![],
+        })),
+        source: ResolutionSource::Static,
+        metadata: ResolutionMetadata::default(),
+        active_facet: Some(FacetKind::Manager),
+        available_facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+    };
+
+    let properties = lookup.get_properties(&resolution);
+    assert!(properties.iter().any(|p| p.name == "ГотоваяПродукция"));
+    let predefined = properties
+        .iter()
+        .find(|p| p.name == "ГотоваяПродукция")
+        .expect("missing predefined property");
+    assert_eq!(predefined.prop_type, "ПланСчетовСсылка.Хозрасчетный");
+    assert!(predefined.is_readonly);
+    assert!(
+        !properties.iter().any(|p| p.name == "Код"),
+        "manager predefined path must not expose regular object attributes"
+    );
+}
+
+#[test]
+fn test_object_facet_skips_predefined_marker_properties() {
+    let repo = Arc::new(InMemoryTypeRepository::new());
+    repo.load_types(vec![RawTypeData {
+        name: "ПланыСчетов.Хозрасчетный".to_string(),
+        source: RawDataSource::Configuration,
+        facets: vec![
+            FacetKind::Manager,
+            FacetKind::Object,
+            FacetKind::Reference,
+            FacetKind::Selection,
+        ],
+        kind: Some(MetadataKind::ChartOfAccounts),
+        properties: vec![
+            RawPropertyData {
+                name: "ГотоваяПродукция".to_string(),
+                prop_type: "__predefined_manager__:ПланСчетовСсылка.Хозрасчетный".to_string(),
+                is_readonly: true,
+            },
+            RawPropertyData {
+                name: "Код".to_string(),
+                prop_type: "Строка".to_string(),
+                is_readonly: false,
+            },
+        ],
+        ..Default::default()
+    }])
+    .expect("Failed to load test types");
+
+    let lookup = TypeMetadataLookup::new(repo);
+    let resolution = TypeResolution {
+        certainty: Certainty::Known,
+        result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
+            kind: MetadataKind::ChartOfAccounts,
+            name: "Хозрасчетный".to_string(),
+            facet: Some(FacetKind::Object),
+            attributes: vec![],
+            tabular_sections: vec![],
+        })),
+        source: ResolutionSource::Static,
+        metadata: ResolutionMetadata::default(),
+        active_facet: Some(FacetKind::Object),
+        available_facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+    };
+
+    let properties = lookup.get_properties(&resolution);
+    assert!(properties.iter().any(|p| p.name == "Код"));
+    assert!(
+        !properties.iter().any(|p| p.name == "ГотоваяПродукция"),
+        "predefined marker properties must not leak into object facet"
+    );
 }

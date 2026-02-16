@@ -3,7 +3,9 @@
 //! Общие типы форматирования используемые в backend и presentation слоях.
 
 use crate::domain::metadata_constants::get_collection_kind;
-use crate::domain::types::FacetKind;
+use crate::domain::types::{
+    FacetKind, TypeResolution, FORM_DATA_CANONICAL_TYPE_NAME, FORM_DATA_SEMANTICS_NOTE,
+};
 
 const LEGACY_FORM_OBJECT_PREFIX: &str = "ДанныеФормыОбъект.";
 
@@ -102,6 +104,23 @@ pub fn normalize_user_facing_type_name(value: &str) -> String {
     normalized
 }
 
+/// Возвращает user-facing имя типа для каналов diagnostics/hover/type-at-position.
+///
+/// Для `FormModule.Объект` с form-data семантикой всегда возвращается
+/// canonical label `ДанныеФормыСтруктура`.
+pub fn user_facing_resolution_type_name(resolution: &TypeResolution) -> String {
+    let is_form_data = resolution
+        .metadata
+        .notes
+        .iter()
+        .any(|note| note == FORM_DATA_SEMANTICS_NOTE);
+    if is_form_data {
+        return FORM_DATA_CANONICAL_TYPE_NAME.to_string();
+    }
+
+    normalize_user_facing_type_name(&resolution.type_name())
+}
+
 fn map_legacy_form_object_alias(collection: &str, object_name: &str) -> Option<String> {
     let kind = get_collection_kind(collection)?;
     let object_facet = kind.faceted_type_prefix(&FacetKind::Object);
@@ -146,6 +165,24 @@ mod tests {
         assert_eq!(
             normalize_user_facing_type_name(value),
             "ДокументОбъект.Док1 | СправочникОбъект.Спр1"
+        );
+    }
+
+    #[test]
+    fn user_facing_resolution_type_name_prefers_form_data_canonical_label() {
+        let mut resolution = TypeResolution::metadata_type(
+            crate::domain::types::MetadataKind::Document,
+            "Док1",
+            Some(FacetKind::Object),
+        );
+        resolution
+            .metadata
+            .notes
+            .push(FORM_DATA_SEMANTICS_NOTE.to_string());
+
+        assert_eq!(
+            user_facing_resolution_type_name(&resolution),
+            FORM_DATA_CANONICAL_TYPE_NAME
         );
     }
 }

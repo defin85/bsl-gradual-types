@@ -6,14 +6,6 @@ use crate::domain::code_location::CompilerDirective;
 use crate::domain::runtime_context::ContextRequirements;
 use crate::domain::types::MetadataKind;
 
-/// Internal marker for diagnostics that originate from FormModule form-data semantics.
-///
-/// Stored in `TypeErrorKind.object_type` and stripped before user-facing formatting.
-pub(crate) const FORM_DATA_DIAGNOSTIC_MARKER: &str = "||contextual_form_data||";
-
-/// User-facing detailed suffix for `FormModule.Объект` dual-layer diagnostics.
-pub(crate) const FORM_DATA_DETAILED_SUFFIX: &str = "данные формы: ДанныеФормыСтруктура";
-
 /// Категории ошибок типизации из статьи Balyuk & Popova
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeErrorKind {

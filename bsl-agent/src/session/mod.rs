@@ -17,7 +17,7 @@ use bsl_shared::api::dtos::{
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::types::{Certainty, ResolutionResult};
 use bsl_shared::domain::TypeMetadataLookup;
-use bsl_shared::formatting::DetailLevel;
+use bsl_shared::formatting::{user_facing_resolution_type_name, DetailLevel};
 use tokio::sync::mpsc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -1821,7 +1821,7 @@ impl SessionManager {
             flow_sensitive_enabled,
         )
         .map(|resolution| TypeInfoDto {
-            name: resolution.type_name(),
+            name: user_facing_resolution_type_name(&resolution),
             certainty: format!("{:?}", resolution.certainty).to_lowercase(),
             active_facet: resolution
                 .active_facet
@@ -2526,7 +2526,7 @@ impl SessionManager {
                             ) {
                                 text.push_line(&format!(
                                     "type_at_position: {}",
-                                    type_info.type_name()
+                                    user_facing_resolution_type_name(&type_info)
                                 ));
                                 text.push_line("");
                             }

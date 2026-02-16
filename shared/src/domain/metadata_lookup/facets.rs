@@ -290,6 +290,9 @@ impl TypeMetadataLookup {
             if let Some(config_type) = self.get_raw_type(resolution) {
                 let is_readonly = facet.properties_are_readonly();
                 for prop in config_type.properties.iter() {
+                    if Self::is_predefined_manager_marker_property_type(&prop.prop_type) {
+                        continue;
+                    }
                     // Избегаем дубликатов (платформенные имеют приоритет)
                     if !combined_properties.iter().any(|p| p.name == prop.name) {
                         let mut new_prop = prop.clone();

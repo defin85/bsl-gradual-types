@@ -206,3 +206,22 @@ fn recordset_module_implicit_arguments_are_not_reported_as_undeclared() {
         messages
     );
 }
+
+#[test]
+fn form_module_bare_owner_member_name_stays_undeclared() {
+    let code = r#"
+Процедура Тест()
+    Проверка = ЗначениеЗаполнено(ДополнительныеСвойства);
+КонецПроцедуры
+"#;
+    let messages =
+        undeclared_messages_for_path("Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl", code);
+
+    assert!(
+        messages
+            .iter()
+            .any(|msg| msg.contains("ДополнительныеСвойства")),
+        "expected undeclared diagnostics for bare owner member name in FormModule, got: {:?}",
+        messages
+    );
+}

@@ -2755,6 +2755,11 @@ mod tests {
                     source: RawDataSource::Configuration,
                     facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
                     kind: Some(MetadataKind::Document),
+                    properties: vec![RawPropertyData {
+                        name: "СвойствоМетаданных".to_string(),
+                        prop_type: "Число".to_string(),
+                        is_readonly: false,
+                    }],
                     ..Default::default()
                 },
                 RawTypeData {
@@ -2828,11 +2833,18 @@ mod tests {
             .expect("missing form attribute");
         assert_eq!(form_attr.source_priority, 1);
 
-        let facet_prop = target
+        let metadata_prop = target
             .iter()
-            .find(|candidate| candidate.item.label == "ФацетСвойство")
-            .expect("missing facet property");
-        assert_eq!(facet_prop.source_priority, 3);
+            .find(|candidate| candidate.item.label == "СвойствоМетаданных")
+            .expect("missing metadata property");
+        assert_eq!(metadata_prop.source_priority, 3);
+
+        assert!(
+            target
+                .iter()
+                .all(|candidate| candidate.item.label != "ФацетСвойство"),
+            "form-data property completion must not include object-facet fallback properties"
+        );
     }
 
     #[test]

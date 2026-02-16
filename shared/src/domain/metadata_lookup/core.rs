@@ -11,13 +11,12 @@ use crate::domain::types::{
 
 const PROPERTY_ORIGIN_REPOSITORY: &str = "repository";
 const PROPERTY_ORIGIN_INTRINSIC: &str = "intrinsic";
+const PREDEFINED_MANAGER_PROP_TYPE_PREFIX: &str = "__predefined_manager__:";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FormDataPropertyProvider {
     FormShape,
-    ObjectFacet,
     IntrinsicGuaranteed,
-    ActiveFacetFallback,
     RawTypeFallback,
 }
 
@@ -25,10 +24,7 @@ impl FormDataPropertyProvider {
     fn origin_tag(self) -> &'static str {
         match self {
             Self::IntrinsicGuaranteed => PROPERTY_ORIGIN_INTRINSIC,
-            Self::FormShape
-            | Self::ObjectFacet
-            | Self::ActiveFacetFallback
-            | Self::RawTypeFallback => PROPERTY_ORIGIN_REPOSITORY,
+            Self::FormShape | Self::RawTypeFallback => PROPERTY_ORIGIN_REPOSITORY,
         }
     }
 }
@@ -290,6 +286,13 @@ impl TypeMetadataLookup {
                 .collect();
         }
 
+        if let Some(predefined_props) = self.get_predefined_manager_properties(resolution) {
+            return predefined_props
+                .into_iter()
+                .map(|property| (property, PROPERTY_ORIGIN_REPOSITORY))
+                .collect();
+        }
+
         if let Some(form_data_props) = self.get_form_data_properties_with_origin(resolution) {
             return form_data_props;
         }
@@ -337,22 +340,31 @@ impl TypeMetadataLookup {
         PROPERTY_ORIGIN_REPOSITORY
     }
 
+    pub(crate) fn is_predefined_manager_marker_property_type(prop_type: &str) -> bool {
+        prop_type.starts_with(PREDEFINED_MANAGER_PROP_TYPE_PREFIX)
+    }
+
+    pub(crate) fn decode_predefined_manager_property(
+        property: &RawPropertyData,
+    ) -> Option<RawPropertyData> {
+        let reference_type = property
+            .prop_type
+            .strip_prefix(PREDEFINED_MANAGER_PROP_TYPE_PREFIX)?;
+        Some(RawPropertyData {
+            name: property.name.clone(),
+            prop_type: reference_type.to_string(),
+            is_readonly: true,
+        })
+    }
+
     fn form_data_property_provider_chain(
-        resolution: &TypeResolution,
+        _resolution: &TypeResolution,
     ) -> Vec<FormDataPropertyProvider> {
-        let mut providers = vec![
+        vec![
             FormDataPropertyProvider::FormShape,
             FormDataPropertyProvider::IntrinsicGuaranteed,
-            FormDataPropertyProvider::ObjectFacet,
-        ];
-
-        if resolution.active_facet.is_some() {
-            providers.push(FormDataPropertyProvider::ActiveFacetFallback);
-        } else {
-            providers.push(FormDataPropertyProvider::RawTypeFallback);
-        }
-
-        providers
+            FormDataPropertyProvider::RawTypeFallback,
+        ]
     }
 
     fn collect_form_data_properties_from_provider(
@@ -373,19 +385,8 @@ impl TypeMetadataLookup {
                     .map(|form_type| form_type.properties)
                     .unwrap_or_default()
             }
-            FormDataPropertyProvider::ObjectFacet => self
-                .get_facet_properties(resolution, FacetKind::Object)
-                .unwrap_or_default(),
             FormDataPropertyProvider::IntrinsicGuaranteed => {
                 Self::intrinsic_form_data_guaranteed_properties(resolution)
-            }
-            FormDataPropertyProvider::ActiveFacetFallback => {
-                let Some(facet) = resolution.active_facet else {
-                    return Vec::new();
-                };
-
-                self.get_facet_properties(resolution, facet)
-                    .unwrap_or_default()
             }
             FormDataPropertyProvider::RawTypeFallback => self
                 .get_raw_type(resolution)
@@ -422,7 +423,7 @@ impl TypeMetadataLookup {
         };
 
         // Явная provider-chain:
-        // form shape -> intrinsic guaranteed -> object facet -> fallback.
+        // form shape -> intrinsic guaranteed -> raw type fallback.
         for provider in Self::form_data_property_provider_chain(resolution) {
             let origin = provider.origin_tag();
             for property in self.collect_form_data_properties_from_provider(resolution, provider) {
@@ -535,6 +536,47 @@ impl TypeMetadataLookup {
                 })
                 .collect(),
         )
+    }
+
+    fn get_predefined_manager_properties(
+        &self,
+        resolution: &TypeResolution,
+    ) -> Option<Vec<RawPropertyData>> {
+        let raw = match &resolution.result {
+            ResolutionResult::Concrete(ConcreteType::Configuration(cfg))
+                if matches!(resolution.active_facet, None | Some(FacetKind::Manager)) =>
+            {
+                let supported_kind = matches!(
+                    cfg.kind,
+                    MetadataKind::Catalog
+                        | MetadataKind::ChartOfAccounts
+                        | MetadataKind::ChartOfCharacteristicTypes
+                        | MetadataKind::ChartOfCalculationTypes
+                );
+                if !supported_kind {
+                    return None;
+                }
+                self.get_raw_type(resolution)?
+            }
+            _ => return None,
+        };
+
+        let mut props: Vec<RawPropertyData> = raw
+            .properties
+            .iter()
+            .filter_map(Self::decode_predefined_manager_property)
+            .collect();
+        if props.is_empty() {
+            return None;
+        }
+
+        props.sort_by(|left, right| {
+            left.name
+                .to_lowercase()
+                .cmp(&right.name.to_lowercase())
+                .then(left.name.cmp(&right.name))
+        });
+        Some(props)
     }
 
     /// Получить табличные части для TypeResolution

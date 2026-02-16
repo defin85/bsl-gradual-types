@@ -59,6 +59,9 @@ pub struct UniversalMetadataObject {
     /// Значения перечисления (для Enum)
     pub enum_values: Vec<String>,
 
+    /// Имена предопределённых элементов (из Ext/Predefined.xml)
+    pub predefined_items: Vec<String>,
+
     /// Дополнительные свойства объекта, извлечённые из XML
     pub properties: HashMap<String, String>,
 
@@ -96,6 +99,7 @@ impl UniversalMetadataObject {
             attributes: Vec::new(),
             tabular_sections: Vec::new(),
             enum_values: Vec::new(),
+            predefined_items: Vec::new(),
             properties: HashMap::new(),
             execution_contexts: Vec::new(),
             common_module_properties: None,

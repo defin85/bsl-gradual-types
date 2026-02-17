@@ -1605,6 +1605,74 @@ fn test_manager_facet_includes_predefined_marker_properties() {
 }
 
 #[test]
+fn test_predefined_merge_keeps_base_property_on_name_conflict() {
+    let repo = Arc::new(InMemoryTypeRepository::new());
+    repo.load_types(vec![RawTypeData {
+        name: "ПланыСчетов.Хозрасчетный".to_string(),
+        source: RawDataSource::Configuration,
+        facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+        kind: Some(MetadataKind::ChartOfAccounts),
+        properties: vec![
+            RawPropertyData {
+                name: "ГотоваяПродукция".to_string(),
+                prop_type: "Строка".to_string(),
+                is_readonly: false,
+            },
+            RawPropertyData {
+                name: "ГотоваяПродукция".to_string(),
+                prop_type: "__predefined_manager__:ПланСчетовСсылка.Хозрасчетный".to_string(),
+                is_readonly: true,
+            },
+            RawPropertyData {
+                name: "Товары".to_string(),
+                prop_type: "__predefined_manager__:ПланСчетовСсылка.Хозрасчетный".to_string(),
+                is_readonly: true,
+            },
+        ],
+        ..Default::default()
+    }])
+    .expect("Failed to load test types");
+
+    let lookup = TypeMetadataLookup::new(repo);
+    let resolution = TypeResolution {
+        certainty: Certainty::Known,
+        result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
+            kind: MetadataKind::ChartOfAccounts,
+            name: "Хозрасчетный".to_string(),
+            facet: None,
+            attributes: vec![],
+            tabular_sections: vec![],
+        })),
+        source: ResolutionSource::Static,
+        metadata: ResolutionMetadata::default(),
+        active_facet: None,
+        available_facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+    };
+
+    let properties = lookup.get_properties(&resolution);
+    let conflict = properties
+        .iter()
+        .find(|property| property.name == "ГотоваяПродукция")
+        .expect("missing merged conflict property");
+    assert_eq!(
+        conflict.prop_type, "Строка",
+        "base layer must win on name conflict with predefined"
+    );
+    assert!(
+        properties
+            .iter()
+            .all(|property| !property.prop_type.starts_with("__predefined_manager__:")),
+        "internal predefined marker type must never leak into lookup output"
+    );
+    assert!(
+        properties.iter().any(|property| {
+            property.name == "Товары" && property.prop_type == "ПланСчетовСсылка.Хозрасчетный"
+        }),
+        "non-conflicting predefined member must be merged into output"
+    );
+}
+
+#[test]
 fn test_object_facet_skips_predefined_marker_properties() {
     let repo = Arc::new(InMemoryTypeRepository::new());
     repo.load_types(vec![RawTypeData {

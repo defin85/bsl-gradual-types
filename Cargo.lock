@@ -383,7 +383,7 @@ checksum = "36f64beae40a84da1b4b26ff2761a5b895c12adc41dc25aaee1c4f2bbfe97a6e"
 
 [[package]]
 name = "bsl-agent"
-version = "0.4.91"
+version = "0.4.92"
 dependencies = [
  "anyhow",
  "axum",
@@ -412,7 +412,7 @@ dependencies = [
 
 [[package]]
 name = "bsl-analysis-v2"
-version = "0.4.91"
+version = "0.4.92"
 dependencies = [
  "anyhow",
  "bsl-diagnostics",
@@ -426,7 +426,7 @@ dependencies = [
 
 [[package]]
 name = "bsl-api-dtos"
-version = "0.4.91"
+version = "0.4.92"
 dependencies = [
  "bsl-repository",
  "chrono",
@@ -436,7 +436,7 @@ dependencies = [
 
 [[package]]
 name = "bsl-backend"
-version = "0.4.91"
+version = "0.4.92"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -497,7 +497,7 @@ dependencies = [
 
 [[package]]
 name = "bsl-cli"
-version = "0.4.91"
+version = "0.4.92"
 dependencies = [
  "anyhow",
  "bsl-analysis-v2",
@@ -515,7 +515,7 @@ dependencies = [
 
 [[package]]
 name = "bsl-diagnostics"
-version = "0.4.91"
+version = "0.4.92"
 dependencies = [
  "bsl-shared",
  "tracing",
@@ -523,7 +523,7 @@ dependencies = [
 
 [[package]]
 name = "bsl-frontend"
-version = "0.4.91"
+version = "0.4.92"
 dependencies = [
  "bsl-shared",
  "console_error_panic_hook",
@@ -544,7 +544,7 @@ dependencies = [
 
 [[package]]
 name = "bsl-gradual-types"
-version = "0.4.91"
+version = "0.4.92"
 dependencies = [
  "bsl-analysis-v2",
  "bsl-backend",
@@ -559,11 +559,11 @@ dependencies = [
 
 [[package]]
 name = "bsl-line-index"
-version = "0.4.91"
+version = "0.4.92"
 
 [[package]]
 name = "bsl-repository"
-version = "0.4.91"
+version = "0.4.92"
 dependencies = [
  "anyhow",
  "bsl-types",
@@ -574,7 +574,7 @@ dependencies = [
 
 [[package]]
 name = "bsl-runtime"
-version = "0.4.91"
+version = "0.4.92"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -627,7 +627,7 @@ dependencies = [
 
 [[package]]
 name = "bsl-shared"
-version = "0.4.91"
+version = "0.4.92"
 dependencies = [
  "anyhow",
  "bsl-api-dtos",
@@ -653,7 +653,7 @@ dependencies = [
 
 [[package]]
 name = "bsl-syntax"
-version = "0.4.91"
+version = "0.4.92"
 dependencies = [
  "bsl-line-index",
  "bsl-shared",
@@ -677,7 +677,7 @@ dependencies = [
 
 [[package]]
 name = "bsl-types"
-version = "0.4.91"
+version = "0.4.92"
 dependencies = [
  "serde",
 ]

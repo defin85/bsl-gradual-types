@@ -369,34 +369,60 @@ impl TypeMetadataLookup {
                 .collect();
         }
 
-        if let Some(predefined_props) = self.get_predefined_manager_properties(resolution) {
-            return predefined_props
-                .into_iter()
-                .map(|property| (property, PROPERTY_ORIGIN_REPOSITORY))
-                .collect();
-        }
-
         if let Some(form_data_props) = self.get_form_data_properties_with_origin(resolution) {
             return form_data_props;
         }
 
-        // Приоритет 1 - Lazy lookup через active_facet (для конфигурационных типов)
-        if let Some(facet) = resolution.active_facet {
-            if let Some(props) = self.get_facet_properties(resolution, facet) {
-                return props
-                    .into_iter()
-                    .map(|property| (property, PROPERTY_ORIGIN_REPOSITORY))
-                    .collect();
+        // Базовый слой: lazy lookup через active_facet (для конфигурационных типов),
+        // затем fallback на raw type properties (для платформенных типов).
+        let base_props = if let Some(facet) = resolution.active_facet {
+            self.get_facet_properties(resolution, facet)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|property| (property, PROPERTY_ORIGIN_REPOSITORY))
+                .collect()
+        } else {
+            self.get_raw_type(resolution)
+                .map(|raw| raw.properties)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|property| (property, PROPERTY_ORIGIN_REPOSITORY))
+                .collect()
+        };
+
+        if let Some(predefined_props) = self.get_predefined_manager_properties(resolution) {
+            return Self::merge_predefined_manager_properties(base_props, predefined_props);
+        }
+
+        base_props
+    }
+
+    fn merge_predefined_manager_properties(
+        base_props: Vec<(RawPropertyData, &'static str)>,
+        predefined_props: Vec<RawPropertyData>,
+    ) -> Vec<(RawPropertyData, &'static str)> {
+        let mut merged: Vec<(RawPropertyData, &'static str)> = Vec::new();
+        let mut seen = std::collections::HashSet::<String>::new();
+
+        // Base слой имеет приоритет над predefined; marker-свойства не должны утекать наружу.
+        for (property, origin) in base_props {
+            if Self::is_predefined_manager_marker_property_type(&property.prop_type) {
+                continue;
+            }
+            let key = property.name.to_lowercase();
+            if seen.insert(key) {
+                merged.push((property, origin));
             }
         }
 
-        // Приоритет 2 - Fallback на raw type properties (для платформенных типов)
-        self.get_raw_type(resolution)
-            .map(|raw| raw.properties)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|property| (property, PROPERTY_ORIGIN_REPOSITORY))
-            .collect()
+        for property in predefined_props {
+            let key = property.name.to_lowercase();
+            if seen.insert(key) {
+                merged.push((property, PROPERTY_ORIGIN_REPOSITORY));
+            }
+        }
+
+        merged
     }
 
     /// Определить происхождение свойства для конкретного resolution.

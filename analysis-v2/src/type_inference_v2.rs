@@ -1121,12 +1121,12 @@ impl TypeInferencer {
             return TypeResolution::primitive("Булево");
         }
 
-        if is_global_collection(name).is_some() {
-            return TypeResolution::inferred(name);
-        }
-
         if let Some(value) = env.variables.get(&name_lower) {
             return value.clone();
+        }
+
+        if is_global_collection(name).is_some() {
+            return TypeResolution::inferred(name);
         }
 
         let common_module_type = format!("ОбщиеМодули.{}", name);
@@ -2635,6 +2635,32 @@ mod tests {
             resolved.is_undeclared_variable(),
             Some("ДоговорКонтрагента"),
             "FormModule must stay strict and not use applied owner fallback"
+        );
+    }
+
+    #[test]
+    fn local_parameter_shadows_global_collection_in_identifier_resolution() {
+        let deps = deps_with_array_method();
+        let source = r#"Процедура Тест(Справочники)
+    x = Справочники;
+КонецПроцедуры
+"#;
+        let program = parse(source);
+        let file_path = "Documents/Док1/Ext/ObjectModule.bsl";
+        let index = build_type_index_with_path(&program, file_path, deps);
+
+        let offset = source
+            .find("x = Справочники")
+            .map(|idx| idx + "x = ".len())
+            .expect("identifier offset") as u32;
+        let resolved = index
+            .type_at_byte_offset(offset)
+            .expect("type at identifier");
+
+        assert!(
+            resolved.is_unknown(),
+            "procedure parameter must shadow global collection and stay unknown, got: {:?}",
+            resolved
         );
     }
 }

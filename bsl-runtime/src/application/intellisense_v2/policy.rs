@@ -161,6 +161,21 @@ pub enum CpuWorkClass {
     Background,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct CpuBudgetSaturationSnapshot {
+    interactive_waiters: usize,
+    background_waiters: usize,
+    interactive_permits: usize,
+    background_permits: usize,
+    shared_permits: usize,
+}
+
+impl CpuBudgetSaturationSnapshot {
+    fn queue_depth_total(self) -> usize {
+        self.interactive_waiters + self.background_waiters
+    }
+}
+
 struct CpuBoundBudget {
     interactive_reserved: Arc<Semaphore>,
     background_reserved: Arc<Semaphore>,
@@ -237,6 +252,16 @@ impl CpuBoundBudget {
         own_waiters.fetch_sub(1, Ordering::AcqRel);
         permit
     }
+
+    fn saturation_snapshot(&self) -> CpuBudgetSaturationSnapshot {
+        CpuBudgetSaturationSnapshot {
+            interactive_waiters: self.interactive_waiters.load(Ordering::Acquire),
+            background_waiters: self.background_waiters.load(Ordering::Acquire),
+            interactive_permits: self.interactive_reserved.available_permits(),
+            background_permits: self.background_reserved.available_permits(),
+            shared_permits: self.shared.available_permits(),
+        }
+    }
 }
 
 static CPU_BOUND_BUDGET: OnceLock<Arc<CpuBoundBudget>> = OnceLock::new();
@@ -275,6 +300,19 @@ where
     F: FnOnce() -> R + Send + 'static,
     R: Send + 'static,
 {
+    spawn_bounded_blocking_with_class_observed_origin(class, "runtime", observability, f).await
+}
+
+pub async fn spawn_bounded_blocking_with_class_observed_origin<F, R>(
+    class: CpuWorkClass,
+    origin: &'static str,
+    observability: Option<&SystemCoordinator>,
+    f: F,
+) -> Result<R, tokio::task::JoinError>
+where
+    F: FnOnce() -> R + Send + 'static,
+    R: Send + 'static,
+{
     let queue_wait_started = Instant::now();
     let permit = if std::thread::available_parallelism()
         .map(|parallelism| parallelism.get() >= 2)
@@ -289,23 +327,85 @@ where
     };
     let queue_wait_elapsed = queue_wait_started.elapsed();
     if let Some(coordinator) = observability {
-        coordinator.record_intellisense_v2_runtime_queue_wait_class_latency(
+        coordinator.record_intellisense_v2_runtime_queue_wait_class_latency_with_origin(
+            origin,
             cpu_class_label(class),
             queue_wait_elapsed,
         );
     }
+    emit_runtime_saturation_gauges(origin, observability);
 
     let exec_started = Instant::now();
     let result = tokio::task::spawn_blocking(f).await;
     let exec_elapsed = exec_started.elapsed();
     if let Some(coordinator) = observability {
-        coordinator.record_intellisense_v2_runtime_exec_class_latency(
+        coordinator.record_intellisense_v2_runtime_exec_class_latency_with_origin(
+            origin,
             cpu_class_label(class),
             exec_elapsed,
         );
     }
     drop(permit);
+    emit_runtime_saturation_gauges(origin, observability);
     result
+}
+
+fn emit_runtime_saturation_gauges(origin: &str, observability: Option<&SystemCoordinator>) {
+    let Some(coordinator) = observability else {
+        return;
+    };
+
+    let snapshot = if std::thread::available_parallelism()
+        .map(|parallelism| parallelism.get() >= 2)
+        .unwrap_or(true)
+    {
+        cpu_bound_budget().saturation_snapshot()
+    } else {
+        CpuBudgetSaturationSnapshot {
+            interactive_waiters: 0,
+            background_waiters: 0,
+            interactive_permits: 0,
+            background_permits: 0,
+            shared_permits: cpu_bound_semaphore().available_permits(),
+        }
+    };
+
+    coordinator.record_intellisense_v2_runtime_saturation_gauge_with_origin(
+        origin,
+        "waiters_interactive",
+        snapshot.interactive_waiters as f64,
+        "intellisense_v2_runtime_saturation_waiters_interactive",
+    );
+    coordinator.record_intellisense_v2_runtime_saturation_gauge_with_origin(
+        origin,
+        "waiters_background",
+        snapshot.background_waiters as f64,
+        "intellisense_v2_runtime_saturation_waiters_background",
+    );
+    coordinator.record_intellisense_v2_runtime_saturation_gauge_with_origin(
+        origin,
+        "permits_interactive",
+        snapshot.interactive_permits as f64,
+        "intellisense_v2_runtime_saturation_permits_interactive",
+    );
+    coordinator.record_intellisense_v2_runtime_saturation_gauge_with_origin(
+        origin,
+        "permits_background",
+        snapshot.background_permits as f64,
+        "intellisense_v2_runtime_saturation_permits_background",
+    );
+    coordinator.record_intellisense_v2_runtime_saturation_gauge_with_origin(
+        origin,
+        "permits_shared",
+        snapshot.shared_permits as f64,
+        "intellisense_v2_runtime_saturation_permits_shared",
+    );
+    coordinator.record_intellisense_v2_runtime_saturation_gauge_with_origin(
+        origin,
+        "queue_depth_total",
+        snapshot.queue_depth_total() as f64,
+        "intellisense_v2_runtime_saturation_queue_depth_total",
+    );
 }
 
 fn cpu_class_label(class: CpuWorkClass) -> &'static str {
@@ -488,6 +588,10 @@ mod tests {
             .get("counters")
             .and_then(|value| value.as_object())
             .expect("metrics.counters object");
+        let gauges = metrics
+            .get("gauges")
+            .and_then(|value| value.as_object())
+            .expect("metrics.gauges object");
         let histograms = metrics
             .get("histograms")
             .and_then(|value| value.as_object())
@@ -524,6 +628,40 @@ mod tests {
         assert!(
             histograms.contains_key("intellisense_v2_runtime_exec_background_ms"),
             "background exec histogram should be recorded"
+        );
+        assert!(
+            counters.contains_key(
+                "intellisense_v2_drilldown_saturation_sample_total_origin_runtime_reason_queue_wait_work_class_interactive"
+            ),
+            "interactive drilldown queue_wait counter should be recorded"
+        );
+        assert!(
+            counters.contains_key(
+                "intellisense_v2_drilldown_saturation_sample_total_origin_runtime_reason_queue_wait_work_class_background"
+            ),
+            "background drilldown queue_wait counter should be recorded"
+        );
+        assert!(
+            histograms.contains_key(
+                "intellisense_v2_drilldown_saturation_sample_latency_ms_origin_runtime_reason_exec_work_class_interactive"
+            ),
+            "interactive drilldown exec histogram should be recorded"
+        );
+        assert!(
+            histograms.contains_key(
+                "intellisense_v2_drilldown_saturation_sample_latency_ms_origin_runtime_reason_exec_work_class_background"
+            ),
+            "background drilldown exec histogram should be recorded"
+        );
+        assert!(
+            gauges.contains_key("intellisense_v2_runtime_saturation_waiters_interactive"),
+            "legacy saturation gauge should be exported"
+        );
+        assert!(
+            gauges.contains_key(
+                "intellisense_v2_drilldown_saturation_gauge_origin_runtime_saturation_metric_queue_depth_total"
+            ),
+            "drilldown saturation gauge should be exported"
         );
     }
 

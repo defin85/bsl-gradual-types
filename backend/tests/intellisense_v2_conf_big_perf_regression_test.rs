@@ -10,7 +10,7 @@ use std::time::Instant;
 use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, FileId as V2FileId, SettingsId};
 use bsl_backend::application::{
     CancellationPolicy, ExecutionContext, ExecutionSettings, IntellisenseV2Facade,
-    ObservabilityStage, SemanticOperation,
+    ObservabilityOrigin, ObservabilityStage, SemanticOperation,
 };
 use bsl_backend::system::{IndexSnapshot, IndexSnapshotId};
 use bsl_shared::formatting::DetailLevel;
@@ -55,6 +55,7 @@ async fn measure_shared_facade_semantic_triplet(
     settings_id: SettingsId,
 ) -> std::time::Duration {
     let context = ExecutionContext {
+        origin: ObservabilityOrigin::Lsp,
         operation: SemanticOperation::Members,
         file_id,
         min_file_version: None,

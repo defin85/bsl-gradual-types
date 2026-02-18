@@ -60,9 +60,30 @@ fn runtime_work_class_for_operation(operation: SemanticOperation) -> &'static st
     }
 }
 
+/// Canonical observability origin across adapters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ObservabilityOrigin {
+    Lsp,
+    Web,
+    Agent,
+    Runtime,
+}
+
+impl ObservabilityOrigin {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ObservabilityOrigin::Lsp => "lsp",
+            ObservabilityOrigin::Web => "web",
+            ObservabilityOrigin::Agent => "agent",
+            ObservabilityOrigin::Runtime => "runtime",
+        }
+    }
+}
+
 /// Shared execution context passed by adapters into semantic operations.
 #[derive(Debug, Clone)]
 pub struct ExecutionContext {
+    pub origin: ObservabilityOrigin,
     pub operation: SemanticOperation,
     pub file_id: FileId,
     /// If set, facade should wait until runtime reaches this file version.
@@ -217,10 +238,21 @@ enum SingleflightQueryKind {
     Ir,
 }
 
+impl SingleflightQueryKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            SingleflightQueryKind::ParseResult => "parse_result",
+            SingleflightQueryKind::SyntaxDiagnostics => "syntax_diagnostics",
+            SingleflightQueryKind::Ir => "ir",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct SingleflightRevisionKey {
     file_id: FileId,
     file_version: i32,
+    file_signature: String,
     deps_id: DepsSnapshotId,
     settings_id: SettingsId,
     query_kind: SingleflightQueryKind,
@@ -614,7 +646,8 @@ impl IntellisenseV2Facade {
             };
             let elapsed = started.elapsed();
             if let Some(coordinator) = observability {
-                coordinator.record_intellisense_v2_wait_for_file_version(
+                coordinator.record_intellisense_v2_wait_for_file_version_with_origin(
+                    context.origin.as_str(),
                     context.operation.as_str(),
                     elapsed,
                 );
@@ -631,15 +664,18 @@ impl IntellisenseV2Facade {
         let (analysis, index_snapshot, deps_id) = self.snapshot_with_deps().await;
         let snapshot_elapsed = snapshot_started.elapsed();
         if let Some(coordinator) = observability {
-            coordinator.record_intellisense_v2_snapshot_latency(
+            coordinator.record_intellisense_v2_snapshot_latency_with_origin(
+                context.origin.as_str(),
                 context.operation.as_str(),
                 snapshot_elapsed,
             );
-            coordinator.record_intellisense_v2_runtime_queue_wait_class_latency(
+            coordinator.record_intellisense_v2_runtime_queue_wait_class_latency_with_origin(
+                context.origin.as_str(),
                 runtime_work_class_for_operation(context.operation),
                 wait_elapsed.unwrap_or(Duration::ZERO),
             );
-            coordinator.record_intellisense_v2_runtime_exec_class_latency(
+            coordinator.record_intellisense_v2_runtime_exec_class_latency_with_origin(
+                context.origin.as_str(),
                 runtime_work_class_for_operation(context.operation),
                 snapshot_elapsed,
             );
@@ -778,7 +814,8 @@ impl IntellisenseV2Facade {
         );
         let snapshot_elapsed = snapshot_started.elapsed();
         if let Some(coordinator) = observability {
-            coordinator.record_intellisense_v2_snapshot_latency(
+            coordinator.record_intellisense_v2_snapshot_latency_with_origin(
+                context.origin.as_str(),
                 context.operation.as_str(),
                 snapshot_elapsed,
             );
@@ -828,31 +865,54 @@ impl IntellisenseV2Facade {
         if let Some(coordinator) = observability {
             match stage {
                 ObservabilityStage::IrQuery => {
-                    coordinator.record_intellisense_v2_ir_query_latency(
+                    coordinator.record_intellisense_v2_ir_query_latency_with_origin(
+                        context.origin.as_str(),
                         context.operation.as_str(),
                         elapsed,
                     );
                     if report_cancelled {
-                        coordinator
-                            .record_intellisense_v2_ir_query_cancelled(context.operation.as_str());
+                        coordinator.record_intellisense_v2_ir_query_cancelled_with_origin(
+                            context.origin.as_str(),
+                            context.operation.as_str(),
+                        );
                     }
                 }
                 ObservabilityStage::SyntaxDiagnosticsQuery => {
-                    coordinator.record_intellisense_v2_syntax_diagnostics_query_latency(elapsed);
+                    coordinator
+                        .record_intellisense_v2_syntax_diagnostics_query_latency_with_origin(
+                            context.origin.as_str(),
+                            elapsed,
+                        );
                     if report_cancelled {
-                        coordinator.record_intellisense_v2_query_cancelled("syntax");
+                        coordinator.record_intellisense_v2_query_cancelled_with_origin(
+                            context.origin.as_str(),
+                            "syntax",
+                        );
                     }
                 }
                 ObservabilityStage::SemanticDiagnosticsQuery => {
-                    coordinator.record_intellisense_v2_semantic_diagnostics_query_latency(elapsed);
+                    coordinator
+                        .record_intellisense_v2_semantic_diagnostics_query_latency_with_origin(
+                            context.origin.as_str(),
+                            elapsed,
+                        );
                     if report_cancelled {
-                        coordinator.record_intellisense_v2_query_cancelled("semantic");
+                        coordinator.record_intellisense_v2_query_cancelled_with_origin(
+                            context.origin.as_str(),
+                            "semantic",
+                        );
                     }
                 }
                 ObservabilityStage::ParseResultQuery => {
-                    coordinator.record_intellisense_v2_parse_result_query_latency(elapsed);
+                    coordinator.record_intellisense_v2_parse_result_query_latency_with_origin(
+                        context.origin.as_str(),
+                        elapsed,
+                    );
                     if report_cancelled {
-                        coordinator.record_intellisense_v2_query_cancelled("other");
+                        coordinator.record_intellisense_v2_query_cancelled_with_origin(
+                            context.origin.as_str(),
+                            "other",
+                        );
                     }
                 }
                 ObservabilityStage::RuntimeQueueWait
@@ -901,12 +961,26 @@ impl IntellisenseV2Facade {
             observability,
             |_analysis| {
                 if let Some(key) = key {
-                    Self::run_singleflight_query(&IR_FLIGHTS, key, observability, || {
-                        analysis
-                            .ir(file_id)
-                            .map_err(|_| SingleflightQueryError::Cancelled)
-                    })
+                    Self::run_singleflight_query(
+                        &IR_FLIGHTS,
+                        key,
+                        context.origin,
+                        SingleflightQueryKind::Ir,
+                        observability,
+                        || {
+                            analysis
+                                .ir(file_id)
+                                .map_err(|_| SingleflightQueryError::Cancelled)
+                        },
+                    )
                 } else {
+                    if let Some(coordinator) = observability {
+                        coordinator
+                            .record_intellisense_v2_singleflight_key_unavailable_with_origin(
+                                context.origin.as_str(),
+                                SingleflightQueryKind::Ir.as_str(),
+                            );
+                    }
                     analysis
                         .ir(file_id)
                         .map_err(|_| SingleflightQueryError::Cancelled)
@@ -934,12 +1008,26 @@ impl IntellisenseV2Facade {
             observability,
             |_analysis| {
                 if let Some(key) = key {
-                    Self::run_singleflight_query(&PARSE_RESULT_FLIGHTS, key, observability, || {
-                        analysis
-                            .parse_result(file_id)
-                            .map_err(|_| SingleflightQueryError::Cancelled)
-                    })
+                    Self::run_singleflight_query(
+                        &PARSE_RESULT_FLIGHTS,
+                        key,
+                        context.origin,
+                        SingleflightQueryKind::ParseResult,
+                        observability,
+                        || {
+                            analysis
+                                .parse_result(file_id)
+                                .map_err(|_| SingleflightQueryError::Cancelled)
+                        },
+                    )
                 } else {
+                    if let Some(coordinator) = observability {
+                        coordinator
+                            .record_intellisense_v2_singleflight_key_unavailable_with_origin(
+                                context.origin.as_str(),
+                                SingleflightQueryKind::ParseResult.as_str(),
+                            );
+                    }
                     analysis
                         .parse_result(file_id)
                         .map_err(|_| SingleflightQueryError::Cancelled)
@@ -969,6 +1057,8 @@ impl IntellisenseV2Facade {
                     Self::run_singleflight_query(
                         &SYNTAX_DIAGNOSTICS_FLIGHTS,
                         key,
+                        context.origin,
+                        SingleflightQueryKind::SyntaxDiagnostics,
                         observability,
                         || {
                             analysis
@@ -977,6 +1067,13 @@ impl IntellisenseV2Facade {
                         },
                     )
                 } else {
+                    if let Some(coordinator) = observability {
+                        coordinator
+                            .record_intellisense_v2_singleflight_key_unavailable_with_origin(
+                                context.origin.as_str(),
+                                SingleflightQueryKind::SyntaxDiagnostics.as_str(),
+                            );
+                    }
                     analysis
                         .syntax_diagnostics(file_id)
                         .map_err(|_| SingleflightQueryError::Cancelled)
@@ -991,20 +1088,32 @@ impl IntellisenseV2Facade {
         query_kind: SingleflightQueryKind,
     ) -> Option<SingleflightRevisionKey> {
         let file_version = analysis.file_version(file_id).ok().flatten()?;
+        let file_signature = Self::singleflight_file_signature(analysis, file_id)?;
         let deps_id = analysis.deps_id().ok()?;
         let settings_id = analysis.settings_id().ok()?;
         Some(SingleflightRevisionKey {
             file_id,
             file_version,
+            file_signature,
             deps_id,
             settings_id,
             query_kind,
         })
     }
 
+    fn singleflight_file_signature(analysis: &AnalysisV2, file_id: FileId) -> Option<String> {
+        if let Some(path) = analysis.file_path(file_id).ok().flatten() {
+            return Some(format!("path:{path}"));
+        }
+        let text = analysis.file_text(file_id).ok().flatten()?;
+        Some(format!("text:{}", blake3::hash(text.as_bytes()).to_hex()))
+    }
+
     fn run_singleflight_query<T>(
         flights: &OnceLock<SingleflightMap<T>>,
         key: SingleflightRevisionKey,
+        origin: ObservabilityOrigin,
+        query_kind: SingleflightQueryKind,
         observability: Option<&SystemCoordinator>,
         query: impl FnOnce() -> Result<Option<T>, SingleflightQueryError>,
     ) -> Result<Option<T>, SingleflightQueryError>
@@ -1027,7 +1136,10 @@ impl IntellisenseV2Facade {
 
         if is_leader {
             if let Some(coordinator) = observability {
-                coordinator.record_intellisense_v2_singleflight_leader();
+                coordinator.record_intellisense_v2_singleflight_leader_with_origin(
+                    origin.as_str(),
+                    query_kind.as_str(),
+                );
             }
             let result = match catch_unwind(AssertUnwindSafe(query)) {
                 Ok(result) => result,
@@ -1052,7 +1164,10 @@ impl IntellisenseV2Facade {
             result
         } else {
             if let Some(coordinator) = observability {
-                coordinator.record_intellisense_v2_singleflight_shared();
+                coordinator.record_intellisense_v2_singleflight_shared_with_origin(
+                    origin.as_str(),
+                    query_kind.as_str(),
+                );
             }
             let wait_started = Instant::now();
             let mut state = flight
@@ -1066,8 +1181,11 @@ impl IntellisenseV2Facade {
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
             }
             if let Some(coordinator) = observability {
-                coordinator
-                    .record_intellisense_v2_singleflight_wait_latency(wait_started.elapsed());
+                coordinator.record_intellisense_v2_singleflight_wait_latency_with_origin(
+                    origin.as_str(),
+                    query_kind.as_str(),
+                    wait_started.elapsed(),
+                );
             }
             match state.terminal_outcome.clone() {
                 Some(SingleflightTerminalOutcome::Success(shared)) => Ok(shared),
@@ -1447,6 +1565,7 @@ mod tests {
         let runtime = IntellisenseV2Facade::new(host, make_index_snapshot("index"), None);
 
         let context = ExecutionContext {
+            origin: ObservabilityOrigin::Lsp,
             operation: SemanticOperation::Hover,
             file_id: FileId(1),
             min_file_version: None,
@@ -1495,6 +1614,7 @@ mod tests {
         let _ = runtime.snapshot().await;
 
         let context = ExecutionContext {
+            origin: ObservabilityOrigin::Lsp,
             operation: SemanticOperation::Completion,
             file_id,
             min_file_version: Some(5),
@@ -1606,6 +1726,7 @@ mod tests {
         let _ = runtime.snapshot().await;
 
         let context = ExecutionContext {
+            origin: ObservabilityOrigin::Lsp,
             operation: SemanticOperation::Completion,
             file_id,
             min_file_version: Some(5),
@@ -1696,6 +1817,7 @@ mod tests {
         let _ = runtime.snapshot().await;
 
         let context = ExecutionContext {
+            origin: ObservabilityOrigin::Lsp,
             operation: SemanticOperation::SignatureHelp,
             file_id,
             min_file_version: Some(5),
@@ -1756,6 +1878,7 @@ mod tests {
         ]);
 
         let context = ExecutionContext {
+            origin: ObservabilityOrigin::Lsp,
             operation: SemanticOperation::Completion,
             file_id,
             min_file_version: Some(5),
@@ -1781,6 +1904,7 @@ mod tests {
     fn run_parse_result_query_skips_when_policy_disallows_it() {
         let analysis = AnalysisHostV2::default().snapshot();
         let context = ExecutionContext {
+            origin: ObservabilityOrigin::Lsp,
             operation: SemanticOperation::Hover,
             file_id: FileId(1),
             min_file_version: None,
@@ -1818,6 +1942,7 @@ mod tests {
         let coordinator = SystemCoordinator::new();
         let analysis = AnalysisHostV2::default().snapshot();
         let context = ExecutionContext {
+            origin: ObservabilityOrigin::Lsp,
             operation: SemanticOperation::Completion,
             file_id: FileId(1),
             min_file_version: None,
@@ -1864,6 +1989,7 @@ mod tests {
         let coordinator = SystemCoordinator::new();
         let analysis = AnalysisHostV2::default().snapshot();
         let context = ExecutionContext {
+            origin: ObservabilityOrigin::Lsp,
             operation: SemanticOperation::Members,
             file_id: FileId(1),
             min_file_version: None,
@@ -1909,6 +2035,7 @@ mod tests {
         let coordinator = SystemCoordinator::new();
         let analysis = AnalysisHostV2::default().snapshot();
         let context = ExecutionContext {
+            origin: ObservabilityOrigin::Lsp,
             operation: SemanticOperation::Members,
             file_id: FileId(1),
             min_file_version: None,
@@ -1952,6 +2079,7 @@ mod tests {
         let key = SingleflightRevisionKey {
             file_id: FileId(777),
             file_version: 10,
+            file_signature: "path:test://singleflight/777.bsl".to_string(),
             deps_id: DepsSnapshotId::from_hash("deps"),
             settings_id: SettingsId::from_hash("settings"),
             query_kind: SingleflightQueryKind::Ir,
@@ -1961,21 +2089,35 @@ mod tests {
         let first_calls = calls.clone();
         let first_key = key.clone();
         let first = std::thread::spawn(move || {
-            IntellisenseV2Facade::run_singleflight_query(&TEST_FLIGHTS, first_key, None, || {
-                first_calls.fetch_add(1, Ordering::SeqCst);
-                std::thread::sleep(std::time::Duration::from_millis(60));
-                Ok(Some(Arc::new(String::from("shared"))))
-            })
+            IntellisenseV2Facade::run_singleflight_query(
+                &TEST_FLIGHTS,
+                first_key,
+                ObservabilityOrigin::Runtime,
+                SingleflightQueryKind::Ir,
+                None,
+                || {
+                    first_calls.fetch_add(1, Ordering::SeqCst);
+                    std::thread::sleep(std::time::Duration::from_millis(60));
+                    Ok(Some(Arc::new(String::from("shared"))))
+                },
+            )
         });
 
         std::thread::sleep(std::time::Duration::from_millis(5));
 
         let second_calls = calls.clone();
         let second = std::thread::spawn(move || {
-            IntellisenseV2Facade::run_singleflight_query(&TEST_FLIGHTS, key, None, || {
-                second_calls.fetch_add(1, Ordering::SeqCst);
-                Ok(Some(Arc::new(String::from("second"))))
-            })
+            IntellisenseV2Facade::run_singleflight_query(
+                &TEST_FLIGHTS,
+                key,
+                ObservabilityOrigin::Runtime,
+                SingleflightQueryKind::Ir,
+                None,
+                || {
+                    second_calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(Some(Arc::new(String::from("second"))))
+                },
+            )
         });
 
         let first_result = first.join().expect("first thread join").expect("first ok");
@@ -2001,6 +2143,7 @@ mod tests {
         let key = SingleflightRevisionKey {
             file_id: FileId(778),
             file_version: 10,
+            file_signature: "path:test://singleflight/778.bsl".to_string(),
             deps_id: DepsSnapshotId::from_hash("deps"),
             settings_id: SettingsId::from_hash("settings"),
             query_kind: SingleflightQueryKind::ParseResult,
@@ -2010,11 +2153,18 @@ mod tests {
         let first_calls = calls.clone();
         let first_key = key.clone();
         let first = std::thread::spawn(move || {
-            IntellisenseV2Facade::run_singleflight_query(&TEST_FLIGHTS, first_key, None, || {
-                first_calls.fetch_add(1, Ordering::SeqCst);
-                std::thread::sleep(std::time::Duration::from_millis(60));
-                Err(SingleflightQueryError::Cancelled)
-            })
+            IntellisenseV2Facade::run_singleflight_query(
+                &TEST_FLIGHTS,
+                first_key,
+                ObservabilityOrigin::Runtime,
+                SingleflightQueryKind::ParseResult,
+                None,
+                || {
+                    first_calls.fetch_add(1, Ordering::SeqCst);
+                    std::thread::sleep(std::time::Duration::from_millis(60));
+                    Err(SingleflightQueryError::Cancelled)
+                },
+            )
         });
 
         std::thread::sleep(std::time::Duration::from_millis(5));
@@ -2022,10 +2172,17 @@ mod tests {
         let second_calls = calls.clone();
         let second_key = key.clone();
         let second = std::thread::spawn(move || {
-            IntellisenseV2Facade::run_singleflight_query(&TEST_FLIGHTS, second_key, None, || {
-                second_calls.fetch_add(1, Ordering::SeqCst);
-                Ok(Some(Arc::new(String::from("unexpected-retry"))))
-            })
+            IntellisenseV2Facade::run_singleflight_query(
+                &TEST_FLIGHTS,
+                second_key,
+                ObservabilityOrigin::Runtime,
+                SingleflightQueryKind::ParseResult,
+                None,
+                || {
+                    second_calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(Some(Arc::new(String::from("unexpected-retry"))))
+                },
+            )
         });
 
         let first_result = first.join().expect("first thread join");
@@ -2051,10 +2208,17 @@ mod tests {
         assert_eq!(inflight_len, 0, "flight entry must be cleaned up");
 
         let rerun_calls = calls.clone();
-        let rerun = IntellisenseV2Facade::run_singleflight_query(&TEST_FLIGHTS, key, None, || {
-            rerun_calls.fetch_add(1, Ordering::SeqCst);
-            Ok(Some(Arc::new(String::from("after-cleanup"))))
-        })
+        let rerun = IntellisenseV2Facade::run_singleflight_query(
+            &TEST_FLIGHTS,
+            key,
+            ObservabilityOrigin::Runtime,
+            SingleflightQueryKind::ParseResult,
+            None,
+            || {
+                rerun_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(Some(Arc::new(String::from("after-cleanup"))))
+            },
+        )
         .expect("new request after cleanup should run as new leader");
         assert_eq!(rerun.as_deref().map(String::as_str), Some("after-cleanup"));
         assert_eq!(calls.load(Ordering::SeqCst), 2);
@@ -2066,6 +2230,7 @@ mod tests {
         let key = SingleflightRevisionKey {
             file_id: FileId(780),
             file_version: 10,
+            file_signature: "path:test://singleflight/780.bsl".to_string(),
             deps_id: DepsSnapshotId::from_hash("deps"),
             settings_id: SettingsId::from_hash("settings"),
             query_kind: SingleflightQueryKind::SyntaxDiagnostics,
@@ -2073,18 +2238,30 @@ mod tests {
 
         let first_key = key.clone();
         let first = std::thread::spawn(move || {
-            IntellisenseV2Facade::run_singleflight_query(&TEST_FLIGHTS, first_key, None, || {
-                std::thread::sleep(std::time::Duration::from_millis(60));
-                panic!("leader panic must not leak in-flight entry")
-            })
+            IntellisenseV2Facade::run_singleflight_query(
+                &TEST_FLIGHTS,
+                first_key,
+                ObservabilityOrigin::Runtime,
+                SingleflightQueryKind::SyntaxDiagnostics,
+                None,
+                || {
+                    std::thread::sleep(std::time::Duration::from_millis(60));
+                    panic!("leader panic must not leak in-flight entry")
+                },
+            )
         });
 
         std::thread::sleep(std::time::Duration::from_millis(5));
 
         let second = std::thread::spawn(move || {
-            IntellisenseV2Facade::run_singleflight_query(&TEST_FLIGHTS, key, None, || {
-                Ok(Some(Arc::new(String::from("unexpected-after-panic"))))
-            })
+            IntellisenseV2Facade::run_singleflight_query(
+                &TEST_FLIGHTS,
+                key,
+                ObservabilityOrigin::Runtime,
+                SingleflightQueryKind::SyntaxDiagnostics,
+                None,
+                || Ok(Some(Arc::new(String::from("unexpected-after-panic")))),
+            )
         });
 
         let first_result = first.join().expect("first thread join");
@@ -2117,6 +2294,7 @@ mod tests {
         let key = SingleflightRevisionKey {
             file_id: FileId(779),
             file_version: 10,
+            file_signature: "path:test://singleflight/779.bsl".to_string(),
             deps_id: DepsSnapshotId::from_hash("deps"),
             settings_id: SettingsId::from_hash("settings"),
             query_kind: SingleflightQueryKind::SyntaxDiagnostics,
@@ -2129,6 +2307,8 @@ mod tests {
             IntellisenseV2Facade::run_singleflight_query(
                 &TEST_FLIGHTS,
                 first_key,
+                ObservabilityOrigin::Runtime,
+                SingleflightQueryKind::SyntaxDiagnostics,
                 Some(first_coordinator.as_ref()),
                 || {
                     std::thread::sleep(std::time::Duration::from_millis(50));
@@ -2144,6 +2324,8 @@ mod tests {
             IntellisenseV2Facade::run_singleflight_query(
                 &TEST_FLIGHTS,
                 key,
+                ObservabilityOrigin::Runtime,
+                SingleflightQueryKind::SyntaxDiagnostics,
                 Some(second_coordinator.as_ref()),
                 || Ok(Some(Arc::new(String::from("second")))),
             )

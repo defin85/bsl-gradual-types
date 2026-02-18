@@ -6,7 +6,7 @@ use bsl_analysis_v2::{FileId, SettingsId};
 use bsl_runtime::application::type_system::web_api_service;
 use bsl_runtime::application::{
     CancellationPolicy, ExecutionContext, ExecutionSettings, IntellisenseV2Facade,
-    ObservabilityStage, PreparedOperationSnapshot, SemanticOperation,
+    ObservabilityOrigin, ObservabilityStage, PreparedOperationSnapshot, SemanticOperation,
 };
 use bsl_runtime::data::loaders::progress::ProgressUpdate;
 use bsl_runtime::data::loaders::ConfigurationDiscovery;
@@ -1605,98 +1605,107 @@ impl SessionManager {
             let query_lower = query_lower.clone();
             let analysis_revision_local = analysis_revision;
 
-            let file_symbols = bsl_runtime::application::spawn_bounded_blocking(
-                move || -> Result<Vec<SymbolDto>, rmcp::ErrorData> {
-                    let (context, prepared) = match prepare_ephemeral_mcp_operation(
-                        SemanticOperation::SymbolSearch,
-                        false,
-                        deps_id_local,
-                        deps_local,
-                        index_snapshot_local,
-                        Arc::from(text),
-                        0,
-                        Arc::from(file_abs_path),
-                        DetailLevel::Full,
-                        coordinator_local.as_ref(),
-                    ) {
-                        Ok(values) => values,
-                        Err(_) => return Ok(Vec::new()),
-                    };
-
-                    let analysis = prepared.snapshot.analysis;
-                    let program_query = IntellisenseV2Facade::run_optional_query(
-                        &context,
-                        ObservabilityStage::IrQuery,
-                        &analysis,
-                        Some(coordinator_local.as_ref()),
-                        |analysis| analysis.ir(FileId(1)),
-                    );
-                    let Some(program) = program_query.ok().flatten() else {
-                        return Ok(Vec::new());
-                    };
-                    let Some(code) = analysis.file_text(FileId(1)).ok().flatten() else {
-                        return Ok(Vec::new());
-                    };
-                    let Some(line_index) = analysis.line_index(FileId(1)).ok().flatten() else {
-                        return Ok(Vec::new());
-                    };
-
-                    let mut out = Vec::new();
-                    for node in program.nodes.iter() {
-                        let (kind, name) = match &node.kind {
-                            bsl_shared::ir::SemanticNodeKind::FunctionDeclaration {
-                                name, ..
-                            } => ("function", name.as_str()),
-                            bsl_shared::ir::SemanticNodeKind::ProcedureDeclaration {
-                                name, ..
-                            } => ("procedure", name.as_str()),
-                            _ => continue,
+            let file_symbols =
+                bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
+                    bsl_runtime::application::CpuWorkClass::Background,
+                    ObservabilityOrigin::Agent.as_str(),
+                    Some(coordinator.as_ref()),
+                    move || -> Result<Vec<SymbolDto>, rmcp::ErrorData> {
+                        let (context, prepared) = match prepare_ephemeral_mcp_operation(
+                            SemanticOperation::SymbolSearch,
+                            false,
+                            deps_id_local,
+                            deps_local,
+                            index_snapshot_local,
+                            Arc::from(text),
+                            0,
+                            Arc::from(file_abs_path),
+                            DetailLevel::Full,
+                            coordinator_local.as_ref(),
+                        ) {
+                            Ok(values) => values,
+                            Err(_) => return Ok(Vec::new()),
                         };
 
-                        if !name.to_lowercase().contains(&query_lower) {
-                            continue;
-                        }
-
-                        if out.len() >= remaining {
-                            break;
-                        }
-
-                        let range =
-                            span_to_range_with_index(code.as_ref(), line_index.as_ref(), node.span);
-                        let file_ref = DocumentRefDto {
-                            root_id: file_root_id.clone(),
-                            path: file_rel_path.clone(),
+                        let analysis = prepared.snapshot.analysis;
+                        let program_query = IntellisenseV2Facade::run_optional_query(
+                            &context,
+                            ObservabilityStage::IrQuery,
+                            &analysis,
+                            Some(coordinator_local.as_ref()),
+                            |analysis| analysis.ir(FileId(1)),
+                        );
+                        let Some(program) = program_query.ok().flatten() else {
+                            return Ok(Vec::new());
                         };
-                        let document_id = ids::document_id(&file_ref.root_id, &file_ref.path);
-                        let symbol_id = ids::stable_id_hex(&[
-                            ids::IdPart::U64(analysis_revision_local),
-                            ids::IdPart::Str(&document_id),
-                            ids::IdPart::Str(kind),
-                            ids::IdPart::U32(range.start.line),
-                            ids::IdPart::U32(range.start.character),
-                            ids::IdPart::U32(range.end.line),
-                            ids::IdPart::U32(range.end.character),
-                            ids::IdPart::Str(name),
-                        ]);
+                        let Some(code) = analysis.file_text(FileId(1)).ok().flatten() else {
+                            return Ok(Vec::new());
+                        };
+                        let Some(line_index) = analysis.line_index(FileId(1)).ok().flatten() else {
+                            return Ok(Vec::new());
+                        };
 
-                        out.push(SymbolDto {
-                            symbol_id,
-                            name: name.to_string(),
-                            kind: kind.to_string(),
-                            file: file_ref,
-                            range,
-                        });
-                    }
-                    Ok(out)
-                },
-            )
-            .await
-            .map_err(|err| {
-                rmcp::ErrorData::internal_error(
-                    format!("symbol_search worker task join failed: {err}"),
-                    None,
+                        let mut out = Vec::new();
+                        for node in program.nodes.iter() {
+                            let (kind, name) = match &node.kind {
+                                bsl_shared::ir::SemanticNodeKind::FunctionDeclaration {
+                                    name,
+                                    ..
+                                } => ("function", name.as_str()),
+                                bsl_shared::ir::SemanticNodeKind::ProcedureDeclaration {
+                                    name,
+                                    ..
+                                } => ("procedure", name.as_str()),
+                                _ => continue,
+                            };
+
+                            if !name.to_lowercase().contains(&query_lower) {
+                                continue;
+                            }
+
+                            if out.len() >= remaining {
+                                break;
+                            }
+
+                            let range = span_to_range_with_index(
+                                code.as_ref(),
+                                line_index.as_ref(),
+                                node.span,
+                            );
+                            let file_ref = DocumentRefDto {
+                                root_id: file_root_id.clone(),
+                                path: file_rel_path.clone(),
+                            };
+                            let document_id = ids::document_id(&file_ref.root_id, &file_ref.path);
+                            let symbol_id = ids::stable_id_hex(&[
+                                ids::IdPart::U64(analysis_revision_local),
+                                ids::IdPart::Str(&document_id),
+                                ids::IdPart::Str(kind),
+                                ids::IdPart::U32(range.start.line),
+                                ids::IdPart::U32(range.start.character),
+                                ids::IdPart::U32(range.end.line),
+                                ids::IdPart::U32(range.end.character),
+                                ids::IdPart::Str(name),
+                            ]);
+
+                            out.push(SymbolDto {
+                                symbol_id,
+                                name: name.to_string(),
+                                kind: kind.to_string(),
+                                file: file_ref,
+                                range,
+                            });
+                        }
+                        Ok(out)
+                    },
                 )
-            })??;
+                .await
+                .map_err(|err| {
+                    rmcp::ErrorData::internal_error(
+                        format!("symbol_search worker task join failed: {err}"),
+                        None,
+                    )
+                })??;
 
             symbols.extend(file_symbols);
             if symbols.len() >= params.limit as usize {
@@ -2249,85 +2258,89 @@ impl SessionManager {
             let file_abs_path = file.abs_path.to_string_lossy().to_string();
             let symbol_name = symbol.name.clone();
 
-            let file_references = bsl_runtime::application::spawn_bounded_blocking(
-                move || -> Result<Vec<ReferenceDto>, rmcp::ErrorData> {
-                    let (context, prepared) = match prepare_ephemeral_mcp_operation(
-                        SemanticOperation::References,
-                        false,
-                        deps_id_local,
-                        deps_local,
-                        index_snapshot_local,
-                        Arc::from(text),
-                        0,
-                        Arc::from(file_abs_path),
-                        DetailLevel::Full,
-                        coordinator_local.as_ref(),
-                    ) {
-                        Ok(values) => values,
-                        Err(_) => return Ok(Vec::new()),
-                    };
-
-                    let analysis = prepared.snapshot.analysis;
-                    let program_query = IntellisenseV2Facade::run_optional_query(
-                        &context,
-                        ObservabilityStage::IrQuery,
-                        &analysis,
-                        Some(coordinator_local.as_ref()),
-                        |analysis| analysis.ir(FileId(1)),
-                    );
-                    let Some(program) = program_query.ok().flatten() else {
-                        return Ok(Vec::new());
-                    };
-                    let Some(code) = analysis.file_text(FileId(1)).ok().flatten() else {
-                        return Ok(Vec::new());
-                    };
-                    let Some(line_index) = analysis.line_index(FileId(1)).ok().flatten() else {
-                        return Ok(Vec::new());
-                    };
-
-                    let mut out = Vec::new();
-                    for node in program.nodes.iter() {
-                        let bsl_shared::ir::SemanticNodeKind::FunctionCall {
-                            function_name,
-                            object_name,
-                            object_node,
-                            ..
-                        } = &node.kind
-                        else {
-                            continue;
+            let file_references =
+                bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
+                    bsl_runtime::application::CpuWorkClass::Background,
+                    ObservabilityOrigin::Agent.as_str(),
+                    Some(coordinator.as_ref()),
+                    move || -> Result<Vec<ReferenceDto>, rmcp::ErrorData> {
+                        let (context, prepared) = match prepare_ephemeral_mcp_operation(
+                            SemanticOperation::References,
+                            false,
+                            deps_id_local,
+                            deps_local,
+                            index_snapshot_local,
+                            Arc::from(text),
+                            0,
+                            Arc::from(file_abs_path),
+                            DetailLevel::Full,
+                            coordinator_local.as_ref(),
+                        ) {
+                            Ok(values) => values,
+                            Err(_) => return Ok(Vec::new()),
                         };
-                        if object_name.is_some() || object_node.is_some() {
-                            continue;
-                        }
-                        if !function_name.eq_ignore_ascii_case(&symbol_name) {
-                            continue;
-                        }
-                        if out.len() >= remaining {
-                            break;
-                        }
 
-                        out.push(ReferenceDto {
-                            file: DocumentRefDto {
-                                root_id: file_root_id.clone(),
-                                path: file_rel_path.clone(),
-                            },
-                            range: span_to_range_with_index(
-                                code.as_ref(),
-                                line_index.as_ref(),
-                                node.span,
-                            ),
-                        });
-                    }
-                    Ok(out)
-                },
-            )
-            .await
-            .map_err(|err| {
-                rmcp::ErrorData::internal_error(
-                    format!("references worker task join failed: {err}"),
-                    None,
+                        let analysis = prepared.snapshot.analysis;
+                        let program_query = IntellisenseV2Facade::run_optional_query(
+                            &context,
+                            ObservabilityStage::IrQuery,
+                            &analysis,
+                            Some(coordinator_local.as_ref()),
+                            |analysis| analysis.ir(FileId(1)),
+                        );
+                        let Some(program) = program_query.ok().flatten() else {
+                            return Ok(Vec::new());
+                        };
+                        let Some(code) = analysis.file_text(FileId(1)).ok().flatten() else {
+                            return Ok(Vec::new());
+                        };
+                        let Some(line_index) = analysis.line_index(FileId(1)).ok().flatten() else {
+                            return Ok(Vec::new());
+                        };
+
+                        let mut out = Vec::new();
+                        for node in program.nodes.iter() {
+                            let bsl_shared::ir::SemanticNodeKind::FunctionCall {
+                                function_name,
+                                object_name,
+                                object_node,
+                                ..
+                            } = &node.kind
+                            else {
+                                continue;
+                            };
+                            if object_name.is_some() || object_node.is_some() {
+                                continue;
+                            }
+                            if !function_name.eq_ignore_ascii_case(&symbol_name) {
+                                continue;
+                            }
+                            if out.len() >= remaining {
+                                break;
+                            }
+
+                            out.push(ReferenceDto {
+                                file: DocumentRefDto {
+                                    root_id: file_root_id.clone(),
+                                    path: file_rel_path.clone(),
+                                },
+                                range: span_to_range_with_index(
+                                    code.as_ref(),
+                                    line_index.as_ref(),
+                                    node.span,
+                                ),
+                            });
+                        }
+                        Ok(out)
+                    },
                 )
-            })??;
+                .await
+                .map_err(|err| {
+                    rmcp::ErrorData::internal_error(
+                        format!("references worker task join failed: {err}"),
+                        None,
+                    )
+                })??;
 
             references.extend(file_references);
             if references.len() >= params.limit as usize {
@@ -3599,6 +3612,7 @@ fn prepare_ephemeral_mcp_operation(
 ) -> Result<(ExecutionContext, PreparedOperationSnapshot), bsl_runtime::application::SemanticOutcome>
 {
     let context = ExecutionContext {
+        origin: ObservabilityOrigin::Agent,
         operation,
         file_id: FileId(1),
         min_file_version: Some(version),
@@ -3994,6 +4008,10 @@ mod tests {
         "intellisense_v2_snapshot_other_total",
         "intellisense_v2_ir_query_other_total",
         "intellisense_v2_parse_result_query_total",
+        "intellisense_v2_singleflight_key_unavailable_total",
+        "intellisense_v2_observability_contract_violation_total",
+        "intellisense_v2_projection_missing_total",
+        "intellisense_v2_runtime_saturation_sample_total",
     ];
 
     const UNIFIED_STAGE_HISTOGRAM_KEYS: &[&str] = &[
@@ -4004,11 +4022,24 @@ mod tests {
         "intellisense_v2_parse_result_query_ms",
     ];
 
+    const UNIFIED_STAGE_GAUGE_KEYS: &[&str] = &[
+        "intellisense_v2_runtime_saturation_waiters_interactive",
+        "intellisense_v2_runtime_saturation_waiters_background",
+        "intellisense_v2_runtime_saturation_permits_interactive",
+        "intellisense_v2_runtime_saturation_permits_background",
+        "intellisense_v2_runtime_saturation_permits_shared",
+        "intellisense_v2_runtime_saturation_queue_depth_total",
+    ];
+
     fn assert_unified_intellisense_v2_stage_contract(metrics: &serde_json::Value) {
         let counters = metrics
             .get("counters")
             .and_then(|value| value.as_object())
             .expect("metrics.counters object");
+        let gauges = metrics
+            .get("gauges")
+            .and_then(|value| value.as_object())
+            .expect("metrics.gauges object");
         let histograms = metrics
             .get("histograms")
             .and_then(|value| value.as_object())
@@ -4029,6 +4060,28 @@ mod tests {
                 histograms.keys().collect::<Vec<_>>()
             );
         }
+
+        for key in UNIFIED_STAGE_GAUGE_KEYS {
+            assert!(
+                gauges.contains_key(*key),
+                "missing gauge key {key}, got keys={:?}",
+                gauges.keys().collect::<Vec<_>>()
+            );
+        }
+
+        assert!(
+            counters
+                .keys()
+                .any(|key| key.starts_with("intellisense_v2_drilldown_stage_total_origin_agent_")),
+            "missing agent drilldown stage_total counters"
+        );
+        assert!(
+            histograms
+                .keys()
+                .any(|key| key
+                    .starts_with("intellisense_v2_drilldown_stage_latency_ms_origin_agent_")),
+            "missing agent drilldown stage_latency histograms"
+        );
     }
 
     #[test]
@@ -4036,6 +4089,7 @@ mod tests {
         let coordinator = bsl_runtime::system::SystemCoordinator::new();
         let analysis = bsl_analysis_v2::AnalysisHostV2::default().snapshot();
         let context = ExecutionContext {
+            origin: ObservabilityOrigin::Agent,
             operation: SemanticOperation::Members,
             file_id: FileId(1),
             min_file_version: None,
@@ -4647,6 +4701,115 @@ mod tests {
             refs.count > 0,
             "expected at least one reference in the source module"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn batch_symbol_search_does_not_starve_members_query() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let src_dir = temp.path().join("src/CommonModules/Foo");
+        std::fs::create_dir_all(&src_dir).expect("mkdir src");
+        let module_path = src_dir.join("Module.bsl");
+        std::fs::write(
+            &module_path,
+            "Процедура ТестStarvation()\nКонецПроцедуры\nПроцедура Вызов()\n    ТестStarvation();\nКонецПроцедуры\n",
+        )
+        .expect("write module");
+        for idx in 0..32 {
+            std::fs::write(
+                temp.path().join(format!("Batch{idx}.bsl")),
+                format!(
+                    "Процедура ТестStarvation{idx}()\nКонецПроцедуры\nПроцедура Вызов{idx}()\n    ТестStarvation{}();\nКонецПроцедуры\n",
+                    idx
+                ),
+            )
+            .expect("write batch module");
+        }
+
+        let job_manager = Arc::new(JobManager::new());
+        let manager = Arc::new(SessionManager::new());
+        let open = manager
+            .open(
+                WorkspaceOpenParams {
+                    roots: vec![temp.path().to_string_lossy().to_string()],
+                    platform_docs_archive: None,
+                    platform_version: None,
+                    configuration_path: None,
+                    mode: None,
+                },
+                Arc::clone(&job_manager),
+            )
+            .await
+            .expect("open");
+        wait_startup(job_manager.as_ref(), &open).await;
+
+        let session_id = open.session_id.clone();
+        let root_id = open.roots[0].root_id.clone();
+        let overlay_file = FileRef {
+            doc: DocumentRef::Canonical(CanonicalDocumentRef {
+                root_id,
+                path: "src/CommonModules/Foo/Module.bsl".to_string(),
+            }),
+            text: Some(
+                "Процедура ТестStarvation()\nКонецПроцедуры\nПроцедура Вызов()\n    ТестStarvation();\nКонецПроцедуры\n"
+                    .to_string(),
+            ),
+            version: Some(1),
+        };
+        manager
+            .documents_set(
+                &session_id,
+                &[WorkspaceDocumentsSetFile::File(overlay_file.clone())],
+                true,
+            )
+            .await
+            .expect("documents_set");
+
+        let mut batch_handles = Vec::new();
+        for _ in 0..6 {
+            let manager_clone = manager.clone();
+            let session_clone = session_id.clone();
+            batch_handles.push(tokio::spawn(async move {
+                manager_clone
+                    .bsl_symbol_search(BslSymbolSearchParams {
+                        session_id: session_clone,
+                        query: "ТестStarvation".to_string(),
+                        limit: 200,
+                    })
+                    .await
+            }));
+        }
+
+        let members = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            manager.bsl_members(BslMembersParams {
+                session_id,
+                file: overlay_file,
+                position: Position {
+                    line: 3,
+                    character: 10,
+                },
+                limit: 50,
+                include_flow_sensitive: false,
+            }),
+        )
+        .await
+        .expect("members query should finish under batch symbol-search load")
+        .expect("members");
+        assert!(
+            !members.truncated,
+            "members query should complete without truncation while batch workers are running"
+        );
+
+        for handle in batch_handles {
+            let search = handle
+                .await
+                .expect("batch symbol_search join")
+                .expect("batch symbol_search");
+            assert!(
+                !search.symbols.is_empty(),
+                "batch symbol_search must still return results"
+            );
+        }
     }
 
     #[test]

@@ -20,7 +20,7 @@ use crate::application::get_hover_info_with_semantic_program;
 use crate::application::type_system::web_api_service;
 use crate::application::{
     CancellationPolicy, ExecutionContext, ExecutionSettings, IntellisenseV2Facade,
-    ObservabilityStage, PreparedOperationSnapshot, SemanticOperation,
+    ObservabilityOrigin, ObservabilityStage, PreparedOperationSnapshot, SemanticOperation,
 };
 use crate::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter, HoverOutputFormat};
 use crate::system::{
@@ -101,6 +101,7 @@ fn prepare_ephemeral_web_operation(
     path: Arc<str>,
 ) -> anyhow::Result<(ExecutionContext, PreparedOperationSnapshot)> {
     let context = ExecutionContext {
+        origin: ObservabilityOrigin::Web,
         operation,
         file_id: V2FileId(1),
         min_file_version: Some(0),

@@ -7,12 +7,12 @@ mod policy;
 
 pub use facade::{
     CancellationPolicy, ExecutionContext, ExecutionSettings, IntellisenseV2Facade,
-    ObservabilityMetricKind, ObservabilityStage, PreparedOperationSnapshot, SemanticOperation,
-    SemanticOutcome, SemanticSnapshot, SingleflightQueryError,
+    ObservabilityMetricKind, ObservabilityOrigin, ObservabilityStage, PreparedOperationSnapshot,
+    SemanticOperation, SemanticOutcome, SemanticSnapshot, SingleflightQueryError,
 };
 pub use policy::{
     classify_optional_query, interactive_freshness_knobs, should_query_parse_result,
     spawn_bounded_blocking, spawn_bounded_blocking_with_class,
-    spawn_bounded_blocking_with_class_observed, CpuWorkClass, InteractiveFreshnessKnobs,
-    RuntimePerfKnobs,
+    spawn_bounded_blocking_with_class_observed, spawn_bounded_blocking_with_class_observed_origin,
+    CpuWorkClass, InteractiveFreshnessKnobs, RuntimePerfKnobs,
 };

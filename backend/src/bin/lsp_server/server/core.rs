@@ -490,6 +490,7 @@ impl BslLanguageServer {
         let expected_deps_id = self.last_deps_id_v2.read().await.clone();
 
         bsl_runtime::application::ExecutionContext {
+            origin: bsl_runtime::application::ObservabilityOrigin::Lsp,
             operation,
             file_id,
             min_file_version,
@@ -918,8 +919,9 @@ impl BslLanguageServer {
                         parse_result_cancelled_error,
                         syntax_cancelled_error,
                         semantic_cancelled_error,
-                    ) = match bsl_runtime::application::spawn_bounded_blocking_with_class_observed(
+                    ) = match bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
                         bsl_runtime::application::CpuWorkClass::Background,
+                        context_for_blocking.origin.as_str(),
                         Some(server.coordinator.as_ref()),
                         move || {
                             let mut diagnostics = Vec::new();
@@ -1386,6 +1388,7 @@ mod tests {
         "intellisense_v2_interactive_knob_clamped_total",
         "intellisense_v2_singleflight_leader_total",
         "intellisense_v2_singleflight_shared_total",
+        "intellisense_v2_singleflight_key_unavailable_total",
         "intellisense_v2_runtime_queue_wait_interactive_total",
         "intellisense_v2_runtime_queue_wait_background_total",
         "intellisense_v2_runtime_exec_interactive_total",
@@ -1393,6 +1396,9 @@ mod tests {
         "intellisense_v2_completion_stale_fallback_total",
         "intellisense_v2_completion_fallback_unavailable_total",
         "intellisense_v2_revision_lag_sample_total",
+        "intellisense_v2_observability_contract_violation_total",
+        "intellisense_v2_projection_missing_total",
+        "intellisense_v2_runtime_saturation_sample_total",
     ];
 
     const UNIFIED_STAGE_HISTOGRAM_KEYS: &[&str] = &[
@@ -1414,12 +1420,25 @@ mod tests {
         "intellisense_v2_revision_lag_versions",
     ];
 
+    const UNIFIED_STAGE_GAUGE_KEYS: &[&str] = &[
+        "intellisense_v2_runtime_saturation_waiters_interactive",
+        "intellisense_v2_runtime_saturation_waiters_background",
+        "intellisense_v2_runtime_saturation_permits_interactive",
+        "intellisense_v2_runtime_saturation_permits_background",
+        "intellisense_v2_runtime_saturation_permits_shared",
+        "intellisense_v2_runtime_saturation_queue_depth_total",
+    ];
+
     fn assert_unified_intellisense_v2_stage_contract(payload: &serde_json::Value) {
         let metrics = payload.get("metrics").expect("metrics field");
         let counters = metrics
             .get("counters")
             .and_then(|value| value.as_object())
             .expect("metrics.counters object");
+        let gauges = metrics
+            .get("gauges")
+            .and_then(|value| value.as_object())
+            .expect("metrics.gauges object");
         let histograms = metrics
             .get("histograms")
             .and_then(|value| value.as_object())
@@ -1438,6 +1457,14 @@ mod tests {
                 histograms.contains_key(*key),
                 "missing histogram key {key}, got keys={:?}",
                 histograms.keys().collect::<Vec<_>>()
+            );
+        }
+
+        for key in UNIFIED_STAGE_GAUGE_KEYS {
+            assert!(
+                gauges.contains_key(*key),
+                "missing gauge key {key}, got keys={:?}",
+                gauges.keys().collect::<Vec<_>>()
             );
         }
     }
@@ -1873,6 +1900,32 @@ mod tests {
         counters.iter().any(|(key, value)| {
             stage_from_metric_key(key.as_str()) == Some(stage) && metric_number(value) > 0.0
         })
+    }
+
+    fn assert_drilldown_stage_metrics_for_origin(payload: &serde_json::Value, origin: &str) {
+        let metrics = metrics_root(payload);
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        let histograms = metrics
+            .get("histograms")
+            .and_then(|value| value.as_object())
+            .expect("metrics.histograms object");
+
+        let stage_prefix = format!("intellisense_v2_drilldown_stage_total_origin_{origin}_");
+        let latency_prefix = format!("intellisense_v2_drilldown_stage_latency_ms_origin_{origin}_");
+
+        assert!(
+            counters.keys().any(|key| key.starts_with(&stage_prefix)),
+            "missing drilldown stage_total counters for origin={origin}"
+        );
+        assert!(
+            histograms
+                .keys()
+                .any(|key| key.starts_with(&latency_prefix)),
+            "missing drilldown stage_latency histograms for origin={origin}"
+        );
     }
 
     #[tokio::test]
@@ -4993,6 +5046,9 @@ mod tests {
                 "MCP stage {stage} has no positive counters"
             );
         }
+
+        assert_drilldown_stage_metrics_for_origin(&lsp_metrics_payload, "lsp");
+        assert_drilldown_stage_metrics_for_origin(&mcp_metrics_payload, "agent");
     }
 
     #[tokio::test]

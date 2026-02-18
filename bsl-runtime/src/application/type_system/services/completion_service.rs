@@ -2838,12 +2838,6 @@ mod tests {
             .expect("missing intrinsic ПометкаУдаления");
         assert_eq!(deletion_mark.source_priority, 2);
 
-        let form_attr = target
-            .iter()
-            .find(|candidate| candidate.item.label == "РеквизитФормы")
-            .expect("missing form attribute");
-        assert_eq!(form_attr.source_priority, 1);
-
         let metadata_prop = target
             .iter()
             .find(|candidate| candidate.item.label == "СвойствоМетаданных")
@@ -2853,13 +2847,19 @@ mod tests {
         assert!(
             target
                 .iter()
+                .all(|candidate| candidate.item.label != "РеквизитФормы"),
+            "form-data property completion must not include form-shape properties"
+        );
+        assert!(
+            target
+                .iter()
                 .all(|candidate| candidate.item.label != "ФацетСвойство"),
             "form-data property completion must not include object-facet fallback properties"
         );
     }
 
     #[test]
-    fn form_data_member_completion_includes_shape_and_intrinsic_properties_only() {
+    fn form_data_member_completion_includes_intrinsic_and_excludes_shape_and_facet_members() {
         let repository = Arc::new(InMemoryTypeRepository::new());
         repository
             .load_types(vec![
@@ -2931,15 +2931,19 @@ mod tests {
 
         assert!(target.iter().any(|candidate| {
             matches!(candidate.item.kind, CompletionKind::Property)
-                && candidate.item.label == "РеквизитФормы"
-        }));
-        assert!(target.iter().any(|candidate| {
-            matches!(candidate.item.kind, CompletionKind::Property)
                 && candidate.item.label == "Ссылка"
         }));
         assert!(target.iter().any(|candidate| {
             matches!(candidate.item.kind, CompletionKind::Property)
                 && candidate.item.label == "ПометкаУдаления"
+        }));
+        assert!(target.iter().all(|candidate| {
+            !(matches!(candidate.item.kind, CompletionKind::Property)
+                && candidate.item.label == "РеквизитФормы")
+        }));
+        assert!(target.iter().all(|candidate| {
+            !(matches!(candidate.item.kind, CompletionKind::Property)
+                && candidate.item.label == "ФацетСвойство")
         }));
         assert!(target.iter().all(|candidate| {
             !(matches!(candidate.item.kind, CompletionKind::Method)
@@ -3910,11 +3914,7 @@ mod tests {
         .expect("completion ok");
 
         let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
-        assert!(
-            labels.contains(&"Записать".to_string()),
-            "labels: {:?}",
-            labels
-        );
+        assert!(!labels.contains(&"Записать".to_string()), "labels: {:?}", labels);
         assert!(
             labels.contains(&"Ссылка".to_string()),
             "labels: {:?}",

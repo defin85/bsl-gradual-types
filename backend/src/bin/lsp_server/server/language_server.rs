@@ -1329,8 +1329,9 @@ impl LanguageServer for BslLanguageServer {
                         let uri_for_query = uri.clone();
                         let observed_deps_id_for_query = observed_deps_id.clone();
                         let query_result =
-                            bsl_runtime::application::spawn_bounded_blocking_with_class_observed(
+                            bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
                                 bsl_runtime::application::CpuWorkClass::Interactive,
+                                context_for_query.origin.as_str(),
                                 Some(self.coordinator.as_ref()),
                                 move || {
                                     let file_content = analysis.file_text(file_id).ok().flatten();

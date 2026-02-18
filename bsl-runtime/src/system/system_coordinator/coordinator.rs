@@ -196,8 +196,17 @@ impl SystemCoordinator {
         kind: &str,
         duration: std::time::Duration,
     ) {
+        self.record_intellisense_v2_wait_for_file_version_with_origin("runtime", kind, duration);
+    }
+
+    pub fn record_intellisense_v2_wait_for_file_version_with_origin(
+        &self,
+        origin: &str,
+        kind: &str,
+        duration: std::time::Duration,
+    ) {
         self.observability
-            .record_intellisense_v2_wait_for_file_version(kind, duration);
+            .record_intellisense_v2_wait_for_file_version_with_origin(origin, kind, duration);
     }
 
     pub fn record_intellisense_v2_snapshot_latency(
@@ -205,8 +214,17 @@ impl SystemCoordinator {
         kind: &str,
         duration: std::time::Duration,
     ) {
+        self.record_intellisense_v2_snapshot_latency_with_origin("runtime", kind, duration);
+    }
+
+    pub fn record_intellisense_v2_snapshot_latency_with_origin(
+        &self,
+        origin: &str,
+        kind: &str,
+        duration: std::time::Duration,
+    ) {
         self.observability
-            .record_intellisense_v2_snapshot_latency(kind, duration);
+            .record_intellisense_v2_snapshot_latency_with_origin(origin, kind, duration);
     }
 
     pub fn record_intellisense_v2_ir_query_latency(
@@ -214,34 +232,77 @@ impl SystemCoordinator {
         kind: &str,
         duration: std::time::Duration,
     ) {
+        self.record_intellisense_v2_ir_query_latency_with_origin("runtime", kind, duration);
+    }
+
+    pub fn record_intellisense_v2_ir_query_latency_with_origin(
+        &self,
+        origin: &str,
+        kind: &str,
+        duration: std::time::Duration,
+    ) {
         self.observability
-            .record_intellisense_v2_ir_query_latency(kind, duration);
+            .record_intellisense_v2_ir_query_latency_with_origin(origin, kind, duration);
     }
 
     pub fn record_intellisense_v2_ir_query_cancelled(&self, kind: &str) {
+        self.record_intellisense_v2_ir_query_cancelled_with_origin("runtime", kind);
+    }
+
+    pub fn record_intellisense_v2_ir_query_cancelled_with_origin(&self, origin: &str, kind: &str) {
         self.observability
-            .record_intellisense_v2_ir_query_cancelled(kind);
+            .record_intellisense_v2_ir_query_cancelled_with_origin(origin, kind);
     }
 
     pub fn record_intellisense_v2_syntax_diagnostics_query_latency(
         &self,
         duration: std::time::Duration,
     ) {
+        self.record_intellisense_v2_syntax_diagnostics_query_latency_with_origin(
+            "runtime", duration,
+        );
+    }
+
+    pub fn record_intellisense_v2_syntax_diagnostics_query_latency_with_origin(
+        &self,
+        origin: &str,
+        duration: std::time::Duration,
+    ) {
         self.observability
-            .record_intellisense_v2_syntax_diagnostics_query_latency(duration);
+            .record_intellisense_v2_syntax_diagnostics_query_latency_with_origin(origin, duration);
     }
 
     pub fn record_intellisense_v2_semantic_diagnostics_query_latency(
         &self,
         duration: std::time::Duration,
     ) {
+        self.record_intellisense_v2_semantic_diagnostics_query_latency_with_origin(
+            "runtime", duration,
+        );
+    }
+
+    pub fn record_intellisense_v2_semantic_diagnostics_query_latency_with_origin(
+        &self,
+        origin: &str,
+        duration: std::time::Duration,
+    ) {
         self.observability
-            .record_intellisense_v2_semantic_diagnostics_query_latency(duration);
+            .record_intellisense_v2_semantic_diagnostics_query_latency_with_origin(
+                origin, duration,
+            );
     }
 
     pub fn record_intellisense_v2_parse_result_query_latency(&self, duration: std::time::Duration) {
+        self.record_intellisense_v2_parse_result_query_latency_with_origin("runtime", duration);
+    }
+
+    pub fn record_intellisense_v2_parse_result_query_latency_with_origin(
+        &self,
+        origin: &str,
+        duration: std::time::Duration,
+    ) {
         self.observability
-            .record_intellisense_v2_parse_result_query_latency(duration);
+            .record_intellisense_v2_parse_result_query_latency_with_origin(origin, duration);
     }
 
     pub fn record_intellisense_v2_interactive_wait_budget_exhausted(&self) {
@@ -275,18 +336,56 @@ impl SystemCoordinator {
     }
 
     pub fn record_intellisense_v2_singleflight_leader(&self) {
+        self.record_intellisense_v2_singleflight_leader_with_origin("runtime", "ir");
+    }
+
+    pub fn record_intellisense_v2_singleflight_leader_with_origin(
+        &self,
+        origin: &str,
+        query_kind: &str,
+    ) {
         self.observability
-            .record_intellisense_v2_singleflight_leader();
+            .record_intellisense_v2_singleflight_leader_with_origin(origin, query_kind);
     }
 
     pub fn record_intellisense_v2_singleflight_shared(&self) {
+        self.record_intellisense_v2_singleflight_shared_with_origin("runtime", "ir");
+    }
+
+    pub fn record_intellisense_v2_singleflight_shared_with_origin(
+        &self,
+        origin: &str,
+        query_kind: &str,
+    ) {
         self.observability
-            .record_intellisense_v2_singleflight_shared();
+            .record_intellisense_v2_singleflight_shared_with_origin(origin, query_kind);
+    }
+
+    pub fn record_intellisense_v2_singleflight_key_unavailable_with_origin(
+        &self,
+        origin: &str,
+        query_kind: &str,
+    ) {
+        self.observability
+            .record_intellisense_v2_singleflight_key_unavailable_with_origin(origin, query_kind);
     }
 
     pub fn record_intellisense_v2_singleflight_wait_latency(&self, duration: std::time::Duration) {
+        self.record_intellisense_v2_singleflight_wait_latency_with_origin(
+            "runtime", "ir", duration,
+        );
+    }
+
+    pub fn record_intellisense_v2_singleflight_wait_latency_with_origin(
+        &self,
+        origin: &str,
+        query_kind: &str,
+        duration: std::time::Duration,
+    ) {
         self.observability
-            .record_intellisense_v2_singleflight_wait_latency(duration);
+            .record_intellisense_v2_singleflight_wait_latency_with_origin(
+                origin, query_kind, duration,
+            );
     }
 
     pub fn record_intellisense_v2_runtime_queue_wait_class_latency(
@@ -294,8 +393,21 @@ impl SystemCoordinator {
         class: &str,
         duration: std::time::Duration,
     ) {
+        self.record_intellisense_v2_runtime_queue_wait_class_latency_with_origin(
+            "runtime", class, duration,
+        );
+    }
+
+    pub fn record_intellisense_v2_runtime_queue_wait_class_latency_with_origin(
+        &self,
+        origin: &str,
+        class: &str,
+        duration: std::time::Duration,
+    ) {
         self.observability
-            .record_intellisense_v2_runtime_queue_wait_class_latency(class, duration);
+            .record_intellisense_v2_runtime_queue_wait_class_latency_with_origin(
+                origin, class, duration,
+            );
     }
 
     pub fn record_intellisense_v2_runtime_exec_class_latency(
@@ -303,13 +415,28 @@ impl SystemCoordinator {
         class: &str,
         duration: std::time::Duration,
     ) {
+        self.record_intellisense_v2_runtime_exec_class_latency_with_origin(
+            "runtime", class, duration,
+        );
+    }
+
+    pub fn record_intellisense_v2_runtime_exec_class_latency_with_origin(
+        &self,
+        origin: &str,
+        class: &str,
+        duration: std::time::Duration,
+    ) {
         self.observability
-            .record_intellisense_v2_runtime_exec_class_latency(class, duration);
+            .record_intellisense_v2_runtime_exec_class_latency_with_origin(origin, class, duration);
     }
 
     pub fn record_intellisense_v2_query_cancelled(&self, kind: &str) {
+        self.record_intellisense_v2_query_cancelled_with_origin("runtime", kind);
+    }
+
+    pub fn record_intellisense_v2_query_cancelled_with_origin(&self, origin: &str, kind: &str) {
         self.observability
-            .record_intellisense_v2_query_cancelled(kind);
+            .record_intellisense_v2_query_cancelled_with_origin(origin, kind);
     }
 
     pub fn record_intellisense_v2_runtime_queue_wait_latency(
@@ -317,8 +444,19 @@ impl SystemCoordinator {
         kind: &str,
         duration: std::time::Duration,
     ) {
+        self.record_intellisense_v2_runtime_queue_wait_latency_with_origin(
+            "runtime", kind, duration,
+        );
+    }
+
+    pub fn record_intellisense_v2_runtime_queue_wait_latency_with_origin(
+        &self,
+        origin: &str,
+        kind: &str,
+        duration: std::time::Duration,
+    ) {
         self.observability
-            .record_intellisense_v2_runtime_queue_wait_latency(kind, duration);
+            .record_intellisense_v2_runtime_queue_wait_latency_with_origin(origin, kind, duration);
     }
 
     pub fn record_intellisense_v2_runtime_exec_latency(
@@ -326,8 +464,33 @@ impl SystemCoordinator {
         kind: &str,
         duration: std::time::Duration,
     ) {
+        self.record_intellisense_v2_runtime_exec_latency_with_origin("runtime", kind, duration);
+    }
+
+    pub fn record_intellisense_v2_runtime_exec_latency_with_origin(
+        &self,
+        origin: &str,
+        kind: &str,
+        duration: std::time::Duration,
+    ) {
         self.observability
-            .record_intellisense_v2_runtime_exec_latency(kind, duration);
+            .record_intellisense_v2_runtime_exec_latency_with_origin(origin, kind, duration);
+    }
+
+    pub fn record_intellisense_v2_runtime_saturation_gauge_with_origin(
+        &self,
+        origin: &str,
+        saturation_metric: &str,
+        value: f64,
+        legacy_key: &str,
+    ) {
+        self.observability
+            .record_intellisense_v2_runtime_saturation_gauge_with_origin(
+                origin,
+                saturation_metric,
+                value,
+                legacy_key,
+            );
     }
 
     pub fn record_intellisense_v2_deps_update_build_latency(&self, duration: std::time::Duration) {

@@ -28,12 +28,14 @@
 
 - publish происходит только для актуальных `file_version + deps_id + settings_id`;
 - stale результаты не публикуются и не могут перезаписать более новую ревизию.
+- speculative `parse_result` prefetch в diagnostics-path отключён (уменьшение parse-stage contention);
+- diagnostics строится через `syntax_diagnostics` + `semantic_diagnostics` без обязательного отдельного parse prefetch.
 
 ## Singleflight Policy
 
 Для дорогих revision-bound query используется singleflight по ключу:
 
-`(file_id, file_version, deps_id, settings_id, query_kind)`
+`(file_id, file_version, file_signature, deps_id, settings_id, query_kind)`
 
 `query_kind`:
 
@@ -53,6 +55,7 @@
 Для blocking CPU-path используются классы budget:
 
 - минимум 1 permit зарезервирован под `interactive`;
+- при `total_permits >= 4` под `interactive` резервируется 2 permits;
 - минимум 1 permit зарезервирован под `background` (если total permits >= 2);
 - при пустой очереди противоположного класса разрешён borrow;
 - при конкуренции fairness восстанавливается.
@@ -84,3 +87,20 @@ Histograms:
 - `intellisense_v2_runtime_queue_wait_background_ms`
 - `intellisense_v2_runtime_exec_interactive_ms`
 - `intellisense_v2_runtime_exec_background_ms`
+
+Rates:
+
+- `intellisense_v2_parse_result_singleflight_shared_rate`
+- `intellisense_v2_parse_result_query_cancel_rate`
+- `completion_incomplete_rate`
+- `completion_error_rate`
+
+## Alerting Baseline (warm-path)
+
+Рекомендуемые первичные алерты/пороги:
+
+- `intellisense_v2_observability_contract_violation_total > 0` за интервал прогона.
+- `intellisense_v2_parse_result_singleflight_shared_rate < 0.15` (низкая эффективность singleflight).
+- `intellisense_v2_parse_result_query_cancel_rate > 0.20` (чрезмерные cancellations в parse-stage).
+- `intellisense_v2_runtime_queue_wait_interactive_ms.p95 > 500ms` (interactive starvation risk).
+- `completion_incomplete_rate > 0.30` или `completion_error_rate > 0.05`.

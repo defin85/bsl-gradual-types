@@ -187,10 +187,15 @@ struct CpuBoundBudget {
 impl CpuBoundBudget {
     fn with_total_permits(permits: usize) -> Self {
         let permits = permits.max(2);
-        let shared_permits = permits.saturating_sub(2);
+        // Keep one dedicated background permit, but reserve an extra interactive
+        // permit when capacity allows to reduce interactive tail under batch load.
+        let interactive_reserved_permits = if permits >= 4 { 2 } else { 1 };
+        let background_reserved_permits = 1;
+        let shared_permits =
+            permits.saturating_sub(interactive_reserved_permits + background_reserved_permits);
         Self {
-            interactive_reserved: Arc::new(Semaphore::new(1)),
-            background_reserved: Arc::new(Semaphore::new(1)),
+            interactive_reserved: Arc::new(Semaphore::new(interactive_reserved_permits)),
+            background_reserved: Arc::new(Semaphore::new(background_reserved_permits)),
             shared: Arc::new(Semaphore::new(shared_permits)),
             interactive_waiters: AtomicUsize::new(0),
             background_waiters: AtomicUsize::new(0),
@@ -662,6 +667,24 @@ mod tests {
                 "intellisense_v2_drilldown_saturation_gauge_origin_runtime_saturation_metric_queue_depth_total"
             ),
             "drilldown saturation gauge should be exported"
+        );
+    }
+
+    #[test]
+    fn cpu_budget_reserves_extra_interactive_permit_when_capacity_allows() {
+        let budget = CpuBoundBudget::with_total_permits(4);
+        let snapshot = budget.saturation_snapshot();
+        assert_eq!(
+            snapshot.interactive_permits, 2,
+            "interactive pool should get extra reserved permit on wider runtimes"
+        );
+        assert_eq!(
+            snapshot.background_permits, 1,
+            "background pool should keep one dedicated permit"
+        );
+        assert_eq!(
+            snapshot.shared_permits, 1,
+            "remaining capacity should stay shared"
         );
     }
 

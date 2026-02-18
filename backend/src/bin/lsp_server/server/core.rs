@@ -926,34 +926,16 @@ impl BslLanguageServer {
                         move || {
                             let mut diagnostics = Vec::new();
                             let mut was_cancelled = false;
-                            let mut parse_result_cancelled_error = None;
+                            let parse_result_cancelled_error: Option<String> = None;
                             let mut syntax_cancelled_error = None;
                             let mut semantic_cancelled_error = None;
 
                         let file_text = analysis.file_text(file_id).ok().flatten();
                         let line_index = analysis.line_index(file_id).ok().flatten();
 
-                        let parse_result_elapsed = if bsl_runtime::application::should_query_parse_result(
-                            context_for_blocking.operation,
-                            false,
-                        ) {
-                            let parse_result_started = Instant::now();
-                            let parse_result_query =
-                                bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query_singleflight(
-                                    &context_for_blocking,
-                                    &analysis,
-                                    false,
-                                    Some(coordinator_for_blocking.as_ref()),
-                                    file_id,
-                                );
-                            if let Err(cancelled) = parse_result_query {
-                                was_cancelled = true;
-                                parse_result_cancelled_error = Some(format!("{cancelled:?}"));
-                            }
-                            parse_result_started.elapsed()
-                        } else {
-                            std::time::Duration::ZERO
-                        };
+                        // Diagnostics does not consume parse_result directly; avoid speculative
+                        // prefetch here to reduce parse-stage contention on warm path.
+                        let parse_result_elapsed = std::time::Duration::ZERO;
 
                         let syntax_started = Instant::now();
                         let syntax_result =

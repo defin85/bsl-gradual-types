@@ -116,12 +116,15 @@ const ALLOWED_OPERATIONS: &[&str] = &[
     "type_at_position",
     "symbol_search",
     "references",
+    "wait_for_file_version",
+    "snapshot_with_deps",
     "other",
 ];
 const ALLOWED_STAGES: &[&str] = &[
     "runtime_wait_for_file_version",
     "runtime_snapshot_with_deps",
     "runtime_queue_wait",
+    "runtime_exec",
     "ir_query",
     "syntax_diagnostics_query",
     "semantic_diagnostics_query",
@@ -521,10 +524,21 @@ impl BasicObservability {
                         key: "intellisense_v2_parse_result_query_total",
                         kind: LegacyMetricKind::Counter,
                     }),
-                    "runtime_queue_wait" => Some(LegacyMetricTarget {
-                        key: "intellisense_v2_runtime_other_queue_wait_total",
-                        kind: LegacyMetricKind::Counter,
-                    }),
+                    "runtime_queue_wait" => {
+                        let (counter_key, _latency_key) =
+                            legacy_runtime_queue_wait_metrics(operation);
+                        Some(LegacyMetricTarget {
+                            key: counter_key,
+                            kind: LegacyMetricKind::Counter,
+                        })
+                    }
+                    "runtime_exec" => {
+                        let (counter_key, _latency_key) = legacy_runtime_exec_metrics(operation);
+                        Some(LegacyMetricTarget {
+                            key: counter_key,
+                            kind: LegacyMetricKind::Counter,
+                        })
+                    }
                     _ => None,
                 }
             }
@@ -566,10 +580,21 @@ impl BasicObservability {
                         key: "intellisense_v2_parse_result_query_ms",
                         kind: LegacyMetricKind::HistogramMs,
                     }),
-                    "runtime_queue_wait" => Some(LegacyMetricTarget {
-                        key: "intellisense_v2_runtime_other_queue_wait_ms",
-                        kind: LegacyMetricKind::HistogramMs,
-                    }),
+                    "runtime_queue_wait" => {
+                        let (_counter_key, latency_key) =
+                            legacy_runtime_queue_wait_metrics(operation);
+                        Some(LegacyMetricTarget {
+                            key: latency_key,
+                            kind: LegacyMetricKind::HistogramMs,
+                        })
+                    }
+                    "runtime_exec" => {
+                        let (_counter_key, latency_key) = legacy_runtime_exec_metrics(operation);
+                        Some(LegacyMetricTarget {
+                            key: latency_key,
+                            kind: LegacyMetricKind::HistogramMs,
+                        })
+                    }
                     _ => None,
                 }
             }
@@ -1508,29 +1533,15 @@ impl BasicObservability {
         kind: &str,
         duration: Duration,
     ) {
-        let (total_metric, histogram_metric, stage) = match kind {
-            "snapshot_with_deps" => (
-                "intellisense_v2_runtime_snapshot_with_deps_queue_wait_total",
-                "intellisense_v2_runtime_snapshot_with_deps_queue_wait_ms",
-                "runtime_snapshot_with_deps",
-            ),
-            "wait_for_file_version" => (
-                "intellisense_v2_runtime_wait_for_file_version_queue_wait_total",
-                "intellisense_v2_runtime_wait_for_file_version_queue_wait_ms",
-                "runtime_wait_for_file_version",
-            ),
-            _ => (
-                "intellisense_v2_runtime_other_queue_wait_total",
-                "intellisense_v2_runtime_other_queue_wait_ms",
-                "runtime_queue_wait",
-            ),
-        };
+        let (total_metric, histogram_metric) = legacy_runtime_queue_wait_metrics(kind);
+        let operation = normalize_runtime_stage_kind(kind);
+        let stage = "runtime_queue_wait";
         let elapsed_ms = duration.as_millis() as f64;
         self.emit_canonical_event(
             CanonicalEvent {
                 family: CanonicalFamily::StageTotal,
                 origin,
-                operation: Some("other"),
+                operation: Some(operation),
                 stage: Some(stage),
                 outcome: None,
                 reason: None,
@@ -1550,7 +1561,7 @@ impl BasicObservability {
             CanonicalEvent {
                 family: CanonicalFamily::StageLatencyMs,
                 origin,
-                operation: Some("other"),
+                operation: Some(operation),
                 stage: Some(stage),
                 outcome: None,
                 reason: None,
@@ -1578,29 +1589,15 @@ impl BasicObservability {
         kind: &str,
         duration: Duration,
     ) {
-        let (total_metric, histogram_metric, stage) = match kind {
-            "snapshot_with_deps" => (
-                "intellisense_v2_runtime_snapshot_with_deps_exec_total",
-                "intellisense_v2_runtime_snapshot_with_deps_exec_ms",
-                "runtime_snapshot_with_deps",
-            ),
-            "wait_for_file_version" => (
-                "intellisense_v2_runtime_wait_for_file_version_exec_total",
-                "intellisense_v2_runtime_wait_for_file_version_exec_ms",
-                "runtime_wait_for_file_version",
-            ),
-            _ => (
-                "intellisense_v2_runtime_other_exec_total",
-                "intellisense_v2_runtime_other_exec_ms",
-                "runtime_queue_wait",
-            ),
-        };
+        let (total_metric, histogram_metric) = legacy_runtime_exec_metrics(kind);
+        let operation = normalize_runtime_stage_kind(kind);
+        let stage = "runtime_exec";
         let elapsed_ms = duration.as_millis() as f64;
         self.emit_canonical_event(
             CanonicalEvent {
                 family: CanonicalFamily::StageTotal,
                 origin,
-                operation: Some("other"),
+                operation: Some(operation),
                 stage: Some(stage),
                 outcome: None,
                 reason: None,
@@ -1620,7 +1617,7 @@ impl BasicObservability {
             CanonicalEvent {
                 family: CanonicalFamily::StageLatencyMs,
                 origin,
-                operation: Some("other"),
+                operation: Some(operation),
                 stage: Some(stage),
                 outcome: None,
                 reason: None,
@@ -1929,6 +1926,45 @@ impl SimpleMetrics {
         ) {
             rates.insert("signature_help_empty_rate".to_string(), rate);
         }
+        let parse_result_leader = sum_counters_with_all_substrings(
+            &counters,
+            &[
+                "intellisense_v2_drilldown_singleflight_effectiveness_total",
+                "_outcome_leader_",
+                "_query_kind_parse_result",
+            ],
+        );
+        let parse_result_shared = sum_counters_with_all_substrings(
+            &counters,
+            &[
+                "intellisense_v2_drilldown_singleflight_effectiveness_total",
+                "_outcome_shared_",
+                "_query_kind_parse_result",
+            ],
+        );
+        let parse_result_singleflight_total = parse_result_leader + parse_result_shared;
+        if parse_result_singleflight_total > 0 {
+            rates.insert(
+                "intellisense_v2_parse_result_singleflight_shared_rate".to_string(),
+                parse_result_shared as f64 / parse_result_singleflight_total as f64,
+            );
+        }
+        let parse_result_cancelled = sum_counters_with_all_substrings(
+            &counters,
+            &[
+                "intellisense_v2_drilldown_stage_reason_total",
+                "_stage_parse_result_query_",
+                "_reason_other",
+            ],
+        );
+        if let Some(parse_total) = counters.get("intellisense_v2_parse_result_query_total") {
+            if *parse_total > 0 {
+                rates.insert(
+                    "intellisense_v2_parse_result_query_cancel_rate".to_string(),
+                    parse_result_cancelled as f64 / *parse_total as f64,
+                );
+            }
+        }
 
         json!({
             "counters": counters,
@@ -1972,6 +2008,14 @@ fn normalize_operation_label(kind: &str) -> &'static str {
         "type_at_position" => "type_at_position",
         "symbol_search" => "symbol_search",
         "references" => "references",
+        _ => "other",
+    }
+}
+
+fn normalize_runtime_stage_kind(kind: &str) -> &'static str {
+    match kind {
+        "wait_for_file_version" => "wait_for_file_version",
+        "snapshot_with_deps" => "snapshot_with_deps",
         _ => "other",
     }
 }
@@ -2050,6 +2094,40 @@ fn legacy_snapshot_metrics(kind: &str) -> (&'static str, &'static str) {
     }
 }
 
+fn legacy_runtime_queue_wait_metrics(kind: &str) -> (&'static str, &'static str) {
+    match kind {
+        "snapshot_with_deps" => (
+            "intellisense_v2_runtime_snapshot_with_deps_queue_wait_total",
+            "intellisense_v2_runtime_snapshot_with_deps_queue_wait_ms",
+        ),
+        "wait_for_file_version" => (
+            "intellisense_v2_runtime_wait_for_file_version_queue_wait_total",
+            "intellisense_v2_runtime_wait_for_file_version_queue_wait_ms",
+        ),
+        _ => (
+            "intellisense_v2_runtime_other_queue_wait_total",
+            "intellisense_v2_runtime_other_queue_wait_ms",
+        ),
+    }
+}
+
+fn legacy_runtime_exec_metrics(kind: &str) -> (&'static str, &'static str) {
+    match kind {
+        "snapshot_with_deps" => (
+            "intellisense_v2_runtime_snapshot_with_deps_exec_total",
+            "intellisense_v2_runtime_snapshot_with_deps_exec_ms",
+        ),
+        "wait_for_file_version" => (
+            "intellisense_v2_runtime_wait_for_file_version_exec_total",
+            "intellisense_v2_runtime_wait_for_file_version_exec_ms",
+        ),
+        _ => (
+            "intellisense_v2_runtime_other_exec_total",
+            "intellisense_v2_runtime_other_exec_ms",
+        ),
+    }
+}
+
 fn legacy_ir_query_metrics(kind: &str) -> (&'static str, &'static str) {
     match kind {
         "completion" => (
@@ -2086,6 +2164,14 @@ fn compute_rate(
         return None;
     }
     Some(numerator / denominator)
+}
+
+fn sum_counters_with_all_substrings(counters: &HashMap<String, u64>, parts: &[&str]) -> u64 {
+    counters
+        .iter()
+        .filter(|(key, _)| parts.iter().all(|part| key.contains(part)))
+        .map(|(_, value)| *value)
+        .sum()
 }
 
 fn percentile_sorted(values: &[f64], percentile: f64) -> f64 {
@@ -2282,6 +2368,93 @@ mod observability_contract_tests {
                 "intellisense_v2_drilldown_saturation_gauge_origin_agent_saturation_metric_queue_depth_total"
             ),
             "drilldown saturation gauge must be present"
+        );
+    }
+
+    #[test]
+    fn runtime_queue_and_exec_projection_do_not_raise_hint_mismatch() {
+        let observability = BasicObservability::default();
+        observability.record_intellisense_v2_runtime_queue_wait_latency_with_origin(
+            "lsp",
+            "wait_for_file_version",
+            Duration::from_millis(7),
+        );
+        observability.record_intellisense_v2_runtime_exec_latency_with_origin(
+            "lsp",
+            "snapshot_with_deps",
+            Duration::from_millis(9),
+        );
+
+        let exported = observability.get_metrics().export_metrics();
+        let counters = counters(&exported);
+        let histograms = histograms(&exported);
+
+        assert_eq!(
+            counter_value(
+                counters,
+                "intellisense_v2_observability_contract_violation_reason_projection_hint_mismatch"
+            ),
+            0,
+            "runtime queue/exec canonical events must deterministically match legacy projection"
+        );
+        assert!(
+            counter_value(
+                counters,
+                "intellisense_v2_runtime_wait_for_file_version_queue_wait_total"
+            ) > 0,
+            "legacy runtime queue wait counter should be projected"
+        );
+        assert!(
+            counter_value(counters, "intellisense_v2_runtime_snapshot_with_deps_exec_total") > 0,
+            "legacy runtime exec counter should be projected"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "intellisense_v2_runtime_wait_for_file_version_queue_wait_ms"
+            ) > 0,
+            "legacy runtime queue histogram should be projected"
+        );
+        assert!(
+            histogram_count(histograms, "intellisense_v2_runtime_snapshot_with_deps_exec_ms") > 0,
+            "legacy runtime exec histogram should be projected"
+        );
+    }
+
+    #[test]
+    fn export_includes_parse_result_singleflight_and_cancel_rates() {
+        let observability = BasicObservability::default();
+        observability
+            .record_intellisense_v2_parse_result_query_latency_with_origin("lsp", Duration::from_millis(10));
+        observability.record_intellisense_v2_query_cancelled_with_origin("lsp", "other");
+        observability.record_intellisense_v2_singleflight_leader_with_origin("lsp", "parse_result");
+        observability.record_intellisense_v2_singleflight_shared_with_origin("lsp", "parse_result");
+        observability.record_intellisense_v2_singleflight_leader_with_origin("agent", "parse_result");
+
+        let exported = observability.get_metrics().export_metrics();
+        let rates = exported
+            .get("rates")
+            .and_then(|value| value.as_object())
+            .expect("metrics.rates object");
+
+        let shared_rate = rates
+            .get("intellisense_v2_parse_result_singleflight_shared_rate")
+            .and_then(|value| value.as_f64())
+            .expect("parse_result singleflight shared rate must be exported");
+        // leaders=2, shared=1
+        assert!(
+            (shared_rate - (1.0 / 3.0)).abs() < 1e-9,
+            "shared rate must be computed from aggregated parse_result singleflight counters"
+        );
+
+        let cancel_rate = rates
+            .get("intellisense_v2_parse_result_query_cancel_rate")
+            .and_then(|value| value.as_f64())
+            .expect("parse_result cancel rate must be exported");
+        // parse_result total=1, parse_result cancelled=1
+        assert!(
+            (cancel_rate - 1.0).abs() < 1e-9,
+            "parse_result cancel rate must be derived from parse_result stage-reason counters"
         );
     }
 }

@@ -6,11 +6,17 @@
 - одинаковую интерпретацию cancellation/skip причин;
 - различие между интерфейсами допускается только по `origin`.
 
+Dual-write представление в `bsl-agent` MUST использовать тот же канонический контракт, что и LSP:
+- drilldown keys MUST быть primary representation;
+- legacy fixed keys MUST быть compatibility-проекцией через тот же deterministic mapping;
+- adapter-local reinterpretation/пересчёт legacy семантики MUST NOT применяться.
+
 #### Scenario: Один semantic сценарий даёт сопоставимые drilldown-метрики в LSP и MCP
 - **GIVEN** эквивалентный сценарий запросов выполняется через LSP и MCP
 - **WHEN** клиент сравнивает observability snapshots
 - **THEN** значения сопоставимы по `operation+stage+outcome/reason`
 - **AND** различия объясняются только `origin`, а не расхождением orchestration логики
+- **AND** legacy fixed keys в MCP и LSP согласованы как проекции одного канонического контракта
 
 ### Requirement: Batch semantic инструменты `bsl-agent` используют background CPU class (MUST)
 Долгие MCP операции со сканированием множества файлов MUST выполняться как background workload class в shared runtime budget.
@@ -35,4 +41,3 @@ Guard MUST опираться на observability и/или детерминир�
 - **WHEN** запускается perf regression guard
 - **THEN** тест подтверждает прогресс interactive path
 - **AND** при starvation тест детерминированно падает
-

@@ -10,6 +10,7 @@
 - Goals:
   - Сузить поиск проблемных мест до комбинации `origin+operation+stage` без взрыва кардинальности.
   - Сохранить совместимость с существующими fixed-key метриками в период миграции.
+  - Обеспечить единый observability контракт: dual-write представления не должны иметь независимую семантику.
   - Сделать saturation/singleflight поведение прозрачно наблюдаемым.
   - Зафиксировать, что `bsl-agent` использует тот же контракт и корректный CPU class для batch-нагрузки.
 - Non-Goals:
@@ -22,9 +23,14 @@
   - Для stage метрик используются только фиксированные enum-измерения: `origin`, `operation`, `stage`, `outcome|reason`.
   - Поля со свободным вводом запрещены в metric key.
 
-- Decision: Сохранить dual-write совместимость.
-  - Существующие fixed-key метрики продолжают публиковаться.
-  - Новые drilldown метрики добавляются как additive слой.
+- Decision: Один канонический контракт и два представления (drilldown + compatibility projection).
+  - Канонический слой задаётся фиксированными измерениями `origin/operation/stage/outcome|reason`.
+  - Legacy fixed-key метрики вычисляются как deterministic projection из канонического слоя.
+  - Drilldown и legacy MUST NOT эмититься как независимые контракты с разной семантикой.
+
+- Decision: Сохранить additive dual-write rollout.
+  - Существующие fixed-key метрики продолжают публиковаться как compatibility projection.
+  - Новые drilldown метрики публикуются параллельно как primary representation.
   - Это исключает поломку текущих tests/dashboards и позволяет постепенную миграцию.
 
 - Decision: Выделить saturation/singleflight наблюдаемость в отдельный обязательный слой.
@@ -52,14 +58,14 @@
   - Mitigation: фиксированные enum-измерения, без high-cardinality; ограничить набор обязательных комбинаций.
 
 - Риск: двойной контракт (legacy + drilldown) временно усложняет тесты.
-  - Mitigation: явный список обязательных ключей в specs и parity tests для LSP/MCP.
+  - Mitigation: единая mapping-таблица и инвариантные tests "каноника -> legacy projection" + parity tests для LSP/MCP.
 
 - Риск: перенос batch-инструментов `bsl-agent` в background может поменять распределение latency.
   - Mitigation: добавить perf smoke с конкурентной нагрузкой и проверить отсутствие starvation интерактивных запросов.
 
 ## Implementation Plan (High Level)
-1. Расширить observability API в `bsl-runtime` под drilldown и saturation слой.
-2. Привязать emission к shared facade/runtime так, чтобы контракт автоматически покрывал LSP и MCP.
-3. Обновить `bsl-agent` batch paths на background class и проверить parity метрик.
-4. Зафиксировать quality checks: контрактные тесты + perf smoke для смешанной нагрузки.
-
+1. Зафиксировать каноническую schema-модель и deterministic mapping в compatibility fixed keys.
+2. Расширить observability API в `bsl-runtime` под канонический drilldown и saturation слой; legacy публиковать только через projection.
+3. Привязать emission к shared facade/runtime так, чтобы один и тот же контракт автоматически покрывал LSP и MCP.
+4. Обновить `bsl-agent` batch paths на background class и проверить parity метрик.
+5. Зафиксировать quality checks: контрактные tests для projection/parity + perf smoke для смешанной нагрузки.

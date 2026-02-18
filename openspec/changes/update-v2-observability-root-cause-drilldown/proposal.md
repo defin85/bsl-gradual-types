@@ -9,10 +9,12 @@
 В результате triage и регрессии по производительности занимают больше времени, чем должны.
 
 ## What Changes
-- Добавить в `bsl-intellisense-v2` root-cause drilldown контракт метрик с низкой кардинальностью: `origin + operation + stage + outcome/cause`.
-- Зафиксировать backward-compatible rollout: новые drilldown метрики добавляются без удаления существующих фиксированных ключей.
+- Добавить в `bsl-intellisense-v2` единый канонический root-cause контракт метрик с низкой кардинальностью: `origin + operation + stage + outcome/cause`.
+- Зафиксировать backward-compatible rollout как dual-write **из одного канонического источника событий**:
+  - drilldown метрики — основное представление контракта;
+  - legacy fixed keys — совместимая проекция того же контракта без отдельной семантики.
 - Добавить требования к saturation/singleflight observability, чтобы явно видеть узкие места очередей и дедупликации.
-- Зафиксировать в `mcp-bsl-agent` обязательное применение общего drilldown-контракта и background-класса для долгих batch semantic инструментов.
+- Зафиксировать в `mcp-bsl-agent` обязательное применение того же канонического контракта (включая dual-write-проекцию) и background-класса для долгих batch semantic инструментов.
 
 ## Impact
 - Affected specs:
@@ -25,4 +27,3 @@
   - `bsl-runtime/src/application/intellisense_v2/policy.rs`
   - `bsl-agent/src/session/mod.rs`
   - `backend/src/bin/lsp_server/server/core.rs`
-

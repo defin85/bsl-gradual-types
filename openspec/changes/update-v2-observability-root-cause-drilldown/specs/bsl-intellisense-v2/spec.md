@@ -23,16 +23,21 @@ Drilldown слой MUST оставаться low-cardinality:
 - **THEN** по drilldown-метрикам можно однозначно определить проблемную комбинацию `operation+stage`
 - **AND** видно, что вклад вызван конкретной `reason` (например, cancellation или skip), а не агрегированным `*_other`
 
-### Requirement: Rollout drilldown-метрик сохраняет fixed-key backward compatibility (MUST)
-При внедрении drilldown слоя система MUST публиковать существующие fixed-key observability метрики параллельно с новыми drilldown метриками.
+### Requirement: Dual-write rollout использует единый канонический observability контракт (MUST)
+При внедрении drilldown слоя система MUST сохранять backward compatibility fixed-key метрик через dual-write из одного канонического источника событий.
 
-Семантика legacy fixed-key метрик MUST оставаться совместимой с текущим контрактом observability, чтобы существующие parity tests/dashboards не требовали одномоментной миграции.
+Система MUST соблюдать следующие инварианты:
+- канонический контракт задаёт семантику метрик;
+- drilldown является primary representation канонического контракта;
+- legacy fixed keys являются compatibility-проекцией канонического контракта и MUST NOT иметь отдельную независимую семантику;
+- mapping каноника -> fixed keys MUST быть детерминированным и единым для LSP/web/MCP.
 
-#### Scenario: Существующие проверки observability продолжают проходить
+#### Scenario: Dual-write сохраняет совместимость без semantic drift
 - **GIVEN** после внедрения drilldown запрошен observability snapshot
-- **WHEN** запускаются текущие контрактные проверки fixed-key метрик
-- **THEN** проверки проходят без изменения ожидаемых legacy ключей
-- **AND** snapshot дополнительно содержит новые drilldown ключи
+- **WHEN** запускаются текущие контрактные проверки fixed-key метрик и проверка соответствия каноника -> legacy projection
+- **THEN** fixed-key проверки проходят без изменения ожидаемых legacy ключей
+- **AND** snapshot дополнительно содержит drilldown ключи
+- **AND** значения legacy fixed keys согласованы с агрегированной канонической drilldown моделью
 
 ### Requirement: Runtime saturation и singleflight effectiveness наблюдаемы отдельным слоем (MUST)
 Система MUST публиковать observability-метрики, которые отделяют queue/CPU contention от логики semantic стадий.
@@ -49,4 +54,3 @@ Drilldown слой MUST оставаться low-cardinality:
 - **WHEN** анализируется saturation/effectiveness слой
 - **THEN** можно определить, вызван ли рост нехваткой runtime budget (waiters/permits/queue depth)
 - **AND** можно оценить, помог ли singleflight (`shared`) или не сработал из-за `key_unavailable`
-

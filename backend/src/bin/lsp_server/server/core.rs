@@ -5558,11 +5558,63 @@ mod tests {
             assert!(completion.is_some(), "completion response expected");
         }
 
+        // Dedicated concurrent parse burst to exercise parse_result singleflight sharing
+        // without polluting completion duration SLO samples.
+        let file_id = server
+            .get_file_id_v2(&uri)
+            .await
+            .expect("file_id must be available after didOpen");
+        let parse_context = Arc::new(
+            server
+                .build_execution_context_v2(
+                    bsl_runtime::application::SemanticOperation::Diagnostics,
+                    file_id,
+                    None,
+                    false,
+                )
+                .await,
+        );
+        let parse_barrier = Arc::new(std::sync::Barrier::new(9));
+        std::thread::scope(|scope| {
+            let mut workers = Vec::new();
+            for _ in 0..8_u32 {
+                let runtime = server.analysis_v2.clone();
+                let parse_context = parse_context.clone();
+                let parse_barrier = parse_barrier.clone();
+                let coordinator = coordinator.clone();
+                workers.push(scope.spawn(move || {
+                    parse_barrier.wait();
+                    let analysis = futures::executor::block_on(runtime.snapshot());
+                    bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query_singleflight(
+                        parse_context.as_ref(),
+                        &analysis,
+                        true,
+                        Some(coordinator.as_ref()),
+                        file_id,
+                    )
+                }));
+            }
+            parse_barrier.wait();
+            for worker in workers {
+                let result = worker
+                    .join()
+                    .expect("parse burst worker should not panic");
+                assert!(
+                    result.is_ok(),
+                    "parse burst worker should complete without hard cancellation"
+                );
+            }
+        });
+
         let metrics = coordinator.observability_metrics();
         let counters = metrics
             .get("counters")
             .and_then(|value| value.as_object())
             .expect("metrics.counters object");
+        let rates = metrics
+            .get("rates")
+            .and_then(|value| value.as_object())
+            .expect("metrics.rates object");
         let histograms = metrics
             .get("histograms")
             .and_then(|value| value.as_object())
@@ -5590,10 +5642,24 @@ mod tests {
             .and_then(|hist| hist.get("p95"))
             .and_then(|value| value.as_f64().or_else(|| value.as_u64().map(|v| v as f64)))
             .unwrap_or(0.0);
+        let queue_wait_interactive_p95 = histograms
+            .get("intellisense_v2_runtime_queue_wait_interactive_ms")
+            .and_then(|value| value.as_object())
+            .and_then(|hist| hist.get("p95"))
+            .and_then(|value| value.as_f64().or_else(|| value.as_u64().map(|v| v as f64)))
+            .unwrap_or(0.0);
         let completion_p95 = completion_hist
             .get("p95")
             .and_then(|value| value.as_f64().or_else(|| value.as_u64().map(|v| v as f64)))
             .expect("completion p95");
+        let parse_result_shared_rate = rates
+            .get("intellisense_v2_parse_result_singleflight_shared_rate")
+            .and_then(|value| value.as_f64().or_else(|| value.as_u64().map(|v| v as f64)))
+            .unwrap_or(0.0);
+        let parse_result_cancel_rate = rates
+            .get("intellisense_v2_parse_result_query_cancel_rate")
+            .and_then(|value| value.as_f64().or_else(|| value.as_u64().map(|v| v as f64)))
+            .unwrap_or(0.0);
         let wait_budget_ms = bsl_runtime::system::global_runtime_config()
             .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
             .unwrap_or(120)
@@ -5609,6 +5675,22 @@ mod tests {
             completion_p95 <= 1500.0,
             "warm-path completion p95 regression: completion_p95={}ms > 1500ms",
             completion_p95
+        );
+        assert!(
+            queue_wait_interactive_p95 <= wait_budget_ms + 250.0,
+            "warm-path interactive queue-wait p95 regression: queue_wait_interactive_p95={}ms budget={}ms",
+            queue_wait_interactive_p95,
+            wait_budget_ms
+        );
+        assert!(
+            parse_result_shared_rate >= 0.01,
+            "parse_result singleflight shared-rate regression: shared_rate={:.3}",
+            parse_result_shared_rate
+        );
+        assert!(
+            parse_result_cancel_rate <= 0.30,
+            "parse_result cancel-rate regression: cancel_rate={:.3}",
+            parse_result_cancel_rate
         );
         let completion_total = counters
             .get("completion_total")

@@ -33,9 +33,10 @@
 
 ## Singleflight Policy
 
-Для дорогих revision-bound query используется singleflight по ключу:
+Для дорогих revision-bound query используется singleflight по каноническому ключу:
 
-`(file_id, file_version, file_signature, deps_id, settings_id, query_kind)`
+- `parse_result` / `syntax_diagnostics`: `(file_id, file_version, file_signature, query_kind)`
+- `ir`: `(file_id, file_version, file_signature, deps_id, settings_id, query_kind)`
 
 `query_kind`:
 
@@ -58,7 +59,22 @@
 - при `total_permits >= 4` под `interactive` резервируется 2 permits;
 - минимум 1 permit зарезервирован под `background` (если total permits >= 2);
 - при пустой очереди противоположного класса разрешён borrow;
+- `background` не забирает `shared` permit, пока в очереди есть `interactive` waiters;
 - при конкуренции fairness восстанавливается.
+
+## Cancellation Checkpoints
+
+В тяжёлых query-пайплайнах `analysis-v2` добавлены ранние checkpoints через
+`db.unwind_if_revision_cancelled()`:
+
+- `parse_result`
+- `ir`
+- `syntax_diagnostics`
+- `semantic_diagnostics`
+- `type_index`
+- `semantic_diagnostics_flow_sensitive`
+
+Это снижает лишнюю CPU-нагрузку после отменённых запросов и ускоряет освобождение budget для новых интерактивных операций.
 
 ## Runtime Knobs
 

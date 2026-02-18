@@ -227,30 +227,52 @@ impl CpuBoundBudget {
 
         own_waiters.fetch_add(1, Ordering::AcqRel);
         let permit = loop {
+            let other_has_waiters = other_waiters.load(Ordering::Acquire) > 0;
+            let can_borrow = !other_has_waiters;
+            // Keep shared permits biased toward interactive work when interactive queue is non-empty.
+            let can_take_shared = matches!(class, CpuWorkClass::Interactive) || !other_has_waiters;
+
             if let Ok(permit) = own_reserved.clone().try_acquire_owned() {
                 break permit;
             }
-            if let Ok(permit) = self.shared.clone().try_acquire_owned() {
-                break permit;
+            if can_take_shared {
+                if let Ok(permit) = self.shared.clone().try_acquire_owned() {
+                    break permit;
+                }
             }
-
-            let can_borrow = other_waiters.load(Ordering::Acquire) == 0;
             if can_borrow {
                 if let Ok(permit) = other_reserved.clone().try_acquire_owned() {
                     break permit;
                 }
             }
 
-            if can_borrow {
-                tokio::select! {
-                    permit = own_reserved.clone().acquire_owned() => break permit.expect("interactive/background reserved semaphore closed"),
-                    permit = self.shared.clone().acquire_owned() => break permit.expect("shared semaphore closed"),
-                    permit = other_reserved.clone().acquire_owned() => break permit.expect("borrowed semaphore closed"),
+            match (can_take_shared, can_borrow) {
+                (true, true) => {
+                    tokio::select! {
+                        permit = own_reserved.clone().acquire_owned() => break permit.expect("interactive/background reserved semaphore closed"),
+                        permit = self.shared.clone().acquire_owned() => break permit.expect("shared semaphore closed"),
+                        permit = other_reserved.clone().acquire_owned() => break permit.expect("borrowed semaphore closed"),
+                    }
                 }
-            } else {
-                tokio::select! {
-                    permit = own_reserved.clone().acquire_owned() => break permit.expect("interactive/background reserved semaphore closed"),
-                    permit = self.shared.clone().acquire_owned() => break permit.expect("shared semaphore closed"),
+                (true, false) => {
+                    tokio::select! {
+                        permit = own_reserved.clone().acquire_owned() => break permit.expect("interactive/background reserved semaphore closed"),
+                        permit = self.shared.clone().acquire_owned() => break permit.expect("shared semaphore closed"),
+                    }
+                }
+                (false, true) => {
+                    tokio::select! {
+                        permit = own_reserved.clone().acquire_owned() => break permit.expect("interactive/background reserved semaphore closed"),
+                        permit = other_reserved.clone().acquire_owned() => break permit.expect("borrowed semaphore closed"),
+                    }
+                }
+                (false, false) => {
+                    let permit = own_reserved
+                        .clone()
+                        .acquire_owned()
+                        .await
+                        .expect("interactive/background reserved semaphore closed");
+                    break permit;
                 }
             }
         };
@@ -564,6 +586,59 @@ mod tests {
 
         let _ = borrowed_release_tx.send(());
         borrowed_task.await.expect("borrowed background task join");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn cpu_budget_background_does_not_take_shared_while_interactive_waits() {
+        let budget = Arc::new(CpuBoundBudget::with_total_permits(3));
+        let interactive_reserved = budget.acquire(CpuWorkClass::Interactive).await;
+        let background_reserved = budget.acquire(CpuWorkClass::Background).await;
+        let shared_taken_by_background = budget.acquire(CpuWorkClass::Background).await;
+
+        let budget_for_interactive = budget.clone();
+        let interactive_waiter = tokio::spawn(async move {
+            budget_for_interactive
+                .acquire(CpuWorkClass::Interactive)
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(
+            !interactive_waiter.is_finished(),
+            "interactive waiter should be queued while all permits are occupied"
+        );
+
+        let budget_for_background = budget.clone();
+        let background_waiter = tokio::spawn(async move {
+            budget_for_background
+                .acquire(CpuWorkClass::Background)
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(
+            !background_waiter.is_finished(),
+            "background waiter should also be queued before shared release"
+        );
+
+        drop(shared_taken_by_background);
+        let interactive_permit = timeout(Duration::from_millis(300), interactive_waiter)
+            .await
+            .expect("interactive waiter should win released shared permit")
+            .expect("interactive waiter join should succeed");
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(
+            !background_waiter.is_finished(),
+            "background waiter must not steal shared while interactive queue is non-empty"
+        );
+
+        drop(interactive_permit);
+        drop(interactive_reserved);
+        drop(background_reserved);
+        let background_permit = timeout(Duration::from_millis(300), background_waiter)
+            .await
+            .expect("background waiter should eventually make progress")
+            .expect("background waiter join should succeed");
+        drop(background_permit);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

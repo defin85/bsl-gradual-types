@@ -145,6 +145,11 @@ fn cancellable<T>(op: impl FnOnce() -> T) -> Cancellable<T> {
     }
 }
 
+#[inline(always)]
+fn cancellation_checkpoint(db: &dyn salsa::Database) {
+    db.unwind_if_revision_cancelled();
+}
+
 #[salsa::input]
 pub struct SourceFile {
     pub id: u32,
@@ -283,8 +288,10 @@ pub fn parse_result(
     file: SourceFile,
     settings: SettingsSnapshot,
 ) -> ParseResultSnapshot {
+    cancellation_checkpoint(db);
     let _settings_id = settings.id(db);
     let text = file.text(db);
+    cancellation_checkpoint(db);
     let options = ParseOptions::default();
     match bsl_syntax::parse(text, &options) {
         Ok(parsed) => ParseResultSnapshot(Arc::new(parsed)),
@@ -309,12 +316,15 @@ pub fn ir(
     deps: DepsSnapshot,
     settings: SettingsSnapshot,
 ) -> SemanticProgramSnapshot {
+    cancellation_checkpoint(db);
     let _deps_id = deps.id(db);
     let deps_data = deps.data(db).0.clone();
 
     let parsed = parse_result(db, file, settings).0;
+    cancellation_checkpoint(db);
     let source = file.text(db).to_string();
     let file_path = file.path(db).to_string();
+    cancellation_checkpoint(db);
 
     match AstToIrConverter::convert_with_resolver(
         parsed.program.clone(),
@@ -340,8 +350,10 @@ pub fn syntax_diagnostics(
     file: SourceFile,
     settings: SettingsSnapshot,
 ) -> SyntaxDiagnosticsSnapshot {
+    cancellation_checkpoint(db);
     let _settings_id = settings.id(db);
     let parsed = parse_result(db, file, settings).0;
+    cancellation_checkpoint(db);
     SyntaxDiagnosticsSnapshot(Arc::new(parsed.syntax_errors.clone()))
 }
 
@@ -352,11 +364,14 @@ pub fn semantic_diagnostics(
     deps: DepsSnapshot,
     settings: SettingsSnapshot,
 ) -> SemanticDiagnosticsSnapshot {
+    cancellation_checkpoint(db);
     let _deps_id = deps.id(db);
     let _settings_id = settings.id(db);
     let deps_data = deps.data(db).0.clone();
+    cancellation_checkpoint(db);
 
     let parsed = parse_result(db, file, settings).0;
+    cancellation_checkpoint(db);
     if !parsed.syntax_errors.is_empty()
         && !syntax_errors_only_in_directives(file.text(db), &parsed.syntax_errors)
     {
@@ -365,6 +380,7 @@ pub fn semantic_diagnostics(
 
     let program = ir(db, file, deps, settings).0;
     let type_index = type_index(db, file, deps, settings).0;
+    cancellation_checkpoint(db);
 
     let mut type_hints = SemanticTypeHints::default();
     populate_assignment_value_hints(&program, &type_index, &mut type_hints);
@@ -385,6 +401,7 @@ pub fn semantic_diagnostics(
         &deps_data.signature_index,
         detail_level,
     );
+    cancellation_checkpoint(db);
     visitor.set_platform_signatures_loaded(deps_data.platform_signatures_loaded);
     visitor.set_type_hints(Some(&type_hints));
     walk_program(&program, &mut visitor);
@@ -421,10 +438,12 @@ pub fn semantic_diagnostics_flow_sensitive(
     deps: DepsSnapshot,
     settings: SettingsSnapshot,
 ) -> SemanticDiagnosticsSnapshot {
+    cancellation_checkpoint(db);
     let _deps_id = deps.id(db);
     let _settings_id = settings.id(db);
 
     let base = semantic_diagnostics(db, file, deps, settings).0;
+    cancellation_checkpoint(db);
 
     // Если base пустой из-за синтаксических ошибок, всё равно не пытаемся добавлять flow-sensitive.
     if base.is_empty() {
@@ -434,12 +453,14 @@ pub fn semantic_diagnostics_flow_sensitive(
     let deps_data = deps.data(db).0.clone();
     let program = ir(db, file, deps, settings).0;
     let type_index = type_index(db, file, deps, settings).0;
+    cancellation_checkpoint(db);
     let resolver = deps_data
         .resolver
         .clone()
         .unwrap_or_else(|| Arc::new(TypeResolver::new(deps_data.repository.clone())));
 
     let mut diagnostics = (*base).clone();
+    cancellation_checkpoint(db);
     diagnostics.extend(flow_sensitive_null_safety_diagnostics(
         &program,
         &type_index,
@@ -901,10 +922,12 @@ pub fn type_index(
     deps: DepsSnapshot,
     settings: SettingsSnapshot,
 ) -> TypeIndexSnapshot {
+    cancellation_checkpoint(db);
     let _deps_id = deps.id(db);
     let _settings_id = settings.id(db);
     let deps_data = deps.data(db).0.clone();
     let parsed = parse_result(db, file, settings).0;
+    cancellation_checkpoint(db);
     TypeIndexSnapshot(Arc::new(type_inference_v2::build_type_index_with_path(
         &parsed.program,
         file.path(db).as_ref(),

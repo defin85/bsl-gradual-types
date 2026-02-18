@@ -253,8 +253,8 @@ struct SingleflightRevisionKey {
     file_id: FileId,
     file_version: i32,
     file_signature: String,
-    deps_id: DepsSnapshotId,
-    settings_id: SettingsId,
+    deps_id: Option<DepsSnapshotId>,
+    settings_id: Option<SettingsId>,
     query_kind: SingleflightQueryKind,
 }
 
@@ -1089,8 +1089,11 @@ impl IntellisenseV2Facade {
     ) -> Option<SingleflightRevisionKey> {
         let file_version = analysis.file_version(file_id).ok().flatten()?;
         let file_signature = Self::singleflight_file_signature(analysis, file_id)?;
-        let deps_id = analysis.deps_id().ok()?;
-        let settings_id = analysis.settings_id().ok()?;
+        let (deps_id, settings_id) = if Self::singleflight_requires_snapshot_identity(query_kind) {
+            (Some(analysis.deps_id().ok()?), Some(analysis.settings_id().ok()?))
+        } else {
+            (None, None)
+        };
         Some(SingleflightRevisionKey {
             file_id,
             file_version,
@@ -1099,6 +1102,10 @@ impl IntellisenseV2Facade {
             settings_id,
             query_kind,
         })
+    }
+
+    fn singleflight_requires_snapshot_identity(query_kind: SingleflightQueryKind) -> bool {
+        matches!(query_kind, SingleflightQueryKind::Ir)
     }
 
     fn singleflight_file_signature(analysis: &AnalysisV2, file_id: FileId) -> Option<String> {
@@ -2074,14 +2081,36 @@ mod tests {
     }
 
     #[test]
+    fn singleflight_scope_is_bound_only_for_ir() {
+        assert!(
+            IntellisenseV2Facade::singleflight_requires_snapshot_identity(
+                SingleflightQueryKind::Ir
+            ),
+            "IR should remain tied to deps/settings snapshots"
+        );
+        assert!(
+            !IntellisenseV2Facade::singleflight_requires_snapshot_identity(
+                SingleflightQueryKind::ParseResult
+            ),
+            "parse_result should not be tied to deps/settings snapshots"
+        );
+        assert!(
+            !IntellisenseV2Facade::singleflight_requires_snapshot_identity(
+                SingleflightQueryKind::SyntaxDiagnostics
+            ),
+            "syntax_diagnostics should not be tied to deps/settings snapshots"
+        );
+    }
+
+    #[test]
     fn singleflight_runs_leader_once_and_shares_result() {
         static TEST_FLIGHTS: OnceLock<SingleflightMap<Arc<String>>> = OnceLock::new();
         let key = SingleflightRevisionKey {
             file_id: FileId(777),
             file_version: 10,
             file_signature: "path:test://singleflight/777.bsl".to_string(),
-            deps_id: DepsSnapshotId::from_hash("deps"),
-            settings_id: SettingsId::from_hash("settings"),
+            deps_id: Some(DepsSnapshotId::from_hash("deps")),
+            settings_id: Some(SettingsId::from_hash("settings")),
             query_kind: SingleflightQueryKind::Ir,
         };
         let calls = Arc::new(AtomicUsize::new(0));
@@ -2144,8 +2173,8 @@ mod tests {
             file_id: FileId(778),
             file_version: 10,
             file_signature: "path:test://singleflight/778.bsl".to_string(),
-            deps_id: DepsSnapshotId::from_hash("deps"),
-            settings_id: SettingsId::from_hash("settings"),
+            deps_id: None,
+            settings_id: None,
             query_kind: SingleflightQueryKind::ParseResult,
         };
         let calls = Arc::new(AtomicUsize::new(0));
@@ -2231,8 +2260,8 @@ mod tests {
             file_id: FileId(780),
             file_version: 10,
             file_signature: "path:test://singleflight/780.bsl".to_string(),
-            deps_id: DepsSnapshotId::from_hash("deps"),
-            settings_id: SettingsId::from_hash("settings"),
+            deps_id: None,
+            settings_id: None,
             query_kind: SingleflightQueryKind::SyntaxDiagnostics,
         };
 
@@ -2295,8 +2324,8 @@ mod tests {
             file_id: FileId(779),
             file_version: 10,
             file_signature: "path:test://singleflight/779.bsl".to_string(),
-            deps_id: DepsSnapshotId::from_hash("deps"),
-            settings_id: SettingsId::from_hash("settings"),
+            deps_id: None,
+            settings_id: None,
             query_kind: SingleflightQueryKind::SyntaxDiagnostics,
         };
         let coordinator = Arc::new(SystemCoordinator::new());

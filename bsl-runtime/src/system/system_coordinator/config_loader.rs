@@ -1663,7 +1663,7 @@ fn config_layer_b_fingerprint(
 
 fn config_layer_b_settings_fingerprint(strict: bool) -> String {
     format!(
-        "config_layer_b_v2;modules_indexing_v1;strict_fingerprint={}",
+        "config_layer_b_v3;modules_indexing_v1;strict_fingerprint={}",
         strict
     )
 }

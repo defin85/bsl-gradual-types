@@ -71,4 +71,14 @@ fn form_module_object_label_policy_is_form_data_for_detailed() {
         "detailed hover must not leak owner-facet label, got:\n{}",
         detailed
     );
+    assert!(
+        !detailed.contains("Фасет:"),
+        "detailed hover for form-data object must not show active facet, got:\n{}",
+        detailed
+    );
+    assert!(
+        !detailed.contains("Доступные фасеты:"),
+        "detailed hover for form-data object must not show available facets, got:\n{}",
+        detailed
+    );
 }

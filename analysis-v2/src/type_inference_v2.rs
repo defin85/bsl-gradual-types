@@ -816,11 +816,7 @@ impl TypeInferencer {
             ContextualTypeDescriptor::FormDataObject {
                 kind, owner_name, ..
             } => {
-                let mut resolution = self.resolve_configuration_facet_descriptor(
-                    *kind,
-                    owner_name,
-                    FacetKind::Object,
-                );
+                let mut resolution = self.resolve_configuration_descriptor(*kind, owner_name);
                 for note in descriptor.resolution_metadata_notes() {
                     if !resolution.metadata.notes.contains(&note) {
                         resolution.metadata.notes.push(note);
@@ -842,6 +838,24 @@ impl TypeInferencer {
         } else {
             TypeResolution::inferred_weak(type_name)
         }
+    }
+
+    fn resolve_configuration_descriptor(&self, kind: MetadataKind, name: &str) -> TypeResolution {
+        let mut resolution = TypeResolution::metadata_type(kind, name, None);
+        let metadata_type_name = format!("{}.{}", kind.to_prefix(), name);
+
+        if let Some(raw) = self.deps.repository.find_type(&metadata_type_name) {
+            resolution.available_facets = raw.facets.clone();
+            return resolution;
+        }
+
+        resolution.certainty = Certainty::InferredWeak;
+        resolution.source = ResolutionSource::Inferred;
+        if !self.metadata_lookup.is_configuration_loaded() {
+            resolution.metadata.uncertainty_reason =
+                Some(UncertaintyReason::ConfigurationNotLoaded);
+        }
+        resolution
     }
 
     fn resolve_configuration_facet_descriptor(
@@ -1970,7 +1984,7 @@ mod tests {
         let object = index
             .type_at_byte_offset(object_offset)
             .expect("type at Объект");
-        assert_eq!(object.type_name(), "ДокументОбъект.Док1");
+        assert_eq!(object.type_name(), "Документы.Док1");
     }
 
     #[test]
@@ -2019,8 +2033,8 @@ mod tests {
             .type_at_byte_offset(object_offset)
             .expect("type at Объект");
 
-        assert_eq!(object.type_name(), "ДокументОбъект.Док1");
-        assert_eq!(object.active_facet, Some(FacetKind::Object));
+        assert_eq!(object.type_name(), "Документы.Док1");
+        assert_eq!(object.active_facet, None);
         assert!(
             object
                 .metadata
@@ -2051,8 +2065,8 @@ mod tests {
             .type_at_byte_offset(object_offset)
             .expect("type at Объект");
 
-        assert_eq!(object.type_name(), "ДокументОбъект.Док1");
-        assert_eq!(object.active_facet, Some(FacetKind::Object));
+        assert_eq!(object.type_name(), "Документы.Док1");
+        assert_eq!(object.active_facet, None);
         assert_eq!(object.certainty, Certainty::InferredWeak);
     }
 
@@ -2254,7 +2268,7 @@ mod tests {
     }
 
     #[test]
-    fn form_module_object_member_resolution_uses_form_shape_before_object_fallback() {
+    fn form_module_object_member_resolution_does_not_leak_form_shape() {
         let repository_impl = Arc::new(InMemoryTypeRepository::new());
         repository_impl
             .load_types(vec![
@@ -2318,7 +2332,11 @@ mod tests {
         let attr_type = index
             .type_at_byte_offset(attr_offset)
             .expect("type at Объект.СчетФактура");
-        assert_eq!(attr_type.type_name(), "Строка");
+        assert!(
+            attr_type.is_unknown(),
+            "form-only реквизиты не должны резолвиться через Объект, got: {:?}",
+            attr_type
+        );
 
         let link_offset = source.rfind("Ссылка").expect("Ссылка") as u32;
         let link_type = index

@@ -1265,7 +1265,7 @@ fn test_form_data_intrinsic_properties_are_available_without_loaded_configuratio
 }
 
 #[test]
-fn test_form_data_provider_chain_orders_shape_then_intrinsic_then_raw_type() {
+fn test_form_data_provider_chain_uses_intrinsic_then_raw_without_form_shape() {
     let repo = Arc::new(InMemoryTypeRepository::new());
     repo.load_types(vec![
         RawTypeData {
@@ -1335,10 +1335,6 @@ fn test_form_data_provider_chain_orders_shape_then_intrinsic_then_raw_type() {
         .map(|(property, _origin)| property.name.as_str())
         .collect();
 
-    let form_attr_idx = labels
-        .iter()
-        .position(|name| *name == "РеквизитФормы")
-        .expect("missing form-shape property");
     let intrinsic_link_idx = labels
         .iter()
         .position(|name| *name == "Ссылка")
@@ -1349,13 +1345,13 @@ fn test_form_data_provider_chain_orders_shape_then_intrinsic_then_raw_type() {
         .expect("missing raw type metadata property");
 
     assert!(
-        form_attr_idx < intrinsic_link_idx,
-        "shape property must appear before intrinsic properties, labels={:?}",
+        intrinsic_link_idx < metadata_prop_idx,
+        "intrinsic properties must appear before raw metadata properties, labels={:?}",
         labels
     );
     assert!(
-        intrinsic_link_idx < metadata_prop_idx,
-        "intrinsic properties must appear before raw metadata properties, labels={:?}",
+        labels.iter().all(|name| *name != "РеквизитФормы"),
+        "form-shape properties must not participate in form-data chain, labels={:?}",
         labels
     );
     assert!(
@@ -1366,7 +1362,7 @@ fn test_form_data_provider_chain_orders_shape_then_intrinsic_then_raw_type() {
 }
 
 #[test]
-fn test_form_data_methods_do_not_use_object_facet_fallback() {
+fn test_form_data_methods_use_canonical_form_data_without_form_shape() {
     let repo = Arc::new(InMemoryTypeRepository::new());
     repo.load_types(vec![
         RawTypeData {
@@ -1457,8 +1453,8 @@ fn test_form_data_methods_do_not_use_object_facet_fallback() {
     let method_names: Vec<&str> = methods.iter().map(|method| method.name.as_str()).collect();
 
     assert!(
-        method_names.iter().any(|name| *name == "МетодФормы"),
-        "form-shape methods must participate in form-data chain, methods={:?}",
+        method_names.iter().all(|name| *name != "МетодФормы"),
+        "form-shape methods must not participate in form-data methods chain, methods={:?}",
         method_names
     );
     assert!(

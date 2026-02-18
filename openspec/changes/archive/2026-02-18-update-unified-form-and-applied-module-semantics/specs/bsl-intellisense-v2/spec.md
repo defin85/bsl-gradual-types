@@ -23,7 +23,7 @@
 - **THEN** `ЭтотОбъект` резолвится как контекст формы
 - **AND** `Объект` резолвится как `ДанныеФормыСтруктура`
 
-### Requirement: Unified contextual type resolver MUST быть source-of-truth для implicit symbols и owner fallback
+### Requirement: Implicit-symbols в v2 MUST резолвиться контекстно по ModuleType
 Система MUST применять единый contextual resolver для:
 - implicit symbol declaration,
 - fallback резолва bare identifiers в applied object contexts,
@@ -50,6 +50,8 @@
 - **THEN** выдача не содержит методов, источником которых является object facet applied object
 - **AND** выдача ограничена form-data/runtime-формой members
 
+## MODIFIED Requirements
+
 ### Requirement: Descriptor-aware member resolution для FormModule.Объект является детерминированным (MUST)
 Для `FormModule.Объект` система MUST выполнять member-resolution через form-data-oriented provider chain без applied object facet fallback.
 
@@ -64,6 +66,8 @@
 - **WHEN** v2 pipeline строит members для hover/completion
 - **THEN** используется только form-data-oriented chain
 - **AND** applied object facet fallback не участвует в выдаче
+
+## ADDED Requirements
 
 ### Requirement: User-facing label policy для FormModule.Объект отделён от owner-facet labels (MUST)
 Система MUST использовать для `FormModule.Объект` user-facing label, согласованный с form-data семантикой.

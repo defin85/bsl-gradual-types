@@ -6,7 +6,7 @@ use crate::domain::signature_index::MethodSignature;
 use crate::domain::types::{
     ConcreteType, FacetKind, GenericType, MetadataKind, PlatformType, RawMethodData, RawParamData,
     RawPropertyData, RawTabularSectionData, RawTypeData, ResolutionResult, TypeResolution,
-    FORM_DATA_CANONICAL_TYPE_NAME, FORM_DATA_FORM_TYPE_NOTE_PREFIX, FORM_DATA_SEMANTICS_NOTE,
+    FORM_DATA_CANONICAL_TYPE_NAME, FORM_DATA_SEMANTICS_NOTE,
 };
 
 const PROPERTY_ORIGIN_REPOSITORY: &str = "repository";
@@ -15,7 +15,6 @@ const PREDEFINED_MANAGER_PROP_TYPE_PREFIX: &str = "__predefined_manager__:";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FormDataPropertyProvider {
-    FormShape,
     IntrinsicGuaranteed,
     RawTypeFallback,
 }
@@ -24,7 +23,7 @@ impl FormDataPropertyProvider {
     fn origin_tag(self) -> &'static str {
         match self {
             Self::IntrinsicGuaranteed => PROPERTY_ORIGIN_INTRINSIC,
-            Self::FormShape | Self::RawTypeFallback => PROPERTY_ORIGIN_REPOSITORY,
+            Self::RawTypeFallback => PROPERTY_ORIGIN_REPOSITORY,
         }
     }
 }
@@ -269,16 +268,6 @@ impl TypeMetadataLookup {
             methods.push(method);
         };
 
-        if let Some(form_type_name) =
-            Self::contextual_note_value(resolution, FORM_DATA_FORM_TYPE_NOTE_PREFIX)
-        {
-            if let Some(form_type) = self.repository.find_type(form_type_name) {
-                for method in form_type.methods {
-                    push_unique(method);
-                }
-            }
-        }
-
         for method in self
             .repository
             .get_methods_from_signature_index(FORM_DATA_CANONICAL_TYPE_NAME)
@@ -356,7 +345,7 @@ impl TypeMetadataLookup {
     /// Получить свойства вместе с тегом происхождения.
     ///
     /// Возможные теги:
-    /// - `repository`: свойство получено из form-shape/facet/raw metadata
+    /// - `repository`: свойство получено из repository (raw metadata / fallback)
     /// - `intrinsic`: свойство добавлено intrinsic-слоем (fill-gaps)
     pub fn get_properties_with_origin(
         &self,
@@ -470,7 +459,6 @@ impl TypeMetadataLookup {
         _resolution: &TypeResolution,
     ) -> Vec<FormDataPropertyProvider> {
         vec![
-            FormDataPropertyProvider::FormShape,
             FormDataPropertyProvider::IntrinsicGuaranteed,
             FormDataPropertyProvider::RawTypeFallback,
         ]
@@ -482,18 +470,6 @@ impl TypeMetadataLookup {
         provider: FormDataPropertyProvider,
     ) -> Vec<RawPropertyData> {
         match provider {
-            FormDataPropertyProvider::FormShape => {
-                let Some(form_type_name) =
-                    Self::contextual_note_value(resolution, FORM_DATA_FORM_TYPE_NOTE_PREFIX)
-                else {
-                    return Vec::new();
-                };
-
-                self.repository
-                    .find_type(form_type_name)
-                    .map(|form_type| form_type.properties)
-                    .unwrap_or_default()
-            }
             FormDataPropertyProvider::IntrinsicGuaranteed => {
                 Self::intrinsic_form_data_guaranteed_properties(resolution)
             }
@@ -531,8 +507,8 @@ impl TypeMetadataLookup {
             merged.push((property, origin));
         };
 
-        // Явная provider-chain:
-        // form shape -> intrinsic guaranteed -> raw type fallback.
+        // Явная provider-chain для FormDataObject:
+        // intrinsic guaranteed -> raw type fallback.
         for provider in Self::form_data_property_provider_chain(resolution) {
             let origin = provider.origin_tag();
             for property in self.collect_form_data_properties_from_provider(resolution, provider) {
@@ -604,14 +580,6 @@ impl TypeMetadataLookup {
 
     fn has_contextual_note(resolution: &TypeResolution, note: &str) -> bool {
         resolution.metadata.notes.iter().any(|item| item == note)
-    }
-
-    fn contextual_note_value<'a>(resolution: &'a TypeResolution, prefix: &str) -> Option<&'a str> {
-        resolution
-            .metadata
-            .notes
-            .iter()
-            .find_map(|note| note.strip_prefix(prefix))
     }
 
     fn get_enum_manager_properties(

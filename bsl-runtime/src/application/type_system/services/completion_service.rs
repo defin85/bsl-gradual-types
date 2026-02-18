@@ -1224,8 +1224,7 @@ fn resolve_type_from_contextual_descriptor(
         ContextualTypeDescriptor::FormDataObject {
             kind, owner_name, ..
         } => {
-            let mut resolution =
-                TypeResolution::metadata_type(*kind, owner_name, Some(FacetKind::Object));
+            let mut resolution = TypeResolution::metadata_type(*kind, owner_name, None);
             for note in descriptor.resolution_metadata_notes() {
                 if !resolution.metadata.notes.contains(&note) {
                     resolution.metadata.notes.push(note);
@@ -2860,7 +2859,7 @@ mod tests {
     }
 
     #[test]
-    fn form_data_member_completion_includes_shape_intrinsic_and_facet_methods() {
+    fn form_data_member_completion_includes_shape_and_intrinsic_properties_only() {
         let repository = Arc::new(InMemoryTypeRepository::new());
         repository
             .load_types(vec![
@@ -2931,10 +2930,6 @@ mod tests {
         add_properties_from_resolution(&metadata_lookup, &resolution, &mut target, 1);
 
         assert!(target.iter().any(|candidate| {
-            matches!(candidate.item.kind, CompletionKind::Method)
-                && candidate.item.label == "Записать"
-        }));
-        assert!(target.iter().any(|candidate| {
             matches!(candidate.item.kind, CompletionKind::Property)
                 && candidate.item.label == "РеквизитФормы"
         }));
@@ -2945,6 +2940,10 @@ mod tests {
         assert!(target.iter().any(|candidate| {
             matches!(candidate.item.kind, CompletionKind::Property)
                 && candidate.item.label == "ПометкаУдаления"
+        }));
+        assert!(target.iter().all(|candidate| {
+            !(matches!(candidate.item.kind, CompletionKind::Method)
+                && candidate.item.label == "Записать")
         }));
     }
 

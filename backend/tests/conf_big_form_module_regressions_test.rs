@@ -120,10 +120,7 @@ fn conf_big_form_module_attributes_and_elements_are_typed() {
         .iter()
         .find(|p| p.name == "Объект")
         .expect("expected form property Объект to be present");
-    assert_eq!(
-        object_prop.prop_type,
-        "ДокументОбъект.РеализацияТоваровУслуг"
-    );
+    assert_eq!(object_prop.prop_type, "ДанныеФормыСтруктура");
 
     // Минимальный код: используем реквизит формы и элемент формы.
     let file_path =

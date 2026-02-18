@@ -4,9 +4,10 @@
 
 use super::types::UniversalMetadataObject;
 use bsl_shared::domain::facet_utils;
-use bsl_shared::domain::types::{FacetKind, MetadataKind};
+use bsl_shared::domain::types::MetadataKind;
 use bsl_shared::domain::types::{
     RawAttributeData, RawDataSource, RawPropertyData, RawTabularSectionData, RawTypeData,
+    FORM_DATA_CANONICAL_TYPE_NAME,
 };
 
 const PREDEFINED_MANAGER_PROP_TYPE_PREFIX: &str = "__predefined_manager__:";
@@ -17,7 +18,7 @@ impl UniversalMetadataObject {
     /// Возвращает:
     /// - основной тип объекта метаданных (как `to_raw_type_data`)
     /// - (если есть формы) дополнительные типы:
-    ///   - `Объект` внутри `Формы.*` указывает на фасет Object владельца
+    ///   - `Объект` внутри `Формы.*` указывает на strict form-data тип (`ДанныеФормыСтруктура`)
     ///   - `Формы.<Коллекция>.<Объект>.<Форма>` для каждой формы
     ///   - `ЭлементыФормы.<Коллекция>.<Объект>.<Форма>` для каждой формы
     ///   - типы строк табличных частей (`Строка<ИмяТЧ>`) для табличных частей объекта
@@ -41,14 +42,11 @@ impl UniversalMetadataObject {
             out.push(Self::build_tabular_row_type(ts, "Число"));
         }
 
-        let form_object_type_name = Self::build_form_object_type_name(kind, &object_name);
-
         // Типы формы и контейнера элементов — по каждой форме
         for form in &self.forms {
             let form_type_name = format!("Формы.{}.{}.{}", collection, object_name, form.name);
             out.push(self.build_form_type(
                 &form_type_name,
-                &form_object_type_name,
                 &object_name,
                 collection,
                 form,
@@ -266,28 +264,19 @@ impl UniversalMetadataObject {
             .collect()
     }
 
-    fn build_form_object_type_name(kind: MetadataKind, object_name: &str) -> String {
-        format!(
-            "{}.{}",
-            kind.faceted_type_prefix(&FacetKind::Object),
-            object_name
-        )
-    }
-
     fn build_form_type(
         &self,
         type_name: &str,
-        form_object_type_name: &str,
         object_name: &str,
         collection: &str,
         form: &super::form_types::FormMetadata,
     ) -> RawTypeData {
         let mut properties: Vec<bsl_shared::domain::types::RawPropertyData> = Vec::new();
 
-        // "Объект" в модуле формы — это applied object владельца (Object facet).
+        // "Объект" в модуле формы — strict form-data контекст.
         properties.push(bsl_shared::domain::types::RawPropertyData {
             name: "Объект".to_string(),
-            prop_type: form_object_type_name.to_string(),
+            prop_type: FORM_DATA_CANONICAL_TYPE_NAME.to_string(),
             is_readonly: false,
         });
 

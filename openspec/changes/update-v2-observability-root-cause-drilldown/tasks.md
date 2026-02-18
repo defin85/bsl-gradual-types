@@ -10,6 +10,7 @@
 - [ ] 2.1 Расширить `BasicObservability` и `SystemCoordinator` для emission канонических drilldown и saturation метрик.
 - [ ] 2.2 Реализовать dual-write через projection-слой: legacy fixed keys формируются из канонического контракта, а не отдельными независимыми ветками emission.
 - [ ] 2.2.1 Реализовать единый mapping-реестр каноника -> legacy keys; отсутствие обязательного mapping считать контрактной ошибкой.
+- [ ] 2.2.2 Зафиксировать backend-first ownership emission: адаптеры не публикуют drilldown/legacy напрямую, а передают только канонические события в shared projection pipeline.
 - [ ] 2.3 Инструментировать shared facade/runtime (`prepare/run_optional_query/singleflight/runtime scheduling`) operation-aware и reason-aware метриками.
 - [ ] 2.4 Добавить метрики эффективности singleflight по `query_kind` и сигнал `key_unavailable`.
 - [ ] 2.5 Экспортировать saturation gauges/counters runtime budget-ов (waiters, permits, queue depth) в observability snapshot.
@@ -23,6 +24,7 @@
 - [ ] 4.1 Обновить контрактные тесты LSP и MCP на наличие drilldown + legacy ключей и корректную parity-интерпретацию.
 - [ ] 4.2 Добавить инвариантные tests каноника -> legacy projection (значения fixed keys соответствуют агрегированным drilldown series).
 - [ ] 4.2.1 Добавить schema-validation tests: недопустимые combinations dimensions не публикуются как метрики и фиксируются контрактным сигналом.
+- [ ] 4.2.2 Добавить tests на projection ownership/invariance: один канонический event детерминированно материализует обе проекции (drilldown + legacy) без adapter-local bypass.
 - [ ] 4.3 Добавить тесты на saturation/singleflight observability (включая смешанную interactive/background нагрузку).
 - [ ] 4.4 Добавить perf smoke для `bsl-agent`: под batch-нагрузкой интерактивные запросы не должны деградировать до starvation.
 - [ ] 4.5 Запустить `cargo test` для затронутых crates и зафиксировать результаты.

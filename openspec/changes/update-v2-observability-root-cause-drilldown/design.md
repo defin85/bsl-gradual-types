@@ -28,6 +28,11 @@
   - Legacy fixed-key метрики вычисляются как deterministic projection из канонического слоя.
   - Drilldown и legacy MUST NOT эмититься как независимые контракты с разной семантикой.
 
+- Decision: Canonical observability pipeline остаётся backend-first и ownership-centralized.
+  - Единственная production точка materialization метрик находится в shared `bsl-runtime` emission/projection слое.
+  - Адаптеры (`LSP/web/MCP`) эмитят только канонические события и MUST NOT вызывать adapter-local emission drilldown/legacy ключей.
+  - Для каждого канонического события dual-write проекции (drilldown + legacy) вычисляются в одном deterministic pipeline-цикле.
+
 - Decision: Канонический event model фиксируется как формальная schema.
   - Каждый observability event MUST иметь:
     - `family` (например, `stage_total`, `stage_latency_ms`, `stage_outcome`, `stage_reason`, `saturation`, `singleflight`);
@@ -65,8 +70,8 @@
   - Плюсы: стандартная модель.
   - Минусы: больше миграции и риск избыточной сложности для текущего JSON snapshot pipeline.
 
-- Chosen: Additive drilldown в текущем формате + bounded dimensions.
-  - Дает нужную диагностическую точность и минимизирует риск/объем изменений.
+- Chosen: Canonical event model + projection (dual-write из одного источника) в текущем snapshot формате + bounded dimensions.
+  - Дает нужную диагностическую точность, предотвращает semantic drift и минимизирует риск/объем изменений.
 
 ## Risks / Trade-offs
 - Риск: рост объема метрик и накладных расходов.
@@ -85,6 +90,6 @@
 1. Зафиксировать каноническую event schema-модель (families/dimensions/allowed combinations) и deterministic mapping в compatibility fixed keys.
 2. Расширить observability API в `bsl-runtime` под канонический drilldown и saturation слой; legacy публиковать только через projection.
 3. Добавить fail-fast валидацию недопустимых комбинаций измерений канонических событий и контрактный сигнал при нарушении.
-4. Привязать emission к shared facade/runtime так, чтобы один и тот же контракт автоматически покрывал LSP и MCP.
+4. Привязать emission к shared facade/runtime так, чтобы один и тот же контракт автоматически покрывал LSP и MCP, без adapter-local bypass emission.
 5. Обновить `bsl-agent` batch paths на background class и проверить parity метрик.
 6. Зафиксировать quality checks: контрактные tests для schema/projection/parity + perf smoke для смешанной нагрузки.

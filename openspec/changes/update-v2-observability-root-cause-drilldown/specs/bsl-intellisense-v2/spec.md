@@ -49,7 +49,9 @@ Drilldown слой MUST оставаться low-cardinality:
 - канонический контракт задаёт семантику метрик;
 - drilldown является primary representation канонического контракта;
 - legacy fixed keys являются compatibility-проекцией канонического контракта и MUST NOT иметь отдельную независимую семантику;
-- mapping каноника -> fixed keys MUST быть детерминированным и единым для LSP/web/MCP.
+- mapping каноника -> fixed keys MUST быть детерминированным и единым для LSP/web/MCP;
+- dual-write materialization MUST выполняться в одном centralized projection pipeline (backend-first) в shared runtime;
+- adapter-layer MUST NOT публиковать drilldown/legacy метрики напрямую в обход канонического event pipeline.
 
 #### Scenario: Dual-write сохраняет совместимость без semantic drift
 - **GIVEN** после внедрения drilldown запрошен observability snapshot
@@ -57,6 +59,12 @@ Drilldown слой MUST оставаться low-cardinality:
 - **THEN** fixed-key проверки проходят без изменения ожидаемых legacy ключей
 - **AND** snapshot дополнительно содержит drilldown ключи
 - **AND** значения legacy fixed keys согласованы с агрегированной канонической drilldown моделью
+
+#### Scenario: Один канонический event детерминированно материализует обе проекции
+- **GIVEN** в shared runtime эмитится каноническое событие наблюдаемости
+- **WHEN** выполняется materialization dual-write представления
+- **THEN** одновременно формируются корректные drilldown и legacy значения согласно единому mapping-реестру
+- **AND** отсутствует adapter-local bypass, который мог бы изменить одну проекцию независимо от другой
 
 ### Requirement: Runtime saturation и singleflight effectiveness наблюдаемы отдельным слоем (MUST)
 Система MUST публиковать observability-метрики, которые отделяют queue/CPU contention от логики semantic стадий.

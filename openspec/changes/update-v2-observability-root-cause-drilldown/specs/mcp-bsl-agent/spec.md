@@ -23,7 +23,8 @@ Dual-write представление в `bsl-agent` MUST использоват
 
 Adapter-layer MUST NOT:
 - вводить отдельные semantic категории outcome/reason, отсутствующие в канонической schema;
-- публиковать legacy fixed keys напрямую в обход projection-слоя.
+- публиковать legacy fixed keys напрямую в обход projection-слоя;
+- вызывать adapter-local materialization dual-write ключей в обход shared backend-first projection pipeline.
 
 #### Scenario: MCP не добавляет adapter-local observability семантику
 - **GIVEN** MCP semantic tool выполняет stage pipeline

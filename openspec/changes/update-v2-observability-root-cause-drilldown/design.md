@@ -28,6 +28,21 @@
   - Legacy fixed-key метрики вычисляются как deterministic projection из канонического слоя.
   - Drilldown и legacy MUST NOT эмититься как независимые контракты с разной семантикой.
 
+- Decision: Канонический event model фиксируется как формальная schema.
+  - Каждый observability event MUST иметь:
+    - `family` (например, `stage_total`, `stage_latency_ms`, `stage_outcome`, `stage_reason`, `saturation`, `singleflight`);
+    - `origin`;
+    - `operation` (если применимо);
+    - `stage` (если применимо);
+    - `value` (counter increment / histogram sample / gauge set).
+  - Контекстные измерения (`reason`, `outcome`, `query_kind`, `work_class`) MAY присутствовать только для совместимых `family`.
+  - Несовместимые комбинации измерений MUST NOT публиковаться как отдельные метрики; они должны детерминированно отклоняться с диагностическим сигналом контракта.
+
+- Decision: Projection слой описывается явной mapping-таблицей.
+  - Mapping канонических событий в legacy fixed keys MUST быть полной и детерминированной функцией без adapter-local ветвлений.
+  - Для каждого legacy key MUST существовать однозначное правило агрегации канонических событий.
+  - Отсутствие mapping для обязательного legacy key считается контрактной ошибкой.
+
 - Decision: Сохранить additive dual-write rollout.
   - Существующие fixed-key метрики продолжают публиковаться как compatibility projection.
   - Новые drilldown метрики публикуются параллельно как primary representation.
@@ -60,12 +75,16 @@
 - Риск: двойной контракт (legacy + drilldown) временно усложняет тесты.
   - Mitigation: единая mapping-таблица и инвариантные tests "каноника -> legacy projection" + parity tests для LSP/MCP.
 
+- Риск: event schema может расползтись между модулями и адаптерами.
+  - Mitigation: единый реестр измерений/семейств и fail-fast проверки на недопустимые сочетания.
+
 - Риск: перенос batch-инструментов `bsl-agent` в background может поменять распределение latency.
   - Mitigation: добавить perf smoke с конкурентной нагрузкой и проверить отсутствие starvation интерактивных запросов.
 
 ## Implementation Plan (High Level)
-1. Зафиксировать каноническую schema-модель и deterministic mapping в compatibility fixed keys.
+1. Зафиксировать каноническую event schema-модель (families/dimensions/allowed combinations) и deterministic mapping в compatibility fixed keys.
 2. Расширить observability API в `bsl-runtime` под канонический drilldown и saturation слой; legacy публиковать только через projection.
-3. Привязать emission к shared facade/runtime так, чтобы один и тот же контракт автоматически покрывал LSP и MCP.
-4. Обновить `bsl-agent` batch paths на background class и проверить parity метрик.
-5. Зафиксировать quality checks: контрактные tests для projection/parity + perf smoke для смешанной нагрузки.
+3. Добавить fail-fast валидацию недопустимых комбинаций измерений канонических событий и контрактный сигнал при нарушении.
+4. Привязать emission к shared facade/runtime так, чтобы один и тот же контракт автоматически покрывал LSP и MCP.
+5. Обновить `bsl-agent` batch paths на background class и проверить parity метрик.
+6. Зафиксировать quality checks: контрактные tests для schema/projection/parity + perf smoke для смешанной нагрузки.

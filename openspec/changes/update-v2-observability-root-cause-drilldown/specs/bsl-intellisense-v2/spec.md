@@ -23,6 +23,25 @@ Drilldown слой MUST оставаться low-cardinality:
 - **THEN** по drilldown-метрикам можно однозначно определить проблемную комбинацию `operation+stage`
 - **AND** видно, что вклад вызван конкретной `reason` (например, cancellation или skip), а не агрегированным `*_other`
 
+### Requirement: Канонический event model является единственным источником observability semantics (MUST)
+Система MUST описывать emission observability через единый канонический event model (transport-agnostic), общий для LSP/web/MCP.
+
+Каноническое событие MUST включать:
+- `family`;
+- `origin`;
+- `value`;
+- `operation` и `stage` для stage-семейств.
+
+Контекстные измерения (`outcome`, `reason`, `query_kind`, `work_class`) MAY применяться только там, где это разрешено schema правилом `family`.
+
+Недопустимые сочетания измерений MUST NOT публиковаться как отдельные метрики и MUST фиксироваться контрактным сигналом нарушения schema.
+
+#### Scenario: Семантика метрик определяется каноническим событием, а не адаптером
+- **GIVEN** одинаковая semantic операция выполняется через LSP и MCP
+- **WHEN** оба адаптера эмитят observability
+- **THEN** формируются канонически эквивалентные события (с разницей только в `origin`)
+- **AND** итоговые drilldown/legacy метрики вычисляются из этих событий без adapter-local semantic ветвлений
+
 ### Requirement: Dual-write rollout использует единый канонический observability контракт (MUST)
 При внедрении drilldown слоя система MUST сохранять backward compatibility fixed-key метрик через dual-write из одного канонического источника событий.
 

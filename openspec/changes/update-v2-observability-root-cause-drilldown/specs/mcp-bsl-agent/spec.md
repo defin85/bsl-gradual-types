@@ -18,6 +18,19 @@ Dual-write представление в `bsl-agent` MUST использоват
 - **AND** различия объясняются только `origin`, а не расхождением orchestration логики
 - **AND** legacy fixed keys в MCP и LSP согласованы как проекции одного канонического контракта
 
+### Requirement: MCP adapter эмитит только канонические observability события (MUST)
+`bsl-agent` MUST формировать observability через тот же канонический event model, что и LSP/web, с `origin=agent`.
+
+Adapter-layer MUST NOT:
+- вводить отдельные semantic категории outcome/reason, отсутствующие в канонической schema;
+- публиковать legacy fixed keys напрямую в обход projection-слоя.
+
+#### Scenario: MCP не добавляет adapter-local observability семантику
+- **GIVEN** MCP semantic tool выполняет stage pipeline
+- **WHEN** формируется observability snapshot
+- **THEN** все значения объясняются каноническими событиями с `origin=agent`
+- **AND** отсутствуют метрики, появившиеся только из adapter-local reinterpretation
+
 ### Requirement: Batch semantic инструменты `bsl-agent` используют background CPU class (MUST)
 Долгие MCP операции со сканированием множества файлов MUST выполняться как background workload class в shared runtime budget.
 

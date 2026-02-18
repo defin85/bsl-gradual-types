@@ -1445,8 +1445,8 @@ mod tests {
     use bsl_shared::domain::signature_index::{MethodSignature, SignatureSource};
     use bsl_shared::domain::type_id::TypeId;
     use bsl_shared::domain::types::{
-        FacetKind, MetadataKind, ParameterInfo, PrimitiveType, RawDataSource, RawPropertyData,
-        RawTypeData, FORM_DATA_SEMANTICS_NOTE,
+        FacetKind, MetadataKind, ParameterInfo, PrimitiveType, RawAttributeData, RawDataSource,
+        RawPropertyData, RawTabularSectionData, RawTypeData, FORM_DATA_SEMANTICS_NOTE,
     };
     use bsl_shared::TypeRepository;
     use bsl_syntax::ParseOptions;
@@ -2343,6 +2343,74 @@ mod tests {
             .type_at_byte_offset(link_offset)
             .expect("type at Объект.Ссылка");
         assert_eq!(link_type.type_name(), "ДокументСсылка.Док1");
+    }
+
+    #[test]
+    fn form_module_object_resolves_tabular_projection_without_form_shape_leakage() {
+        let repository_impl = Arc::new(InMemoryTypeRepository::new());
+        repository_impl
+            .load_types(vec![
+                RawTypeData {
+                    name: "Документы.Док1".to_string(),
+                    source: RawDataSource::Configuration,
+                    facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+                    kind: Some(MetadataKind::Document),
+                    tabular_sections: vec![RawTabularSectionData {
+                        name: "Товары".to_string(),
+                        attributes: vec![RawAttributeData {
+                            name: "Номенклатура".to_string(),
+                            attr_type: "СправочникСсылка.Номенклатура".to_string(),
+                        }],
+                    }],
+                    ..Default::default()
+                },
+                RawTypeData {
+                    name: "Формы.Документы.Док1.Форма1".to_string(),
+                    source: RawDataSource::Configuration,
+                    properties: vec![RawPropertyData {
+                        name: "СчетФактура".to_string(),
+                        prop_type: "Строка".to_string(),
+                        is_readonly: false,
+                    }],
+                    ..Default::default()
+                },
+            ])
+            .expect("load types");
+
+        let repository =
+            repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+        let resolver = Arc::new(TypeResolver::new(repository.clone()));
+        let deps = Arc::new(SemanticDeps {
+            repository,
+            signature_index: SignatureIndex::new(),
+            resolver: Some(resolver),
+            platform_signatures_loaded: true,
+        });
+
+        let source = r#"Процедура Тест()
+    a = Объект.Товары;
+    b = Объект.СчетФактура;
+КонецПроцедуры
+"#;
+        let program = parse(source);
+        let file_path = "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl";
+        let index = build_type_index_with_path(&program, file_path, deps);
+
+        let table_offset = source.find("Товары").expect("Товары") as u32;
+        let table_type = index
+            .type_at_byte_offset(table_offset)
+            .expect("type at Объект.Товары");
+        assert_eq!(table_type.type_name(), "ДанныеФормыКоллекция<СтрокаТовары>");
+
+        let form_only_offset = source.find("СчетФактура").expect("СчетФактура") as u32;
+        let form_only_type = index
+            .type_at_byte_offset(form_only_offset)
+            .expect("type at Объект.СчетФактура");
+        assert!(
+            form_only_type.is_unknown(),
+            "form-only реквизиты не должны резолвиться через Объект, got: {:?}",
+            form_only_type
+        );
     }
 
     #[test]

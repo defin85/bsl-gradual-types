@@ -25,6 +25,25 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 pub struct UniversalMetadataParser;
 
 impl UniversalMetadataParser {
+    fn local_name(name: &str) -> &str {
+        name.rsplit(':').next().unwrap_or(name)
+    }
+
+    fn push_unique_case_insensitive(
+        out: &mut Vec<String>,
+        seen: &mut HashSet<String>,
+        name: &str,
+    ) {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        let key = trimmed.to_lowercase();
+        if seen.insert(key) {
+            out.push(trimmed.to_string());
+        }
+    }
+
     /// Парсит ЛЮБОЙ объект метаданных из XML файла
     ///
     /// Автоматически определяет тип объекта из корневого тега.
@@ -42,20 +61,28 @@ impl UniversalMetadataParser {
         let mut name = String::new();
         let mut synonym: Option<String> = None;
         let mut attributes = Vec::new();
+        let mut standard_attributes = Vec::new();
+        let mut standard_attribute_seen = HashSet::new();
         let mut tabular_sections = Vec::new();
         let mut enum_values = Vec::new();
+        let mut number_type: Option<String> = None;
+        let mut posting_mode: Option<String> = None;
 
         let mut current_element = String::new();
         let mut current_attribute: Option<AttributeInfo> = None;
         let mut current_tabular: Option<TabularSectionInfo> = None;
         let mut current_enum_value: Option<String> = None;
         let mut in_tabular_attributes = false;
+        let mut in_object_properties = false;
+        let mut in_standard_attributes = false;
+        let mut seen_root_child_objects = false;
         let mut in_type_tag = false; // Флаг для отслеживания вхождения в <Type>
 
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(Event::Start(e)) => {
-                    let tag_name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                    let raw_tag_name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                    let tag_name = Self::local_name(&raw_tag_name).to_string();
 
                     // Первый тег после MetaDataObject - это тип объекта (Catalog, Document, etc.)
                     // И он содержит UUID в атрибутах
@@ -66,7 +93,8 @@ impl UniversalMetadataParser {
 
                         // Извлекаем UUID из атрибута
                         for a in e.attributes().flatten() {
-                            let key = String::from_utf8_lossy(a.key.as_ref());
+                            let raw_key = String::from_utf8_lossy(a.key.as_ref()).to_string();
+                            let key = Self::local_name(&raw_key);
                             if key == "uuid" {
                                 uuid = String::from_utf8_lossy(&a.value).to_string();
                                 tracing::trace!("🆔 UUID: {}", uuid);
@@ -74,7 +102,33 @@ impl UniversalMetadataParser {
                         }
                     }
 
-                    if tag_name == "Attribute" {
+                    if tag_name == "Properties"
+                        && current_attribute.is_none()
+                        && current_tabular.is_none()
+                        && current_enum_value.is_none()
+                        && !in_tabular_attributes
+                        && !seen_root_child_objects
+                    {
+                        in_object_properties = true;
+                    } else if tag_name == "StandardAttributes" && in_object_properties {
+                        in_standard_attributes = true;
+                    } else if tag_name == "StandardAttribute"
+                        && in_object_properties
+                        && in_standard_attributes
+                    {
+                        for attr in e.attributes().flatten() {
+                            let raw_key = String::from_utf8_lossy(attr.key.as_ref()).to_string();
+                            if Self::local_name(&raw_key) != "name" {
+                                continue;
+                            }
+                            let raw_value = String::from_utf8_lossy(&attr.value).to_string();
+                            Self::push_unique_case_insensitive(
+                                &mut standard_attributes,
+                                &mut standard_attribute_seen,
+                                &raw_value,
+                            );
+                        }
+                    } else if tag_name == "Attribute" {
                         current_attribute = Some(AttributeInfo {
                             name: String::new(),
                             type_name: String::new(),
@@ -89,6 +143,13 @@ impl UniversalMetadataParser {
                         tracing::trace!("📋 Создана новая табличная часть");
                     } else if tag_name == "EnumValue" {
                         current_enum_value = Some(String::new());
+                    } else if tag_name == "ChildObjects"
+                        && current_attribute.is_none()
+                        && current_tabular.is_none()
+                        && current_enum_value.is_none()
+                        && !in_tabular_attributes
+                    {
+                        seen_root_child_objects = true;
                     } else if tag_name == "ChildObjects" && current_tabular.is_some() {
                         in_tabular_attributes = true;
                         tracing::trace!("🔄 Вход в ChildObjects табличной части");
@@ -104,6 +165,22 @@ impl UniversalMetadataParser {
 
                     if text.is_empty() {
                         continue;
+                    }
+
+                    if in_object_properties
+                        && current_attribute.is_none()
+                        && current_tabular.is_none()
+                        && current_enum_value.is_none()
+                    {
+                        match current_element.as_str() {
+                            "NumberType" => {
+                                number_type = Some(text.clone());
+                            }
+                            "Posting" => {
+                                posting_mode = Some(text.clone());
+                            }
+                            _ => {}
+                        }
                     }
 
                     // Если находимся внутри <Type>, читаем ВСЕ текстовые значения
@@ -159,7 +236,8 @@ impl UniversalMetadataParser {
                     }
                 }
                 Ok(Event::End(e)) => {
-                    let tag_name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                    let raw_tag_name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                    let tag_name = Self::local_name(&raw_tag_name).to_string();
 
                     if tag_name == "Attribute" {
                         if let Some(attr) = current_attribute.take() {
@@ -186,6 +264,14 @@ impl UniversalMetadataParser {
                             tabular_sections.push(tab);
                         }
                         in_tabular_attributes = false;
+                    } else if tag_name == "StandardAttributes" {
+                        in_standard_attributes = false;
+                    } else if tag_name == "Properties"
+                        && current_attribute.is_none()
+                        && current_tabular.is_none()
+                        && current_enum_value.is_none()
+                    {
+                        in_object_properties = false;
                     } else if tag_name == "EnumValue" {
                         if let Some(value) = current_enum_value.take() {
                             if !value.is_empty() {
@@ -212,12 +298,55 @@ impl UniversalMetadataParser {
             buf.clear();
         }
 
+        if object_type_raw == "Document" {
+            let posting_capable = matches!(posting_mode.as_deref(), Some("Allow"));
+
+            // Для документов standard attrs должны присутствовать даже когда блок
+            // <StandardAttributes> в XML отсутствует (старые выгрузки/совместимость).
+            Self::push_unique_case_insensitive(
+                &mut standard_attributes,
+                &mut standard_attribute_seen,
+                "Ref",
+            );
+            Self::push_unique_case_insensitive(
+                &mut standard_attributes,
+                &mut standard_attribute_seen,
+                "DeletionMark",
+            );
+            Self::push_unique_case_insensitive(
+                &mut standard_attributes,
+                &mut standard_attribute_seen,
+                "Date",
+            );
+            Self::push_unique_case_insensitive(
+                &mut standard_attributes,
+                &mut standard_attribute_seen,
+                "Number",
+            );
+            if posting_capable {
+                Self::push_unique_case_insensitive(
+                    &mut standard_attributes,
+                    &mut standard_attribute_seen,
+                    "Posted",
+                );
+            } else {
+                standard_attributes.retain(|name| !name.eq_ignore_ascii_case("Posted"));
+            }
+        }
+
         // Создаём объект метаданных
         let mut metadata = UniversalMetadataObject::new(object_type_raw.clone(), name, uuid);
         metadata.synonym = synonym;
         metadata.attributes = attributes;
+        metadata.standard_attributes = standard_attributes;
         metadata.tabular_sections = tabular_sections;
         metadata.enum_values = enum_values;
+        if let Some(value) = number_type {
+            metadata.properties.insert("NumberType".to_string(), value);
+        }
+        if let Some(value) = posting_mode {
+            metadata.properties.insert("Posting".to_string(), value);
+        }
 
         // Парсим дополнительные свойства для CommonModule
         if object_type_raw == "CommonModule" {
@@ -445,6 +574,7 @@ impl UniversalMetadataParser {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -506,5 +636,75 @@ mod tests {
 
         let items = UniversalMetadataParser::parse_predefined_items(file.path()).unwrap();
         assert_eq!(items, vec!["Корень", "Потомок1", "Потомок2"]);
+    }
+
+    #[test]
+    fn parses_document_standard_attributes_with_fallback_from_properties() {
+        let xml = r#"
+<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses">
+    <Document uuid="00000000-0000-0000-0000-000000000001">
+        <Properties>
+            <Name>Док1</Name>
+            <NumberType>String</NumberType>
+            <Posting>Allow</Posting>
+        </Properties>
+    </Document>
+</MetaDataObject>
+"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let parsed = UniversalMetadataParser::parse_any_object(file.path()).unwrap();
+        let attrs: BTreeSet<_> = parsed.standard_attributes.iter().cloned().collect();
+        assert!(attrs.contains("Ref"));
+        assert!(attrs.contains("DeletionMark"));
+        assert!(attrs.contains("Date"));
+        assert!(attrs.contains("Number"));
+        assert!(attrs.contains("Posted"));
+        assert_eq!(
+            parsed.properties.get("NumberType").map(String::as_str),
+            Some("String")
+        );
+        assert_eq!(
+            parsed.properties.get("Posting").map(String::as_str),
+            Some("Allow")
+        );
+    }
+
+    #[test]
+    fn excludes_posted_standard_attribute_for_non_posting_document() {
+        let xml = r#"
+<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable">
+    <Document uuid="00000000-0000-0000-0000-000000000002">
+        <Properties>
+            <Name>Док2</Name>
+            <Posting>Deny</Posting>
+            <StandardAttributes>
+                <xr:StandardAttribute name="Posted"/>
+                <xr:StandardAttribute name="Ref"/>
+            </StandardAttributes>
+        </Properties>
+    </Document>
+</MetaDataObject>
+"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let parsed = UniversalMetadataParser::parse_any_object(file.path()).unwrap();
+        assert!(parsed
+            .standard_attributes
+            .iter()
+            .any(|name| name == "Ref"));
+        assert!(
+            parsed
+                .standard_attributes
+                .iter()
+                .all(|name| !name.eq_ignore_ascii_case("Posted")),
+            "Posted should not be present for non-posting document"
+        );
     }
 }

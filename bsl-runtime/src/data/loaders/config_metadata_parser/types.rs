@@ -53,6 +53,9 @@ pub struct UniversalMetadataObject {
     /// Атрибуты объекта (для справочников, документов и т.д.)
     pub attributes: Vec<AttributeInfo>,
 
+    /// StandardAttributes applied-object (например, Ref/DeletionMark/Date/Number/Posted)
+    pub standard_attributes: Vec<String>,
+
     /// Табличные части объекта (для документов, справочников)
     pub tabular_sections: Vec<TabularSectionInfo>,
 
@@ -97,6 +100,7 @@ impl UniversalMetadataObject {
             synonym: None,
             facets,
             attributes: Vec::new(),
+            standard_attributes: Vec::new(),
             tabular_sections: Vec::new(),
             enum_values: Vec::new(),
             predefined_items: Vec::new(),

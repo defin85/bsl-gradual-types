@@ -138,8 +138,16 @@ fn parse_hover_property_names(hover: &str) -> BTreeSet<String> {
 
 #[test]
 fn conf_big_realizatsiya_tovarov_uslug_contextual_object_matrix() {
-    let (Some(conf_big), Some(syntax_helper)) = (conf_big_root(), syntax_helper_root()) else {
-        // Конфиг/платформенные типы могут отсутствовать локально — тогда пропускаем.
+    let Some(conf_big) = conf_big_root() else {
+        eprintln!(
+            "skip parity test: missing prerequisite examples/conf_big/Configuration.xml"
+        );
+        return;
+    };
+    let Some(syntax_helper) = syntax_helper_root() else {
+        eprintln!(
+            "skip parity test: missing prerequisite examples/syntax_helper/syntax.xml"
+        );
         return;
     };
 
@@ -206,6 +214,40 @@ fn conf_big_realizatsiya_tovarov_uslug_contextual_object_matrix() {
         form_this_hover.contains("**Объект**: ДанныеФормыСтруктура"),
         "FormModule.ЭтотОбъект must expose Объект as form-data property, got:\n{}",
         form_this_hover
+    );
+
+    let form_object_props = parse_hover_property_names(&form_object_hover);
+    assert!(
+        !form_object_props.is_empty(),
+        "failed to parse properties from FormModule.Объект hover:\n{}",
+        form_object_hover
+    );
+
+    // required/minimum parity для FormModule.Объект
+    for required in ["Дата", "Номер", "Проведен", "Товары", "Услуги"] {
+        assert!(
+            form_object_props.contains(required),
+            "FormModule.Объект must contain required member '{}', got: {:?}",
+            required,
+            form_object_props
+        );
+    }
+
+    // negative-set: form-only members не должны попадать в Объект
+    for forbidden in ["ПоказыватьБаннер", "СсылкаДляПереходаНаКарту"] {
+        assert!(
+            !form_object_props.contains(forbidden),
+            "FormModule.Объект must not contain form-only member '{}', got: {:?}",
+            forbidden,
+            form_object_props
+        );
+    }
+    assert!(
+        form_object_props
+            .iter()
+            .all(|name| !name.starts_with("Надпись")),
+        "FormModule.Объект must not contain form-only members 'Надпись*', got: {:?}",
+        form_object_props
     );
 
     // 2) ObjectModule
@@ -286,6 +328,9 @@ fn conf_big_realizatsiya_tovarov_uslug_contextual_object_matrix() {
 #[test]
 fn conf_big_realizatsiya_tovarov_uslug_hover_properties_compare_with_debugger_samples() {
     let (Some(conf_big), Some(syntax_helper)) = (conf_big_root(), syntax_helper_root()) else {
+        eprintln!(
+            "skip debugger parity compare: missing examples/conf_big or examples/syntax_helper"
+        );
         return;
     };
 
@@ -294,6 +339,11 @@ fn conf_big_realizatsiya_tovarov_uslug_hover_properties_compare_with_debugger_sa
     let this_object_dump_path = workspace.join("ЭтотОбъект.txt");
     if !object_dump_path.exists() || !this_object_dump_path.exists() {
         // Локальные дампы отладчика могут отсутствовать в CI/у других разработчиков.
+        eprintln!(
+            "skip debugger parity compare: missing {} or {}",
+            object_dump_path.display(),
+            this_object_dump_path.display()
+        );
         return;
     }
 

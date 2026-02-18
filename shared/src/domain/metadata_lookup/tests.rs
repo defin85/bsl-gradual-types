@@ -1362,6 +1362,140 @@ fn test_form_data_provider_chain_uses_intrinsic_then_raw_without_form_shape() {
 }
 
 #[test]
+fn test_form_data_provider_chain_uses_repository_standard_attributes() {
+    let repo = Arc::new(InMemoryTypeRepository::new());
+    repo.load_types(vec![RawTypeData {
+        name: "Документы.Док1".to_string(),
+        source: RawDataSource::Configuration,
+        facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+        kind: Some(MetadataKind::Document),
+        properties: vec![
+            RawPropertyData {
+                name: "Дата".to_string(),
+                prop_type: "Дата".to_string(),
+                is_readonly: false,
+            },
+            RawPropertyData {
+                name: "Номер".to_string(),
+                prop_type: "Строка".to_string(),
+                is_readonly: false,
+            },
+            RawPropertyData {
+                name: "Проведен".to_string(),
+                prop_type: "Булево".to_string(),
+                is_readonly: false,
+            },
+        ],
+        ..Default::default()
+    }])
+    .expect("Failed to load test types");
+
+    let lookup = TypeMetadataLookup::new(repo);
+    let resolution = TypeResolution {
+        certainty: Certainty::Known,
+        result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
+            kind: MetadataKind::Document,
+            name: "Док1".to_string(),
+            facet: Some(FacetKind::Object),
+            attributes: vec![],
+            tabular_sections: vec![],
+        })),
+        source: ResolutionSource::Static,
+        metadata: ResolutionMetadata {
+            notes: vec![FORM_DATA_SEMANTICS_NOTE.to_string()],
+            ..Default::default()
+        },
+        active_facet: Some(FacetKind::Object),
+        available_facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+    };
+
+    let properties = lookup.get_properties(&resolution);
+    assert!(properties.iter().any(|property| property.name == "Дата"));
+    assert!(properties.iter().any(|property| property.name == "Номер"));
+    assert!(properties.iter().any(|property| property.name == "Проведен"));
+
+    assert_eq!(
+        lookup.get_property_origin_tag(&resolution, "Дата"),
+        Some(TypeMetadataLookup::repository_property_origin_tag())
+    );
+    assert_eq!(
+        lookup.get_property_origin_tag(&resolution, "Номер"),
+        Some(TypeMetadataLookup::repository_property_origin_tag())
+    );
+    assert_eq!(
+        lookup.get_property_origin_tag(&resolution, "Проведен"),
+        Some(TypeMetadataLookup::repository_property_origin_tag())
+    );
+}
+
+#[test]
+fn test_form_data_provider_chain_projects_tabular_sections_from_repository() {
+    let repo = Arc::new(InMemoryTypeRepository::new());
+    repo.load_types(vec![RawTypeData {
+        name: "Документы.Док1".to_string(),
+        source: RawDataSource::Configuration,
+        facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+        kind: Some(MetadataKind::Document),
+        tabular_sections: vec![
+            RawTabularSectionData {
+                name: "Товары".to_string(),
+                attributes: vec![RawAttributeData {
+                    name: "Номенклатура".to_string(),
+                    attr_type: "СправочникСсылка.Номенклатура".to_string(),
+                }],
+            },
+            RawTabularSectionData {
+                name: "Услуги".to_string(),
+                attributes: vec![],
+            },
+        ],
+        ..Default::default()
+    }])
+    .expect("Failed to load test types");
+
+    let lookup = TypeMetadataLookup::new(repo);
+    let resolution = TypeResolution {
+        certainty: Certainty::Known,
+        result: ResolutionResult::Concrete(ConcreteType::Configuration(ConfigurationType {
+            kind: MetadataKind::Document,
+            name: "Док1".to_string(),
+            facet: Some(FacetKind::Object),
+            attributes: vec![],
+            tabular_sections: vec![],
+        })),
+        source: ResolutionSource::Static,
+        metadata: ResolutionMetadata {
+            notes: vec![FORM_DATA_SEMANTICS_NOTE.to_string()],
+            ..Default::default()
+        },
+        active_facet: Some(FacetKind::Object),
+        available_facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+    };
+
+    let properties = lookup.get_properties(&resolution);
+    let goods = properties
+        .iter()
+        .find(|property| property.name == "Товары")
+        .expect("missing tabular projection Товары");
+    assert_eq!(goods.prop_type, "ДанныеФормыКоллекция<СтрокаТовары>");
+
+    let services = properties
+        .iter()
+        .find(|property| property.name == "Услуги")
+        .expect("missing tabular projection Услуги");
+    assert_eq!(services.prop_type, "ДанныеФормыКоллекция<СтрокаУслуги>");
+
+    assert_eq!(
+        lookup.get_property_origin_tag(&resolution, "Товары"),
+        Some(TypeMetadataLookup::repository_property_origin_tag())
+    );
+    assert_eq!(
+        lookup.get_property_origin_tag(&resolution, "Услуги"),
+        Some(TypeMetadataLookup::repository_property_origin_tag())
+    );
+}
+
+#[test]
 fn test_form_data_methods_use_canonical_form_data_without_form_shape() {
     let repo = Arc::new(InMemoryTypeRepository::new());
     repo.load_types(vec![

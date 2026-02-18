@@ -85,7 +85,9 @@ impl UniversalMetadataObject {
         let type_name = self.get_full_type_name(prefix);
         let module_paths = self.build_module_paths();
         let mut properties = self.convert_attributes_to_properties();
+        properties.extend(self.convert_standard_attributes_to_properties(prefix));
         properties.extend(self.convert_predefined_items_to_marker_properties(prefix));
+        let properties = Self::dedup_properties_case_insensitive(properties);
 
         RawTypeData {
             name: type_name.clone(),
@@ -181,6 +183,100 @@ impl UniversalMetadataObject {
                 is_readonly: false, // TODO: определить из метаданных
             })
             .collect()
+    }
+
+    fn dedup_properties_case_insensitive(properties: Vec<RawPropertyData>) -> Vec<RawPropertyData> {
+        let mut out = Vec::new();
+        let mut seen = std::collections::HashSet::<String>::new();
+        for property in properties {
+            let key = property.name.to_lowercase();
+            if seen.insert(key) {
+                out.push(property);
+            }
+        }
+        out
+    }
+
+    fn is_posting_capable_document(&self) -> bool {
+        self.object_type == Some(MetadataKind::Document)
+            && matches!(self.properties.get("Posting").map(String::as_str), Some("Allow"))
+    }
+
+    fn number_standard_attribute_type(&self) -> String {
+        match self.properties.get("NumberType").map(String::as_str) {
+            Some("Number") => "Число".to_string(),
+            Some("String") => "Строка".to_string(),
+            _ => "Строка".to_string(),
+        }
+    }
+
+    fn reference_type_for_standard_attribute(&self, prefix: Option<&str>) -> Option<String> {
+        let kind = self.object_type?;
+        let template = match kind {
+            MetadataKind::Document => "ДокументСсылка.<Имя документа>",
+            MetadataKind::Catalog => "СправочникСсылка.<Имя справочника>",
+            MetadataKind::Enum => "ПеречислениеСсылка.<Имя перечисления>",
+            MetadataKind::ChartOfAccounts => "ПланСчетовСсылка.<Имя плана счетов>",
+            MetadataKind::ChartOfCharacteristicTypes => {
+                "ПланВидовХарактеристикСсылка.<Имя плана видов характеристик>"
+            }
+            MetadataKind::ChartOfCalculationTypes => {
+                "ПланВидовРасчетаСсылка.<Имя плана видов расчета>"
+            }
+            _ => return None,
+        };
+        let object_name = Self::apply_prefix(prefix, &self.name);
+        Some(facet_utils::substitute_type_name(template, &object_name))
+    }
+
+    fn convert_standard_attributes_to_properties(
+        &self,
+        prefix: Option<&str>,
+    ) -> Vec<RawPropertyData> {
+        let mut out = Vec::new();
+        for standard_attr in &self.standard_attributes {
+            let key = standard_attr.trim().to_lowercase();
+            match key.as_str() {
+                "ref" => {
+                    let Some(reference_type) = self.reference_type_for_standard_attribute(prefix)
+                    else {
+                        continue;
+                    };
+                    out.push(RawPropertyData {
+                        name: "Ссылка".to_string(),
+                        prop_type: reference_type,
+                        is_readonly: true,
+                    });
+                }
+                "deletionmark" => out.push(RawPropertyData {
+                    name: "ПометкаУдаления".to_string(),
+                    prop_type: "Булево".to_string(),
+                    is_readonly: true,
+                }),
+                "date" => out.push(RawPropertyData {
+                    name: "Дата".to_string(),
+                    prop_type: "Дата".to_string(),
+                    is_readonly: false,
+                }),
+                "number" => out.push(RawPropertyData {
+                    name: "Номер".to_string(),
+                    prop_type: self.number_standard_attribute_type(),
+                    is_readonly: false,
+                }),
+                "posted" => {
+                    if !self.is_posting_capable_document() {
+                        continue;
+                    }
+                    out.push(RawPropertyData {
+                        name: "Проведен".to_string(),
+                        prop_type: "Булево".to_string(),
+                        is_readonly: false,
+                    });
+                }
+                _ => {}
+            }
+        }
+        out
     }
 
     fn predefined_manager_reference_type(kind: MetadataKind, object_name: &str) -> Option<String> {
@@ -567,6 +663,111 @@ mod tests {
             p.prop_type
                 == format!("{PREDEFINED_MANAGER_PROP_TYPE_PREFIX}ПланСчетовСсылка.Хозрасчетный")
         }));
+    }
+
+    #[test]
+    fn test_convert_document_standard_attributes_to_properties() {
+        let mut obj = UniversalMetadataObject::new(
+            "Document".to_string(),
+            "Док1".to_string(),
+            "12345678-1234-1234-1234-123456789012".to_string(),
+        );
+        obj.standard_attributes = vec![
+            "Ref".to_string(),
+            "DeletionMark".to_string(),
+            "Date".to_string(),
+            "Number".to_string(),
+            "Posted".to_string(),
+        ];
+        obj.properties
+            .insert("NumberType".to_string(), "Number".to_string());
+        obj.properties
+            .insert("Posting".to_string(), "Allow".to_string());
+
+        let raw_type = obj.to_raw_type_data(None);
+
+        let link = raw_type
+            .properties
+            .iter()
+            .find(|prop| prop.name == "Ссылка")
+            .expect("missing Ссылка");
+        assert_eq!(link.prop_type, "ДокументСсылка.Док1");
+        assert!(link.is_readonly);
+
+        let deletion_mark = raw_type
+            .properties
+            .iter()
+            .find(|prop| prop.name == "ПометкаУдаления")
+            .expect("missing ПометкаУдаления");
+        assert_eq!(deletion_mark.prop_type, "Булево");
+        assert!(deletion_mark.is_readonly);
+
+        let date = raw_type
+            .properties
+            .iter()
+            .find(|prop| prop.name == "Дата")
+            .expect("missing Дата");
+        assert_eq!(date.prop_type, "Дата");
+
+        let number = raw_type
+            .properties
+            .iter()
+            .find(|prop| prop.name == "Номер")
+            .expect("missing Номер");
+        assert_eq!(number.prop_type, "Число");
+
+        let posted = raw_type
+            .properties
+            .iter()
+            .find(|prop| prop.name == "Проведен")
+            .expect("missing Проведен");
+        assert_eq!(posted.prop_type, "Булево");
+    }
+
+    #[test]
+    fn test_convert_document_posted_property_only_for_posting_capable_documents() {
+        let mut obj = UniversalMetadataObject::new(
+            "Document".to_string(),
+            "Док2".to_string(),
+            "12345678-1234-1234-1234-123456789012".to_string(),
+        );
+        obj.standard_attributes = vec!["Posted".to_string()];
+        obj.properties
+            .insert("Posting".to_string(), "Deny".to_string());
+
+        let raw_type = obj.to_raw_type_data(None);
+        assert!(
+            raw_type
+                .properties
+                .iter()
+                .all(|prop| prop.name != "Проведен"),
+            "Проведен must be absent for non-posting documents"
+        );
+    }
+
+    #[test]
+    fn test_converter_dedup_keeps_existing_repository_property_on_standard_attr_conflict() {
+        let mut obj = UniversalMetadataObject::new(
+            "Document".to_string(),
+            "Док3".to_string(),
+            "12345678-1234-1234-1234-123456789012".to_string(),
+        );
+        obj.attributes.push(AttributeInfo {
+            name: "Ссылка".to_string(),
+            type_name: "ПроизвольныйТип".to_string(),
+            synonym: None,
+        });
+        obj.standard_attributes = vec!["Ref".to_string()];
+
+        let raw_type = obj.to_raw_type_data(None);
+        let links: Vec<_> = raw_type
+            .properties
+            .iter()
+            .filter(|prop| prop.name == "Ссылка")
+            .collect();
+
+        assert_eq!(links.len(), 1, "Ссылка must be deduplicated");
+        assert_eq!(links[0].prop_type, "ПроизвольныйТип");
     }
 
     #[test]

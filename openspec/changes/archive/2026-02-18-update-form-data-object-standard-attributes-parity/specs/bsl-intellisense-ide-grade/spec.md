@@ -6,6 +6,9 @@
 - стандартные реквизиты applied-object (включая как минимум `Дата`, `Номер`, `Проведен` для документов),
 - без включения form-only реквизитов формы.
 
+Система SHALL строить этот набор через metadata pipeline (`parser -> converter -> repository/lookup`) как source of truth.
+Система SHALL NOT полагаться только на hardcoded intrinsic supplement для достижения parity standard attributes.
+
 #### Scenario: Hover по `Объект` в модуле формы документа
 - **GIVEN** модуль `Documents/<Doc>/Forms/<Form>/Ext/Form/Module.bsl`
 - **AND** форма имеет main attribute `Объект`
@@ -20,3 +23,10 @@
 - **THEN** отображается тип `Формы.<...>`
 - **AND** у `ЭтотОбъект` присутствует свойство `Объект: ДанныеФормыСтруктура`
 - **AND** form-only реквизиты доступны в контексте `ЭтотОбъект`/формы
+
+#### Scenario: Standard attributes берутся из metadata source, а не из form-shape
+- **GIVEN** applied-object документа в metadata содержит standard attributes `Date`, `Number`, `Posted`
+- **AND** `Form.xml` содержит form-only attributes, отсутствующие в applied-object metadata
+- **WHEN** IDE формирует members для `FormModule.Объект`
+- **THEN** `Дата`, `Номер`, `Проведен` присутствуют в выдаче
+- **AND** form-only attributes отсутствуют в выдаче `Объект`

@@ -3,12 +3,19 @@ use rmcp::{
     model::{Content, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo},
     tool, tool_handler, tool_router, ServerHandler,
 };
+use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::RwLock;
+
+use bsl_runtime::application::{
+    cpu_work_class_for_operation, diagnostics_execution_plan, DiagnosticsDisposition,
+    DiagnosticsProfile, DiagnosticsTrigger, SemanticOperation,
+};
 
 use crate::jobs::JobManager;
 use crate::session::SessionManager;
 use crate::types::{
-    BslAgentError, BuildInfoResponse, JobStartResponse, McpHelpResponse, UiUrlResponse,
+    BslAgentError, BuildInfoResponse, JobStartResponse, JobStateDto, McpHelpResponse, UiUrlResponse,
 };
 
 pub mod types;
@@ -24,10 +31,18 @@ use types::{
 };
 use types::{WorkspaceDocumentsClearParams, WorkspaceDocumentsSetParams};
 
+#[derive(Debug, Clone)]
+struct TrackedBatchJob {
+    job_id: String,
+    analysis_revision: u64,
+    profile: DiagnosticsProfile,
+}
+
 #[derive(Clone)]
 pub struct BslAgentHandler {
     session_manager: Arc<SessionManager>,
     job_manager: Arc<JobManager>,
+    batch_jobs_by_session: Arc<RwLock<HashMap<String, Vec<TrackedBatchJob>>>>,
     ui_url: Option<String>,
     tool_router: ToolRouter<Self>,
 }
@@ -42,6 +57,7 @@ impl BslAgentHandler {
         Self {
             session_manager,
             job_manager,
+            batch_jobs_by_session: Arc::new(RwLock::new(HashMap::new())),
             ui_url: None,
             tool_router: Self::tool_router(),
         }
@@ -57,6 +73,109 @@ impl BslAgentHandler {
 
     pub fn set_ui_url(&mut self, ui_url: String) {
         self.ui_url = Some(ui_url);
+    }
+
+    async fn record_diagnostics_pipeline_event_best_effort(
+        &self,
+        session_id: &str,
+        trigger: DiagnosticsTrigger,
+        profile: DiagnosticsProfile,
+        reason: DiagnosticsDisposition,
+    ) {
+        let _ = self
+            .session_manager
+            .record_diagnostics_pipeline_event(session_id, trigger, profile, reason)
+            .await;
+    }
+
+    async fn register_batch_job(
+        &self,
+        session_id: &str,
+        analysis_revision: u64,
+        job_id: &str,
+        profile: DiagnosticsProfile,
+    ) {
+        let mut jobs = self.batch_jobs_by_session.write().await;
+        jobs.entry(session_id.to_string())
+            .or_default()
+            .push(TrackedBatchJob {
+                job_id: job_id.to_string(),
+                analysis_revision,
+                profile,
+            });
+    }
+
+    async fn take_batch_job_by_id(&self, job_id: &str) -> Option<(String, DiagnosticsProfile)> {
+        let mut jobs = self.batch_jobs_by_session.write().await;
+        let mut found: Option<(String, DiagnosticsProfile)> = None;
+        let mut empty_sessions = Vec::new();
+
+        for (session_id, entries) in jobs.iter_mut() {
+            if let Some(index) = entries.iter().position(|entry| entry.job_id == job_id) {
+                let removed = entries.swap_remove(index);
+                found = Some((session_id.clone(), removed.profile));
+            }
+            if entries.is_empty() {
+                empty_sessions.push(session_id.clone());
+            }
+            if found.is_some() {
+                break;
+            }
+        }
+
+        for session_id in empty_sessions {
+            jobs.remove(&session_id);
+        }
+
+        found
+    }
+
+    async fn cancel_stale_batch_jobs(&self, session_id: &str, min_revision: u64) {
+        let stale_jobs = {
+            let mut jobs = self.batch_jobs_by_session.write().await;
+            let Some(entries) = jobs.get_mut(session_id) else {
+                return;
+            };
+
+            let mut stale = Vec::new();
+            entries.retain(|entry| {
+                if entry.analysis_revision < min_revision {
+                    stale.push(entry.clone());
+                    false
+                } else {
+                    true
+                }
+            });
+
+            if entries.is_empty() {
+                jobs.remove(session_id);
+            }
+
+            stale
+        };
+
+        for job in stale_jobs {
+            let is_active = self
+                .job_manager
+                .status(&job.job_id)
+                .await
+                .ok()
+                .is_some_and(|status| {
+                    matches!(status.state, JobStateDto::Queued | JobStateDto::Running)
+                });
+            if !is_active {
+                continue;
+            }
+
+            let _ = self.job_manager.cancel(&job.job_id).await;
+            self.record_diagnostics_pipeline_event_best_effort(
+                session_id,
+                DiagnosticsTrigger::DocumentsSet,
+                job.profile,
+                DiagnosticsDisposition::SupersededGeneration,
+            )
+            .await;
+        }
     }
 
     #[tool(description = "On-demand help: quickstart + per-tool examples (read-only)")]
@@ -450,10 +569,18 @@ impl BslAgentHandler {
         &self,
         Parameters(params): Parameters<WorkspaceDocumentsSetParams>,
     ) -> Result<Content, rmcp::ErrorData> {
+        let previous_revision = self
+            .session_manager
+            .analysis_revision(&params.session_id)
+            .await?;
         let response = self
             .session_manager
             .documents_set(&params.session_id, &params.files, params.mark_hot)
             .await?;
+        if response.analysis_revision > previous_revision {
+            self.cancel_stale_batch_jobs(&params.session_id, response.analysis_revision)
+                .await;
+        }
         Content::json(response)
     }
 
@@ -464,10 +591,18 @@ impl BslAgentHandler {
         &self,
         Parameters(params): Parameters<WorkspaceDocumentsClearParams>,
     ) -> Result<Content, rmcp::ErrorData> {
+        let previous_revision = self
+            .session_manager
+            .analysis_revision(&params.session_id)
+            .await?;
         let response = self
             .session_manager
             .documents_clear(&params.session_id, &params.documents, params.clear_hot)
             .await?;
+        if response.analysis_revision > previous_revision {
+            self.cancel_stale_batch_jobs(&params.session_id, response.analysis_revision)
+                .await;
+        }
         Content::json(response)
     }
 
@@ -495,10 +630,23 @@ impl BslAgentHandler {
             }
         }
 
+        let analysis_revision = self
+            .session_manager
+            .analysis_revision(&params.session_id)
+            .await?;
+        let profile = match &params.scope {
+            types::WorkspaceScope::Tagged(types::WorkspaceScopeTagged::File { .. }) => {
+                DiagnosticsProfile::Fast
+            }
+            _ => DiagnosticsProfile::DebouncedFull,
+        };
+        let job_class = diagnostics_execution_plan(profile, false).cpu_class;
+
         let session_manager = Arc::clone(&self.session_manager);
+        let session_id = params.session_id.clone();
         let job_id = self
             .job_manager
-            .spawn("bsl_diagnostics", move |ctx| async move {
+            .spawn_with_class("bsl_diagnostics", job_class, move |ctx| async move {
                 ctx.set_progress("bsl_diagnostics/running", 0).await;
                 let response = session_manager
                     .bsl_diagnostics(params)
@@ -507,6 +655,17 @@ impl BslAgentHandler {
                 serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
             })
             .await;
+        if !matches!(profile, DiagnosticsProfile::Fast) {
+            self.register_batch_job(&session_id, analysis_revision, &job_id, profile)
+                .await;
+        }
+        self.record_diagnostics_pipeline_event_best_effort(
+            &session_id,
+            DiagnosticsTrigger::JobStart,
+            profile,
+            DiagnosticsDisposition::Published,
+        )
+        .await;
         Content::json(JobStartResponse {
             job_id,
             recommended_poll_ms: Some(200),
@@ -520,10 +679,18 @@ impl BslAgentHandler {
         &self,
         Parameters(params): Parameters<BslSymbolSearchParams>,
     ) -> Result<Content, rmcp::ErrorData> {
+        let analysis_revision = self
+            .session_manager
+            .analysis_revision(&params.session_id)
+            .await?;
+        let session_id = params.session_id.clone();
+        let profile = DiagnosticsProfile::DebouncedFull;
+        let job_class = cpu_work_class_for_operation(SemanticOperation::SymbolSearch);
+
         let session_manager = Arc::clone(&self.session_manager);
         let job_id = self
             .job_manager
-            .spawn("bsl_symbol_search", move |ctx| async move {
+            .spawn_with_class("bsl_symbol_search", job_class, move |ctx| async move {
                 ctx.set_progress("bsl_symbol_search/running", 0).await;
                 let response = session_manager
                     .bsl_symbol_search(params)
@@ -532,6 +699,15 @@ impl BslAgentHandler {
                 serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
             })
             .await;
+        self.register_batch_job(&session_id, analysis_revision, &job_id, profile)
+            .await;
+        self.record_diagnostics_pipeline_event_best_effort(
+            &session_id,
+            DiagnosticsTrigger::JobStart,
+            profile,
+            DiagnosticsDisposition::Published,
+        )
+        .await;
         Content::json(JobStartResponse {
             job_id,
             recommended_poll_ms: Some(200),
@@ -682,10 +858,14 @@ impl BslAgentHandler {
         &self,
         Parameters(params): Parameters<BslTypeAtPositionParams>,
     ) -> Result<Content, rmcp::ErrorData> {
+        let session_id = params.session_id.clone();
+        let profile = DiagnosticsProfile::Fast;
+        let job_class = cpu_work_class_for_operation(SemanticOperation::TypeAtPosition);
+
         let session_manager = Arc::clone(&self.session_manager);
         let job_id = self
             .job_manager
-            .spawn("bsl_type_at_position", move |ctx| async move {
+            .spawn_with_class("bsl_type_at_position", job_class, move |ctx| async move {
                 ctx.set_progress("bsl_type_at_position/running", 0).await;
                 let response = session_manager
                     .bsl_type_at_position(params)
@@ -694,6 +874,13 @@ impl BslAgentHandler {
                 serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
             })
             .await;
+        self.record_diagnostics_pipeline_event_best_effort(
+            &session_id,
+            DiagnosticsTrigger::JobStart,
+            profile,
+            DiagnosticsDisposition::Published,
+        )
+        .await;
         Content::json(JobStartResponse {
             job_id,
             recommended_poll_ms: Some(200),
@@ -707,10 +894,14 @@ impl BslAgentHandler {
         &self,
         Parameters(params): Parameters<BslMembersParams>,
     ) -> Result<Content, rmcp::ErrorData> {
+        let session_id = params.session_id.clone();
+        let profile = DiagnosticsProfile::Fast;
+        let job_class = cpu_work_class_for_operation(SemanticOperation::Members);
+
         let session_manager = Arc::clone(&self.session_manager);
         let job_id = self
             .job_manager
-            .spawn("bsl_members", move |ctx| async move {
+            .spawn_with_class("bsl_members", job_class, move |ctx| async move {
                 ctx.set_progress("bsl_members/running", 0).await;
                 let response = session_manager
                     .bsl_members(params)
@@ -719,6 +910,13 @@ impl BslAgentHandler {
                 serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
             })
             .await;
+        self.record_diagnostics_pipeline_event_best_effort(
+            &session_id,
+            DiagnosticsTrigger::JobStart,
+            profile,
+            DiagnosticsDisposition::Published,
+        )
+        .await;
         Content::json(JobStartResponse {
             job_id,
             recommended_poll_ms: Some(200),
@@ -732,10 +930,14 @@ impl BslAgentHandler {
         &self,
         Parameters(params): Parameters<BslDefinitionParams>,
     ) -> Result<Content, rmcp::ErrorData> {
+        let session_id = params.session_id.clone();
+        let profile = DiagnosticsProfile::Fast;
+        let job_class = cpu_work_class_for_operation(SemanticOperation::Definition);
+
         let session_manager = Arc::clone(&self.session_manager);
         let job_id = self
             .job_manager
-            .spawn("bsl_definition", move |ctx| async move {
+            .spawn_with_class("bsl_definition", job_class, move |ctx| async move {
                 ctx.set_progress("bsl_definition/running", 0).await;
                 let response = session_manager
                     .bsl_definition(params)
@@ -744,6 +946,13 @@ impl BslAgentHandler {
                 serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
             })
             .await;
+        self.record_diagnostics_pipeline_event_best_effort(
+            &session_id,
+            DiagnosticsTrigger::JobStart,
+            profile,
+            DiagnosticsDisposition::Published,
+        )
+        .await;
         Content::json(JobStartResponse {
             job_id,
             recommended_poll_ms: Some(200),
@@ -757,10 +966,18 @@ impl BslAgentHandler {
         &self,
         Parameters(params): Parameters<BslReferencesParams>,
     ) -> Result<Content, rmcp::ErrorData> {
+        let analysis_revision = self
+            .session_manager
+            .analysis_revision(&params.session_id)
+            .await?;
+        let session_id = params.session_id.clone();
+        let profile = DiagnosticsProfile::DebouncedFull;
+        let job_class = cpu_work_class_for_operation(SemanticOperation::References);
+
         let session_manager = Arc::clone(&self.session_manager);
         let job_id = self
             .job_manager
-            .spawn("bsl_references", move |ctx| async move {
+            .spawn_with_class("bsl_references", job_class, move |ctx| async move {
                 ctx.set_progress("bsl_references/running", 0).await;
                 let response = session_manager
                     .bsl_references(params)
@@ -769,6 +986,15 @@ impl BslAgentHandler {
                 serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
             })
             .await;
+        self.register_batch_job(&session_id, analysis_revision, &job_id, profile)
+            .await;
+        self.record_diagnostics_pipeline_event_best_effort(
+            &session_id,
+            DiagnosticsTrigger::JobStart,
+            profile,
+            DiagnosticsDisposition::Published,
+        )
+        .await;
         Content::json(JobStartResponse {
             job_id,
             recommended_poll_ms: Some(200),
@@ -867,6 +1093,17 @@ impl BslAgentHandler {
         Parameters(params): Parameters<JobCancelParams>,
     ) -> Result<Content, rmcp::ErrorData> {
         let response = self.job_manager.cancel(&params.job_id).await?;
+        if let Some((session_id, profile)) = self.take_batch_job_by_id(&params.job_id).await {
+            if response.state == JobStateDto::Canceled {
+                self.record_diagnostics_pipeline_event_best_effort(
+                    &session_id,
+                    DiagnosticsTrigger::JobStart,
+                    profile,
+                    DiagnosticsDisposition::Cancelled,
+                )
+                .await;
+            }
+        }
         Content::json(response)
     }
 }
@@ -895,5 +1132,204 @@ impl Default for BslAgentHandler {
 impl From<BslAgentError> for rmcp::ErrorData {
     fn from(err: BslAgentError) -> Self {
         err.into_rmcp()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::server::types::{JobCancelParams, WorkspaceOpenParams};
+    use crate::types::{JobStateDto, WorkspaceOpenResponse};
+    use rmcp::handler::server::wrapper::Parameters;
+    use std::time::Duration;
+
+    async fn wait_workspace_ready(
+        session_manager: &Arc<SessionManager>,
+        job_manager: &Arc<JobManager>,
+        open: &WorkspaceOpenResponse,
+    ) {
+        let startup_job_id = open
+            .startup_job_id
+            .as_ref()
+            .expect("startup_job_id")
+            .clone();
+
+        let startup = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let status = job_manager
+                    .wait(&startup_job_id, 200)
+                    .await
+                    .expect("startup wait");
+                if !matches!(status.state, JobStateDto::Queued | JobStateDto::Running) {
+                    break status;
+                }
+            }
+        })
+        .await
+        .expect("startup must reach terminal state");
+        assert_eq!(
+            startup.state,
+            JobStateDto::Succeeded,
+            "startup job must succeed"
+        );
+
+        let ready = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let status = session_manager.status(&open.session_id).await.expect("status");
+                if status.ready {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await;
+        assert!(ready.is_ok(), "workspace must become ready after startup");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancel_stale_batch_jobs_cancels_running_jobs() {
+        let session_manager = Arc::new(SessionManager::new());
+        let job_manager = Arc::new(JobManager::new_in_memory());
+        let handler = BslAgentHandler::with_state(session_manager, Arc::clone(&job_manager));
+
+        let job_id = job_manager
+            .spawn_with_class(
+                "batch-test",
+                cpu_work_class_for_operation(SemanticOperation::SymbolSearch),
+                move |_| async move {
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    Ok(serde_json::json!({ "ok": true }))
+                },
+            )
+            .await;
+
+        handler
+            .register_batch_job("session-1", 1, &job_id, DiagnosticsProfile::DebouncedFull)
+            .await;
+        handler.cancel_stale_batch_jobs("session-1", 2).await;
+
+        let status = job_manager.status(&job_id).await.expect("status");
+        assert_eq!(
+            status.state,
+            JobStateDto::Canceled,
+            "stale running batch job must be canceled on revision advance"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancel_stale_batch_jobs_does_not_rewrite_terminal_state() {
+        let session_manager = Arc::new(SessionManager::new());
+        let job_manager = Arc::new(JobManager::new_in_memory());
+        let handler = BslAgentHandler::with_state(session_manager, Arc::clone(&job_manager));
+
+        let job_id = job_manager
+            .spawn_with_class(
+                "batch-test-finished",
+                cpu_work_class_for_operation(SemanticOperation::SymbolSearch),
+                move |_| async move { Ok(serde_json::json!({ "done": true })) },
+            )
+            .await;
+        let waited = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let status = job_manager.status(&job_id).await.expect("status");
+                if !matches!(status.state, JobStateDto::Queued | JobStateDto::Running) {
+                    break status;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("job should reach terminal state");
+        assert_eq!(
+            waited.state,
+            JobStateDto::Succeeded,
+            "test precondition: batch job must finish before stale cancellation"
+        );
+
+        handler
+            .register_batch_job("session-1", 1, &job_id, DiagnosticsProfile::DebouncedFull)
+            .await;
+        handler.cancel_stale_batch_jobs("session-1", 2).await;
+
+        let status = job_manager.status(&job_id).await.expect("status");
+        assert_eq!(
+            status.state,
+            JobStateDto::Succeeded,
+            "terminal jobs must stay terminal when cleanup scans stale entries"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn job_cancel_records_cancelled_reason_for_tracked_batch_job() {
+        let session_manager = Arc::new(SessionManager::new());
+        let job_manager = Arc::new(JobManager::new_in_memory());
+        let handler =
+            BslAgentHandler::with_state(Arc::clone(&session_manager), Arc::clone(&job_manager));
+
+        let root = tempfile::TempDir::new().expect("tempdir");
+        let open = session_manager
+            .open(
+                WorkspaceOpenParams {
+                    roots: vec![root.path().to_string_lossy().to_string()],
+                    platform_docs_archive: None,
+                    platform_version: None,
+                    configuration_path: None,
+                    mode: None,
+                },
+                Arc::clone(&job_manager),
+            )
+            .await
+            .expect("workspace_open");
+        wait_workspace_ready(&session_manager, &job_manager, &open).await;
+
+        let job_id = job_manager
+            .spawn_with_class(
+                "batch-cancel-observability",
+                cpu_work_class_for_operation(SemanticOperation::SymbolSearch),
+                move |_| async move {
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    Ok(serde_json::json!({ "ok": true }))
+                },
+            )
+            .await;
+
+        handler
+            .register_batch_job(
+                &open.session_id,
+                open.analysis_revision,
+                &job_id,
+                DiagnosticsProfile::DebouncedFull,
+            )
+            .await;
+
+        let _ = handler
+            .job_cancel(Parameters(JobCancelParams {
+                job_id: job_id.clone(),
+            }))
+            .await
+            .expect("job_cancel");
+
+        let status = job_manager.status(&job_id).await.expect("job status");
+        assert_eq!(
+            status.state,
+            JobStateDto::Canceled,
+            "batch job must be canceled"
+        );
+
+        let metrics = session_manager
+            .observability_metrics_get(&open.session_id)
+            .await
+            .expect("metrics");
+        let counters = metrics
+            .metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        let key = "intellisense_v2_diagnostics_pipeline_total_origin_agent_trigger_job_start_profile_debounced_full_reason_cancelled";
+        let value = counters.get(key).and_then(|value| value.as_u64()).unwrap_or(0);
+        assert!(
+            value > 0,
+            "expected diagnostics pipeline cancelled metric key {key} to be incremented"
+        );
     }
 }

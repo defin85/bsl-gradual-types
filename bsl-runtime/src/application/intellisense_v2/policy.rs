@@ -161,6 +161,135 @@ pub enum CpuWorkClass {
     Background,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DiagnosticsTrigger {
+    DidChange,
+    DidOpen,
+    DidSave,
+    Idle,
+    DocumentsSet,
+    JobStart,
+}
+
+impl DiagnosticsTrigger {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DiagnosticsTrigger::DidChange => "did_change",
+            DiagnosticsTrigger::DidOpen => "did_open",
+            DiagnosticsTrigger::DidSave => "did_save",
+            DiagnosticsTrigger::Idle => "idle",
+            DiagnosticsTrigger::DocumentsSet => "documents_set",
+            DiagnosticsTrigger::JobStart => "job_start",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DiagnosticsProfile {
+    Fast,
+    DebouncedFull,
+    IdleHeavy,
+}
+
+impl DiagnosticsProfile {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DiagnosticsProfile::Fast => "fast",
+            DiagnosticsProfile::DebouncedFull => "debounced_full",
+            DiagnosticsProfile::IdleHeavy => "idle_heavy",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DiagnosticsDisposition {
+    Published,
+    SupersededVersion,
+    SupersededGeneration,
+    Cancelled,
+}
+
+impl DiagnosticsDisposition {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DiagnosticsDisposition::Published => "published",
+            DiagnosticsDisposition::SupersededVersion => "superseded_version",
+            DiagnosticsDisposition::SupersededGeneration => "superseded_generation",
+            DiagnosticsDisposition::Cancelled => "cancelled",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DiagnosticsExecutionPlan {
+    pub run_syntax: bool,
+    pub run_semantic: bool,
+    pub flow_sensitive_semantic: bool,
+    pub cpu_class: CpuWorkClass,
+}
+
+const PROFILES_DID_CHANGE: &[DiagnosticsProfile] = &[
+    DiagnosticsProfile::Fast,
+    DiagnosticsProfile::DebouncedFull,
+    DiagnosticsProfile::IdleHeavy,
+];
+const PROFILES_DID_OPEN: &[DiagnosticsProfile] = &[DiagnosticsProfile::DebouncedFull];
+const PROFILES_DID_SAVE: &[DiagnosticsProfile] = &[DiagnosticsProfile::IdleHeavy];
+const PROFILES_IDLE: &[DiagnosticsProfile] = &[DiagnosticsProfile::IdleHeavy];
+const PROFILES_DOCUMENTS_SET: &[DiagnosticsProfile] = &[DiagnosticsProfile::DebouncedFull];
+const PROFILES_JOB_START: &[DiagnosticsProfile] = &[DiagnosticsProfile::DebouncedFull];
+
+pub fn diagnostics_profiles_for_trigger(
+    trigger: DiagnosticsTrigger,
+) -> &'static [DiagnosticsProfile] {
+    match trigger {
+        DiagnosticsTrigger::DidChange => PROFILES_DID_CHANGE,
+        DiagnosticsTrigger::DidOpen => PROFILES_DID_OPEN,
+        DiagnosticsTrigger::DidSave => PROFILES_DID_SAVE,
+        DiagnosticsTrigger::Idle => PROFILES_IDLE,
+        DiagnosticsTrigger::DocumentsSet => PROFILES_DOCUMENTS_SET,
+        DiagnosticsTrigger::JobStart => PROFILES_JOB_START,
+    }
+}
+
+pub fn diagnostics_execution_plan(
+    profile: DiagnosticsProfile,
+    flow_sensitive_enabled: bool,
+) -> DiagnosticsExecutionPlan {
+    match profile {
+        DiagnosticsProfile::Fast => DiagnosticsExecutionPlan {
+            run_syntax: true,
+            run_semantic: false,
+            flow_sensitive_semantic: false,
+            cpu_class: CpuWorkClass::Interactive,
+        },
+        DiagnosticsProfile::DebouncedFull => DiagnosticsExecutionPlan {
+            run_syntax: true,
+            run_semantic: true,
+            flow_sensitive_semantic: false,
+            cpu_class: CpuWorkClass::Background,
+        },
+        DiagnosticsProfile::IdleHeavy => DiagnosticsExecutionPlan {
+            run_syntax: true,
+            run_semantic: true,
+            flow_sensitive_semantic: flow_sensitive_enabled,
+            cpu_class: CpuWorkClass::Background,
+        },
+    }
+}
+
+pub fn cpu_work_class_for_operation(operation: SemanticOperation) -> CpuWorkClass {
+    match operation {
+        SemanticOperation::Completion
+        | SemanticOperation::Hover
+        | SemanticOperation::SignatureHelp
+        | SemanticOperation::Members
+        | SemanticOperation::TypeAtPosition
+        | SemanticOperation::Definition => CpuWorkClass::Interactive,
+        _ => CpuWorkClass::Background,
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 struct CpuBudgetSaturationSnapshot {
     interactive_waiters: usize,
@@ -458,6 +587,87 @@ mod tests {
         assert!(
             !should_query_parse_result(SemanticOperation::Completion, false),
             "completion parse_result remains gated by IR availability"
+        );
+    }
+
+    #[test]
+    fn diagnostics_profiles_follow_tiered_trigger_contract() {
+        assert_eq!(
+            diagnostics_profiles_for_trigger(DiagnosticsTrigger::DidChange),
+            &[
+                DiagnosticsProfile::Fast,
+                DiagnosticsProfile::DebouncedFull,
+                DiagnosticsProfile::IdleHeavy,
+            ]
+        );
+        assert_eq!(
+            diagnostics_profiles_for_trigger(DiagnosticsTrigger::DidOpen),
+            &[DiagnosticsProfile::DebouncedFull]
+        );
+        assert_eq!(
+            diagnostics_profiles_for_trigger(DiagnosticsTrigger::DidSave),
+            &[DiagnosticsProfile::IdleHeavy]
+        );
+        assert_eq!(
+            diagnostics_profiles_for_trigger(DiagnosticsTrigger::Idle),
+            &[DiagnosticsProfile::IdleHeavy]
+        );
+        assert_eq!(
+            diagnostics_profiles_for_trigger(DiagnosticsTrigger::DocumentsSet),
+            &[DiagnosticsProfile::DebouncedFull]
+        );
+        assert_eq!(
+            diagnostics_profiles_for_trigger(DiagnosticsTrigger::JobStart),
+            &[DiagnosticsProfile::DebouncedFull]
+        );
+    }
+
+    #[test]
+    fn diagnostics_execution_plan_matches_profile_expectations() {
+        let fast = diagnostics_execution_plan(DiagnosticsProfile::Fast, true);
+        assert!(fast.run_syntax);
+        assert!(!fast.run_semantic);
+        assert!(!fast.flow_sensitive_semantic);
+        assert_eq!(fast.cpu_class, CpuWorkClass::Interactive);
+
+        let debounced = diagnostics_execution_plan(DiagnosticsProfile::DebouncedFull, true);
+        assert!(debounced.run_syntax);
+        assert!(debounced.run_semantic);
+        assert!(!debounced.flow_sensitive_semantic);
+        assert_eq!(debounced.cpu_class, CpuWorkClass::Background);
+
+        let idle_heavy_flow_off = diagnostics_execution_plan(DiagnosticsProfile::IdleHeavy, false);
+        assert!(idle_heavy_flow_off.run_syntax);
+        assert!(idle_heavy_flow_off.run_semantic);
+        assert!(!idle_heavy_flow_off.flow_sensitive_semantic);
+        assert_eq!(idle_heavy_flow_off.cpu_class, CpuWorkClass::Background);
+
+        let idle_heavy_flow_on = diagnostics_execution_plan(DiagnosticsProfile::IdleHeavy, true);
+        assert!(idle_heavy_flow_on.flow_sensitive_semantic);
+        assert_eq!(idle_heavy_flow_on.cpu_class, CpuWorkClass::Background);
+    }
+
+    #[test]
+    fn cpu_work_class_keeps_interactive_tools_out_of_background_queue() {
+        assert_eq!(
+            cpu_work_class_for_operation(SemanticOperation::TypeAtPosition),
+            CpuWorkClass::Interactive
+        );
+        assert_eq!(
+            cpu_work_class_for_operation(SemanticOperation::Members),
+            CpuWorkClass::Interactive
+        );
+        assert_eq!(
+            cpu_work_class_for_operation(SemanticOperation::Definition),
+            CpuWorkClass::Interactive
+        );
+        assert_eq!(
+            cpu_work_class_for_operation(SemanticOperation::SymbolSearch),
+            CpuWorkClass::Background
+        );
+        assert_eq!(
+            cpu_work_class_for_operation(SemanticOperation::References),
+            CpuWorkClass::Background
         );
     }
 

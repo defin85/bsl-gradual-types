@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use bsl_runtime::application::CpuWorkClass;
 use bsl_runtime::system::runtime_config::{global_runtime_config, RuntimeKey};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Notify, RwLock, Semaphore};
@@ -176,7 +177,8 @@ impl JobStore {
 pub struct JobManager {
     store: Option<Arc<JobStore>>,
     jobs: Arc<RwLock<HashMap<Uuid, Arc<JobEntry>>>>,
-    concurrency_limiter: Arc<Semaphore>,
+    interactive_limiter: Arc<Semaphore>,
+    background_limiter: Arc<Semaphore>,
 }
 
 #[derive(Clone)]
@@ -220,10 +222,13 @@ impl JobContext {
 }
 
 impl JobManager {
-    fn default_concurrency_limit() -> usize {
-        std::thread::available_parallelism()
+    fn default_concurrency_limits() -> (usize, usize) {
+        let total = std::thread::available_parallelism()
             .map(|parallelism| parallelism.get().max(2))
-            .unwrap_or(4)
+            .unwrap_or(4);
+        let interactive = 1;
+        let background = total.saturating_sub(interactive).max(1);
+        (interactive, background)
     }
 
     pub fn new() -> Self {
@@ -262,22 +267,41 @@ impl JobManager {
             }
         }
 
+        let (interactive_limit, background_limit) = Self::default_concurrency_limits();
         Self {
             store,
             jobs: Arc::new(RwLock::new(map)),
-            concurrency_limiter: Arc::new(Semaphore::new(Self::default_concurrency_limit())),
+            interactive_limiter: Arc::new(Semaphore::new(interactive_limit)),
+            background_limiter: Arc::new(Semaphore::new(background_limit)),
         }
     }
 
     pub fn new_in_memory() -> Self {
+        let (interactive_limit, background_limit) = Self::default_concurrency_limits();
         Self {
             store: None,
             jobs: Arc::new(RwLock::new(HashMap::new())),
-            concurrency_limiter: Arc::new(Semaphore::new(Self::default_concurrency_limit())),
+            interactive_limiter: Arc::new(Semaphore::new(interactive_limit)),
+            background_limiter: Arc::new(Semaphore::new(background_limit)),
         }
     }
 
     pub async fn spawn<F, Fut>(&self, phase: impl Into<String>, job_fn: F) -> String
+    where
+        F: FnOnce(JobContext) -> Fut + Send + 'static,
+        Fut:
+            std::future::Future<Output = Result<serde_json::Value, anyhow::Error>> + Send + 'static,
+    {
+        self.spawn_with_class(phase, CpuWorkClass::Background, job_fn)
+            .await
+    }
+
+    pub async fn spawn_with_class<F, Fut>(
+        &self,
+        phase: impl Into<String>,
+        class: CpuWorkClass,
+        job_fn: F,
+    ) -> String
     where
         F: FnOnce(JobContext) -> Fut + Send + 'static,
         Fut:
@@ -308,7 +332,10 @@ impl JobManager {
 
         let store = self.store.clone();
         let jobs = self.jobs.clone();
-        let concurrency_limiter = Arc::clone(&self.concurrency_limiter);
+        let limiter = match class {
+            CpuWorkClass::Interactive => Arc::clone(&self.interactive_limiter),
+            CpuWorkClass::Background => Arc::clone(&self.background_limiter),
+        };
         let job_id_str = job_id.to_string();
         let job_id_str_for_cleanup = job_id_str.clone();
         let ctx = JobContext {
@@ -318,10 +345,10 @@ impl JobManager {
         };
 
         tokio::spawn(async move {
-            let _permit = concurrency_limiter
+            let _permit = limiter
                 .acquire_owned()
                 .await
-                .expect("job concurrency limiter closed");
+                .expect("job class concurrency limiter closed");
 
             if entry.canceled.load(Ordering::Relaxed) {
                 {

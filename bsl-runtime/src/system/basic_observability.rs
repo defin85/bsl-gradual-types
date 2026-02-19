@@ -1666,6 +1666,23 @@ impl BasicObservability {
             .increment("intellisense_v2_runtime_saturation_sample_total");
     }
 
+    pub fn record_intellisense_v2_diagnostics_pipeline_event(
+        &self,
+        origin: &str,
+        trigger: &str,
+        profile: &str,
+        reason: &str,
+    ) {
+        let origin = normalize_observability_origin_label(origin);
+        let trigger = normalize_diagnostics_trigger_label(trigger);
+        let profile = normalize_diagnostics_profile_label(profile);
+        let reason = normalize_diagnostics_reason_label(reason);
+        let key = format!(
+            "intellisense_v2_diagnostics_pipeline_total_origin_{origin}_trigger_{trigger}_profile_{profile}_reason_{reason}"
+        );
+        self.metrics.increment(&key);
+    }
+
     pub fn record_intellisense_v2_deps_update_build_latency(&self, duration: Duration) {
         self.metrics
             .increment("intellisense_v2_deps_update_build_total");
@@ -2044,6 +2061,47 @@ fn normalize_work_class_label(class: &str) -> &'static str {
     }
 }
 
+fn normalize_observability_origin_label(origin: &str) -> &'static str {
+    match origin {
+        "lsp" => "lsp",
+        "web" => "web",
+        "agent" => "agent",
+        "runtime" => "runtime",
+        _ => "runtime",
+    }
+}
+
+fn normalize_diagnostics_trigger_label(trigger: &str) -> &'static str {
+    match trigger {
+        "did_change" => "did_change",
+        "did_open" => "did_open",
+        "did_save" => "did_save",
+        "idle" => "idle",
+        "documents_set" => "documents_set",
+        "job_start" => "job_start",
+        _ => "idle",
+    }
+}
+
+fn normalize_diagnostics_profile_label(profile: &str) -> &'static str {
+    match profile {
+        "fast" => "fast",
+        "debounced_full" => "debounced_full",
+        "idle_heavy" => "idle_heavy",
+        _ => "debounced_full",
+    }
+}
+
+fn normalize_diagnostics_reason_label(reason: &str) -> &'static str {
+    match reason {
+        "published" => "published",
+        "superseded_version" => "superseded_version",
+        "superseded_generation" => "superseded_generation",
+        "cancelled" => "cancelled",
+        _ => "cancelled",
+    }
+}
+
 fn legacy_wait_for_file_version_metrics(kind: &str) -> (&'static str, &'static str) {
     match kind {
         "completion" => (
@@ -2405,7 +2463,10 @@ mod observability_contract_tests {
             "legacy runtime queue wait counter should be projected"
         );
         assert!(
-            counter_value(counters, "intellisense_v2_runtime_snapshot_with_deps_exec_total") > 0,
+            counter_value(
+                counters,
+                "intellisense_v2_runtime_snapshot_with_deps_exec_total"
+            ) > 0,
             "legacy runtime exec counter should be projected"
         );
         assert!(
@@ -2416,20 +2477,66 @@ mod observability_contract_tests {
             "legacy runtime queue histogram should be projected"
         );
         assert!(
-            histogram_count(histograms, "intellisense_v2_runtime_snapshot_with_deps_exec_ms") > 0,
+            histogram_count(
+                histograms,
+                "intellisense_v2_runtime_snapshot_with_deps_exec_ms"
+            ) > 0,
             "legacy runtime exec histogram should be projected"
+        );
+    }
+
+    #[test]
+    fn diagnostics_pipeline_event_exports_low_cardinality_key() {
+        let observability = BasicObservability::default();
+        observability.record_intellisense_v2_diagnostics_pipeline_event(
+            "agent",
+            "documents_set",
+            "idle_heavy",
+            "superseded_generation",
+        );
+
+        let exported = observability.get_metrics().export_metrics();
+        let counters = counters(&exported);
+        let key = "intellisense_v2_diagnostics_pipeline_total_origin_agent_trigger_documents_set_profile_idle_heavy_reason_superseded_generation";
+        assert_eq!(
+            counter_value(counters, key),
+            1,
+            "diagnostics pipeline counter must include canonical trigger/profile/reason dimensions"
+        );
+    }
+
+    #[test]
+    fn diagnostics_pipeline_event_normalizes_unknown_dimensions() {
+        let observability = BasicObservability::default();
+        observability.record_intellisense_v2_diagnostics_pipeline_event(
+            "unknown-origin",
+            "unknown-trigger",
+            "unknown-profile",
+            "unknown-reason",
+        );
+
+        let exported = observability.get_metrics().export_metrics();
+        let counters = counters(&exported);
+        let normalized_key = "intellisense_v2_diagnostics_pipeline_total_origin_runtime_trigger_idle_profile_debounced_full_reason_cancelled";
+        assert_eq!(
+            counter_value(counters, normalized_key),
+            1,
+            "invalid labels must collapse into bounded fallback dimensions"
         );
     }
 
     #[test]
     fn export_includes_parse_result_singleflight_and_cancel_rates() {
         let observability = BasicObservability::default();
-        observability
-            .record_intellisense_v2_parse_result_query_latency_with_origin("lsp", Duration::from_millis(10));
+        observability.record_intellisense_v2_parse_result_query_latency_with_origin(
+            "lsp",
+            Duration::from_millis(10),
+        );
         observability.record_intellisense_v2_query_cancelled_with_origin("lsp", "other");
         observability.record_intellisense_v2_singleflight_leader_with_origin("lsp", "parse_result");
         observability.record_intellisense_v2_singleflight_shared_with_origin("lsp", "parse_result");
-        observability.record_intellisense_v2_singleflight_leader_with_origin("agent", "parse_result");
+        observability
+            .record_intellisense_v2_singleflight_leader_with_origin("agent", "parse_result");
 
         let exported = observability.get_metrics().export_metrics();
         let rates = exported

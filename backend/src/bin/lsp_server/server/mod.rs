@@ -96,6 +96,7 @@ pub struct BslLanguageServer {
     pub(crate) file_key_to_file_id_v2: Arc<RwLock<HashMap<V2FileKey, V2FileId>>>,
     pub(crate) next_file_id_v2: Arc<AtomicU32>,
     pub(crate) diagnostics_tasks_v2: Arc<Mutex<DiagnosticsTasksV2>>,
+    pub(crate) diagnostics_generation_v2: Arc<RwLock<HashMap<V2FileId, u64>>>,
     pub(crate) latest_received_file_versions_v2: Arc<RwLock<HashMap<V2FileId, i32>>>,
     pub(crate) completion_seen_files_v2: Arc<RwLock<HashSet<V2FileId>>>,
     pub(crate) completion_stale_fallback_cache_v2:
@@ -104,13 +105,21 @@ pub struct BslLanguageServer {
     pub(crate) last_settings_id_v2: Arc<RwLock<Option<SettingsId>>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct DiagnosticsTaskKeyV2 {
+    pub file_id: V2FileId,
+    pub profile: bsl_runtime::application::DiagnosticsProfile,
+}
+
 pub(crate) struct DiagnosticsTaskV2 {
     pub requested_version: i32,
+    pub diagnostics_generation: u64,
+    pub trigger: bsl_runtime::application::DiagnosticsTrigger,
     pub debounce: bool,
     pub handle: JoinHandle<()>,
 }
 
-type DiagnosticsTasksV2 = HashMap<V2FileId, DiagnosticsTaskV2>;
+type DiagnosticsTasksV2 = HashMap<DiagnosticsTaskKeyV2, DiagnosticsTaskV2>;
 
 pub(crate) fn intellisense_v2_slow_wait_warn_threshold() -> Option<Duration> {
     bsl_runtime::application::RuntimePerfKnobs::from_runtime_config().slow_wait_warn_threshold

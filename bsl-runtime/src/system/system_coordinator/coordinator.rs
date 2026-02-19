@@ -493,6 +493,17 @@ impl SystemCoordinator {
             );
     }
 
+    pub fn record_intellisense_v2_diagnostics_pipeline_event(
+        &self,
+        origin: &str,
+        trigger: &str,
+        profile: &str,
+        reason: &str,
+    ) {
+        self.observability
+            .record_intellisense_v2_diagnostics_pipeline_event(origin, trigger, profile, reason);
+    }
+
     pub fn record_intellisense_v2_deps_update_build_latency(&self, duration: std::time::Duration) {
         self.observability
             .record_intellisense_v2_deps_update_build_latency(duration);

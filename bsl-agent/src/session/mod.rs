@@ -5,8 +5,9 @@ use std::sync::Arc;
 use bsl_analysis_v2::{FileId, SettingsId};
 use bsl_runtime::application::type_system::web_api_service;
 use bsl_runtime::application::{
-    CancellationPolicy, ExecutionContext, ExecutionSettings, IntellisenseV2Facade,
-    ObservabilityOrigin, ObservabilityStage, PreparedOperationSnapshot, SemanticOperation,
+    CancellationPolicy, DiagnosticsDisposition, DiagnosticsProfile, DiagnosticsTrigger,
+    ExecutionContext, ExecutionSettings, IntellisenseV2Facade, ObservabilityOrigin,
+    ObservabilityStage, PreparedOperationSnapshot, SemanticOperation,
 };
 use bsl_runtime::data::loaders::progress::ProgressUpdate;
 use bsl_runtime::data::loaders::ConfigurationDiscovery;
@@ -1242,6 +1243,41 @@ impl SessionManager {
         Ok(WorkspaceObservabilityMetricsResponse {
             metrics: startup.coordinator.observability_metrics(),
         })
+    }
+
+    pub async fn analysis_revision(&self, session_id: &str) -> Result<u64, rmcp::ErrorData> {
+        let uuid = parse_session_id(session_id)?;
+        let sessions = self.sessions.read().await;
+        let session = sessions
+            .get(&uuid)
+            .ok_or_else(|| rmcp::ErrorData::invalid_params("session not found", None))?;
+        Ok(session.analysis_revision)
+    }
+
+    pub async fn record_diagnostics_pipeline_event(
+        &self,
+        session_id: &str,
+        trigger: DiagnosticsTrigger,
+        profile: DiagnosticsProfile,
+        reason: DiagnosticsDisposition,
+    ) -> Result<(), rmcp::ErrorData> {
+        let uuid = parse_session_id(session_id)?;
+        let sessions = self.sessions.read().await;
+        let session = sessions
+            .get(&uuid)
+            .ok_or_else(|| rmcp::ErrorData::invalid_params("session not found", None))?;
+        let startup = session.startup.as_ref().ok_or_else(|| {
+            rmcp::ErrorData::invalid_params("workspace not ready (startup in progress)", None)
+        })?;
+        startup
+            .coordinator
+            .record_intellisense_v2_diagnostics_pipeline_event(
+                ObservabilityOrigin::Agent.as_str(),
+                trigger.as_str(),
+                profile.as_str(),
+                reason.as_str(),
+            );
+        Ok(())
     }
 
     pub async fn documents_set(

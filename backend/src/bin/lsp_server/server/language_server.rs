@@ -422,9 +422,25 @@ impl LanguageServer for BslLanguageServer {
                                 });
 
                                 if let Some(uri) = uri {
-                                    self_clone
-                                        .schedule_diagnostics_v2(uri, file_id, version, true)
-                                        .await;
+                                    let diagnostics_generation =
+                                        self_clone.bump_diagnostics_generation_v2(file_id).await;
+                                    for profile in
+                                        bsl_runtime::application::diagnostics_profiles_for_trigger(
+                                            bsl_runtime::application::DiagnosticsTrigger::DidOpen,
+                                        )
+                                    {
+                                        self_clone
+                                            .schedule_diagnostics_profile_v2(
+                                                uri.clone(),
+                                                file_id,
+                                                version,
+                                                diagnostics_generation,
+                                                bsl_runtime::application::DiagnosticsTrigger::DidOpen,
+                                                *profile,
+                                                true,
+                                            )
+                                            .await;
+                                    }
                                 }
                             }
                         }
@@ -696,8 +712,21 @@ impl LanguageServer for BslLanguageServer {
                 path: Arc::from(path),
             }]);
 
-        self.schedule_diagnostics_v2(uri.clone(), file_id, version, false)
+        let diagnostics_generation = self.bump_diagnostics_generation_v2(file_id).await;
+        for profile in bsl_runtime::application::diagnostics_profiles_for_trigger(
+            bsl_runtime::application::DiagnosticsTrigger::DidOpen,
+        ) {
+            self.schedule_diagnostics_profile_v2(
+                uri.clone(),
+                file_id,
+                version,
+                diagnostics_generation,
+                bsl_runtime::application::DiagnosticsTrigger::DidOpen,
+                *profile,
+                false,
+            )
             .await;
+        }
 
         self.client
             .log_message(
@@ -770,8 +799,74 @@ impl LanguageServer for BslLanguageServer {
                 path: Arc::from(path),
             }]);
 
-        self.schedule_diagnostics_v2(uri.clone(), file_id, version, true)
+        let diagnostics_generation = self.bump_diagnostics_generation_v2(file_id).await;
+        for profile in bsl_runtime::application::diagnostics_profiles_for_trigger(
+            bsl_runtime::application::DiagnosticsTrigger::DidChange,
+        ) {
+            match profile {
+                bsl_runtime::application::DiagnosticsProfile::Fast => {
+                    self.run_diagnostics_profile_immediate_v2(
+                        uri.clone(),
+                        file_id,
+                        version,
+                        diagnostics_generation,
+                        bsl_runtime::application::DiagnosticsTrigger::DidChange,
+                        *profile,
+                    )
+                    .await;
+                }
+                _ => {
+                    let trigger = match profile {
+                        bsl_runtime::application::DiagnosticsProfile::IdleHeavy => {
+                            bsl_runtime::application::DiagnosticsTrigger::Idle
+                        }
+                        _ => bsl_runtime::application::DiagnosticsTrigger::DidChange,
+                    };
+                    self.schedule_diagnostics_profile_v2(
+                        uri.clone(),
+                        file_id,
+                        version,
+                        diagnostics_generation,
+                        trigger,
+                        *profile,
+                        true,
+                    )
+                    .await;
+                }
+            }
+        }
+    }
+
+    async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        let uri = params.text_document.uri;
+        let Some(file_id) = self.get_file_id_v2(&uri).await else {
+            return;
+        };
+        let Some(version) = self
+            .latest_received_file_versions_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied()
+        else {
+            return;
+        };
+
+        let diagnostics_generation = self.bump_diagnostics_generation_v2(file_id).await;
+        for profile in bsl_runtime::application::diagnostics_profiles_for_trigger(
+            bsl_runtime::application::DiagnosticsTrigger::DidSave,
+        ) {
+            self.schedule_diagnostics_profile_v2(
+                uri.clone(),
+                file_id,
+                version,
+                diagnostics_generation,
+                bsl_runtime::application::DiagnosticsTrigger::DidSave,
+                *profile,
+                false,
+            )
             .await;
+        }
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
@@ -786,6 +881,10 @@ impl LanguageServer for BslLanguageServer {
                 .await
                 .remove(&file_id);
             self.completion_stale_fallback_cache_v2
+                .write()
+                .await
+                .remove(&file_id);
+            self.diagnostics_generation_v2
                 .write()
                 .await
                 .remove(&file_id);

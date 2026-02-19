@@ -9,6 +9,7 @@
 Текущее поведение частично допускается существующим контрактом (stale/incomplete fallback), но не фиксирует UX-инвариант "первый интерактивный ответ должен быть полезным" и не задаёт явный trigger-aware контракт для `TriggerCharacter='.'`.
 
 ## What Changes
+- Подход реализации для этого change фиксируется как **runtime-centric trigger contract + LSP adapter shadow state** (без полной реархитектуры очередей).
 - **MODIFIED**: `bsl-intellisense-v2` requirement `Инкрементальность и корректность позиций в v2 pipeline (MUST)`.
   - Добавляется требование, что первый completion после `didChange` в member-access контексте не требует повторного ручного триггера для получения полезной выдачи.
 - **ADDED**: новое requirement в `bsl-intellisense-v2` про trigger-aware completion контракт.
@@ -34,3 +35,10 @@
 ## Scope
 - Change ограничен интерактивным completion pipeline (LSP + v2 runtime + VS Code client integration).
 - В change не входят новые completion фичи (новые типы candidates, ranking-модель, расширение domain coverage).
+- В change не входит полная event-driven rearchitecture очередей runtime/LSP; она вынесена в отдельный change: `refactor-v2-completion-event-driven-pipeline`.
+
+## Acceptance Gates
+- Интерактивный warm-path completion latency под профильной нагрузкой: `p95 <= 300ms`, `p99 <= 800ms`.
+- First-trigger success rate для member-access (`expr.` сразу после `didChange`): `>= 99%` на регрессионном наборе.
+- Terminal-empty rate для распознанного member-access контекста, вызванный только transient недоступностью IR: `<= 0.5%`.
+- Parity mismatch rate между `TriggerCharacter='.'` и `Invoked` для одной ревизии/позиции: `<= 1%` на нагрузочном telemetry-срезе и `0` в контрактных тестах.

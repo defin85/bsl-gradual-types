@@ -22,6 +22,7 @@
   - Переработка ranking/score модели completion.
   - Расширение доменной coverage типов/metadata beyond текущего контракта.
   - Изменение пользовательских editor settings автоматически.
+  - Полная event-driven rearchitecture очередей runtime/LSP (выделена в отдельный change `refactor-v2-completion-event-driven-pipeline`).
 
 ## Decisions
 
@@ -53,6 +54,21 @@ Member-owner hint не должен полностью зависеть от г�
 
 Контракт: при старте/активации extension явно логирует warning и даёт понятный remediation path, не изменяя пользовательские настройки автоматически.
 
+### Decision 6: Полная event-driven rearchitecture выделяется в отдельный трек
+
+Для этого change выбирается эволюционный путь (runtime-centric contract + adapter shadow state) с минимальным риском регрессий.
+
+Полная event-driven rearchitecture очередей и диспетчеризации completion/didChange вынесена в отдельный change `refactor-v2-completion-event-driven-pipeline`, чтобы не блокировать быстрые UX-исправления текущего цикла.
+
+### Decision 7: Observability фиксируется с trigger-aware разрезом
+
+Для контроля parity и деградации observability должна включать как минимум:
+- trigger mode (`TriggerCharacter`, `Invoked`, `TriggerForIncompleteCompletions`),
+- completion outcome class (`ok_non_empty`, `ok_empty`, `degraded_incomplete`, `fallback_unavailable`),
+- parity drift indicator между `.` и `Invoked` в рамках одной ревизии.
+
+Это нужно, чтобы регрессии parity обнаруживались по метрикам, а не только тестами.
+
 ## Implementation Considerations
 
 1. Ввести/расширить LSP-level document shadow state для `didOpen/didChange/didClose`.
@@ -60,6 +76,18 @@ Member-owner hint не должен полностью зависеть от г�
 3. Устранить ветки, которые дают terminal-empty из-за transient `missing_ir` в member-access контексте.
 4. Добавить parity/first-trigger/latency regression tests в LSP integration набор.
 5. Добавить extension-level observable warning (output channel + user-visible lightweight notification/diagnostic hook).
+6. Добавить trigger-aware observability (разрез по trigger mode, parity drift, terminal-empty в member-access контексте).
+
+## Acceptance SLI (для этого change)
+
+- Warm-path completion latency под профильной нагрузкой:
+  - `p95 <= 300ms`
+  - `p99 <= 800ms`
+- First-trigger success rate для member-access после `didChange`: `>= 99%`.
+- Terminal-empty rate в распознанном member-access контексте из-за transient `missing_ir`: `<= 0.5%`.
+- Parity mismatch между `TriggerCharacter='.'` и `Invoked`:
+  - `0` в контрактных тестах,
+  - `<= 1%` на нагрузочном telemetry-срезе.
 
 ## Risks / Trade-offs
 
@@ -73,4 +101,3 @@ Member-owner hint не должен полностью зависеть от г�
 ## Open Questions
 
 - Нужен ли отдельный пользовательский indicator для degraded completion (кроме `isIncomplete=true`) в UI extension.
-- Нужно ли фиксировать отдельный SLO для cold-path completion, или достаточно интерактивного warm-path контракта.

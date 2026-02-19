@@ -33,10 +33,19 @@
 
 Если fresh semantic данные временно недоступны, система MUST возвращать полезный degraded completion для распознанного member-access контекста с `isIncomplete=true`, вместо terminal-empty ответа, вызванного только transient недоступностью IR.
 
-Система MUST сохранять observability по стадиям latency/fallback, достаточную для регрессионного контроля интерактивного пути.
+Система MUST сохранять observability по стадиям latency/fallback, достаточную для регрессионного контроля интерактивного пути, включая:
+- разрез по trigger mode (`TriggerCharacter`, `Invoked`, `TriggerForIncompleteCompletions`, `None`),
+- parity drift индикаторы между `TriggerCharacter='.'` и `Invoked`,
+- счётчики transient member-access terminal-empty и fallback_unavailable.
 
 #### Scenario: Под серией `didChange` completion остаётся bounded и не даёт transient terminal-empty
 - **GIVEN** пользователь быстро печатает, и IDE отправляет серию `didChange`
 - **WHEN** IDE запрашивает completion в member-access контексте во время transient нагрузки
 - **THEN** completion возвращается в bounded интерактивном времени (без зависания)
 - **AND** при временной недоступности fresh IR сервер возвращает degraded `isIncomplete=true` ответ вместо terminal-empty результата, если контекст позволяет полезные candidates
+
+#### Scenario: Trigger-aware observability доступна для контроля parity
+- **GIVEN** IDE выполняет completion запросы в режимах `TriggerCharacter='.'`, `Invoked` и `TriggerForIncompleteCompletions`
+- **WHEN** система публикует observability метрики completion
+- **THEN** метрики содержат trigger mode разрез и позволяют сравнить parity между `.` и `Invoked`
+- **AND** transient member-access terminal-empty и fallback_unavailable отражаются отдельными счётчиками

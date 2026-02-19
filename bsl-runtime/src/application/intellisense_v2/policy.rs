@@ -258,7 +258,7 @@ pub fn diagnostics_execution_plan(
 ) -> DiagnosticsExecutionPlan {
     match profile {
         DiagnosticsProfile::Fast => DiagnosticsExecutionPlan {
-            run_syntax: true,
+            run_syntax: false,
             run_semantic: false,
             flow_sensitive_semantic: false,
             cpu_class: CpuWorkClass::Interactive,
@@ -625,7 +625,7 @@ mod tests {
     #[test]
     fn diagnostics_execution_plan_matches_profile_expectations() {
         let fast = diagnostics_execution_plan(DiagnosticsProfile::Fast, true);
-        assert!(fast.run_syntax);
+        assert!(!fast.run_syntax);
         assert!(!fast.run_semantic);
         assert!(!fast.flow_sensitive_semantic);
         assert_eq!(fast.cpu_class, CpuWorkClass::Interactive);

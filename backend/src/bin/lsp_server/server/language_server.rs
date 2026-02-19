@@ -49,6 +49,16 @@ fn effective_include_flow_sensitive(
     request_override.unwrap_or(enable_flow_sensitive_setting)
 }
 
+fn should_schedule_profile(
+    profile: bsl_runtime::application::DiagnosticsProfile,
+    flow_sensitive_enabled: bool,
+) -> bool {
+    if matches!(profile, bsl_runtime::application::DiagnosticsProfile::IdleHeavy) {
+        return flow_sensitive_enabled;
+    }
+    true
+}
+
 #[tower_lsp::async_trait]
 impl LanguageServer for BslLanguageServer {
     // ========================================================================
@@ -799,10 +809,17 @@ impl LanguageServer for BslLanguageServer {
                 path: Arc::from(path),
             }]);
 
+        let flow_sensitive_enabled = {
+            let settings = self.settings.read().await;
+            settings.enable_flow_sensitive
+        };
         let diagnostics_generation = self.bump_diagnostics_generation_v2(file_id).await;
         for profile in bsl_runtime::application::diagnostics_profiles_for_trigger(
             bsl_runtime::application::DiagnosticsTrigger::DidChange,
         ) {
+            if !should_schedule_profile(*profile, flow_sensitive_enabled) {
+                continue;
+            }
             match profile {
                 bsl_runtime::application::DiagnosticsProfile::Fast => {
                     self.run_diagnostics_profile_immediate_v2(
@@ -852,10 +869,17 @@ impl LanguageServer for BslLanguageServer {
             return;
         };
 
+        let flow_sensitive_enabled = {
+            let settings = self.settings.read().await;
+            settings.enable_flow_sensitive
+        };
         let diagnostics_generation = self.bump_diagnostics_generation_v2(file_id).await;
         for profile in bsl_runtime::application::diagnostics_profiles_for_trigger(
             bsl_runtime::application::DiagnosticsTrigger::DidSave,
         ) {
+            if !should_schedule_profile(*profile, flow_sensitive_enabled) {
+                continue;
+            }
             self.schedule_diagnostics_profile_v2(
                 uri.clone(),
                 file_id,
@@ -2965,4 +2989,21 @@ fn normalize_optional_string(value: Option<String>) -> Option<String> {
             Some(trimmed.to_string())
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_schedule_profile;
+    use bsl_runtime::application::DiagnosticsProfile;
+
+    #[test]
+    fn idle_heavy_is_skipped_when_flow_sensitive_disabled() {
+        assert!(!should_schedule_profile(DiagnosticsProfile::IdleHeavy, false));
+        assert!(should_schedule_profile(DiagnosticsProfile::IdleHeavy, true));
+        assert!(should_schedule_profile(DiagnosticsProfile::Fast, false));
+        assert!(should_schedule_profile(
+            DiagnosticsProfile::DebouncedFull,
+            false
+        ));
+    }
 }

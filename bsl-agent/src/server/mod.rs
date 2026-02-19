@@ -1138,7 +1138,10 @@ impl From<BslAgentError> for rmcp::ErrorData {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::types::{JobCancelParams, WorkspaceOpenParams};
+    use crate::server::types::{
+        DocumentRef, FileRef, JobCancelParams, WorkspaceDocumentsSetFile,
+        WorkspaceDocumentsSetParams, WorkspaceOpenParams,
+    };
     use crate::types::{JobStateDto, WorkspaceOpenResponse};
     use rmcp::handler::server::wrapper::Parameters;
     use std::time::Duration;
@@ -1330,6 +1333,86 @@ mod tests {
         assert!(
             value > 0,
             "expected diagnostics pipeline cancelled metric key {key} to be incremented"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn workspace_documents_set_records_superseded_generation_for_stale_batch_jobs() {
+        let session_manager = Arc::new(SessionManager::new());
+        let job_manager = Arc::new(JobManager::new_in_memory());
+        let handler =
+            BslAgentHandler::with_state(Arc::clone(&session_manager), Arc::clone(&job_manager));
+
+        let root = tempfile::TempDir::new().expect("tempdir");
+        let open = session_manager
+            .open(
+                WorkspaceOpenParams {
+                    roots: vec![root.path().to_string_lossy().to_string()],
+                    platform_docs_archive: None,
+                    platform_version: None,
+                    configuration_path: None,
+                    mode: None,
+                },
+                Arc::clone(&job_manager),
+            )
+            .await
+            .expect("workspace_open");
+        wait_workspace_ready(&session_manager, &job_manager, &open).await;
+
+        let job_id = job_manager
+            .spawn_with_class(
+                "batch-documents-set-observability",
+                cpu_work_class_for_operation(SemanticOperation::SymbolSearch),
+                move |_| async move {
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    Ok(serde_json::json!({ "ok": true }))
+                },
+            )
+            .await;
+        handler
+            .register_batch_job(
+                &open.session_id,
+                open.analysis_revision,
+                &job_id,
+                DiagnosticsProfile::DebouncedFull,
+            )
+            .await;
+
+        let overlay_path = root.path().join("Module.bsl");
+        let _ = handler
+            .workspace_documents_set(Parameters(WorkspaceDocumentsSetParams {
+                session_id: open.session_id.clone(),
+                files: vec![WorkspaceDocumentsSetFile::File(FileRef {
+                    doc: DocumentRef::Path(overlay_path.to_string_lossy().to_string()),
+                    text: Some("Procedure T()\nEndProcedure\n".to_string()),
+                    version: Some(1),
+                })],
+                mark_hot: true,
+            }))
+            .await
+            .expect("workspace_documents_set");
+
+        let status = job_manager.status(&job_id).await.expect("job status");
+        assert_eq!(
+            status.state,
+            JobStateDto::Canceled,
+            "stale batch job must be canceled after documents_set revision bump"
+        );
+
+        let metrics = session_manager
+            .observability_metrics_get(&open.session_id)
+            .await
+            .expect("metrics");
+        let counters = metrics
+            .metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        let key = "intellisense_v2_diagnostics_pipeline_total_origin_agent_trigger_documents_set_profile_debounced_full_reason_superseded_generation";
+        let value = counters.get(key).and_then(|value| value.as_u64()).unwrap_or(0);
+        assert!(
+            value > 0,
+            "expected diagnostics pipeline superseded metric key {key} to be incremented"
         );
     }
 }

@@ -39,10 +39,16 @@ fn diagnostics_debounce_duration() -> Duration {
     // typing can build up a backlog and make completion/hover feel "frozen".
     //
     // Default: 250ms. Can be overridden via env for experiments.
+    // Clamp to a small floor to avoid "0ms" misconfiguration that turns debounced profiles into
+    // tight loops under rapid didChange traffic.
     let raw = bsl_runtime::system::global_runtime_config()
         .get_u64(bsl_runtime::system::RuntimeKey::LspDiagnosticsDebounceMs)
         .unwrap_or(250);
-    Duration::from_millis(raw)
+    Duration::from_millis(clamp_diagnostics_debounce_ms(raw))
+}
+
+fn clamp_diagnostics_debounce_ms(raw: u64) -> u64 {
+    raw.max(25)
 }
 
 impl BslLanguageServer {
@@ -910,6 +916,14 @@ impl BslLanguageServer {
         };
         let plan =
             bsl_runtime::application::diagnostics_execution_plan(profile, flow_sensitive_enabled);
+        if !plan.run_syntax && !plan.run_semantic {
+            self.record_diagnostics_pipeline_event_v2(
+                trigger,
+                profile,
+                bsl_runtime::application::DiagnosticsDisposition::Published,
+            );
+            return bsl_runtime::application::DiagnosticsDisposition::Published;
+        }
 
         let context = self
             .build_execution_context_v2(
@@ -1441,6 +1455,14 @@ mod tests {
         "intellisense_v2_runtime_exec_background_ms",
         "intellisense_v2_revision_lag_versions",
     ];
+
+    #[test]
+    fn diagnostics_debounce_floor_prevents_zero_ms_tight_loops() {
+        assert_eq!(clamp_diagnostics_debounce_ms(0), 25);
+        assert_eq!(clamp_diagnostics_debounce_ms(1), 25);
+        assert_eq!(clamp_diagnostics_debounce_ms(25), 25);
+        assert_eq!(clamp_diagnostics_debounce_ms(250), 250);
+    }
 
     const UNIFIED_STAGE_GAUGE_KEYS: &[&str] = &[
         "intellisense_v2_runtime_saturation_waiters_interactive",

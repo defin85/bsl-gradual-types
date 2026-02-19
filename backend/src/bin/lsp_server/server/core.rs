@@ -29,8 +29,8 @@ use crate::converters::{semantic_error_to_diagnostic, syntax_errors_to_diagnosti
 
 use super::analysis_v2_runtime::AnalysisV2Runtime;
 use super::{
-    BslLanguageServer, CodeActionsCapabilityState, FormattingCapabilityState,
-    InlayHintsCapabilityState, Url, V2FileKey,
+    BslLanguageServer, CodeActionsCapabilityState, DocumentShadowStateV2,
+    FormattingCapabilityState, InlayHintsCapabilityState, Url, V2FileKey,
 };
 
 fn diagnostics_debounce_duration() -> Duration {
@@ -124,8 +124,10 @@ impl BslLanguageServer {
             diagnostics_tasks_v2: Arc::new(Mutex::new(HashMap::new())),
             diagnostics_generation_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_received_file_versions_v2: Arc::new(RwLock::new(HashMap::new())),
+            latest_document_shadow_state_v2: Arc::new(RwLock::new(HashMap::new())),
             completion_seen_files_v2: Arc::new(RwLock::new(std::collections::HashSet::new())),
             completion_stale_fallback_cache_v2: Arc::new(RwLock::new(HashMap::new())),
+            completion_parity_state_v2: Arc::new(RwLock::new(HashMap::new())),
             last_deps_id_v2: Arc::new(RwLock::new(Some(initial_deps_id))),
             last_settings_id_v2: Arc::new(RwLock::new(Some(initial_settings_id))),
         }
@@ -567,10 +569,21 @@ impl BslLanguageServer {
                 self.analysis_v2
                     .apply_changes(vec![bsl_analysis_v2::Change::SetFile {
                         file_id,
-                        text: Arc::from(file_content),
+                        text: Arc::from(file_content.clone()),
                         version: 0,
-                        path: Arc::from(path_string),
+                        path: Arc::from(path_string.clone()),
                     }]);
+                self.latest_received_file_versions_v2
+                    .write()
+                    .await
+                    .insert(file_id, 0);
+                self.latest_document_shadow_state_v2.write().await.insert(
+                    file_id,
+                    DocumentShadowStateV2 {
+                        version: 0,
+                        text: Arc::from(file_content),
+                    },
+                );
                 0
             }
         };
@@ -1390,17 +1403,17 @@ mod tests {
     use tower_lsp::jsonrpc::Request;
     use tower_lsp::lsp_types::{
         ClientCapabilities, CodeActionContext, CodeActionOrCommand, CodeActionParams,
-        CompletionItemKind, CompletionParams, CompletionResponse, DidChangeConfigurationParams,
-        DidChangeTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams,
-        DocumentRangeFormattingParams, DocumentSymbolParams, DocumentSymbolResponse,
-        FormattingOptions, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents,
-        HoverParams, InitializeParams, InitializedParams, InlayHint, InlayHintLabel,
-        InlayHintParams, Location, MarkedString, PartialResultParams, Position,
-        PrepareRenameResponse, PublishDiagnosticsParams, Range, ReferenceContext, ReferenceParams,
-        RenameParams, SymbolInformation, SymbolKind, TextDocumentContentChangeEvent,
-        TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
-        VersionedTextDocumentIdentifier, WorkDoneProgressParams, WorkspaceEdit,
-        WorkspaceSymbolParams,
+        CompletionContext, CompletionItemKind, CompletionParams, CompletionResponse,
+        CompletionTriggerKind, DidChangeConfigurationParams, DidChangeTextDocumentParams,
+        DidOpenTextDocumentParams, DocumentFormattingParams, DocumentRangeFormattingParams,
+        DocumentSymbolParams, DocumentSymbolResponse, FormattingOptions, GotoDefinitionParams,
+        GotoDefinitionResponse, Hover, HoverContents, HoverParams, InitializeParams,
+        InitializedParams, InlayHint, InlayHintLabel, InlayHintParams, Location, MarkedString,
+        PartialResultParams, Position, PrepareRenameResponse, PublishDiagnosticsParams, Range,
+        ReferenceContext, ReferenceParams, RenameParams, SymbolInformation, SymbolKind,
+        TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
+        TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
+        WorkspaceEdit, WorkspaceSymbolParams,
     };
     use tower_lsp::LanguageServer;
     use tower_lsp::LspService;
@@ -2332,6 +2345,290 @@ mod tests {
         assert!(
             completion_response.is_some(),
             "completion should return a response"
+        );
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
+    async fn p7_trigger_character_and_invoked_member_access_keep_semantic_parity() {
+        let coordinator = Arc::new(SystemCoordinator::new());
+        let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+            Arc::new(std::sync::Mutex::new(None));
+
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            let server_holder = server_holder.clone();
+            move |client| {
+                let server = BslLanguageServer::new(client, coordinator.clone());
+                *server_holder.lock().expect("server holder lock") = Some(server.clone());
+                server
+            }
+        })
+        .finish();
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        initialize_lsp_service(&mut service).await;
+
+        let uri = Url::parse("file:///test_p7_trigger_parity.bsl").expect("test uri");
+        let text = concat!(
+            "Процедура Тест()\n",
+            "    ЛокМассив = Новый Массив;\n",
+            "    ЛокМассив.\n",
+            "КонецПроцедуры\n"
+        );
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        };
+        let did_open_req = Request::build("textDocument/didOpen")
+            .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+            .finish();
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+
+        let did_change = DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: uri.clone(),
+                version: 2,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                range: None,
+                range_length: None,
+                text: text.to_string(),
+            }],
+        };
+        let did_change_req = Request::build("textDocument/didChange")
+            .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+            .finish();
+        let did_change_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_change_req)
+            .await
+            .expect("didChange notification");
+        assert!(did_change_response.is_none(), "didChange is a notification");
+
+        let server = server_holder
+            .lock()
+            .expect("server holder lock")
+            .clone()
+            .expect("server must be created");
+        let member_character = "    ЛокМассив."
+            .chars()
+            .map(|ch| ch.len_utf16())
+            .sum::<usize>() as u32;
+        let dot_response = server
+            .completion(CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: Position::new(2, member_character),
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: Some(CompletionContext {
+                    trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+                    trigger_character: Some(".".to_string()),
+                }),
+            })
+            .await
+            .expect("dot completion request")
+            .expect("dot completion response");
+
+        let invoked_response = server
+            .completion(CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: Position::new(2, member_character),
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: Some(CompletionContext {
+                    trigger_kind: CompletionTriggerKind::INVOKED,
+                    trigger_character: None,
+                }),
+            })
+            .await
+            .expect("invoked completion request")
+            .expect("invoked completion response");
+
+        let extract_labels = |response: &CompletionResponse| -> Vec<String> {
+            match response {
+                CompletionResponse::Array(items) => {
+                    items.iter().map(|item| item.label.clone()).collect()
+                }
+                CompletionResponse::List(list) => {
+                    list.items.iter().map(|item| item.label.clone()).collect()
+                }
+            }
+        };
+        let dot_members = extract_labels(&dot_response);
+        let invoked_members = extract_labels(&invoked_response);
+        assert!(
+            !dot_members.is_empty(),
+            "trigger-character completion must return candidates"
+        );
+        assert!(
+            !invoked_members.is_empty(),
+            "invoked completion must return candidates"
+        );
+        assert!(
+            dot_members.iter().any(|label| invoked_members.contains(label)),
+            "trigger-character and invoked completion must have semantic overlap: dot={:?} invoked={:?}",
+            dot_members,
+            invoked_members
+        );
+
+        let metrics = coordinator.observability_metrics();
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        let trigger_char_total = counters
+            .get("intellisense_v2_completion_trigger_mode_total_mode_trigger_character")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0);
+        let invoked_total = counters
+            .get("intellisense_v2_completion_trigger_mode_total_mode_invoked")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0);
+        assert!(
+            trigger_char_total > 0,
+            "trigger-character completion metric must be recorded"
+        );
+        assert!(invoked_total > 0, "invoked completion metric must be recorded");
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
+    async fn p7_completion_context_modes_are_supported() {
+        let coordinator = Arc::new(SystemCoordinator::new());
+        let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+            Arc::new(std::sync::Mutex::new(None));
+
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            let server_holder = server_holder.clone();
+            move |client| {
+                let server = BslLanguageServer::new(client, coordinator.clone());
+                *server_holder.lock().expect("server holder lock") = Some(server.clone());
+                server
+            }
+        })
+        .finish();
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        initialize_lsp_service(&mut service).await;
+
+        let uri = Url::parse("file:///test_p7_completion_context_modes.bsl").expect("test uri");
+        let text = "Процедура Тест()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.\nКонецПроцедуры\n";
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        };
+        let did_open_req = Request::build("textDocument/didOpen")
+            .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+            .finish();
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+
+        let server = server_holder
+            .lock()
+            .expect("server holder lock")
+            .clone()
+            .expect("server must be created");
+        let member_character = "    ЛокМассив."
+            .chars()
+            .map(|ch| ch.len_utf16())
+            .sum::<usize>() as u32;
+        let base_params = TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position::new(2, member_character),
+        };
+
+        let contexts = [
+            Some(CompletionContext {
+                trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+                trigger_character: Some(".".to_string()),
+            }),
+            Some(CompletionContext {
+                trigger_kind: CompletionTriggerKind::INVOKED,
+                trigger_character: None,
+            }),
+            Some(CompletionContext {
+                trigger_kind: CompletionTriggerKind::TRIGGER_FOR_INCOMPLETE_COMPLETIONS,
+                trigger_character: None,
+            }),
+            None,
+        ];
+
+        for context in contexts {
+            let response = server
+                .completion(CompletionParams {
+                    text_document_position: base_params.clone(),
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                    partial_result_params: PartialResultParams::default(),
+                    context,
+                })
+                .await
+                .expect("completion request");
+            assert!(response.is_some(), "completion response must be present");
+        }
+
+        let metrics = coordinator.observability_metrics();
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        assert!(
+            counters
+                .get("intellisense_v2_completion_trigger_mode_total_mode_trigger_character")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0)
+                > 0
+        );
+        assert!(
+            counters
+                .get("intellisense_v2_completion_trigger_mode_total_mode_invoked")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0)
+                > 0
+        );
+        assert!(
+            counters
+                .get("intellisense_v2_completion_trigger_mode_total_mode_trigger_for_incomplete")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0)
+                > 0
+        );
+        assert!(
+            counters
+                .get("intellisense_v2_completion_trigger_mode_total_mode_none")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0)
+                > 0
         );
 
         drain_task.abort();

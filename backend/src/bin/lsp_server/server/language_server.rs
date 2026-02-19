@@ -59,6 +59,63 @@ fn should_schedule_profile(
     true
 }
 
+fn completion_trigger_mode_label(context: Option<&CompletionContext>) -> &'static str {
+    match context.map(|ctx| ctx.trigger_kind) {
+        Some(CompletionTriggerKind::TRIGGER_CHARACTER) => "trigger_character",
+        Some(CompletionTriggerKind::INVOKED) => "invoked",
+        Some(CompletionTriggerKind::TRIGGER_FOR_INCOMPLETE_COMPLETIONS) => {
+            "trigger_for_incomplete"
+        }
+        Some(_) => "other",
+        None => "none",
+    }
+}
+
+fn completion_trigger_character(context: Option<&CompletionContext>) -> Option<char> {
+    context
+        .and_then(|ctx| ctx.trigger_character.as_deref())
+        .and_then(|value| value.chars().next())
+}
+
+fn is_completion_identifier_char(ch: char) -> bool {
+    ch == '_' || ch.is_alphanumeric()
+}
+
+fn completion_request_targets_member_access(
+    text: &str,
+    position: Position,
+    trigger_char_hint: Option<char>,
+) -> bool {
+    if trigger_char_hint == Some('.') {
+        return true;
+    }
+
+    let Some(line_text) = text.lines().nth(position.line as usize) else {
+        return false;
+    };
+    let column_index = bsl_backend::system::positioning::utf16_to_byte_offset(
+        line_text,
+        position.character,
+    );
+    let line_prefix = line_text.get(..column_index).unwrap_or(line_text);
+    let line_prefix = if line_text
+        .get(column_index..)
+        .and_then(|tail| tail.chars().next())
+        == Some('.')
+    {
+        format!("{line_prefix}.")
+    } else {
+        line_prefix.to_string()
+    };
+
+    let trimmed = line_prefix.trim_end();
+    let Some(dot_pos) = trimmed.rfind('.') else {
+        return false;
+    };
+    let after_dot = trimmed[dot_pos + 1..].trim_start();
+    after_dot.is_empty() || after_dot.chars().all(is_completion_identifier_char)
+}
+
 #[tower_lsp::async_trait]
 impl LanguageServer for BslLanguageServer {
     // ========================================================================
@@ -697,7 +754,7 @@ impl LanguageServer for BslLanguageServer {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
-        let text = params.text_document.text.clone();
+        let text = params.text_document.text;
         let version = params.text_document.version;
 
         let _sync_guard = self.text_sync_v2.lock().await;
@@ -708,18 +765,27 @@ impl LanguageServer for BslLanguageServer {
             Ok(path) => path.to_string_lossy().to_string(),
             Err(_) => uri.to_string(),
         };
+        let text: Arc<str> = Arc::from(text);
+        let path: Arc<str> = Arc::from(path);
 
         self.latest_received_file_versions_v2
             .write()
             .await
             .insert(file_id, version);
+        self.latest_document_shadow_state_v2.write().await.insert(
+            file_id,
+            super::DocumentShadowStateV2 {
+                version,
+                text: text.clone(),
+            },
+        );
 
         self.analysis_v2
             .apply_changes(vec![bsl_analysis_v2::Change::SetFile {
                 file_id,
-                text: Arc::from(text.clone()),
+                text,
                 version,
-                path: Arc::from(path),
+                path,
             }]);
 
         let diagnostics_generation = self.bump_diagnostics_generation_v2(file_id).await;
@@ -760,32 +826,38 @@ impl LanguageServer for BslLanguageServer {
             Err(_) => uri.to_string(),
         };
 
-        let prev_version = self
-            .latest_received_file_versions_v2
-            .read()
-            .await
-            .get(&file_id)
-            .copied();
-        if let Some(prev_version) = prev_version {
-            let _ = self
-                .analysis_v2
-                .wait_for_file_version(file_id, prev_version)
-                .await;
-        }
-
         // Apply changes
         let updated_text = if let Some(full_change) = changes.iter().find(|c| c.range.is_none()) {
             full_change.text.clone()
         } else {
-            let base_text = self
-                .analysis_v2
-                .snapshot()
-                .await
-                .file_text(file_id)
-                .ok()
-                .flatten()
-                .map(|text| text.to_string())
-                .unwrap_or_default();
+            let shadow_state = {
+                let shadow = self.latest_document_shadow_state_v2.read().await;
+                shadow.get(&file_id).cloned()
+            };
+            if let Some(state) = shadow_state.as_ref() {
+                if version < state.version {
+                    warn!(
+                        uri = %uri,
+                        file_id = file_id.0,
+                        requested_version = version,
+                        shadow_version = state.version,
+                        "Skipping out-of-order didChange for older version"
+                    );
+                    return;
+                }
+            }
+            let base_text = if let Some(state) = shadow_state {
+                state.text.to_string()
+            } else {
+                self.analysis_v2
+                    .snapshot()
+                    .await
+                    .file_text(file_id)
+                    .ok()
+                    .flatten()
+                    .map(|text| text.to_string())
+                    .unwrap_or_default()
+            };
 
             let mut current_text = base_text;
             for change in &changes {
@@ -800,13 +872,22 @@ impl LanguageServer for BslLanguageServer {
             .write()
             .await
             .insert(file_id, version);
+        let updated_text: Arc<str> = Arc::from(updated_text);
+        let path: Arc<str> = Arc::from(path);
+        self.latest_document_shadow_state_v2.write().await.insert(
+            file_id,
+            super::DocumentShadowStateV2 {
+                version,
+                text: updated_text.clone(),
+            },
+        );
 
         self.analysis_v2
             .apply_changes(vec![bsl_analysis_v2::Change::SetFile {
                 file_id,
-                text: Arc::from(updated_text.clone()),
+                text: updated_text,
                 version,
-                path: Arc::from(path),
+                path,
             }]);
 
         let flow_sensitive_enabled = {
@@ -904,10 +985,18 @@ impl LanguageServer for BslLanguageServer {
                 .write()
                 .await
                 .remove(&file_id);
+            self.latest_document_shadow_state_v2
+                .write()
+                .await
+                .remove(&file_id);
             self.completion_stale_fallback_cache_v2
                 .write()
                 .await
                 .remove(&file_id);
+            self.completion_parity_state_v2
+                .write()
+                .await
+                .retain(|(tracked_file_id, _, _, _), _| *tracked_file_id != file_id);
             self.diagnostics_generation_v2
                 .write()
                 .await
@@ -1303,12 +1392,18 @@ impl LanguageServer for BslLanguageServer {
     ) -> JsonRpcResult<Option<CompletionResponse>> {
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
+        let trigger_mode = completion_trigger_mode_label(params.context.as_ref());
+        let trigger_char_hint = completion_trigger_character(params.context.as_ref());
+        self.coordinator
+            .record_intellisense_v2_completion_trigger_mode(trigger_mode);
 
+        let file_id = self.get_or_create_file_id_v2(&uri).await;
         let started = Instant::now();
         let snippet_support = *self.completion_snippet_support.read().await;
         let mut completion_outcome: Option<&'static str> = None;
+        let mut observed_file_version_for_completion: Option<i32> = None;
+        let mut member_access_observed = false;
         let completion = {
-            let file_id = self.get_or_create_file_id_v2(&uri).await;
             let first_completion_for_file = {
                 let mut seen = self.completion_seen_files_v2.write().await;
                 seen.insert(file_id)
@@ -1339,6 +1434,20 @@ impl LanguageServer for BslLanguageServer {
                     CompletionResponse::Array(items) if !items.is_empty() => Some(items.clone()),
                     _ => None,
                 };
+            let mut member_access_request = trigger_char_hint == Some('.');
+            if !member_access_request {
+                let shadow_text = {
+                    let shadow = self.latest_document_shadow_state_v2.read().await;
+                    shadow.get(&file_id).map(|state| state.text.clone())
+                };
+                if let Some(text) = shadow_text {
+                    member_access_request = completion_request_targets_member_access(
+                        text.as_ref(),
+                        position,
+                        trigger_char_hint,
+                    );
+                }
+            }
 
             let include_flow_sensitive = {
                 let settings = self.settings.read().await;
@@ -1397,6 +1506,8 @@ impl LanguageServer for BslLanguageServer {
                     ) = {
                         let analysis = prepared.snapshot.analysis;
                         let index_snapshot = prepared.snapshot.index_snapshot;
+                        let parse_result_without_ir = member_access_request;
+                        let member_access_request_for_query = member_access_request;
 
                         let observed_file_version = analysis.file_version(file_id).ok().flatten();
                         let observed_deps_id = prepared.snapshot.deps_id;
@@ -1540,7 +1651,7 @@ impl LanguageServer for BslLanguageServer {
                                         bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query_singleflight(
                                             &context_for_query,
                                             &analysis,
-                                            ir_program.is_some(),
+                                            ir_program.is_some() || parse_result_without_ir,
                                             Some(coordinator_for_query.as_ref()),
                                             file_id,
                                         )
@@ -1588,7 +1699,8 @@ impl LanguageServer for BslLanguageServer {
                                         }
                                     }
 
-                                    let member_access_owner_type_hint = if ir_program.is_some() {
+                                    let member_access_owner_type_hint =
+                                        if member_access_request_for_query {
                                         file_content.as_deref().and_then(|text| {
                                             let line_text = text.lines().nth(position.line as usize)?;
                                             let cursor_byte =
@@ -1699,11 +1811,23 @@ impl LanguageServer for BslLanguageServer {
                             observed_file_version,
                         )
                     };
+                    observed_file_version_for_completion = observed_file_version;
+                    let member_access_context = file_content
+                        .as_deref()
+                        .map(|text| {
+                            completion_request_targets_member_access(
+                                text,
+                                position,
+                                trigger_char_hint,
+                            )
+                        })
+                        .unwrap_or(member_access_request);
+                    member_access_observed = member_access_context;
 
                     let mut completion_response = match (file_content, file_path, deps, ir_program)
                     {
                         (Some(file_content), Some(file_path), Some(deps), Some(ir_program)) => {
-                            crate::handlers::handle_completion_v2(
+                            crate::handlers::handle_completion_v2_with_trigger_hint(
                                 file_content,
                                 file_path,
                                 ir_program,
@@ -1715,6 +1839,7 @@ impl LanguageServer for BslLanguageServer {
                                 index_snapshot.as_ref(),
                                 snippet_support,
                                 include_flow_sensitive,
+                                trigger_char_hint,
                             )
                             .await
                         }
@@ -1730,41 +1855,62 @@ impl LanguageServer for BslLanguageServer {
                             completion_outcome.get_or_insert("missing_deps");
                             empty()
                         }
-                        (Some(_), Some(_), Some(_), None) => {
-                            if force_incomplete_due_stale {
-                                let stale_cached_items =
-                                    match (observed_settings_id.as_ref(), observed_file_version) {
-                                        (Some(settings_id), Some(file_version)) => {
-                                            let cache = self
-                                                .completion_stale_fallback_cache_v2
-                                                .read()
-                                                .await;
-                                            cache.get(&file_id).and_then(|entry| {
-                                                let compatible = entry.deps_id == observed_deps_id
-                                                    && entry.settings_id == *settings_id
-                                                    && entry.file_version == file_version
-                                                    && !entry.items.is_empty();
-                                                if compatible {
-                                                    Some(entry.items.clone())
-                                                } else {
-                                                    None
-                                                }
-                                            })
-                                        }
-                                        _ => None,
-                                    };
+                        (Some(file_content), Some(file_path), Some(deps), None) => {
+                            let stale_cached_items =
+                                match (observed_settings_id.as_ref(), observed_file_version) {
+                                    (Some(settings_id), Some(file_version)) => {
+                                        let cache =
+                                            self.completion_stale_fallback_cache_v2.read().await;
+                                        cache.get(&file_id).and_then(|entry| {
+                                            let compatible = entry.deps_id == observed_deps_id
+                                                && entry.settings_id == *settings_id
+                                                && entry.file_version == file_version
+                                                && !entry.items.is_empty();
+                                            if compatible {
+                                                Some(entry.items.clone())
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                    }
+                                    _ => None,
+                                };
 
-                                if let Some(items) = stale_cached_items {
-                                    Some(crate::handlers::CompletionResponseWithStats {
-                                        response: CompletionResponse::List(CompletionList {
-                                            is_incomplete: true,
-                                            items,
-                                        }),
-                                        stats: None,
-                                        had_error: false,
-                                    })
+                            if let Some(items) = stale_cached_items {
+                                completion_outcome.get_or_insert("degraded_incomplete");
+                                Some(crate::handlers::CompletionResponseWithStats {
+                                    response: CompletionResponse::List(CompletionList {
+                                        is_incomplete: true,
+                                        items,
+                                    }),
+                                    stats: None,
+                                    had_error: false,
+                                })
+                            } else if member_access_context {
+                                let mut degraded = crate::handlers::handle_completion_v2_degraded(
+                                    file_content,
+                                    file_path,
+                                    parse_result,
+                                    member_access_owner_type_hint,
+                                    deps,
+                                    position,
+                                    &uri,
+                                    index_snapshot.as_ref(),
+                                    snippet_support,
+                                    include_flow_sensitive,
+                                    trigger_char_hint,
+                                )
+                                .await;
+                                if let Some(response) = degraded.as_mut() {
+                                    if let CompletionResponse::List(list) = &mut response.response {
+                                        list.is_incomplete = true;
+                                    }
+                                }
+                                if degraded.is_some() {
+                                    completion_outcome.get_or_insert("degraded_incomplete");
+                                    degraded
                                 } else {
-                                    completion_outcome.get_or_insert("missing_ir");
+                                    completion_outcome.get_or_insert("fallback_unavailable");
                                     self.coordinator
                                         .record_intellisense_v2_completion_fallback_unavailable();
                                     empty()
@@ -1874,6 +2020,45 @@ impl LanguageServer for BslLanguageServer {
                 } else {
                     "ok_non_empty"
                 });
+            }
+
+            if member_access_observed && !result.had_error && items_count == 0 {
+                self.coordinator
+                    .record_intellisense_v2_completion_member_access_terminal_empty(
+                        trigger_mode,
+                        completion_outcome.unwrap_or("ok_empty"),
+                    );
+            }
+
+            if member_access_observed
+                && matches!(trigger_mode, "trigger_character" | "invoked")
+                && observed_file_version_for_completion.is_some()
+            {
+                let observed_file_version = observed_file_version_for_completion
+                    .expect("checked completion observed version");
+                let key = (file_id, observed_file_version, position.line, position.character);
+                let non_empty = items_count > 0;
+                let parity_drift = {
+                    let mut parity = self.completion_parity_state_v2.write().await;
+                    let entry = parity.entry(key).or_default();
+                    if trigger_mode == "trigger_character" {
+                        entry.trigger_character_non_empty = Some(non_empty);
+                    } else {
+                        entry.invoked_non_empty = Some(non_empty);
+                    }
+                    match (entry.trigger_character_non_empty, entry.invoked_non_empty) {
+                        (Some(trigger_non_empty), Some(invoked_non_empty)) => {
+                            let mismatch = trigger_non_empty != invoked_non_empty;
+                            parity.remove(&key);
+                            mismatch
+                        }
+                        _ => false,
+                    }
+                };
+                if parity_drift {
+                    self.coordinator
+                        .record_intellisense_v2_completion_parity_drift(trigger_mode);
+                }
             }
         }
 

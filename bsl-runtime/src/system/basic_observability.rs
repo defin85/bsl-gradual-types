@@ -813,6 +813,10 @@ impl BasicObservability {
             "missing_file_path" => "intellisense_v2_completion_result_total_missing_file_path",
             "missing_deps" => "intellisense_v2_completion_result_total_missing_deps",
             "missing_ir" => "intellisense_v2_completion_result_total_missing_ir",
+            "degraded_incomplete" => "intellisense_v2_completion_result_total_degraded_incomplete",
+            "fallback_unavailable" => {
+                "intellisense_v2_completion_result_total_fallback_unavailable"
+            }
             "cancelled" => "intellisense_v2_completion_result_total_cancelled",
             "handler_error" => "intellisense_v2_completion_result_total_handler_error",
             "ok_empty" => "intellisense_v2_completion_result_total_ok_empty",
@@ -833,6 +837,31 @@ impl BasicObservability {
             _ => "intellisense_v2_completion_warm_for_file_total",
         };
         self.metrics.increment(metric);
+    }
+
+    pub fn record_intellisense_v2_completion_trigger_mode(&self, mode: &str) {
+        let mode = normalize_completion_trigger_mode_label(mode);
+        let key = format!("intellisense_v2_completion_trigger_mode_total_mode_{mode}");
+        self.metrics.increment(&key);
+    }
+
+    pub fn record_intellisense_v2_completion_parity_drift(&self, mode: &str) {
+        let mode = normalize_completion_trigger_mode_label(mode);
+        let key = format!("intellisense_v2_completion_parity_drift_total_mode_{mode}");
+        self.metrics.increment(&key);
+    }
+
+    pub fn record_intellisense_v2_completion_member_access_terminal_empty(
+        &self,
+        mode: &str,
+        reason: &str,
+    ) {
+        let mode = normalize_completion_trigger_mode_label(mode);
+        let reason = normalize_completion_terminal_reason_label(reason);
+        let key = format!(
+            "intellisense_v2_completion_member_access_terminal_empty_total_mode_{mode}_reason_{reason}"
+        );
+        self.metrics.increment(&key);
     }
 
     pub fn record_intellisense_v2_wait_for_file_version(&self, kind: &str, duration: Duration) {
@@ -2102,6 +2131,26 @@ fn normalize_diagnostics_reason_label(reason: &str) -> &'static str {
     }
 }
 
+fn normalize_completion_trigger_mode_label(mode: &str) -> &'static str {
+    match mode {
+        "trigger_character" => "trigger_character",
+        "invoked" => "invoked",
+        "trigger_for_incomplete" => "trigger_for_incomplete",
+        "none" => "none",
+        _ => "other",
+    }
+}
+
+fn normalize_completion_terminal_reason_label(reason: &str) -> &'static str {
+    match reason {
+        "ok_empty" => "ok_empty",
+        "fallback_unavailable" => "fallback_unavailable",
+        "missing_ir" => "missing_ir",
+        "wait_not_ready" => "wait_not_ready",
+        _ => "other",
+    }
+}
+
 fn legacy_wait_for_file_version_metrics(kind: &str) -> (&'static str, &'static str) {
     match kind {
         "completion" => (
@@ -2562,6 +2611,70 @@ mod observability_contract_tests {
         assert!(
             (cancel_rate - 1.0).abs() < 1e-9,
             "parse_result cancel rate must be derived from parse_result stage-reason counters"
+        );
+    }
+
+    #[test]
+    fn completion_outcome_exports_degraded_and_fallback_unavailable() {
+        let observability = BasicObservability::default();
+        observability.record_intellisense_v2_completion_outcome("degraded_incomplete");
+        observability.record_intellisense_v2_completion_outcome("fallback_unavailable");
+
+        let exported = observability.get_metrics().export_metrics();
+        let counters = counters(&exported);
+        assert_eq!(
+            counter_value(
+                counters,
+                "intellisense_v2_completion_result_total_degraded_incomplete"
+            ),
+            1,
+            "degraded_incomplete outcome must be exported"
+        );
+        assert_eq!(
+            counter_value(
+                counters,
+                "intellisense_v2_completion_result_total_fallback_unavailable"
+            ),
+            1,
+            "fallback_unavailable outcome must be exported"
+        );
+    }
+
+    #[test]
+    fn completion_trigger_and_terminal_empty_metrics_normalize_labels() {
+        let observability = BasicObservability::default();
+        observability.record_intellisense_v2_completion_trigger_mode("unexpected-mode");
+        observability.record_intellisense_v2_completion_parity_drift("invoked");
+        observability.record_intellisense_v2_completion_member_access_terminal_empty(
+            "trigger_character",
+            "unexpected-reason",
+        );
+
+        let exported = observability.get_metrics().export_metrics();
+        let counters = counters(&exported);
+        assert_eq!(
+            counter_value(
+                counters,
+                "intellisense_v2_completion_trigger_mode_total_mode_other"
+            ),
+            1,
+            "trigger mode must collapse into bounded label set"
+        );
+        assert_eq!(
+            counter_value(
+                counters,
+                "intellisense_v2_completion_parity_drift_total_mode_invoked"
+            ),
+            1,
+            "parity drift metric must be exported with normalized mode"
+        );
+        assert_eq!(
+            counter_value(
+                counters,
+                "intellisense_v2_completion_member_access_terminal_empty_total_mode_trigger_character_reason_other"
+            ),
+            1,
+            "terminal-empty metric must normalize unknown reason"
         );
     }
 }

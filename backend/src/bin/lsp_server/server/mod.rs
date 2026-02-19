@@ -73,6 +73,18 @@ pub(crate) struct CompletionStaleFallbackCacheEntryV2 {
     pub items: Vec<CompletionItem>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct DocumentShadowStateV2 {
+    pub version: i32,
+    pub text: Arc<str>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CompletionParityStateV2 {
+    pub trigger_character_non_empty: Option<bool>,
+    pub invoked_non_empty: Option<bool>,
+}
+
 /// BSL Language Server backend - CLEAN ARCHITECTURE
 #[derive(Clone)]
 pub struct BslLanguageServer {
@@ -98,9 +110,12 @@ pub struct BslLanguageServer {
     pub(crate) diagnostics_tasks_v2: Arc<Mutex<DiagnosticsTasksV2>>,
     pub(crate) diagnostics_generation_v2: Arc<RwLock<HashMap<V2FileId, u64>>>,
     pub(crate) latest_received_file_versions_v2: Arc<RwLock<HashMap<V2FileId, i32>>>,
+    pub(crate) latest_document_shadow_state_v2: Arc<RwLock<HashMap<V2FileId, DocumentShadowStateV2>>>,
     pub(crate) completion_seen_files_v2: Arc<RwLock<HashSet<V2FileId>>>,
     pub(crate) completion_stale_fallback_cache_v2:
         Arc<RwLock<HashMap<V2FileId, CompletionStaleFallbackCacheEntryV2>>>,
+    pub(crate) completion_parity_state_v2:
+        Arc<RwLock<HashMap<(V2FileId, i32, u32, u32), CompletionParityStateV2>>>,
     pub(crate) last_deps_id_v2: Arc<RwLock<Option<DepsSnapshotId>>>,
     pub(crate) last_settings_id_v2: Arc<RwLock<Option<SettingsId>>>,
 }

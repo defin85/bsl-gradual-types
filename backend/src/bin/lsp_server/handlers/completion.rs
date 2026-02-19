@@ -13,7 +13,9 @@ use bsl_backend::application::type_system::{
 };
 use bsl_backend::application::CompletionStats;
 use bsl_backend::application::{
-    get_completion_with_semantic_program_snapshot, get_completion_with_semantic_program_snapshot_v2,
+    get_completion_with_semantic_hint_snapshot_with_trigger_hint,
+    get_completion_with_semantic_program_snapshot_v2_with_trigger_hint,
+    get_completion_with_semantic_program_snapshot_with_trigger_hint,
 };
 use bsl_backend::system::IndexSnapshot;
 use bsl_shared::domain::resolver::TypeResolver;
@@ -73,6 +75,7 @@ pub struct CompletionResponseWithStats {
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(dead_code)]
 pub async fn handle_completion_v2(
     file_content: Arc<str>,
     file_path: Arc<str>,
@@ -86,6 +89,38 @@ pub async fn handle_completion_v2(
     snippet_support: bool,
     include_flow_sensitive: bool,
 ) -> Option<CompletionResponseWithStats> {
+    handle_completion_v2_with_trigger_hint(
+        file_content,
+        file_path,
+        ir_program,
+        parse_result,
+        member_access_owner_type_hint,
+        deps,
+        position,
+        file_uri,
+        index_snapshot,
+        snippet_support,
+        include_flow_sensitive,
+        None,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn handle_completion_v2_with_trigger_hint(
+    file_content: Arc<str>,
+    file_path: Arc<str>,
+    ir_program: Arc<SemanticProgram>,
+    parse_result: Option<Arc<bsl_syntax::ast::ParseResult>>,
+    member_access_owner_type_hint: Option<TypeResolution>,
+    deps: Arc<bsl_analysis_v2::SemanticDeps>,
+    position: Position,
+    file_uri: &Url,
+    index_snapshot: &IndexSnapshot,
+    snippet_support: bool,
+    include_flow_sensitive: bool,
+    trigger_char_hint: Option<char>,
+) -> Option<CompletionResponseWithStats> {
     let resolver = deps
         .resolver
         .clone()
@@ -94,7 +129,7 @@ pub async fn handle_completion_v2(
 
     let completion = match parse_result {
         Some(parse_result) => {
-            get_completion_with_semantic_program_snapshot_v2(
+            get_completion_with_semantic_program_snapshot_v2_with_trigger_hint(
                 file_content.as_ref(),
                 position.line,
                 position.character,
@@ -107,11 +142,12 @@ pub async fn handle_completion_v2(
                 parse_result,
                 member_access_owner_type_hint,
                 include_flow_sensitive,
+                trigger_char_hint,
             )
             .await
         }
         None => {
-            get_completion_with_semantic_program_snapshot(
+            get_completion_with_semantic_program_snapshot_with_trigger_hint(
                 file_content.as_ref(),
                 position.line,
                 position.character,
@@ -123,6 +159,7 @@ pub async fn handle_completion_v2(
                 ir_program,
                 member_access_owner_type_hint,
                 include_flow_sensitive,
+                trigger_char_hint,
             )
             .await
         }
@@ -162,6 +199,77 @@ pub async fn handle_completion_v2(
                 stats: None,
                 had_error: true,
             })
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+#[allow(dead_code)]
+pub async fn handle_completion_v2_degraded(
+    file_content: Arc<str>,
+    file_path: Arc<str>,
+    parse_result: Option<Arc<bsl_syntax::ast::ParseResult>>,
+    member_access_owner_type_hint: Option<TypeResolution>,
+    deps: Arc<bsl_analysis_v2::SemanticDeps>,
+    position: Position,
+    file_uri: &Url,
+    index_snapshot: &IndexSnapshot,
+    snippet_support: bool,
+    include_flow_sensitive: bool,
+    trigger_char_hint: Option<char>,
+) -> Option<CompletionResponseWithStats> {
+    let resolver = deps
+        .resolver
+        .clone()
+        .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())));
+    let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
+
+    let completion = get_completion_with_semantic_hint_snapshot_with_trigger_hint(
+        file_content.as_ref(),
+        position.line,
+        position.character,
+        Some(file_uri.as_str()),
+        index_snapshot,
+        &metadata_lookup,
+        file_path.as_ref(),
+        resolver.as_ref(),
+        parse_result,
+        member_access_owner_type_hint,
+        include_flow_sensitive,
+        trigger_char_hint,
+    )
+    .await;
+
+    match completion {
+        Ok(result) => {
+            if result.items.is_empty() {
+                return None;
+            }
+            let lsp_completions: Vec<CompletionItem> = result
+                .items
+                .into_iter()
+                .map(|candidate| {
+                    to_lsp_completion(
+                        candidate.item,
+                        candidate.owner_type,
+                        candidate.origin_sources,
+                        snippet_support,
+                        Some(deps.as_ref()),
+                    )
+                })
+                .collect();
+            Some(CompletionResponseWithStats {
+                response: CompletionResponse::List(CompletionList {
+                    is_incomplete: true,
+                    items: lsp_completions,
+                }),
+                stats: Some(result.stats),
+                had_error: false,
+            })
+        }
+        Err(e) => {
+            error!("Failed to get degraded completions (v2): {}", e);
+            None
         }
     }
 }

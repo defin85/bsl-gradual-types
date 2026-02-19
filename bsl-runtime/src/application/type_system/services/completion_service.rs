@@ -131,6 +131,7 @@ pub async fn get_completion(
         index,
         metadata_lookup,
         None,
+        None,
     )
     .await
 }
@@ -165,6 +166,7 @@ pub async fn get_completion_with_semantic_program(
         index,
         metadata_lookup,
         Some(&analysis),
+        None,
     )
     .await
 }
@@ -183,6 +185,38 @@ pub async fn get_completion_with_semantic_program_snapshot(
     member_access_owner_type_hint: Option<TypeResolution>,
     include_flow_sensitive: bool,
 ) -> Result<CompletionResult> {
+    get_completion_with_semantic_program_snapshot_with_trigger_hint(
+        file_content,
+        line,
+        column,
+        file_uri,
+        index_snapshot,
+        metadata_lookup,
+        file_path,
+        resolver,
+        ir_program,
+        member_access_owner_type_hint,
+        include_flow_sensitive,
+        None,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn get_completion_with_semantic_program_snapshot_with_trigger_hint(
+    file_content: &str,
+    line: u32,
+    column: u32,
+    file_uri: Option<&str>,
+    index_snapshot: &IndexSnapshot,
+    metadata_lookup: &TypeMetadataLookup,
+    file_path: &str,
+    resolver: &TypeResolver,
+    ir_program: Arc<SemanticProgram>,
+    member_access_owner_type_hint: Option<TypeResolution>,
+    include_flow_sensitive: bool,
+    trigger_char_hint: Option<char>,
+) -> Result<CompletionResult> {
     let analysis = CompletionAnalysisContext {
         ir_program: Some(ir_program),
         resolver,
@@ -200,6 +234,7 @@ pub async fn get_completion_with_semantic_program_snapshot(
         index_snapshot,
         metadata_lookup,
         Some(&analysis),
+        trigger_char_hint,
     )
     .await
 }
@@ -219,6 +254,40 @@ pub async fn get_completion_with_semantic_program_snapshot_v2(
     member_access_owner_type_hint: Option<TypeResolution>,
     include_flow_sensitive: bool,
 ) -> Result<CompletionResult> {
+    get_completion_with_semantic_program_snapshot_v2_with_trigger_hint(
+        file_content,
+        line,
+        column,
+        file_uri,
+        index_snapshot,
+        metadata_lookup,
+        file_path,
+        resolver,
+        ir_program,
+        parse_result,
+        member_access_owner_type_hint,
+        include_flow_sensitive,
+        None,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn get_completion_with_semantic_program_snapshot_v2_with_trigger_hint(
+    file_content: &str,
+    line: u32,
+    column: u32,
+    file_uri: Option<&str>,
+    index_snapshot: &IndexSnapshot,
+    metadata_lookup: &TypeMetadataLookup,
+    file_path: &str,
+    resolver: &TypeResolver,
+    ir_program: Arc<SemanticProgram>,
+    parse_result: Arc<bsl_syntax::ast::ParseResult>,
+    member_access_owner_type_hint: Option<TypeResolution>,
+    include_flow_sensitive: bool,
+    trigger_char_hint: Option<char>,
+) -> Result<CompletionResult> {
     let analysis = CompletionAnalysisContext {
         ir_program: Some(ir_program),
         resolver,
@@ -236,6 +305,44 @@ pub async fn get_completion_with_semantic_program_snapshot_v2(
         index_snapshot,
         metadata_lookup,
         Some(&analysis),
+        trigger_char_hint,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn get_completion_with_semantic_hint_snapshot_with_trigger_hint(
+    file_content: &str,
+    line: u32,
+    column: u32,
+    file_uri: Option<&str>,
+    index_snapshot: &IndexSnapshot,
+    metadata_lookup: &TypeMetadataLookup,
+    file_path: &str,
+    resolver: &TypeResolver,
+    parse_result: Option<Arc<bsl_syntax::ast::ParseResult>>,
+    member_access_owner_type_hint: Option<TypeResolution>,
+    include_flow_sensitive: bool,
+    trigger_char_hint: Option<char>,
+) -> Result<CompletionResult> {
+    let analysis = CompletionAnalysisContext {
+        ir_program: None,
+        resolver,
+        file_path,
+        parse_result,
+        member_access_owner_type_hint,
+        include_flow_sensitive,
+    };
+
+    get_completion_with_analysis(
+        file_content,
+        line,
+        column,
+        file_uri,
+        index_snapshot,
+        metadata_lookup,
+        Some(&analysis),
+        trigger_char_hint,
     )
     .await
 }
@@ -248,6 +355,7 @@ pub(crate) async fn get_completion_with_analysis(
     index: &dyn IndexSnapshotSource,
     metadata_lookup: &TypeMetadataLookup,
     analysis: Option<&CompletionAnalysisContext<'_>>,
+    trigger_char_hint: Option<char>,
 ) -> Result<CompletionResult> {
     let trace_request_id = if completion_trace_enabled() {
         Some(next_completion_request_id())
@@ -255,7 +363,12 @@ pub(crate) async fn get_completion_with_analysis(
         None
     };
     let analysis_file_path = analysis.map(|analysis| analysis.file_path);
-    let context = analyze_completion_context(file_content, line, column);
+    let context = analyze_completion_context_with_trigger_hint(
+        file_content,
+        line,
+        column,
+        trigger_char_hint,
+    );
     let snapshot_started = Instant::now();
     let snapshot = index.snapshot();
     let snapshot_elapsed = snapshot_started.elapsed();
@@ -569,7 +682,17 @@ pub(crate) async fn get_completion_with_analysis(
 ///
 /// # Returns
 /// CompletionContext with analysis results
+#[allow(dead_code)]
 pub fn analyze_completion_context(content: &str, line: u32, column: u32) -> CompletionContext {
+    analyze_completion_context_with_trigger_hint(content, line, column, None)
+}
+
+pub fn analyze_completion_context_with_trigger_hint(
+    content: &str,
+    line: u32,
+    column: u32,
+    trigger_char_hint: Option<char>,
+) -> CompletionContext {
     let lines: Vec<&str> = content.lines().collect();
     let line_index = line as usize;
 
@@ -600,6 +723,16 @@ pub fn analyze_completion_context(content: &str, line: u32, column: u32) -> Comp
     } else {
         line_prefix_raw.to_string()
     };
+    let effective_prefix_raw = if !in_string_or_comment {
+        match trigger_char_hint.filter(|ch| *ch == '.' || *ch == '(') {
+            Some(trigger_char) if !effective_prefix_raw.trim_end().ends_with(trigger_char) => {
+                format!("{effective_prefix_raw}{trigger_char}")
+            }
+            _ => effective_prefix_raw,
+        }
+    } else {
+        effective_prefix_raw
+    };
 
     let line_prefix = trim_to_window(&effective_prefix_raw, CONTEXT_WINDOW_CHARS);
     let line_trimmed = line_prefix.trim_end();
@@ -611,15 +744,17 @@ pub fn analyze_completion_context(content: &str, line: u32, column: u32) -> Comp
                 .last()
                 .filter(|ch| *ch == '.' || *ch == '(')
         })
-        .flatten();
+        .flatten()
+        .or(trigger_char_hint.filter(|ch| *ch == '.' || *ch == '('));
     let member_base = (!in_string_or_comment)
         .then(|| extract_member_base(line_trimmed))
         .flatten();
-    let member_access = !in_string_or_comment && is_member_access_context(line_trimmed);
+    let member_access = !in_string_or_comment
+        && (is_member_access_context(line_trimmed) || trigger_char_hint == Some('.'));
 
     // Extract current word
     let mut current_word = extract_word_at_position(content, line, column).unwrap_or_default();
-    if member_access && line_trimmed.ends_with('.') {
+    if member_access && (line_trimmed.ends_with('.') || trigger_char_hint == Some('.')) {
         current_word.clear();
     }
 
@@ -2737,6 +2872,21 @@ mod tests {
     }
 
     #[test]
+    fn completion_context_uses_trigger_hint_for_member_access() {
+        let content = "Объект";
+        let line = 0;
+        let column = content.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+        let ctx = analyze_completion_context_with_trigger_hint(content, line, column, Some('.'));
+
+        assert!(ctx.member_access);
+        assert_eq!(ctx.trigger_char, Some('.'));
+        assert!(
+            ctx.current_word.is_empty(),
+            "trigger hint for '.' should clear prefix in member-access context"
+        );
+    }
+
+    #[test]
     fn completion_context_reads_current_word_with_utf16_column() {
         let content = "Перем a😀b";
         let (line, column) = utf16_column(content, "b");
@@ -3182,6 +3332,7 @@ mod tests {
             index,
             metadata_lookup,
             Some(&ctx),
+            None,
         )
         .await
         .expect("completion ok");
@@ -3799,6 +3950,7 @@ mod tests {
             &index,
             &metadata_lookup,
             Some(&ctx),
+            None,
         )
         .await
         .expect("completion ok");
@@ -3909,6 +4061,7 @@ mod tests {
             &index,
             &metadata_lookup,
             Some(&ctx),
+            None,
         )
         .await
         .expect("completion ok");
@@ -4002,6 +4155,7 @@ mod tests {
             &index,
             &metadata_lookup,
             Some(&ctx),
+            None,
         )
         .await
         .expect("completion ok");
@@ -4098,6 +4252,7 @@ mod tests {
             &index,
             &metadata_lookup,
             Some(&ctx),
+            None,
         )
         .await
         .expect("completion ok");
@@ -4209,6 +4364,7 @@ mod tests {
             &index,
             &metadata_lookup,
             Some(&ctx),
+            None,
         )
         .await
         .expect("completion ok");
@@ -4303,6 +4459,7 @@ mod tests {
             &index,
             &metadata_lookup,
             Some(&ctx),
+            None,
         )
         .await
         .expect("completion ok");
@@ -4397,6 +4554,7 @@ mod tests {
             &index,
             &metadata_lookup,
             Some(&ctx),
+            None,
         )
         .await
         .expect("completion ok");
@@ -4493,6 +4651,7 @@ mod tests {
             &index,
             &metadata_lookup,
             Some(&ctx),
+            None,
         )
         .await
         .expect("completion ok");
@@ -4601,6 +4760,7 @@ mod tests {
             &index,
             &metadata_lookup,
             Some(&ctx),
+            None,
         )
         .await
         .expect("completion ok");
@@ -4712,6 +4872,7 @@ mod tests {
             &index,
             &metadata_lookup,
             Some(&ctx),
+            None,
         )
         .await
         .expect("completion ok");

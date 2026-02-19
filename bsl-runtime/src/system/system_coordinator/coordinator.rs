@@ -179,6 +179,25 @@ impl SystemCoordinator {
             .record_intellisense_v2_completion_temperature(state);
     }
 
+    pub fn record_intellisense_v2_completion_trigger_mode(&self, mode: &str) {
+        self.observability
+            .record_intellisense_v2_completion_trigger_mode(mode);
+    }
+
+    pub fn record_intellisense_v2_completion_parity_drift(&self, mode: &str) {
+        self.observability
+            .record_intellisense_v2_completion_parity_drift(mode);
+    }
+
+    pub fn record_intellisense_v2_completion_member_access_terminal_empty(
+        &self,
+        mode: &str,
+        reason: &str,
+    ) {
+        self.observability
+            .record_intellisense_v2_completion_member_access_terminal_empty(mode, reason);
+    }
+
     pub fn observability_metrics(&self) -> Value {
         self.observability.get_metrics().export_metrics()
     }

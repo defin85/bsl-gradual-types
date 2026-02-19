@@ -1,6 +1,7 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { State } from 'vscode-languageclient/node';
+import { isCompletionTriggerEnabledForBsl } from '../../lsp/client/lifecycle';
 import { updateLspStatus } from '../../lsp/progress';
 
 /**
@@ -8,6 +9,14 @@ import { updateLspStatus } from '../../lsp/progress';
  * Эти тесты помогают отловить ошибку "command already exists"
  */
 suite('LSP Integration Test Suite', () => {
+    test('Completion trigger helper returns effective boolean', () => {
+        const enabled = isCompletionTriggerEnabledForBsl();
+        assert.strictEqual(
+            typeof enabled,
+            'boolean',
+            'completion trigger helper must always return boolean'
+        );
+    });
 
     /**
      * Тест на дублирование команд - главная причина ошибки

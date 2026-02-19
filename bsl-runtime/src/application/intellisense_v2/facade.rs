@@ -1090,7 +1090,10 @@ impl IntellisenseV2Facade {
         let file_version = analysis.file_version(file_id).ok().flatten()?;
         let file_signature = Self::singleflight_file_signature(analysis, file_id)?;
         let (deps_id, settings_id) = if Self::singleflight_requires_snapshot_identity(query_kind) {
-            (Some(analysis.deps_id().ok()?), Some(analysis.settings_id().ok()?))
+            (
+                Some(analysis.deps_id().ok()?),
+                Some(analysis.settings_id().ok()?),
+            )
         } else {
             (None, None)
         };

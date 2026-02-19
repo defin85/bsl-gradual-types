@@ -63,11 +63,7 @@ fn hover_for_marker(
 ) -> String {
     let offset = content
         .find(line_fragment)
-        .and_then(|line_start| {
-            line_fragment
-                .find(symbol)
-                .map(|local| line_start + local)
-        })
+        .and_then(|line_start| line_fragment.find(symbol).map(|local| line_start + local))
         .expect("symbol marker in probe code");
     let (line, column) = byte_offset_to_utf16_position(content, offset);
     let hover_config = HoverFormatConfig {
@@ -139,15 +135,11 @@ fn parse_hover_property_names(hover: &str) -> BTreeSet<String> {
 #[test]
 fn conf_big_realizatsiya_tovarov_uslug_contextual_object_matrix() {
     let Some(conf_big) = conf_big_root() else {
-        eprintln!(
-            "skip parity test: missing prerequisite examples/conf_big/Configuration.xml"
-        );
+        eprintln!("skip parity test: missing prerequisite examples/conf_big/Configuration.xml");
         return;
     };
     let Some(syntax_helper) = syntax_helper_root() else {
-        eprintln!(
-            "skip parity test: missing prerequisite examples/syntax_helper/syntax.xml"
-        );
+        eprintln!("skip parity test: missing prerequisite examples/syntax_helper/syntax.xml");
         return;
     };
 
@@ -164,8 +156,7 @@ fn conf_big_realizatsiya_tovarov_uslug_contextual_object_matrix() {
     assert!(stats.platform_types > 0, "platform types must be loaded");
 
     // 1) FormModule
-    let form_rel =
-        "Documents/РеализацияТоваровУслуг/Forms/ФормаДокументаОбщая/Ext/Form/Module.bsl";
+    let form_rel = "Documents/РеализацияТоваровУслуг/Forms/ФормаДокументаОбщая/Ext/Form/Module.bsl";
     let form_original =
         std::fs::read_to_string(conf_big.join(form_rel)).expect("read form module file");
     let form_probe = concat!(
@@ -234,7 +225,8 @@ fn conf_big_realizatsiya_tovarov_uslug_contextual_object_matrix() {
     }
 
     // negative-set: form-only members не должны попадать в Объект
-    for forbidden in ["ПоказыватьБаннер", "СсылкаДляПереходаНаКарту"] {
+    for forbidden in ["ПоказыватьБаннер", "СсылкаДляПереходаНаКарту"]
+    {
         assert!(
             !form_object_props.contains(forbidden),
             "FormModule.Объект must not contain form-only member '{}', got: {:?}",
@@ -358,8 +350,7 @@ fn conf_big_realizatsiya_tovarov_uslug_hover_properties_compare_with_debugger_sa
         "expected loaded config and platform types"
     );
 
-    let form_rel =
-        "Documents/РеализацияТоваровУслуг/Forms/ФормаДокументаОбщая/Ext/Form/Module.bsl";
+    let form_rel = "Documents/РеализацияТоваровУслуг/Forms/ФормаДокументаОбщая/Ext/Form/Module.bsl";
     let original = std::fs::read_to_string(conf_big.join(form_rel)).expect("read form module");
     let probe = concat!(
         "\nПроцедура __Probe_DebuggerParity_RealizationTovaryUslugi()\n",

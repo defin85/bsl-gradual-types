@@ -363,12 +363,8 @@ pub(crate) async fn get_completion_with_analysis(
         None
     };
     let analysis_file_path = analysis.map(|analysis| analysis.file_path);
-    let context = analyze_completion_context_with_trigger_hint(
-        file_content,
-        line,
-        column,
-        trigger_char_hint,
-    );
+    let context =
+        analyze_completion_context_with_trigger_hint(file_content, line, column, trigger_char_hint);
     let snapshot_started = Instant::now();
     let snapshot = index.snapshot();
     let snapshot_elapsed = snapshot_started.elapsed();
@@ -4067,7 +4063,11 @@ mod tests {
         .expect("completion ok");
 
         let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
-        assert!(!labels.contains(&"Записать".to_string()), "labels: {:?}", labels);
+        assert!(
+            !labels.contains(&"Записать".to_string()),
+            "labels: {:?}",
+            labels
+        );
         assert!(
             labels.contains(&"Ссылка".to_string()),
             "labels: {:?}",

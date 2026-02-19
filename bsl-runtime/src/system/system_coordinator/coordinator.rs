@@ -189,6 +189,15 @@ impl SystemCoordinator {
             .record_intellisense_v2_completion_parity_drift(mode);
     }
 
+    pub fn record_intellisense_v2_completion_parity_overlap_bucket(
+        &self,
+        mode: &str,
+        bucket: &str,
+    ) {
+        self.observability
+            .record_intellisense_v2_completion_parity_overlap_bucket(mode, bucket);
+    }
+
     pub fn record_intellisense_v2_completion_member_access_terminal_empty(
         &self,
         mode: &str,

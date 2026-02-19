@@ -29,11 +29,7 @@ impl UniversalMetadataParser {
         name.rsplit(':').next().unwrap_or(name)
     }
 
-    fn push_unique_case_insensitive(
-        out: &mut Vec<String>,
-        seen: &mut HashSet<String>,
-        name: &str,
-    ) {
+    fn push_unique_case_insensitive(out: &mut Vec<String>, seen: &mut HashSet<String>, name: &str) {
         let trimmed = name.trim();
         if trimmed.is_empty() {
             return;
@@ -695,10 +691,7 @@ mod tests {
         file.write_all(xml.as_bytes()).unwrap();
 
         let parsed = UniversalMetadataParser::parse_any_object(file.path()).unwrap();
-        assert!(parsed
-            .standard_attributes
-            .iter()
-            .any(|name| name == "Ref"));
+        assert!(parsed.standard_attributes.iter().any(|name| name == "Ref"));
         assert!(
             parsed
                 .standard_attributes

@@ -24,12 +24,12 @@ pub mod extractors;
 mod formatters;
 mod services;
 
-pub use services::completion_service::get_completion_with_semantic_program;
 pub use services::completion_service::get_completion_with_semantic_hint_snapshot_with_trigger_hint;
+pub use services::completion_service::get_completion_with_semantic_program;
 pub use services::completion_service::get_completion_with_semantic_program_snapshot;
-pub use services::completion_service::get_completion_with_semantic_program_snapshot_with_trigger_hint;
 pub use services::completion_service::get_completion_with_semantic_program_snapshot_v2;
 pub use services::completion_service::get_completion_with_semantic_program_snapshot_v2_with_trigger_hint;
+pub use services::completion_service::get_completion_with_semantic_program_snapshot_with_trigger_hint;
 pub use services::completion_service::{
     build_call_snippet, resolve_method_completion, resolve_type_details, CompletionResolveDetails,
 };

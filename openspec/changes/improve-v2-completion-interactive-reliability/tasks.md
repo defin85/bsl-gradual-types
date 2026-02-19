@@ -21,5 +21,5 @@
 - [ ] 3.3 Добавить/обновить тесты latency/fallback: под серией `didChange` completion остаётся bounded и не зависает, а member-access не уходит в transient terminal-empty.
 - [ ] 3.4 Добавить/обновить extension-тест на warning при отключённом `suggestOnTriggerCharacters`.
 - [ ] 3.5 Добавить/обновить тесты trigger-context обработки (`TriggerCharacter`, `Invoked`, `TriggerForIncompleteCompletions`, `context=None`).
-- [ ] 3.6 Проверить acceptance gates на профильном наборе: `p95 <= 300ms`, `p99 <= 800ms`, `first-trigger >= 99%`, `terminal-empty <= 0.5%`, `parity mismatch <= 1%`.
-- [ ] 3.7 Прогнать профильные тестовые наборы и `openspec validate improve-v2-completion-interactive-reliability --strict --no-interactive`.
+- [x] 3.6 Проверить acceptance gates на профильном наборе: `p95 <= 300ms`, `p99 <= 800ms`, `first-trigger >= 99%`, `terminal-empty <= 0.5%`, `parity mismatch <= 1%`. (Артефакты: `backend/tests/perf/reports/improve-v2-completion-interactive-reliability-gate.json`, `backend/tests/perf/reports/improve-v2-completion-interactive-reliability-gate.md`)
+- [x] 3.7 Прогнать профильные тестовые наборы и `openspec validate improve-v2-completion-interactive-reliability --strict --no-interactive`. (Лог: `backend/tests/perf/reports/improve-v2-completion-interactive-reliability-openspec-validate.log`, запуск: `scripts/validate-v2-completion-gates.sh`)

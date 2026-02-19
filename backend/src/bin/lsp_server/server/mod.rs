@@ -83,6 +83,8 @@ pub(crate) struct DocumentShadowStateV2 {
 pub(crate) struct CompletionParityStateV2 {
     pub trigger_character_non_empty: Option<bool>,
     pub invoked_non_empty: Option<bool>,
+    pub trigger_character_labels: Option<Vec<String>>,
+    pub invoked_labels: Option<Vec<String>>,
 }
 
 /// BSL Language Server backend - CLEAN ARCHITECTURE
@@ -110,7 +112,8 @@ pub struct BslLanguageServer {
     pub(crate) diagnostics_tasks_v2: Arc<Mutex<DiagnosticsTasksV2>>,
     pub(crate) diagnostics_generation_v2: Arc<RwLock<HashMap<V2FileId, u64>>>,
     pub(crate) latest_received_file_versions_v2: Arc<RwLock<HashMap<V2FileId, i32>>>,
-    pub(crate) latest_document_shadow_state_v2: Arc<RwLock<HashMap<V2FileId, DocumentShadowStateV2>>>,
+    pub(crate) latest_document_shadow_state_v2:
+        Arc<RwLock<HashMap<V2FileId, DocumentShadowStateV2>>>,
     pub(crate) completion_seen_files_v2: Arc<RwLock<HashSet<V2FileId>>>,
     pub(crate) completion_stale_fallback_cache_v2:
         Arc<RwLock<HashMap<V2FileId, CompletionStaleFallbackCacheEntryV2>>>,

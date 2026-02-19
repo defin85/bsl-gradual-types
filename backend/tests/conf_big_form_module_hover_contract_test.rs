@@ -70,7 +70,8 @@ fn conf_big_form_module_hover_contract_for_object_and_this_object() {
         "platform types must be loaded from syntax_helper"
     );
 
-    let module_rel = "Documents/РеализацияТоваровУслуг/Forms/ФормаДокументаОбщая/Ext/Form/Module.bsl";
+    let module_rel =
+        "Documents/РеализацияТоваровУслуг/Forms/ФормаДокументаОбщая/Ext/Form/Module.bsl";
     let module_path = conf_big.join(module_rel);
     assert!(
         module_path.exists(),
@@ -90,11 +91,7 @@ fn conf_big_form_module_hover_contract_for_object_and_this_object() {
     let object_marker = "ProbeObject = Объект";
     let object_offset = content
         .find(object_marker)
-        .and_then(|line_start| {
-            object_marker
-                .find("Объект")
-                .map(|local| line_start + local)
-        })
+        .and_then(|line_start| object_marker.find("Объект").map(|local| line_start + local))
         .expect("object probe marker");
     let (object_line, object_column) = byte_offset_to_utf16_position(&content, object_offset);
 

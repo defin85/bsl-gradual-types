@@ -1178,7 +1178,10 @@ mod tests {
 
         let ready = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                let status = session_manager.status(&open.session_id).await.expect("status");
+                let status = session_manager
+                    .status(&open.session_id)
+                    .await
+                    .expect("status");
                 if status.ready {
                     break;
                 }
@@ -1329,7 +1332,10 @@ mod tests {
             .and_then(|value| value.as_object())
             .expect("metrics.counters object");
         let key = "intellisense_v2_diagnostics_pipeline_total_origin_agent_trigger_job_start_profile_debounced_full_reason_cancelled";
-        let value = counters.get(key).and_then(|value| value.as_u64()).unwrap_or(0);
+        let value = counters
+            .get(key)
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0);
         assert!(
             value > 0,
             "expected diagnostics pipeline cancelled metric key {key} to be incremented"
@@ -1409,7 +1415,10 @@ mod tests {
             .and_then(|value| value.as_object())
             .expect("metrics.counters object");
         let key = "intellisense_v2_diagnostics_pipeline_total_origin_agent_trigger_documents_set_profile_debounced_full_reason_superseded_generation";
-        let value = counters.get(key).and_then(|value| value.as_u64()).unwrap_or(0);
+        let value = counters
+            .get(key)
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0);
         assert!(
             value > 0,
             "expected diagnostics pipeline superseded metric key {key} to be incremented"

@@ -2503,11 +2503,22 @@ mod tests {
             .get("intellisense_v2_completion_trigger_mode_total_mode_invoked")
             .and_then(|value| value.as_u64())
             .unwrap_or(0);
+        let overlap_metric_recorded = counters.iter().any(|(key, value)| {
+            key.starts_with("intellisense_v2_completion_parity_overlap_total_mode_invoked_bucket_")
+                && value.as_u64().unwrap_or(0) > 0
+        });
         assert!(
             trigger_char_total > 0,
             "trigger-character completion metric must be recorded"
         );
-        assert!(invoked_total > 0, "invoked completion metric must be recorded");
+        assert!(
+            invoked_total > 0,
+            "invoked completion metric must be recorded"
+        );
+        assert!(
+            overlap_metric_recorded,
+            "semantic-overlap parity metric must be recorded"
+        );
 
         drain_task.abort();
     }
@@ -2533,7 +2544,8 @@ mod tests {
         initialize_lsp_service(&mut service).await;
 
         let uri = Url::parse("file:///test_p7_completion_context_modes.bsl").expect("test uri");
-        let text = "Процедура Тест()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.\nКонецПроцедуры\n";
+        let text =
+            "Процедура Тест()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.\nКонецПроцедуры\n";
         let did_open = DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: uri.clone(),
@@ -6108,6 +6120,296 @@ mod tests {
             completion_cancelled_total,
             completion_total,
             completion_cancelled_rate
+        );
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
+    async fn p27_interactive_completion_acceptance_gates_emit_artifact() {
+        const ITERATIONS: u64 = 120;
+        const MAX_P95_MS: f64 = 300.0;
+        const MAX_P99_MS: f64 = 800.0;
+        const MIN_FIRST_TRIGGER_SUCCESS_RATE: f64 = 0.99;
+        const MAX_TERMINAL_EMPTY_RATE: f64 = 0.005;
+        const MAX_PARITY_MISMATCH_RATE: f64 = 0.01;
+
+        fn completion_items_count(response: &CompletionResponse) -> usize {
+            match response {
+                CompletionResponse::Array(items) => items.len(),
+                CompletionResponse::List(list) => list.items.len(),
+            }
+        }
+
+        fn metric_as_f64(value: Option<&serde_json::Value>) -> f64 {
+            value
+                .and_then(|value| value.as_f64().or_else(|| value.as_u64().map(|v| v as f64)))
+                .unwrap_or(0.0)
+        }
+
+        fn sum_counters_by_prefix(
+            counters: &serde_json::Map<String, serde_json::Value>,
+            prefix: &str,
+        ) -> u64 {
+            counters
+                .iter()
+                .filter(|(key, _)| key.starts_with(prefix))
+                .map(|(_, value)| value.as_u64().unwrap_or(0))
+                .sum()
+        }
+
+        fn sum_counters_by_prefix_and_substring(
+            counters: &serde_json::Map<String, serde_json::Value>,
+            prefix: &str,
+            needle: &str,
+        ) -> u64 {
+            counters
+                .iter()
+                .filter(|(key, _)| key.starts_with(prefix) && key.contains(needle))
+                .map(|(_, value)| value.as_u64().unwrap_or(0))
+                .sum()
+        }
+
+        let coordinator = Arc::new(SystemCoordinator::new());
+        let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+            Arc::new(std::sync::Mutex::new(None));
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            let server_holder = server_holder.clone();
+            move |client| {
+                let server = BslLanguageServer::new(client, coordinator.clone());
+                *server_holder.lock().expect("server holder lock") = Some(server.clone());
+                server
+            }
+        })
+        .finish();
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        initialize_lsp_service(&mut service).await;
+
+        let uri = Url::parse("file:///test_p27_interactive_acceptance_gate.bsl").expect("test uri");
+        let text = concat!(
+            "Процедура Тест()\n",
+            "    ЛокМассив = Новый Массив;\n",
+            "    ЛокМассив.\n",
+            "КонецПроцедуры\n"
+        );
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        };
+        let did_open_req = Request::build("textDocument/didOpen")
+            .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+            .finish();
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+
+        let server = server_holder
+            .lock()
+            .expect("server holder lock")
+            .clone()
+            .expect("server must be created");
+        let member_character = "    ЛокМассив."
+            .chars()
+            .map(|ch| ch.len_utf16())
+            .sum::<usize>() as u32;
+
+        let mut first_trigger_success_total = 0_u64;
+        let mut first_trigger_total = 0_u64;
+        let mut parity_pairs_total = 0_u64;
+
+        for iteration in 0..ITERATIONS {
+            let version = (iteration + 2) as i32;
+            let did_change = DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: text.to_string(),
+                }],
+            };
+            let did_change_req = Request::build("textDocument/didChange")
+                .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+                .finish();
+            let did_change_response = service
+                .ready()
+                .await
+                .unwrap()
+                .call(did_change_req)
+                .await
+                .expect("didChange notification");
+            assert!(did_change_response.is_none(), "didChange is a notification");
+
+            let dot_completion = server
+                .completion(CompletionParams {
+                    text_document_position: TextDocumentPositionParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        position: Position::new(2, member_character),
+                    },
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                    partial_result_params: PartialResultParams::default(),
+                    context: Some(CompletionContext {
+                        trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+                        trigger_character: Some(".".to_string()),
+                    }),
+                })
+                .await
+                .expect("dot completion request")
+                .expect("dot completion response");
+            first_trigger_total += 1;
+            if completion_items_count(&dot_completion) > 0 {
+                first_trigger_success_total += 1;
+            }
+
+            let invoked_completion = server
+                .completion(CompletionParams {
+                    text_document_position: TextDocumentPositionParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        position: Position::new(2, member_character),
+                    },
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                    partial_result_params: PartialResultParams::default(),
+                    context: Some(CompletionContext {
+                        trigger_kind: CompletionTriggerKind::INVOKED,
+                        trigger_character: None,
+                    }),
+                })
+                .await
+                .expect("invoked completion request")
+                .expect("invoked completion response");
+            assert!(
+                completion_items_count(&invoked_completion) > 0,
+                "invoked completion must return non-empty candidates in acceptance gate loop"
+            );
+            parity_pairs_total += 1;
+        }
+
+        let metrics = coordinator.observability_metrics();
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        let histograms = metrics
+            .get("histograms")
+            .and_then(|value| value.as_object())
+            .expect("metrics.histograms object");
+        let completion_hist = histograms
+            .get("completion_duration_ms")
+            .and_then(|value| value.as_object())
+            .expect("completion duration histogram");
+        let completion_p95 = metric_as_f64(completion_hist.get("p95"));
+        let completion_p99 = metric_as_f64(completion_hist.get("p99"));
+
+        let first_trigger_success_rate =
+            first_trigger_success_total as f64 / first_trigger_total.max(1) as f64;
+        let terminal_empty_missing_ir_total = sum_counters_by_prefix_and_substring(
+            counters,
+            "intellisense_v2_completion_member_access_terminal_empty_total_",
+            "_reason_missing_ir",
+        );
+        let terminal_empty_rate =
+            terminal_empty_missing_ir_total as f64 / first_trigger_total.max(1) as f64;
+        let parity_drift_total = sum_counters_by_prefix(
+            counters,
+            "intellisense_v2_completion_parity_drift_total_mode_",
+        );
+        let parity_mismatch_rate = parity_drift_total as f64 / parity_pairs_total.max(1) as f64;
+
+        let pass = completion_p95 <= MAX_P95_MS
+            && completion_p99 <= MAX_P99_MS
+            && first_trigger_success_rate >= MIN_FIRST_TRIGGER_SUCCESS_RATE
+            && terminal_empty_rate <= MAX_TERMINAL_EMPTY_RATE
+            && parity_mismatch_rate <= MAX_PARITY_MISMATCH_RATE;
+
+        let report = serde_json::json!({
+            "change_id": "improve-v2-completion-interactive-reliability",
+            "profile": "p27_interactive_completion_acceptance_gates",
+            "iterations": ITERATIONS,
+            "thresholds": {
+                "completion_p95_ms_max": MAX_P95_MS,
+                "completion_p99_ms_max": MAX_P99_MS,
+                "first_trigger_success_rate_min": MIN_FIRST_TRIGGER_SUCCESS_RATE,
+                "terminal_empty_missing_ir_rate_max": MAX_TERMINAL_EMPTY_RATE,
+                "parity_mismatch_rate_max": MAX_PARITY_MISMATCH_RATE
+            },
+            "results": {
+                "completion_p95_ms": completion_p95,
+                "completion_p99_ms": completion_p99,
+                "first_trigger_success_total": first_trigger_success_total,
+                "first_trigger_total": first_trigger_total,
+                "first_trigger_success_rate": first_trigger_success_rate,
+                "terminal_empty_missing_ir_total": terminal_empty_missing_ir_total,
+                "terminal_empty_missing_ir_rate": terminal_empty_rate,
+                "parity_drift_total": parity_drift_total,
+                "parity_pairs_total": parity_pairs_total,
+                "parity_mismatch_rate": parity_mismatch_rate
+            },
+            "pass": pass
+        });
+
+        let report_path = std::env::var("BSL_V2_COMPLETION_GATE_REPORT")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests")
+                    .join("perf")
+                    .join("reports")
+                    .join("improve-v2-completion-interactive-reliability-gate.json")
+            });
+        if let Some(parent) = report_path.parent() {
+            std::fs::create_dir_all(parent)
+                .expect("failed to create directory for v2 completion gate report");
+        }
+        std::fs::write(
+            &report_path,
+            serde_json::to_string_pretty(&report)
+                .expect("failed to serialize v2 completion gate report"),
+        )
+        .expect("failed to write v2 completion gate report");
+        println!("v2_completion_gate_report={}", report_path.display());
+
+        assert!(
+            completion_p95 <= MAX_P95_MS,
+            "acceptance gate failed: completion p95={}ms > {}ms",
+            completion_p95,
+            MAX_P95_MS
+        );
+        assert!(
+            completion_p99 <= MAX_P99_MS,
+            "acceptance gate failed: completion p99={}ms > {}ms",
+            completion_p99,
+            MAX_P99_MS
+        );
+        assert!(
+            first_trigger_success_rate >= MIN_FIRST_TRIGGER_SUCCESS_RATE,
+            "acceptance gate failed: first-trigger success rate={:.4} < {:.4}",
+            first_trigger_success_rate,
+            MIN_FIRST_TRIGGER_SUCCESS_RATE
+        );
+        assert!(
+            terminal_empty_rate <= MAX_TERMINAL_EMPTY_RATE,
+            "acceptance gate failed: terminal-empty(missing_ir) rate={:.4} > {:.4}",
+            terminal_empty_rate,
+            MAX_TERMINAL_EMPTY_RATE
+        );
+        assert!(
+            parity_mismatch_rate <= MAX_PARITY_MISMATCH_RATE,
+            "acceptance gate failed: parity mismatch rate={:.4} > {:.4}",
+            parity_mismatch_rate,
+            MAX_PARITY_MISMATCH_RATE
         );
 
         drain_task.abort();

@@ -163,6 +163,29 @@ cargo run -p bsl-backend --bin intellisense_perf -- \
 
 ---
 
+### `validate-v2-completion-gates.sh` - Acceptance gates для `improve-v2-completion-interactive-reliability`
+
+**Назначение:** воспроизводимый fail-fast прогон acceptance gates для задач `3.6/3.7`:
+- completion latency: `p95 <= 300ms`, `p99 <= 800ms`;
+- first-trigger success rate: `>= 99%`;
+- terminal-empty (`missing_ir`) rate: `<= 0.5%`;
+- parity mismatch rate: `<= 1%`;
+- strict-валидация change через OpenSpec.
+
+**Использование:**
+```bash
+./scripts/validate-v2-completion-gates.sh
+```
+
+**Важно:** скрипт не зависит от `.github/workflows/*` и предназначен для локального запуска или внешнего CI (например, Jenkins/GitLab Runner).
+
+**Артефакты:**
+- `backend/tests/perf/reports/improve-v2-completion-interactive-reliability-gate.json`
+- `backend/tests/perf/reports/improve-v2-completion-interactive-reliability-gate.md`
+- `backend/tests/perf/reports/improve-v2-completion-interactive-reliability-openspec-validate.log`
+
+---
+
 ### `run-intellisense-tests.sh` - Smoke/full тесты IntelliSense
 
 **Назначение:** стабильный набор тестов M8 для локального полного прогона; подходит для CI при подключении.

@@ -325,6 +325,37 @@ export function isCompletionTriggerEnabledForBsl(scopeUri?: vscode.Uri): boolean
     return enabled !== false;
 }
 
+export interface CompletionTriggerWarningPayload {
+    scopeText: string;
+    outputLines: string[];
+    userMessage: string;
+    actionLabel: string;
+    settingsQuery: string;
+}
+
+export function buildCompletionTriggerWarningPayload(
+    triggerEnabled: boolean,
+    scopeUri?: vscode.Uri,
+): CompletionTriggerWarningPayload | null {
+    if (triggerEnabled) {
+        return null;
+    }
+
+    const scopeText = scopeUri ? scopeUri.toString() : 'global';
+    return {
+        scopeText,
+        outputLines: [
+            '⚠️ Completion auto-trigger for BSL is disabled: editor.suggestOnTriggerCharacters=false',
+            `   Effective scope: ${scopeText}`,
+            '   Remediation: enable editor.suggestOnTriggerCharacters (User/Workspace/[bsl]).',
+        ],
+        userMessage:
+            'BSL Analyzer: editor.suggestOnTriggerCharacters=false. Completion по "." не будет автозапускаться.',
+        actionLabel: 'Open Settings',
+        settingsQuery: 'editor.suggestOnTriggerCharacters',
+    };
+}
+
 async function warnIfCompletionTriggerDisabled(
     outputChannel: vscode.OutputChannel,
 ): Promise<void> {
@@ -333,28 +364,27 @@ async function warnIfCompletionTriggerDisabled(
     }
 
     const scopeUri = completionTriggerConfigScopeUri();
-    if (isCompletionTriggerEnabledForBsl(scopeUri)) {
+    const payload = buildCompletionTriggerWarningPayload(
+        isCompletionTriggerEnabledForBsl(scopeUri),
+        scopeUri,
+    );
+    if (!payload) {
         return;
     }
 
     completionTriggerWarningShown = true;
-    const scopeText = scopeUri ? scopeUri.toString() : 'global';
-    outputChannel.appendLine(
-        '⚠️ Completion auto-trigger for BSL is disabled: editor.suggestOnTriggerCharacters=false',
-    );
-    outputChannel.appendLine(`   Effective scope: ${scopeText}`);
-    outputChannel.appendLine(
-        '   Remediation: enable editor.suggestOnTriggerCharacters (User/Workspace/[bsl]).',
-    );
+    for (const line of payload.outputLines) {
+        outputChannel.appendLine(line);
+    }
 
     const selection = await vscode.window.showWarningMessage(
-        'BSL Analyzer: editor.suggestOnTriggerCharacters=false. Completion по "." не будет автозапускаться.',
-        'Open Settings',
+        payload.userMessage,
+        payload.actionLabel,
     );
-    if (selection === 'Open Settings') {
+    if (selection === payload.actionLabel) {
         await vscode.commands.executeCommand(
             'workbench.action.openSettings',
-            'editor.suggestOnTriggerCharacters',
+            payload.settingsQuery,
         );
     }
 }

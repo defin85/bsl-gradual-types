@@ -477,18 +477,13 @@ impl TypeMetadataLookup {
                 .get_raw_type(resolution)
                 .map(|raw| {
                     let mut properties = raw.properties;
-                    properties.extend(
-                        raw.tabular_sections
-                            .into_iter()
-                            .map(|tabular| RawPropertyData {
-                                name: tabular.name.clone(),
-                                prop_type: format!(
-                                    "ДанныеФормыКоллекция<Строка{}>",
-                                    tabular.name
-                                ),
-                                is_readonly: false,
-                            }),
-                    );
+                    properties.extend(raw.tabular_sections.into_iter().map(|tabular| {
+                        RawPropertyData {
+                            name: tabular.name.clone(),
+                            prop_type: format!("ДанныеФормыКоллекция<Строка{}>", tabular.name),
+                            is_readonly: false,
+                        }
+                    }));
                     properties
                 })
                 .unwrap_or_default(),

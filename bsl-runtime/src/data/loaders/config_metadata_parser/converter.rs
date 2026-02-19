@@ -45,12 +45,7 @@ impl UniversalMetadataObject {
         // Типы формы и контейнера элементов — по каждой форме
         for form in &self.forms {
             let form_type_name = format!("Формы.{}.{}.{}", collection, object_name, form.name);
-            out.push(self.build_form_type(
-                &form_type_name,
-                &object_name,
-                collection,
-                form,
-            ));
+            out.push(self.build_form_type(&form_type_name, &object_name, collection, form));
 
             let elements_type_name =
                 format!("ЭлементыФормы.{}.{}.{}", collection, object_name, form.name);
@@ -199,7 +194,10 @@ impl UniversalMetadataObject {
 
     fn is_posting_capable_document(&self) -> bool {
         self.object_type == Some(MetadataKind::Document)
-            && matches!(self.properties.get("Posting").map(String::as_str), Some("Allow"))
+            && matches!(
+                self.properties.get("Posting").map(String::as_str),
+                Some("Allow")
+            )
     }
 
     fn number_standard_attribute_type(&self) -> String {

@@ -1412,7 +1412,9 @@ fn test_form_data_provider_chain_uses_repository_standard_attributes() {
     let properties = lookup.get_properties(&resolution);
     assert!(properties.iter().any(|property| property.name == "Дата"));
     assert!(properties.iter().any(|property| property.name == "Номер"));
-    assert!(properties.iter().any(|property| property.name == "Проведен"));
+    assert!(properties
+        .iter()
+        .any(|property| property.name == "Проведен"));
 
     assert_eq!(
         lookup.get_property_origin_tag(&resolution, "Дата"),

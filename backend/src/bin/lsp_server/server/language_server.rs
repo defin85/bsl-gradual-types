@@ -8,6 +8,7 @@
 //! - Features: completion, hover, goto_definition, signature_help
 //! - Commands: execute_command
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
@@ -53,7 +54,10 @@ fn should_schedule_profile(
     profile: bsl_runtime::application::DiagnosticsProfile,
     flow_sensitive_enabled: bool,
 ) -> bool {
-    if matches!(profile, bsl_runtime::application::DiagnosticsProfile::IdleHeavy) {
+    if matches!(
+        profile,
+        bsl_runtime::application::DiagnosticsProfile::IdleHeavy
+    ) {
         return flow_sensitive_enabled;
     }
     true
@@ -63,9 +67,7 @@ fn completion_trigger_mode_label(context: Option<&CompletionContext>) -> &'stati
     match context.map(|ctx| ctx.trigger_kind) {
         Some(CompletionTriggerKind::TRIGGER_CHARACTER) => "trigger_character",
         Some(CompletionTriggerKind::INVOKED) => "invoked",
-        Some(CompletionTriggerKind::TRIGGER_FOR_INCOMPLETE_COMPLETIONS) => {
-            "trigger_for_incomplete"
-        }
+        Some(CompletionTriggerKind::TRIGGER_FOR_INCOMPLETE_COMPLETIONS) => "trigger_for_incomplete",
         Some(_) => "other",
         None => "none",
     }
@@ -93,10 +95,8 @@ fn completion_request_targets_member_access(
     let Some(line_text) = text.lines().nth(position.line as usize) else {
         return false;
     };
-    let column_index = bsl_backend::system::positioning::utf16_to_byte_offset(
-        line_text,
-        position.character,
-    );
+    let column_index =
+        bsl_backend::system::positioning::utf16_to_byte_offset(line_text, position.character);
     let line_prefix = line_text.get(..column_index).unwrap_or(line_text);
     let line_prefix = if line_text
         .get(column_index..)
@@ -114,6 +114,63 @@ fn completion_request_targets_member_access(
     };
     let after_dot = trimmed[dot_pos + 1..].trim_start();
     after_dot.is_empty() || after_dot.chars().all(is_completion_identifier_char)
+}
+
+fn completion_labels_fingerprint(response: &CompletionResponse) -> Vec<String> {
+    const PARITY_LABELS_LIMIT: usize = 64;
+
+    let mut labels = BTreeSet::new();
+    let push_label = |set: &mut BTreeSet<String>, label: &str| {
+        if set.len() >= PARITY_LABELS_LIMIT {
+            return;
+        }
+        let normalized = label.trim().to_lowercase();
+        if normalized.is_empty() {
+            return;
+        }
+        set.insert(normalized);
+    };
+
+    match response {
+        CompletionResponse::List(list) => {
+            for item in &list.items {
+                push_label(&mut labels, &item.label);
+            }
+        }
+        CompletionResponse::Array(items) => {
+            for item in items {
+                push_label(&mut labels, &item.label);
+            }
+        }
+    }
+
+    labels.into_iter().collect()
+}
+
+fn completion_labels_overlap_ratio(lhs: &[String], rhs: &[String]) -> f64 {
+    if lhs.is_empty() || rhs.is_empty() {
+        return 0.0;
+    }
+
+    let left: BTreeSet<&str> = lhs.iter().map(String::as_str).collect();
+    let right: BTreeSet<&str> = rhs.iter().map(String::as_str).collect();
+    let intersection = left.intersection(&right).count();
+    let union = left.union(&right).count();
+    if union == 0 {
+        0.0
+    } else {
+        intersection as f64 / union as f64
+    }
+}
+
+fn completion_parity_overlap_bucket(overlap_ratio: f64) -> &'static str {
+    if overlap_ratio <= 0.0 {
+        "none"
+    } else if overlap_ratio < 0.3 {
+        "low"
+    } else {
+        "high"
+    }
 }
 
 #[tower_lsp::async_trait]
@@ -1856,27 +1913,44 @@ impl LanguageServer for BslLanguageServer {
                             empty()
                         }
                         (Some(file_content), Some(file_path), Some(deps), None) => {
-                            let stale_cached_items =
-                                match (observed_settings_id.as_ref(), observed_file_version) {
-                                    (Some(settings_id), Some(file_version)) => {
-                                        let cache =
-                                            self.completion_stale_fallback_cache_v2.read().await;
-                                        cache.get(&file_id).and_then(|entry| {
-                                            let compatible = entry.deps_id == observed_deps_id
-                                                && entry.settings_id == *settings_id
-                                                && entry.file_version == file_version
-                                                && !entry.items.is_empty();
-                                            if compatible {
-                                                Some(entry.items.clone())
-                                            } else {
-                                                None
-                                            }
-                                        })
+                            let (strict_stale_cached_items, relaxed_stale_cached_items) = {
+                                let cache = self.completion_stale_fallback_cache_v2.read().await;
+                                let strict =
+                                    match (observed_settings_id.as_ref(), observed_file_version) {
+                                        (Some(settings_id), Some(file_version)) => {
+                                            cache.get(&file_id).and_then(|entry| {
+                                                let compatible = entry.deps_id == observed_deps_id
+                                                    && entry.settings_id == *settings_id
+                                                    && entry.file_version == file_version
+                                                    && !entry.items.is_empty();
+                                                if compatible {
+                                                    Some(entry.items.clone())
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                        }
+                                        _ => None,
+                                    };
+                                let relaxed = cache.get(&file_id).and_then(|entry| {
+                                    if entry.items.is_empty() {
+                                        return None;
                                     }
-                                    _ => None,
-                                };
+                                    let deps_compatible = entry.deps_id == observed_deps_id;
+                                    let settings_compatible = observed_settings_id
+                                        .as_ref()
+                                        .map(|settings_id| entry.settings_id == *settings_id)
+                                        .unwrap_or(true);
+                                    if deps_compatible && settings_compatible {
+                                        Some(entry.items.clone())
+                                    } else {
+                                        None
+                                    }
+                                });
+                                (strict, relaxed)
+                            };
 
-                            if let Some(items) = stale_cached_items {
+                            if let Some(items) = strict_stale_cached_items {
                                 completion_outcome.get_or_insert("degraded_incomplete");
                                 Some(crate::handlers::CompletionResponseWithStats {
                                     response: CompletionResponse::List(CompletionList {
@@ -1909,11 +1983,25 @@ impl LanguageServer for BslLanguageServer {
                                 if degraded.is_some() {
                                     completion_outcome.get_or_insert("degraded_incomplete");
                                     degraded
+                                } else if let Some(items) = relaxed_stale_cached_items {
+                                    completion_outcome.get_or_insert("degraded_incomplete");
+                                    self.coordinator
+                                        .record_intellisense_v2_completion_stale_fallback();
+                                    Some(crate::handlers::CompletionResponseWithStats {
+                                        response: CompletionResponse::List(CompletionList {
+                                            is_incomplete: true,
+                                            items,
+                                        }),
+                                        stats: None,
+                                        had_error: false,
+                                    })
                                 } else {
                                     completion_outcome.get_or_insert("fallback_unavailable");
                                     self.coordinator
                                         .record_intellisense_v2_completion_fallback_unavailable();
-                                    empty()
+                                    Some(crate::handlers::build_keyword_degraded_completion(
+                                        snippet_support,
+                                    ))
                                 }
                             } else {
                                 completion_outcome.get_or_insert("missing_ir");
@@ -2036,28 +2124,56 @@ impl LanguageServer for BslLanguageServer {
             {
                 let observed_file_version = observed_file_version_for_completion
                     .expect("checked completion observed version");
-                let key = (file_id, observed_file_version, position.line, position.character);
+                let key = (
+                    file_id,
+                    observed_file_version,
+                    position.line,
+                    position.character,
+                );
                 let non_empty = items_count > 0;
-                let parity_drift = {
+                let labels = completion_labels_fingerprint(&result.response);
+                let parity_result = {
                     let mut parity = self.completion_parity_state_v2.write().await;
                     let entry = parity.entry(key).or_default();
                     if trigger_mode == "trigger_character" {
                         entry.trigger_character_non_empty = Some(non_empty);
+                        entry.trigger_character_labels = Some(labels.clone());
                     } else {
                         entry.invoked_non_empty = Some(non_empty);
+                        entry.invoked_labels = Some(labels.clone());
                     }
-                    match (entry.trigger_character_non_empty, entry.invoked_non_empty) {
-                        (Some(trigger_non_empty), Some(invoked_non_empty)) => {
-                            let mismatch = trigger_non_empty != invoked_non_empty;
+                    match (
+                        entry.trigger_character_non_empty,
+                        entry.invoked_non_empty,
+                        entry.trigger_character_labels.as_ref(),
+                        entry.invoked_labels.as_ref(),
+                    ) {
+                        (
+                            Some(trigger_non_empty),
+                            Some(invoked_non_empty),
+                            Some(trigger_labels),
+                            Some(invoked_labels),
+                        ) => {
+                            let overlap_ratio =
+                                completion_labels_overlap_ratio(trigger_labels, invoked_labels);
+                            let mismatch = trigger_non_empty != invoked_non_empty
+                                || (trigger_non_empty && invoked_non_empty && overlap_ratio <= 0.0);
                             parity.remove(&key);
-                            mismatch
+                            Some((mismatch, overlap_ratio))
                         }
-                        _ => false,
+                        _ => None,
                     }
                 };
-                if parity_drift {
+                if let Some((parity_drift, overlap_ratio)) = parity_result {
                     self.coordinator
-                        .record_intellisense_v2_completion_parity_drift(trigger_mode);
+                        .record_intellisense_v2_completion_parity_overlap_bucket(
+                            trigger_mode,
+                            completion_parity_overlap_bucket(overlap_ratio),
+                        );
+                    if parity_drift {
+                        self.coordinator
+                            .record_intellisense_v2_completion_parity_drift(trigger_mode);
+                    }
                 }
             }
         }
@@ -3183,7 +3299,10 @@ mod tests {
 
     #[test]
     fn idle_heavy_is_skipped_when_flow_sensitive_disabled() {
-        assert!(!should_schedule_profile(DiagnosticsProfile::IdleHeavy, false));
+        assert!(!should_schedule_profile(
+            DiagnosticsProfile::IdleHeavy,
+            false
+        ));
         assert!(should_schedule_profile(DiagnosticsProfile::IdleHeavy, true));
         assert!(should_schedule_profile(DiagnosticsProfile::Fast, false));
         assert!(should_schedule_profile(

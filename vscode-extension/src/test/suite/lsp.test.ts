@@ -1,7 +1,10 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { State } from 'vscode-languageclient/node';
-import { isCompletionTriggerEnabledForBsl } from '../../lsp/client/lifecycle';
+import {
+    buildCompletionTriggerWarningPayload,
+    isCompletionTriggerEnabledForBsl,
+} from '../../lsp/client/lifecycle';
 import { updateLspStatus } from '../../lsp/progress';
 
 /**
@@ -16,6 +19,38 @@ suite('LSP Integration Test Suite', () => {
             'boolean',
             'completion trigger helper must always return boolean'
         );
+    });
+
+    test('Completion warning payload includes remediation when suggestOnTriggerCharacters=false', () => {
+        const payload = buildCompletionTriggerWarningPayload(false);
+        assert.ok(payload, 'warning payload must be produced when trigger is disabled');
+        assert.ok(
+            payload!.outputLines.some((line) =>
+                line.includes('editor.suggestOnTriggerCharacters=false')
+            ),
+            'payload must explain disabled trigger setting'
+        );
+        assert.ok(
+            payload!.outputLines.some((line) =>
+                line.includes('Remediation: enable editor.suggestOnTriggerCharacters')
+            ),
+            'payload must include remediation hint'
+        );
+        assert.strictEqual(
+            payload!.settingsQuery,
+            'editor.suggestOnTriggerCharacters',
+            'payload must point to the exact settings key'
+        );
+        assert.strictEqual(
+            payload!.actionLabel,
+            'Open Settings',
+            'payload must expose remediation action label'
+        );
+    });
+
+    test('Completion warning payload is absent when trigger is enabled', () => {
+        const payload = buildCompletionTriggerWarningPayload(true);
+        assert.strictEqual(payload, null, 'no warning payload expected when trigger is enabled');
     });
 
     /**

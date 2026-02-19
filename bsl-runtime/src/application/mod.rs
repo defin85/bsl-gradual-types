@@ -18,11 +18,11 @@ pub use intellisense_v2::{
     ObservabilityOrigin, ObservabilityStage, PreparedOperationSnapshot, RuntimePerfKnobs,
     SemanticOperation, SemanticOutcome, SemanticSnapshot, SingleflightQueryError,
 };
-pub use type_system::get_completion_with_semantic_program;
 pub use type_system::get_completion_with_semantic_hint_snapshot_with_trigger_hint;
+pub use type_system::get_completion_with_semantic_program;
 pub use type_system::get_completion_with_semantic_program_snapshot;
-pub use type_system::get_completion_with_semantic_program_snapshot_with_trigger_hint;
 pub use type_system::get_completion_with_semantic_program_snapshot_v2;
 pub use type_system::get_completion_with_semantic_program_snapshot_v2_with_trigger_hint;
+pub use type_system::get_completion_with_semantic_program_snapshot_with_trigger_hint;
 pub use type_system::get_hover_info_with_semantic_program;
 pub use type_system::{get_completion, CompletionContext, CompletionStats};

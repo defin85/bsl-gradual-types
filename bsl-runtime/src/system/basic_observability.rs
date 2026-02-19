@@ -851,6 +851,18 @@ impl BasicObservability {
         self.metrics.increment(&key);
     }
 
+    pub fn record_intellisense_v2_completion_parity_overlap_bucket(
+        &self,
+        mode: &str,
+        bucket: &str,
+    ) {
+        let mode = normalize_completion_trigger_mode_label(mode);
+        let bucket = normalize_completion_parity_overlap_bucket_label(bucket);
+        let key =
+            format!("intellisense_v2_completion_parity_overlap_total_mode_{mode}_bucket_{bucket}");
+        self.metrics.increment(&key);
+    }
+
     pub fn record_intellisense_v2_completion_member_access_terminal_empty(
         &self,
         mode: &str,
@@ -2141,6 +2153,15 @@ fn normalize_completion_trigger_mode_label(mode: &str) -> &'static str {
     }
 }
 
+fn normalize_completion_parity_overlap_bucket_label(bucket: &str) -> &'static str {
+    match bucket {
+        "none" => "none",
+        "low" => "low",
+        "high" => "high",
+        _ => "other",
+    }
+}
+
 fn normalize_completion_terminal_reason_label(reason: &str) -> &'static str {
     match reason {
         "ok_empty" => "ok_empty",
@@ -2645,6 +2666,10 @@ mod observability_contract_tests {
         let observability = BasicObservability::default();
         observability.record_intellisense_v2_completion_trigger_mode("unexpected-mode");
         observability.record_intellisense_v2_completion_parity_drift("invoked");
+        observability.record_intellisense_v2_completion_parity_overlap_bucket(
+            "trigger_character",
+            "unexpected-overlap",
+        );
         observability.record_intellisense_v2_completion_member_access_terminal_empty(
             "trigger_character",
             "unexpected-reason",
@@ -2667,6 +2692,14 @@ mod observability_contract_tests {
             ),
             1,
             "parity drift metric must be exported with normalized mode"
+        );
+        assert_eq!(
+            counter_value(
+                counters,
+                "intellisense_v2_completion_parity_overlap_total_mode_trigger_character_bucket_other"
+            ),
+            1,
+            "parity overlap metric must normalize unknown bucket"
         );
         assert_eq!(
             counter_value(

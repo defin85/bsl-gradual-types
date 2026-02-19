@@ -18,9 +18,11 @@ use bsl_backend::application::{
     get_completion_with_semantic_program_snapshot_with_trigger_hint,
 };
 use bsl_backend::system::IndexSnapshot;
+use bsl_runtime::system::keyword_index::DEFAULT_KEYWORDS;
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::{MethodSignature, SignatureSource};
 use bsl_shared::domain::types::{MetadataKind, TypeResolution};
+use bsl_shared::domain::CompletionKind;
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::formatting::normalize_user_facing_type_name;
 use bsl_shared::ir::SemanticProgram;
@@ -72,6 +74,36 @@ pub struct CompletionResponseWithStats {
     #[allow(dead_code)]
     pub stats: Option<CompletionStats>,
     pub had_error: bool,
+}
+
+pub fn build_keyword_degraded_completion(snippet_support: bool) -> CompletionResponseWithStats {
+    const KEYWORD_FALLBACK_LIMIT: usize = 64;
+
+    let items: Vec<CompletionItem> = DEFAULT_KEYWORDS
+        .iter()
+        .take(KEYWORD_FALLBACK_LIMIT)
+        .map(|keyword| {
+            to_lsp_completion(
+                bsl_shared::domain::CompletionItem::new(
+                    (*keyword).to_string(),
+                    CompletionKind::Keyword,
+                ),
+                None,
+                vec![],
+                snippet_support,
+                None,
+            )
+        })
+        .collect();
+
+    CompletionResponseWithStats {
+        response: CompletionResponse::List(CompletionList {
+            is_incomplete: true,
+            items,
+        }),
+        stats: None,
+        had_error: false,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -243,7 +275,7 @@ pub async fn handle_completion_v2_degraded(
     match completion {
         Ok(result) => {
             if result.items.is_empty() {
-                return None;
+                return Some(build_keyword_degraded_completion(snippet_support));
             }
             let lsp_completions: Vec<CompletionItem> = result
                 .items
@@ -269,7 +301,7 @@ pub async fn handle_completion_v2_degraded(
         }
         Err(e) => {
             error!("Failed to get degraded completions (v2): {}", e);
-            None
+            Some(build_keyword_degraded_completion(snippet_support))
         }
     }
 }

@@ -1047,6 +1047,10 @@ impl BslLanguageServer {
         let line_index = analysis
             .as_ref()
             .and_then(|value| value.line_index(file_id).ok().flatten());
+        let (file_bytes, file_lines) = file_text
+            .as_deref()
+            .map(|text| (text.len(), text.lines().count()))
+            .unwrap_or((0, 0));
 
         let snapshot_elapsed = prepared.snapshot_elapsed;
         if let Some(threshold) = super::intellisense_v2_slow_snapshot_warn_threshold() {
@@ -1068,6 +1072,14 @@ impl BslLanguageServer {
         let mut was_cancelled = false;
 
         if plan.run_syntax {
+            self.coordinator
+                .record_intellisense_v2_payload_shape_with_origin(
+                    context.origin.as_str(),
+                    context.operation.as_str(),
+                    bsl_runtime::application::ObservabilityStage::SyntaxDiagnosticsQuery.as_str(),
+                    file_bytes,
+                    file_lines,
+                );
             let analysis_for_blocking = analysis
                 .take()
                 .expect("analysis snapshot must be available for syntax stage");
@@ -1125,6 +1137,8 @@ impl BslLanguageServer {
                                 expected_generation = requested_generation,
                                 profile = profile.as_str(),
                                 syntax_diagnostics_ms = syntax_elapsed.as_millis(),
+                                file_bytes,
+                                file_lines,
                                 threshold_ms = threshold.as_millis(),
                                 "diagnostics_v2: syntax_diagnostics query is slow"
                             );
@@ -1156,6 +1170,15 @@ impl BslLanguageServer {
         }
 
         if plan.run_semantic {
+            self.coordinator
+                .record_intellisense_v2_payload_shape_with_origin(
+                    context.origin.as_str(),
+                    context.operation.as_str(),
+                    bsl_runtime::application::ObservabilityStage::SemanticDiagnosticsQuery
+                        .as_str(),
+                    file_bytes,
+                    file_lines,
+                );
             let current_generation = self.current_diagnostics_generation_v2(file_id).await;
             if current_generation != Some(requested_generation) {
                 self.record_diagnostics_pipeline_event_v2(
@@ -1248,6 +1271,8 @@ impl BslLanguageServer {
                                 expected_generation = requested_generation,
                                 profile = profile.as_str(),
                                 semantic_diagnostics_ms = semantic_elapsed.as_millis(),
+                                file_bytes,
+                                file_lines,
                                 threshold_ms = threshold.as_millis(),
                                 "diagnostics_v2: semantic_diagnostics query is slow"
                             );

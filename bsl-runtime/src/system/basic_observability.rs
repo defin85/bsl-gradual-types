@@ -876,6 +876,51 @@ impl BasicObservability {
         self.metrics.increment(&key);
     }
 
+    pub fn record_intellisense_v2_payload_shape(
+        &self,
+        operation: &str,
+        stage: &str,
+        file_bytes: usize,
+        line_count: usize,
+    ) {
+        self.record_intellisense_v2_payload_shape_with_origin(
+            "runtime",
+            operation,
+            stage,
+            file_bytes,
+            line_count,
+        );
+    }
+
+    pub fn record_intellisense_v2_payload_shape_with_origin(
+        &self,
+        origin: &str,
+        operation: &str,
+        stage: &str,
+        file_bytes: usize,
+        line_count: usize,
+    ) {
+        let origin = normalize_observability_origin_label(origin);
+        let operation = normalize_operation_label(operation);
+        let stage = normalize_payload_shape_stage_label(stage);
+        let size_bucket = payload_size_bucket(file_bytes);
+        let line_bucket = payload_line_bucket(line_count);
+
+        let bucket_counter = format!(
+            "intellisense_v2_payload_shape_total_origin_{origin}_operation_{operation}_stage_{stage}_size_bucket_{size_bucket}_line_bucket_{line_bucket}"
+        );
+        let bytes_histogram =
+            format!("intellisense_v2_payload_shape_bytes_origin_{origin}_operation_{operation}_stage_{stage}");
+        let lines_histogram =
+            format!("intellisense_v2_payload_shape_lines_origin_{origin}_operation_{operation}_stage_{stage}");
+
+        self.metrics.increment(&bucket_counter);
+        self.metrics
+            .observe_histogram(&bytes_histogram, file_bytes as f64);
+        self.metrics
+            .observe_histogram(&lines_histogram, line_count as f64);
+    }
+
     pub fn record_intellisense_v2_wait_for_file_version(&self, kind: &str, duration: Duration) {
         self.record_intellisense_v2_wait_for_file_version_with_origin("runtime", kind, duration);
     }
@@ -1182,7 +1227,11 @@ impl BasicObservability {
     }
 
     pub fn record_intellisense_v2_parse_result_query_latency(&self, duration: Duration) {
-        self.record_intellisense_v2_parse_result_query_latency_with_origin("runtime", duration);
+        self.record_intellisense_v2_parse_result_query_latency_with_origin_and_operation(
+            "runtime",
+            "other",
+            duration,
+        );
     }
 
     pub fn record_intellisense_v2_parse_result_query_latency_with_origin(
@@ -1190,12 +1239,26 @@ impl BasicObservability {
         origin: &str,
         duration: Duration,
     ) {
+        self.record_intellisense_v2_parse_result_query_latency_with_origin_and_operation(
+            origin,
+            "other",
+            duration,
+        );
+    }
+
+    pub fn record_intellisense_v2_parse_result_query_latency_with_origin_and_operation(
+        &self,
+        origin: &str,
+        operation: &str,
+        duration: Duration,
+    ) {
+        let operation = normalize_operation_label(operation);
         let elapsed_ms = duration.as_millis() as f64;
         self.emit_canonical_event(
             CanonicalEvent {
                 family: CanonicalFamily::StageTotal,
                 origin,
-                operation: Some("diagnostics"),
+                operation: Some(operation),
                 stage: Some("parse_result_query"),
                 outcome: None,
                 reason: None,
@@ -1215,7 +1278,7 @@ impl BasicObservability {
             CanonicalEvent {
                 family: CanonicalFamily::StageLatencyMs,
                 origin,
-                operation: Some("diagnostics"),
+                operation: Some(operation),
                 stage: Some("parse_result_query"),
                 outcome: None,
                 reason: None,
@@ -2172,6 +2235,37 @@ fn normalize_completion_terminal_reason_label(reason: &str) -> &'static str {
     }
 }
 
+fn normalize_payload_shape_stage_label(stage: &str) -> &'static str {
+    match stage {
+        "runtime_snapshot_with_deps" => "runtime_snapshot_with_deps",
+        "runtime_wait_for_file_version" => "runtime_wait_for_file_version",
+        "syntax_diagnostics_query" => "syntax_diagnostics_query",
+        "semantic_diagnostics_query" => "semantic_diagnostics_query",
+        "parse_result_query" => "parse_result_query",
+        _ => "other",
+    }
+}
+
+fn payload_size_bucket(file_bytes: usize) -> &'static str {
+    match file_bytes {
+        0 => "zero",
+        1..=4095 => "lt_4k",
+        4096..=16383 => "lt_16k",
+        16384..=65535 => "lt_64k",
+        _ => "ge_64k",
+    }
+}
+
+fn payload_line_bucket(line_count: usize) -> &'static str {
+    match line_count {
+        0 => "zero",
+        1..=99 => "lt_100",
+        100..=499 => "lt_500",
+        500..=1999 => "lt_2k",
+        _ => "ge_2k",
+    }
+}
+
 fn legacy_wait_for_file_version_metrics(kind: &str) -> (&'static str, &'static str) {
     match kind {
         "completion" => (
@@ -2636,6 +2730,36 @@ mod observability_contract_tests {
     }
 
     #[test]
+    fn parse_result_query_tracks_operation_dimension() {
+        let observability = BasicObservability::default();
+        observability.record_intellisense_v2_parse_result_query_latency_with_origin_and_operation(
+            "lsp",
+            "completion",
+            Duration::from_millis(10),
+        );
+
+        let exported = observability.get_metrics().export_metrics();
+        let counters = counters(&exported);
+        let histograms = histograms(&exported);
+
+        let stage_counter_key =
+            "intellisense_v2_drilldown_stage_total_origin_lsp_operation_completion_stage_parse_result_query";
+        let stage_histogram_key =
+            "intellisense_v2_drilldown_stage_latency_ms_origin_lsp_operation_completion_stage_parse_result_query";
+
+        assert_eq!(
+            counter_value(counters, stage_counter_key),
+            1,
+            "parse_result stage counter must be attributed to the operation that issued the query"
+        );
+        assert_eq!(
+            histogram_count(histograms, stage_histogram_key),
+            1,
+            "parse_result stage latency must be attributed to the operation that issued the query"
+        );
+    }
+
+    #[test]
     fn completion_outcome_exports_degraded_and_fallback_unavailable() {
         let observability = BasicObservability::default();
         observability.record_intellisense_v2_completion_outcome("degraded_incomplete");
@@ -2708,6 +2832,41 @@ mod observability_contract_tests {
             ),
             1,
             "terminal-empty metric must normalize unknown reason"
+        );
+    }
+
+    #[test]
+    fn payload_shape_metrics_export_bucket_and_histograms() {
+        let observability = BasicObservability::default();
+        observability.record_intellisense_v2_payload_shape_with_origin(
+            "lsp",
+            "completion",
+            "runtime_snapshot_with_deps",
+            12_345,
+            321,
+        );
+
+        let exported = observability.get_metrics().export_metrics();
+        let counters = counters(&exported);
+        let histograms = histograms(&exported);
+        let counter_key = "intellisense_v2_payload_shape_total_origin_lsp_operation_completion_stage_runtime_snapshot_with_deps_size_bucket_lt_16k_line_bucket_lt_500";
+        let bytes_histogram_key =
+            "intellisense_v2_payload_shape_bytes_origin_lsp_operation_completion_stage_runtime_snapshot_with_deps";
+        let lines_histogram_key =
+            "intellisense_v2_payload_shape_lines_origin_lsp_operation_completion_stage_runtime_snapshot_with_deps";
+
+        assert_eq!(
+            counter_value(counters, counter_key),
+            1,
+            "payload-shape bucket counter should include normalized dimensions"
+        );
+        assert!(
+            histogram_count(histograms, bytes_histogram_key) > 0,
+            "payload-shape bytes histogram should be exported"
+        );
+        assert!(
+            histogram_count(histograms, lines_histogram_key) > 0,
+            "payload-shape lines histogram should be exported"
         );
     }
 }

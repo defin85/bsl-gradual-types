@@ -904,10 +904,12 @@ impl IntellisenseV2Facade {
                     }
                 }
                 ObservabilityStage::ParseResultQuery => {
-                    coordinator.record_intellisense_v2_parse_result_query_latency_with_origin(
-                        context.origin.as_str(),
-                        elapsed,
-                    );
+                    coordinator
+                        .record_intellisense_v2_parse_result_query_latency_with_origin_and_operation(
+                            context.origin.as_str(),
+                            context.operation.as_str(),
+                            elapsed,
+                        );
                     if report_cancelled {
                         coordinator.record_intellisense_v2_query_cancelled_with_origin(
                             context.origin.as_str(),

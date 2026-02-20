@@ -321,7 +321,11 @@ impl SystemCoordinator {
     }
 
     pub fn record_intellisense_v2_parse_result_query_latency(&self, duration: std::time::Duration) {
-        self.record_intellisense_v2_parse_result_query_latency_with_origin("runtime", duration);
+        self.record_intellisense_v2_parse_result_query_latency_with_origin_and_operation(
+            "runtime",
+            "other",
+            duration,
+        );
     }
 
     pub fn record_intellisense_v2_parse_result_query_latency_with_origin(
@@ -329,8 +333,55 @@ impl SystemCoordinator {
         origin: &str,
         duration: std::time::Duration,
     ) {
+        self.record_intellisense_v2_parse_result_query_latency_with_origin_and_operation(
+            origin,
+            "other",
+            duration,
+        );
+    }
+
+    pub fn record_intellisense_v2_parse_result_query_latency_with_origin_and_operation(
+        &self,
+        origin: &str,
+        operation: &str,
+        duration: std::time::Duration,
+    ) {
         self.observability
-            .record_intellisense_v2_parse_result_query_latency_with_origin(origin, duration);
+            .record_intellisense_v2_parse_result_query_latency_with_origin_and_operation(
+                origin,
+                operation,
+                duration,
+            );
+    }
+
+    pub fn record_intellisense_v2_payload_shape(
+        &self,
+        operation: &str,
+        stage: &str,
+        file_bytes: usize,
+        line_count: usize,
+    ) {
+        self.record_intellisense_v2_payload_shape_with_origin(
+            "runtime",
+            operation,
+            stage,
+            file_bytes,
+            line_count,
+        );
+    }
+
+    pub fn record_intellisense_v2_payload_shape_with_origin(
+        &self,
+        origin: &str,
+        operation: &str,
+        stage: &str,
+        file_bytes: usize,
+        line_count: usize,
+    ) {
+        self.observability
+            .record_intellisense_v2_payload_shape_with_origin(
+                origin, operation, stage, file_bytes, line_count,
+            );
     }
 
     pub fn record_intellisense_v2_interactive_wait_budget_exhausted(&self) {

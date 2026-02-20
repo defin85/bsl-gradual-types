@@ -51,14 +51,20 @@ fn effective_include_flow_sensitive(
 }
 
 fn should_schedule_profile(
+    trigger: bsl_runtime::application::DiagnosticsTrigger,
     profile: bsl_runtime::application::DiagnosticsProfile,
     flow_sensitive_enabled: bool,
 ) -> bool {
     if matches!(
         profile,
         bsl_runtime::application::DiagnosticsProfile::IdleHeavy
-    ) {
-        return flow_sensitive_enabled;
+    ) && !flow_sensitive_enabled
+    {
+        return matches!(
+            trigger,
+            bsl_runtime::application::DiagnosticsTrigger::DidSave
+                | bsl_runtime::application::DiagnosticsTrigger::Idle
+        );
     }
     true
 }
@@ -955,7 +961,11 @@ impl LanguageServer for BslLanguageServer {
         for profile in bsl_runtime::application::diagnostics_profiles_for_trigger(
             bsl_runtime::application::DiagnosticsTrigger::DidChange,
         ) {
-            if !should_schedule_profile(*profile, flow_sensitive_enabled) {
+            if !should_schedule_profile(
+                bsl_runtime::application::DiagnosticsTrigger::DidChange,
+                *profile,
+                flow_sensitive_enabled,
+            ) {
                 continue;
             }
             match profile {
@@ -1015,7 +1025,11 @@ impl LanguageServer for BslLanguageServer {
         for profile in bsl_runtime::application::diagnostics_profiles_for_trigger(
             bsl_runtime::application::DiagnosticsTrigger::DidSave,
         ) {
-            if !should_schedule_profile(*profile, flow_sensitive_enabled) {
+            if !should_schedule_profile(
+                bsl_runtime::application::DiagnosticsTrigger::DidSave,
+                *profile,
+                flow_sensitive_enabled,
+            ) {
                 continue;
             }
             self.schedule_diagnostics_profile_v2(
@@ -1523,6 +1537,23 @@ impl LanguageServer for BslLanguageServer {
             match prepared {
                 Ok((context, prepared, expected_version)) => {
                     let force_incomplete_due_stale = prepared.stale_served;
+                    let (snapshot_file_bytes, snapshot_file_lines) = prepared
+                        .snapshot
+                        .analysis
+                        .file_text(file_id)
+                        .ok()
+                        .flatten()
+                        .map(|text| (text.len(), text.lines().count()))
+                        .unwrap_or((0, 0));
+                    self.coordinator
+                        .record_intellisense_v2_payload_shape_with_origin(
+                            context.origin.as_str(),
+                            context.operation.as_str(),
+                            bsl_runtime::application::ObservabilityStage::RuntimeSnapshotWithDeps
+                                .as_str(),
+                            snapshot_file_bytes,
+                            snapshot_file_lines,
+                        );
                     if let Some(wait_elapsed) = prepared.wait_elapsed {
                         if let Some(threshold) = super::intellisense_v2_slow_wait_warn_threshold() {
                             if wait_elapsed >= threshold {
@@ -1543,6 +1574,8 @@ impl LanguageServer for BslLanguageServer {
                                 uri = %uri,
                                 file_id = file_id.0,
                                 snapshot_ms = prepared.snapshot_elapsed.as_millis(),
+                                file_bytes = snapshot_file_bytes,
+                                file_lines = snapshot_file_lines,
                                 threshold_ms = threshold.as_millis(),
                                 "Completion v2: snapshot acquisition is slow"
                             );
@@ -3295,17 +3328,37 @@ fn normalize_optional_string(value: Option<String>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::should_schedule_profile;
-    use bsl_runtime::application::DiagnosticsProfile;
+    use bsl_runtime::application::{DiagnosticsProfile, DiagnosticsTrigger};
 
     #[test]
-    fn idle_heavy_is_skipped_when_flow_sensitive_disabled() {
+    fn idle_heavy_runs_for_save_trigger_even_when_flow_sensitive_disabled() {
         assert!(!should_schedule_profile(
+            DiagnosticsTrigger::DidChange,
             DiagnosticsProfile::IdleHeavy,
             false
         ));
-        assert!(should_schedule_profile(DiagnosticsProfile::IdleHeavy, true));
-        assert!(should_schedule_profile(DiagnosticsProfile::Fast, false));
         assert!(should_schedule_profile(
+            DiagnosticsTrigger::DidSave,
+            DiagnosticsProfile::IdleHeavy,
+            false
+        ));
+        assert!(should_schedule_profile(
+            DiagnosticsTrigger::Idle,
+            DiagnosticsProfile::IdleHeavy,
+            false
+        ));
+        assert!(should_schedule_profile(
+            DiagnosticsTrigger::DidChange,
+            DiagnosticsProfile::IdleHeavy,
+            true
+        ));
+        assert!(should_schedule_profile(
+            DiagnosticsTrigger::DidChange,
+            DiagnosticsProfile::Fast,
+            false
+        ));
+        assert!(should_schedule_profile(
+            DiagnosticsTrigger::DidChange,
             DiagnosticsProfile::DebouncedFull,
             false
         ));

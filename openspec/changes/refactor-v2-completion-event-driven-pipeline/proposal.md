@@ -16,13 +16,28 @@
 
 Эти данные показывают, что проблема лежит не в одном query-этапе, а в orchestration модели: горячий completion путь и фоновые стадии конкурируют за ресурсы, а snapshot+queue-wait дают тяжелый tail.
 
+## Selected Architecture Option
+Выбран **вариант 2**: per-file event-driven orchestrator (actor) на границе LSP/runtime с bounded очередью, deterministic ordering, latest-wins scheduling и явной cancellation propagation.
+
+Почему выбран именно он:
+- устраняет adapter-local процедурную связность hot path;
+- дает формальный контракт порядка/отмены для burst `didChange`/completion;
+- поддерживает безопасный dual-mode rollout (`legacy` + `event-driven`) без breaking change клиентского контракта.
+
 ## What Changes
-- **ADDED**: requirement в `bsl-intellisense-v2` про event-driven orchestration интерактивного completion pipeline.
-  - `didChange`/completion MUST обрабатываться через явную модель событий и планировщик, без блокирующих ожиданий в hot path.
-- **ADDED**: requirement в `bsl-intellisense-v2` про deterministic ordering и latest-wins semantics для completion под burst-нагрузкой.
-  - Система MUST давать предсказуемый результат для актуальной ревизии и не тратить интерактивный бюджет на устаревшие запросы.
-- **ADDED**: requirement в `bsl-intellisense-v2` про rollout/rollback контракт для event-driven режима.
-  - Режим MUST включаться feature-flag'ом, иметь метрики паритета/латентности и безопасный rollback.
+- **ADDED**: requirement в `bsl-intellisense-v2` про event-driven orchestration интерактивного completion pipeline через per-file dispatcher/actor и bounded очередь событий.
+  - `didChange` ingest MUST оставаться неблокирующим для интерактивного completion;
+  - `didChange`/completion/cancel MUST обрабатываться как формализованные события.
+- **ADDED**: requirement в `bsl-intellisense-v2` про deterministic ordering + latest-wins semantics.
+  - completion для устаревшей ревизии MUST коалесцироваться/отменяться до тяжелых стадий;
+  - актуальный запрос MUST получать приоритет в интерактивном бюджете.
+- **ADDED**: requirement в `bsl-intellisense-v2` про cancellation contract.
+  - LSP cancel MUST доходить до orchestrator и прерывать дальнейшие тяжелые стадии между checkpoint-этапами.
+- **ADDED**: requirement в `bsl-intellisense-v2` про rollout/rollback контракт.
+  - режим MUST управляться feature-flag mode (`off|shadow|canary|on`);
+  - MUST быть безопасный kill-switch rollback к legacy/runtime-centric пути.
+- **ADDED**: requirement в `bsl-intellisense-v2` про observability сравнение legacy vs event-driven.
+  - MUST быть mode-aware разрез метрик для формального pass/fail rollout-гейтов.
 
 ## Impact
 - Affected specs:
@@ -32,6 +47,8 @@
   - `backend/src/bin/lsp_server/server/mod.rs`
   - `bsl-runtime/src/application/intellisense_v2/facade.rs`
   - `bsl-runtime/src/application/intellisense_v2/policy.rs`
+  - `bsl-runtime/src/system/runtime_config.rs`
+  - `bsl-runtime/src/system/basic_observability.rs`
   - `backend/src/bin/lsp_server/server/core.rs` (контрактные и нагрузочные тесты)
   - `backend/tests/lsp_incremental_completion_test.rs`
 

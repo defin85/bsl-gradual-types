@@ -1,8 +1,12 @@
 ## Context
 
-Существующий completion pipeline содержит зрелые элементы (singleflight, stale fallback, bounded interactive knobs), но остаётся частично процедурным: части жизненного цикла `didChange`/completion синхронизируются через локальные блокировки и точечные guard'ы.
+Существующий completion pipeline уже содержит важные строительные блоки:
+- centralized facade (`prepare_stateful_operation`);
+- stale fallback и bounded wait budget;
+- singleflight для дорогих query;
+- CPU fairness между interactive/background.
 
-Это усложняет обеспечение предсказуемого интерактивного поведения при burst-нагрузке и росте параллелизма.
+Но orchestration completion в LSP всё ещё процедурный: hot path остаётся длинной цепочкой adapter-local шагов. Это усложняет детерминизм под burst `didChange`/completion и не дает явного контракта отмены/коалесцирования.
 
 Observed baseline (2026-02-20, conf_big, warm run):
 - completion duration p95 = 3685ms
@@ -13,98 +17,133 @@ Observed baseline (2026-02-20, conf_big, warm run):
 - semantic diagnostics p95 = 584ms
 - interactive wait budget exhausted = 2 events
 
+## Architecture Options
+
+### Option 1: Укрепить текущий adapter-local pipeline (не выбран)
+- Плюс: минимальные изменения в коде.
+- Минус: масштабирование сложности в `language_server.rs`, слабый контракт latest-wins/cancel.
+
+### Option 2: Per-file event-driven orchestrator actor (выбран)
+- Для каждого `file_id` отдельный dispatcher/actor и bounded queue.
+- Явные события `DidOpen/DidChange/CompletionRequest/Cancel/DidClose`.
+- Latest-wins и cancellation применяются на уровне scheduler до тяжелых стадий.
+- Dual-mode rollout (`legacy` + `event-driven`) с shadow-режимом.
+
+### Option 3: Единый глобальный orchestrator на весь workspace (не выбран)
+- Плюс: один центр принятия решений.
+- Минус: риск cross-file head-of-line blocking и сложнее локальная изоляция нагрузки.
+
 ## Goals / Non-Goals
 
 - Goals:
-  - Перейти на event-driven orchestration интерактивного completion пути с явной моделью событий и очередей.
-  - Гарантировать deterministic ordering и latest-wins обработку completion для актуальной ревизии документа.
-  - Снизить зависимость от блокирующих ожиданий в hot path и стабилизировать tail latency.
-  - Достичь измеримых SLO для интерактивного пути completion в canary и production rollout.
-  - Ввести безопасный rollout/rollback через feature flag и наблюдаемые SLI/SLO.
+  - Перевести completion hot path на вариант 2 (per-file actor orchestration).
+  - Формально закрепить deterministic ordering и latest-wins.
+  - Встроить явную cancellation propagation по стадиям.
+  - Обеспечить dual-mode rollout и безопасный kill-switch rollback.
+  - Снизить интерактивный tail latency до rollout SLO.
 - Non-Goals:
-  - Изменение доменной семантики completion (какие типы кандидатов возвращаются).
-  - Переработка ranking/score модели.
-  - Изменение пользовательских editor settings автоматически.
+  - Изменение семантики completion candidates.
+  - Изменение ranking/score модели.
+  - Автоматическое изменение editor settings пользователя.
 
 ## Decisions
 
-### Decision 1: Per-file event stream как источник оркестрации
+### Decision 1: Dispatcher topology
 
-Для каждого открытого документа вводится event stream с событиями как минимум:
-- `DidOpen(version, text)`,
-- `DidChange(version, diff|full_text)`,
-- `CompletionRequest(request_id, position, trigger_mode, revision_hint)`,
-- `Cancel(request_id)`,
+На границе LSP/runtime вводится per-file dispatcher:
+- key: `file_id`;
+- execution unit: actor task;
+- inbox: bounded `mpsc` queue (размер конфигурируемый, фиксированный верхний предел).
+
+Это устраняет глобальную конкуренцию между файлами и позволяет локально применять backpressure/coalescing.
+
+### Decision 2: Event contract и инварианты порядка
+
+События:
+- `DidOpen(version, text)`;
+- `DidChange(version, diff_or_full_text)`;
+- `CompletionRequest(request_id, position, trigger_mode, revision_hint)`;
+- `Cancel(request_id)`;
 - `DidClose`.
 
-Порядок событий внутри файла MUST быть детерминированным.
+Инварианты:
+- внутри одного `file_id` события обрабатываются строго FIFO;
+- каждый completion request получает monotonic `request_epoch`;
+- результат может быть опубликован только если `request_epoch == latest_epoch`.
 
-### Decision 2: Коалесцирование и latest-wins для интерактивных completion
+### Decision 3: Latest-wins + coalescing policy
 
-Completion scheduler MUST коалесцировать устаревшие задания и отдавать приоритет последнему релевантному запросу в интерактивном бюджете.
+Scheduler обязан:
+- коалесцировать устаревшие completion задачи;
+- отменять задачи, потерявшие актуальность по `version/epoch`, до тяжелых стадий;
+- гарантировать, что интерактивный бюджет тратится только на latest-запрос.
 
-Запросы, потерявшие актуальность по ревизии/позиции, MUST отменяться до тяжёлых стадий (`snapshot/ir/collect/rank`), а не только в конце пайплайна.
+### Decision 4: Cancellation propagation contract
 
-### Decision 3: Разделение ingest и query path
+`Cancel(request_id)` MUST:
+- привязываться к активному `CompletionRequest` через registry `request_id -> token`;
+- прекращать дальнейшее выполнение между stage-checkpoints (`wait`, `snapshot`, `ir`, `collect`, `rank`, `format`);
+- завершать запрос согласно LSP cancellation semantics без подвисания.
 
-`didChange` ingest не должен блокироваться ожиданием завершения предыдущих вычислений completion/diagnostics.
+### Decision 5: Fallback policy централизуется в orchestrator/runtime
 
-Согласованность достигается через версионированный state + event ordering, а не через блокирующую сериализацию всех шагов в hot path.
+Stale/degraded policy (`isIncomplete=true`, `fallback_unavailable`, terminal-empty guard) остается единой runtime policy и не дублируется adapter-local ветками.
 
-### Decision 4: Политика отмены и деградации как часть контракта orchestrator
+### Decision 6: Dual-mode rollout через runtime key
 
-Orchestrator MUST централизованно управлять:
-- cancellation propagation,
-- stale/degraded fallback policy,
-- правилами `isIncomplete=true` для частичных ответов.
+Вводится feature flag mode (runtime-config) с фиксированными значениями:
+- `off` (legacy только),
+- `shadow` (event-driven исполняется параллельно для метрик/сравнения),
+- `canary` (частичный ответ event-driven),
+- `on` (event-driven default path).
 
-Это исключает расхождение между адаптером LSP и runtime policy.
+Rollback: моментальное переключение mode назад в `off`.
 
-### Decision 5: Feature-flag rollout и безопасный rollback
+### Decision 7: Observability contract для сравнения режимов
 
-Event-driven режим включается через флаг (например, `bsl.intellisenseV2.eventDrivenCompletion`).
-Требуется dual-mode поддержка:
-- legacy/runtime-centric путь,
-- event-driven путь.
+Для completion-контура добавляется mode-aware измерение (`mode=legacy|event_driven|shadow`) с низкой кардинальностью, включая operation-scoped stages:
+- `runtime_wait_for_file_version`,
+- `runtime_snapshot_with_deps`,
+- `ir_query`,
+- `parse_result_query`.
 
-Rollback MUST выполняться переключением флага без изменения пользовательских документов/настроек.
+Это дает формальное сравнение legacy vs event-driven без изменения семантики existing keys.
 
-### Decision 6: SLO фиксируются как gate для rollout
+### Decision 8: Rollout quality gates
 
-Для перехода из canary в default-on режим должны выполняться измеримые acceptance-гейты:
-- `completion_duration_ms` p95 <= 1500ms на warm профиле.
-- `intellisense_v2_wait_for_file_version_completion_ms` p95 <= configured wait budget + 20ms.
-- `intellisense_v2_runtime_queue_wait_interactive_ms` p95 <= configured wait budget + 250ms.
-- `intellisense_v2_interactive_wait_budget_exhausted_total / completion_total <= 1%`.
-- `intellisense_v2_completion_result_total_ok_empty / completion_total <= 5%` на фиксированном conf_big smoke-профиле.
-
-Гейты валидируются автоматизированными тестами и сравниваются с baseline.
+Переход `shadow -> canary -> on` разрешается только при выполнении SLO:
+- `completion_duration_ms` p95 <= 1500ms;
+- `wait_for_file_version_completion_ms` p95 <= wait_budget + 20ms;
+- `runtime_queue_wait_interactive_ms` p95 <= wait_budget + 250ms;
+- `interactive_wait_budget_exhausted / completion_total <= 1%`;
+- `completion_result_total_ok_empty / completion_total <= 5%` на фиксированном smoke-профиле.
 
 ## Architecture Sketch
 
-1. `LSP Adapter` публикует события в per-file orchestrator queue.
-2. `Orchestrator` применяет ordering/coalescing/cancellation policy.
-3. `Runtime Query Executor` выполняет bounded stages с приоритетами.
-4. `Response Assembler` формирует LSP completion response + outcome/latency метрики.
+1. `LSP Adapter` преобразует transport-сигналы в канонические события и отправляет их в `PerFileDispatcher`.
+2. `PerFileOrchestrator` применяет ordering, latest-wins, cancellation, coalescing.
+3. `Runtime Query Executor` выполняет bounded стадии (singleflight/fairness сохраняются).
+4. `Response Assembler` формирует итоговый LSP response и mode-aware observability.
 
 ## Migration Plan
 
-1. Добавить флаг и dual-path orchestration каркас (без включения по умолчанию).
-2. Подключить event stream для completion в shadow-режиме (метрики, но ответ берётся из legacy пути).
-3. Включить event-driven ответы для canary-конфигураций и сравнивать baseline/SLO.
-4. После достижения целевых SLI/SLO включить по умолчанию.
-5. Сохранить rollback до завершения стабилизации.
+1. Добавить runtime mode key + dual-path wiring (без смены default поведения).
+2. Ввести per-file dispatcher/actor с bounded queue, пока без user-facing switch.
+3. Подключить `shadow` режим: event-driven исполняется, ответ пользователю остается legacy.
+4. Добавить сравнение mode-aware метрик и parity checks.
+5. Включить `canary`, затем `on` только при прохождении quality gates.
+6. Держать kill-switch rollback до завершения стабилизации.
 
 ## Risks / Trade-offs
 
-- Риск роста архитектурной сложности и стоимости сопровождения.
-  - Митигация: чёткая ownership model по слоям (adapter/orchestrator/runtime), контрактные тесты.
-- Риск скрытых starvation сценариев при неправильной политике приоритетов.
-  - Митигация: fairness guards + метрики очередей и отмен.
-- Риск временной деградации latency на этапе dual-mode.
-  - Митигация: phased rollout, kill-switch, budget limits.
+- Рост архитектурной сложности.
+  - Митигация: четкие границы ownership (`adapter`, `orchestrator`, `runtime`), контрактные тесты.
+- Ошибки в latest-wins/coalescing могут вызвать starvation.
+  - Митигация: bounded queue, fairness guards, saturation метрики.
+- Временная деградация latency в dual-mode.
+  - Митигация: shadow-first rollout, жесткие SLO gates, быстрый rollback.
 
 ## Open Questions
 
-- Нужен ли единый orchestrator для completion+hover+signatureHelp, или на первом этапе только completion.
-- Требуется ли отдельная пер-file backpressure policy для очень больших модулей (порог по размеру/частоте событий).
+- Ограничивать первый этап только `completion` или сразу включать `hover/signatureHelp` в тот же orchestrator.
+- Нужны ли отдельные per-file лимиты backpressure для очень больших модулей (по размеру/частоте событий).

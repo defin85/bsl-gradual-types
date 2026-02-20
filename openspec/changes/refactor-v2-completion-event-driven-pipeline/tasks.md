@@ -1,31 +1,49 @@
-## 1. Specification
-- [ ] 1.1 Добавить requirement в `bsl-intellisense-v2` про per-file event-driven dispatcher/actor и bounded queue для completion pipeline.
-- [ ] 1.2 Добавить requirement в `bsl-intellisense-v2` про deterministic ordering + latest-wins semantics под burst `didChange`/completion.
-- [ ] 1.3 Добавить requirement в `bsl-intellisense-v2` про cancellation propagation (`Cancel(request_id)` -> остановка тяжелых стадий на checkpoint'ах).
-- [ ] 1.4 Добавить requirement в `bsl-intellisense-v2` про rollout/rollback контракт mode-based feature flag (`off|shadow|canary|on`).
-- [ ] 1.5 Добавить requirement в `bsl-intellisense-v2` про mode-aware observability разрез для сравнения legacy vs event-driven.
+## 0. Architecture Lock
+- [ ] 0.1 Подтвердить в implementation PR, что реализация следует зафиксированной целевой архитектуре per-file event-driven orchestrator без архитектурных отклонений.
+
+## 1. Specification & Contracts
+- [ ] 1.1 Уточнить delta-spec: event envelope (`file_id`, `file_seq`, `request_id`, `request_epoch`, `version_hint`) и publish-инварианты latest-wins.
+- [ ] 1.2 Уточнить delta-spec: bounded queue + overflow policy (coalescing `DidChange`, вытеснение устаревших completion, non-droppable `Cancel`).
+- [ ] 1.3 Уточнить delta-spec: cancellation contract (`$/cancelRequest` -> `Cancel(request_id)` -> checkpoint stop + no late publish).
+- [ ] 1.4 Уточнить delta-spec: mode rollout (`off|shadow|canary|on`) и kill-switch rollback.
+- [ ] 1.5 Уточнить delta-spec: mode-aware observability (`mode=legacy|event_driven|shadow`) и rollout gates.
 - [ ] 1.6 Зафиксировать baseline метрик (conf_big start/cold/warm, дата + n + p95/p99) как reference для acceptance.
 
-## 2. Architecture & Design
-- [ ] 2.1 Зафиксировать event model (`DidOpen/DidChange/CompletionRequest/Cancel/DidClose`) и инварианты порядка (`file_seq`, `request_epoch`) для per-file stream.
-- [ ] 2.2 Спроектировать latest-wins/coalescing policy и bounded backpressure policy (размер очереди + overflow strategy).
-- [ ] 2.3 Спроектировать cancellation propagation contract до тяжёлых стадий runtime (`wait/snapshot/ir/collect/rank/format` checkpoints).
-- [ ] 2.4 Определить SLI/SLO и observability contract: queue wait, exec latency, cancel ratio, stale/degraded ratio, parity drift, `mode`.
-- [ ] 2.5 Описать migration/rollout план dual-mode (`off|shadow|canary|on`) и kill-switch rollback.
-- [ ] 2.6 Привязать SLO-гейты rollout к автоматизированным smoke/regression тестам (`p26`/acceptance suite).
+## 2. Runtime Configuration
+- [ ] 2.1 Добавить runtime key `BSL_INTELLISENSE_V2_COMPLETION_MODE` (`off|shadow|canary|on`, default=`off`).
+- [ ] 2.2 Добавить runtime key `BSL_INTELLISENSE_V2_COMPLETION_CANARY_PERCENT` (`0..100`, deterministic routing input).
+- [ ] 2.3 Добавить runtime key `BSL_INTELLISENSE_V2_COMPLETION_QUEUE_CAPACITY` (bounded capacity с clamp).
+- [ ] 2.4 Добавить тесты валидации/нормализации runtime keys (tier/default/clamp).
 
-## 3. Implementation
-- [ ] 3.1 Ввести runtime key для event-driven mode (`off|shadow|canary|on`) и wiring в LSP/runtime.
-- [ ] 3.2 Ввести orchestrator queue abstraction и per-file dispatcher actor в LSP/runtime boundary (bounded queue).
-- [ ] 3.3 Перевести completion hot path на event-driven планировщик с latest-wins семантикой.
-- [ ] 3.4 Добавить request-level cancellation registry (`request_id -> token`) и propagation `Cancel(request_id)` до stage checkpoints.
-- [ ] 3.5 Централизовать fallback/degraded policy в orchestrator/runtime слое и убрать adapter-local дублирование policy.
-- [ ] 3.6 Добавить mode-aware observability разрез (`legacy|event_driven|shadow`) для completion stage metrics.
+## 3. Orchestrator Core (LSP/runtime boundary)
+- [ ] 3.1 Ввести queue abstraction и per-file dispatcher registry (`file_id -> actor`).
+- [ ] 3.2 Реализовать actor lifecycle: create on first event, cleanup on `DidClose`, drain/stop semantics.
+- [ ] 3.3 Реализовать deterministic ordering по `file_seq` и monotonic `request_epoch`.
+- [ ] 3.4 Реализовать latest-wins scheduling и publish guard (`request_epoch == latest_epoch`).
+- [ ] 3.5 Реализовать overflow strategy для saturation (без неограниченного backlog).
 
-## 4. Validation
-- [ ] 4.1 Добавить контрактные тесты порядка событий и latest-wins поведения под burst-нагрузкой.
-- [ ] 4.2 Добавить контрактные тесты cancellation propagation (`Cancel(request_id)`) и гарантии отсутствия зависаний response path.
-- [ ] 4.3 Добавить тесты bounded backpressure/fairness (interactive не starving под background и наоборот).
-- [ ] 4.4 Добавить parity-тесты между legacy/runtime-centric и event-driven режимами на фиксированной ревизии (включая `shadow` сравнение).
-- [ ] 4.5 Прогнать профильные наборы и `openspec validate refactor-v2-completion-event-driven-pipeline --strict --no-interactive`.
-- [ ] 4.6 Задокументировать сравнение baseline vs event-driven (cold/warm snapshot + SLO pass/fail + mode-split метрики) в change-артефактах.
+## 4. Cancellation & Fallback Semantics
+- [ ] 4.1 Добавить request-level cancellation registry (`request_id -> token + file_id + epoch`).
+- [ ] 4.2 Пробросить `Cancel(request_id)` в orchestrator и runtime stage-checkpoints (`wait/snapshot/ir/collect/rank/format/publish`).
+- [ ] 4.3 Гарантировать no-late-publish для cancelled/superseded completion.
+- [ ] 4.4 Централизовать fallback/degraded policy в orchestrator/runtime, удалить adapter-local дублирование.
+
+## 5. Rollout & Routing
+- [ ] 5.1 Реализовать mode routing: `off` legacy only, `shadow` dual-exec/legacy-response, `canary` percentage routing, `on` event-driven default.
+- [ ] 5.2 Сделать canary routing детерминированным и воспроизводимым.
+- [ ] 5.3 Реализовать kill-switch rollback в `off` без рестарта.
+
+## 6. Observability
+- [ ] 6.1 Расширить canonical observability contract mode-aware low-cardinality dimension.
+- [ ] 6.2 Добавить mode-split completion stage metrics для `runtime_wait_for_file_version`, `runtime_snapshot_with_deps`, `ir_query`, `parse_result_query`.
+- [ ] 6.3 Сохранить deterministic dual-write projection (drilldown primary, legacy compatibility).
+- [ ] 6.4 Добавить contract tests на mode dimension + projection parity.
+
+## 7. Validation
+- [ ] 7.1 Добавить контрактные тесты порядка событий и latest-wins поведения под burst-нагрузкой.
+- [ ] 7.2 Добавить контрактные тесты cancellation propagation и отсутствия late publish.
+- [ ] 7.3 Добавить тесты bounded backpressure/fairness (interactive не starving под background и наоборот).
+- [ ] 7.4 Добавить parity-тесты между `off`/`shadow`/`canary`/`on` на фиксированной ревизии.
+- [ ] 7.5 Прогнать профильные наборы (`p26` + acceptance suite) и зафиксировать pass/fail по rollout gates.
+- [ ] 7.6 Прогнать `openspec validate refactor-v2-completion-event-driven-pipeline --strict --no-interactive`.
+- [ ] 7.7 Задокументировать baseline vs event-driven (cold/warm snapshot + SLO pass/fail + mode-split метрики) в change-артефактах.

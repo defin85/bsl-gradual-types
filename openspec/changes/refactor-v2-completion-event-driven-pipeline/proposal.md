@@ -16,13 +16,17 @@
 
 Эти данные показывают, что проблема лежит не в одном query-этапе, а в orchestration модели: горячий completion путь и фоновые стадии конкурируют за ресурсы, а snapshot+queue-wait дают тяжелый tail.
 
-## Selected Architecture Option
-Выбран **вариант 2**: per-file event-driven orchestrator (actor) на границе LSP/runtime с bounded очередью, deterministic ordering, latest-wins scheduling и явной cancellation propagation.
+## Target Architecture
+Целевая архитектура: per-file event-driven orchestrator (actor) на границе LSP/runtime с bounded очередью, deterministic ordering, latest-wins scheduling и явной cancellation propagation.
 
-Почему выбран именно он:
+Ключевые свойства целевой архитектуры:
 - устраняет adapter-local процедурную связность hot path;
 - дает формальный контракт порядка/отмены для burst `didChange`/completion;
 - поддерживает безопасный dual-mode rollout (`legacy` + `event-driven`) без breaking change клиентского контракта.
+
+### Architecture Lock
+Для данного change целевая архитектура жёстко фиксируется как per-file event-driven orchestrator.
+Любые отклонения от этой архитектуры находятся вне scope данного change.
 
 ## What Changes
 - **ADDED**: requirement в `bsl-intellisense-v2` про event-driven orchestration интерактивного completion pipeline через per-file dispatcher/actor и bounded очередь событий.
@@ -39,6 +43,25 @@
 - **ADDED**: requirement в `bsl-intellisense-v2` про observability сравнение legacy vs event-driven.
   - MUST быть mode-aware разрез метрик для формального pass/fail rollout-гейтов.
 
+## Acceptance Contract (Implementation-Ready)
+- Пользовательский LSP-контракт completion MUST оставаться backward-compatible во всех режимах (`off|shadow|canary|on`):
+  - без изменений формы `CompletionResponse`/`CompletionItem`;
+  - без требования ручных изменений editor settings у пользователя.
+- `off` MUST быть безопасным default-режимом запуска.
+- Rollout переходы MUST быть gated:
+  - `off -> shadow`: разрешается только после прохождения контрактных тестов event-order/cancel/backpressure;
+  - `shadow -> canary`: разрешается только после pass mode-aware SLO-гейтов на warm-профиле;
+  - `canary -> on`: разрешается только после стабильного pass на canary-профиле и проверки parity drift.
+- Kill-switch rollback MUST быть мгновенным переключением mode в `off` без перезапуска процесса.
+
+### Rollout Pass/Fail Gates
+- `completion_duration_ms` p95 `<= 1500ms` (warm profile).
+- `intellisense_v2_wait_for_file_version_completion_ms` p95 `<= interactive_wait_budget_ms + 20ms`.
+- `intellisense_v2_runtime_queue_wait_interactive_ms` p95 `<= interactive_wait_budget_ms + 250ms`.
+- `completion_cancelled_rate <= 0.10`.
+- `completion_parity_drift_rate <= 0.01` (для `shadow`/`canary`).
+- `member_access_terminal_empty_missing_ir_rate <= 0.005` (для `shadow`/`canary`).
+
 ## Impact
 - Affected specs:
   - `bsl-intellisense-v2`
@@ -54,6 +77,10 @@
 
 ## Dependencies
 - Реализуется отдельным треком после стабилизации `improve-v2-completion-interactive-reliability`, чтобы не блокировать быстрые UX-исправления.
+
+## Baseline Reference
+- Baseline для acceptance фиксируется датированным артефактом с обязательными полями: `profile`, `mode`, `n`, `p50/p95/p99`, `pass/fail`.
+- Источник baseline для текущего change: наблюдения `2026-02-20` в этом proposal и профильные тесты warm-path в `backend/src/bin/lsp_server/server/core.rs`.
 
 ## Scope
 - В scope: orchestration/очереди/политика отмены/коалесцирование событий/гарантии порядка/наблюдаемость/rollout.

@@ -15,6 +15,7 @@ pub use policy::{
     diagnostics_profiles_for_trigger, interactive_freshness_knobs, should_query_parse_result,
     spawn_bounded_blocking, spawn_bounded_blocking_with_class,
     spawn_bounded_blocking_with_class_observed, spawn_bounded_blocking_with_class_observed_origin,
-    CpuWorkClass, DiagnosticsDisposition, DiagnosticsExecutionPlan, DiagnosticsProfile,
-    DiagnosticsTrigger, InteractiveFreshnessKnobs, RuntimePerfKnobs,
+    CompletionMode, CompletionPipelineKnobs, CpuWorkClass, DiagnosticsDisposition,
+    DiagnosticsExecutionPlan, DiagnosticsProfile, DiagnosticsTrigger, InteractiveFreshnessKnobs,
+    RuntimePerfKnobs,
 };

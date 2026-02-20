@@ -9,8 +9,11 @@
 
 mod analysis_v2_runtime;
 mod command_handlers;
+mod completion_cancellation;
+mod completion_dispatcher;
 mod core;
 mod language_server;
+pub(crate) mod request_context;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -119,6 +122,9 @@ pub struct BslLanguageServer {
         Arc<RwLock<HashMap<V2FileId, CompletionStaleFallbackCacheEntryV2>>>,
     pub(crate) completion_parity_state_v2:
         Arc<RwLock<HashMap<(V2FileId, i32, u32, u32), CompletionParityStateV2>>>,
+    pub(crate) completion_dispatcher_v2: Arc<completion_dispatcher::CompletionDispatcherRegistry>,
+    pub(crate) completion_cancellation_registry_v2:
+        Arc<completion_cancellation::CompletionCancellationRegistry>,
     pub(crate) last_deps_id_v2: Arc<RwLock<Option<DepsSnapshotId>>>,
     pub(crate) last_settings_id_v2: Arc<RwLock<Option<SettingsId>>>,
 }

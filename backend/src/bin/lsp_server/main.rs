@@ -23,6 +23,7 @@ use tower_lsp::{LspService, Server};
 use tracing::info;
 
 use bsl_backend::system::SystemCoordinator;
+use server::request_context::RequestContextService;
 use server::BslLanguageServer;
 
 #[derive(Parser, Debug)]
@@ -125,6 +126,7 @@ async fn main() -> Result<()> {
         BslLanguageServer::handle_resume_auto_reindex,
     )
     .finish();
+    let service = RequestContextService::new(service);
     info!("LSP service created");
 
     // Start server

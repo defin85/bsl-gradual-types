@@ -54,6 +54,54 @@ impl InteractiveFreshnessKnobs {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompletionMode {
+    Off,
+    Shadow,
+    Canary,
+    On,
+}
+
+impl CompletionMode {
+    fn parse(raw: &str) -> Self {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "shadow" => Self::Shadow,
+            "canary" => Self::Canary,
+            "on" => Self::On,
+            _ => Self::Off,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CompletionPipelineKnobs {
+    pub mode: CompletionMode,
+    pub canary_percent: u8,
+    pub queue_capacity: usize,
+}
+
+impl CompletionPipelineKnobs {
+    pub fn from_runtime_config() -> Self {
+        let mode = global_runtime_config()
+            .get_string(RuntimeKey::IntellisenseV2CompletionMode)
+            .map(|value| CompletionMode::parse(&value))
+            .unwrap_or(CompletionMode::Off);
+        let (canary_percent, _) =
+            read_clamped_u8(RuntimeKey::IntellisenseV2CompletionCanaryPercent, 0, 0, 100);
+        let (queue_capacity, _) = read_clamped_usize(
+            RuntimeKey::IntellisenseV2CompletionQueueCapacity,
+            256,
+            16,
+            4096,
+        );
+        Self {
+            mode,
+            canary_percent,
+            queue_capacity,
+        }
+    }
+}
+
 impl RuntimePerfKnobs {
     pub fn from_runtime_config() -> Self {
         Self {
@@ -103,6 +151,25 @@ fn read_clamped_i32(key: RuntimeKey, default: i32, min: i32, max: i32) -> (i32, 
     };
     let clamped = raw_i32.clamp(min, max);
     (clamped, clamped != raw_i32)
+}
+
+fn read_clamped_u8(key: RuntimeKey, default: u8, min: u8, max: u8) -> (u8, bool) {
+    let raw = global_runtime_config()
+        .get_u64(key)
+        .unwrap_or(default as u64);
+    let raw_u8 = if raw > u8::MAX as u64 {
+        u8::MAX
+    } else {
+        raw as u8
+    };
+    let clamped = raw_u8.clamp(min, max);
+    (clamped, clamped != raw_u8)
+}
+
+fn read_clamped_usize(key: RuntimeKey, default: usize, min: usize, max: usize) -> (usize, bool) {
+    let raw = global_runtime_config().get_usize(key).unwrap_or(default);
+    let clamped = raw.clamp(min, max);
+    (clamped, clamped != raw)
 }
 
 pub fn interactive_freshness_knobs(
@@ -676,10 +743,19 @@ mod tests {
         prev: Option<String>,
     }
 
+    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
     impl EnvVarGuard {
         fn set(key: &'static str, value: &str) -> Self {
             let prev = std::env::var(key).ok();
             std::env::set_var(key, value);
+            global_runtime_config().reload_env_bootstrap_from_env();
+            Self { key, prev }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let prev = std::env::var(key).ok();
+            std::env::remove_var(key);
             global_runtime_config().reload_env_bootstrap_from_env();
             Self { key, prev }
         }
@@ -975,7 +1051,6 @@ mod tests {
 
     #[test]
     fn interactive_knobs_clamp_and_emit_metric() {
-        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         let _env_guard = ENV_LOCK
             .get_or_init(|| Mutex::new(()))
             .lock()
@@ -1006,5 +1081,53 @@ mod tests {
             counters.contains_key("intellisense_v2_interactive_knob_clamped_total"),
             "clamped interactive knobs should emit metric"
         );
+    }
+
+    #[test]
+    fn completion_pipeline_knobs_use_defaults_when_env_missing() {
+        let _env_guard = ENV_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("env lock should not be poisoned");
+
+        let _mode_guard = EnvVarGuard::unset("BSL_INTELLISENSE_V2_COMPLETION_MODE");
+        let _canary_guard = EnvVarGuard::unset("BSL_INTELLISENSE_V2_COMPLETION_CANARY_PERCENT");
+        let _capacity_guard = EnvVarGuard::unset("BSL_INTELLISENSE_V2_COMPLETION_QUEUE_CAPACITY");
+
+        let knobs = CompletionPipelineKnobs::from_runtime_config();
+        assert_eq!(knobs.mode, CompletionMode::Off);
+        assert_eq!(knobs.canary_percent, 0);
+        assert_eq!(knobs.queue_capacity, 256);
+    }
+
+    #[test]
+    fn completion_pipeline_knobs_normalize_mode_and_clamp_values() {
+        let _env_guard = ENV_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("env lock should not be poisoned");
+
+        let _mode_guard = EnvVarGuard::set("BSL_INTELLISENSE_V2_COMPLETION_MODE", "CANARY");
+        let _canary_guard =
+            EnvVarGuard::set("BSL_INTELLISENSE_V2_COMPLETION_CANARY_PERCENT", "999");
+        let _capacity_guard =
+            EnvVarGuard::set("BSL_INTELLISENSE_V2_COMPLETION_QUEUE_CAPACITY", "1");
+
+        let knobs = CompletionPipelineKnobs::from_runtime_config();
+        assert_eq!(knobs.mode, CompletionMode::Canary);
+        assert_eq!(knobs.canary_percent, 100);
+        assert_eq!(knobs.queue_capacity, 16);
+    }
+
+    #[test]
+    fn completion_pipeline_knobs_fallback_to_off_for_unknown_mode() {
+        let _env_guard = ENV_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("env lock should not be poisoned");
+
+        let _mode_guard = EnvVarGuard::set("BSL_INTELLISENSE_V2_COMPLETION_MODE", "legacy_like");
+        let knobs = CompletionPipelineKnobs::from_runtime_config();
+        assert_eq!(knobs.mode, CompletionMode::Off);
     }
 }

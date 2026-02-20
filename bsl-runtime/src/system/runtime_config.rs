@@ -651,6 +651,9 @@ pub enum RuntimeKey {
     IntellisenseV2InteractiveWaitBudgetMs,
     IntellisenseV2InteractiveMaxStaleVersionGap,
     IntellisenseV2InteractiveMaxStaleAgeMs,
+    IntellisenseV2CompletionMode,
+    IntellisenseV2CompletionCanaryPercent,
+    IntellisenseV2CompletionQueueCapacity,
     AgentHttpAddr,
     AgentHttpStaticDir,
     AgentStateTtlSecs,
@@ -694,6 +697,9 @@ impl RuntimeKey {
         RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs,
         RuntimeKey::IntellisenseV2InteractiveMaxStaleVersionGap,
         RuntimeKey::IntellisenseV2InteractiveMaxStaleAgeMs,
+        RuntimeKey::IntellisenseV2CompletionMode,
+        RuntimeKey::IntellisenseV2CompletionCanaryPercent,
+        RuntimeKey::IntellisenseV2CompletionQueueCapacity,
         RuntimeKey::AgentHttpAddr,
         RuntimeKey::AgentHttpStaticDir,
         RuntimeKey::AgentStateTtlSecs,
@@ -921,6 +927,32 @@ impl RuntimeKey {
                 },
                 tier: ConfigTier::Stable,
                 default: Some(ConfigValue::U64(1000)),
+                mutability: self.mutability(),
+            },
+            RuntimeKey::IntellisenseV2CompletionMode => KeySpec {
+                env: "BSL_INTELLISENSE_V2_COMPLETION_MODE",
+                kind: ValueKind::String,
+                tier: ConfigTier::Stable,
+                default: Some(ConfigValue::String("off".to_string())),
+                mutability: self.mutability(),
+            },
+            RuntimeKey::IntellisenseV2CompletionCanaryPercent => KeySpec {
+                env: "BSL_INTELLISENSE_V2_COMPLETION_CANARY_PERCENT",
+                kind: ValueKind::U64 {
+                    positive_only: false,
+                    zero_means_none: false,
+                },
+                tier: ConfigTier::Stable,
+                default: Some(ConfigValue::U64(0)),
+                mutability: self.mutability(),
+            },
+            RuntimeKey::IntellisenseV2CompletionQueueCapacity => KeySpec {
+                env: "BSL_INTELLISENSE_V2_COMPLETION_QUEUE_CAPACITY",
+                kind: ValueKind::Usize {
+                    positive_only: false,
+                },
+                tier: ConfigTier::Stable,
+                default: Some(ConfigValue::Usize(256)),
                 mutability: self.mutability(),
             },
             RuntimeKey::AgentHttpAddr => KeySpec {
@@ -1213,5 +1245,41 @@ mod tests {
         stable.insert("BSL_CACHE_DISABLE".to_string(), JsonValue::Bool(true));
         let report = store.replace_stable_overrides(&stable);
         assert!(report.requires_restart_keys.is_empty());
+    }
+
+    #[test]
+    fn completion_runtime_keys_have_stable_tier_and_defaults() {
+        let store = RuntimeConfigStore::new_from_env_bootstrap();
+        let snapshot = store.snapshot();
+
+        assert_eq!(
+            snapshot.tiers.get("BSL_INTELLISENSE_V2_COMPLETION_MODE"),
+            Some(&ConfigTier::Stable)
+        );
+        assert_eq!(
+            snapshot
+                .tiers
+                .get("BSL_INTELLISENSE_V2_COMPLETION_CANARY_PERCENT"),
+            Some(&ConfigTier::Stable)
+        );
+        assert_eq!(
+            snapshot
+                .tiers
+                .get("BSL_INTELLISENSE_V2_COMPLETION_QUEUE_CAPACITY"),
+            Some(&ConfigTier::Stable)
+        );
+
+        assert_eq!(
+            store.get_string(RuntimeKey::IntellisenseV2CompletionMode),
+            Some("off".to_string())
+        );
+        assert_eq!(
+            store.get_u64(RuntimeKey::IntellisenseV2CompletionCanaryPercent),
+            Some(0)
+        );
+        assert_eq!(
+            store.get_usize(RuntimeKey::IntellisenseV2CompletionQueueCapacity),
+            Some(256)
+        );
     }
 }

@@ -179,6 +179,23 @@ fn completion_parity_overlap_bucket(overlap_ratio: f64) -> &'static str {
     }
 }
 
+fn completion_publish_allowed(request_epoch: u64, latest_request_epoch: Option<u64>) -> bool {
+    match latest_request_epoch {
+        Some(latest_epoch) => latest_epoch == request_epoch,
+        None => true,
+    }
+}
+
+fn completion_queue_enqueue_failed(
+    outcome: super::completion_dispatcher::QueueEnqueueOutcome,
+) -> bool {
+    matches!(
+        outcome,
+        super::completion_dispatcher::QueueEnqueueOutcome::Full
+            | super::completion_dispatcher::QueueEnqueueOutcome::Closed
+    )
+}
+
 #[tower_lsp::async_trait]
 impl LanguageServer for BslLanguageServer {
     // ========================================================================
@@ -824,6 +841,20 @@ impl LanguageServer for BslLanguageServer {
 
         self.sync_v2_globals().await;
         let file_id = self.get_or_create_file_id_v2(&uri).await;
+        let open_ticket = self
+            .completion_dispatcher_v2
+            .emit_did_open(file_id, version)
+            .await;
+        if completion_queue_enqueue_failed(open_ticket.queue_outcome) {
+            debug!(
+                uri = %uri,
+                file_id = file_id.0,
+                file_seq = open_ticket.file_seq,
+                request_epoch = open_ticket.request_epoch,
+                queue_outcome = ?open_ticket.queue_outcome,
+                "completion dispatcher dropped didOpen event"
+            );
+        }
         let path = match uri.to_file_path() {
             Ok(path) => path.to_string_lossy().to_string(),
             Err(_) => uri.to_string(),
@@ -884,6 +915,20 @@ impl LanguageServer for BslLanguageServer {
 
         self.sync_v2_globals().await;
         let file_id = self.get_or_create_file_id_v2(&uri).await;
+        let change_ticket = self
+            .completion_dispatcher_v2
+            .emit_did_change(file_id, version)
+            .await;
+        if completion_queue_enqueue_failed(change_ticket.queue_outcome) {
+            debug!(
+                uri = %uri,
+                file_id = file_id.0,
+                file_seq = change_ticket.file_seq,
+                request_epoch = change_ticket.request_epoch,
+                queue_outcome = ?change_ticket.queue_outcome,
+                "completion dispatcher dropped didChange event"
+            );
+        }
         let path = match uri.to_file_path() {
             Ok(path) => path.to_string_lossy().to_string(),
             Err(_) => uri.to_string(),
@@ -1051,6 +1096,34 @@ impl LanguageServer for BslLanguageServer {
         let _sync_guard = self.text_sync_v2.lock().await;
 
         if let Some(file_id) = self.get_file_id_v2(&uri).await {
+            let close_ticket = self
+                .completion_dispatcher_v2
+                .close_file_dispatcher(file_id)
+                .await;
+            if close_ticket
+                .map(|ticket| completion_queue_enqueue_failed(ticket.queue_outcome))
+                .unwrap_or(false)
+            {
+                debug!(
+                    uri = %uri,
+                    file_id = file_id.0,
+                    file_seq = ?close_ticket.map(|ticket| ticket.file_seq),
+                    request_epoch = ?close_ticket.map(|ticket| ticket.request_epoch),
+                    queue_outcome = ?close_ticket.map(|ticket| ticket.queue_outcome),
+                    "completion dispatcher dropped didClose event"
+                );
+            }
+            let removed_completion_cancellations = self
+                .completion_cancellation_registry_v2
+                .remove_file(file_id);
+            if removed_completion_cancellations > 0 {
+                debug!(
+                    uri = %uri,
+                    file_id = file_id.0,
+                    removed_completion_cancellations,
+                    "completion cancellation registry cleanup on didClose"
+                );
+            }
             self.cancel_diagnostics_v2(file_id).await;
             self.latest_received_file_versions_v2
                 .write()
@@ -1465,16 +1538,50 @@ impl LanguageServer for BslLanguageServer {
         let position = params.text_document_position.position;
         let trigger_mode = completion_trigger_mode_label(params.context.as_ref());
         let trigger_char_hint = completion_trigger_character(params.context.as_ref());
+        let completion_request_id = super::request_context::current_request_id();
         self.coordinator
             .record_intellisense_v2_completion_trigger_mode(trigger_mode);
 
         let file_id = self.get_or_create_file_id_v2(&uri).await;
+        let version_hint = self
+            .latest_received_file_versions_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied();
+        let completion_ticket = self
+            .completion_dispatcher_v2
+            .emit_completion_request(
+                file_id,
+                completion_request_id.clone(),
+                version_hint,
+                trigger_mode.to_string(),
+            )
+            .await;
+        let _completion_request_registration = completion_request_id.clone().map(|request_id| {
+            self.completion_cancellation_registry_v2.register_request(
+                request_id,
+                file_id,
+                completion_ticket.request_epoch,
+            )
+        });
+        if completion_queue_enqueue_failed(completion_ticket.queue_outcome) {
+            debug!(
+                uri = %uri,
+                file_id = file_id.0,
+                file_seq = completion_ticket.file_seq,
+                request_epoch = completion_ticket.request_epoch,
+                request_id = ?completion_request_id,
+                queue_outcome = ?completion_ticket.queue_outcome,
+                "completion dispatcher dropped completion event"
+            );
+        }
         let started = Instant::now();
         let snippet_support = *self.completion_snippet_support.read().await;
         let mut completion_outcome: Option<&'static str> = None;
         let mut observed_file_version_for_completion: Option<i32> = None;
         let mut member_access_observed = false;
-        let completion = {
+        let mut completion = {
             let first_completion_for_file = {
                 let mut seen = self.completion_seen_files_v2.write().await;
                 seen.insert(file_id)
@@ -2085,6 +2192,21 @@ impl LanguageServer for BslLanguageServer {
         };
         let elapsed = started.elapsed();
         self.coordinator.record_completion_latency(elapsed);
+        let latest_request_epoch = self
+            .completion_dispatcher_v2
+            .latest_request_epoch(file_id)
+            .await;
+        if !completion_publish_allowed(completion_ticket.request_epoch, latest_request_epoch) {
+            completion_outcome = Some("superseded_epoch");
+            completion = Some(crate::handlers::CompletionResponseWithStats {
+                response: CompletionResponse::List(CompletionList {
+                    is_incomplete: true,
+                    items: Vec::new(),
+                }),
+                stats: None,
+                had_error: false,
+            });
+        }
 
         if let Some(result) = &completion {
             if result.had_error {
@@ -3327,7 +3449,7 @@ fn normalize_optional_string(value: Option<String>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::should_schedule_profile;
+    use super::{completion_publish_allowed, should_schedule_profile};
     use bsl_runtime::application::{DiagnosticsProfile, DiagnosticsTrigger};
 
     #[test]
@@ -3362,5 +3484,12 @@ mod tests {
             DiagnosticsProfile::DebouncedFull,
             false
         ));
+    }
+
+    #[test]
+    fn completion_publish_guard_requires_latest_epoch() {
+        assert!(completion_publish_allowed(3, Some(3)));
+        assert!(completion_publish_allowed(1, None));
+        assert!(!completion_publish_allowed(3, Some(4)));
     }
 }

@@ -82,6 +82,23 @@
 - Baseline для acceptance фиксируется датированным артефактом с обязательными полями: `profile`, `mode`, `n`, `p50/p95/p99`, `pass/fail`.
 - Источник baseline для текущего change: наблюдения `2026-02-20` в этом proposal и профильные тесты warm-path в `backend/src/bin/lsp_server/server/core.rs`.
 
+### conf_big start/cold/warm baseline (2026-02-20)
+
+Методика:
+- harness: `intellisense_perf` + `backend/tests/perf/scenarios/intellisense_large.json` (`config_path=examples/conf_big`);
+- `mode`: legacy (`BSL_INTELLISENSE_V2_COMPLETION_MODE=off`, runtime default);
+- значения `n` считаются как `cases * iterations` (5 кейсов в сценарии).
+
+Результаты:
+- `start` (`warmup=0`, `iterations=1`): `n=5`, `p95=230.827ms`, `p99=230.827ms`.
+- `cold` (`warmup=0`, `iterations=20`): `n=100`, `p95=96.519ms`, `p99=142.700ms`.
+- `warm` (`warmup=20`, `iterations=200`): `n=1000`, `p95=78.522ms`, `p99=83.468ms`.
+
+Артефакты:
+- `backend/tests/perf/reports/refactor-v2-completion-event-driven-pipeline-baseline-start.json`
+- `backend/tests/perf/reports/refactor-v2-completion-event-driven-pipeline-baseline-cold.json`
+- `backend/tests/perf/reports/refactor-v2-completion-event-driven-pipeline-baseline-warm.json`
+
 ## Scope
 - В scope: orchestration/очереди/политика отмены/коалесцирование событий/гарантии порядка/наблюдаемость/rollout.
 - Вне scope: новые completion features (новые кандидаты, ranking-модель, расширение типового покрытия).

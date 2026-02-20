@@ -17,6 +17,11 @@ Observed baseline (2026-02-20, conf_big, warm run):
 - semantic diagnostics p95 = 584ms
 - interactive wait budget exhausted = 2 events
 
+Reference baseline (`intellisense_perf`, `intellisense_large`, `mode=off`, 2026-02-20):
+- start (`warmup=0`, `iterations=1`, `n=5`): p95 = 230.827ms, p99 = 230.827ms
+- cold (`warmup=0`, `iterations=20`, `n=100`): p95 = 96.519ms, p99 = 142.700ms
+- warm (`warmup=20`, `iterations=200`, `n=1000`): p95 = 78.522ms, p99 = 83.468ms
+
 ## Target Architecture
 
 Целевой design для этого change:
@@ -30,6 +35,13 @@ Observed baseline (2026-02-20, conf_big, warm run):
 
 В этом change implementation target фиксируется однозначно как описанная выше целевая архитектура.
 Отклонение от нее не входит в implementation scope.
+
+## Implementation PR Conformance Statement
+
+Implementation PR for this change MUST include an explicit "Architecture Lock Conformance" section confirming:
+- the completion pipeline target remains per-file event-driven orchestrator (`dispatcher/actor`);
+- no alternative orchestration model is introduced as target behavior;
+- bounded queue + latest-wins + cancellation contracts remain mandatory invariants.
 
 ## Goals / Non-Goals
 

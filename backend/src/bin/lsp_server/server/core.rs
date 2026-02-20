@@ -104,6 +104,8 @@ impl BslLanguageServer {
             initial_deps_bundle.index_snapshot.clone(),
             Some(coordinator.clone()),
         );
+        let completion_pipeline_knobs =
+            bsl_runtime::application::CompletionPipelineKnobs::from_runtime_config();
 
         Self {
             client,
@@ -128,6 +130,14 @@ impl BslLanguageServer {
             completion_seen_files_v2: Arc::new(RwLock::new(std::collections::HashSet::new())),
             completion_stale_fallback_cache_v2: Arc::new(RwLock::new(HashMap::new())),
             completion_parity_state_v2: Arc::new(RwLock::new(HashMap::new())),
+            completion_dispatcher_v2: Arc::new(
+                super::completion_dispatcher::CompletionDispatcherRegistry::new(
+                    completion_pipeline_knobs.queue_capacity,
+                ),
+            ),
+            completion_cancellation_registry_v2: Arc::new(
+                super::completion_cancellation::CompletionCancellationRegistry::default(),
+            ),
             last_deps_id_v2: Arc::new(RwLock::new(Some(initial_deps_id))),
             last_settings_id_v2: Arc::new(RwLock::new(Some(initial_settings_id))),
         }
@@ -1174,8 +1184,7 @@ impl BslLanguageServer {
                 .record_intellisense_v2_payload_shape_with_origin(
                     context.origin.as_str(),
                     context.operation.as_str(),
-                    bsl_runtime::application::ObservabilityStage::SemanticDiagnosticsQuery
-                        .as_str(),
+                    bsl_runtime::application::ObservabilityStage::SemanticDiagnosticsQuery.as_str(),
                     file_bytes,
                     file_lines,
                 );

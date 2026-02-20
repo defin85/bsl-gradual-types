@@ -884,11 +884,7 @@ impl BasicObservability {
         line_count: usize,
     ) {
         self.record_intellisense_v2_payload_shape_with_origin(
-            "runtime",
-            operation,
-            stage,
-            file_bytes,
-            line_count,
+            "runtime", operation, stage, file_bytes, line_count,
         );
     }
 
@@ -1228,9 +1224,7 @@ impl BasicObservability {
 
     pub fn record_intellisense_v2_parse_result_query_latency(&self, duration: Duration) {
         self.record_intellisense_v2_parse_result_query_latency_with_origin_and_operation(
-            "runtime",
-            "other",
-            duration,
+            "runtime", "other", duration,
         );
     }
 
@@ -1240,9 +1234,7 @@ impl BasicObservability {
         duration: Duration,
     ) {
         self.record_intellisense_v2_parse_result_query_latency_with_origin_and_operation(
-            origin,
-            "other",
-            duration,
+            origin, "other", duration,
         );
     }
 

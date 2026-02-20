@@ -144,6 +144,7 @@ const ALLOWED_OUTCOMES: &[&str] = &[
 const ALLOWED_REASONS: &[&str] = &["syntax", "semantic", "other", "queue_wait", "exec"];
 const ALLOWED_QUERY_KINDS: &[&str] = &["parse_result", "syntax_diagnostics", "ir", "other"];
 const ALLOWED_WORK_CLASSES: &[&str] = &["interactive", "background"];
+const ALLOWED_COMPLETION_MODES: &[&str] = &["legacy", "event_driven", "shadow"];
 const ALLOWED_SATURATION_METRICS: &[&str] = &[
     "waiters_interactive",
     "waiters_background",
@@ -202,6 +203,7 @@ struct LegacyMetricTarget<'a> {
 struct CanonicalEvent<'a> {
     family: CanonicalFamily,
     origin: &'a str,
+    mode: Option<&'a str>,
     operation: Option<&'a str>,
     stage: Option<&'a str>,
     outcome: Option<&'a str>,
@@ -324,6 +326,10 @@ impl BasicObservability {
         let mut key = format!("intellisense_v2_drilldown_{}", event.family.as_str());
         key.push_str("_origin_");
         key.push_str(event.origin);
+        if let Some(mode) = event.mode {
+            key.push_str("_mode_");
+            key.push_str(mode);
+        }
         if let Some(operation) = event.operation {
             key.push_str("_operation_");
             key.push_str(operation);
@@ -361,6 +367,11 @@ impl BasicObservability {
         }
         if !event.value.is_finite() {
             return Err("invalid_value");
+        }
+        if let Some(mode) = event.mode {
+            if !contains_allowed(ALLOWED_COMPLETION_MODES, mode) {
+                return Err("invalid_mode");
+            }
         }
         if let Some(operation) = event.operation {
             if !contains_allowed(ALLOWED_OPERATIONS, operation) {
@@ -927,6 +938,19 @@ impl BasicObservability {
         kind: &str,
         duration: Duration,
     ) {
+        self.record_intellisense_v2_wait_for_file_version_with_origin_and_mode(
+            origin, kind, None, duration,
+        );
+    }
+
+    pub fn record_intellisense_v2_wait_for_file_version_with_origin_and_mode(
+        &self,
+        origin: &str,
+        kind: &str,
+        completion_mode: Option<&str>,
+        duration: Duration,
+    ) {
+        let completion_mode = completion_mode.map(normalize_completion_observability_mode_label);
         let (total_metric, histogram_metric) = legacy_wait_for_file_version_metrics(kind);
         let operation = normalize_operation_label(kind);
         let stage = "runtime_wait_for_file_version";
@@ -935,6 +959,7 @@ impl BasicObservability {
             CanonicalEvent {
                 family: CanonicalFamily::StageTotal,
                 origin,
+                mode: completion_mode,
                 operation: Some(operation),
                 stage: Some(stage),
                 outcome: None,
@@ -955,6 +980,7 @@ impl BasicObservability {
             CanonicalEvent {
                 family: CanonicalFamily::StageLatencyMs,
                 origin,
+                mode: completion_mode,
                 operation: Some(operation),
                 stage: Some(stage),
                 outcome: None,
@@ -983,6 +1009,19 @@ impl BasicObservability {
         kind: &str,
         duration: Duration,
     ) {
+        self.record_intellisense_v2_snapshot_latency_with_origin_and_mode(
+            origin, kind, None, duration,
+        );
+    }
+
+    pub fn record_intellisense_v2_snapshot_latency_with_origin_and_mode(
+        &self,
+        origin: &str,
+        kind: &str,
+        completion_mode: Option<&str>,
+        duration: Duration,
+    ) {
+        let completion_mode = completion_mode.map(normalize_completion_observability_mode_label);
         let (total_metric, histogram_metric) = legacy_snapshot_metrics(kind);
         let operation = normalize_operation_label(kind);
         let stage = "runtime_snapshot_with_deps";
@@ -991,6 +1030,7 @@ impl BasicObservability {
             CanonicalEvent {
                 family: CanonicalFamily::StageTotal,
                 origin,
+                mode: completion_mode,
                 operation: Some(operation),
                 stage: Some(stage),
                 outcome: None,
@@ -1011,6 +1051,7 @@ impl BasicObservability {
             CanonicalEvent {
                 family: CanonicalFamily::StageLatencyMs,
                 origin,
+                mode: completion_mode,
                 operation: Some(operation),
                 stage: Some(stage),
                 outcome: None,
@@ -1039,6 +1080,19 @@ impl BasicObservability {
         kind: &str,
         duration: Duration,
     ) {
+        self.record_intellisense_v2_ir_query_latency_with_origin_and_mode(
+            origin, kind, None, duration,
+        );
+    }
+
+    pub fn record_intellisense_v2_ir_query_latency_with_origin_and_mode(
+        &self,
+        origin: &str,
+        kind: &str,
+        completion_mode: Option<&str>,
+        duration: Duration,
+    ) {
+        let completion_mode = completion_mode.map(normalize_completion_observability_mode_label);
         let (total_metric, histogram_metric) = legacy_ir_query_metrics(kind);
         let operation = normalize_operation_label(kind);
         let stage = "ir_query";
@@ -1047,6 +1101,7 @@ impl BasicObservability {
             CanonicalEvent {
                 family: CanonicalFamily::StageTotal,
                 origin,
+                mode: completion_mode,
                 operation: Some(operation),
                 stage: Some(stage),
                 outcome: None,
@@ -1067,6 +1122,7 @@ impl BasicObservability {
             CanonicalEvent {
                 family: CanonicalFamily::StageLatencyMs,
                 origin,
+                mode: completion_mode,
                 operation: Some(operation),
                 stage: Some(stage),
                 outcome: None,
@@ -1090,12 +1146,23 @@ impl BasicObservability {
     }
 
     pub fn record_intellisense_v2_ir_query_cancelled_with_origin(&self, origin: &str, kind: &str) {
+        self.record_intellisense_v2_ir_query_cancelled_with_origin_and_mode(origin, kind, None);
+    }
+
+    pub fn record_intellisense_v2_ir_query_cancelled_with_origin_and_mode(
+        &self,
+        origin: &str,
+        kind: &str,
+        completion_mode: Option<&str>,
+    ) {
+        let completion_mode = completion_mode.map(normalize_completion_observability_mode_label);
         let metric = legacy_ir_query_cancelled_metric(kind);
         let operation = normalize_operation_label(kind);
         self.emit_canonical_event(
             CanonicalEvent {
                 family: CanonicalFamily::StageReasonTotal,
                 origin,
+                mode: completion_mode,
                 operation: Some(operation),
                 stage: Some("ir_query"),
                 outcome: None,
@@ -1130,6 +1197,7 @@ impl BasicObservability {
             CanonicalEvent {
                 family: CanonicalFamily::StageTotal,
                 origin,
+                mode: None,
                 operation: Some("diagnostics"),
                 stage: Some("syntax_diagnostics_query"),
                 outcome: None,
@@ -1150,6 +1218,7 @@ impl BasicObservability {
             CanonicalEvent {
                 family: CanonicalFamily::StageLatencyMs,
                 origin,
+                mode: None,
                 operation: Some("diagnostics"),
                 stage: Some("syntax_diagnostics_query"),
                 outcome: None,
@@ -1184,6 +1253,7 @@ impl BasicObservability {
             CanonicalEvent {
                 family: CanonicalFamily::StageTotal,
                 origin,
+                mode: None,
                 operation: Some("diagnostics"),
                 stage: Some("semantic_diagnostics_query"),
                 outcome: None,
@@ -1204,6 +1274,7 @@ impl BasicObservability {
             CanonicalEvent {
                 family: CanonicalFamily::StageLatencyMs,
                 origin,
+                mode: None,
                 operation: Some("diagnostics"),
                 stage: Some("semantic_diagnostics_query"),
                 outcome: None,
@@ -1244,12 +1315,26 @@ impl BasicObservability {
         operation: &str,
         duration: Duration,
     ) {
+        self.record_intellisense_v2_parse_result_query_latency_with_origin_operation_and_mode(
+            origin, operation, None, duration,
+        );
+    }
+
+    pub fn record_intellisense_v2_parse_result_query_latency_with_origin_operation_and_mode(
+        &self,
+        origin: &str,
+        operation: &str,
+        completion_mode: Option<&str>,
+        duration: Duration,
+    ) {
+        let completion_mode = completion_mode.map(normalize_completion_observability_mode_label);
         let operation = normalize_operation_label(operation);
         let elapsed_ms = duration.as_millis() as f64;
         self.emit_canonical_event(
             CanonicalEvent {
                 family: CanonicalFamily::StageTotal,
                 origin,
+                mode: completion_mode,
                 operation: Some(operation),
                 stage: Some("parse_result_query"),
                 outcome: None,
@@ -1270,6 +1355,7 @@ impl BasicObservability {
             CanonicalEvent {
                 family: CanonicalFamily::StageLatencyMs,
                 origin,
+                mode: completion_mode,
                 operation: Some(operation),
                 stage: Some("parse_result_query"),
                 outcome: None,
@@ -1334,6 +1420,7 @@ impl BasicObservability {
             CanonicalEvent {
                 family: CanonicalFamily::SingleflightEffectivenessTotal,
                 origin,
+                mode: None,
                 operation: None,
                 stage: None,
                 outcome: Some("leader"),
@@ -1365,6 +1452,7 @@ impl BasicObservability {
             CanonicalEvent {
                 family: CanonicalFamily::SingleflightEffectivenessTotal,
                 origin,
+                mode: None,
                 operation: None,
                 stage: None,
                 outcome: Some("shared"),
@@ -1392,6 +1480,7 @@ impl BasicObservability {
             CanonicalEvent {
                 family: CanonicalFamily::SingleflightEffectivenessTotal,
                 origin,
+                mode: None,
                 operation: None,
                 stage: None,
                 outcome: Some("key_unavailable"),
@@ -1464,6 +1553,7 @@ impl BasicObservability {
             CanonicalEvent {
                 family: CanonicalFamily::SaturationSampleTotal,
                 origin,
+                mode: None,
                 operation: None,
                 stage: None,
                 outcome: None,
@@ -1484,6 +1574,7 @@ impl BasicObservability {
             CanonicalEvent {
                 family: CanonicalFamily::SaturationSampleLatencyMs,
                 origin,
+                mode: None,
                 operation: None,
                 stage: None,
                 outcome: None,
@@ -1534,6 +1625,7 @@ impl BasicObservability {
             CanonicalEvent {
                 family: CanonicalFamily::SaturationSampleTotal,
                 origin,
+                mode: None,
                 operation: None,
                 stage: None,
                 outcome: None,
@@ -1554,6 +1646,7 @@ impl BasicObservability {
             CanonicalEvent {
                 family: CanonicalFamily::SaturationSampleLatencyMs,
                 origin,
+                mode: None,
                 operation: None,
                 stage: None,
                 outcome: None,
@@ -1577,6 +1670,16 @@ impl BasicObservability {
     }
 
     pub fn record_intellisense_v2_query_cancelled_with_origin(&self, origin: &str, kind: &str) {
+        self.record_intellisense_v2_query_cancelled_with_origin_and_mode(origin, kind, None);
+    }
+
+    pub fn record_intellisense_v2_query_cancelled_with_origin_and_mode(
+        &self,
+        origin: &str,
+        kind: &str,
+        completion_mode: Option<&str>,
+    ) {
+        let completion_mode = completion_mode.map(normalize_completion_observability_mode_label);
         let (metric, stage) = match kind {
             "syntax" => (
                 "intellisense_v2_query_cancelled_total_syntax",
@@ -1595,6 +1698,7 @@ impl BasicObservability {
             CanonicalEvent {
                 family: CanonicalFamily::StageReasonTotal,
                 origin,
+                mode: completion_mode,
                 operation: Some("diagnostics"),
                 stage: Some(stage),
                 outcome: None,
@@ -1637,6 +1741,7 @@ impl BasicObservability {
             CanonicalEvent {
                 family: CanonicalFamily::StageTotal,
                 origin,
+                mode: None,
                 operation: Some(operation),
                 stage: Some(stage),
                 outcome: None,
@@ -1657,6 +1762,7 @@ impl BasicObservability {
             CanonicalEvent {
                 family: CanonicalFamily::StageLatencyMs,
                 origin,
+                mode: None,
                 operation: Some(operation),
                 stage: Some(stage),
                 outcome: None,
@@ -1693,6 +1799,7 @@ impl BasicObservability {
             CanonicalEvent {
                 family: CanonicalFamily::StageTotal,
                 origin,
+                mode: None,
                 operation: Some(operation),
                 stage: Some(stage),
                 outcome: None,
@@ -1713,6 +1820,7 @@ impl BasicObservability {
             CanonicalEvent {
                 family: CanonicalFamily::StageLatencyMs,
                 origin,
+                mode: None,
                 operation: Some(operation),
                 stage: Some(stage),
                 outcome: None,
@@ -1742,6 +1850,7 @@ impl BasicObservability {
             CanonicalEvent {
                 family: CanonicalFamily::SaturationGauge,
                 origin,
+                mode: None,
                 operation: None,
                 stage: None,
                 outcome: None,
@@ -2227,6 +2336,15 @@ fn normalize_completion_terminal_reason_label(reason: &str) -> &'static str {
     }
 }
 
+fn normalize_completion_observability_mode_label(mode: &str) -> &'static str {
+    match mode {
+        "legacy" => "legacy",
+        "event_driven" => "event_driven",
+        "shadow" => "shadow",
+        _ => "legacy",
+    }
+}
+
 fn normalize_payload_shape_stage_label(stage: &str) -> &'static str {
     match stage {
         "runtime_snapshot_with_deps" => "runtime_snapshot_with_deps",
@@ -2468,6 +2586,95 @@ mod observability_contract_tests {
     }
 
     #[test]
+    fn completion_stage_metrics_include_mode_dimension_and_keep_projection_parity() {
+        let observability = BasicObservability::default();
+
+        observability.record_intellisense_v2_wait_for_file_version_with_origin_and_mode(
+            "lsp",
+            "completion",
+            Some("legacy"),
+            Duration::from_millis(12),
+        );
+        observability.record_intellisense_v2_snapshot_latency_with_origin_and_mode(
+            "lsp",
+            "completion",
+            Some("event_driven"),
+            Duration::from_millis(17),
+        );
+        observability.record_intellisense_v2_ir_query_latency_with_origin_and_mode(
+            "lsp",
+            "completion",
+            Some("shadow"),
+            Duration::from_millis(23),
+        );
+        observability
+            .record_intellisense_v2_parse_result_query_latency_with_origin_operation_and_mode(
+                "lsp",
+                "completion",
+                Some("event_driven"),
+                Duration::from_millis(19),
+            );
+
+        let exported = observability.get_metrics().export_metrics();
+        let counters = counters(&exported);
+        let histograms = histograms(&exported);
+
+        let wait_drilldown_counter = "intellisense_v2_drilldown_stage_total_origin_lsp_mode_legacy_operation_completion_stage_runtime_wait_for_file_version";
+        let wait_drilldown_histogram = "intellisense_v2_drilldown_stage_latency_ms_origin_lsp_mode_legacy_operation_completion_stage_runtime_wait_for_file_version";
+        assert_eq!(counter_value(counters, wait_drilldown_counter), 1);
+        assert_eq!(histogram_count(histograms, wait_drilldown_histogram), 1);
+        assert_eq!(
+            counter_value(
+                counters,
+                "intellisense_v2_wait_for_file_version_completion_total"
+            ),
+            counter_value(counters, wait_drilldown_counter),
+            "wait stage legacy projection must stay deterministic even with mode dimension"
+        );
+        assert_eq!(
+            histogram_count(
+                histograms,
+                "intellisense_v2_wait_for_file_version_completion_ms"
+            ),
+            histogram_count(histograms, wait_drilldown_histogram),
+            "wait stage histogram projection must stay deterministic even with mode dimension"
+        );
+
+        let snapshot_drilldown_counter = "intellisense_v2_drilldown_stage_total_origin_lsp_mode_event_driven_operation_completion_stage_runtime_snapshot_with_deps";
+        let ir_drilldown_counter = "intellisense_v2_drilldown_stage_total_origin_lsp_mode_shadow_operation_completion_stage_ir_query";
+        let parse_drilldown_counter = "intellisense_v2_drilldown_stage_total_origin_lsp_mode_event_driven_operation_completion_stage_parse_result_query";
+        assert_eq!(counter_value(counters, snapshot_drilldown_counter), 1);
+        assert_eq!(counter_value(counters, ir_drilldown_counter), 1);
+        assert_eq!(counter_value(counters, parse_drilldown_counter), 1);
+    }
+
+    #[test]
+    fn completion_mode_dimension_normalizes_unknown_values() {
+        let observability = BasicObservability::default();
+        observability.record_intellisense_v2_wait_for_file_version_with_origin_and_mode(
+            "lsp",
+            "completion",
+            Some("unknown-mode"),
+            Duration::from_millis(8),
+        );
+
+        let exported = observability.get_metrics().export_metrics();
+        let counters = counters(&exported);
+        let normalized_key = "intellisense_v2_drilldown_stage_total_origin_lsp_mode_legacy_operation_completion_stage_runtime_wait_for_file_version";
+        assert_eq!(
+            counter_value(counters, normalized_key),
+            1,
+            "unknown completion mode must collapse into bounded mode label set"
+        );
+        assert!(
+            !counters
+                .keys()
+                .any(|key| key.contains("_mode_unknown-mode")),
+            "unexpected mode labels must not leak into drilldown metrics"
+        );
+    }
+
+    #[test]
     fn invalid_origin_event_is_dropped_with_contract_violation_signal() {
         let observability = BasicObservability::default();
         observability.record_intellisense_v2_wait_for_file_version_with_origin(
@@ -2516,6 +2723,7 @@ mod observability_contract_tests {
             CanonicalEvent {
                 family: CanonicalFamily::StageReasonTotal,
                 origin: "lsp",
+                mode: None,
                 operation: Some("completion"),
                 stage: Some("ir_query"),
                 outcome: None,

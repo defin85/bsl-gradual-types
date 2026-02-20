@@ -1,16 +1,32 @@
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
 use tower::Service;
 use tower_lsp::jsonrpc::{Id, Request};
+use tower_lsp::lsp_types::{CancelParams, NumberOrString};
 
 tokio::task_local! {
     static LSP_REQUEST_ID: Option<String>;
 }
 
+type CancelRequestHook = Arc<dyn Fn(String) + Send + Sync + 'static>;
+
+fn cancel_request_hook_cell() -> &'static Mutex<Option<CancelRequestHook>> {
+    static CELL: std::sync::OnceLock<Mutex<Option<CancelRequestHook>>> = std::sync::OnceLock::new();
+    CELL.get_or_init(|| Mutex::new(None))
+}
+
 pub(crate) fn current_request_id() -> Option<String> {
     LSP_REQUEST_ID.try_with(Clone::clone).ok().flatten()
+}
+
+pub(crate) fn set_cancel_request_hook(hook: Option<CancelRequestHook>) {
+    let mut slot = cancel_request_hook_cell()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *slot = hook;
 }
 
 async fn with_request_id<F, T>(request_id: Option<String>, future: F) -> T
@@ -30,6 +46,30 @@ fn request_id_from_jsonrpc_id(id: &Id) -> Option<String> {
 
 fn request_id_from_request(request: &Request) -> Option<String> {
     request.id().and_then(request_id_from_jsonrpc_id)
+}
+
+fn cancelled_request_id_from_request(request: &Request) -> Option<String> {
+    if request.method() != "$/cancelRequest" {
+        return None;
+    }
+    let params = request.params()?.clone();
+    let cancel_params: CancelParams = serde_json::from_value(params).ok()?;
+    match cancel_params.id {
+        NumberOrString::Number(value) => Some(value.to_string()),
+        NumberOrString::String(value) => Some(value),
+    }
+}
+
+fn notify_cancel_request_hook(request_id: String) {
+    let hook = {
+        let slot = cancel_request_hook_cell()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        slot.clone()
+    };
+    if let Some(hook) = hook {
+        hook(request_id);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -59,6 +99,9 @@ where
     }
 
     fn call(&mut self, request: Request) -> Self::Future {
+        if let Some(request_id) = cancelled_request_id_from_request(&request) {
+            notify_cancel_request_hook(request_id);
+        }
         let request_id = request_id_from_request(&request);
         let future = self.inner.call(request);
         Box::pin(async move { with_request_id(request_id, future).await })
@@ -68,6 +111,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[tokio::test]
     async fn current_request_id_is_none_outside_scope() {
@@ -103,5 +147,27 @@ mod tests {
         let request = Request::build("textDocument/completion").id(9_i64).finish();
         let captured = service.call(request).await.expect("service call");
         assert_eq!(captured, Some("9".to_string()));
+    }
+
+    #[test]
+    fn cancelled_request_id_extracted_for_numeric_and_string_ids() {
+        let numeric = Request::build("$/cancelRequest")
+            .params(json!({ "id": 7 }))
+            .finish();
+        assert_eq!(
+            cancelled_request_id_from_request(&numeric),
+            Some("7".to_string())
+        );
+
+        let string = Request::build("$/cancelRequest")
+            .params(json!({ "id": "r42" }))
+            .finish();
+        assert_eq!(
+            cancelled_request_id_from_request(&string),
+            Some("r42".to_string())
+        );
+
+        let non_cancel = Request::build("textDocument/completion").id(1_i64).finish();
+        assert_eq!(cancelled_request_id_from_request(&non_cancel), None);
     }
 }

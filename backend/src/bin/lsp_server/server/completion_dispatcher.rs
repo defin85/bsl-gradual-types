@@ -149,6 +149,15 @@ impl CompletionEventQueue {
             .collect()
     }
 
+    #[cfg(test)]
+    fn debug_envelopes(&self) -> Vec<CompletionEventEnvelope> {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.entries.iter().cloned().collect()
+    }
+
     fn apply_pre_enqueue_policy(
         entries: &mut VecDeque<CompletionEventEnvelope>,
         event: &CompletionEventEnvelope,
@@ -485,6 +494,14 @@ impl CompletionDispatcherRegistry {
     }
 
     pub(crate) async fn close_file_dispatcher(&self, file_id: V2FileId) -> Option<DispatchTicket> {
+        let has_dispatcher = {
+            let per_file = self.per_file.lock().await;
+            per_file.contains_key(&file_id)
+        };
+        if !has_dispatcher {
+            return None;
+        }
+
         let ticket = self.emit_did_close(file_id).await;
         let dispatcher = {
             let mut per_file = self.per_file.lock().await;
@@ -675,6 +692,105 @@ mod tests {
         assert_eq!(queue.debug_payloads().len(), 2);
     }
 
+    #[test]
+    fn queue_burst_latest_wins_keeps_latest_did_change_and_completion() {
+        let queue = CompletionEventQueue::new(8);
+
+        for version in 1..=5_i32 {
+            let did_change = queue.try_enqueue(make_event(
+                (version as u64) * 10,
+                0,
+                CompletionEventPayload::DidChange { version },
+            ));
+            assert!(matches!(
+                did_change,
+                QueueEnqueueOutcome::Enqueued | QueueEnqueueOutcome::CoalescedDidChange
+            ));
+
+            let request_id = format!("r{version}");
+            let completion = queue.try_enqueue(make_event(
+                (version as u64) * 10 + 1,
+                version as u64,
+                CompletionEventPayload::CompletionRequest {
+                    request_id: Some(request_id),
+                    version_hint: Some(version),
+                    trigger_mode: "invoked".to_string(),
+                },
+            ));
+            assert!(matches!(
+                completion,
+                QueueEnqueueOutcome::Enqueued | QueueEnqueueOutcome::EvictedStaleCompletion
+            ));
+        }
+
+        let envelopes = queue.debug_envelopes();
+        assert_eq!(envelopes.len(), 2, "burst should keep bounded latest state");
+
+        let file_seq: Vec<u64> = envelopes.iter().map(|entry| entry.file_seq).collect();
+        assert!(
+            file_seq.windows(2).all(|pair| pair[0] < pair[1]),
+            "queued envelopes must stay ordered by file_seq, got {file_seq:?}"
+        );
+
+        assert!(matches!(
+            envelopes[0].payload,
+            CompletionEventPayload::DidChange { version: 5 }
+        ));
+        assert!(matches!(
+            &envelopes[1].payload,
+            CompletionEventPayload::CompletionRequest { request_id, .. }
+                if request_id.as_deref() == Some("r5")
+        ));
+        assert_eq!(
+            envelopes[1].request_epoch, 5,
+            "latest completion epoch should survive burst coalescing"
+        );
+    }
+
+    #[test]
+    fn newer_completion_evicts_stale_cancel_for_previous_request() {
+        let queue = CompletionEventQueue::new(4);
+
+        let first = queue.try_enqueue(make_event(
+            1,
+            1,
+            CompletionEventPayload::CompletionRequest {
+                request_id: Some("r1".to_string()),
+                version_hint: Some(1),
+                trigger_mode: "invoked".to_string(),
+            },
+        ));
+        assert_eq!(first, QueueEnqueueOutcome::Enqueued);
+
+        let cancel = queue.try_enqueue(make_event(
+            2,
+            1,
+            CompletionEventPayload::Cancel {
+                request_id: "r1".to_string(),
+            },
+        ));
+        assert_eq!(cancel, QueueEnqueueOutcome::Enqueued);
+
+        let second = queue.try_enqueue(make_event(
+            3,
+            2,
+            CompletionEventPayload::CompletionRequest {
+                request_id: Some("r2".to_string()),
+                version_hint: Some(2),
+                trigger_mode: "invoked".to_string(),
+            },
+        ));
+        assert_eq!(second, QueueEnqueueOutcome::EvictedStaleCompletion);
+
+        let payloads = queue.debug_payloads();
+        assert_eq!(payloads.len(), 1);
+        assert!(matches!(
+            &payloads[0],
+            CompletionEventPayload::CompletionRequest { request_id, .. }
+                if request_id.as_deref() == Some("r2")
+        ));
+    }
+
     #[tokio::test]
     async fn request_epoch_advances_only_for_completion_requests() {
         let registry = CompletionDispatcherRegistry::new(8);
@@ -716,5 +832,17 @@ mod tests {
         let second = registry.emit_did_open(file_id, 2).await;
         assert_eq!(second.file_seq, 1);
         assert_eq!(second.request_epoch, 0);
+    }
+
+    #[tokio::test]
+    async fn close_file_dispatcher_is_noop_when_dispatcher_absent() {
+        let registry = CompletionDispatcherRegistry::new(8);
+        let file_id = V2FileId(42);
+
+        let close = registry.close_file_dispatcher(file_id).await;
+        assert!(close.is_none());
+
+        let open = registry.emit_did_open(file_id, 1).await;
+        assert_eq!(open.file_seq, 1);
     }
 }

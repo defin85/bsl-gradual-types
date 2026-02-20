@@ -22,6 +22,7 @@ use tracing::{debug, error, info, warn};
 use bsl_backend::data::loaders::progress::{IndexingPhase, ProgressUpdate};
 use bsl_backend::system::{startup_v2, StartupInputs};
 use bsl_shared::api::semantic_dtos::{GetSemanticHtmlRequest, GetSemanticTreeRequest};
+use bsl_shared::utils::hash::hash_content;
 
 use crate::commands::{
     handle_cache_clear, handle_cache_set_enabled, handle_cache_stats, handle_get_all_types,
@@ -79,10 +80,40 @@ fn completion_trigger_mode_label(context: Option<&CompletionContext>) -> &'stati
     }
 }
 
+const COMPLETION_SHADOW_INTERNAL_TRIGGER_MARKER: &str = "__bsl_shadow_internal__";
+
+fn completion_shadow_internal_trigger_payload(value: &str) -> Option<Option<char>> {
+    let payload = value.strip_prefix(COMPLETION_SHADOW_INTERNAL_TRIGGER_MARKER)?;
+    let payload = payload.strip_prefix(':')?;
+    let codepoint = payload.parse::<u32>().ok()?;
+    if codepoint == 0 {
+        Some(None)
+    } else {
+        char::from_u32(codepoint).map(Some)
+    }
+}
+
+fn completion_shadow_internal_trigger_value(trigger_char_hint: Option<char>) -> String {
+    format!(
+        "{}:{}",
+        COMPLETION_SHADOW_INTERNAL_TRIGGER_MARKER,
+        trigger_char_hint.map(u32::from).unwrap_or(0),
+    )
+}
+
+fn completion_is_shadow_internal_request(context: Option<&CompletionContext>) -> bool {
+    context
+        .and_then(|ctx| ctx.trigger_character.as_deref())
+        .is_some_and(|value| completion_shadow_internal_trigger_payload(value).is_some())
+}
+
 fn completion_trigger_character(context: Option<&CompletionContext>) -> Option<char> {
     context
         .and_then(|ctx| ctx.trigger_character.as_deref())
-        .and_then(|value| value.chars().next())
+        .and_then(|value| {
+            completion_shadow_internal_trigger_payload(value)
+                .unwrap_or_else(|| value.chars().next())
+        })
 }
 
 fn is_completion_identifier_char(ch: char) -> bool {
@@ -193,6 +224,368 @@ fn completion_queue_enqueue_failed(
         outcome,
         super::completion_dispatcher::QueueEnqueueOutcome::Full
             | super::completion_dispatcher::QueueEnqueueOutcome::Closed
+    )
+}
+
+fn completion_empty_response(is_incomplete: bool) -> crate::handlers::CompletionResponseWithStats {
+    crate::handlers::CompletionResponseWithStats {
+        response: CompletionResponse::List(CompletionList {
+            is_incomplete,
+            items: Vec::new(),
+        }),
+        stats: None,
+        had_error: false,
+    }
+}
+
+fn completion_incomplete_empty_response() -> crate::handlers::CompletionResponseWithStats {
+    completion_empty_response(true)
+}
+
+fn completion_response_with_cached_items(
+    items: Vec<CompletionItem>,
+) -> crate::handlers::CompletionResponseWithStats {
+    crate::handlers::CompletionResponseWithStats {
+        response: CompletionResponse::List(CompletionList {
+            is_incomplete: true,
+            items,
+        }),
+        stats: None,
+        had_error: false,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompletionResponseRoute {
+    Legacy,
+    EventDriven,
+}
+
+impl CompletionResponseRoute {
+    fn event_driven_guards_enabled(self) -> bool {
+        matches!(self, Self::EventDriven)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CompletionRoutingPlan {
+    response_route: CompletionResponseRoute,
+    run_shadow_event_driven: bool,
+}
+
+fn completion_dispatch_enabled_for_mode(mode: bsl_runtime::application::CompletionMode) -> bool {
+    !matches!(mode, bsl_runtime::application::CompletionMode::Off)
+}
+
+fn completion_canary_routing_key(
+    uri: &Url,
+    position: Position,
+    trigger_mode: &str,
+    trigger_char_hint: Option<char>,
+    version_hint: Option<i32>,
+) -> String {
+    let trigger_char_code = trigger_char_hint.map(u32::from).unwrap_or(0);
+    format!(
+        "{}:{}:{}:{}:{}:{}",
+        uri,
+        position.line,
+        position.character,
+        trigger_mode,
+        trigger_char_code,
+        version_hint.unwrap_or(i32::MIN),
+    )
+}
+
+fn completion_route_canary_event_driven(routing_key: &str, canary_percent: u8) -> bool {
+    if canary_percent == 0 {
+        return false;
+    }
+    if canary_percent >= 100 {
+        return true;
+    }
+    (hash_content(routing_key) % 100) < u64::from(canary_percent)
+}
+
+fn completion_routing_plan(
+    mode: bsl_runtime::application::CompletionMode,
+    canary_percent: u8,
+    routing_key: &str,
+) -> CompletionRoutingPlan {
+    match mode {
+        bsl_runtime::application::CompletionMode::Off => CompletionRoutingPlan {
+            response_route: CompletionResponseRoute::Legacy,
+            run_shadow_event_driven: false,
+        },
+        bsl_runtime::application::CompletionMode::Shadow => CompletionRoutingPlan {
+            response_route: CompletionResponseRoute::Legacy,
+            run_shadow_event_driven: true,
+        },
+        bsl_runtime::application::CompletionMode::Canary => CompletionRoutingPlan {
+            response_route: if completion_route_canary_event_driven(routing_key, canary_percent) {
+                CompletionResponseRoute::EventDriven
+            } else {
+                CompletionResponseRoute::Legacy
+            },
+            run_shadow_event_driven: false,
+        },
+        bsl_runtime::application::CompletionMode::On => CompletionRoutingPlan {
+            response_route: CompletionResponseRoute::EventDriven,
+            run_shadow_event_driven: false,
+        },
+    }
+}
+
+fn completion_observability_mode_label(
+    response_route: CompletionResponseRoute,
+    shadow_internal_request: bool,
+) -> &'static str {
+    if shadow_internal_request {
+        "shadow"
+    } else if response_route.event_driven_guards_enabled() {
+        "event_driven"
+    } else {
+        "legacy"
+    }
+}
+
+struct CompletionRequestDropCancelGuard {
+    request_id: Option<String>,
+    cancellation_registry: Arc<super::completion_cancellation::CompletionCancellationRegistry>,
+    dispatcher: Arc<super::completion_dispatcher::CompletionDispatcherRegistry>,
+    disarmed: bool,
+}
+
+impl CompletionRequestDropCancelGuard {
+    fn new(
+        request_id: Option<String>,
+        cancellation_registry: Arc<super::completion_cancellation::CompletionCancellationRegistry>,
+        dispatcher: Arc<super::completion_dispatcher::CompletionDispatcherRegistry>,
+    ) -> Self {
+        Self {
+            request_id,
+            cancellation_registry,
+            dispatcher,
+            disarmed: false,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.disarmed = true;
+    }
+}
+
+impl Drop for CompletionRequestDropCancelGuard {
+    fn drop(&mut self) {
+        if self.disarmed {
+            return;
+        }
+        let Some(request_id) = self.request_id.clone() else {
+            return;
+        };
+        let Some(entry) = self.cancellation_registry.cancel_request(&request_id) else {
+            return;
+        };
+        let dispatcher = Arc::clone(&self.dispatcher);
+        tokio::spawn(async move {
+            let _ = dispatcher.emit_cancel(entry.file_id, request_id).await;
+        });
+    }
+}
+
+async fn completion_checkpoint_outcome(
+    server: &BslLanguageServer,
+    file_id: bsl_analysis_v2::FileId,
+    request_id: Option<&str>,
+    request_epoch: u64,
+    cancellation_token: Option<&super::completion_cancellation::CompletionCancellationToken>,
+    checkpoint: &'static str,
+    cancel_event_emitted: &mut bool,
+) -> Option<&'static str> {
+    if cancellation_token.is_some_and(|token| token.is_cancelled()) {
+        if let Some(request_id) = request_id {
+            if !*cancel_event_emitted {
+                let cancel_ticket = server
+                    .completion_dispatcher_v2
+                    .emit_cancel(file_id, request_id.to_string())
+                    .await;
+                *cancel_event_emitted = true;
+                if completion_queue_enqueue_failed(cancel_ticket.queue_outcome) {
+                    debug!(
+                        file_id = file_id.0,
+                        file_seq = cancel_ticket.file_seq,
+                        request_epoch = cancel_ticket.request_epoch,
+                        request_id = request_id,
+                        queue_outcome = ?cancel_ticket.queue_outcome,
+                        checkpoint,
+                        "completion dispatcher dropped cancel checkpoint event"
+                    );
+                }
+            }
+        }
+        return Some("cancelled");
+    }
+
+    let latest_request_epoch = server
+        .completion_dispatcher_v2
+        .latest_request_epoch(file_id)
+        .await;
+    if !completion_publish_allowed(request_epoch, latest_request_epoch) {
+        return Some("superseded_epoch");
+    }
+
+    None
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn completion_checkpoint_outcome_if_enabled(
+    event_driven_guards_enabled: bool,
+    server: &BslLanguageServer,
+    file_id: bsl_analysis_v2::FileId,
+    request_id: Option<&str>,
+    request_epoch: u64,
+    cancellation_token: Option<&super::completion_cancellation::CompletionCancellationToken>,
+    checkpoint: &'static str,
+    cancel_event_emitted: &mut bool,
+) -> Option<&'static str> {
+    if !event_driven_guards_enabled {
+        return None;
+    }
+    completion_checkpoint_outcome(
+        server,
+        file_id,
+        request_id,
+        request_epoch,
+        cancellation_token,
+        checkpoint,
+        cancel_event_emitted,
+    )
+    .await
+}
+
+async fn completion_cached_stale_items(
+    server: &BslLanguageServer,
+    file_id: bsl_analysis_v2::FileId,
+    observed_deps_id: &bsl_analysis_v2::DepsSnapshotId,
+    observed_settings_id: Option<&bsl_analysis_v2::SettingsId>,
+    observed_file_version: Option<i32>,
+) -> (Option<Vec<CompletionItem>>, Option<Vec<CompletionItem>>) {
+    let cache = server.completion_stale_fallback_cache_v2.read().await;
+    let strict = match (observed_settings_id, observed_file_version) {
+        (Some(settings_id), Some(file_version)) => cache.get(&file_id).and_then(|entry| {
+            let compatible = entry.deps_id == *observed_deps_id
+                && entry.settings_id == *settings_id
+                && entry.file_version == file_version
+                && !entry.items.is_empty();
+            if compatible {
+                Some(entry.items.clone())
+            } else {
+                None
+            }
+        }),
+        _ => None,
+    };
+    let relaxed = cache.get(&file_id).and_then(|entry| {
+        if entry.items.is_empty() {
+            return None;
+        }
+        let deps_compatible = entry.deps_id == *observed_deps_id;
+        let settings_compatible = observed_settings_id
+            .map(|settings_id| entry.settings_id == *settings_id)
+            .unwrap_or(true);
+        if deps_compatible && settings_compatible {
+            Some(entry.items.clone())
+        } else {
+            None
+        }
+    });
+    (strict, relaxed)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn resolve_completion_without_ir(
+    server: &BslLanguageServer,
+    file_id: bsl_analysis_v2::FileId,
+    observed_deps_id: bsl_analysis_v2::DepsSnapshotId,
+    observed_settings_id: Option<bsl_analysis_v2::SettingsId>,
+    observed_file_version: Option<i32>,
+    member_access_context: bool,
+    file_content: Arc<str>,
+    file_path: Arc<str>,
+    parse_result: Option<Arc<bsl_syntax::ast::ParseResult>>,
+    member_access_owner_type_hint: Option<bsl_shared::domain::types::TypeResolution>,
+    deps: Arc<bsl_analysis_v2::SemanticDeps>,
+    position: Position,
+    uri: &Url,
+    index_snapshot: &bsl_backend::system::IndexSnapshot,
+    snippet_support: bool,
+    include_flow_sensitive: bool,
+    trigger_char_hint: Option<char>,
+) -> (
+    &'static str,
+    Option<crate::handlers::CompletionResponseWithStats>,
+) {
+    let (strict_stale_cached_items, relaxed_stale_cached_items) = completion_cached_stale_items(
+        server,
+        file_id,
+        &observed_deps_id,
+        observed_settings_id.as_ref(),
+        observed_file_version,
+    )
+    .await;
+
+    if let Some(items) = strict_stale_cached_items {
+        return (
+            "degraded_incomplete",
+            Some(completion_response_with_cached_items(items)),
+        );
+    }
+
+    if !member_access_context {
+        return ("missing_ir", Some(completion_empty_response(false)));
+    }
+
+    let mut degraded = crate::handlers::handle_completion_v2_degraded(
+        file_content,
+        file_path,
+        parse_result,
+        member_access_owner_type_hint,
+        deps,
+        position,
+        uri,
+        index_snapshot,
+        snippet_support,
+        include_flow_sensitive,
+        trigger_char_hint,
+    )
+    .await;
+
+    if let Some(response) = degraded.as_mut() {
+        if let CompletionResponse::List(list) = &mut response.response {
+            list.is_incomplete = true;
+        }
+    }
+    if degraded.is_some() {
+        return ("degraded_incomplete", degraded);
+    }
+
+    if let Some(items) = relaxed_stale_cached_items {
+        server
+            .coordinator
+            .record_intellisense_v2_completion_stale_fallback();
+        return (
+            "degraded_incomplete",
+            Some(completion_response_with_cached_items(items)),
+        );
+    }
+
+    server
+        .coordinator
+        .record_intellisense_v2_completion_fallback_unavailable();
+    (
+        "fallback_unavailable",
+        Some(crate::handlers::build_keyword_degraded_completion(
+            snippet_support,
+        )),
     )
 }
 
@@ -841,19 +1234,23 @@ impl LanguageServer for BslLanguageServer {
 
         self.sync_v2_globals().await;
         let file_id = self.get_or_create_file_id_v2(&uri).await;
-        let open_ticket = self
-            .completion_dispatcher_v2
-            .emit_did_open(file_id, version)
-            .await;
-        if completion_queue_enqueue_failed(open_ticket.queue_outcome) {
-            debug!(
-                uri = %uri,
-                file_id = file_id.0,
-                file_seq = open_ticket.file_seq,
-                request_epoch = open_ticket.request_epoch,
-                queue_outcome = ?open_ticket.queue_outcome,
-                "completion dispatcher dropped didOpen event"
-            );
+        let completion_mode =
+            bsl_runtime::application::CompletionPipelineKnobs::from_runtime_config().mode;
+        if completion_dispatch_enabled_for_mode(completion_mode) {
+            let open_ticket = self
+                .completion_dispatcher_v2
+                .emit_did_open(file_id, version)
+                .await;
+            if completion_queue_enqueue_failed(open_ticket.queue_outcome) {
+                debug!(
+                    uri = %uri,
+                    file_id = file_id.0,
+                    file_seq = open_ticket.file_seq,
+                    request_epoch = open_ticket.request_epoch,
+                    queue_outcome = ?open_ticket.queue_outcome,
+                    "completion dispatcher dropped didOpen event"
+                );
+            }
         }
         let path = match uri.to_file_path() {
             Ok(path) => path.to_string_lossy().to_string(),
@@ -915,19 +1312,23 @@ impl LanguageServer for BslLanguageServer {
 
         self.sync_v2_globals().await;
         let file_id = self.get_or_create_file_id_v2(&uri).await;
-        let change_ticket = self
-            .completion_dispatcher_v2
-            .emit_did_change(file_id, version)
-            .await;
-        if completion_queue_enqueue_failed(change_ticket.queue_outcome) {
-            debug!(
-                uri = %uri,
-                file_id = file_id.0,
-                file_seq = change_ticket.file_seq,
-                request_epoch = change_ticket.request_epoch,
-                queue_outcome = ?change_ticket.queue_outcome,
-                "completion dispatcher dropped didChange event"
-            );
+        let completion_mode =
+            bsl_runtime::application::CompletionPipelineKnobs::from_runtime_config().mode;
+        if completion_dispatch_enabled_for_mode(completion_mode) {
+            let change_ticket = self
+                .completion_dispatcher_v2
+                .emit_did_change(file_id, version)
+                .await;
+            if completion_queue_enqueue_failed(change_ticket.queue_outcome) {
+                debug!(
+                    uri = %uri,
+                    file_id = file_id.0,
+                    file_seq = change_ticket.file_seq,
+                    request_epoch = change_ticket.request_epoch,
+                    queue_outcome = ?change_ticket.queue_outcome,
+                    "completion dispatcher dropped didChange event"
+                );
+            }
         }
         let path = match uri.to_file_path() {
             Ok(path) => path.to_string_lossy().to_string(),
@@ -1534,13 +1935,17 @@ impl LanguageServer for BslLanguageServer {
         &self,
         params: CompletionParams,
     ) -> JsonRpcResult<Option<CompletionResponse>> {
-        let uri = params.text_document_position.text_document.uri;
+        let uri = params.text_document_position.text_document.uri.clone();
         let position = params.text_document_position.position;
         let trigger_mode = completion_trigger_mode_label(params.context.as_ref());
         let trigger_char_hint = completion_trigger_character(params.context.as_ref());
+        let shadow_internal_request =
+            completion_is_shadow_internal_request(params.context.as_ref());
         let completion_request_id = super::request_context::current_request_id();
-        self.coordinator
-            .record_intellisense_v2_completion_trigger_mode(trigger_mode);
+        if !shadow_internal_request {
+            self.coordinator
+                .record_intellisense_v2_completion_trigger_mode(trigger_mode);
+        }
 
         let file_id = self.get_or_create_file_id_v2(&uri).await;
         let version_hint = self
@@ -1549,39 +1954,116 @@ impl LanguageServer for BslLanguageServer {
             .await
             .get(&file_id)
             .copied();
-        let completion_ticket = self
-            .completion_dispatcher_v2
-            .emit_completion_request(
-                file_id,
-                completion_request_id.clone(),
-                version_hint,
-                trigger_mode.to_string(),
+        let completion_knobs =
+            bsl_runtime::application::CompletionPipelineKnobs::from_runtime_config();
+        let routing_key = completion_canary_routing_key(
+            &uri,
+            position,
+            trigger_mode,
+            trigger_char_hint,
+            version_hint,
+        );
+        let routing_plan = if shadow_internal_request {
+            CompletionRoutingPlan {
+                response_route: CompletionResponseRoute::EventDriven,
+                run_shadow_event_driven: false,
+            }
+        } else {
+            completion_routing_plan(
+                completion_knobs.mode,
+                completion_knobs.canary_percent,
+                &routing_key,
             )
-            .await;
-        let _completion_request_registration = completion_request_id.clone().map(|request_id| {
-            self.completion_cancellation_registry_v2.register_request(
-                request_id,
-                file_id,
-                completion_ticket.request_epoch,
-            )
-        });
-        if completion_queue_enqueue_failed(completion_ticket.queue_outcome) {
-            debug!(
-                uri = %uri,
-                file_id = file_id.0,
-                file_seq = completion_ticket.file_seq,
-                request_epoch = completion_ticket.request_epoch,
-                request_id = ?completion_request_id,
-                queue_outcome = ?completion_ticket.queue_outcome,
-                "completion dispatcher dropped completion event"
-            );
+        };
+
+        if routing_plan.run_shadow_event_driven {
+            let mut shadow_params = params.clone();
+            let shadow_trigger = completion_shadow_internal_trigger_value(trigger_char_hint);
+            if let Some(context) = shadow_params.context.as_mut() {
+                context.trigger_character = Some(shadow_trigger);
+            } else {
+                shadow_params.context = Some(CompletionContext {
+                    trigger_kind: CompletionTriggerKind::INVOKED,
+                    trigger_character: Some(shadow_trigger),
+                });
+            }
+            let shadow_server = self.clone();
+            tokio::spawn(async move {
+                let _ = shadow_server.completion(shadow_params).await;
+            });
         }
+
+        let event_driven_guards_enabled = routing_plan.response_route.event_driven_guards_enabled();
+        let completion_observability_mode = completion_observability_mode_label(
+            routing_plan.response_route,
+            shadow_internal_request,
+        );
+        let (
+            completion_ticket,
+            _completion_request_registration,
+            completion_cancellation_token,
+            mut completion_drop_guard,
+        ) = if event_driven_guards_enabled {
+            let completion_ticket = self
+                .completion_dispatcher_v2
+                .emit_completion_request(
+                    file_id,
+                    completion_request_id.clone(),
+                    version_hint,
+                    trigger_mode.to_string(),
+                )
+                .await;
+            let completion_request_registration = completion_request_id.clone().map(|request_id| {
+                self.completion_cancellation_registry_v2.register_request(
+                    request_id,
+                    file_id,
+                    completion_ticket.request_epoch,
+                )
+            });
+            let completion_cancellation_token = completion_request_registration
+                .as_ref()
+                .map(|registration| registration.token());
+            let completion_drop_guard = Some(CompletionRequestDropCancelGuard::new(
+                completion_request_id.clone(),
+                Arc::clone(&self.completion_cancellation_registry_v2),
+                Arc::clone(&self.completion_dispatcher_v2),
+            ));
+            if completion_queue_enqueue_failed(completion_ticket.queue_outcome) {
+                debug!(
+                    uri = %uri,
+                    file_id = file_id.0,
+                    file_seq = completion_ticket.file_seq,
+                    request_epoch = completion_ticket.request_epoch,
+                    request_id = ?completion_request_id,
+                    queue_outcome = ?completion_ticket.queue_outcome,
+                    "completion dispatcher dropped completion event"
+                );
+            }
+            (
+                completion_ticket,
+                completion_request_registration,
+                completion_cancellation_token,
+                completion_drop_guard,
+            )
+        } else {
+            (
+                super::completion_dispatcher::DispatchTicket {
+                    file_seq: 0,
+                    request_epoch: 0,
+                    queue_outcome: super::completion_dispatcher::QueueEnqueueOutcome::Enqueued,
+                },
+                None,
+                None,
+                None,
+            )
+        };
         let started = Instant::now();
         let snippet_support = *self.completion_snippet_support.read().await;
         let mut completion_outcome: Option<&'static str> = None;
         let mut observed_file_version_for_completion: Option<i32> = None;
         let mut member_access_observed = false;
-        let mut completion = {
+        let mut cancel_event_emitted = false;
+        let mut completion = 'completion_flow: {
             let first_completion_for_file = {
                 let mut seen = self.completion_seen_files_v2.write().await;
                 seen.insert(file_id)
@@ -1594,16 +2076,7 @@ impl LanguageServer for BslLanguageServer {
                 });
             self.sync_v2_globals().await;
 
-            let empty = || {
-                Some(crate::handlers::CompletionResponseWithStats {
-                    response: CompletionResponse::List(CompletionList {
-                        is_incomplete: false,
-                        items: vec![],
-                    }),
-                    stats: None,
-                    had_error: false,
-                })
-            };
+            let empty = || Some(completion_empty_response(false));
             let extract_non_empty_items =
                 |response: &crate::handlers::CompletionResponseWithStats| match &response.response {
                     CompletionResponse::List(list) if !list.items.is_empty() => {
@@ -1633,17 +2106,33 @@ impl LanguageServer for BslLanguageServer {
             };
 
             let prepared = self
-                .prepare_lsp_stateful_operation_v2(
+                .prepare_lsp_stateful_operation_v2_with_completion_mode(
                     &uri,
                     file_id,
                     bsl_runtime::application::SemanticOperation::Completion,
                     include_flow_sensitive,
+                    Some(completion_observability_mode),
                 )
                 .await;
 
             match prepared {
                 Ok((context, prepared, expected_version)) => {
                     let force_incomplete_due_stale = prepared.stale_served;
+                    if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
+                        event_driven_guards_enabled,
+                        self,
+                        file_id,
+                        completion_request_id.as_deref(),
+                        completion_ticket.request_epoch,
+                        completion_cancellation_token.as_ref(),
+                        "wait",
+                        &mut cancel_event_emitted,
+                    )
+                    .await
+                    {
+                        completion_outcome = Some(outcome);
+                        break 'completion_flow Some(completion_incomplete_empty_response());
+                    }
                     let (snapshot_file_bytes, snapshot_file_lines) = prepared
                         .snapshot
                         .analysis
@@ -1687,6 +2176,21 @@ impl LanguageServer for BslLanguageServer {
                                 "Completion v2: snapshot acquisition is slow"
                             );
                         }
+                    }
+                    if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
+                        event_driven_guards_enabled,
+                        self,
+                        file_id,
+                        completion_request_id.as_deref(),
+                        completion_ticket.request_epoch,
+                        completion_cancellation_token.as_ref(),
+                        "snapshot",
+                        &mut cancel_event_emitted,
+                    )
+                    .await
+                    {
+                        completion_outcome = Some(outcome);
+                        break 'completion_flow Some(completion_incomplete_empty_response());
                     }
 
                     let (
@@ -1759,6 +2263,7 @@ impl LanguageServer for BslLanguageServer {
                         let coordinator_for_query = self.coordinator.clone();
                         let uri_for_query = uri.clone();
                         let observed_deps_id_for_query = observed_deps_id.clone();
+                        let cancellation_token_for_query = completion_cancellation_token.clone();
                         let query_result =
                             bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
                                 bsl_runtime::application::CpuWorkClass::Interactive,
@@ -1768,6 +2273,21 @@ impl LanguageServer for BslLanguageServer {
                                     let file_content = analysis.file_text(file_id).ok().flatten();
                                     let file_path = analysis.file_path(file_id).ok().flatten();
                                     let deps = analysis.deps_data().ok();
+                                    if cancellation_token_for_query
+                                        .as_ref()
+                                        .is_some_and(|token| token.is_cancelled())
+                                    {
+                                        return (
+                                            file_content,
+                                            file_path,
+                                            None,
+                                            None,
+                                            deps,
+                                            None,
+                                            false,
+                                            true,
+                                        );
+                                    }
 
                                     let ir_started = Instant::now();
                                     let ir_query =
@@ -1844,6 +2364,21 @@ impl LanguageServer for BslLanguageServer {
                                             }
                                         }
                                     };
+                                    if cancellation_token_for_query
+                                        .as_ref()
+                                        .is_some_and(|token| token.is_cancelled())
+                                    {
+                                        return (
+                                            file_content,
+                                            file_path,
+                                            None,
+                                            None,
+                                            deps,
+                                            ir_program,
+                                            ir_cancelled_after_retry,
+                                            true,
+                                        );
+                                    }
                                     let parse_result =
                                         bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query_singleflight(
                                             &context_for_query,
@@ -1894,6 +2429,21 @@ impl LanguageServer for BslLanguageServer {
                                                 uri_for_query, file_id.0
                                             ),
                                         }
+                                    }
+                                    if cancellation_token_for_query
+                                        .as_ref()
+                                        .is_some_and(|token| token.is_cancelled())
+                                    {
+                                        return (
+                                            file_content,
+                                            file_path,
+                                            parse_result,
+                                            None,
+                                            deps,
+                                            ir_program,
+                                            ir_cancelled_after_retry,
+                                            true,
+                                        );
                                     }
 
                                     let member_access_owner_type_hint =
@@ -1966,6 +2516,7 @@ impl LanguageServer for BslLanguageServer {
                                         deps,
                                         ir_program,
                                         ir_cancelled_after_retry,
+                                        false,
                                     )
                                 },
                             )
@@ -1979,6 +2530,7 @@ impl LanguageServer for BslLanguageServer {
                             deps,
                             ir_program,
                             ir_cancelled_after_retry,
+                            query_checkpoint_cancelled,
                         ) = match query_result {
                             Ok(result) => result,
                             Err(join_error) => {
@@ -1988,11 +2540,28 @@ impl LanguageServer for BslLanguageServer {
                                     error = %join_error,
                                     "Completion v2: interactive query task failed"
                                 );
-                                (None, None, None, None, None, None, true)
+                                (None, None, None, None, None, None, true, true)
                             }
                         };
-                        if ir_cancelled_after_retry && completion_outcome.is_none() {
+                        if (ir_cancelled_after_retry || query_checkpoint_cancelled)
+                            && completion_outcome.is_none()
+                        {
                             completion_outcome = Some("cancelled");
+                        }
+                        if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
+                            event_driven_guards_enabled,
+                            self,
+                            file_id,
+                            completion_request_id.as_deref(),
+                            completion_ticket.request_epoch,
+                            completion_cancellation_token.as_ref(),
+                            "ir",
+                            &mut cancel_event_emitted,
+                        )
+                        .await
+                        {
+                            completion_outcome = Some(outcome);
+                            break 'completion_flow Some(completion_incomplete_empty_response());
                         }
 
                         (
@@ -2020,6 +2589,21 @@ impl LanguageServer for BslLanguageServer {
                         })
                         .unwrap_or(member_access_request);
                     member_access_observed = member_access_context;
+                    if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
+                        event_driven_guards_enabled,
+                        self,
+                        file_id,
+                        completion_request_id.as_deref(),
+                        completion_ticket.request_epoch,
+                        completion_cancellation_token.as_ref(),
+                        "collect",
+                        &mut cancel_event_emitted,
+                    )
+                    .await
+                    {
+                        completion_outcome = Some(outcome);
+                        break 'completion_flow Some(completion_incomplete_empty_response());
+                    }
 
                     let mut completion_response = match (file_content, file_path, deps, ir_program)
                     {
@@ -2053,102 +2637,60 @@ impl LanguageServer for BslLanguageServer {
                             empty()
                         }
                         (Some(file_content), Some(file_path), Some(deps), None) => {
-                            let (strict_stale_cached_items, relaxed_stale_cached_items) = {
-                                let cache = self.completion_stale_fallback_cache_v2.read().await;
-                                let strict =
-                                    match (observed_settings_id.as_ref(), observed_file_version) {
-                                        (Some(settings_id), Some(file_version)) => {
-                                            cache.get(&file_id).and_then(|entry| {
-                                                let compatible = entry.deps_id == observed_deps_id
-                                                    && entry.settings_id == *settings_id
-                                                    && entry.file_version == file_version
-                                                    && !entry.items.is_empty();
-                                                if compatible {
-                                                    Some(entry.items.clone())
-                                                } else {
-                                                    None
-                                                }
-                                            })
-                                        }
-                                        _ => None,
-                                    };
-                                let relaxed = cache.get(&file_id).and_then(|entry| {
-                                    if entry.items.is_empty() {
-                                        return None;
-                                    }
-                                    let deps_compatible = entry.deps_id == observed_deps_id;
-                                    let settings_compatible = observed_settings_id
-                                        .as_ref()
-                                        .map(|settings_id| entry.settings_id == *settings_id)
-                                        .unwrap_or(true);
-                                    if deps_compatible && settings_compatible {
-                                        Some(entry.items.clone())
-                                    } else {
-                                        None
-                                    }
-                                });
-                                (strict, relaxed)
-                            };
-
-                            if let Some(items) = strict_stale_cached_items {
-                                completion_outcome.get_or_insert("degraded_incomplete");
-                                Some(crate::handlers::CompletionResponseWithStats {
-                                    response: CompletionResponse::List(CompletionList {
-                                        is_incomplete: true,
-                                        items,
-                                    }),
-                                    stats: None,
-                                    had_error: false,
-                                })
-                            } else if member_access_context {
-                                let mut degraded = crate::handlers::handle_completion_v2_degraded(
-                                    file_content,
-                                    file_path,
-                                    parse_result,
-                                    member_access_owner_type_hint,
-                                    deps,
-                                    position,
-                                    &uri,
-                                    index_snapshot.as_ref(),
-                                    snippet_support,
-                                    include_flow_sensitive,
-                                    trigger_char_hint,
-                                )
-                                .await;
-                                if let Some(response) = degraded.as_mut() {
-                                    if let CompletionResponse::List(list) = &mut response.response {
-                                        list.is_incomplete = true;
-                                    }
-                                }
-                                if degraded.is_some() {
-                                    completion_outcome.get_or_insert("degraded_incomplete");
-                                    degraded
-                                } else if let Some(items) = relaxed_stale_cached_items {
-                                    completion_outcome.get_or_insert("degraded_incomplete");
-                                    self.coordinator
-                                        .record_intellisense_v2_completion_stale_fallback();
-                                    Some(crate::handlers::CompletionResponseWithStats {
-                                        response: CompletionResponse::List(CompletionList {
-                                            is_incomplete: true,
-                                            items,
-                                        }),
-                                        stats: None,
-                                        had_error: false,
-                                    })
-                                } else {
-                                    completion_outcome.get_or_insert("fallback_unavailable");
-                                    self.coordinator
-                                        .record_intellisense_v2_completion_fallback_unavailable();
-                                    Some(crate::handlers::build_keyword_degraded_completion(
-                                        snippet_support,
-                                    ))
-                                }
-                            } else {
-                                completion_outcome.get_or_insert("missing_ir");
-                                empty()
-                            }
+                            let (fallback_outcome, response) = resolve_completion_without_ir(
+                                self,
+                                file_id,
+                                observed_deps_id.clone(),
+                                observed_settings_id.clone(),
+                                observed_file_version,
+                                member_access_context,
+                                file_content,
+                                file_path,
+                                parse_result,
+                                member_access_owner_type_hint,
+                                deps,
+                                position,
+                                &uri,
+                                index_snapshot.as_ref(),
+                                snippet_support,
+                                include_flow_sensitive,
+                                trigger_char_hint,
+                            )
+                            .await;
+                            completion_outcome.get_or_insert(fallback_outcome);
+                            response
                         }
                     };
+                    if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
+                        event_driven_guards_enabled,
+                        self,
+                        file_id,
+                        completion_request_id.as_deref(),
+                        completion_ticket.request_epoch,
+                        completion_cancellation_token.as_ref(),
+                        "rank",
+                        &mut cancel_event_emitted,
+                    )
+                    .await
+                    {
+                        completion_outcome = Some(outcome);
+                        break 'completion_flow Some(completion_incomplete_empty_response());
+                    }
+                    if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
+                        event_driven_guards_enabled,
+                        self,
+                        file_id,
+                        completion_request_id.as_deref(),
+                        completion_ticket.request_epoch,
+                        completion_cancellation_token.as_ref(),
+                        "format",
+                        &mut cancel_event_emitted,
+                    )
+                    .await
+                    {
+                        completion_outcome = Some(outcome);
+                        break 'completion_flow Some(completion_incomplete_empty_response());
+                    }
                     if force_incomplete_due_stale {
                         if let Some(response) = completion_response.as_mut() {
                             if let CompletionResponse::List(list) = &mut response.response {
@@ -2156,25 +2698,27 @@ impl LanguageServer for BslLanguageServer {
                             }
                         }
                     }
-                    if let (Some(settings_id), Some(file_version), Some(response_items)) = (
-                        observed_settings_id.clone(),
-                        observed_file_version,
-                        completion_response
-                            .as_ref()
-                            .and_then(extract_non_empty_items),
-                    ) {
-                        self.completion_stale_fallback_cache_v2
-                            .write()
-                            .await
-                            .insert(
-                                file_id,
-                                CompletionStaleFallbackCacheEntryV2 {
-                                    deps_id: observed_deps_id,
-                                    settings_id,
-                                    file_version,
-                                    items: response_items,
-                                },
-                            );
+                    if !matches!(completion_outcome, Some("cancelled" | "superseded_epoch")) {
+                        if let (Some(settings_id), Some(file_version), Some(response_items)) = (
+                            observed_settings_id.clone(),
+                            observed_file_version,
+                            completion_response
+                                .as_ref()
+                                .and_then(extract_non_empty_items),
+                        ) {
+                            self.completion_stale_fallback_cache_v2
+                                .write()
+                                .await
+                                .insert(
+                                    file_id,
+                                    CompletionStaleFallbackCacheEntryV2 {
+                                        deps_id: observed_deps_id,
+                                        settings_id,
+                                        file_version,
+                                        items: response_items,
+                                    },
+                                );
+                        }
                     }
                     completion_response
                 }
@@ -2192,20 +2736,20 @@ impl LanguageServer for BslLanguageServer {
         };
         let elapsed = started.elapsed();
         self.coordinator.record_completion_latency(elapsed);
-        let latest_request_epoch = self
-            .completion_dispatcher_v2
-            .latest_request_epoch(file_id)
-            .await;
-        if !completion_publish_allowed(completion_ticket.request_epoch, latest_request_epoch) {
-            completion_outcome = Some("superseded_epoch");
-            completion = Some(crate::handlers::CompletionResponseWithStats {
-                response: CompletionResponse::List(CompletionList {
-                    is_incomplete: true,
-                    items: Vec::new(),
-                }),
-                stats: None,
-                had_error: false,
-            });
+        if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
+            event_driven_guards_enabled,
+            self,
+            file_id,
+            completion_request_id.as_deref(),
+            completion_ticket.request_epoch,
+            completion_cancellation_token.as_ref(),
+            "publish",
+            &mut cancel_event_emitted,
+        )
+        .await
+        {
+            completion_outcome = Some(outcome);
+            completion = Some(completion_incomplete_empty_response());
         }
 
         if let Some(result) = &completion {
@@ -2338,6 +2882,9 @@ impl LanguageServer for BslLanguageServer {
                 .record_intellisense_v2_completion_outcome(outcome);
         }
 
+        if let Some(drop_guard) = completion_drop_guard.as_mut() {
+            drop_guard.disarm();
+        }
         Ok(completion.map(|result| result.response))
     }
 
@@ -3449,8 +3996,14 @@ fn normalize_optional_string(value: Option<String>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{completion_publish_allowed, should_schedule_profile};
-    use bsl_runtime::application::{DiagnosticsProfile, DiagnosticsTrigger};
+    use super::{
+        completion_canary_routing_key, completion_dispatch_enabled_for_mode,
+        completion_publish_allowed, completion_route_canary_event_driven, completion_routing_plan,
+        completion_shadow_internal_trigger_payload, completion_shadow_internal_trigger_value,
+        should_schedule_profile, CompletionResponseRoute,
+    };
+    use bsl_runtime::application::{CompletionMode, DiagnosticsProfile, DiagnosticsTrigger};
+    use tower_lsp::lsp_types::{Position, Url};
 
     #[test]
     fn idle_heavy_runs_for_save_trigger_even_when_flow_sensitive_disabled() {
@@ -3491,5 +4044,120 @@ mod tests {
         assert!(completion_publish_allowed(3, Some(3)));
         assert!(completion_publish_allowed(1, None));
         assert!(!completion_publish_allowed(3, Some(4)));
+    }
+
+    #[test]
+    fn completion_publish_guard_rejects_superseded_epochs_in_burst() {
+        let latest_epoch = Some(11);
+        assert!(!completion_publish_allowed(9, latest_epoch));
+        assert!(!completion_publish_allowed(10, latest_epoch));
+        assert!(completion_publish_allowed(11, latest_epoch));
+    }
+
+    #[test]
+    fn completion_dispatch_disabled_only_for_off_mode() {
+        assert!(!completion_dispatch_enabled_for_mode(CompletionMode::Off));
+        assert!(completion_dispatch_enabled_for_mode(CompletionMode::Shadow));
+        assert!(completion_dispatch_enabled_for_mode(CompletionMode::Canary));
+        assert!(completion_dispatch_enabled_for_mode(CompletionMode::On));
+    }
+
+    #[test]
+    fn completion_canary_routing_is_deterministic_for_same_key() {
+        let key = "file:///test.bsl:10:5:invoked:0:3";
+        let first = completion_route_canary_event_driven(key, 37);
+        for _ in 0..16 {
+            assert_eq!(completion_route_canary_event_driven(key, 37), first);
+        }
+    }
+
+    #[test]
+    fn completion_canary_routing_uses_threshold_bucket() {
+        let key = "file:///test.bsl:1:2:trigger_character:46:9";
+        let bucket = (bsl_shared::utils::hash::hash_content(key) % 100) as u8;
+        assert!(!completion_route_canary_event_driven(key, bucket));
+        let next_threshold = bucket.saturating_add(1).max(1);
+        assert!(completion_route_canary_event_driven(key, next_threshold));
+    }
+
+    #[test]
+    fn completion_routing_plan_follows_mode_contract() {
+        let key = "file:///test.bsl:2:4:invoked:0:-1";
+
+        let off = completion_routing_plan(CompletionMode::Off, 100, key);
+        assert_eq!(off.response_route, CompletionResponseRoute::Legacy);
+        assert!(!off.run_shadow_event_driven);
+
+        let shadow = completion_routing_plan(CompletionMode::Shadow, 100, key);
+        assert_eq!(shadow.response_route, CompletionResponseRoute::Legacy);
+        assert!(shadow.run_shadow_event_driven);
+
+        let canary_zero = completion_routing_plan(CompletionMode::Canary, 0, key);
+        assert_eq!(canary_zero.response_route, CompletionResponseRoute::Legacy);
+        assert!(!canary_zero.run_shadow_event_driven);
+
+        let canary_hundred = completion_routing_plan(CompletionMode::Canary, 100, key);
+        assert_eq!(
+            canary_hundred.response_route,
+            CompletionResponseRoute::EventDriven
+        );
+        assert!(!canary_hundred.run_shadow_event_driven);
+
+        let on = completion_routing_plan(CompletionMode::On, 0, key);
+        assert_eq!(on.response_route, CompletionResponseRoute::EventDriven);
+        assert!(!on.run_shadow_event_driven);
+    }
+
+    #[test]
+    fn completion_mode_parity_groups_are_stable_for_fixed_revision() {
+        let key = "file:///test_fixed_revision.bsl:15:9:trigger_character:46:42";
+
+        let off = completion_routing_plan(CompletionMode::Off, 50, key).response_route;
+        let shadow = completion_routing_plan(CompletionMode::Shadow, 50, key).response_route;
+        let canary_zero = completion_routing_plan(CompletionMode::Canary, 0, key).response_route;
+        let canary_hundred =
+            completion_routing_plan(CompletionMode::Canary, 100, key).response_route;
+        let on = completion_routing_plan(CompletionMode::On, 50, key).response_route;
+
+        assert_eq!(off, CompletionResponseRoute::Legacy);
+        assert_eq!(shadow, CompletionResponseRoute::Legacy);
+        assert_eq!(canary_zero, CompletionResponseRoute::Legacy);
+        assert_eq!(canary_hundred, CompletionResponseRoute::EventDriven);
+        assert_eq!(on, CompletionResponseRoute::EventDriven);
+    }
+
+    #[test]
+    fn completion_shadow_internal_trigger_roundtrip_keeps_original_char() {
+        let dot_encoded = completion_shadow_internal_trigger_value(Some('.'));
+        assert_eq!(
+            completion_shadow_internal_trigger_payload(&dot_encoded),
+            Some(Some('.'))
+        );
+
+        let none_encoded = completion_shadow_internal_trigger_value(None);
+        assert_eq!(
+            completion_shadow_internal_trigger_payload(&none_encoded),
+            Some(None)
+        );
+    }
+
+    #[test]
+    fn completion_canary_routing_key_is_stable_for_same_inputs() {
+        let uri = Url::parse("file:///test.bsl").expect("url");
+        let first = completion_canary_routing_key(
+            &uri,
+            Position::new(10, 4),
+            "invoked",
+            Some('.'),
+            Some(7),
+        );
+        let second = completion_canary_routing_key(
+            &uri,
+            Position::new(10, 4),
+            "invoked",
+            Some('.'),
+            Some(7),
+        );
+        assert_eq!(first, second);
     }
 }

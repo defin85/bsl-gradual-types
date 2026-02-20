@@ -3650,6 +3650,7 @@ fn prepare_ephemeral_mcp_operation(
     let context = ExecutionContext {
         origin: ObservabilityOrigin::Agent,
         operation,
+        completion_mode: None,
         file_id: FileId(1),
         min_file_version: Some(version),
         expected_deps_id: Some(deps_id.clone()),
@@ -4127,6 +4128,7 @@ mod tests {
         let context = ExecutionContext {
             origin: ObservabilityOrigin::Agent,
             operation: SemanticOperation::Members,
+            completion_mode: None,
             file_id: FileId(1),
             min_file_version: None,
             expected_deps_id: None,

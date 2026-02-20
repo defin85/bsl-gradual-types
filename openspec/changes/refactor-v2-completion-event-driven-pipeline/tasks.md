@@ -24,26 +24,26 @@
 
 ## 4. Cancellation & Fallback Semantics
 - [x] 4.1 Добавить request-level cancellation registry (`request_id -> token + file_id + epoch`).
-- [ ] 4.2 Пробросить `Cancel(request_id)` в orchestrator и runtime stage-checkpoints (`wait/snapshot/ir/collect/rank/format/publish`).
-- [ ] 4.3 Гарантировать no-late-publish для cancelled/superseded completion.
-- [ ] 4.4 Централизовать fallback/degraded policy в orchestrator/runtime, удалить adapter-local дублирование.
+- [x] 4.2 Пробросить `Cancel(request_id)` в orchestrator и runtime stage-checkpoints (`wait/snapshot/ir/collect/rank/format/publish`).
+- [x] 4.3 Гарантировать no-late-publish для cancelled/superseded completion.
+- [x] 4.4 Централизовать fallback/degraded policy в orchestrator/runtime, удалить adapter-local дублирование.
 
 ## 5. Rollout & Routing
-- [ ] 5.1 Реализовать mode routing: `off` legacy only, `shadow` dual-exec/legacy-response, `canary` percentage routing, `on` event-driven default.
-- [ ] 5.2 Сделать canary routing детерминированным и воспроизводимым.
-- [ ] 5.3 Реализовать kill-switch rollback в `off` без рестарта.
+- [x] 5.1 Реализовать mode routing: `off` legacy only, `shadow` dual-exec/legacy-response, `canary` percentage routing, `on` event-driven default.
+- [x] 5.2 Сделать canary routing детерминированным и воспроизводимым.
+- [x] 5.3 Реализовать kill-switch rollback в `off` без рестарта.
 
 ## 6. Observability
-- [ ] 6.1 Расширить canonical observability contract mode-aware low-cardinality dimension.
-- [ ] 6.2 Добавить mode-split completion stage metrics для `runtime_wait_for_file_version`, `runtime_snapshot_with_deps`, `ir_query`, `parse_result_query`.
-- [ ] 6.3 Сохранить deterministic dual-write projection (drilldown primary, legacy compatibility).
-- [ ] 6.4 Добавить contract tests на mode dimension + projection parity.
+- [x] 6.1 Расширить canonical observability contract mode-aware low-cardinality dimension.
+- [x] 6.2 Добавить mode-split completion stage metrics для `runtime_wait_for_file_version`, `runtime_snapshot_with_deps`, `ir_query`, `parse_result_query`.
+- [x] 6.3 Сохранить deterministic dual-write projection (drilldown primary, legacy compatibility).
+- [x] 6.4 Добавить contract tests на mode dimension + projection parity.
 
 ## 7. Validation
-- [ ] 7.1 Добавить контрактные тесты порядка событий и latest-wins поведения под burst-нагрузкой.
-- [ ] 7.2 Добавить контрактные тесты cancellation propagation и отсутствия late publish.
-- [ ] 7.3 Добавить тесты bounded backpressure/fairness (interactive не starving под background и наоборот).
-- [ ] 7.4 Добавить parity-тесты между `off`/`shadow`/`canary`/`on` на фиксированной ревизии.
-- [ ] 7.5 Прогнать профильные наборы (`p26` + acceptance suite) и зафиксировать pass/fail по rollout gates.
-- [ ] 7.6 Прогнать `openspec validate refactor-v2-completion-event-driven-pipeline --strict --no-interactive`.
-- [ ] 7.7 Задокументировать baseline vs event-driven (cold/warm snapshot + SLO pass/fail + mode-split метрики) в change-артефактах.
+- [x] 7.1 Добавить контрактные тесты порядка событий и latest-wins поведения под burst-нагрузкой.
+- [x] 7.2 Добавить контрактные тесты cancellation propagation и отсутствия late publish.
+- [x] 7.3 Добавить тесты bounded backpressure/fairness (interactive не starving под background и наоборот).
+- [x] 7.4 Добавить parity-тесты между `off`/`shadow`/`canary`/`on` на фиксированной ревизии.
+- [x] 7.5 Прогнать профильные наборы (`p26` + acceptance suite) и зафиксировать pass/fail по rollout gates.
+- [x] 7.6 Прогнать `openspec validate refactor-v2-completion-event-driven-pipeline --strict --no-interactive`.
+- [x] 7.7 Задокументировать baseline vs event-driven (cold/warm snapshot + SLO pass/fail + mode-split метрики) в change-артефактах.

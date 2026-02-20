@@ -57,6 +57,7 @@ async fn measure_shared_facade_semantic_triplet(
     let context = ExecutionContext {
         origin: ObservabilityOrigin::Lsp,
         operation: SemanticOperation::Members,
+        completion_mode: None,
         file_id,
         min_file_version: None,
         expected_deps_id: Some(deps_id),

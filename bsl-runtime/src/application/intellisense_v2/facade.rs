@@ -85,6 +85,8 @@ impl ObservabilityOrigin {
 pub struct ExecutionContext {
     pub origin: ObservabilityOrigin,
     pub operation: SemanticOperation,
+    /// Optional completion routing mode for mode-aware drilldown metrics.
+    pub completion_mode: Option<&'static str>,
     pub file_id: FileId,
     /// If set, facade should wait until runtime reaches this file version.
     pub min_file_version: Option<i32>,
@@ -646,9 +648,10 @@ impl IntellisenseV2Facade {
             };
             let elapsed = started.elapsed();
             if let Some(coordinator) = observability {
-                coordinator.record_intellisense_v2_wait_for_file_version_with_origin(
+                coordinator.record_intellisense_v2_wait_for_file_version_with_origin_and_mode(
                     context.origin.as_str(),
                     context.operation.as_str(),
+                    context.completion_mode,
                     elapsed,
                 );
             }
@@ -664,9 +667,10 @@ impl IntellisenseV2Facade {
         let (analysis, index_snapshot, deps_id) = self.snapshot_with_deps().await;
         let snapshot_elapsed = snapshot_started.elapsed();
         if let Some(coordinator) = observability {
-            coordinator.record_intellisense_v2_snapshot_latency_with_origin(
+            coordinator.record_intellisense_v2_snapshot_latency_with_origin_and_mode(
                 context.origin.as_str(),
                 context.operation.as_str(),
+                context.completion_mode,
                 snapshot_elapsed,
             );
             coordinator.record_intellisense_v2_runtime_queue_wait_class_latency_with_origin(
@@ -865,15 +869,17 @@ impl IntellisenseV2Facade {
         if let Some(coordinator) = observability {
             match stage {
                 ObservabilityStage::IrQuery => {
-                    coordinator.record_intellisense_v2_ir_query_latency_with_origin(
+                    coordinator.record_intellisense_v2_ir_query_latency_with_origin_and_mode(
                         context.origin.as_str(),
                         context.operation.as_str(),
+                        context.completion_mode,
                         elapsed,
                     );
                     if report_cancelled {
-                        coordinator.record_intellisense_v2_ir_query_cancelled_with_origin(
+                        coordinator.record_intellisense_v2_ir_query_cancelled_with_origin_and_mode(
                             context.origin.as_str(),
                             context.operation.as_str(),
+                            context.completion_mode,
                         );
                     }
                 }
@@ -905,15 +911,17 @@ impl IntellisenseV2Facade {
                 }
                 ObservabilityStage::ParseResultQuery => {
                     coordinator
-                        .record_intellisense_v2_parse_result_query_latency_with_origin_and_operation(
+                        .record_intellisense_v2_parse_result_query_latency_with_origin_operation_and_mode(
                             context.origin.as_str(),
                             context.operation.as_str(),
+                            context.completion_mode,
                             elapsed,
                         );
                     if report_cancelled {
-                        coordinator.record_intellisense_v2_query_cancelled_with_origin(
+                        coordinator.record_intellisense_v2_query_cancelled_with_origin_and_mode(
                             context.origin.as_str(),
                             "other",
+                            context.completion_mode,
                         );
                     }
                 }
@@ -1579,6 +1587,7 @@ mod tests {
         let context = ExecutionContext {
             origin: ObservabilityOrigin::Lsp,
             operation: SemanticOperation::Hover,
+            completion_mode: None,
             file_id: FileId(1),
             min_file_version: None,
             expected_deps_id: Some(DepsSnapshotId::from_hash("deps_expected")),
@@ -1628,6 +1637,7 @@ mod tests {
         let context = ExecutionContext {
             origin: ObservabilityOrigin::Lsp,
             operation: SemanticOperation::Completion,
+            completion_mode: None,
             file_id,
             min_file_version: Some(5),
             expected_deps_id: Some(deps_id),
@@ -1709,6 +1719,123 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn completion_mode_propagates_into_stage_drilldown_metrics() {
+        let coordinator = SystemCoordinator::new();
+        let file_id = FileId(21);
+        let deps_id = DepsSnapshotId::from_hash("deps_mode_split");
+        let settings_id = SettingsId::from_hash("settings");
+
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(Change::SetDepsSnapshot {
+            deps_id: deps_id.clone(),
+            deps: make_deps(),
+        });
+        host.apply_change(Change::SetSettingsSnapshot {
+            settings_id: settings_id.clone(),
+            diagnostics_detail_level: DetailLevel::Full,
+        });
+        let runtime = IntellisenseV2Facade::new(
+            host,
+            Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash(
+                "mode_split",
+            ))),
+            None,
+        );
+        runtime.apply_changes(vec![Change::SetFile {
+            file_id,
+            text: Arc::from("x = 1;"),
+            version: 1,
+            path: Arc::from("mode_split.bsl"),
+        }]);
+        let _ = runtime.snapshot().await;
+
+        let context = ExecutionContext {
+            origin: ObservabilityOrigin::Lsp,
+            operation: SemanticOperation::Completion,
+            completion_mode: Some("event_driven"),
+            file_id,
+            min_file_version: Some(1),
+            expected_deps_id: Some(deps_id),
+            flow_sensitive: false,
+            settings: ExecutionSettings {
+                settings_id,
+                diagnostics_detail_level: DetailLevel::Full,
+            },
+            cancellation: CancellationPolicy::BestEffort,
+        };
+
+        let prepared = runtime
+            .prepare_stateful_operation(&context, Some(&coordinator))
+            .await
+            .expect("prepare_stateful_operation");
+        let analysis = prepared.snapshot.analysis;
+
+        let _: Result<Option<()>, ()> = IntellisenseV2Facade::run_optional_query(
+            &context,
+            ObservabilityStage::IrQuery,
+            &analysis,
+            Some(&coordinator),
+            |_analysis| Ok(None),
+        );
+        let _: Result<Option<()>, ()> = IntellisenseV2Facade::run_optional_query(
+            &context,
+            ObservabilityStage::ParseResultQuery,
+            &analysis,
+            Some(&coordinator),
+            |_analysis| Ok(None),
+        );
+
+        let metrics = coordinator.observability_metrics();
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+
+        assert!(
+            counters.contains_key(
+                "intellisense_v2_drilldown_stage_total_origin_lsp_mode_event_driven_operation_completion_stage_runtime_wait_for_file_version"
+            ),
+            "wait stage counter must include completion mode dimension"
+        );
+        assert!(
+            counters.contains_key(
+                "intellisense_v2_drilldown_stage_total_origin_lsp_mode_event_driven_operation_completion_stage_runtime_snapshot_with_deps"
+            ),
+            "snapshot stage counter must include completion mode dimension"
+        );
+        assert!(
+            counters.contains_key(
+                "intellisense_v2_drilldown_stage_total_origin_lsp_mode_event_driven_operation_completion_stage_ir_query"
+            ),
+            "ir stage counter must include completion mode dimension"
+        );
+        assert!(
+            counters.contains_key(
+                "intellisense_v2_drilldown_stage_total_origin_lsp_mode_event_driven_operation_completion_stage_parse_result_query"
+            ),
+            "parse_result stage counter must include completion mode dimension"
+        );
+        assert!(
+            counters.contains_key("intellisense_v2_wait_for_file_version_completion_total"),
+            "legacy wait counter must still be projected"
+        );
+        assert!(
+            counters.contains_key("intellisense_v2_snapshot_completion_total"),
+            "legacy snapshot counter must still be projected"
+        );
+        assert!(
+            counters.contains_key("intellisense_v2_ir_query_completion_total"),
+            "legacy ir counter must still be projected"
+        );
+        assert!(
+            counters.contains_key("intellisense_v2_parse_result_query_total"),
+            "legacy parse_result counter must still be projected"
+        );
+
+        runtime.shutdown_for_test().await;
+    }
+
+    #[tokio::test]
     async fn interactive_prepare_timeout_rejects_stale_when_gap_exceeds_default() {
         let coordinator = SystemCoordinator::new();
         let file_id = FileId(11);
@@ -1740,6 +1867,7 @@ mod tests {
         let context = ExecutionContext {
             origin: ObservabilityOrigin::Lsp,
             operation: SemanticOperation::Completion,
+            completion_mode: None,
             file_id,
             min_file_version: Some(5),
             expected_deps_id: Some(deps_id),
@@ -1831,6 +1959,7 @@ mod tests {
         let context = ExecutionContext {
             origin: ObservabilityOrigin::Lsp,
             operation: SemanticOperation::SignatureHelp,
+            completion_mode: None,
             file_id,
             min_file_version: Some(5),
             expected_deps_id: Some(deps_id),
@@ -1892,6 +2021,7 @@ mod tests {
         let context = ExecutionContext {
             origin: ObservabilityOrigin::Lsp,
             operation: SemanticOperation::Completion,
+            completion_mode: None,
             file_id,
             min_file_version: Some(5),
             expected_deps_id: None,
@@ -1918,6 +2048,7 @@ mod tests {
         let context = ExecutionContext {
             origin: ObservabilityOrigin::Lsp,
             operation: SemanticOperation::Hover,
+            completion_mode: None,
             file_id: FileId(1),
             min_file_version: None,
             expected_deps_id: None,
@@ -1956,6 +2087,7 @@ mod tests {
         let context = ExecutionContext {
             origin: ObservabilityOrigin::Lsp,
             operation: SemanticOperation::Completion,
+            completion_mode: None,
             file_id: FileId(1),
             min_file_version: None,
             expected_deps_id: None,
@@ -2003,6 +2135,7 @@ mod tests {
         let context = ExecutionContext {
             origin: ObservabilityOrigin::Lsp,
             operation: SemanticOperation::Members,
+            completion_mode: None,
             file_id: FileId(1),
             min_file_version: None,
             expected_deps_id: None,
@@ -2049,6 +2182,7 @@ mod tests {
         let context = ExecutionContext {
             origin: ObservabilityOrigin::Lsp,
             operation: SemanticOperation::Members,
+            completion_mode: None,
             file_id: FileId(1),
             min_file_version: None,
             expected_deps_id: None,

@@ -927,6 +927,69 @@ mod tests {
         drop(background_permit);
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn cpu_budget_bidirectional_waiters_eventually_make_progress() {
+        let budget = Arc::new(CpuBoundBudget::with_total_permits(3));
+        let interactive_reserved = budget.acquire(CpuWorkClass::Interactive).await;
+        let background_reserved = budget.acquire(CpuWorkClass::Background).await;
+        let shared_taken_by_interactive = budget.acquire(CpuWorkClass::Interactive).await;
+
+        let budget_for_background = budget.clone();
+        let mut background_waiter = tokio::spawn(async move {
+            budget_for_background
+                .acquire(CpuWorkClass::Background)
+                .await
+        });
+        let budget_for_interactive = budget.clone();
+        let mut interactive_waiter = tokio::spawn(async move {
+            budget_for_interactive
+                .acquire(CpuWorkClass::Interactive)
+                .await
+        });
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(
+            !background_waiter.is_finished(),
+            "background waiter should queue while permits are saturated"
+        );
+        assert!(
+            !interactive_waiter.is_finished(),
+            "interactive waiter should queue while permits are saturated"
+        );
+
+        drop(shared_taken_by_interactive);
+        let (first_finished, first_result) = timeout(Duration::from_millis(300), async {
+            tokio::select! {
+                res = &mut interactive_waiter => ("interactive", res),
+                res = &mut background_waiter => ("background", res),
+            }
+        })
+        .await
+        .expect("at least one waiter should make progress after shared release");
+        let first_permit = first_result.expect("first waiter join should succeed");
+        drop(first_permit);
+
+        drop(interactive_reserved);
+        drop(background_reserved);
+        match first_finished {
+            "interactive" => {
+                let background_permit = timeout(Duration::from_millis(300), background_waiter)
+                    .await
+                    .expect("background waiter should eventually make progress")
+                    .expect("background waiter join should succeed");
+                drop(background_permit);
+            }
+            "background" => {
+                let interactive_permit = timeout(Duration::from_millis(300), interactive_waiter)
+                    .await
+                    .expect("interactive waiter should eventually make progress")
+                    .expect("interactive waiter join should succeed");
+                drop(interactive_permit);
+            }
+            _ => unreachable!("unexpected waiter class"),
+        }
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn observed_spawn_records_runtime_class_metrics() {
         let coordinator = SystemCoordinator::new();

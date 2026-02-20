@@ -106,6 +106,45 @@ impl BslLanguageServer {
         );
         let completion_pipeline_knobs =
             bsl_runtime::application::CompletionPipelineKnobs::from_runtime_config();
+        let completion_dispatcher_v2 = Arc::new(
+            super::completion_dispatcher::CompletionDispatcherRegistry::new(
+                completion_pipeline_knobs.queue_capacity,
+            ),
+        );
+        let completion_cancellation_registry_v2 =
+            Arc::new(super::completion_cancellation::CompletionCancellationRegistry::default());
+
+        let cancellation_registry_weak = Arc::downgrade(&completion_cancellation_registry_v2);
+        let dispatcher_weak = Arc::downgrade(&completion_dispatcher_v2);
+        super::request_context::set_cancel_request_hook(Some(Arc::new(move |request_id| {
+            let Some(registry) = cancellation_registry_weak.upgrade() else {
+                return;
+            };
+            let Some(dispatcher) = dispatcher_weak.upgrade() else {
+                return;
+            };
+            let Some(entry) = registry.cancel_request(&request_id) else {
+                return;
+            };
+            tokio::spawn(async move {
+                let file_id = entry.file_id;
+                let ticket = dispatcher.emit_cancel(file_id, request_id.clone()).await;
+                if matches!(
+                    ticket.queue_outcome,
+                    super::completion_dispatcher::QueueEnqueueOutcome::Full
+                        | super::completion_dispatcher::QueueEnqueueOutcome::Closed
+                ) {
+                    debug!(
+                        file_id = file_id.0,
+                        file_seq = ticket.file_seq,
+                        request_epoch = ticket.request_epoch,
+                        request_id = %request_id,
+                        queue_outcome = ?ticket.queue_outcome,
+                        "completion dispatcher dropped cancel event"
+                    );
+                }
+            });
+        })));
 
         Self {
             client,
@@ -130,14 +169,8 @@ impl BslLanguageServer {
             completion_seen_files_v2: Arc::new(RwLock::new(std::collections::HashSet::new())),
             completion_stale_fallback_cache_v2: Arc::new(RwLock::new(HashMap::new())),
             completion_parity_state_v2: Arc::new(RwLock::new(HashMap::new())),
-            completion_dispatcher_v2: Arc::new(
-                super::completion_dispatcher::CompletionDispatcherRegistry::new(
-                    completion_pipeline_knobs.queue_capacity,
-                ),
-            ),
-            completion_cancellation_registry_v2: Arc::new(
-                super::completion_cancellation::CompletionCancellationRegistry::default(),
-            ),
+            completion_dispatcher_v2,
+            completion_cancellation_registry_v2,
             last_deps_id_v2: Arc::new(RwLock::new(Some(initial_deps_id))),
             last_settings_id_v2: Arc::new(RwLock::new(Some(initial_settings_id))),
         }
@@ -493,6 +526,24 @@ impl BslLanguageServer {
         min_file_version: Option<i32>,
         flow_sensitive: bool,
     ) -> bsl_runtime::application::ExecutionContext {
+        self.build_execution_context_v2_with_completion_mode(
+            operation,
+            file_id,
+            min_file_version,
+            flow_sensitive,
+            None,
+        )
+        .await
+    }
+
+    pub(crate) async fn build_execution_context_v2_with_completion_mode(
+        &self,
+        operation: bsl_runtime::application::SemanticOperation,
+        file_id: V2FileId,
+        min_file_version: Option<i32>,
+        flow_sensitive: bool,
+        completion_mode: Option<&'static str>,
+    ) -> bsl_runtime::application::ExecutionContext {
         let settings = self.settings.read().await.clone();
         let settings_id = self
             .last_settings_id_v2
@@ -511,6 +562,7 @@ impl BslLanguageServer {
         bsl_runtime::application::ExecutionContext {
             origin: bsl_runtime::application::ObservabilityOrigin::Lsp,
             operation,
+            completion_mode,
             file_id,
             min_file_version,
             expected_deps_id,
@@ -531,6 +583,31 @@ impl BslLanguageServer {
         file_id: V2FileId,
         operation: bsl_runtime::application::SemanticOperation,
         flow_sensitive: bool,
+    ) -> Result<
+        (
+            bsl_runtime::application::ExecutionContext,
+            bsl_runtime::application::PreparedOperationSnapshot,
+            i32,
+        ),
+        bsl_runtime::application::SemanticOutcome,
+    > {
+        self.prepare_lsp_stateful_operation_v2_with_completion_mode(
+            uri,
+            file_id,
+            operation,
+            flow_sensitive,
+            None,
+        )
+        .await
+    }
+
+    pub(crate) async fn prepare_lsp_stateful_operation_v2_with_completion_mode(
+        &self,
+        uri: &Url,
+        file_id: V2FileId,
+        operation: bsl_runtime::application::SemanticOperation,
+        flow_sensitive: bool,
+        completion_mode: Option<&'static str>,
     ) -> Result<
         (
             bsl_runtime::application::ExecutionContext,
@@ -599,7 +676,13 @@ impl BslLanguageServer {
         };
 
         let context = self
-            .build_execution_context_v2(operation, file_id, Some(min_file_version), flow_sensitive)
+            .build_execution_context_v2_with_completion_mode(
+                operation,
+                file_id,
+                Some(min_file_version),
+                flow_sensitive,
+                completion_mode,
+            )
             .await;
         let prepared = self
             .analysis_v2
@@ -6161,6 +6244,7 @@ mod tests {
 
     #[tokio::test]
     async fn p27_interactive_completion_acceptance_gates_emit_artifact() {
+        const CHANGE_ID: &str = "refactor-v2-completion-event-driven-pipeline";
         const ITERATIONS: u64 = 120;
         const MAX_P95_MS: f64 = 300.0;
         const MAX_P99_MS: f64 = 800.0;
@@ -6202,6 +6286,74 @@ mod tests {
                 .filter(|(key, _)| key.starts_with(prefix) && key.contains(needle))
                 .map(|(_, value)| value.as_u64().unwrap_or(0))
                 .sum()
+        }
+
+        fn stage_mode_counter_total(
+            counters: &serde_json::Map<String, serde_json::Value>,
+            stage: &str,
+            mode: &str,
+        ) -> u64 {
+            let stage_token = format!("_stage_{stage}");
+            counters
+                .iter()
+                .filter(|(key, _)| {
+                    key.starts_with("intellisense_v2_drilldown_stage_total_")
+                        && key.contains("_origin_lsp_")
+                        && key.contains("_operation_completion_")
+                        && (key.contains(&format!("{stage_token}_")) || key.ends_with(&stage_token))
+                        && key.contains(&format!("_mode_{mode}"))
+                })
+                .map(|(_, value)| value.as_u64().unwrap_or(0))
+                .sum()
+        }
+
+        fn stage_mode_latency_p95(
+            histograms: &serde_json::Map<String, serde_json::Value>,
+            stage: &str,
+            mode: &str,
+        ) -> f64 {
+            let stage_token = format!("_stage_{stage}");
+            histograms
+                .iter()
+                .filter(|(key, _)| {
+                    key.starts_with("intellisense_v2_drilldown_stage_latency_ms_")
+                        && key.contains("_origin_lsp_")
+                        && key.contains("_operation_completion_")
+                        && (key.contains(&format!("{stage_token}_")) || key.ends_with(&stage_token))
+                        && key.contains(&format!("_mode_{mode}"))
+                })
+                .filter_map(|(_, value)| value.as_object())
+                .map(|hist| metric_as_f64(hist.get("p95")))
+                .fold(0.0, f64::max)
+        }
+
+        fn collect_mode_split_stage_metrics(
+            counters: &serde_json::Map<String, serde_json::Value>,
+            histograms: &serde_json::Map<String, serde_json::Value>,
+        ) -> serde_json::Value {
+            const STAGES: &[&str] = &[
+                "runtime_wait_for_file_version",
+                "runtime_snapshot_with_deps",
+                "ir_query",
+                "parse_result_query",
+            ];
+            const MODES: &[&str] = &["legacy", "event_driven", "shadow"];
+
+            let mut by_mode = serde_json::Map::new();
+            for mode in MODES {
+                let mut by_stage = serde_json::Map::new();
+                for stage in STAGES {
+                    by_stage.insert(
+                        (*stage).to_string(),
+                        serde_json::json!({
+                            "total": stage_mode_counter_total(counters, stage, mode),
+                            "p95_ms": stage_mode_latency_p95(histograms, stage, mode),
+                        }),
+                    );
+                }
+                by_mode.insert((*mode).to_string(), serde_json::Value::Object(by_stage));
+            }
+            serde_json::Value::Object(by_mode)
         }
 
         let coordinator = Arc::new(SystemCoordinator::new());
@@ -6346,6 +6498,7 @@ mod tests {
             .expect("completion duration histogram");
         let completion_p95 = metric_as_f64(completion_hist.get("p95"));
         let completion_p99 = metric_as_f64(completion_hist.get("p99"));
+        let mode_split_stage_metrics = collect_mode_split_stage_metrics(counters, histograms);
 
         let first_trigger_success_rate =
             first_trigger_success_total as f64 / first_trigger_total.max(1) as f64;
@@ -6361,6 +6514,19 @@ mod tests {
             "intellisense_v2_completion_parity_drift_total_mode_",
         );
         let parity_mismatch_rate = parity_drift_total as f64 / parity_pairs_total.max(1) as f64;
+        let completion_mode = bsl_runtime::system::global_runtime_config()
+            .get_string(bsl_runtime::system::RuntimeKey::IntellisenseV2CompletionMode)
+            .unwrap_or_else(|| "off".to_string())
+            .to_ascii_lowercase();
+        let canary_percent = bsl_runtime::system::global_runtime_config()
+            .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2CompletionCanaryPercent)
+            .unwrap_or(0)
+            .clamp(0, 100) as u8;
+        let report_mode_suffix = if completion_mode == "canary" {
+            format!("canary-{canary_percent}")
+        } else {
+            completion_mode.clone()
+        };
 
         let pass = completion_p95 <= MAX_P95_MS
             && completion_p99 <= MAX_P99_MS
@@ -6369,8 +6535,10 @@ mod tests {
             && parity_mismatch_rate <= MAX_PARITY_MISMATCH_RATE;
 
         let report = serde_json::json!({
-            "change_id": "improve-v2-completion-interactive-reliability",
+            "change_id": CHANGE_ID,
             "profile": "p27_interactive_completion_acceptance_gates",
+            "mode": completion_mode,
+            "canary_percent": canary_percent,
             "iterations": ITERATIONS,
             "thresholds": {
                 "completion_p95_ms_max": MAX_P95_MS,
@@ -6389,7 +6557,8 @@ mod tests {
                 "terminal_empty_missing_ir_rate": terminal_empty_rate,
                 "parity_drift_total": parity_drift_total,
                 "parity_pairs_total": parity_pairs_total,
-                "parity_mismatch_rate": parity_mismatch_rate
+                "parity_mismatch_rate": parity_mismatch_rate,
+                "mode_split_stage_metrics": mode_split_stage_metrics
             },
             "pass": pass
         });
@@ -6401,7 +6570,7 @@ mod tests {
                     .join("tests")
                     .join("perf")
                     .join("reports")
-                    .join("improve-v2-completion-interactive-reliability-gate.json")
+                    .join(format!("{CHANGE_ID}-gate-{report_mode_suffix}.json"))
             });
         if let Some(parent) = report_path.parent() {
             std::fs::create_dir_all(parent)

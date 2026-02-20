@@ -237,6 +237,22 @@ impl SystemCoordinator {
             .record_intellisense_v2_wait_for_file_version_with_origin(origin, kind, duration);
     }
 
+    pub fn record_intellisense_v2_wait_for_file_version_with_origin_and_mode(
+        &self,
+        origin: &str,
+        kind: &str,
+        completion_mode: Option<&str>,
+        duration: std::time::Duration,
+    ) {
+        self.observability
+            .record_intellisense_v2_wait_for_file_version_with_origin_and_mode(
+                origin,
+                kind,
+                completion_mode,
+                duration,
+            );
+    }
+
     pub fn record_intellisense_v2_snapshot_latency(
         &self,
         kind: &str,
@@ -253,6 +269,22 @@ impl SystemCoordinator {
     ) {
         self.observability
             .record_intellisense_v2_snapshot_latency_with_origin(origin, kind, duration);
+    }
+
+    pub fn record_intellisense_v2_snapshot_latency_with_origin_and_mode(
+        &self,
+        origin: &str,
+        kind: &str,
+        completion_mode: Option<&str>,
+        duration: std::time::Duration,
+    ) {
+        self.observability
+            .record_intellisense_v2_snapshot_latency_with_origin_and_mode(
+                origin,
+                kind,
+                completion_mode,
+                duration,
+            );
     }
 
     pub fn record_intellisense_v2_ir_query_latency(
@@ -273,6 +305,22 @@ impl SystemCoordinator {
             .record_intellisense_v2_ir_query_latency_with_origin(origin, kind, duration);
     }
 
+    pub fn record_intellisense_v2_ir_query_latency_with_origin_and_mode(
+        &self,
+        origin: &str,
+        kind: &str,
+        completion_mode: Option<&str>,
+        duration: std::time::Duration,
+    ) {
+        self.observability
+            .record_intellisense_v2_ir_query_latency_with_origin_and_mode(
+                origin,
+                kind,
+                completion_mode,
+                duration,
+            );
+    }
+
     pub fn record_intellisense_v2_ir_query_cancelled(&self, kind: &str) {
         self.record_intellisense_v2_ir_query_cancelled_with_origin("runtime", kind);
     }
@@ -280,6 +328,20 @@ impl SystemCoordinator {
     pub fn record_intellisense_v2_ir_query_cancelled_with_origin(&self, origin: &str, kind: &str) {
         self.observability
             .record_intellisense_v2_ir_query_cancelled_with_origin(origin, kind);
+    }
+
+    pub fn record_intellisense_v2_ir_query_cancelled_with_origin_and_mode(
+        &self,
+        origin: &str,
+        kind: &str,
+        completion_mode: Option<&str>,
+    ) {
+        self.observability
+            .record_intellisense_v2_ir_query_cancelled_with_origin_and_mode(
+                origin,
+                kind,
+                completion_mode,
+            );
     }
 
     pub fn record_intellisense_v2_syntax_diagnostics_query_latency(
@@ -345,6 +407,22 @@ impl SystemCoordinator {
         self.observability
             .record_intellisense_v2_parse_result_query_latency_with_origin_and_operation(
                 origin, operation, duration,
+            );
+    }
+
+    pub fn record_intellisense_v2_parse_result_query_latency_with_origin_operation_and_mode(
+        &self,
+        origin: &str,
+        operation: &str,
+        completion_mode: Option<&str>,
+        duration: std::time::Duration,
+    ) {
+        self.observability
+            .record_intellisense_v2_parse_result_query_latency_with_origin_operation_and_mode(
+                origin,
+                operation,
+                completion_mode,
+                duration,
             );
     }
 
@@ -506,6 +584,20 @@ impl SystemCoordinator {
     pub fn record_intellisense_v2_query_cancelled_with_origin(&self, origin: &str, kind: &str) {
         self.observability
             .record_intellisense_v2_query_cancelled_with_origin(origin, kind);
+    }
+
+    pub fn record_intellisense_v2_query_cancelled_with_origin_and_mode(
+        &self,
+        origin: &str,
+        kind: &str,
+        completion_mode: Option<&str>,
+    ) {
+        self.observability
+            .record_intellisense_v2_query_cancelled_with_origin_and_mode(
+                origin,
+                kind,
+                completion_mode,
+            );
     }
 
     pub fn record_intellisense_v2_runtime_queue_wait_latency(

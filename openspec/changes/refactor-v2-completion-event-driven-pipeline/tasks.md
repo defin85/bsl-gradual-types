@@ -2,12 +2,14 @@
 - [ ] 1.1 Добавить requirement в `bsl-intellisense-v2` про event-driven orchestration интерактивного completion pipeline.
 - [ ] 1.2 Добавить requirement в `bsl-intellisense-v2` про deterministic ordering + latest-wins semantics под burst `didChange`/completion.
 - [ ] 1.3 Добавить requirement в `bsl-intellisense-v2` про rollout/rollback контракт (feature flag + observability + safe fallback path).
+- [ ] 1.4 Зафиксировать baseline метрик (conf_big start/cold/warm, дата + n + p95/p99) как reference для acceptance.
 
 ## 2. Architecture & Design
 - [ ] 2.1 Зафиксировать event model (`DidOpen/DidChange/CompletionRequest/Cancel/DidClose`) и инварианты порядка для per-file stream.
 - [ ] 2.2 Спроектировать policy коалесцирования и cancellation propagation до тяжёлых стадий runtime.
 - [ ] 2.3 Определить SLI/SLO и observability contract: queue wait, exec latency, cancel ratio, stale/degraded ratio, parity drift.
 - [ ] 2.4 Описать migration/rollout план dual-mode и kill-switch rollback.
+- [ ] 2.5 Привязать SLO-гейты rollout к автоматизированным smoke/regression тестам (`p26`/acceptance suite).
 
 ## 3. Implementation
 - [ ] 3.1 Ввести orchestrator queue abstraction и per-file dispatcher в LSP/runtime boundary.
@@ -20,3 +22,4 @@
 - [ ] 4.2 Добавить тесты cancellation/starvation и bounded latency для event-driven режима.
 - [ ] 4.3 Добавить parity-тесты между legacy/runtime-centric и event-driven режимами на фиксированной ревизии.
 - [ ] 4.4 Прогнать профильные наборы и `openspec validate refactor-v2-completion-event-driven-pipeline --strict --no-interactive`.
+- [ ] 4.5 Задокументировать сравнение baseline vs event-driven (cold/warm snapshot + SLO pass/fail) в change-артефактах.

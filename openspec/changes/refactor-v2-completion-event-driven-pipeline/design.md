@@ -4,12 +4,22 @@
 
 Это усложняет обеспечение предсказуемого интерактивного поведения при burst-нагрузке и росте параллелизма.
 
+Observed baseline (2026-02-20, conf_big, warm run):
+- completion duration p95 = 3685ms
+- completion snapshot p95 = 3623ms
+- completion wait-for-version p95 = 121ms
+- background queue-wait p95 = 2788ms (p99 = 3303ms)
+- syntax diagnostics p95 = 2858ms
+- semantic diagnostics p95 = 584ms
+- interactive wait budget exhausted = 2 events
+
 ## Goals / Non-Goals
 
 - Goals:
   - Перейти на event-driven orchestration интерактивного completion пути с явной моделью событий и очередей.
   - Гарантировать deterministic ordering и latest-wins обработку completion для актуальной ревизии документа.
   - Снизить зависимость от блокирующих ожиданий в hot path и стабилизировать tail latency.
+  - Достичь измеримых SLO для интерактивного пути completion в canary и production rollout.
   - Ввести безопасный rollout/rollback через feature flag и наблюдаемые SLI/SLO.
 - Non-Goals:
   - Изменение доменной семантики completion (какие типы кандидатов возвращаются).
@@ -59,6 +69,17 @@ Event-driven режим включается через флаг (наприме
 
 Rollback MUST выполняться переключением флага без изменения пользовательских документов/настроек.
 
+### Decision 6: SLO фиксируются как gate для rollout
+
+Для перехода из canary в default-on режим должны выполняться измеримые acceptance-гейты:
+- `completion_duration_ms` p95 <= 1500ms на warm профиле.
+- `intellisense_v2_wait_for_file_version_completion_ms` p95 <= configured wait budget + 20ms.
+- `intellisense_v2_runtime_queue_wait_interactive_ms` p95 <= configured wait budget + 250ms.
+- `intellisense_v2_interactive_wait_budget_exhausted_total / completion_total <= 1%`.
+- `intellisense_v2_completion_result_total_ok_empty / completion_total <= 5%` на фиксированном conf_big smoke-профиле.
+
+Гейты валидируются автоматизированными тестами и сравниваются с baseline.
+
 ## Architecture Sketch
 
 1. `LSP Adapter` публикует события в per-file orchestrator queue.
@@ -70,7 +91,7 @@ Rollback MUST выполняться переключением флага бе�
 
 1. Добавить флаг и dual-path orchestration каркас (без включения по умолчанию).
 2. Подключить event stream для completion в shadow-режиме (метрики, но ответ берётся из legacy пути).
-3. Включить event-driven ответы для canary-конфигураций.
+3. Включить event-driven ответы для canary-конфигураций и сравнивать baseline/SLO.
 4. После достижения целевых SLI/SLO включить по умолчанию.
 5. Сохранить rollback до завершения стабилизации.
 

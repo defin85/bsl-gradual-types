@@ -5,6 +5,17 @@
 
 Для долгосрочной устойчивости интерактивного пути нужен отдельный архитектурный шаг: перейти на event-driven orchestration очередей и жизненного цикла интерактивных запросов.
 
+### Observed Baseline (2026-02-20, conf_big, warm run)
+- `completion_duration_ms`: p50=3246ms, p95=3685ms, p99=3685ms (n=7)
+- `intellisense_v2_snapshot_completion_ms`: p50=2773ms, p95=3623ms, p99=3623ms (n=7)
+- `intellisense_v2_wait_for_file_version_completion_ms`: p50=2ms, p95=121ms, p99=121ms (n=7)
+- `intellisense_v2_runtime_queue_wait_background_ms`: p50=0ms, p95=2788ms, p99=3303ms (n=123)
+- `intellisense_v2_syntax_diagnostics_query_ms`: p50=2570ms, p95=2858ms, p99=2983ms (n=21)
+- `intellisense_v2_semantic_diagnostics_query_ms`: p50=0ms, p95=584ms, p99=861ms (n=21)
+- `intellisense_v2_interactive_wait_budget_exhausted_total`: 2
+
+Эти данные показывают, что проблема лежит не в одном query-этапе, а в orchestration модели: горячий completion путь и фоновые стадии конкурируют за ресурсы, а snapshot+queue-wait дают тяжелый tail.
+
 ## What Changes
 - **ADDED**: requirement в `bsl-intellisense-v2` про event-driven orchestration интерактивного completion pipeline.
   - `didChange`/completion MUST обрабатываться через явную модель событий и планировщик, без блокирующих ожиданий в hot path.

@@ -9,3 +9,8 @@ EMBEDDING_PROVIDER = "Ollama"
 MILVUS_ADDRESS = "127.0.0.1:20530"
 CUSTOM_EXTENSIONS = ".bsl,.rs"
 CUSTOM_IGNORE_PATTERNS = "docs/**,openspec/**,vscode-extension/.vscode-test/**,**/target/**,**/node_modules/**,**/dist/**,**/build/**,**/coverage/**,**/tests/**,examples/**"
+
+[mcp_servers.chrome-devtools]
+command = "npx"
+args = ["-y", "chrome-devtools-mcp@latest", "--executablePath=/usr/lib/chromium/chromium", "--isolated", "--headless", "--logFile=/tmp/chrome-devtools-mcp.log", "--chromeArg=--no-sandbox", "--chromeArg=--disable-setuid-sandbox", "--chromeArg=--no-first-run", "--chromeArg=--no-default-browser-check", "--chromeArg=--disable-dev-shm-usage"]
+startup_timeout_sec = 30.0

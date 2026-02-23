@@ -2843,10 +2843,7 @@ mod tests {
                 .sum()
         }
 
-        async fn run_mode_scenario(
-            scenario: ModeScenario,
-            iterations: usize,
-        ) -> ModeOutcome {
+        async fn run_mode_scenario(scenario: ModeScenario, iterations: usize) -> ModeOutcome {
             let coordinator = Arc::new(SystemCoordinator::new());
             let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
                 Arc::new(std::sync::Mutex::new(None));
@@ -3386,13 +3383,8 @@ mod tests {
             .cloned()
             .expect("server instance");
 
-        let (warm_interactive_success, _) = run_hover_requests(
-            server.clone(),
-            primary_uri.clone(),
-            hover_position,
-            2,
-        )
-        .await;
+        let (warm_interactive_success, _) =
+            run_hover_requests(server.clone(), primary_uri.clone(), hover_position, 2).await;
         assert!(
             warm_interactive_success > 0,
             "warm-up interactive requests should succeed"
@@ -3415,20 +3407,16 @@ mod tests {
             hover_position,
             INTERACTIVE_PROBE_TOTAL,
         ));
-        let (round_a_background_success, round_a_background_max_ms) = tokio::time::timeout(
-            Duration::from_secs(ROUND_TIMEOUT_SECS),
-            round_a_background,
-        )
-        .await
-        .expect("background burst timeout in round A")
-        .expect("background burst join in round A");
-        let (round_a_interactive_success, round_a_interactive_max_ms) = tokio::time::timeout(
-            Duration::from_secs(ROUND_TIMEOUT_SECS),
-            round_a_interactive,
-        )
-        .await
-        .expect("interactive probe timeout in round A")
-        .expect("interactive probe join in round A");
+        let (round_a_background_success, round_a_background_max_ms) =
+            tokio::time::timeout(Duration::from_secs(ROUND_TIMEOUT_SECS), round_a_background)
+                .await
+                .expect("background burst timeout in round A")
+                .expect("background burst join in round A");
+        let (round_a_interactive_success, round_a_interactive_max_ms) =
+            tokio::time::timeout(Duration::from_secs(ROUND_TIMEOUT_SECS), round_a_interactive)
+                .await
+                .expect("interactive probe timeout in round A")
+                .expect("interactive probe join in round A");
 
         let round_b_interactive = tokio::spawn(run_hover_burst(
             server.clone(),
@@ -3441,39 +3429,31 @@ mod tests {
             "Тест".to_string(),
             BACKGROUND_PROBE_TOTAL,
         ));
-        let (round_b_interactive_success, round_b_interactive_max_ms) = tokio::time::timeout(
-            Duration::from_secs(ROUND_TIMEOUT_SECS),
-            round_b_interactive,
-        )
-        .await
-        .expect("interactive burst timeout in round B")
-        .expect("interactive burst join in round B");
-        let (round_b_background_success, round_b_background_max_ms) = tokio::time::timeout(
-            Duration::from_secs(ROUND_TIMEOUT_SECS),
-            round_b_background,
-        )
-        .await
-        .expect("background probe timeout in round B")
-        .expect("background probe join in round B");
+        let (round_b_interactive_success, round_b_interactive_max_ms) =
+            tokio::time::timeout(Duration::from_secs(ROUND_TIMEOUT_SECS), round_b_interactive)
+                .await
+                .expect("interactive burst timeout in round B")
+                .expect("interactive burst join in round B");
+        let (round_b_background_success, round_b_background_max_ms) =
+            tokio::time::timeout(Duration::from_secs(ROUND_TIMEOUT_SECS), round_b_background)
+                .await
+                .expect("background probe timeout in round B")
+                .expect("background probe join in round B");
 
         assert_eq!(
-            round_a_interactive_success,
-            INTERACTIVE_PROBE_TOTAL as u64,
+            round_a_interactive_success, INTERACTIVE_PROBE_TOTAL as u64,
             "interactive requests must progress under background burst"
         );
         assert_eq!(
-            round_a_background_success,
-            BACKGROUND_BURST_TOTAL as u64,
+            round_a_background_success, BACKGROUND_BURST_TOTAL as u64,
             "background burst must complete without starvation"
         );
         assert_eq!(
-            round_b_interactive_success,
-            INTERACTIVE_BURST_TOTAL as u64,
+            round_b_interactive_success, INTERACTIVE_BURST_TOTAL as u64,
             "interactive burst must complete under mixed load"
         );
         assert_eq!(
-            round_b_background_success,
-            BACKGROUND_PROBE_TOTAL as u64,
+            round_b_background_success, BACKGROUND_PROBE_TOTAL as u64,
             "background probe must progress under interactive burst"
         );
         for (name, value) in [
@@ -3567,7 +3547,9 @@ mod tests {
                     .join("tests")
                     .join("perf")
                     .join("reports")
-                    .join(format!("{CHANGE_ID}-fairness-interactive-vs-background.json"))
+                    .join(format!(
+                        "{CHANGE_ID}-fairness-interactive-vs-background.json"
+                    ))
             });
         if let Some(parent) = report_path.parent() {
             std::fs::create_dir_all(parent)
@@ -7097,6 +7079,8 @@ mod tests {
 
     #[tokio::test]
     async fn p26_interactive_warm_path_completion_slo_smoke_conf_big() {
+        let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
+
         fn conf_big_root() -> Option<std::path::PathBuf> {
             let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .parent()
@@ -7113,11 +7097,15 @@ mod tests {
         }
 
         let Some(root) = conf_big_root() else {
-            if std::env::var_os("CI").is_some() {
-                panic!("examples/conf_big fixture is missing");
+            if allow_fixture_skip {
+                eprintln!(
+                    "skipping p26 warm-path SLO smoke: examples/conf_big fixture is missing and BSL_TEST_ALLOW_MISSING_CONF_BIG is set"
+                );
+                return;
             }
-            eprintln!("skipping p26 warm-path SLO smoke: examples/conf_big fixture is missing");
-            return;
+            panic!(
+                "examples/conf_big fixture is missing; set BSL_TEST_ALLOW_MISSING_CONF_BIG=1 to skip this test explicitly"
+            );
         };
 
         let module_rel = std::path::PathBuf::from("Documents")
@@ -7129,17 +7117,17 @@ mod tests {
             .join("Module.bsl");
         let module_path = root.join(&module_rel);
         if !module_path.exists() {
-            if std::env::var_os("CI").is_some() {
-                panic!(
-                    "conf_big module fixture is missing: {}",
+            if allow_fixture_skip {
+                eprintln!(
+                    "skipping p26 warm-path SLO smoke: module fixture is missing and BSL_TEST_ALLOW_MISSING_CONF_BIG is set: {}",
                     module_path.display()
                 );
+                return;
             }
-            eprintln!(
-                "skipping p26 warm-path SLO smoke: module fixture is missing: {}",
+            panic!(
+                "conf_big module fixture is missing: {}; set BSL_TEST_ALLOW_MISSING_CONF_BIG=1 to skip this test explicitly",
                 module_path.display()
             );
-            return;
         }
 
         let module_text = std::fs::read_to_string(&module_path).expect("read conf_big module");

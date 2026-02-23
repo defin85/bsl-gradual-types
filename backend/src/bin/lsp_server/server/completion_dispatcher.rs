@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -42,6 +42,7 @@ pub(crate) enum QueueEnqueueOutcome {
     CoalescedCancel,
     EvictedStaleCompletion,
     EvictedNonCancelForCancel,
+    EvictedCancelForCancel,
     Full,
     Closed,
 }
@@ -87,7 +88,7 @@ struct CompletionEventQueueState {
 
 #[derive(Debug, Clone)]
 pub(crate) struct CompletionEventQueue {
-    capacity: usize,
+    capacity: Arc<AtomicUsize>,
     state: Arc<Mutex<CompletionEventQueueState>>,
     notify: Arc<Notify>,
 }
@@ -95,10 +96,18 @@ pub(crate) struct CompletionEventQueue {
 impl CompletionEventQueue {
     fn new(capacity: usize) -> Self {
         Self {
-            capacity: capacity.max(1),
+            capacity: Arc::new(AtomicUsize::new(capacity.max(1))),
             state: Arc::new(Mutex::new(CompletionEventQueueState::default())),
             notify: Arc::new(Notify::new()),
         }
+    }
+
+    fn capacity(&self) -> usize {
+        self.capacity.load(Ordering::SeqCst).max(1)
+    }
+
+    fn set_capacity(&self, capacity: usize) {
+        self.capacity.store(capacity.max(1), Ordering::SeqCst);
     }
 
     #[cfg(test)]
@@ -110,6 +119,7 @@ impl CompletionEventQueue {
         &self,
         event: CompletionEventEnvelope,
     ) -> (QueueEnqueueOutcome, Vec<u64>) {
+        let capacity = self.capacity();
         let mut state = self
             .state
             .lock()
@@ -137,7 +147,7 @@ impl CompletionEventQueue {
             return (outcome, dropped);
         }
 
-        if state.entries.len() >= self.capacity {
+        if state.entries.len() >= capacity {
             let overflow_outcome = Self::apply_overflow_policy(&mut state.entries, &event);
             let Some(overflow_outcome) = overflow_outcome else {
                 let dropped =
@@ -147,7 +157,7 @@ impl CompletionEventQueue {
             outcome = overflow_outcome;
         }
 
-        if state.entries.len() >= self.capacity {
+        if state.entries.len() >= capacity {
             let dropped =
                 Self::dropped_completion_file_seq(&before_completion_file_seq, &state.entries);
             return (QueueEnqueueOutcome::Full, dropped);
@@ -286,8 +296,10 @@ impl CompletionEventQueue {
             CompletionEventPayload::Cancel { .. } => {
                 if Self::remove_oldest_non_cancel(entries).is_some() {
                     Some(QueueEnqueueOutcome::EvictedNonCancelForCancel)
-                } else if entries.pop_front().is_some() {
-                    Some(QueueEnqueueOutcome::EvictedNonCancelForCancel)
+                } else if Self::remove_oldest_cancel(entries) {
+                    // Queue is saturated by cancel events only. Keep latest cancellation intent
+                    // by rotating out the oldest cancel event.
+                    Some(QueueEnqueueOutcome::EvictedCancelForCancel)
                 } else {
                     None
                 }
@@ -376,6 +388,18 @@ impl CompletionEventQueue {
             .iter()
             .position(|queued| !matches!(queued.payload, CompletionEventPayload::Cancel { .. }))?;
         entries.remove(index)
+    }
+
+    fn remove_oldest_cancel(entries: &mut VecDeque<CompletionEventEnvelope>) -> bool {
+        let index = entries
+            .iter()
+            .position(|queued| matches!(queued.payload, CompletionEventPayload::Cancel { .. }));
+        if let Some(index) = index {
+            entries.remove(index);
+            true
+        } else {
+            false
+        }
     }
 
     fn remove_completion_at(entries: &mut VecDeque<CompletionEventEnvelope>, index: usize) {
@@ -608,15 +632,28 @@ fn consume_event(event: CompletionEventEnvelope) {
 
 #[derive(Debug, Clone)]
 pub(crate) struct CompletionDispatcherRegistry {
-    queue_capacity: usize,
+    queue_capacity: Arc<AtomicUsize>,
     per_file: Arc<TokioMutex<HashMap<V2FileId, PerFileDispatcher>>>,
 }
 
 impl CompletionDispatcherRegistry {
     pub(crate) fn new(queue_capacity: usize) -> Self {
         Self {
-            queue_capacity: queue_capacity.max(1),
+            queue_capacity: Arc::new(AtomicUsize::new(queue_capacity.max(1))),
             per_file: Arc::new(TokioMutex::new(HashMap::new())),
+        }
+    }
+
+    fn queue_capacity(&self) -> usize {
+        self.queue_capacity.load(Ordering::SeqCst).max(1)
+    }
+
+    pub(crate) async fn set_queue_capacity(&self, queue_capacity: usize) {
+        let normalized = queue_capacity.max(1);
+        self.queue_capacity.store(normalized, Ordering::SeqCst);
+        let per_file = self.per_file.lock().await;
+        for dispatcher in per_file.values() {
+            dispatcher.queue.set_capacity(normalized);
         }
     }
 
@@ -640,7 +677,7 @@ impl CompletionDispatcherRegistry {
         let mut per_file = self.per_file.lock().await;
         let dispatcher = per_file
             .entry(file_id)
-            .or_insert_with(|| PerFileDispatcher::new(self.queue_capacity));
+            .or_insert_with(|| PerFileDispatcher::new(self.queue_capacity()));
         let payload = CompletionEventPayload::CompletionRequest {
             request_id,
             version_hint,
@@ -736,7 +773,7 @@ impl CompletionDispatcherRegistry {
         let mut per_file = self.per_file.lock().await;
         let dispatcher = per_file
             .entry(file_id)
-            .or_insert_with(|| PerFileDispatcher::new(self.queue_capacity));
+            .or_insert_with(|| PerFileDispatcher::new(self.queue_capacity()));
         let mut ticket = dispatcher.next_ticket(&payload);
         let event = CompletionEventEnvelope {
             file_id,
@@ -882,6 +919,47 @@ mod tests {
         assert!(payloads.iter().any(|payload| matches!(
             payload,
             CompletionEventPayload::Cancel { request_id } if request_id == "r1"
+        )));
+    }
+
+    #[test]
+    fn queue_rotates_oldest_cancel_when_saturated_by_cancel_events() {
+        let queue = CompletionEventQueue::new(2);
+        let first = queue.try_enqueue(make_event(
+            1,
+            1,
+            CompletionEventPayload::Cancel {
+                request_id: "r1".to_string(),
+            },
+        ));
+        assert_eq!(first, QueueEnqueueOutcome::Enqueued);
+        let second = queue.try_enqueue(make_event(
+            2,
+            1,
+            CompletionEventPayload::Cancel {
+                request_id: "r2".to_string(),
+            },
+        ));
+        assert_eq!(second, QueueEnqueueOutcome::Enqueued);
+
+        let third = queue.try_enqueue(make_event(
+            3,
+            1,
+            CompletionEventPayload::Cancel {
+                request_id: "r3".to_string(),
+            },
+        ));
+        assert_eq!(third, QueueEnqueueOutcome::EvictedCancelForCancel);
+
+        let payloads = queue.debug_payloads();
+        assert_eq!(payloads.len(), 2);
+        assert!(payloads.iter().any(|payload| matches!(
+            payload,
+            CompletionEventPayload::Cancel { request_id } if request_id == "r2"
+        )));
+        assert!(payloads.iter().any(|payload| matches!(
+            payload,
+            CompletionEventPayload::Cancel { request_id } if request_id == "r3"
         )));
     }
 
@@ -1177,6 +1255,33 @@ mod tests {
         assert!(
             dispatch.turn_waiter.is_none(),
             "queue rejected dispatch must not expose waiter"
+        );
+
+        let close = registry.close_file_dispatcher(file_id).await;
+        assert!(close.is_some());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn queue_capacity_update_applies_to_existing_dispatchers() {
+        let registry = CompletionDispatcherRegistry::new(1);
+        let file_id = V2FileId(123);
+
+        let _ = registry.emit_cancel(file_id, "occupy".to_string()).await;
+        registry.set_queue_capacity(2).await;
+
+        let dispatch = registry
+            .emit_completion_request_with_turn(
+                file_id,
+                Some("r1".to_string()),
+                Some(1),
+                "invoked".to_string(),
+            )
+            .await;
+
+        assert_ne!(
+            dispatch.ticket.queue_outcome,
+            QueueEnqueueOutcome::Full,
+            "updated capacity must unblock completion enqueue"
         );
 
         let close = registry.close_file_dispatcher(file_id).await;

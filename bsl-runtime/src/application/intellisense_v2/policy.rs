@@ -80,6 +80,34 @@ pub struct CompletionPipelineKnobs {
     pub queue_capacity: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompletionMissingIrPolicyDecision {
+    StrictCacheIncomplete,
+    EmptyForNonMemberAccess,
+    DegradedIncomplete,
+    RelaxedCacheIncomplete,
+    KeywordFallbackUnavailable,
+}
+
+pub fn completion_missing_ir_policy_decision(
+    has_strict_cached_items: bool,
+    member_access_context: bool,
+    degraded_available: bool,
+    has_relaxed_cached_items: bool,
+) -> CompletionMissingIrPolicyDecision {
+    if has_strict_cached_items {
+        CompletionMissingIrPolicyDecision::StrictCacheIncomplete
+    } else if !member_access_context {
+        CompletionMissingIrPolicyDecision::EmptyForNonMemberAccess
+    } else if degraded_available {
+        CompletionMissingIrPolicyDecision::DegradedIncomplete
+    } else if has_relaxed_cached_items {
+        CompletionMissingIrPolicyDecision::RelaxedCacheIncomplete
+    } else {
+        CompletionMissingIrPolicyDecision::KeywordFallbackUnavailable
+    }
+}
+
 impl CompletionPipelineKnobs {
     pub fn from_runtime_config() -> Self {
         let mode = global_runtime_config()
@@ -1192,5 +1220,29 @@ mod tests {
         let _mode_guard = EnvVarGuard::set("BSL_INTELLISENSE_V2_COMPLETION_MODE", "legacy_like");
         let knobs = CompletionPipelineKnobs::from_runtime_config();
         assert_eq!(knobs.mode, CompletionMode::Off);
+    }
+
+    #[test]
+    fn completion_missing_ir_policy_decision_is_deterministic() {
+        assert_eq!(
+            completion_missing_ir_policy_decision(true, true, true, true),
+            CompletionMissingIrPolicyDecision::StrictCacheIncomplete
+        );
+        assert_eq!(
+            completion_missing_ir_policy_decision(false, false, true, true),
+            CompletionMissingIrPolicyDecision::EmptyForNonMemberAccess
+        );
+        assert_eq!(
+            completion_missing_ir_policy_decision(false, true, true, true),
+            CompletionMissingIrPolicyDecision::DegradedIncomplete
+        );
+        assert_eq!(
+            completion_missing_ir_policy_decision(false, true, false, true),
+            CompletionMissingIrPolicyDecision::RelaxedCacheIncomplete
+        );
+        assert_eq!(
+            completion_missing_ir_policy_decision(false, true, false, false),
+            CompletionMissingIrPolicyDecision::KeywordFallbackUnavailable
+        );
     }
 }

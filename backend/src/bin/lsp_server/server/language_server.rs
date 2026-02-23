@@ -533,60 +533,75 @@ async fn resolve_completion_without_ir(
     )
     .await;
 
-    if let Some(items) = strict_stale_cached_items {
-        return (
-            "degraded_incomplete",
-            Some(completion_response_with_cached_items(items)),
-        );
-    }
-
-    if !member_access_context {
-        return ("missing_ir", Some(completion_empty_response(false)));
-    }
-
-    let mut degraded = crate::handlers::handle_completion_v2_degraded(
-        file_content,
-        file_path,
-        parse_result,
-        member_access_owner_type_hint,
-        deps,
-        position,
-        uri,
-        index_snapshot,
-        snippet_support,
-        include_flow_sensitive,
-        trigger_char_hint,
-    )
-    .await;
+    let mut degraded = if strict_stale_cached_items.is_none() && member_access_context {
+        crate::handlers::handle_completion_v2_degraded(
+            file_content,
+            file_path,
+            parse_result,
+            member_access_owner_type_hint,
+            deps,
+            position,
+            uri,
+            index_snapshot,
+            snippet_support,
+            include_flow_sensitive,
+            trigger_char_hint,
+        )
+        .await
+    } else {
+        None
+    };
 
     if let Some(response) = degraded.as_mut() {
         if let CompletionResponse::List(list) = &mut response.response {
             list.is_incomplete = true;
         }
     }
-    if degraded.is_some() {
-        return ("degraded_incomplete", degraded);
-    }
 
-    if let Some(items) = relaxed_stale_cached_items {
-        server
-            .coordinator
-            .record_intellisense_v2_completion_stale_fallback();
-        return (
+    let decision = bsl_runtime::application::completion_missing_ir_policy_decision(
+        strict_stale_cached_items.is_some(),
+        member_access_context,
+        degraded.is_some(),
+        relaxed_stale_cached_items.is_some(),
+    );
+
+    match decision {
+        bsl_runtime::application::CompletionMissingIrPolicyDecision::StrictCacheIncomplete => (
             "degraded_incomplete",
-            Some(completion_response_with_cached_items(items)),
-        );
+            Some(completion_response_with_cached_items(
+                strict_stale_cached_items.expect("strict cache decision requires strict items"),
+            )),
+        ),
+        bsl_runtime::application::CompletionMissingIrPolicyDecision::EmptyForNonMemberAccess => {
+            ("missing_ir", Some(completion_empty_response(false)))
+        }
+        bsl_runtime::application::CompletionMissingIrPolicyDecision::DegradedIncomplete => {
+            ("degraded_incomplete", degraded)
+        }
+        bsl_runtime::application::CompletionMissingIrPolicyDecision::RelaxedCacheIncomplete => {
+            server
+                .coordinator
+                .record_intellisense_v2_completion_stale_fallback();
+            (
+                "degraded_incomplete",
+                Some(completion_response_with_cached_items(
+                    relaxed_stale_cached_items
+                        .expect("relaxed cache decision requires relaxed items"),
+                )),
+            )
+        }
+        bsl_runtime::application::CompletionMissingIrPolicyDecision::KeywordFallbackUnavailable => {
+            server
+                .coordinator
+                .record_intellisense_v2_completion_fallback_unavailable();
+            (
+                "fallback_unavailable",
+                Some(crate::handlers::build_keyword_degraded_completion(
+                    snippet_support,
+                )),
+            )
+        }
     }
-
-    server
-        .coordinator
-        .record_intellisense_v2_completion_fallback_unavailable();
-    (
-        "fallback_unavailable",
-        Some(crate::handlers::build_keyword_degraded_completion(
-            snippet_support,
-        )),
-    )
 }
 
 #[tower_lsp::async_trait]
@@ -1234,8 +1249,12 @@ impl LanguageServer for BslLanguageServer {
 
         self.sync_v2_globals().await;
         let file_id = self.get_or_create_file_id_v2(&uri).await;
-        let completion_mode =
-            bsl_runtime::application::CompletionPipelineKnobs::from_runtime_config().mode;
+        let completion_knobs =
+            bsl_runtime::application::CompletionPipelineKnobs::from_runtime_config();
+        self.completion_dispatcher_v2
+            .set_queue_capacity(completion_knobs.queue_capacity)
+            .await;
+        let completion_mode = completion_knobs.mode;
         if completion_dispatch_enabled_for_mode(completion_mode) {
             let open_ticket = self
                 .completion_dispatcher_v2
@@ -1312,8 +1331,12 @@ impl LanguageServer for BslLanguageServer {
 
         self.sync_v2_globals().await;
         let file_id = self.get_or_create_file_id_v2(&uri).await;
-        let completion_mode =
-            bsl_runtime::application::CompletionPipelineKnobs::from_runtime_config().mode;
+        let completion_knobs =
+            bsl_runtime::application::CompletionPipelineKnobs::from_runtime_config();
+        self.completion_dispatcher_v2
+            .set_queue_capacity(completion_knobs.queue_capacity)
+            .await;
+        let completion_mode = completion_knobs.mode;
         if completion_dispatch_enabled_for_mode(completion_mode) {
             let change_ticket = self
                 .completion_dispatcher_v2
@@ -1957,6 +1980,9 @@ impl LanguageServer for BslLanguageServer {
             .copied();
         let completion_knobs =
             bsl_runtime::application::CompletionPipelineKnobs::from_runtime_config();
+        self.completion_dispatcher_v2
+            .set_queue_capacity(completion_knobs.queue_capacity)
+            .await;
         let routing_key = completion_canary_routing_key(
             &uri,
             position,

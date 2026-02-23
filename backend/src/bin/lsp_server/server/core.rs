@@ -2703,6 +2703,888 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn p29_completion_mode_matrix_parity_on_fixed_revision() {
+        const CHANGE_ID: &str = "refactor-v2-completion-event-driven-pipeline";
+        const ITERATIONS: usize = 40;
+        const MAX_USER_FACING_DRIFT_RATE: f64 = 0.01;
+        const MAX_SHADOW_PARITY_DRIFT_RATE: f64 = 0.01;
+        const MIN_FIRST_TRIGGER_SUCCESS_RATE: f64 = 0.99;
+
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        struct CompletionFingerprint {
+            is_incomplete: bool,
+            labels: Vec<String>,
+        }
+
+        #[derive(Debug, Clone, Copy)]
+        struct ModeScenario {
+            name: &'static str,
+            completion_mode: &'static str,
+            canary_percent: u8,
+        }
+
+        #[derive(Debug)]
+        struct ModeOutcome {
+            name: String,
+            completion_p95_ms: f64,
+            completion_p99_ms: f64,
+            completion_total: u64,
+            first_trigger_success_rate: f64,
+            parity_drift_rate: f64,
+            legacy_stage_total: u64,
+            shadow_stage_total: u64,
+            event_driven_stage_total: u64,
+            dot_fingerprints: Vec<CompletionFingerprint>,
+            invoked_fingerprints: Vec<CompletionFingerprint>,
+        }
+
+        struct CompletionModeEnvGuard {
+            previous_mode: Option<String>,
+            previous_canary_percent: Option<String>,
+        }
+
+        impl CompletionModeEnvGuard {
+            fn new() -> Self {
+                Self {
+                    previous_mode: std::env::var("BSL_INTELLISENSE_V2_COMPLETION_MODE").ok(),
+                    previous_canary_percent: std::env::var(
+                        "BSL_INTELLISENSE_V2_COMPLETION_CANARY_PERCENT",
+                    )
+                    .ok(),
+                }
+            }
+
+            fn apply(&self, completion_mode: &str, canary_percent: u8) {
+                std::env::set_var("BSL_INTELLISENSE_V2_COMPLETION_MODE", completion_mode);
+                std::env::set_var(
+                    "BSL_INTELLISENSE_V2_COMPLETION_CANARY_PERCENT",
+                    canary_percent.to_string(),
+                );
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+        }
+
+        impl Drop for CompletionModeEnvGuard {
+            fn drop(&mut self) {
+                if let Some(value) = &self.previous_mode {
+                    std::env::set_var("BSL_INTELLISENSE_V2_COMPLETION_MODE", value);
+                } else {
+                    std::env::remove_var("BSL_INTELLISENSE_V2_COMPLETION_MODE");
+                }
+                if let Some(value) = &self.previous_canary_percent {
+                    std::env::set_var("BSL_INTELLISENSE_V2_COMPLETION_CANARY_PERCENT", value);
+                } else {
+                    std::env::remove_var("BSL_INTELLISENSE_V2_COMPLETION_CANARY_PERCENT");
+                }
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+        }
+
+        fn metric_as_f64(value: Option<&serde_json::Value>) -> f64 {
+            value
+                .and_then(|value| value.as_f64().or_else(|| value.as_u64().map(|v| v as f64)))
+                .unwrap_or(0.0)
+        }
+
+        fn completion_items_count(response: &CompletionResponse) -> usize {
+            match response {
+                CompletionResponse::Array(items) => items.len(),
+                CompletionResponse::List(list) => list.items.len(),
+            }
+        }
+
+        fn completion_fingerprint(response: &CompletionResponse) -> CompletionFingerprint {
+            let (is_incomplete, labels) = match response {
+                CompletionResponse::Array(items) => (
+                    false,
+                    items
+                        .iter()
+                        .map(|item| item.label.clone())
+                        .collect::<BTreeSet<_>>(),
+                ),
+                CompletionResponse::List(list) => (
+                    list.is_incomplete,
+                    list.items
+                        .iter()
+                        .map(|item| item.label.clone())
+                        .collect::<BTreeSet<_>>(),
+                ),
+            };
+            CompletionFingerprint {
+                is_incomplete,
+                labels: labels.into_iter().collect(),
+            }
+        }
+
+        fn sum_counters_by_prefix(
+            counters: &serde_json::Map<String, serde_json::Value>,
+            prefix: &str,
+        ) -> u64 {
+            counters
+                .iter()
+                .filter(|(key, _)| key.starts_with(prefix))
+                .map(|(_, value)| value.as_u64().unwrap_or(0))
+                .sum()
+        }
+
+        fn completion_stage_mode_total(
+            counters: &serde_json::Map<String, serde_json::Value>,
+            mode: &str,
+        ) -> u64 {
+            counters
+                .iter()
+                .filter(|(key, _)| {
+                    key.starts_with("intellisense_v2_drilldown_stage_total_")
+                        && key.contains("_origin_lsp_")
+                        && key.contains("_operation_completion_")
+                        && key.contains(&format!("_mode_{mode}"))
+                })
+                .map(|(_, value)| value.as_u64().unwrap_or(0))
+                .sum()
+        }
+
+        async fn run_mode_scenario(
+            scenario: ModeScenario,
+            iterations: usize,
+        ) -> ModeOutcome {
+            let coordinator = Arc::new(SystemCoordinator::new());
+            let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+                Arc::new(std::sync::Mutex::new(None));
+            let (mut service, mut socket) = LspService::build({
+                let coordinator = coordinator.clone();
+                let server_holder = server_holder.clone();
+                move |client| {
+                    let server = BslLanguageServer::new(client, coordinator.clone());
+                    *server_holder.lock().expect("server holder lock") = Some(server.clone());
+                    server
+                }
+            })
+            .finish();
+            let drain_task =
+                tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+            initialize_lsp_service(&mut service).await;
+
+            let uri = Url::parse(&format!("file:///test_p29_mode_{}.bsl", scenario.name))
+                .expect("test uri");
+            let text = concat!(
+                "Процедура Тест()\n",
+                "    ЛокМассив = Новый Массив;\n",
+                "    ЛокМассив.\n",
+                "КонецПроцедуры\n"
+            );
+            let did_open = DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "bsl".to_string(),
+                    version: 1,
+                    text: text.to_string(),
+                },
+            };
+            let did_open_req = Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish();
+            let did_open_response = service
+                .ready()
+                .await
+                .unwrap()
+                .call(did_open_req)
+                .await
+                .expect("didOpen notification");
+            assert!(did_open_response.is_none(), "didOpen is a notification");
+
+            let server = server_holder
+                .lock()
+                .expect("server holder lock")
+                .as_ref()
+                .cloned()
+                .expect("server instance");
+            let member_character = "    ЛокМассив."
+                .chars()
+                .map(|ch| ch.len_utf16())
+                .sum::<usize>() as u32;
+
+            let mut dot_fingerprints = Vec::with_capacity(iterations);
+            let mut invoked_fingerprints = Vec::with_capacity(iterations);
+            let mut first_trigger_success_total = 0_u64;
+
+            for _ in 0..iterations {
+                let dot_completion = server
+                    .completion(CompletionParams {
+                        text_document_position: TextDocumentPositionParams {
+                            text_document: TextDocumentIdentifier { uri: uri.clone() },
+                            position: Position::new(2, member_character),
+                        },
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                        partial_result_params: PartialResultParams::default(),
+                        context: Some(CompletionContext {
+                            trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+                            trigger_character: Some(".".to_string()),
+                        }),
+                    })
+                    .await
+                    .expect("dot completion request")
+                    .expect("dot completion response");
+                if completion_items_count(&dot_completion) > 0 {
+                    first_trigger_success_total += 1;
+                }
+                dot_fingerprints.push(completion_fingerprint(&dot_completion));
+
+                let invoked_completion = server
+                    .completion(CompletionParams {
+                        text_document_position: TextDocumentPositionParams {
+                            text_document: TextDocumentIdentifier { uri: uri.clone() },
+                            position: Position::new(2, member_character),
+                        },
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                        partial_result_params: PartialResultParams::default(),
+                        context: Some(CompletionContext {
+                            trigger_kind: CompletionTriggerKind::INVOKED,
+                            trigger_character: None,
+                        }),
+                    })
+                    .await
+                    .expect("invoked completion request")
+                    .expect("invoked completion response");
+                invoked_fingerprints.push(completion_fingerprint(&invoked_completion));
+            }
+
+            let metrics = coordinator.observability_metrics();
+            let counters = metrics
+                .get("counters")
+                .and_then(|value| value.as_object())
+                .expect("metrics.counters object");
+            let histograms = metrics
+                .get("histograms")
+                .and_then(|value| value.as_object())
+                .expect("metrics.histograms object");
+            let completion_hist = histograms
+                .get("completion_duration_ms")
+                .and_then(|value| value.as_object())
+                .expect("completion duration histogram");
+            let completion_p95_ms = metric_as_f64(completion_hist.get("p95"));
+            let completion_p99_ms = metric_as_f64(completion_hist.get("p99"));
+            let completion_total = counters
+                .get("completion_total")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0);
+            let parity_pairs_total = (iterations as u64) * 2;
+            let parity_drift_total = sum_counters_by_prefix(
+                counters,
+                "intellisense_v2_completion_parity_drift_total_mode_",
+            );
+            let parity_drift_rate = parity_drift_total as f64 / parity_pairs_total.max(1) as f64;
+            let first_trigger_success_rate =
+                first_trigger_success_total as f64 / iterations.max(1) as f64;
+            let legacy_stage_total = completion_stage_mode_total(counters, "legacy");
+            let shadow_stage_total = completion_stage_mode_total(counters, "shadow");
+            let event_driven_stage_total = completion_stage_mode_total(counters, "event_driven");
+
+            drain_task.abort();
+
+            ModeOutcome {
+                name: scenario.name.to_string(),
+                completion_p95_ms,
+                completion_p99_ms,
+                completion_total,
+                first_trigger_success_rate,
+                parity_drift_rate,
+                legacy_stage_total,
+                shadow_stage_total,
+                event_driven_stage_total,
+                dot_fingerprints,
+                invoked_fingerprints,
+            }
+        }
+
+        static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        let _env_lock = ENV_LOCK
+            .get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .expect("env lock");
+        let env_guard = CompletionModeEnvGuard::new();
+
+        let scenarios = [
+            ModeScenario {
+                name: "off",
+                completion_mode: "off",
+                canary_percent: 0,
+            },
+            ModeScenario {
+                name: "shadow",
+                completion_mode: "shadow",
+                canary_percent: 0,
+            },
+            ModeScenario {
+                name: "canary",
+                completion_mode: "canary",
+                canary_percent: 100,
+            },
+            ModeScenario {
+                name: "on",
+                completion_mode: "on",
+                canary_percent: 0,
+            },
+        ];
+
+        let mut outcomes = Vec::with_capacity(scenarios.len());
+        for scenario in scenarios {
+            env_guard.apply(scenario.completion_mode, scenario.canary_percent);
+            let outcome = run_mode_scenario(scenario, ITERATIONS).await;
+            assert!(
+                outcome.first_trigger_success_rate >= MIN_FIRST_TRIGGER_SUCCESS_RATE,
+                "mode={} first-trigger success rate={:.4} < {:.4}",
+                outcome.name,
+                outcome.first_trigger_success_rate,
+                MIN_FIRST_TRIGGER_SUCCESS_RATE
+            );
+            outcomes.push(outcome);
+        }
+
+        let off_outcome = outcomes
+            .iter()
+            .find(|outcome| outcome.name == "off")
+            .expect("off mode outcome");
+        let mut drift_by_mode = serde_json::Map::new();
+        for outcome in outcomes.iter().filter(|outcome| outcome.name != "off") {
+            let dot_mismatch_total = outcome
+                .dot_fingerprints
+                .iter()
+                .zip(off_outcome.dot_fingerprints.iter())
+                .filter(|(actual, expected)| actual != expected)
+                .count() as u64;
+            let invoked_mismatch_total = outcome
+                .invoked_fingerprints
+                .iter()
+                .zip(off_outcome.invoked_fingerprints.iter())
+                .filter(|(actual, expected)| actual != expected)
+                .count() as u64;
+            let mismatch_total = dot_mismatch_total + invoked_mismatch_total;
+            let mismatch_rate = mismatch_total as f64 / ((ITERATIONS * 2) as f64);
+
+            drift_by_mode.insert(
+                outcome.name.clone(),
+                serde_json::json!({
+                    "mismatch_total": mismatch_total,
+                    "mismatch_rate": mismatch_rate,
+                    "dot_mismatch_total": dot_mismatch_total,
+                    "invoked_mismatch_total": invoked_mismatch_total,
+                }),
+            );
+            assert!(
+                mismatch_rate <= MAX_USER_FACING_DRIFT_RATE,
+                "mode={} user-facing completion drift rate={:.4} > {:.4}",
+                outcome.name,
+                mismatch_rate,
+                MAX_USER_FACING_DRIFT_RATE
+            );
+        }
+
+        let shadow_outcome = outcomes
+            .iter()
+            .find(|outcome| outcome.name == "shadow")
+            .expect("shadow mode outcome");
+        let canary_outcome = outcomes
+            .iter()
+            .find(|outcome| outcome.name == "canary")
+            .expect("canary mode outcome");
+        let on_outcome = outcomes
+            .iter()
+            .find(|outcome| outcome.name == "on")
+            .expect("on mode outcome");
+
+        assert!(
+            off_outcome.legacy_stage_total > 0
+                && off_outcome.shadow_stage_total == 0
+                && off_outcome.event_driven_stage_total == 0,
+            "off mode stage routing must be strictly legacy: {:?}",
+            (
+                off_outcome.legacy_stage_total,
+                off_outcome.shadow_stage_total,
+                off_outcome.event_driven_stage_total
+            )
+        );
+        assert!(
+            shadow_outcome.legacy_stage_total > 0
+                && shadow_outcome.shadow_stage_total > 0
+                && shadow_outcome.event_driven_stage_total == 0,
+            "shadow mode must route user-facing via legacy and run shadow pipeline: {:?}",
+            (
+                shadow_outcome.legacy_stage_total,
+                shadow_outcome.shadow_stage_total,
+                shadow_outcome.event_driven_stage_total
+            )
+        );
+        assert!(
+            shadow_outcome.parity_drift_rate <= MAX_SHADOW_PARITY_DRIFT_RATE,
+            "shadow mode parity drift rate={:.4} > {:.4}",
+            shadow_outcome.parity_drift_rate,
+            MAX_SHADOW_PARITY_DRIFT_RATE
+        );
+        assert!(
+            canary_outcome.event_driven_stage_total > 0
+                && canary_outcome.legacy_stage_total == 0
+                && canary_outcome.shadow_stage_total == 0,
+            "canary(100) mode must route completion via event-driven only: {:?}",
+            (
+                canary_outcome.legacy_stage_total,
+                canary_outcome.shadow_stage_total,
+                canary_outcome.event_driven_stage_total
+            )
+        );
+        assert!(
+            on_outcome.event_driven_stage_total > 0
+                && on_outcome.legacy_stage_total == 0
+                && on_outcome.shadow_stage_total == 0,
+            "on mode must route completion via event-driven only: {:?}",
+            (
+                on_outcome.legacy_stage_total,
+                on_outcome.shadow_stage_total,
+                on_outcome.event_driven_stage_total
+            )
+        );
+
+        let mut modes_report = serde_json::Map::new();
+        for outcome in &outcomes {
+            modes_report.insert(
+                outcome.name.clone(),
+                serde_json::json!({
+                    "completion_total": outcome.completion_total,
+                    "completion_p95_ms": outcome.completion_p95_ms,
+                    "completion_p99_ms": outcome.completion_p99_ms,
+                    "first_trigger_success_rate": outcome.first_trigger_success_rate,
+                    "parity_drift_rate": outcome.parity_drift_rate,
+                    "stage_totals": {
+                        "legacy": outcome.legacy_stage_total,
+                        "shadow": outcome.shadow_stage_total,
+                        "event_driven": outcome.event_driven_stage_total
+                    }
+                }),
+            );
+        }
+        let report = serde_json::json!({
+            "change_id": CHANGE_ID,
+            "profile": "p29_completion_mode_matrix_parity_on_fixed_revision",
+            "iterations": ITERATIONS,
+            "thresholds": {
+                "max_user_facing_drift_rate": MAX_USER_FACING_DRIFT_RATE,
+                "max_shadow_parity_drift_rate": MAX_SHADOW_PARITY_DRIFT_RATE,
+                "min_first_trigger_success_rate": MIN_FIRST_TRIGGER_SUCCESS_RATE
+            },
+            "mode_user_facing_drift_vs_off": drift_by_mode,
+            "modes": serde_json::Value::Object(modes_report),
+        });
+        let report_path = std::env::var("BSL_V2_COMPLETION_MODE_MATRIX_REPORT")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests")
+                    .join("perf")
+                    .join("reports")
+                    .join(format!("{CHANGE_ID}-mode-parity-matrix.json"))
+            });
+        if let Some(parent) = report_path.parent() {
+            std::fs::create_dir_all(parent)
+                .expect("failed to create directory for completion mode matrix report");
+        }
+        std::fs::write(
+            &report_path,
+            serde_json::to_string_pretty(&report)
+                .expect("failed to serialize completion mode matrix report"),
+        )
+        .expect("failed to write completion mode matrix report");
+        println!("v2_completion_mode_matrix_report={}", report_path.display());
+    }
+
+    #[tokio::test]
+    async fn p30_backpressure_fairness_interactive_vs_background_no_starvation() {
+        const CHANGE_ID: &str = "refactor-v2-completion-event-driven-pipeline";
+        const INTERACTIVE_PROBE_TOTAL: usize = 24;
+        const BACKGROUND_BURST_TOTAL: usize = 24;
+        const INTERACTIVE_BURST_TOTAL: usize = 32;
+        const BACKGROUND_PROBE_TOTAL: usize = 16;
+        const ROUND_TIMEOUT_SECS: u64 = 30;
+        const MAX_REQUEST_LATENCY_MS: f64 = 10_000.0;
+
+        async fn run_hover_requests(
+            server: BslLanguageServer,
+            uri: Url,
+            position: Position,
+            total: usize,
+        ) -> (u64, f64) {
+            let mut success_total = 0_u64;
+            let mut max_latency_ms = 0.0_f64;
+            for _ in 0..total {
+                let started = Instant::now();
+                let response = server
+                    .hover(HoverParams {
+                        text_document_position_params: TextDocumentPositionParams {
+                            text_document: TextDocumentIdentifier { uri: uri.clone() },
+                            position,
+                        },
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                    })
+                    .await;
+                let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+                max_latency_ms = max_latency_ms.max(elapsed_ms);
+                if response.is_ok() {
+                    success_total += 1;
+                }
+            }
+            (success_total, max_latency_ms)
+        }
+
+        async fn run_hover_burst(
+            server: BslLanguageServer,
+            uri: Url,
+            position: Position,
+            total: usize,
+        ) -> (u64, f64) {
+            let mut handles = Vec::with_capacity(total);
+            for _ in 0..total {
+                let server = server.clone();
+                let uri = uri.clone();
+                handles.push(tokio::spawn(async move {
+                    let started = Instant::now();
+                    let response = server
+                        .hover(HoverParams {
+                            text_document_position_params: TextDocumentPositionParams {
+                                text_document: TextDocumentIdentifier { uri },
+                                position,
+                            },
+                            work_done_progress_params: WorkDoneProgressParams::default(),
+                        })
+                        .await;
+                    (response.is_ok(), started.elapsed().as_secs_f64() * 1000.0)
+                }));
+            }
+            let mut success_total = 0_u64;
+            let mut max_latency_ms = 0.0_f64;
+            for handle in handles {
+                let (ok, latency_ms) = handle.await.expect("hover burst task join");
+                if ok {
+                    success_total += 1;
+                }
+                max_latency_ms = max_latency_ms.max(latency_ms);
+            }
+            (success_total, max_latency_ms)
+        }
+
+        async fn run_workspace_symbol_requests(
+            server: BslLanguageServer,
+            query: String,
+            total: usize,
+        ) -> (u64, f64) {
+            let mut success_total = 0_u64;
+            let mut max_latency_ms = 0.0_f64;
+            for _ in 0..total {
+                let started = Instant::now();
+                let response = server
+                    .symbol(WorkspaceSymbolParams {
+                        query: query.clone(),
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                        partial_result_params: PartialResultParams::default(),
+                    })
+                    .await;
+                let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+                max_latency_ms = max_latency_ms.max(elapsed_ms);
+                if response.is_ok() {
+                    success_total += 1;
+                }
+            }
+            (success_total, max_latency_ms)
+        }
+
+        async fn run_workspace_symbol_burst(
+            server: BslLanguageServer,
+            query: String,
+            total: usize,
+        ) -> (u64, f64) {
+            let mut handles = Vec::with_capacity(total);
+            for _ in 0..total {
+                let server = server.clone();
+                let query = query.clone();
+                handles.push(tokio::spawn(async move {
+                    let started = Instant::now();
+                    let response = server
+                        .symbol(WorkspaceSymbolParams {
+                            query,
+                            work_done_progress_params: WorkDoneProgressParams::default(),
+                            partial_result_params: PartialResultParams::default(),
+                        })
+                        .await;
+                    (response.is_ok(), started.elapsed().as_secs_f64() * 1000.0)
+                }));
+            }
+            let mut success_total = 0_u64;
+            let mut max_latency_ms = 0.0_f64;
+            for handle in handles {
+                let (ok, latency_ms) = handle.await.expect("workspace_symbol burst task join");
+                if ok {
+                    success_total += 1;
+                }
+                max_latency_ms = max_latency_ms.max(latency_ms);
+            }
+            (success_total, max_latency_ms)
+        }
+
+        let coordinator = Arc::new(SystemCoordinator::new());
+        let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+            Arc::new(std::sync::Mutex::new(None));
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            let server_holder = server_holder.clone();
+            move |client| {
+                let server = BslLanguageServer::new(client, coordinator.clone());
+                *server_holder.lock().expect("server holder lock") = Some(server.clone());
+                server
+            }
+        })
+        .finish();
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        initialize_lsp_service(&mut service).await;
+
+        let mut primary_uri: Option<Url> = None;
+        for index in 0..8_u32 {
+            let uri = Url::parse(&format!("file:///test_p30_fairness_{index}.bsl")).expect("uri");
+            if primary_uri.is_none() {
+                primary_uri = Some(uri.clone());
+            }
+            let mut text = format!("Процедура Тест{index}()\n    ЛокПерем = Новый Массив;\n");
+            for value in 0..120_u32 {
+                text.push_str(&format!("    ЛокПерем.Добавить({value});\n"));
+            }
+            text.push_str("    Возврат ЛокПерем.Количество();\nКонецПроцедуры\n");
+            let did_open = DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "bsl".to_string(),
+                    version: 1,
+                    text,
+                },
+            };
+            let did_open_req = Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish();
+            let did_open_response = service
+                .ready()
+                .await
+                .unwrap()
+                .call(did_open_req)
+                .await
+                .expect("didOpen notification");
+            assert!(did_open_response.is_none(), "didOpen is a notification");
+        }
+        let primary_uri = primary_uri.expect("primary uri");
+        let hover_position = Position::new(2, 8);
+
+        let server = server_holder
+            .lock()
+            .expect("server holder lock")
+            .as_ref()
+            .cloned()
+            .expect("server instance");
+
+        let (warm_interactive_success, _) = run_hover_requests(
+            server.clone(),
+            primary_uri.clone(),
+            hover_position,
+            2,
+        )
+        .await;
+        assert!(
+            warm_interactive_success > 0,
+            "warm-up interactive requests should succeed"
+        );
+        let (warm_background_success, _) =
+            run_workspace_symbol_requests(server.clone(), "Тест".to_string(), 2).await;
+        assert!(
+            warm_background_success > 0,
+            "warm-up background requests should succeed"
+        );
+
+        let round_a_background = tokio::spawn(run_workspace_symbol_burst(
+            server.clone(),
+            "Тест".to_string(),
+            BACKGROUND_BURST_TOTAL,
+        ));
+        let round_a_interactive = tokio::spawn(run_hover_requests(
+            server.clone(),
+            primary_uri.clone(),
+            hover_position,
+            INTERACTIVE_PROBE_TOTAL,
+        ));
+        let (round_a_background_success, round_a_background_max_ms) = tokio::time::timeout(
+            Duration::from_secs(ROUND_TIMEOUT_SECS),
+            round_a_background,
+        )
+        .await
+        .expect("background burst timeout in round A")
+        .expect("background burst join in round A");
+        let (round_a_interactive_success, round_a_interactive_max_ms) = tokio::time::timeout(
+            Duration::from_secs(ROUND_TIMEOUT_SECS),
+            round_a_interactive,
+        )
+        .await
+        .expect("interactive probe timeout in round A")
+        .expect("interactive probe join in round A");
+
+        let round_b_interactive = tokio::spawn(run_hover_burst(
+            server.clone(),
+            primary_uri.clone(),
+            hover_position,
+            INTERACTIVE_BURST_TOTAL,
+        ));
+        let round_b_background = tokio::spawn(run_workspace_symbol_requests(
+            server.clone(),
+            "Тест".to_string(),
+            BACKGROUND_PROBE_TOTAL,
+        ));
+        let (round_b_interactive_success, round_b_interactive_max_ms) = tokio::time::timeout(
+            Duration::from_secs(ROUND_TIMEOUT_SECS),
+            round_b_interactive,
+        )
+        .await
+        .expect("interactive burst timeout in round B")
+        .expect("interactive burst join in round B");
+        let (round_b_background_success, round_b_background_max_ms) = tokio::time::timeout(
+            Duration::from_secs(ROUND_TIMEOUT_SECS),
+            round_b_background,
+        )
+        .await
+        .expect("background probe timeout in round B")
+        .expect("background probe join in round B");
+
+        assert_eq!(
+            round_a_interactive_success,
+            INTERACTIVE_PROBE_TOTAL as u64,
+            "interactive requests must progress under background burst"
+        );
+        assert_eq!(
+            round_a_background_success,
+            BACKGROUND_BURST_TOTAL as u64,
+            "background burst must complete without starvation"
+        );
+        assert_eq!(
+            round_b_interactive_success,
+            INTERACTIVE_BURST_TOTAL as u64,
+            "interactive burst must complete under mixed load"
+        );
+        assert_eq!(
+            round_b_background_success,
+            BACKGROUND_PROBE_TOTAL as u64,
+            "background probe must progress under interactive burst"
+        );
+        for (name, value) in [
+            ("round_a_background_max_ms", round_a_background_max_ms),
+            ("round_a_interactive_max_ms", round_a_interactive_max_ms),
+            ("round_b_background_max_ms", round_b_background_max_ms),
+            ("round_b_interactive_max_ms", round_b_interactive_max_ms),
+        ] {
+            assert!(
+                value <= MAX_REQUEST_LATENCY_MS,
+                "{name} exceeded bounded latency: {value:.2}ms > {MAX_REQUEST_LATENCY_MS:.2}ms"
+            );
+        }
+
+        let metrics = coordinator.observability_metrics();
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        let interactive_queue_wait_total = counters
+            .get("intellisense_v2_runtime_queue_wait_interactive_total")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0);
+        let background_queue_wait_total = counters
+            .get("intellisense_v2_runtime_queue_wait_background_total")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0);
+        let interactive_exec_total = counters
+            .get("intellisense_v2_runtime_exec_interactive_total")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0);
+        let background_exec_total = counters
+            .get("intellisense_v2_runtime_exec_background_total")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0);
+
+        assert!(
+            interactive_queue_wait_total > 0,
+            "interactive queue-wait counter must be present under mixed load"
+        );
+        assert!(
+            background_queue_wait_total > 0,
+            "background queue-wait counter must be present under mixed load"
+        );
+        assert!(
+            interactive_exec_total > 0,
+            "interactive exec counter must be present under mixed load"
+        );
+        assert!(
+            background_exec_total > 0,
+            "background exec counter must be present under mixed load"
+        );
+
+        let report = serde_json::json!({
+            "change_id": CHANGE_ID,
+            "profile": "p30_backpressure_fairness_interactive_vs_background_no_starvation",
+            "thresholds": {
+                "round_timeout_secs": ROUND_TIMEOUT_SECS,
+                "max_request_latency_ms": MAX_REQUEST_LATENCY_MS,
+            },
+            "rounds": {
+                "background_burst_vs_interactive_probe": {
+                    "interactive_total": INTERACTIVE_PROBE_TOTAL,
+                    "interactive_success": round_a_interactive_success,
+                    "interactive_max_latency_ms": round_a_interactive_max_ms,
+                    "background_total": BACKGROUND_BURST_TOTAL,
+                    "background_success": round_a_background_success,
+                    "background_max_latency_ms": round_a_background_max_ms,
+                },
+                "interactive_burst_vs_background_probe": {
+                    "interactive_total": INTERACTIVE_BURST_TOTAL,
+                    "interactive_success": round_b_interactive_success,
+                    "interactive_max_latency_ms": round_b_interactive_max_ms,
+                    "background_total": BACKGROUND_PROBE_TOTAL,
+                    "background_success": round_b_background_success,
+                    "background_max_latency_ms": round_b_background_max_ms,
+                }
+            },
+            "metrics": {
+                "intellisense_v2_runtime_queue_wait_interactive_total": interactive_queue_wait_total,
+                "intellisense_v2_runtime_queue_wait_background_total": background_queue_wait_total,
+                "intellisense_v2_runtime_exec_interactive_total": interactive_exec_total,
+                "intellisense_v2_runtime_exec_background_total": background_exec_total,
+            },
+            "pass": true
+        });
+        let report_path = std::env::var("BSL_V2_COMPLETION_FAIRNESS_REPORT")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests")
+                    .join("perf")
+                    .join("reports")
+                    .join(format!("{CHANGE_ID}-fairness-interactive-vs-background.json"))
+            });
+        if let Some(parent) = report_path.parent() {
+            std::fs::create_dir_all(parent)
+                .expect("failed to create directory for completion fairness report");
+        }
+        std::fs::write(
+            &report_path,
+            serde_json::to_string_pretty(&report)
+                .expect("failed to serialize completion fairness report"),
+        )
+        .expect("failed to write completion fairness report");
+        println!("v2_completion_fairness_report={}", report_path.display());
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
     async fn p7_trigger_character_and_invoked_member_access_keep_semantic_parity() {
         let coordinator = Arc::new(SystemCoordinator::new());
         let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =

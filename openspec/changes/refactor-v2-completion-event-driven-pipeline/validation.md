@@ -1,6 +1,6 @@
 # Validation: refactor-v2-completion-event-driven-pipeline
 
-Дата: 2026-02-20
+Дата: 2026-02-23 (updated; baseline reference remains from 2026-02-20)
 
 ## 1. Baseline reference (cold/warm/start)
 
@@ -70,3 +70,47 @@ Gate thresholds (из p27):
 
 Результат:
 - PASS (`Change 'refactor-v2-completion-event-driven-pipeline' is valid`)
+
+## 6. Additional e2e contract runs (2026-02-23)
+
+Выполненные команды:
+- `cargo test -p bsl-backend --bin bsl-lsp-server p28_cancel_request_stops_completion_and_prevents_late_publish -- --nocapture`
+- `cargo test -p bsl-backend --bin bsl-lsp-server p29_completion_mode_matrix_parity_on_fixed_revision -- --nocapture`
+- `cargo test -p bsl-backend --bin bsl-lsp-server p30_backpressure_fairness_interactive_vs_background_no_starvation -- --nocapture`
+
+Результат:
+- `p28_cancel_request_stops_completion_and_prevents_late_publish`: PASS
+- `p29_completion_mode_matrix_parity_on_fixed_revision`: PASS
+- `p30_backpressure_fairness_interactive_vs_background_no_starvation`: PASS
+
+Артефакты:
+- `backend/tests/perf/reports/refactor-v2-completion-event-driven-pipeline-mode-parity-matrix.json`
+- `backend/tests/perf/reports/refactor-v2-completion-event-driven-pipeline-fairness-interactive-vs-background.json`
+
+Ключевые значения (p29 matrix):
+- user-facing drift vs `off`: `shadow=0.0`, `canary=0.0`, `on=0.0` (threshold `<= 0.01`)
+- shadow parity drift: `0.0` (threshold `<= 0.01`)
+- stage routing:
+  - `off`: `legacy=320`, `shadow=0`, `event_driven=0`
+  - `shadow`: `legacy=320`, `shadow=316`, `event_driven=0`
+  - `canary(100)`: `legacy=0`, `shadow=0`, `event_driven=320`
+  - `on`: `legacy=0`, `shadow=0`, `event_driven=320`
+
+Ключевые значения (p30 fairness):
+- Round A (`background burst` vs `interactive probe`): interactive `24/24`, background `24/24`
+- Round B (`interactive burst` vs `background probe`): interactive `32/32`, background `16/16`
+- bounded latency: `max_request_latency_ms` observed `23.92ms` (threshold `10000ms`)
+- saturation counters:
+  - `intellisense_v2_runtime_queue_wait_interactive_total=58`
+  - `intellisense_v2_runtime_queue_wait_background_total=360`
+  - `intellisense_v2_runtime_exec_interactive_total=58`
+  - `intellisense_v2_runtime_exec_background_total=360`
+
+## 7. Architecture Lock Conformance Statement
+
+Подтверждение conformance к Architecture Lock:
+- Completion execution выполняется **строго через per-file actor queue** с deterministic ordering (`file_seq`) и monotonic `request_epoch`.
+- Turn-gating enforced до heavy-path (`CompletionTurnOutcome::Ready|SupersededBeforeStart|QueueRejected`), что исключает late publish для superseded requests.
+- Cancellation проходит по контракту `$/cancelRequest -> Cancel(request_id)` с checkpoint stop/no-late-publish (подтверждено `p28`).
+- Rollout routing соблюдает lock-контракт `off|shadow|canary|on` с mode-aware stage split (подтверждено `p29`).
+- Bounded backpressure/fairness подтверждены двунаправленным e2e (`p30`): interactive и background выполняются без starvation под встречной burst-нагрузкой.

@@ -11,7 +11,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 use tower_lsp::jsonrpc::Result as JsonRpcResult;
@@ -1941,7 +1941,8 @@ impl LanguageServer for BslLanguageServer {
         let trigger_char_hint = completion_trigger_character(params.context.as_ref());
         let shadow_internal_request =
             completion_is_shadow_internal_request(params.context.as_ref());
-        let completion_request_id = super::request_context::current_request_id();
+        let completion_request_id = super::request_context::current_request_id()
+            .or_else(|| super::request_context::take_completion_request_id(&uri, position));
         if !shadow_internal_request {
             self.coordinator
                 .record_intellisense_v2_completion_trigger_mode(trigger_mode);
@@ -1998,21 +1999,24 @@ impl LanguageServer for BslLanguageServer {
             routing_plan.response_route,
             shadow_internal_request,
         );
+        let started = Instant::now();
         let (
             completion_ticket,
+            completion_turn_outcome,
             _completion_request_registration,
             completion_cancellation_token,
             mut completion_drop_guard,
         ) = if event_driven_guards_enabled {
-            let completion_ticket = self
+            let completion_dispatch = self
                 .completion_dispatcher_v2
-                .emit_completion_request(
+                .emit_completion_request_with_turn(
                     file_id,
                     completion_request_id.clone(),
                     version_hint,
                     trigger_mode.to_string(),
                 )
                 .await;
+            let completion_ticket = completion_dispatch.ticket;
             let completion_request_registration = completion_request_id.clone().map(|request_id| {
                 self.completion_cancellation_registry_v2.register_request(
                     request_id,
@@ -2039,8 +2043,17 @@ impl LanguageServer for BslLanguageServer {
                     "completion dispatcher dropped completion event"
                 );
             }
+            let completion_turn_outcome =
+                if completion_queue_enqueue_failed(completion_ticket.queue_outcome) {
+                    super::completion_dispatcher::CompletionTurnOutcome::QueueRejected
+                } else if let Some(turn_waiter) = completion_dispatch.turn_waiter {
+                    turn_waiter.wait().await
+                } else {
+                    super::completion_dispatcher::CompletionTurnOutcome::QueueRejected
+                };
             (
                 completion_ticket,
+                Some(completion_turn_outcome),
                 completion_request_registration,
                 completion_cancellation_token,
                 completion_drop_guard,
@@ -2055,15 +2068,36 @@ impl LanguageServer for BslLanguageServer {
                 None,
                 None,
                 None,
+                None,
             )
         };
-        let started = Instant::now();
         let snippet_support = *self.completion_snippet_support.read().await;
+        #[cfg(test)]
+        if let Some(delay_ms) = std::env::var("BSL_TEST_COMPLETION_DELAY_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+        {
+            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+        }
         let mut completion_outcome: Option<&'static str> = None;
         let mut observed_file_version_for_completion: Option<i32> = None;
         let mut member_access_observed = false;
         let mut cancel_event_emitted = false;
         let mut completion = 'completion_flow: {
+            if let Some(turn_outcome) = completion_turn_outcome {
+                match turn_outcome {
+                    super::completion_dispatcher::CompletionTurnOutcome::Ready => {}
+                    super::completion_dispatcher::CompletionTurnOutcome::SupersededBeforeStart => {
+                        completion_outcome = Some("superseded_epoch");
+                        break 'completion_flow Some(completion_incomplete_empty_response());
+                    }
+                    super::completion_dispatcher::CompletionTurnOutcome::QueueRejected => {
+                        completion_outcome = Some("queue_rejected");
+                        break 'completion_flow Some(completion_incomplete_empty_response());
+                    }
+                }
+            }
             let first_completion_for_file = {
                 let mut seen = self.completion_seen_files_v2.write().await;
                 seen.insert(file_id)

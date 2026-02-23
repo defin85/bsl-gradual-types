@@ -2410,6 +2410,7 @@ mod tests {
             .await
             .expect("didOpen notification");
         assert!(did_open_response.is_none(), "didOpen is a notification");
+        let mut service = crate::server::request_context::RequestContextService::new(service);
 
         let did_change = DidChangeTextDocumentParams {
             text_document: VersionedTextDocumentIdentifier {
@@ -2462,6 +2463,240 @@ mod tests {
         assert!(
             completion_response.is_some(),
             "completion should return a response"
+        );
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
+    async fn p28_cancel_request_stops_completion_and_prevents_late_publish() {
+        fn completion_response_incomplete_empty(response: &CompletionResponse) -> bool {
+            match response {
+                CompletionResponse::List(list) => list.is_incomplete && list.items.is_empty(),
+                CompletionResponse::Array(items) => items.is_empty(),
+            }
+        }
+        struct EnvVarGuard {
+            key: &'static str,
+            previous: Option<String>,
+        }
+
+        impl EnvVarGuard {
+            fn set(key: &'static str, value: &str) -> Self {
+                let previous = std::env::var(key).ok();
+                std::env::set_var(key, value);
+                Self { key, previous }
+            }
+        }
+
+        impl Drop for EnvVarGuard {
+            fn drop(&mut self) {
+                if let Some(previous) = &self.previous {
+                    std::env::set_var(self.key, previous);
+                } else {
+                    std::env::remove_var(self.key);
+                }
+            }
+        }
+
+        static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        let _env_lock = ENV_LOCK
+            .get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .expect("env lock");
+        let _delay_guard = EnvVarGuard::set("BSL_TEST_COMPLETION_DELAY_MS", "40");
+
+        let coordinator = Arc::new(SystemCoordinator::new());
+        let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+            Arc::new(std::sync::Mutex::new(None));
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            let server_holder = server_holder.clone();
+            move |client| {
+                let server = BslLanguageServer::new(client, coordinator.clone());
+                *server_holder.lock().expect("server holder lock") = Some(server.clone());
+                server
+            }
+        })
+        .finish();
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        initialize_lsp_service(&mut service).await;
+        let mut service = crate::server::request_context::RequestContextService::new(service);
+
+        let uri = Url::parse("file:///test_p28_cancel_request.bsl").expect("test uri");
+        let mut base_text = String::from("Процедура Тест()\n    ЛокМассив = Новый Массив;\n");
+        for value in 0..800 {
+            base_text.push_str(&format!("    ЛокМассив.Добавить({value});\n"));
+        }
+        base_text.push_str("    ЛокМассив.\nКонецПроцедуры\n");
+        let completion_line = 802_u32;
+        let completion_character = "    ЛокМассив.".encode_utf16().count() as u32;
+
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: base_text.clone(),
+            },
+        };
+        let did_open_req = Request::build("textDocument/didOpen")
+            .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+            .finish();
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+
+        let server = server_holder
+            .lock()
+            .expect("server holder lock")
+            .as_ref()
+            .cloned()
+            .expect("server instance");
+        let file_id = server.get_or_create_file_id_v2(&uri).await;
+
+        let mut observed_cancelled_completion = false;
+        for attempt in 0..8_i32 {
+            let version = attempt + 2;
+            let changed_text = format!("{base_text}// attempt {attempt}\n");
+            let did_change = DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: changed_text,
+                }],
+            };
+            let did_change_req = Request::build("textDocument/didChange")
+                .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+                .finish();
+            let did_change_response = service
+                .ready()
+                .await
+                .unwrap()
+                .call(did_change_req)
+                .await
+                .expect("didChange notification");
+            assert!(did_change_response.is_none(), "didChange is a notification");
+
+            let request_id = 100_i64 + i64::from(attempt);
+            let completion_params = CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: Position::new(completion_line, completion_character),
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: Some(CompletionContext {
+                    trigger_kind: CompletionTriggerKind::INVOKED,
+                    trigger_character: Some("__bsl_shadow_internal__:46".to_string()),
+                }),
+            };
+            let completion_req = Request::build("textDocument/completion")
+                .id(request_id)
+                .params(serde_json::to_value(completion_params).expect("CompletionParams"))
+                .finish();
+            let completion_future = service.ready().await.unwrap().call(completion_req);
+            let completion_task = tokio::spawn(async move { completion_future.await });
+            let expected_epoch = u64::try_from(attempt + 1).expect("positive epoch");
+            let mut before_state = None;
+            for _ in 0..100 {
+                if let Some((file_seq, epoch)) =
+                    server.completion_dispatcher_v2.debug_state(file_id).await
+                {
+                    if epoch >= expected_epoch {
+                        before_state = Some((file_seq, epoch));
+                        break;
+                    }
+                }
+                tokio::task::yield_now().await;
+            }
+            let (before_file_seq, before_epoch) =
+                before_state.expect("dispatcher state before cancel");
+            let request_id_string = request_id.to_string();
+            let mut registration_present = false;
+            for _ in 0..20 {
+                if server
+                    .completion_cancellation_registry_v2
+                    .get(&request_id_string)
+                    .is_some()
+                {
+                    registration_present = true;
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+
+            let cancel_req = Request::build("$/cancelRequest")
+                .params(serde_json::json!({ "id": request_id }))
+                .finish();
+            let cancel_response = service
+                .call(cancel_req)
+                .await
+                .expect("cancel request notification");
+            assert!(cancel_response.is_none(), "cancel is a notification");
+
+            let mut cancel_event_observed = false;
+            for _ in 0..20 {
+                if let Some((after_file_seq, after_epoch)) =
+                    server.completion_dispatcher_v2.debug_state(file_id).await
+                {
+                    if after_file_seq > before_file_seq && after_epoch >= before_epoch {
+                        cancel_event_observed = true;
+                        break;
+                    }
+                }
+                tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
+            }
+
+            let completion_response =
+                tokio::time::timeout(tokio::time::Duration::from_secs(5), completion_task)
+                    .await
+                    .expect("completion request timeout")
+                    .expect("completion task join")
+                    .expect("completion request")
+                    .expect("completion response");
+            let completion_value =
+                serde_json::to_value(&completion_response).expect("serialize completion");
+            let completion_is_safe =
+                if let Some(completion_result) = completion_value.get("result").cloned() {
+                    let completion_lsp: Option<CompletionResponse> =
+                        serde_json::from_value(completion_result).expect("parse completion result");
+                    completion_lsp
+                        .as_ref()
+                        .is_some_and(completion_response_incomplete_empty)
+                } else if let Some(error) = completion_value.get("error") {
+                    let error_code = error
+                        .get("code")
+                        .and_then(|value| value.as_i64())
+                        .unwrap_or_default();
+                    let error_message = error
+                        .get("message")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or_default()
+                        .to_ascii_lowercase();
+                    error_code == -32800 || error_message.contains("cancel")
+                } else {
+                    false
+                };
+            if registration_present && cancel_event_observed && completion_is_safe {
+                observed_cancelled_completion = true;
+                break;
+            }
+        }
+
+        assert!(
+            observed_cancelled_completion,
+            "expected $/cancelRequest to enqueue Cancel(request_id) and avoid late completion publish"
         );
 
         drain_task.abort();

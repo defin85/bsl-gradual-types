@@ -1,9 +1,10 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use bsl_analysis_v2::FileId as V2FileId;
-use tokio::sync::{Mutex as TokioMutex, Notify};
+use tokio::sync::{oneshot, Mutex as TokioMutex, Notify};
 use tokio::task::JoinHandle;
 
 #[derive(Debug, Clone)]
@@ -52,6 +53,32 @@ pub(crate) struct DispatchTicket {
     pub queue_outcome: QueueEnqueueOutcome,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CompletionTurnOutcome {
+    Ready,
+    SupersededBeforeStart,
+    QueueRejected,
+}
+
+#[derive(Debug)]
+pub(crate) struct CompletionTurnWaiter {
+    receiver: oneshot::Receiver<CompletionTurnOutcome>,
+}
+
+impl CompletionTurnWaiter {
+    pub(crate) async fn wait(self) -> CompletionTurnOutcome {
+        self.receiver
+            .await
+            .unwrap_or(CompletionTurnOutcome::QueueRejected)
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct CompletionRequestDispatch {
+    pub ticket: DispatchTicket,
+    pub turn_waiter: Option<CompletionTurnWaiter>,
+}
+
 #[derive(Debug, Default)]
 struct CompletionEventQueueState {
     entries: VecDeque<CompletionEventEnvelope>,
@@ -74,36 +101,64 @@ impl CompletionEventQueue {
         }
     }
 
+    #[cfg(test)]
     fn try_enqueue(&self, event: CompletionEventEnvelope) -> QueueEnqueueOutcome {
+        self.try_enqueue_with_report(event).0
+    }
+
+    fn try_enqueue_with_report(
+        &self,
+        event: CompletionEventEnvelope,
+    ) -> (QueueEnqueueOutcome, Vec<u64>) {
         let mut state = self
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if state.closed {
-            return QueueEnqueueOutcome::Closed;
+            return (QueueEnqueueOutcome::Closed, Vec::new());
         }
+
+        let before_completion_file_seq: HashSet<u64> = state
+            .entries
+            .iter()
+            .filter(|entry| {
+                matches!(
+                    entry.payload,
+                    CompletionEventPayload::CompletionRequest { .. }
+                )
+            })
+            .map(|entry| entry.file_seq)
+            .collect();
 
         let mut outcome = Self::apply_pre_enqueue_policy(&mut state.entries, &event);
         if matches!(outcome, QueueEnqueueOutcome::CoalescedCancel) {
-            return outcome;
+            let dropped =
+                Self::dropped_completion_file_seq(&before_completion_file_seq, &state.entries);
+            return (outcome, dropped);
         }
 
         if state.entries.len() >= self.capacity {
             let overflow_outcome = Self::apply_overflow_policy(&mut state.entries, &event);
             let Some(overflow_outcome) = overflow_outcome else {
-                return QueueEnqueueOutcome::Full;
+                let dropped =
+                    Self::dropped_completion_file_seq(&before_completion_file_seq, &state.entries);
+                return (QueueEnqueueOutcome::Full, dropped);
             };
             outcome = overflow_outcome;
         }
 
         if state.entries.len() >= self.capacity {
-            return QueueEnqueueOutcome::Full;
+            let dropped =
+                Self::dropped_completion_file_seq(&before_completion_file_seq, &state.entries);
+            return (QueueEnqueueOutcome::Full, dropped);
         }
 
         state.entries.push_back(event);
+        let dropped =
+            Self::dropped_completion_file_seq(&before_completion_file_seq, &state.entries);
         drop(state);
         self.notify.notify_one();
-        outcome
+        (outcome, dropped)
     }
 
     async fn recv(&self) -> Option<CompletionEventEnvelope> {
@@ -361,6 +416,63 @@ impl CompletionEventQueue {
         *entries = kept;
         removed
     }
+
+    fn dropped_completion_file_seq(
+        before_completion_file_seq: &HashSet<u64>,
+        entries: &VecDeque<CompletionEventEnvelope>,
+    ) -> Vec<u64> {
+        let after_completion_file_seq: HashSet<u64> = entries
+            .iter()
+            .filter(|entry| {
+                matches!(
+                    entry.payload,
+                    CompletionEventPayload::CompletionRequest { .. }
+                )
+            })
+            .map(|entry| entry.file_seq)
+            .collect();
+        before_completion_file_seq
+            .iter()
+            .filter(|file_seq| !after_completion_file_seq.contains(file_seq))
+            .copied()
+            .collect()
+    }
+}
+
+#[derive(Debug)]
+struct CompletionTurnState {
+    waiters: HashMap<u64, oneshot::Sender<CompletionTurnOutcome>>,
+}
+
+impl CompletionTurnState {
+    fn register(&mut self, file_seq: u64, sender: oneshot::Sender<CompletionTurnOutcome>) {
+        self.waiters.insert(file_seq, sender);
+    }
+
+    fn resolve(&mut self, file_seq: u64, outcome: CompletionTurnOutcome) -> bool {
+        let Some(sender) = self.waiters.remove(&file_seq) else {
+            return false;
+        };
+        let _ = sender.send(outcome);
+        true
+    }
+
+    fn resolve_many(&mut self, file_seq: &[u64], outcome: CompletionTurnOutcome) -> usize {
+        let mut resolved = 0usize;
+        for seq in file_seq {
+            if self.resolve(*seq, outcome) {
+                resolved = resolved.saturating_add(1);
+            }
+        }
+        resolved
+    }
+
+    fn resolve_all(&mut self, outcome: CompletionTurnOutcome) {
+        let pending = std::mem::take(&mut self.waiters);
+        for (_, sender) in pending {
+            let _ = sender.send(outcome);
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -368,6 +480,8 @@ struct PerFileDispatcher {
     queue: CompletionEventQueue,
     next_file_seq: u64,
     latest_request_epoch: u64,
+    latest_request_epoch_shared: Arc<AtomicU64>,
+    turn_state: Arc<Mutex<CompletionTurnState>>,
     drain_task: JoinHandle<()>,
 }
 
@@ -375,15 +489,42 @@ impl PerFileDispatcher {
     fn new(capacity: usize) -> Self {
         let queue = CompletionEventQueue::new(capacity);
         let drain_queue = queue.clone();
+        let latest_request_epoch_shared = Arc::new(AtomicU64::new(0));
+        let turn_state = Arc::new(Mutex::new(CompletionTurnState {
+            waiters: HashMap::new(),
+        }));
+        let turn_state_for_drain = Arc::clone(&turn_state);
+        let latest_epoch_for_drain = Arc::clone(&latest_request_epoch_shared);
         let drain_task = tokio::spawn(async move {
             while let Some(event) = drain_queue.recv().await {
+                if matches!(
+                    event.payload,
+                    CompletionEventPayload::CompletionRequest { .. }
+                ) {
+                    let latest_epoch = latest_epoch_for_drain.load(Ordering::SeqCst);
+                    let turn_outcome = if event.request_epoch < latest_epoch {
+                        CompletionTurnOutcome::SupersededBeforeStart
+                    } else {
+                        CompletionTurnOutcome::Ready
+                    };
+                    let mut turn_state = turn_state_for_drain
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    let _ = turn_state.resolve(event.file_seq, turn_outcome);
+                }
                 consume_event(event);
             }
+            let mut turn_state = turn_state_for_drain
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            turn_state.resolve_all(CompletionTurnOutcome::QueueRejected);
         });
         Self {
             queue,
             next_file_seq: 0,
             latest_request_epoch: 0,
+            latest_request_epoch_shared,
+            turn_state,
             drain_task,
         }
     }
@@ -392,12 +533,46 @@ impl PerFileDispatcher {
         self.next_file_seq = self.next_file_seq.saturating_add(1);
         if matches!(payload, CompletionEventPayload::CompletionRequest { .. }) {
             self.latest_request_epoch = self.latest_request_epoch.saturating_add(1);
+            self.latest_request_epoch_shared
+                .store(self.latest_request_epoch, Ordering::SeqCst);
         }
         DispatchTicket {
             file_seq: self.next_file_seq,
             request_epoch: self.latest_request_epoch,
             queue_outcome: QueueEnqueueOutcome::Enqueued,
         }
+    }
+
+    fn register_turn_waiter(&self, file_seq: u64, sender: oneshot::Sender<CompletionTurnOutcome>) {
+        let mut turn_state = self
+            .turn_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        turn_state.register(file_seq, sender);
+    }
+
+    fn resolve_turn_waiter(&self, file_seq: u64, outcome: CompletionTurnOutcome) -> bool {
+        let mut turn_state = self
+            .turn_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        turn_state.resolve(file_seq, outcome)
+    }
+
+    fn resolve_turn_waiters(&self, file_seq: &[u64], outcome: CompletionTurnOutcome) -> usize {
+        let mut turn_state = self
+            .turn_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        turn_state.resolve_many(file_seq, outcome)
+    }
+
+    fn reject_all_turn_waiters(&self) {
+        let mut turn_state = self
+            .turn_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        turn_state.resolve_all(CompletionTurnOutcome::QueueRejected);
     }
 }
 
@@ -455,22 +630,56 @@ impl CompletionDispatcherRegistry {
             .await
     }
 
-    pub(crate) async fn emit_completion_request(
+    pub(crate) async fn emit_completion_request_with_turn(
         &self,
         file_id: V2FileId,
         request_id: Option<String>,
         version_hint: Option<i32>,
         trigger_mode: String,
-    ) -> DispatchTicket {
-        self.emit(
+    ) -> CompletionRequestDispatch {
+        let mut per_file = self.per_file.lock().await;
+        let dispatcher = per_file
+            .entry(file_id)
+            .or_insert_with(|| PerFileDispatcher::new(self.queue_capacity));
+        let payload = CompletionEventPayload::CompletionRequest {
+            request_id,
+            version_hint,
+            trigger_mode,
+        };
+        let mut ticket = dispatcher.next_ticket(&payload);
+        let event = CompletionEventEnvelope {
             file_id,
-            CompletionEventPayload::CompletionRequest {
-                request_id,
-                version_hint,
-                trigger_mode,
-            },
-        )
-        .await
+            file_seq: ticket.file_seq,
+            request_epoch: ticket.request_epoch,
+            received_at: Instant::now(),
+            payload,
+        };
+        let (sender, receiver) = oneshot::channel();
+        dispatcher.register_turn_waiter(ticket.file_seq, sender);
+
+        let (queue_outcome, dropped_completion_file_seq) =
+            dispatcher.queue.try_enqueue_with_report(event);
+        ticket.queue_outcome = queue_outcome;
+        let _ = dispatcher.resolve_turn_waiters(
+            &dropped_completion_file_seq,
+            CompletionTurnOutcome::SupersededBeforeStart,
+        );
+        if matches!(
+            queue_outcome,
+            QueueEnqueueOutcome::Full | QueueEnqueueOutcome::Closed
+        ) {
+            let _ = dispatcher
+                .resolve_turn_waiter(ticket.file_seq, CompletionTurnOutcome::QueueRejected);
+            return CompletionRequestDispatch {
+                ticket,
+                turn_waiter: None,
+            };
+        }
+
+        CompletionRequestDispatch {
+            ticket,
+            turn_waiter: Some(CompletionTurnWaiter { receiver }),
+        }
     }
 
     pub(crate) async fn emit_cancel(
@@ -493,6 +702,14 @@ impl CompletionDispatcherRegistry {
             .map(|dispatcher| dispatcher.latest_request_epoch)
     }
 
+    #[cfg(test)]
+    pub(crate) async fn debug_state(&self, file_id: V2FileId) -> Option<(u64, u64)> {
+        let per_file = self.per_file.lock().await;
+        per_file
+            .get(&file_id)
+            .map(|dispatcher| (dispatcher.next_file_seq, dispatcher.latest_request_epoch))
+    }
+
     pub(crate) async fn close_file_dispatcher(&self, file_id: V2FileId) -> Option<DispatchTicket> {
         let has_dispatcher = {
             let per_file = self.per_file.lock().await;
@@ -508,6 +725,7 @@ impl CompletionDispatcherRegistry {
             per_file.remove(&file_id)
         };
         if let Some(dispatcher) = dispatcher {
+            dispatcher.reject_all_turn_waiters();
             dispatcher.queue.close();
             let _ = tokio::time::timeout(Duration::from_millis(50), dispatcher.drain_task).await;
         }
@@ -527,7 +745,13 @@ impl CompletionDispatcherRegistry {
             received_at: Instant::now(),
             payload,
         };
-        ticket.queue_outcome = dispatcher.queue.try_enqueue(event);
+        let (queue_outcome, dropped_completion_file_seq) =
+            dispatcher.queue.try_enqueue_with_report(event);
+        ticket.queue_outcome = queue_outcome;
+        let _ = dispatcher.resolve_turn_waiters(
+            &dropped_completion_file_seq,
+            CompletionTurnOutcome::SupersededBeforeStart,
+        );
         ticket
     }
 }
@@ -791,6 +1015,38 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn queue_report_lists_dropped_completion_file_seq_on_latest_wins_eviction() {
+        let queue = CompletionEventQueue::new(4);
+        let (first_outcome, first_dropped) = queue.try_enqueue_with_report(make_event(
+            1,
+            1,
+            CompletionEventPayload::CompletionRequest {
+                request_id: Some("r1".to_string()),
+                version_hint: Some(1),
+                trigger_mode: "invoked".to_string(),
+            },
+        ));
+        assert_eq!(first_outcome, QueueEnqueueOutcome::Enqueued);
+        assert!(first_dropped.is_empty());
+
+        let (second_outcome, second_dropped) = queue.try_enqueue_with_report(make_event(
+            2,
+            2,
+            CompletionEventPayload::CompletionRequest {
+                request_id: Some("r2".to_string()),
+                version_hint: Some(2),
+                trigger_mode: "invoked".to_string(),
+            },
+        ));
+        assert_eq!(second_outcome, QueueEnqueueOutcome::EvictedStaleCompletion);
+        assert_eq!(
+            second_dropped,
+            vec![1],
+            "dropped report must include stale completion file_seq"
+        );
+    }
+
     #[tokio::test]
     async fn request_epoch_advances_only_for_completion_requests() {
         let registry = CompletionDispatcherRegistry::new(8);
@@ -806,10 +1062,20 @@ mod tests {
         assert_eq!(change.request_epoch, 0);
 
         let completion = registry
-            .emit_completion_request(file_id, None, Some(2), "invoked".to_string())
+            .emit_completion_request_with_turn(file_id, None, Some(2), "invoked".to_string())
             .await;
-        assert_eq!(completion.file_seq, 3);
-        assert_eq!(completion.request_epoch, 1);
+        assert_eq!(completion.ticket.file_seq, 3);
+        assert_eq!(completion.ticket.request_epoch, 1);
+        let completion_outcome = tokio::time::timeout(
+            Duration::from_millis(200),
+            completion
+                .turn_waiter
+                .expect("turn waiter must be present")
+                .wait(),
+        )
+        .await
+        .expect("turn waiter timeout");
+        assert_eq!(completion_outcome, CompletionTurnOutcome::Ready);
 
         let cancel = registry.emit_cancel(file_id, "42".to_string()).await;
         assert_eq!(cancel.file_seq, 4);
@@ -844,5 +1110,76 @@ mod tests {
 
         let open = registry.emit_did_open(file_id, 1).await;
         assert_eq!(open.file_seq, 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn newer_turn_request_supersedes_pending_stale_request_before_start() {
+        let registry = CompletionDispatcherRegistry::new(8);
+        let file_id = V2FileId(77);
+
+        let first = registry
+            .emit_completion_request_with_turn(
+                file_id,
+                Some("r1".to_string()),
+                Some(1),
+                "invoked".to_string(),
+            )
+            .await;
+        let second = registry
+            .emit_completion_request_with_turn(
+                file_id,
+                Some("r2".to_string()),
+                Some(2),
+                "invoked".to_string(),
+            )
+            .await;
+
+        assert_eq!(first.ticket.request_epoch, 1);
+        assert_eq!(second.ticket.request_epoch, 2);
+
+        let first_outcome = tokio::time::timeout(
+            Duration::from_millis(200),
+            first.turn_waiter.expect("first waiter").wait(),
+        )
+        .await
+        .expect("first waiter timeout");
+        assert_eq!(first_outcome, CompletionTurnOutcome::SupersededBeforeStart);
+
+        let second_outcome = tokio::time::timeout(
+            Duration::from_millis(200),
+            second.turn_waiter.expect("second waiter").wait(),
+        )
+        .await
+        .expect("second waiter timeout");
+        assert_eq!(second_outcome, CompletionTurnOutcome::Ready);
+
+        let close = registry.close_file_dispatcher(file_id).await;
+        assert!(close.is_some());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn turn_dispatch_returns_queue_rejected_when_queue_saturated_by_cancel_only() {
+        let registry = CompletionDispatcherRegistry::new(1);
+        let file_id = V2FileId(99);
+
+        let _ = registry.emit_cancel(file_id, "occupy".to_string()).await;
+        let dispatch = registry
+            .emit_completion_request_with_turn(
+                file_id,
+                Some("r1".to_string()),
+                Some(1),
+                "invoked".to_string(),
+            )
+            .await;
+
+        assert_eq!(dispatch.ticket.request_epoch, 1);
+        assert_eq!(dispatch.ticket.queue_outcome, QueueEnqueueOutcome::Full);
+        assert!(
+            dispatch.turn_waiter.is_none(),
+            "queue rejected dispatch must not expose waiter"
+        );
+
+        let close = registry.close_file_dispatcher(file_id).await;
+        assert!(close.is_some());
     }
 }

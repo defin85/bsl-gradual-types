@@ -90,6 +90,10 @@ pub(crate) struct CompletionParityStateV2 {
     pub invoked_labels: Option<Vec<String>>,
 }
 
+pub(crate) type CompletionParityKeyV2 = (V2FileId, i32, u32, u32);
+pub(crate) type CompletionParityStoreV2 =
+    Arc<RwLock<HashMap<CompletionParityKeyV2, CompletionParityStateV2>>>;
+
 /// BSL Language Server backend - CLEAN ARCHITECTURE
 #[derive(Clone)]
 pub struct BslLanguageServer {
@@ -120,8 +124,7 @@ pub struct BslLanguageServer {
     pub(crate) completion_seen_files_v2: Arc<RwLock<HashSet<V2FileId>>>,
     pub(crate) completion_stale_fallback_cache_v2:
         Arc<RwLock<HashMap<V2FileId, CompletionStaleFallbackCacheEntryV2>>>,
-    pub(crate) completion_parity_state_v2:
-        Arc<RwLock<HashMap<(V2FileId, i32, u32, u32), CompletionParityStateV2>>>,
+    pub(crate) completion_parity_state_v2: CompletionParityStoreV2,
     pub(crate) completion_dispatcher_v2: Arc<completion_dispatcher::CompletionDispatcherRegistry>,
     pub(crate) completion_cancellation_registry_v2:
         Arc<completion_cancellation::CompletionCancellationRegistry>,

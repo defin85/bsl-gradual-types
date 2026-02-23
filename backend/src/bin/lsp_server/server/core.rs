@@ -128,6 +128,7 @@ impl BslLanguageServer {
             };
             tokio::spawn(async move {
                 let file_id = entry.file_id;
+                let cancelled_request_epoch = entry.request_epoch;
                 let ticket = dispatcher.emit_cancel(file_id, request_id.clone()).await;
                 if matches!(
                     ticket.queue_outcome,
@@ -138,6 +139,7 @@ impl BslLanguageServer {
                         file_id = file_id.0,
                         file_seq = ticket.file_seq,
                         request_epoch = ticket.request_epoch,
+                        cancelled_request_epoch,
                         request_id = %request_id,
                         queue_outcome = ?ticket.queue_outcome,
                         "completion dispatcher dropped cancel event"
@@ -877,6 +879,7 @@ impl BslLanguageServer {
             .await;
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn schedule_diagnostics_profile_v2(
         &self,
         uri: Url,
@@ -1995,10 +1998,14 @@ mod tests {
                 MarkedString::String(value) => Some(value),
                 MarkedString::LanguageString(value) => Some(value.value),
             },
-            HoverContents::Array(values) => values.into_iter().find_map(|value| match value {
-                MarkedString::String(value) => Some(value),
-                MarkedString::LanguageString(value) => Some(value.value),
-            }),
+            HoverContents::Array(values) => values
+                .into_iter()
+                .map(|value| match value {
+                    MarkedString::String(value) => Some(value),
+                    MarkedString::LanguageString(value) => Some(value.value),
+                })
+                .next()
+                .flatten(),
             HoverContents::Markup(value) => Some(value.value),
         }
     }
@@ -2469,6 +2476,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn p28_cancel_request_stops_completion_and_prevents_late_publish() {
         fn completion_response_incomplete_empty(response: &CompletionResponse) -> bool {
             match response {
@@ -2606,7 +2614,7 @@ mod tests {
                 .params(serde_json::to_value(completion_params).expect("CompletionParams"))
                 .finish();
             let completion_future = service.ready().await.unwrap().call(completion_req);
-            let completion_task = tokio::spawn(async move { completion_future.await });
+            let completion_task = tokio::spawn(completion_future);
             let expected_epoch = u64::try_from(attempt + 1).expect("positive epoch");
             let mut before_state = None;
             for _ in 0..100 {
@@ -2703,6 +2711,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn p29_completion_mode_matrix_parity_on_fixed_revision() {
         const CHANGE_ID: &str = "refactor-v2-completion-event-driven-pipeline";
         const ITERATIONS: usize = 40;

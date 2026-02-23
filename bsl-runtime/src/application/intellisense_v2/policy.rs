@@ -450,55 +450,47 @@ impl CpuBoundBudget {
         };
 
         own_waiters.fetch_add(1, Ordering::AcqRel);
-        let permit = loop {
-            let other_has_waiters = other_waiters.load(Ordering::Acquire) > 0;
-            let can_borrow = !other_has_waiters;
-            // Keep shared permits biased toward interactive work when interactive queue is non-empty.
-            let can_take_shared = matches!(class, CpuWorkClass::Interactive) || !other_has_waiters;
+        let other_has_waiters = other_waiters.load(Ordering::Acquire) > 0;
+        let can_borrow = !other_has_waiters;
+        // Keep shared permits biased toward interactive work when interactive queue is non-empty.
+        let can_take_shared = matches!(class, CpuWorkClass::Interactive) || !other_has_waiters;
 
-            if let Ok(permit) = own_reserved.clone().try_acquire_owned() {
-                break permit;
-            }
-            if can_take_shared {
-                if let Ok(permit) = self.shared.clone().try_acquire_owned() {
-                    break permit;
-                }
-            }
-            if can_borrow {
+        let permit = if let Ok(permit) = own_reserved.clone().try_acquire_owned() {
+            permit
+        } else if can_take_shared {
+            if let Ok(permit) = self.shared.clone().try_acquire_owned() {
+                permit
+            } else if can_borrow {
                 if let Ok(permit) = other_reserved.clone().try_acquire_owned() {
-                    break permit;
+                    permit
+                } else {
+                    tokio::select! {
+                        permit = own_reserved.clone().acquire_owned() => permit.expect("interactive/background reserved semaphore closed"),
+                        permit = self.shared.clone().acquire_owned() => permit.expect("shared semaphore closed"),
+                        permit = other_reserved.clone().acquire_owned() => permit.expect("borrowed semaphore closed"),
+                    }
+                }
+            } else {
+                tokio::select! {
+                    permit = own_reserved.clone().acquire_owned() => permit.expect("interactive/background reserved semaphore closed"),
+                    permit = self.shared.clone().acquire_owned() => permit.expect("shared semaphore closed"),
                 }
             }
-
-            match (can_take_shared, can_borrow) {
-                (true, true) => {
-                    tokio::select! {
-                        permit = own_reserved.clone().acquire_owned() => break permit.expect("interactive/background reserved semaphore closed"),
-                        permit = self.shared.clone().acquire_owned() => break permit.expect("shared semaphore closed"),
-                        permit = other_reserved.clone().acquire_owned() => break permit.expect("borrowed semaphore closed"),
-                    }
-                }
-                (true, false) => {
-                    tokio::select! {
-                        permit = own_reserved.clone().acquire_owned() => break permit.expect("interactive/background reserved semaphore closed"),
-                        permit = self.shared.clone().acquire_owned() => break permit.expect("shared semaphore closed"),
-                    }
-                }
-                (false, true) => {
-                    tokio::select! {
-                        permit = own_reserved.clone().acquire_owned() => break permit.expect("interactive/background reserved semaphore closed"),
-                        permit = other_reserved.clone().acquire_owned() => break permit.expect("borrowed semaphore closed"),
-                    }
-                }
-                (false, false) => {
-                    let permit = own_reserved
-                        .clone()
-                        .acquire_owned()
-                        .await
-                        .expect("interactive/background reserved semaphore closed");
-                    break permit;
+        } else if can_borrow {
+            if let Ok(permit) = other_reserved.clone().try_acquire_owned() {
+                permit
+            } else {
+                tokio::select! {
+                    permit = own_reserved.clone().acquire_owned() => permit.expect("interactive/background reserved semaphore closed"),
+                    permit = other_reserved.clone().acquire_owned() => permit.expect("borrowed semaphore closed"),
                 }
             }
+        } else {
+            own_reserved
+                .clone()
+                .acquire_owned()
+                .await
+                .expect("interactive/background reserved semaphore closed")
         };
         own_waiters.fetch_sub(1, Ordering::AcqRel);
         permit

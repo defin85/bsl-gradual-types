@@ -114,7 +114,7 @@ impl LayerValue {
         matches!(self, LayerValue::Unset)
     }
 
-    fn into_effective(&self) -> Option<ConfigValue> {
+    fn effective_value(&self) -> Option<ConfigValue> {
         match self {
             LayerValue::Unset => None,
             LayerValue::Null => None,
@@ -182,17 +182,17 @@ impl RuntimeConfigState {
 
             let (value, source) = if !self.dev_overrides[idx].is_unset() {
                 (
-                    self.dev_overrides[idx].into_effective(),
+                    self.dev_overrides[idx].effective_value(),
                     ValueSource::DevOverride,
                 )
             } else if !self.stable_overrides[idx].is_unset() {
                 (
-                    self.stable_overrides[idx].into_effective(),
+                    self.stable_overrides[idx].effective_value(),
                     ValueSource::StableOverride,
                 )
             } else if !self.env_bootstrap[idx].is_unset() {
                 (
-                    self.env_bootstrap[idx].into_effective(),
+                    self.env_bootstrap[idx].effective_value(),
                     ValueSource::EnvBootstrap,
                 )
             } else {

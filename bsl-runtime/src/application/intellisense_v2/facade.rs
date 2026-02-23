@@ -795,6 +795,7 @@ impl IntellisenseV2Facade {
 
     /// Canonical ephemeral operation preparation for one-shot adapters:
     /// snapshot build -> deps guard check.
+    #[allow(clippy::too_many_arguments)]
     pub fn prepare_ephemeral_operation(
         context: &ExecutionContext,
         deps_id: DepsSnapshotId,
@@ -1217,6 +1218,7 @@ impl IntellisenseV2Facade {
 
     /// One-shot helper for ephemeral adapters (e.g. web handlers).
     /// Builds a semantic snapshot without creating a long-lived writer-thread runtime.
+    #[allow(clippy::too_many_arguments)]
     pub fn ephemeral_snapshot(
         deps_id: DepsSnapshotId,
         deps: Arc<SemanticDeps>,

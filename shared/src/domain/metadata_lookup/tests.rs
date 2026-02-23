@@ -764,12 +764,12 @@ fn test_get_methods_merges_manager_facet_with_owner_specific_signatures() {
     let names: Vec<&str> = methods.iter().map(|method| method.name.as_str()).collect();
 
     assert!(
-        names.iter().any(|name| *name == "СтандартныйМетод"),
+        names.contains(&"СтандартныйМетод"),
         "facet methods should remain available, methods={:?}",
         names
     );
     assert!(
-        names.iter().any(|name| *name == "СервисПодключен"),
+        names.contains(&"СервисПодключен"),
         "owner-specific exported methods should be merged, methods={:?}",
         names
     );
@@ -873,12 +873,12 @@ fn test_information_register_object_facet_adds_intrinsic_system_properties_when_
         .collect();
 
     assert!(
-        names.iter().any(|name| *name == "ОбменДанными"),
+        names.contains(&"ОбменДанными"),
         "recordset object facet must include intrinsic property ОбменДанными, properties={:?}",
         names
     );
     assert!(
-        names.iter().any(|name| *name == "ДополнительныеСвойства"),
+        names.contains(&"ДополнительныеСвойства"),
         "recordset object facet must include intrinsic property ДополнительныеСвойства, properties={:?}",
         names
     );
@@ -1594,7 +1594,7 @@ fn test_form_data_methods_use_canonical_form_data_without_form_shape() {
         method_names
     );
     assert!(
-        method_names.iter().any(|name| *name == "МетодДанныхФормы"),
+        method_names.contains(&"МетодДанныхФормы"),
         "form-data canonical methods must participate in form-data chain, methods={:?}",
         method_names
     );

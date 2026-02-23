@@ -347,6 +347,7 @@ pub async fn get_completion_with_semantic_hint_snapshot_with_trigger_hint(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn get_completion_with_analysis(
     file_content: &str,
     line: u32,
@@ -2153,94 +2154,93 @@ fn collect_local_candidates_from_ir(
     scope_position: &CompletionScopePosition,
 ) -> Vec<LocalSymbolCandidate> {
     let mut best_by_name: HashMap<String, LocalSymbolCandidate> = HashMap::new();
+    {
+        let mut push_candidate = |name: &str, scope_id: ScopeId, span_start: u32| {
+            push_local_candidate_if_visible(
+                ir_program,
+                scope_position,
+                &mut best_by_name,
+                name,
+                scope_id,
+                span_start,
+                false,
+            );
+        };
 
-    let mut push_candidate = |name: &str, scope_id: ScopeId, span_start: u32| {
-        push_local_candidate_if_visible(
-            ir_program,
-            scope_position,
-            &mut best_by_name,
-            name,
-            scope_id,
-            span_start,
-            false,
-        );
-    };
+        let enclosing_function_scope = scope_position
+            .scope_rank
+            .iter()
+            .filter_map(|(scope_id, rank)| {
+                let scope = ir_program.get_scope(*scope_id)?;
+                matches!(scope.kind, ScopeKind::Function).then_some((*rank, *scope_id))
+            })
+            .min_by_key(|(rank, _)| *rank)
+            .map(|(_, scope_id)| scope_id);
 
-    let enclosing_function_scope = scope_position
-        .scope_rank
-        .iter()
-        .filter_map(|(scope_id, rank)| {
-            let scope = ir_program.get_scope(*scope_id)?;
-            matches!(scope.kind, ScopeKind::Function).then_some((*rank, *scope_id))
-        })
-        .min_by_key(|(rank, _)| *rank)
-        .map(|(_, scope_id)| scope_id);
-
-    let mut collected_from_routine = false;
-    if let Some(function_scope_id) = enclosing_function_scope {
-        if let Some(decl_node) = ir_program.nodes.iter().find(|node| match &node.kind {
-            SemanticNodeKind::FunctionDeclaration { body_scope, .. }
-            | SemanticNodeKind::ProcedureDeclaration { body_scope, .. } => {
-                *body_scope == function_scope_id
-            }
-            _ => false,
-        }) {
-            match &decl_node.kind {
-                SemanticNodeKind::FunctionDeclaration { params, body, .. }
-                | SemanticNodeKind::ProcedureDeclaration { params, body, .. } => {
-                    for param in params {
-                        push_candidate(&param.name, function_scope_id, decl_node.span.start);
-                    }
-                    collect_local_candidates_from_body(
-                        ir_program,
-                        scope_position,
-                        body,
-                        &mut push_candidate,
-                    );
-                    collected_from_routine = true;
+        let mut collected_from_routine = false;
+        if let Some(function_scope_id) = enclosing_function_scope {
+            if let Some(decl_node) = ir_program.nodes.iter().find(|node| match &node.kind {
+                SemanticNodeKind::FunctionDeclaration { body_scope, .. }
+                | SemanticNodeKind::ProcedureDeclaration { body_scope, .. } => {
+                    *body_scope == function_scope_id
                 }
-                _ => {}
+                _ => false,
+            }) {
+                match &decl_node.kind {
+                    SemanticNodeKind::FunctionDeclaration { params, body, .. }
+                    | SemanticNodeKind::ProcedureDeclaration { params, body, .. } => {
+                        for param in params {
+                            push_candidate(&param.name, function_scope_id, decl_node.span.start);
+                        }
+                        collect_local_candidates_from_body(
+                            ir_program,
+                            scope_position,
+                            body,
+                            &mut push_candidate,
+                        );
+                        collected_from_routine = true;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        if !collected_from_routine {
+            for node in ir_program.nodes.iter() {
+                match &node.kind {
+                    SemanticNodeKind::VariableDeclaration { name, .. } => {
+                        push_candidate(name, node.scope_id, node.span.start);
+                    }
+                    SemanticNodeKind::Assignment { variable, .. } => {
+                        push_candidate(variable, node.scope_id, node.span.start);
+                    }
+                    SemanticNodeKind::FunctionDeclaration {
+                        params, body_scope, ..
+                    }
+                    | SemanticNodeKind::ProcedureDeclaration {
+                        params, body_scope, ..
+                    } => {
+                        for param in params {
+                            push_candidate(&param.name, *body_scope, node.span.start);
+                        }
+                    }
+                    SemanticNodeKind::ForLoop { variable, body }
+                    | SemanticNodeKind::ForEachLoop { variable, body } => {
+                        if let Some(loop_scope) = resolve_loop_body_scope(
+                            ir_program,
+                            node.scope_id,
+                            body,
+                            Some(variable.as_str()),
+                            node.span.start,
+                        ) {
+                            push_candidate(variable, loop_scope, node.span.start);
+                        }
+                    }
+                    _ => {}
+                }
             }
         }
     }
-
-    if !collected_from_routine {
-        for node in ir_program.nodes.iter() {
-            match &node.kind {
-                SemanticNodeKind::VariableDeclaration { name, .. } => {
-                    push_candidate(name, node.scope_id, node.span.start);
-                }
-                SemanticNodeKind::Assignment { variable, .. } => {
-                    push_candidate(variable, node.scope_id, node.span.start);
-                }
-                SemanticNodeKind::FunctionDeclaration {
-                    params, body_scope, ..
-                }
-                | SemanticNodeKind::ProcedureDeclaration {
-                    params, body_scope, ..
-                } => {
-                    for param in params {
-                        push_candidate(&param.name, *body_scope, node.span.start);
-                    }
-                }
-                SemanticNodeKind::ForLoop { variable, body }
-                | SemanticNodeKind::ForEachLoop { variable, body } => {
-                    if let Some(loop_scope) = resolve_loop_body_scope(
-                        ir_program,
-                        node.scope_id,
-                        body,
-                        Some(variable.as_str()),
-                        node.span.start,
-                    ) {
-                        push_candidate(variable, loop_scope, node.span.start);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    drop(push_candidate);
 
     // Дополняем кандидатов только implicit symbols из SymbolTable:
     // они могут не иметь отдельных AST/IR-узлов.
@@ -3300,6 +3300,7 @@ mod tests {
         (index, metadata_lookup, resolver, ir_program)
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn completion_labels_non_member(
         content: &str,
         line: u32,

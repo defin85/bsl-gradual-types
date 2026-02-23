@@ -11,7 +11,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 use tower_lsp::jsonrpc::Result as JsonRpcResult;
@@ -1865,8 +1865,8 @@ impl LanguageServer for BslLanguageServer {
             .latest_received_file_versions_v2
             .read()
             .await
-            .iter()
-            .map(|(file_id, _version)| *file_id)
+            .keys()
+            .copied()
             .collect();
 
         if open_file_ids.is_empty() {
@@ -2104,7 +2104,7 @@ impl LanguageServer for BslLanguageServer {
             .and_then(|value| value.parse::<u64>().ok())
             .filter(|value| *value > 0)
         {
-            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
         }
         let mut completion_outcome: Option<&'static str> = None;
         let mut observed_file_version_for_completion: Option<i32> = None;
@@ -2877,61 +2877,60 @@ impl LanguageServer for BslLanguageServer {
                     );
             }
 
-            if member_access_observed
-                && matches!(trigger_mode, "trigger_character" | "invoked")
-                && observed_file_version_for_completion.is_some()
-            {
-                let observed_file_version = observed_file_version_for_completion
-                    .expect("checked completion observed version");
-                let key = (
-                    file_id,
-                    observed_file_version,
-                    position.line,
-                    position.character,
-                );
-                let non_empty = items_count > 0;
-                let labels = completion_labels_fingerprint(&result.response);
-                let parity_result = {
-                    let mut parity = self.completion_parity_state_v2.write().await;
-                    let entry = parity.entry(key).or_default();
-                    if trigger_mode == "trigger_character" {
-                        entry.trigger_character_non_empty = Some(non_empty);
-                        entry.trigger_character_labels = Some(labels.clone());
-                    } else {
-                        entry.invoked_non_empty = Some(non_empty);
-                        entry.invoked_labels = Some(labels.clone());
-                    }
-                    match (
-                        entry.trigger_character_non_empty,
-                        entry.invoked_non_empty,
-                        entry.trigger_character_labels.as_ref(),
-                        entry.invoked_labels.as_ref(),
-                    ) {
-                        (
-                            Some(trigger_non_empty),
-                            Some(invoked_non_empty),
-                            Some(trigger_labels),
-                            Some(invoked_labels),
-                        ) => {
-                            let overlap_ratio =
-                                completion_labels_overlap_ratio(trigger_labels, invoked_labels);
-                            let mismatch = trigger_non_empty != invoked_non_empty
-                                || (trigger_non_empty && invoked_non_empty && overlap_ratio <= 0.0);
-                            parity.remove(&key);
-                            Some((mismatch, overlap_ratio))
+            if member_access_observed && matches!(trigger_mode, "trigger_character" | "invoked") {
+                if let Some(observed_file_version) = observed_file_version_for_completion {
+                    let key = (
+                        file_id,
+                        observed_file_version,
+                        position.line,
+                        position.character,
+                    );
+                    let non_empty = items_count > 0;
+                    let labels = completion_labels_fingerprint(&result.response);
+                    let parity_result = {
+                        let mut parity = self.completion_parity_state_v2.write().await;
+                        let entry = parity.entry(key).or_default();
+                        if trigger_mode == "trigger_character" {
+                            entry.trigger_character_non_empty = Some(non_empty);
+                            entry.trigger_character_labels = Some(labels.clone());
+                        } else {
+                            entry.invoked_non_empty = Some(non_empty);
+                            entry.invoked_labels = Some(labels.clone());
                         }
-                        _ => None,
-                    }
-                };
-                if let Some((parity_drift, overlap_ratio)) = parity_result {
-                    self.coordinator
-                        .record_intellisense_v2_completion_parity_overlap_bucket(
-                            trigger_mode,
-                            completion_parity_overlap_bucket(overlap_ratio),
-                        );
-                    if parity_drift {
+                        match (
+                            entry.trigger_character_non_empty,
+                            entry.invoked_non_empty,
+                            entry.trigger_character_labels.as_ref(),
+                            entry.invoked_labels.as_ref(),
+                        ) {
+                            (
+                                Some(trigger_non_empty),
+                                Some(invoked_non_empty),
+                                Some(trigger_labels),
+                                Some(invoked_labels),
+                            ) => {
+                                let overlap_ratio =
+                                    completion_labels_overlap_ratio(trigger_labels, invoked_labels);
+                                let mismatch = trigger_non_empty != invoked_non_empty
+                                    || (trigger_non_empty
+                                        && invoked_non_empty
+                                        && overlap_ratio <= 0.0);
+                                parity.remove(&key);
+                                Some((mismatch, overlap_ratio))
+                            }
+                            _ => None,
+                        }
+                    };
+                    if let Some((parity_drift, overlap_ratio)) = parity_result {
                         self.coordinator
-                            .record_intellisense_v2_completion_parity_drift(trigger_mode);
+                            .record_intellisense_v2_completion_parity_overlap_bucket(
+                                trigger_mode,
+                                completion_parity_overlap_bucket(overlap_ratio),
+                            );
+                        if parity_drift {
+                            self.coordinator
+                                .record_intellisense_v2_completion_parity_drift(trigger_mode);
+                        }
                     }
                 }
             }

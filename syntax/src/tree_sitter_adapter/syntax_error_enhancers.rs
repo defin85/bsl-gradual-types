@@ -64,10 +64,14 @@ pub(crate) fn normalize_syntax_errors(
     sorted.into_iter().map(|d| d.error).collect()
 }
 
+type UnexpectedCacheKey = (usize, usize, usize);
+type UnexpectedCacheValue = Option<(usize, usize)>;
+type UnexpectedClauseCache = RefCell<HashMap<UnexpectedCacheKey, UnexpectedCacheValue>>;
+
 struct Context<'a> {
     source: &'a str,
     line_index: &'a LineIndex,
-    for_unexpected_cache: RefCell<HashMap<(usize, usize, usize), Option<(usize, usize)>>>,
+    for_unexpected_cache: UnexpectedClauseCache,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

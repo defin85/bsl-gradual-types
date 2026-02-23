@@ -3634,6 +3634,7 @@ fn settings_id_v2(diagnostics_detail_level: DetailLevel) -> SettingsId {
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn prepare_ephemeral_mcp_operation(
     operation: SemanticOperation,
     flow_sensitive: bool,

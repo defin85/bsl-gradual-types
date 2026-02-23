@@ -547,69 +547,68 @@ impl TypeInferencer {
         // Tarjan SCC
         fn scc_tarjan(edges: &[Vec<usize>]) -> Vec<Vec<usize>> {
             let n = edges.len();
-            let mut index: usize = 0;
-            let mut stack: Vec<usize> = Vec::new();
-            let mut on_stack = vec![false; n];
-            let mut indices: Vec<Option<usize>> = vec![None; n];
-            let mut lowlink: Vec<usize> = vec![0; n];
-            let mut sccs: Vec<Vec<usize>> = Vec::new();
+            struct TarjanCtx<'a> {
+                index: usize,
+                stack: Vec<usize>,
+                on_stack: Vec<bool>,
+                indices: Vec<Option<usize>>,
+                lowlink: Vec<usize>,
+                edges: &'a [Vec<usize>],
+                sccs: Vec<Vec<usize>>,
+            }
 
-            fn strongconnect(
-                v: usize,
-                index: &mut usize,
-                stack: &mut Vec<usize>,
-                on_stack: &mut [bool],
-                indices: &mut [Option<usize>],
-                lowlink: &mut [usize],
-                edges: &[Vec<usize>],
-                sccs: &mut Vec<Vec<usize>>,
-            ) {
-                indices[v] = Some(*index);
-                lowlink[v] = *index;
-                *index += 1;
-                stack.push(v);
-                on_stack[v] = true;
+            impl<'a> TarjanCtx<'a> {
+                fn strongconnect(&mut self, v: usize) {
+                    self.indices[v] = Some(self.index);
+                    self.lowlink[v] = self.index;
+                    self.index += 1;
+                    self.stack.push(v);
+                    self.on_stack[v] = true;
 
-                for &w in &edges[v] {
-                    if indices[w].is_none() {
-                        strongconnect(w, index, stack, on_stack, indices, lowlink, edges, sccs);
-                        lowlink[v] = lowlink[v].min(lowlink[w]);
-                    } else if on_stack[w] {
-                        lowlink[v] = lowlink[v].min(indices[w].expect("index set"));
-                    }
-                }
-
-                if lowlink[v] == indices[v].expect("index set") {
-                    let mut component = Vec::new();
-                    loop {
-                        let w = stack.pop().expect("stack pop");
-                        on_stack[w] = false;
-                        component.push(w);
-                        if w == v {
-                            break;
+                    let neighbors = self.edges[v].clone();
+                    for w in neighbors {
+                        if self.indices[w].is_none() {
+                            self.strongconnect(w);
+                            self.lowlink[v] = self.lowlink[v].min(self.lowlink[w]);
+                        } else if self.on_stack[w] {
+                            self.lowlink[v] =
+                                self.lowlink[v].min(self.indices[w].expect("index set"));
                         }
                     }
-                    component.sort_unstable();
-                    sccs.push(component);
+
+                    if self.lowlink[v] == self.indices[v].expect("index set") {
+                        let mut component = Vec::new();
+                        loop {
+                            let w = self.stack.pop().expect("stack pop");
+                            self.on_stack[w] = false;
+                            component.push(w);
+                            if w == v {
+                                break;
+                            }
+                        }
+                        component.sort_unstable();
+                        self.sccs.push(component);
+                    }
                 }
             }
+
+            let mut ctx = TarjanCtx {
+                index: 0,
+                stack: Vec::new(),
+                on_stack: vec![false; n],
+                indices: vec![None; n],
+                lowlink: vec![0; n],
+                edges,
+                sccs: Vec::new(),
+            };
 
             for v in 0..n {
-                if indices[v].is_none() {
-                    strongconnect(
-                        v,
-                        &mut index,
-                        &mut stack,
-                        &mut on_stack,
-                        &mut indices,
-                        &mut lowlink,
-                        edges,
-                        &mut sccs,
-                    );
+                if ctx.indices[v].is_none() {
+                    ctx.strongconnect(v);
                 }
             }
 
-            sccs
+            ctx.sccs
         }
 
         let sccs = scc_tarjan(&edges);
@@ -1346,9 +1345,7 @@ impl TypeInferencer {
         name_lower: &str,
         env: &TypeEnv,
     ) -> Option<TypeResolution> {
-        let Some(module_type) = env.module_type.as_ref() else {
-            return None;
-        };
+        let module_type = env.module_type.as_ref()?;
 
         if !matches!(
             module_type,

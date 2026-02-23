@@ -2199,7 +2199,7 @@ impl SimpleMetrics {
 }
 
 fn contains_allowed(allowed: &[&str], value: &str) -> bool {
-    allowed.iter().any(|candidate| *candidate == value)
+    allowed.contains(&value)
 }
 
 fn sanitize_identifier(value: &str) -> String {

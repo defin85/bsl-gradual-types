@@ -66,13 +66,12 @@ impl CompletionCancellationRegistry {
         }
         CompletionCancellationRegistration {
             request_id,
-            file_id,
-            request_epoch,
             token,
             registry: Arc::clone(self),
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn get(&self, request_id: &str) -> Option<CompletionCancellationEntry> {
         let entries = self
             .entries
@@ -150,25 +149,11 @@ impl CompletionCancellationRegistry {
 #[derive(Debug)]
 pub(crate) struct CompletionCancellationRegistration {
     request_id: String,
-    file_id: V2FileId,
-    request_epoch: u64,
     token: CompletionCancellationToken,
     registry: Arc<CompletionCancellationRegistry>,
 }
 
 impl CompletionCancellationRegistration {
-    pub(crate) fn request_id(&self) -> &str {
-        &self.request_id
-    }
-
-    pub(crate) fn file_id(&self) -> V2FileId {
-        self.file_id
-    }
-
-    pub(crate) fn request_epoch(&self) -> u64 {
-        self.request_epoch
-    }
-
     pub(crate) fn token(&self) -> CompletionCancellationToken {
         self.token.clone()
     }
@@ -195,9 +180,7 @@ mod tests {
         assert_eq!(entry.file_id, V2FileId(7));
         assert_eq!(entry.request_epoch, 3);
         assert!(!entry.token.is_cancelled());
-        assert_eq!(registration.request_id(), "42");
-        assert_eq!(registration.file_id(), V2FileId(7));
-        assert_eq!(registration.request_epoch(), 3);
+        assert!(!registration.token().is_cancelled());
     }
 
     #[test]
@@ -205,13 +188,10 @@ mod tests {
         let registry = Arc::new(CompletionCancellationRegistry::default());
         let first = registry.register_request("42".to_string(), V2FileId(7), 1);
         let first_token = first.token();
-        let second = registry.register_request("42".to_string(), V2FileId(7), 2);
+        let _second = registry.register_request("42".to_string(), V2FileId(7), 2);
 
         assert!(first_token.is_cancelled());
-        assert_eq!(
-            registry.get("42").expect("active entry").request_epoch,
-            second.request_epoch()
-        );
+        assert_eq!(registry.get("42").expect("active entry").request_epoch, 2);
     }
 
     #[test]

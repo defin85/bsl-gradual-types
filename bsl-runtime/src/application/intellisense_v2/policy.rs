@@ -113,7 +113,7 @@ impl CompletionPipelineKnobs {
         let mode = global_runtime_config()
             .get_string(RuntimeKey::IntellisenseV2CompletionMode)
             .map(|value| CompletionMode::parse(&value))
-            .unwrap_or(CompletionMode::Off);
+            .unwrap_or(CompletionMode::On);
         let (canary_percent, _) =
             read_clamped_u8(RuntimeKey::IntellisenseV2CompletionCanaryPercent, 0, 0, 100);
         let (queue_capacity, _) = read_clamped_usize(
@@ -1178,7 +1178,7 @@ mod tests {
         let _capacity_guard = EnvVarGuard::unset("BSL_INTELLISENSE_V2_COMPLETION_QUEUE_CAPACITY");
 
         let knobs = CompletionPipelineKnobs::from_runtime_config();
-        assert_eq!(knobs.mode, CompletionMode::Off);
+        assert_eq!(knobs.mode, CompletionMode::On);
         assert_eq!(knobs.canary_percent, 0);
         assert_eq!(knobs.queue_capacity, 256);
     }

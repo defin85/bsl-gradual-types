@@ -7630,7 +7630,7 @@ mod tests {
         let parity_mismatch_rate = parity_drift_total as f64 / parity_pairs_total.max(1) as f64;
         let completion_mode = bsl_runtime::system::global_runtime_config()
             .get_string(bsl_runtime::system::RuntimeKey::IntellisenseV2CompletionMode)
-            .unwrap_or_else(|| "off".to_string())
+            .unwrap_or_else(|| "on".to_string())
             .to_ascii_lowercase();
         let canary_percent = bsl_runtime::system::global_runtime_config()
             .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2CompletionCanaryPercent)

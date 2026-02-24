@@ -933,7 +933,7 @@ impl RuntimeKey {
                 env: "BSL_INTELLISENSE_V2_COMPLETION_MODE",
                 kind: ValueKind::String,
                 tier: ConfigTier::Stable,
-                default: Some(ConfigValue::String("off".to_string())),
+                default: Some(ConfigValue::String("on".to_string())),
                 mutability: self.mutability(),
             },
             RuntimeKey::IntellisenseV2CompletionCanaryPercent => KeySpec {
@@ -1271,7 +1271,7 @@ mod tests {
 
         assert_eq!(
             store.get_string(RuntimeKey::IntellisenseV2CompletionMode),
-            Some("off".to_string())
+            Some("on".to_string())
         );
         assert_eq!(
             store.get_u64(RuntimeKey::IntellisenseV2CompletionCanaryPercent),

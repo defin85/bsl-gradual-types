@@ -7731,4 +7731,548 @@ mod tests {
 
         drain_task.abort();
     }
+
+    #[derive(Clone, Copy)]
+    struct ScaleAwarePhase {
+        name: &'static str,
+        warmup: u64,
+        iterations: u64,
+    }
+
+    fn read_numeric_metric(value: Option<&serde_json::Value>) -> f64 {
+        value
+            .and_then(|v| v.as_f64().or_else(|| v.as_u64().map(|n| n as f64)))
+            .unwrap_or(0.0)
+    }
+
+    fn read_u64_metric(value: Option<&serde_json::Value>) -> u64 {
+        value.and_then(|v| v.as_u64()).unwrap_or(0)
+    }
+
+    fn histogram_metric_value(
+        histograms: &serde_json::Map<String, serde_json::Value>,
+        primary_key: &str,
+        fallback_key: Option<&str>,
+    ) -> serde_json::Value {
+        let histogram = histograms
+            .get(primary_key)
+            .or_else(|| fallback_key.and_then(|key| histograms.get(key)))
+            .and_then(|value| value.as_object())
+            .unwrap_or_else(|| panic!("missing histogram key {primary_key}"));
+
+        serde_json::json!({
+            "count": read_u64_metric(histogram.get("count")),
+            "p50": read_numeric_metric(histogram.get("p50")),
+            "p95": read_numeric_metric(histogram.get("p95")),
+            "p99": read_numeric_metric(histogram.get("p99")),
+        })
+    }
+
+    fn find_utf16_position_after_marker(source: &str, marker: &str) -> Position {
+        let byte_index = source
+            .find(marker)
+            .unwrap_or_else(|| panic!("marker not found: {marker}"));
+        let prefix = &source[..byte_index + marker.len()];
+        let line = prefix.lines().count().saturating_sub(1) as u32;
+        let last_line = prefix.lines().last().unwrap_or("");
+        let character = last_line.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+        Position::new(line, character)
+    }
+
+    async fn run_scale_aware_profile(
+        profile_name: &str,
+        uri: Url,
+        text: String,
+        position: Position,
+        phases: &[ScaleAwarePhase],
+    ) -> serde_json::Value {
+        let mut profile_report = serde_json::Map::new();
+
+        for phase in phases {
+            let coordinator = Arc::new(SystemCoordinator::new());
+            let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+                Arc::new(std::sync::Mutex::new(None));
+            let (mut service, mut socket) = LspService::build({
+                let coordinator = coordinator.clone();
+                let server_holder = server_holder.clone();
+                move |client| {
+                    let server = BslLanguageServer::new(client, coordinator.clone());
+                    *server_holder.lock().expect("server holder lock") = Some(server.clone());
+                    server
+                }
+            })
+            .finish();
+            let drain_task =
+                tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+            initialize_lsp_service(&mut service).await;
+
+            let did_open = DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "bsl".to_string(),
+                    version: 1,
+                    text: text.clone(),
+                },
+            };
+            let did_open_req = Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish();
+            let did_open_response = service
+                .ready()
+                .await
+                .unwrap()
+                .call(did_open_req)
+                .await
+                .expect("didOpen notification");
+            assert!(did_open_response.is_none(), "didOpen is a notification");
+
+            let server = server_holder
+                .lock()
+                .expect("server holder lock")
+                .clone()
+                .expect("server must be created");
+
+            let total_requests = phase.warmup + phase.iterations;
+            for _ in 0..total_requests {
+                let completion = server
+                    .completion(CompletionParams {
+                        text_document_position: TextDocumentPositionParams {
+                            text_document: TextDocumentIdentifier { uri: uri.clone() },
+                            position,
+                        },
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                        partial_result_params: PartialResultParams::default(),
+                        context: Some(CompletionContext {
+                            trigger_kind: CompletionTriggerKind::INVOKED,
+                            trigger_character: None,
+                        }),
+                    })
+                    .await
+                    .expect("completion request");
+                assert!(
+                    completion.is_some(),
+                    "completion response expected for profile={profile_name}, phase={}",
+                    phase.name
+                );
+            }
+
+            let metrics = coordinator.observability_metrics();
+            let counters = metrics
+                .get("counters")
+                .and_then(|value| value.as_object())
+                .expect("metrics.counters object");
+            let histograms = metrics
+                .get("histograms")
+                .and_then(|value| value.as_object())
+                .expect("metrics.histograms object");
+
+            let completion_total = read_u64_metric(counters.get("completion_total"));
+            let completion_cancelled_total =
+                read_u64_metric(counters.get("intellisense_v2_completion_result_total_cancelled"));
+            let completion_cancelled_rate =
+                completion_cancelled_total as f64 / completion_total.max(1) as f64;
+
+            let phase_report = serde_json::json!({
+                "warmup": phase.warmup,
+                "iterations": phase.iterations,
+                "completion_total": completion_total,
+                "completion_cancelled_total": completion_cancelled_total,
+                "completion_cancelled_rate": completion_cancelled_rate,
+                "metrics": {
+                    "completion_duration_ms": histogram_metric_value(histograms, "completion_duration_ms", None),
+                    "intellisense_v2_wait_for_file_version_completion_ms": histogram_metric_value(
+                        histograms,
+                        "intellisense_v2_wait_for_file_version_completion_ms",
+                        Some("intellisense_v2_wait_for_file_version_other_ms")
+                    ),
+                    "intellisense_v2_snapshot_completion_ms": histogram_metric_value(
+                        histograms,
+                        "intellisense_v2_snapshot_completion_ms",
+                        Some("intellisense_v2_snapshot_other_ms")
+                    ),
+                    "intellisense_v2_ir_query_completion_ms": histogram_metric_value(
+                        histograms,
+                        "intellisense_v2_ir_query_completion_ms",
+                        Some("intellisense_v2_ir_query_other_ms")
+                    ),
+                }
+            });
+            profile_report.insert(phase.name.to_string(), phase_report);
+
+            drain_task.abort();
+        }
+
+        serde_json::Value::Object(profile_report)
+    }
+
+    fn get_report_metric_f64(report: &serde_json::Value, path: &[&str]) -> Result<f64, String> {
+        let mut cursor = report;
+        for segment in path {
+            cursor = cursor
+                .get(*segment)
+                .ok_or_else(|| format!("missing field '{}'", path.join(".")))?;
+        }
+        cursor
+            .as_f64()
+            .or_else(|| cursor.as_u64().map(|n| n as f64))
+            .ok_or_else(|| format!("field '{}' must be numeric", path.join(".")))
+    }
+
+    fn get_report_u64(report: &serde_json::Value, path: &[&str]) -> Result<u64, String> {
+        let mut cursor = report;
+        for segment in path {
+            cursor = cursor
+                .get(*segment)
+                .ok_or_else(|| format!("missing field '{}'", path.join(".")))?;
+        }
+        cursor
+            .as_u64()
+            .ok_or_else(|| format!("field '{}' must be u64", path.join(".")))
+    }
+
+    fn evaluate_scale_aware_gate(
+        current_report: &serde_json::Value,
+        baseline_report: &serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        const LARGE_WAIT_RATIO_MAX: f64 = 0.60;
+        const LARGE_COMPLETION_RATIO_MAX: f64 = 0.75;
+        const SMALL_COMPLETION_RATIO_MAX: f64 = 1.25;
+        const MAX_CANCELLED_RATE: f64 = 0.10;
+        const MIN_COMPLETION_TOTAL: u64 = 50;
+
+        let large_current_wait = get_report_metric_f64(
+            current_report,
+            &[
+                "profiles",
+                "large",
+                "warm",
+                "metrics",
+                "intellisense_v2_wait_for_file_version_completion_ms",
+                "p95",
+            ],
+        )?;
+        let large_current_completion = get_report_metric_f64(
+            current_report,
+            &[
+                "profiles",
+                "large",
+                "warm",
+                "metrics",
+                "completion_duration_ms",
+                "p95",
+            ],
+        )?;
+        let small_current_completion = get_report_metric_f64(
+            current_report,
+            &[
+                "profiles",
+                "small",
+                "warm",
+                "metrics",
+                "completion_duration_ms",
+                "p95",
+            ],
+        )?;
+
+        let large_baseline_wait = get_report_metric_f64(
+            baseline_report,
+            &[
+                "profiles",
+                "large",
+                "warm",
+                "metrics",
+                "intellisense_v2_wait_for_file_version_completion_ms",
+                "p95",
+            ],
+        )?;
+        let large_baseline_completion = get_report_metric_f64(
+            baseline_report,
+            &[
+                "profiles",
+                "large",
+                "warm",
+                "metrics",
+                "completion_duration_ms",
+                "p95",
+            ],
+        )?;
+        let small_baseline_completion = get_report_metric_f64(
+            baseline_report,
+            &[
+                "profiles",
+                "small",
+                "warm",
+                "metrics",
+                "completion_duration_ms",
+                "p95",
+            ],
+        )?;
+
+        let large_completion_total = get_report_u64(
+            current_report,
+            &["profiles", "large", "warm", "completion_total"],
+        )?;
+        let small_completion_total = get_report_u64(
+            current_report,
+            &["profiles", "small", "warm", "completion_total"],
+        )?;
+        let large_cancelled_total = get_report_u64(
+            current_report,
+            &["profiles", "large", "warm", "completion_cancelled_total"],
+        )?;
+        let small_cancelled_total = get_report_u64(
+            current_report,
+            &["profiles", "small", "warm", "completion_cancelled_total"],
+        )?;
+
+        let large_wait_ratio = large_current_wait / large_baseline_wait.max(0.000_001);
+        let large_completion_ratio =
+            large_current_completion / large_baseline_completion.max(0.000_001);
+        let small_completion_ratio =
+            small_current_completion / small_baseline_completion.max(0.000_001);
+
+        let large_cancelled_rate =
+            large_cancelled_total as f64 / large_completion_total.max(1) as f64;
+        let small_cancelled_rate =
+            small_cancelled_total as f64 / small_completion_total.max(1) as f64;
+
+        let pass = large_wait_ratio <= LARGE_WAIT_RATIO_MAX
+            && large_completion_ratio <= LARGE_COMPLETION_RATIO_MAX
+            && small_completion_ratio <= SMALL_COMPLETION_RATIO_MAX
+            && large_cancelled_rate <= MAX_CANCELLED_RATE
+            && small_cancelled_rate <= MAX_CANCELLED_RATE
+            && large_completion_total >= MIN_COMPLETION_TOTAL
+            && small_completion_total >= MIN_COMPLETION_TOTAL;
+
+        Ok(serde_json::json!({
+            "pass": pass,
+            "ratios": {
+                "large_wait_ratio": large_wait_ratio,
+                "large_completion_ratio": large_completion_ratio,
+                "small_completion_ratio": small_completion_ratio
+            },
+            "rates": {
+                "large_completion_cancelled_rate": large_cancelled_rate,
+                "small_completion_cancelled_rate": small_cancelled_rate
+            },
+            "counts": {
+                "large_completion_total": large_completion_total,
+                "small_completion_total": small_completion_total
+            },
+            "thresholds": {
+                "large_wait_ratio_max": LARGE_WAIT_RATIO_MAX,
+                "large_completion_ratio_max": LARGE_COMPLETION_RATIO_MAX,
+                "small_completion_ratio_max": SMALL_COMPLETION_RATIO_MAX,
+                "completion_cancelled_rate_max": MAX_CANCELLED_RATE,
+                "min_completion_total": MIN_COMPLETION_TOTAL
+            }
+        }))
+    }
+
+    #[tokio::test]
+    async fn p31_scale_aware_large_small_completion_gate_live() {
+        const CHANGE_ID: &str = "add-large-module-completion-acceleration-gate";
+        let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
+
+        let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("workspace root")
+            .to_path_buf();
+        let conf_big_root = [
+            workspace_root.join("examples").join("conf_big"),
+            std::path::PathBuf::from("examples/conf_big"),
+            std::path::PathBuf::from("../examples/conf_big"),
+        ]
+        .into_iter()
+        .find(|path| path.join("Configuration.xml").exists());
+
+        let Some(conf_big_root) = conf_big_root else {
+            if allow_fixture_skip {
+                eprintln!(
+                    "skipping p31 scale-aware gate: examples/conf_big fixture is missing and BSL_TEST_ALLOW_MISSING_CONF_BIG is set"
+                );
+                return;
+            }
+            panic!(
+                "examples/conf_big fixture is missing; set BSL_TEST_ALLOW_MISSING_CONF_BIG=1 to skip explicitly"
+            );
+        };
+
+        let large_module_rel = std::path::PathBuf::from("Documents")
+            .join("РеализацияТоваровУслуг")
+            .join("Forms")
+            .join("ФормаДокументаОбщая")
+            .join("Ext")
+            .join("Form")
+            .join("Module.bsl");
+        let large_module_path = conf_big_root.join(&large_module_rel);
+        if !large_module_path.exists() {
+            if allow_fixture_skip {
+                eprintln!(
+                    "skipping p31 scale-aware gate: conf_big module fixture is missing and BSL_TEST_ALLOW_MISSING_CONF_BIG is set: {}",
+                    large_module_path.display()
+                );
+                return;
+            }
+            panic!(
+                "conf_big module fixture is missing: {}; set BSL_TEST_ALLOW_MISSING_CONF_BIG=1 to skip explicitly",
+                large_module_path.display()
+            );
+        }
+
+        let small_module_path = workspace_root.join("examples").join("test_lsp.bsl");
+        assert!(
+            small_module_path.exists(),
+            "small module fixture not found: {}",
+            small_module_path.display()
+        );
+
+        let large_text = std::fs::read_to_string(&large_module_path)
+            .expect("read conf_big module text for p31 scale-aware gate");
+        let small_text = std::fs::read_to_string(&small_module_path)
+            .expect("read small module text for p31 scale-aware gate");
+
+        let large_position = find_utf16_position_after_marker(&large_text, "Объект.");
+        let small_position = find_utf16_position_after_marker(&small_text, "Arr.");
+        let phases = [
+            ScaleAwarePhase {
+                name: "start",
+                warmup: 0,
+                iterations: 1,
+            },
+            ScaleAwarePhase {
+                name: "cold",
+                warmup: 0,
+                iterations: 5,
+            },
+            ScaleAwarePhase {
+                name: "warm",
+                warmup: 5,
+                iterations: 50,
+            },
+        ];
+
+        let large_profile = run_scale_aware_profile(
+            "large",
+            Url::parse("file:///p31_scale_large_module.bsl").expect("large uri"),
+            large_text,
+            large_position,
+            &phases,
+        )
+        .await;
+        let small_profile = run_scale_aware_profile(
+            "small",
+            Url::parse("file:///p31_scale_small_module.bsl").expect("small uri"),
+            small_text,
+            small_position,
+            &phases,
+        )
+        .await;
+
+        let mut report = serde_json::json!({
+            "change_id": CHANGE_ID,
+            "profile": "p31_scale_aware_large_small_completion_gate_live",
+            "schema_version": 1,
+            "phases": phases.iter().map(|phase| {
+                serde_json::json!({
+                    "name": phase.name,
+                    "warmup": phase.warmup,
+                    "iterations": phase.iterations
+                })
+            }).collect::<Vec<_>>(),
+            "profiles": {
+                "large": large_profile,
+                "small": small_profile
+            }
+        });
+
+        let baseline_path = std::env::var("BSL_V2_SCALE_AWARE_GATE_BASELINE")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests")
+                    .join("perf")
+                    .join("baselines")
+                    .join("add-large-module-completion-acceleration-gate.json")
+            });
+        let enforce_gate = std::env::var("BSL_V2_SCALE_AWARE_GATE_ENFORCE")
+            .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+
+        if baseline_path.exists() {
+            let baseline_raw =
+                std::fs::read_to_string(&baseline_path).expect("read scale-aware baseline file");
+            let baseline_report: serde_json::Value =
+                serde_json::from_str(&baseline_raw).expect("parse scale-aware baseline json");
+            let gate = evaluate_scale_aware_gate(&report, &baseline_report)
+                .expect("evaluate scale-aware large/small gate");
+            report["baseline"] = serde_json::json!({
+                "path": baseline_path,
+                "present": true
+            });
+            report["gate"] = gate.clone();
+
+            if enforce_gate {
+                let pass = gate
+                    .get("pass")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false);
+                assert!(
+                    pass,
+                    "p31 scale-aware gate failed in enforce mode: {}",
+                    serde_json::to_string_pretty(&gate)
+                        .unwrap_or_else(|_| "<gate json>".to_string())
+                );
+            }
+        } else {
+            report["baseline"] = serde_json::json!({
+                "path": baseline_path,
+                "present": false
+            });
+            report["gate"] = serde_json::json!({
+                "evaluated": false,
+                "reason": "baseline_missing"
+            });
+            if enforce_gate {
+                panic!(
+                    "BSL_V2_SCALE_AWARE_GATE_ENFORCE is enabled, but baseline is missing: {}",
+                    baseline_path.display()
+                );
+            }
+        }
+
+        let report_path = std::env::var("BSL_V2_SCALE_AWARE_GATE_REPORT")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests")
+                    .join("perf")
+                    .join("reports")
+                    .join(format!("{CHANGE_ID}-live.json"))
+            });
+        if let Some(parent) = report_path.parent() {
+            std::fs::create_dir_all(parent)
+                .expect("failed to create directory for p31 scale-aware report");
+        }
+        std::fs::write(
+            &report_path,
+            serde_json::to_string_pretty(&report).expect("serialize p31 scale-aware report"),
+        )
+        .expect("write p31 scale-aware report");
+        println!("p31_scale_aware_gate_report={}", report_path.display());
+
+        let large_warm_total =
+            get_report_u64(&report, &["profiles", "large", "warm", "completion_total"])
+                .expect("large warm completion_total");
+        let small_warm_total =
+            get_report_u64(&report, &["profiles", "small", "warm", "completion_total"])
+                .expect("small warm completion_total");
+        assert!(
+            large_warm_total >= 50 && small_warm_total >= 50,
+            "expected >=50 warm completion samples for both profiles, got large={} small={}",
+            large_warm_total,
+            small_warm_total
+        );
+    }
 }

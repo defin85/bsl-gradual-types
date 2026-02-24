@@ -1,0 +1,469 @@
+{
+  "baseline": {
+    "path": "/home/egor/code/bsl-gradual-types/backend/tests/perf/baselines/add-large-module-completion-acceleration-gate.json",
+    "present": true
+  },
+  "change_id": "add-large-module-completion-acceleration-gate",
+  "churn": {
+    "every": 1,
+    "mode": "large_warm"
+  },
+  "gate": {
+    "counts": {
+      "large_completion_total": 55,
+      "small_completion_total": 55
+    },
+    "dominant_stage": {
+      "large_warm": {
+        "candidates_p95_ms": {
+          "ir_query_completion": 37768.0,
+          "runtime_queue_wait_interactive": 188.0,
+          "semantic_diagnostics_query": 261.0,
+          "snapshot_completion": 90.0,
+          "syntax_diagnostics_query": 37518.0,
+          "wait_for_file_version_completion": 121.0
+        },
+        "p95_ms": 37768.0,
+        "stage": "ir_query_completion"
+      },
+      "small_warm": {
+        "candidates_p95_ms": {
+          "ir_query_completion": 0.0,
+          "runtime_queue_wait_interactive": 1.0,
+          "semantic_diagnostics_query": 0.0,
+          "snapshot_completion": 0.0,
+          "syntax_diagnostics_query": 2.0,
+          "wait_for_file_version_completion": 2.0
+        },
+        "p95_ms": 2.0,
+        "stage": "wait_for_file_version_completion"
+      }
+    },
+    "pass": false,
+    "rates": {
+      "large_completion_cancelled_rate": 0.0,
+      "small_completion_cancelled_rate": 0.0
+    },
+    "ratios": {
+      "large_completion_ratio": 9.714833759590793,
+      "large_wait_ratio": 0.040013227513227514,
+      "small_completion_ratio": 0.013986013986013986
+    },
+    "thresholds": {
+      "completion_cancelled_rate_max": 0.1,
+      "large_completion_ratio_max": 0.75,
+      "large_wait_ratio_max": 0.6,
+      "min_completion_total": 50,
+      "small_completion_ratio_max": 1.25
+    }
+  },
+  "phases": [
+    {
+      "iterations": 1,
+      "name": "start",
+      "warmup": 0
+    },
+    {
+      "iterations": 5,
+      "name": "cold",
+      "warmup": 0
+    },
+    {
+      "iterations": 50,
+      "name": "warm",
+      "warmup": 5
+    }
+  ],
+  "profile": "p31_scale_aware_large_small_completion_gate_live",
+  "profiles": {
+    "large": {
+      "cold": {
+        "churn_edits_applied": 0,
+        "completion_cancelled_rate": 0.0,
+        "completion_cancelled_total": 0,
+        "completion_total": 5,
+        "dominant_stage": {
+          "candidates_p95_ms": {
+            "ir_query_completion": 36254.0,
+            "runtime_queue_wait_interactive": 1.0,
+            "semantic_diagnostics_query": 0.0,
+            "snapshot_completion": 0.0,
+            "syntax_diagnostics_query": 36234.0,
+            "wait_for_file_version_completion": 1.0
+          },
+          "p95_ms": 36254.0,
+          "stage": "ir_query_completion"
+        },
+        "iterations": 5,
+        "metrics": {
+          "completion_duration_ms": {
+            "count": 5,
+            "p50": 15.0,
+            "p95": 36334.0,
+            "p99": 36334.0
+          },
+          "intellisense_v2_ir_query_completion_ms": {
+            "count": 5,
+            "p50": 0.0,
+            "p95": 36254.0,
+            "p99": 36254.0
+          },
+          "intellisense_v2_runtime_queue_wait_interactive_ms": {
+            "count": 15,
+            "p50": 0.0,
+            "p95": 1.0,
+            "p99": 1.0
+          },
+          "intellisense_v2_semantic_diagnostics_query_ms": {
+            "count": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0
+          },
+          "intellisense_v2_snapshot_completion_ms": {
+            "count": 5,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0
+          },
+          "intellisense_v2_syntax_diagnostics_query_ms": {
+            "count": 1,
+            "p50": 36234.0,
+            "p95": 36234.0,
+            "p99": 36234.0
+          },
+          "intellisense_v2_wait_for_file_version_completion_ms": {
+            "count": 5,
+            "p50": 1.0,
+            "p95": 1.0,
+            "p99": 1.0
+          }
+        },
+        "warmup": 0
+      },
+      "start": {
+        "churn_edits_applied": 0,
+        "completion_cancelled_rate": 0.0,
+        "completion_cancelled_total": 0,
+        "completion_total": 1,
+        "dominant_stage": {
+          "candidates_p95_ms": {
+            "ir_query_completion": 36013.0,
+            "runtime_queue_wait_interactive": 0.0,
+            "semantic_diagnostics_query": 0.0,
+            "snapshot_completion": 0.0,
+            "syntax_diagnostics_query": 36003.0,
+            "wait_for_file_version_completion": 0.0
+          },
+          "p95_ms": 36013.0,
+          "stage": "ir_query_completion"
+        },
+        "iterations": 1,
+        "metrics": {
+          "completion_duration_ms": {
+            "count": 1,
+            "p50": 36049.0,
+            "p95": 36049.0,
+            "p99": 36049.0
+          },
+          "intellisense_v2_ir_query_completion_ms": {
+            "count": 1,
+            "p50": 36013.0,
+            "p95": 36013.0,
+            "p99": 36013.0
+          },
+          "intellisense_v2_runtime_queue_wait_interactive_ms": {
+            "count": 3,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0
+          },
+          "intellisense_v2_semantic_diagnostics_query_ms": {
+            "count": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0
+          },
+          "intellisense_v2_snapshot_completion_ms": {
+            "count": 1,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0
+          },
+          "intellisense_v2_syntax_diagnostics_query_ms": {
+            "count": 1,
+            "p50": 36003.0,
+            "p95": 36003.0,
+            "p99": 36003.0
+          },
+          "intellisense_v2_wait_for_file_version_completion_ms": {
+            "count": 1,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0
+          }
+        },
+        "warmup": 0
+      },
+      "warm": {
+        "churn_edits_applied": 50,
+        "completion_cancelled_rate": 0.0,
+        "completion_cancelled_total": 0,
+        "completion_total": 55,
+        "dominant_stage": {
+          "candidates_p95_ms": {
+            "ir_query_completion": 37768.0,
+            "runtime_queue_wait_interactive": 188.0,
+            "semantic_diagnostics_query": 261.0,
+            "snapshot_completion": 90.0,
+            "syntax_diagnostics_query": 37518.0,
+            "wait_for_file_version_completion": 121.0
+          },
+          "p95_ms": 37768.0,
+          "stage": "ir_query_completion"
+        },
+        "iterations": 50,
+        "metrics": {
+          "completion_duration_ms": {
+            "count": 55,
+            "p50": 35573.0,
+            "p95": 37985.0,
+            "p99": 38081.0
+          },
+          "intellisense_v2_ir_query_completion_ms": {
+            "count": 55,
+            "p50": 35358.0,
+            "p95": 37768.0,
+            "p99": 37825.0
+          },
+          "intellisense_v2_runtime_queue_wait_interactive_ms": {
+            "count": 165,
+            "p50": 0.0,
+            "p95": 188.0,
+            "p99": 201.0
+          },
+          "intellisense_v2_semantic_diagnostics_query_ms": {
+            "count": 50,
+            "p50": 225.0,
+            "p95": 261.0,
+            "p99": 357.0
+          },
+          "intellisense_v2_snapshot_completion_ms": {
+            "count": 55,
+            "p50": 62.0,
+            "p95": 90.0,
+            "p99": 93.0
+          },
+          "intellisense_v2_syntax_diagnostics_query_ms": {
+            "count": 51,
+            "p50": 35306.0,
+            "p95": 37518.0,
+            "p99": 42870.0
+          },
+          "intellisense_v2_wait_for_file_version_completion_ms": {
+            "count": 55,
+            "p50": 121.0,
+            "p95": 121.0,
+            "p99": 121.0
+          }
+        },
+        "warmup": 5
+      }
+    },
+    "small": {
+      "cold": {
+        "churn_edits_applied": 0,
+        "completion_cancelled_rate": 0.0,
+        "completion_cancelled_total": 0,
+        "completion_total": 5,
+        "dominant_stage": {
+          "candidates_p95_ms": {
+            "ir_query_completion": 2.0,
+            "runtime_queue_wait_interactive": 0.0,
+            "semantic_diagnostics_query": 0.0,
+            "snapshot_completion": 0.0,
+            "syntax_diagnostics_query": 2.0,
+            "wait_for_file_version_completion": 0.0
+          },
+          "p95_ms": 2.0,
+          "stage": "ir_query_completion"
+        },
+        "iterations": 5,
+        "metrics": {
+          "completion_duration_ms": {
+            "count": 5,
+            "p50": 1.0,
+            "p95": 5.0,
+            "p99": 5.0
+          },
+          "intellisense_v2_ir_query_completion_ms": {
+            "count": 5,
+            "p50": 0.0,
+            "p95": 2.0,
+            "p99": 2.0
+          },
+          "intellisense_v2_runtime_queue_wait_interactive_ms": {
+            "count": 15,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0
+          },
+          "intellisense_v2_semantic_diagnostics_query_ms": {
+            "count": 1,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0
+          },
+          "intellisense_v2_snapshot_completion_ms": {
+            "count": 5,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0
+          },
+          "intellisense_v2_syntax_diagnostics_query_ms": {
+            "count": 1,
+            "p50": 2.0,
+            "p95": 2.0,
+            "p99": 2.0
+          },
+          "intellisense_v2_wait_for_file_version_completion_ms": {
+            "count": 5,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0
+          }
+        },
+        "warmup": 0
+      },
+      "start": {
+        "churn_edits_applied": 0,
+        "completion_cancelled_rate": 0.0,
+        "completion_cancelled_total": 0,
+        "completion_total": 1,
+        "dominant_stage": {
+          "candidates_p95_ms": {
+            "ir_query_completion": 2.0,
+            "runtime_queue_wait_interactive": 0.0,
+            "semantic_diagnostics_query": 0.0,
+            "snapshot_completion": 0.0,
+            "syntax_diagnostics_query": 2.0,
+            "wait_for_file_version_completion": 0.0
+          },
+          "p95_ms": 2.0,
+          "stage": "ir_query_completion"
+        },
+        "iterations": 1,
+        "metrics": {
+          "completion_duration_ms": {
+            "count": 1,
+            "p50": 6.0,
+            "p95": 6.0,
+            "p99": 6.0
+          },
+          "intellisense_v2_ir_query_completion_ms": {
+            "count": 1,
+            "p50": 2.0,
+            "p95": 2.0,
+            "p99": 2.0
+          },
+          "intellisense_v2_runtime_queue_wait_interactive_ms": {
+            "count": 3,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0
+          },
+          "intellisense_v2_semantic_diagnostics_query_ms": {
+            "count": 1,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0
+          },
+          "intellisense_v2_snapshot_completion_ms": {
+            "count": 1,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0
+          },
+          "intellisense_v2_syntax_diagnostics_query_ms": {
+            "count": 1,
+            "p50": 2.0,
+            "p95": 2.0,
+            "p99": 2.0
+          },
+          "intellisense_v2_wait_for_file_version_completion_ms": {
+            "count": 1,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0
+          }
+        },
+        "warmup": 0
+      },
+      "warm": {
+        "churn_edits_applied": 0,
+        "completion_cancelled_rate": 0.0,
+        "completion_cancelled_total": 0,
+        "completion_total": 55,
+        "dominant_stage": {
+          "candidates_p95_ms": {
+            "ir_query_completion": 0.0,
+            "runtime_queue_wait_interactive": 1.0,
+            "semantic_diagnostics_query": 0.0,
+            "snapshot_completion": 0.0,
+            "syntax_diagnostics_query": 2.0,
+            "wait_for_file_version_completion": 2.0
+          },
+          "p95_ms": 2.0,
+          "stage": "wait_for_file_version_completion"
+        },
+        "iterations": 50,
+        "metrics": {
+          "completion_duration_ms": {
+            "count": 55,
+            "p50": 2.0,
+            "p95": 4.0,
+            "p99": 5.0
+          },
+          "intellisense_v2_ir_query_completion_ms": {
+            "count": 55,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0
+          },
+          "intellisense_v2_runtime_queue_wait_interactive_ms": {
+            "count": 165,
+            "p50": 0.0,
+            "p95": 1.0,
+            "p99": 2.0
+          },
+          "intellisense_v2_semantic_diagnostics_query_ms": {
+            "count": 1,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0
+          },
+          "intellisense_v2_snapshot_completion_ms": {
+            "count": 55,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0
+          },
+          "intellisense_v2_syntax_diagnostics_query_ms": {
+            "count": 1,
+            "p50": 2.0,
+            "p95": 2.0,
+            "p99": 2.0
+          },
+          "intellisense_v2_wait_for_file_version_completion_ms": {
+            "count": 55,
+            "p50": 0.0,
+            "p95": 2.0,
+            "p99": 2.0
+          }
+        },
+        "warmup": 5
+      }
+    }
+  },
+  "schema_version": 1
+}

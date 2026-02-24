@@ -560,12 +560,22 @@ impl BslLanguageServer {
             }
             _ => bsl_runtime::application::CancellationPolicy::RespectClientAbort,
         };
+        let completion_large_churn_active = matches!(
+            operation,
+            bsl_runtime::application::SemanticOperation::Completion
+        ) && self
+            .scale_aware_churn_state_v2
+            .read()
+            .await
+            .get(&file_id)
+            .is_some_and(|state| state.large_churn_active);
         let expected_deps_id = self.last_deps_id_v2.read().await.clone();
 
         bsl_runtime::application::ExecutionContext {
             origin: bsl_runtime::application::ObservabilityOrigin::Lsp,
             operation,
             completion_mode,
+            completion_large_churn_active,
             file_id,
             min_file_version,
             expected_deps_id,
@@ -4501,6 +4511,224 @@ mod tests {
         assert!(
             stale_fallback_total > 0,
             "expected stale fallback counter to be incremented"
+        );
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
+    async fn p7_large_churn_budget_timeout_serves_cached_stale_fastpath() {
+        const FILLER_LINES: usize = 2200;
+        let mut fixture = String::new();
+        fixture.push_str("Процедура Тест()\n");
+        fixture.push_str("    ЛокМассив = Новый Массив;\n");
+        for idx in 0..FILLER_LINES {
+            fixture.push_str(&format!("    // filler {idx}\n"));
+        }
+        fixture.push_str("    ЛокМассив.\n");
+        fixture.push_str("КонецПроцедуры\n");
+
+        let completion_line = (2 + FILLER_LINES) as u32;
+        let completion_character = "    ЛокМассив."
+            .chars()
+            .map(|ch| ch.len_utf16())
+            .sum::<usize>() as u32;
+
+        let completion_items_count = |response: &CompletionResponse| match response {
+            CompletionResponse::Array(items) => items.len(),
+            CompletionResponse::List(list) => list.items.len(),
+        };
+
+        let coordinator = Arc::new(SystemCoordinator::new());
+        let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+            Arc::new(std::sync::Mutex::new(None));
+
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            let server_holder = server_holder.clone();
+            move |client| {
+                let server = BslLanguageServer::new(client, coordinator.clone());
+                *server_holder.lock().expect("server holder lock") = Some(server.clone());
+                server
+            }
+        })
+        .finish();
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        initialize_lsp_service(&mut service).await;
+
+        let uri = Url::parse("file:///test_p7_large_churn_stale_fastpath.bsl").expect("test uri");
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: fixture.clone(),
+            },
+        };
+        let did_open_req = Request::build("textDocument/didOpen")
+            .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+            .finish();
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+
+        for version in 2..=7_i32 {
+            let did_change = DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: fixture.clone(),
+                }],
+            };
+            let did_change_req = Request::build("textDocument/didChange")
+                .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+                .finish();
+            let did_change_response = service
+                .ready()
+                .await
+                .unwrap()
+                .call(did_change_req)
+                .await
+                .expect("didChange notification");
+            assert!(did_change_response.is_none(), "didChange is a notification");
+        }
+
+        let server = server_holder
+            .lock()
+            .expect("server holder lock")
+            .clone()
+            .expect("server must be created");
+        server
+            .deps_update_v2("p7_large_churn_stale_fastpath_setup", None, None)
+            .await;
+        server.sync_v2_globals().await;
+
+        let file_id = server.get_or_create_file_id_v2(&uri).await;
+        let large_churn_active = server
+            .scale_aware_churn_state_v2
+            .read()
+            .await
+            .get(&file_id)
+            .is_some_and(|state| state.large_churn_active);
+        assert!(
+            large_churn_active,
+            "expected large+churn state to be active after burst didChange on large document"
+        );
+
+        let warm_completion = server
+            .completion(CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: Position::new(completion_line, completion_character),
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: Some(CompletionContext {
+                    trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+                    trigger_character: Some(".".to_string()),
+                }),
+            })
+            .await
+            .expect("warm completion request")
+            .expect("warm completion response");
+        assert!(
+            completion_items_count(&warm_completion) > 0,
+            "warm completion should prime stale fallback cache"
+        );
+
+        {
+            let mut versions = server.latest_received_file_versions_v2.write().await;
+            versions.insert(file_id, 8);
+        }
+
+        let wait_budget_ms = bsl_runtime::system::global_runtime_config()
+            .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
+            .unwrap_or(120);
+        let started = Instant::now();
+        let stale_completion = server
+            .completion(CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: Position::new(completion_line, completion_character),
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: Some(CompletionContext {
+                    trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+                    trigger_character: Some(".".to_string()),
+                }),
+            })
+            .await
+            .expect("stale completion request")
+            .expect("stale completion response");
+        let elapsed = started.elapsed();
+
+        match stale_completion {
+            CompletionResponse::List(list) => {
+                assert!(
+                    list.is_incomplete,
+                    "stale fastpath response must be marked as incomplete"
+                );
+                assert!(
+                    !list.items.is_empty(),
+                    "stale fastpath should serve cached non-empty completion items"
+                );
+            }
+            CompletionResponse::Array(items) => {
+                assert!(
+                    !items.is_empty(),
+                    "stale fastpath should not degrade to empty completion array"
+                );
+                panic!("stale fastpath response should use CompletionList");
+            }
+        }
+        assert!(
+            elapsed <= Duration::from_millis(wait_budget_ms.saturating_add(300)),
+            "stale fastpath should remain bounded near wait budget (elapsed={elapsed:?}, budget_ms={wait_budget_ms})"
+        );
+        let refresh_epoch = tokio::time::timeout(Duration::from_millis(700), async {
+            loop {
+                let epoch = server
+                    .completion_dispatcher_v2
+                    .latest_request_epoch(file_id)
+                    .await
+                    .unwrap_or(0);
+                if epoch >= 3 {
+                    break epoch;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("background refresh should enqueue follow-up completion request");
+        assert!(
+            refresh_epoch >= 3,
+            "expected background refresh to advance completion request epoch, got {}",
+            refresh_epoch
+        );
+
+        let metrics = coordinator.observability_metrics();
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        let stale_fallback_total = counters
+            .get("intellisense_v2_completion_stale_fallback_total")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0);
+        assert!(
+            stale_fallback_total > 0,
+            "expected stale fallback counter to increment under churn fastpath"
         );
 
         drain_task.abort();
@@ -8649,11 +8877,25 @@ mod tests {
                     "intellisense_v2_semantic_diagnostics_query_ms",
                     None
                 ),
+                "intellisense_v2_interactive_wait_budget_exhausted_total": read_u64_metric(
+                    counters.get("intellisense_v2_interactive_wait_budget_exhausted_total")
+                ),
+                "intellisense_v2_interactive_stale_served_total": read_u64_metric(
+                    counters.get("intellisense_v2_interactive_stale_served_total")
+                ),
+                "intellisense_v2_completion_stale_fallback_total": read_u64_metric(
+                    counters.get("intellisense_v2_completion_stale_fallback_total")
+                ),
+                "intellisense_v2_completion_fallback_unavailable_total": read_u64_metric(
+                    counters.get("intellisense_v2_completion_fallback_unavailable_total")
+                ),
             });
             let dominant_stage = dominant_stage_from_metrics(&phase_metrics);
             let phase_report = serde_json::json!({
                 "warmup": phase.warmup,
                 "iterations": phase.iterations,
+                "profile_size": profile_name,
+                "churn_mode": churn_mode.as_str(),
                 "completion_total": completion_total,
                 "completion_cancelled_total": completion_cancelled_total,
                 "completion_cancelled_rate": completion_cancelled_rate,
@@ -8703,6 +8945,7 @@ mod tests {
         const SMALL_COMPLETION_RATIO_MAX: f64 = 1.25;
         const MAX_CANCELLED_RATE: f64 = 0.10;
         const MIN_COMPLETION_TOTAL: u64 = 50;
+        const MAX_STALE_FALLBACK_UNAVAILABLE_PER_BUDGET_EXHAUSTED: f64 = 0.20;
 
         let large_current_wait = get_report_metric_f64(
             current_report,
@@ -8799,6 +9042,87 @@ mod tests {
             large_cancelled_total as f64 / large_completion_total.max(1) as f64;
         let small_cancelled_rate =
             small_cancelled_total as f64 / small_completion_total.max(1) as f64;
+
+        let phase_counter = |profile: &str, phase: &str, metric: &str| -> Result<u64, String> {
+            get_report_u64(
+                current_report,
+                &["profiles", profile, phase, "metrics", metric],
+            )
+        };
+
+        let large_start_stale_fallback_total = phase_counter(
+            "large",
+            "start",
+            "intellisense_v2_completion_stale_fallback_total",
+        )?;
+        let large_cold_stale_fallback_total = phase_counter(
+            "large",
+            "cold",
+            "intellisense_v2_completion_stale_fallback_total",
+        )?;
+        let large_warm_stale_fallback_total = phase_counter(
+            "large",
+            "warm",
+            "intellisense_v2_completion_stale_fallback_total",
+        )?;
+        let small_start_stale_fallback_total = phase_counter(
+            "small",
+            "start",
+            "intellisense_v2_completion_stale_fallback_total",
+        )?;
+        let small_cold_stale_fallback_total = phase_counter(
+            "small",
+            "cold",
+            "intellisense_v2_completion_stale_fallback_total",
+        )?;
+        let small_warm_stale_fallback_total = phase_counter(
+            "small",
+            "warm",
+            "intellisense_v2_completion_stale_fallback_total",
+        )?;
+
+        let large_warm_budget_exhausted_total = phase_counter(
+            "large",
+            "warm",
+            "intellisense_v2_interactive_wait_budget_exhausted_total",
+        )?;
+        let small_warm_budget_exhausted_total = phase_counter(
+            "small",
+            "warm",
+            "intellisense_v2_interactive_wait_budget_exhausted_total",
+        )?;
+        let large_warm_fallback_unavailable_total = phase_counter(
+            "large",
+            "warm",
+            "intellisense_v2_completion_fallback_unavailable_total",
+        )?;
+        let small_warm_fallback_unavailable_total = phase_counter(
+            "small",
+            "warm",
+            "intellisense_v2_completion_fallback_unavailable_total",
+        )?;
+        let large_warm_stale_served_total = phase_counter(
+            "large",
+            "warm",
+            "intellisense_v2_interactive_stale_served_total",
+        )?;
+        let small_warm_stale_served_total = phase_counter(
+            "small",
+            "warm",
+            "intellisense_v2_interactive_stale_served_total",
+        )?;
+
+        let large_warm_fallback_unavailable_rate = large_warm_fallback_unavailable_total as f64
+            / large_warm_budget_exhausted_total.max(1) as f64;
+        let small_warm_fallback_unavailable_rate = small_warm_fallback_unavailable_total as f64
+            / small_warm_budget_exhausted_total.max(1) as f64;
+        let stale_fastpath_exercised =
+            large_warm_stale_fallback_total > 0 || small_warm_stale_fallback_total > 0;
+        let stale_fastpath_pass = !stale_fastpath_exercised
+            || (large_warm_fallback_unavailable_rate
+                <= MAX_STALE_FALLBACK_UNAVAILABLE_PER_BUDGET_EXHAUSTED
+                && small_warm_fallback_unavailable_rate
+                    <= MAX_STALE_FALLBACK_UNAVAILABLE_PER_BUDGET_EXHAUSTED);
         let large_warm_dominant_stage = current_report
             .get("profiles")
             .and_then(|value| value.get("large"))
@@ -8820,7 +9144,8 @@ mod tests {
             && large_cancelled_rate <= MAX_CANCELLED_RATE
             && small_cancelled_rate <= MAX_CANCELLED_RATE
             && large_completion_total >= MIN_COMPLETION_TOTAL
-            && small_completion_total >= MIN_COMPLETION_TOTAL;
+            && small_completion_total >= MIN_COMPLETION_TOTAL
+            && stale_fastpath_pass;
 
         Ok(serde_json::json!({
             "pass": pass,
@@ -8837,6 +9162,32 @@ mod tests {
                 "large_warm": large_warm_dominant_stage,
                 "small_warm": small_warm_dominant_stage
             },
+            "stale_fastpath": {
+                "evaluated": stale_fastpath_exercised,
+                "pass": stale_fastpath_pass,
+                "counts": {
+                    "large": {
+                        "start_stale_fallback_total": large_start_stale_fallback_total,
+                        "cold_stale_fallback_total": large_cold_stale_fallback_total,
+                        "warm_stale_fallback_total": large_warm_stale_fallback_total,
+                        "warm_budget_exhausted_total": large_warm_budget_exhausted_total,
+                        "warm_stale_served_total": large_warm_stale_served_total,
+                        "warm_fallback_unavailable_total": large_warm_fallback_unavailable_total
+                    },
+                    "small": {
+                        "start_stale_fallback_total": small_start_stale_fallback_total,
+                        "cold_stale_fallback_total": small_cold_stale_fallback_total,
+                        "warm_stale_fallback_total": small_warm_stale_fallback_total,
+                        "warm_budget_exhausted_total": small_warm_budget_exhausted_total,
+                        "warm_stale_served_total": small_warm_stale_served_total,
+                        "warm_fallback_unavailable_total": small_warm_fallback_unavailable_total
+                    }
+                },
+                "rates": {
+                    "large_warm_fallback_unavailable_per_budget_exhausted": large_warm_fallback_unavailable_rate,
+                    "small_warm_fallback_unavailable_per_budget_exhausted": small_warm_fallback_unavailable_rate
+                }
+            },
             "counts": {
                 "large_completion_total": large_completion_total,
                 "small_completion_total": small_completion_total
@@ -8846,7 +9197,8 @@ mod tests {
                 "large_completion_ratio_max": LARGE_COMPLETION_RATIO_MAX,
                 "small_completion_ratio_max": SMALL_COMPLETION_RATIO_MAX,
                 "completion_cancelled_rate_max": MAX_CANCELLED_RATE,
-                "min_completion_total": MIN_COMPLETION_TOTAL
+                "min_completion_total": MIN_COMPLETION_TOTAL,
+                "stale_fallback_unavailable_per_budget_exhausted_max": MAX_STALE_FALLBACK_UNAVAILABLE_PER_BUDGET_EXHAUSTED
             }
         }))
     }

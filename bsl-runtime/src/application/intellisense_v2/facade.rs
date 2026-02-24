@@ -4,7 +4,8 @@ use std::sync::{Arc, Condvar, OnceLock};
 use std::time::{Duration, Instant};
 
 use super::policy::{
-    interactive_freshness_knobs, should_query_parse_result, InteractiveFreshnessKnobs,
+    completion_fastpath_preconditions, interactive_freshness_knobs, should_query_parse_result,
+    InteractiveFreshnessKnobs,
 };
 use tokio::sync::oneshot;
 use tracing::warn;
@@ -102,6 +103,8 @@ pub struct ExecutionContext {
     pub operation: SemanticOperation,
     /// Optional completion routing mode for mode-aware drilldown metrics.
     pub completion_mode: Option<&'static str>,
+    /// True when scale-aware policy marks this file as `large + churn`.
+    pub completion_large_churn_active: bool,
     pub file_id: FileId,
     /// If set, facade should wait until runtime reaches this file version.
     pub min_file_version: Option<i32>,
@@ -195,6 +198,7 @@ pub struct PreparedOperationSnapshot {
     pub snapshot_elapsed: Duration,
     pub wait_budget_exhausted: bool,
     pub stale_served: bool,
+    pub completion_churn_fastpath_active: bool,
     pub observed_file_version: Option<i32>,
 }
 
@@ -820,6 +824,13 @@ impl IntellisenseV2Facade {
         observability: Option<&SystemCoordinator>,
     ) -> Result<PreparedOperationSnapshot, SemanticOutcome> {
         let interactive_knobs = interactive_freshness_knobs(context.operation, observability);
+        let fastpath_preconditions = completion_fastpath_preconditions(
+            context.operation,
+            context.completion_large_churn_active,
+            context.min_file_version,
+            context.expected_deps_id.is_some(),
+            interactive_knobs.is_some(),
+        );
         let queue_priority = RuntimeQueuePriority::for_operation(context.operation);
         let mut wait_budget_exhausted = false;
         let mut stale_served = false;
@@ -899,7 +910,7 @@ impl IntellisenseV2Facade {
         {
             if wait_budget_exhausted {
                 let completion_fallback_metric_enabled =
-                    matches!(context.operation, SemanticOperation::Completion);
+                    fastpath_preconditions.operation_is_completion;
                 let record_completion_fallback_unavailable = || {
                     if completion_fallback_metric_enabled {
                         if let Some(coordinator) = observability {
@@ -908,6 +919,10 @@ impl IntellisenseV2Facade {
                     }
                 };
 
+                if !fastpath_preconditions.can_attempt_bounded_stale_fallback() {
+                    record_completion_fallback_unavailable();
+                    return Err(SemanticOutcome::StaleVersion);
+                }
                 let Some(expected_deps_id) = context.expected_deps_id.as_ref() else {
                     record_completion_fallback_unavailable();
                     return Err(SemanticOutcome::StaleVersion);
@@ -966,6 +981,7 @@ impl IntellisenseV2Facade {
             snapshot_elapsed,
             wait_budget_exhausted,
             stale_served,
+            completion_churn_fastpath_active: fastpath_preconditions.churn_aware_fastpath_active(),
             observed_file_version,
         })
     }
@@ -1040,6 +1056,7 @@ impl IntellisenseV2Facade {
             snapshot_elapsed,
             wait_budget_exhausted: false,
             stale_served: false,
+            completion_churn_fastpath_active: false,
             observed_file_version: Some(file_version),
         })
     }
@@ -1899,6 +1916,7 @@ mod tests {
             origin: ObservabilityOrigin::Lsp,
             operation: SemanticOperation::Hover,
             completion_mode: None,
+            completion_large_churn_active: false,
             file_id: FileId(1),
             min_file_version: None,
             expected_deps_id: Some(DepsSnapshotId::from_hash("deps_expected")),
@@ -1949,6 +1967,7 @@ mod tests {
             origin: ObservabilityOrigin::Lsp,
             operation: SemanticOperation::Completion,
             completion_mode: None,
+            completion_large_churn_active: true,
             file_id,
             min_file_version: Some(5),
             expected_deps_id: Some(deps_id),
@@ -1971,6 +1990,10 @@ mod tests {
         assert!(
             prepared.stale_served,
             "expected stale fallback to be served"
+        );
+        assert!(
+            prepared.completion_churn_fastpath_active,
+            "completion stale fallback under large churn should set churn-aware fastpath flag"
         );
         assert_eq!(prepared.observed_file_version, Some(4));
         assert!(
@@ -2030,6 +2053,71 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn interactive_prepare_prefers_latest_when_version_is_ready_under_large_churn() {
+        let file_id = FileId(110);
+        let deps_id = DepsSnapshotId::from_hash("deps_latest_ready");
+        let settings_id = SettingsId::from_hash("settings");
+
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(Change::SetDepsSnapshot {
+            deps_id: deps_id.clone(),
+            deps: make_deps(),
+        });
+        host.apply_change(Change::SetSettingsSnapshot {
+            settings_id: settings_id.clone(),
+            diagnostics_detail_level: DetailLevel::Full,
+        });
+        let runtime = IntellisenseV2Facade::new(
+            host,
+            Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p9"))),
+            None,
+        );
+        runtime.apply_changes(vec![Change::SetFile {
+            file_id,
+            text: Arc::from("x = 1;"),
+            version: 5,
+            path: Arc::from("latest_ready.bsl"),
+        }]);
+        let _ = runtime.snapshot().await;
+
+        let context = ExecutionContext {
+            origin: ObservabilityOrigin::Lsp,
+            operation: SemanticOperation::Completion,
+            completion_mode: None,
+            completion_large_churn_active: true,
+            file_id,
+            min_file_version: Some(5),
+            expected_deps_id: Some(deps_id),
+            flow_sensitive: false,
+            settings: ExecutionSettings {
+                settings_id,
+                diagnostics_detail_level: DetailLevel::Full,
+            },
+            cancellation: CancellationPolicy::BestEffort,
+        };
+
+        let prepared = runtime
+            .prepare_stateful_operation(&context, None)
+            .await
+            .expect("latest snapshot should be available without stale fallback");
+        assert!(
+            !prepared.wait_budget_exhausted,
+            "latest path should not exceed wait budget when requested version is ready"
+        );
+        assert!(
+            !prepared.stale_served,
+            "stale fallback must not be served when latest version is already available"
+        );
+        assert_eq!(
+            prepared.observed_file_version,
+            Some(5),
+            "prepared snapshot should observe requested latest file version"
+        );
+
+        runtime.shutdown_for_test().await;
+    }
+
+    #[tokio::test]
     async fn completion_mode_propagates_into_stage_drilldown_metrics() {
         let coordinator = SystemCoordinator::new();
         let file_id = FileId(21);
@@ -2064,6 +2152,7 @@ mod tests {
             origin: ObservabilityOrigin::Lsp,
             operation: SemanticOperation::Completion,
             completion_mode: Some("event_driven"),
+            completion_large_churn_active: false,
             file_id,
             min_file_version: Some(1),
             expected_deps_id: Some(deps_id),
@@ -2179,6 +2268,7 @@ mod tests {
             origin: ObservabilityOrigin::Lsp,
             operation: SemanticOperation::Completion,
             completion_mode: None,
+            completion_large_churn_active: false,
             file_id,
             min_file_version: Some(5),
             expected_deps_id: Some(deps_id),
@@ -2239,6 +2329,131 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn interactive_prepare_timeout_rejects_stale_when_age_exceeds_default() {
+        let file_id = FileId(111);
+        let deps_id = DepsSnapshotId::from_hash("deps_stale_age");
+        let settings_id = SettingsId::from_hash("settings");
+
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(Change::SetDepsSnapshot {
+            deps_id: deps_id.clone(),
+            deps: make_deps(),
+        });
+        host.apply_change(Change::SetSettingsSnapshot {
+            settings_id: settings_id.clone(),
+            diagnostics_detail_level: DetailLevel::Full,
+        });
+        let runtime = IntellisenseV2Facade::new(
+            host,
+            Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p9"))),
+            None,
+        );
+        runtime.apply_changes(vec![Change::SetFile {
+            file_id,
+            text: Arc::from("x = 1;"),
+            version: 4,
+            path: Arc::from("stale_age.bsl"),
+        }]);
+        let _ = runtime.snapshot().await;
+
+        // Default max_stale_age is 1000ms; exceed it to verify age-based stale rejection.
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+
+        let context = ExecutionContext {
+            origin: ObservabilityOrigin::Lsp,
+            operation: SemanticOperation::Completion,
+            completion_mode: None,
+            completion_large_churn_active: true,
+            file_id,
+            min_file_version: Some(5),
+            expected_deps_id: Some(deps_id),
+            flow_sensitive: false,
+            settings: ExecutionSettings {
+                settings_id,
+                diagnostics_detail_level: DetailLevel::Full,
+            },
+            cancellation: CancellationPolicy::BestEffort,
+        };
+
+        let wait_budget_ms = crate::system::global_runtime_config()
+            .get_u64(crate::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
+            .unwrap_or(120);
+        let started = Instant::now();
+        let result = runtime.prepare_stateful_operation(&context, None).await;
+        let elapsed = started.elapsed();
+        assert!(
+            matches!(result, Err(SemanticOutcome::StaleVersion)),
+            "stale fallback must be rejected when stale age exceeds configured bound"
+        );
+        let min_expected = Duration::from_millis(wait_budget_ms.saturating_sub(30));
+        let max_expected = Duration::from_millis(wait_budget_ms.saturating_add(400));
+        assert!(
+            elapsed >= min_expected,
+            "stale-age reject should spend wait budget before fail (elapsed={elapsed:?}, budget_ms={wait_budget_ms})"
+        );
+        assert!(
+            elapsed <= max_expected,
+            "stale-age reject should stay bounded near wait budget (elapsed={elapsed:?}, budget_ms={wait_budget_ms})"
+        );
+
+        runtime.shutdown_for_test().await;
+    }
+
+    #[tokio::test]
+    async fn interactive_prepare_completion_reports_missing_deps_before_stale_acceptance() {
+        let file_id = FileId(112);
+        let deps_id_actual = DepsSnapshotId::from_hash("deps_actual");
+        let deps_id_requested = DepsSnapshotId::from_hash("deps_requested");
+        let settings_id = SettingsId::from_hash("settings");
+
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(Change::SetDepsSnapshot {
+            deps_id: deps_id_actual.clone(),
+            deps: make_deps(),
+        });
+        host.apply_change(Change::SetSettingsSnapshot {
+            settings_id: settings_id.clone(),
+            diagnostics_detail_level: DetailLevel::Full,
+        });
+        let runtime = IntellisenseV2Facade::new(
+            host,
+            Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p9"))),
+            None,
+        );
+        runtime.apply_changes(vec![Change::SetFile {
+            file_id,
+            text: Arc::from("x = 1;"),
+            version: 4,
+            path: Arc::from("stale_deps_mismatch.bsl"),
+        }]);
+        let _ = runtime.snapshot().await;
+
+        let context = ExecutionContext {
+            origin: ObservabilityOrigin::Lsp,
+            operation: SemanticOperation::Completion,
+            completion_mode: None,
+            completion_large_churn_active: true,
+            file_id,
+            min_file_version: Some(5),
+            expected_deps_id: Some(deps_id_requested),
+            flow_sensitive: false,
+            settings: ExecutionSettings {
+                settings_id,
+                diagnostics_detail_level: DetailLevel::Full,
+            },
+            cancellation: CancellationPolicy::BestEffort,
+        };
+
+        let result = runtime.prepare_stateful_operation(&context, None).await;
+        assert!(
+            matches!(result, Err(SemanticOutcome::MissingDeps)),
+            "deps mismatch must short-circuit stale acceptance with MissingDeps"
+        );
+
+        runtime.shutdown_for_test().await;
+    }
+
+    #[tokio::test]
     async fn interactive_prepare_timeout_rejects_stale_on_settings_mismatch() {
         let file_id = FileId(12);
         let deps_id = DepsSnapshotId::from_hash("deps_stale_mismatch");
@@ -2271,6 +2486,7 @@ mod tests {
             origin: ObservabilityOrigin::Lsp,
             operation: SemanticOperation::SignatureHelp,
             completion_mode: None,
+            completion_large_churn_active: false,
             file_id,
             min_file_version: Some(5),
             expected_deps_id: Some(deps_id),
@@ -2333,6 +2549,7 @@ mod tests {
             origin: ObservabilityOrigin::Lsp,
             operation: SemanticOperation::Completion,
             completion_mode: None,
+            completion_large_churn_active: false,
             file_id,
             min_file_version: Some(5),
             expected_deps_id: None,
@@ -2360,6 +2577,7 @@ mod tests {
             origin: ObservabilityOrigin::Lsp,
             operation: SemanticOperation::Hover,
             completion_mode: None,
+            completion_large_churn_active: false,
             file_id: FileId(1),
             min_file_version: None,
             expected_deps_id: None,
@@ -2399,6 +2617,7 @@ mod tests {
             origin: ObservabilityOrigin::Lsp,
             operation: SemanticOperation::Completion,
             completion_mode: None,
+            completion_large_churn_active: false,
             file_id: FileId(1),
             min_file_version: None,
             expected_deps_id: None,
@@ -2447,6 +2666,7 @@ mod tests {
             origin: ObservabilityOrigin::Lsp,
             operation: SemanticOperation::Members,
             completion_mode: None,
+            completion_large_churn_active: false,
             file_id: FileId(1),
             min_file_version: None,
             expected_deps_id: None,
@@ -2494,6 +2714,7 @@ mod tests {
             origin: ObservabilityOrigin::Lsp,
             operation: SemanticOperation::Members,
             completion_mode: None,
+            completion_large_churn_active: false,
             file_id: FileId(1),
             min_file_version: None,
             expected_deps_id: None,

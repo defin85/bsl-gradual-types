@@ -328,6 +328,25 @@ fn completion_response_with_cached_items(
     }
 }
 
+fn spawn_completion_refresh_after_stale_fastpath(
+    server: BslLanguageServer,
+    mut params: CompletionParams,
+    trigger_char_hint: Option<char>,
+) {
+    let shadow_trigger = completion_shadow_internal_trigger_value(trigger_char_hint);
+    if let Some(context) = params.context.as_mut() {
+        context.trigger_character = Some(shadow_trigger);
+    } else {
+        params.context = Some(CompletionContext {
+            trigger_kind: CompletionTriggerKind::INVOKED,
+            trigger_character: Some(shadow_trigger),
+        });
+    }
+    tokio::spawn(async move {
+        let _ = server.completion(params).await;
+    });
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CompletionResponseRoute {
     Legacy,
@@ -2560,6 +2579,67 @@ impl LanguageServer for BslLanguageServer {
                     .await
                     {
                         completion_outcome = Some(outcome);
+                        break 'completion_flow Some(completion_incomplete_empty_response());
+                    }
+
+                    if prepared.completion_churn_fastpath_active
+                        && prepared.wait_budget_exhausted
+                        && prepared.stale_served
+                    {
+                        let observed_deps_id = prepared.snapshot.deps_id.clone();
+                        let observed_settings_id = prepared.snapshot.analysis.settings_id().ok();
+                        let observed_file_version = prepared
+                            .snapshot
+                            .analysis
+                            .file_version(file_id)
+                            .ok()
+                            .flatten();
+                        observed_file_version_for_completion = observed_file_version;
+
+                        let (strict_stale_cached_items, relaxed_stale_cached_items) =
+                            completion_cached_stale_items(
+                                self,
+                                file_id,
+                                &observed_deps_id,
+                                observed_settings_id.as_ref(),
+                                observed_file_version,
+                            )
+                            .await;
+                        if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
+                            event_driven_guards_enabled,
+                            self,
+                            file_id,
+                            completion_request_id.as_deref(),
+                            completion_ticket.request_epoch,
+                            completion_cancellation_token.as_ref(),
+                            "collect",
+                            &mut cancel_event_emitted,
+                        )
+                        .await
+                        {
+                            completion_outcome = Some(outcome);
+                            break 'completion_flow Some(completion_incomplete_empty_response());
+                        }
+
+                        if let Some(items) =
+                            strict_stale_cached_items.or(relaxed_stale_cached_items)
+                        {
+                            completion_outcome.get_or_insert("degraded_incomplete");
+                            if !shadow_internal_request {
+                                spawn_completion_refresh_after_stale_fastpath(
+                                    self.clone(),
+                                    params.clone(),
+                                    trigger_char_hint,
+                                );
+                            }
+                            break 'completion_flow Some(completion_response_with_cached_items(
+                                items,
+                            ));
+                        }
+
+                        self.coordinator
+                            .record_intellisense_v2_completion_fallback_unavailable();
+                        completion_outcome.get_or_insert("fallback_unavailable");
                         break 'completion_flow Some(completion_incomplete_empty_response());
                     }
 

@@ -55,6 +55,44 @@ impl InteractiveFreshnessKnobs {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CompletionFastpathPreconditions {
+    pub operation_is_completion: bool,
+    pub large_churn_active: bool,
+    pub has_min_file_version: bool,
+    pub has_expected_deps: bool,
+    pub has_interactive_knobs: bool,
+}
+
+impl CompletionFastpathPreconditions {
+    pub fn can_attempt_bounded_stale_fallback(self) -> bool {
+        self.operation_is_completion
+            && self.has_min_file_version
+            && self.has_expected_deps
+            && self.has_interactive_knobs
+    }
+
+    pub fn churn_aware_fastpath_active(self) -> bool {
+        self.can_attempt_bounded_stale_fallback() && self.large_churn_active
+    }
+}
+
+pub fn completion_fastpath_preconditions(
+    operation: SemanticOperation,
+    large_churn_active: bool,
+    min_file_version: Option<i32>,
+    expected_deps_present: bool,
+    interactive_knobs_present: bool,
+) -> CompletionFastpathPreconditions {
+    CompletionFastpathPreconditions {
+        operation_is_completion: matches!(operation, SemanticOperation::Completion),
+        large_churn_active,
+        has_min_file_version: min_file_version.is_some(),
+        has_expected_deps: expected_deps_present,
+        has_interactive_knobs: interactive_knobs_present,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompletionMode {
     Off,
     Shadow,
@@ -1362,6 +1400,53 @@ mod tests {
         assert_eq!(
             completion_missing_ir_policy_decision(false, true, false, false),
             CompletionMissingIrPolicyDecision::KeywordFallbackUnavailable
+        );
+    }
+
+    #[test]
+    fn completion_fastpath_preconditions_require_completion_version_deps_and_knobs() {
+        let ready = completion_fastpath_preconditions(
+            SemanticOperation::Completion,
+            true,
+            Some(42),
+            true,
+            true,
+        );
+        assert!(ready.can_attempt_bounded_stale_fallback());
+        assert!(ready.churn_aware_fastpath_active());
+
+        let missing_deps = completion_fastpath_preconditions(
+            SemanticOperation::Completion,
+            true,
+            Some(42),
+            false,
+            true,
+        );
+        assert!(!missing_deps.can_attempt_bounded_stale_fallback());
+        assert!(!missing_deps.churn_aware_fastpath_active());
+
+        let non_completion =
+            completion_fastpath_preconditions(SemanticOperation::Hover, true, Some(42), true, true);
+        assert!(!non_completion.can_attempt_bounded_stale_fallback());
+        assert!(!non_completion.churn_aware_fastpath_active());
+    }
+
+    #[test]
+    fn completion_fastpath_preconditions_expose_large_churn_without_forcing_fallback() {
+        let stable_mode = completion_fastpath_preconditions(
+            SemanticOperation::Completion,
+            false,
+            Some(7),
+            true,
+            true,
+        );
+        assert!(
+            stable_mode.can_attempt_bounded_stale_fallback(),
+            "stale fallback contract stays available outside churn when other preconditions pass"
+        );
+        assert!(
+            !stable_mode.churn_aware_fastpath_active(),
+            "churn-specific fastpath flag should only activate under large churn"
         );
     }
 }

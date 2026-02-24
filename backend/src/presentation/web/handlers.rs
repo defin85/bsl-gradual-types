@@ -104,6 +104,7 @@ fn prepare_ephemeral_web_operation(
         origin: ObservabilityOrigin::Web,
         operation,
         completion_mode: None,
+        completion_large_churn_active: false,
         file_id: V2FileId(1),
         min_file_version: Some(0),
         expected_deps_id: Some(deps_bundle.deps_id.clone()),

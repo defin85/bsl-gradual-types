@@ -58,6 +58,7 @@ async fn measure_shared_facade_semantic_triplet(
         origin: ObservabilityOrigin::Lsp,
         operation: SemanticOperation::Members,
         completion_mode: None,
+        completion_large_churn_active: false,
         file_id,
         min_file_version: None,
         expected_deps_id: Some(deps_id),

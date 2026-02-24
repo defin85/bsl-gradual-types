@@ -1,0 +1,41 @@
+name: Contracts Compatibility Diff Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: "Git ref for baseline contracts"
+        required: false
+        default: "master"
+      candidate_root:
+        description: "Candidate contracts root path"
+        required: false
+        default: "contracts"
+      report_path:
+        description: "Output JSON report path"
+        required: false
+        default: "artifacts/contracts-compatibility-diff-report.json"
+
+permissions: read-all
+
+jobs:
+  compatibility_diff:
+    name: Versioned contracts compatibility diff (manual)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run compatibility-diff checker
+        run: |
+          mkdir -p "$(dirname "${{ inputs.report_path }}")"
+          python3 scripts/check-contract-compatibility-diff.py \
+            --baseline-ref "${{ inputs.baseline_ref }}" \
+            --candidate-root "${{ inputs.candidate_root }}" \
+            --report "${{ inputs.report_path }}"
+      - name: Upload compatibility-diff report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: contracts-compatibility-diff-report
+          path: ${{ inputs.report_path }}

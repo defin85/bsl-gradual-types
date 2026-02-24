@@ -1,0 +1,11 @@
+{
+  "surface": "demo-surface",
+  "major_version": 1,
+  "schema_version": 1,
+  "compatibility": {
+    "breaking_change_requires_major_bump": true,
+    "breaking_change_requires_migration_note": true
+  },
+  "labels": ["alpha"],
+  "mode": "strict"
+}

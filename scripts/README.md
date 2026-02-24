@@ -186,6 +186,30 @@ cargo run -p bsl-backend --bin intellisense_perf -- \
 
 ---
 
+### `check-contract-compatibility-diff.py` - Manual compatibility-diff gate для `contracts/**`
+
+**Назначение:** сравнить baseline и candidate versioned contracts и определить
+`non_breaking`/`breaking` изменения с policy enforcement:
+- breaking без major bump → fail (`breaking_without_major_bump`);
+- major bump без migration note → fail (`missing_migration_note`).
+
+**Использование:**
+```bash
+python3 scripts/check-contract-compatibility-diff.py \
+  --baseline-ref master \
+  --candidate-root contracts \
+  --report artifacts/contracts-compatibility-diff-report.json
+```
+
+**Regression fixtures/tests (2 breaking + 2 non-breaking):**
+```bash
+python3 scripts/test-contract-compatibility-diff.py
+```
+
+Фикстуры лежат в `scripts/fixtures/contracts-compatibility-diff/`.
+
+---
+
 ### `run-intellisense-tests.sh` - Smoke/full тесты IntelliSense
 
 **Назначение:** стабильный набор тестов M8 для локального полного прогона; подходит для CI при подключении.

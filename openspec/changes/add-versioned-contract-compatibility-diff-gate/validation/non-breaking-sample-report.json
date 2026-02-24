@@ -1,0 +1,45 @@
+{
+  "baseline": {
+    "source": "scripts/fixtures/contracts-compatibility-diff/non_breaking_additive_same_major/baseline/contracts"
+  },
+  "candidate": {
+    "source": "scripts/fixtures/contracts-compatibility-diff/non_breaking_additive_same_major/candidate/contracts"
+  },
+  "generated_at_utc": "2026-02-24T13:14:09.120075+00:00",
+  "overall": {
+    "pass": true,
+    "surfaces_failed": 0,
+    "surfaces_total": 1,
+    "violations_total": 0
+  },
+  "schema_version": 1,
+  "surfaces": [
+    {
+      "compared_versions": {
+        "baseline_major": 1,
+        "candidate_latest_major": 1,
+        "candidate_major": 1,
+        "major_bump": false
+      },
+      "diff_classification": "non_breaking",
+      "issues": [
+        {
+          "baseline": [
+            "\"alpha\"",
+            "\"beta\""
+          ],
+          "candidate": [
+            "\"gamma\""
+          ],
+          "classification": "non_breaking",
+          "path": "$.labels",
+          "reason": "list_values_added"
+        }
+      ],
+      "pass": true,
+      "surface": "demo-surface",
+      "violations": []
+    }
+  ],
+  "violations": []
+}

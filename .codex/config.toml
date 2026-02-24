@@ -4,7 +4,7 @@ args = ["-lc", 'export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM
 startup_timeout_sec = 60.0
 
 [mcp_servers.claude-context.env]
-EMBEDDING_MODEL = "bge-m3"
+EMBEDDING_MODEL = "nomic-embed-text-v2-moe"
 EMBEDDING_PROVIDER = "Ollama"
 MILVUS_ADDRESS = "127.0.0.1:20530"
 CUSTOM_EXTENSIONS = ".bsl,.rs"

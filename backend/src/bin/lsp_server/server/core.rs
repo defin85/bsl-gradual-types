@@ -7739,6 +7739,69 @@ mod tests {
         iterations: u64,
     }
 
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum ScaleAwareChurnMode {
+        Off,
+        LargeWarm,
+        WarmAll,
+        All,
+    }
+
+    impl ScaleAwareChurnMode {
+        fn as_str(self) -> &'static str {
+            match self {
+                ScaleAwareChurnMode::Off => "off",
+                ScaleAwareChurnMode::LargeWarm => "large_warm",
+                ScaleAwareChurnMode::WarmAll => "warm_all",
+                ScaleAwareChurnMode::All => "all",
+            }
+        }
+    }
+
+    fn scale_aware_churn_mode_from_env() -> ScaleAwareChurnMode {
+        let raw = std::env::var("BSL_V2_SCALE_AWARE_CHURN_MODE")
+            .unwrap_or_else(|_| "large_warm".to_string());
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "off" => ScaleAwareChurnMode::Off,
+            "warm_all" => ScaleAwareChurnMode::WarmAll,
+            "all" => ScaleAwareChurnMode::All,
+            "large_warm" => ScaleAwareChurnMode::LargeWarm,
+            _ => ScaleAwareChurnMode::LargeWarm,
+        }
+    }
+
+    fn scale_aware_churn_every_from_env() -> u64 {
+        std::env::var("BSL_V2_SCALE_AWARE_CHURN_EVERY")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(1)
+            .clamp(1, 1024)
+    }
+
+    fn should_apply_scale_aware_churn(
+        mode: ScaleAwareChurnMode,
+        profile_name: &str,
+        phase: ScaleAwarePhase,
+        request_index: u64,
+        churn_every: u64,
+    ) -> bool {
+        let measured = request_index >= phase.warmup;
+        if !measured {
+            return false;
+        }
+        let measured_index = request_index - phase.warmup;
+        if measured_index % churn_every != 0 {
+            return false;
+        }
+
+        match mode {
+            ScaleAwareChurnMode::Off => false,
+            ScaleAwareChurnMode::LargeWarm => profile_name == "large" && phase.name == "warm",
+            ScaleAwareChurnMode::WarmAll => phase.name == "warm",
+            ScaleAwareChurnMode::All => true,
+        }
+    }
+
     fn read_numeric_metric(value: Option<&serde_json::Value>) -> f64 {
         value
             .and_then(|v| v.as_f64().or_else(|| v.as_u64().map(|n| n as f64)))
@@ -7779,12 +7842,79 @@ mod tests {
         Position::new(line, character)
     }
 
+    fn utf16_end_position(source: &str) -> Position {
+        let mut line = 0u32;
+        let mut last_line = "";
+        for (idx, segment) in source.split('\n').enumerate() {
+            line = idx as u32;
+            last_line = segment;
+        }
+        let character = last_line.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+        Position::new(line, character)
+    }
+
+    fn histogram_p95(metrics: &serde_json::Value, key: &str) -> f64 {
+        metrics
+            .get(key)
+            .and_then(|value| value.get("p95"))
+            .and_then(|value| value.as_f64().or_else(|| value.as_u64().map(|n| n as f64)))
+            .unwrap_or(0.0)
+    }
+
+    fn dominant_stage_from_metrics(metrics: &serde_json::Value) -> serde_json::Value {
+        let stage_keys = [
+            (
+                "wait_for_file_version_completion",
+                "intellisense_v2_wait_for_file_version_completion_ms",
+            ),
+            (
+                "snapshot_completion",
+                "intellisense_v2_snapshot_completion_ms",
+            ),
+            (
+                "ir_query_completion",
+                "intellisense_v2_ir_query_completion_ms",
+            ),
+            (
+                "runtime_queue_wait_interactive",
+                "intellisense_v2_runtime_queue_wait_interactive_ms",
+            ),
+            (
+                "syntax_diagnostics_query",
+                "intellisense_v2_syntax_diagnostics_query_ms",
+            ),
+            (
+                "semantic_diagnostics_query",
+                "intellisense_v2_semantic_diagnostics_query_ms",
+            ),
+        ];
+
+        let mut candidates = serde_json::Map::new();
+        let mut dominant: Option<(&'static str, f64)> = None;
+        for (name, key) in stage_keys {
+            let p95 = histogram_p95(metrics, key);
+            candidates.insert(name.to_string(), serde_json::json!(p95));
+            if p95 > 0.0 && dominant.map_or(true, |(_, value)| p95 > value) {
+                dominant = Some((name, p95));
+            }
+        }
+
+        let (stage, p95_ms) = dominant.unwrap_or(("none", 0.0));
+        serde_json::json!({
+            "stage": stage,
+            "p95_ms": p95_ms,
+            "candidates_p95_ms": candidates
+        })
+    }
+
     async fn run_scale_aware_profile(
         profile_name: &str,
         uri: Url,
         text: String,
         position: Position,
         phases: &[ScaleAwarePhase],
+        churn_mode: ScaleAwareChurnMode,
+        churn_every: u64,
     ) -> serde_json::Value {
         let mut profile_report = serde_json::Map::new();
 
@@ -7832,9 +7962,61 @@ mod tests {
                 .expect("server holder lock")
                 .clone()
                 .expect("server must be created");
+            let mut current_text = text.clone();
+            let mut current_version: i32 = 1;
+            let mut churn_edits_applied = 0u64;
 
             let total_requests = phase.warmup + phase.iterations;
-            for _ in 0..total_requests {
+            for request_index in 0..total_requests {
+                if should_apply_scale_aware_churn(
+                    churn_mode,
+                    profile_name,
+                    *phase,
+                    request_index,
+                    churn_every,
+                ) {
+                    let end_position = utf16_end_position(&current_text);
+                    let churn_payload = if churn_edits_applied % 2 == 0 {
+                        " "
+                    } else {
+                        "\n"
+                    };
+                    let next_version = current_version
+                        .checked_add(1)
+                        .expect("scale-aware churn version overflow");
+                    let did_change = DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri.clone(),
+                            version: next_version,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: Some(Range {
+                                start: end_position,
+                                end: end_position,
+                            }),
+                            range_length: None,
+                            text: churn_payload.to_string(),
+                        }],
+                    };
+                    let did_change_req = Request::build("textDocument/didChange")
+                        .params(
+                            serde_json::to_value(did_change)
+                                .expect("scale-aware churn didChange params"),
+                        )
+                        .finish();
+                    let did_change_response = service
+                        .ready()
+                        .await
+                        .unwrap()
+                        .call(did_change_req)
+                        .await
+                        .expect("scale-aware churn didChange notification");
+                    assert!(did_change_response.is_none(), "didChange is a notification");
+                    current_version = next_version;
+                    current_text.push_str(churn_payload);
+                    churn_edits_applied += 1;
+                }
+
                 let completion = server
                     .completion(CompletionParams {
                         text_document_position: TextDocumentPositionParams {
@@ -7873,30 +8055,49 @@ mod tests {
             let completion_cancelled_rate =
                 completion_cancelled_total as f64 / completion_total.max(1) as f64;
 
+            let phase_metrics = serde_json::json!({
+                "completion_duration_ms": histogram_metric_value(histograms, "completion_duration_ms", None),
+                "intellisense_v2_wait_for_file_version_completion_ms": histogram_metric_value(
+                    histograms,
+                    "intellisense_v2_wait_for_file_version_completion_ms",
+                    Some("intellisense_v2_wait_for_file_version_other_ms")
+                ),
+                "intellisense_v2_snapshot_completion_ms": histogram_metric_value(
+                    histograms,
+                    "intellisense_v2_snapshot_completion_ms",
+                    Some("intellisense_v2_snapshot_other_ms")
+                ),
+                "intellisense_v2_ir_query_completion_ms": histogram_metric_value(
+                    histograms,
+                    "intellisense_v2_ir_query_completion_ms",
+                    Some("intellisense_v2_ir_query_other_ms")
+                ),
+                "intellisense_v2_runtime_queue_wait_interactive_ms": histogram_metric_value(
+                    histograms,
+                    "intellisense_v2_runtime_queue_wait_interactive_ms",
+                    None
+                ),
+                "intellisense_v2_syntax_diagnostics_query_ms": histogram_metric_value(
+                    histograms,
+                    "intellisense_v2_syntax_diagnostics_query_ms",
+                    None
+                ),
+                "intellisense_v2_semantic_diagnostics_query_ms": histogram_metric_value(
+                    histograms,
+                    "intellisense_v2_semantic_diagnostics_query_ms",
+                    None
+                ),
+            });
+            let dominant_stage = dominant_stage_from_metrics(&phase_metrics);
             let phase_report = serde_json::json!({
                 "warmup": phase.warmup,
                 "iterations": phase.iterations,
                 "completion_total": completion_total,
                 "completion_cancelled_total": completion_cancelled_total,
                 "completion_cancelled_rate": completion_cancelled_rate,
-                "metrics": {
-                    "completion_duration_ms": histogram_metric_value(histograms, "completion_duration_ms", None),
-                    "intellisense_v2_wait_for_file_version_completion_ms": histogram_metric_value(
-                        histograms,
-                        "intellisense_v2_wait_for_file_version_completion_ms",
-                        Some("intellisense_v2_wait_for_file_version_other_ms")
-                    ),
-                    "intellisense_v2_snapshot_completion_ms": histogram_metric_value(
-                        histograms,
-                        "intellisense_v2_snapshot_completion_ms",
-                        Some("intellisense_v2_snapshot_other_ms")
-                    ),
-                    "intellisense_v2_ir_query_completion_ms": histogram_metric_value(
-                        histograms,
-                        "intellisense_v2_ir_query_completion_ms",
-                        Some("intellisense_v2_ir_query_other_ms")
-                    ),
-                }
+                "churn_edits_applied": churn_edits_applied,
+                "metrics": phase_metrics,
+                "dominant_stage": dominant_stage
             });
             profile_report.insert(phase.name.to_string(), phase_report);
 
@@ -8036,6 +8237,20 @@ mod tests {
             large_cancelled_total as f64 / large_completion_total.max(1) as f64;
         let small_cancelled_rate =
             small_cancelled_total as f64 / small_completion_total.max(1) as f64;
+        let large_warm_dominant_stage = current_report
+            .get("profiles")
+            .and_then(|value| value.get("large"))
+            .and_then(|value| value.get("warm"))
+            .and_then(|value| value.get("dominant_stage"))
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({"stage": "unknown", "p95_ms": 0.0}));
+        let small_warm_dominant_stage = current_report
+            .get("profiles")
+            .and_then(|value| value.get("small"))
+            .and_then(|value| value.get("warm"))
+            .and_then(|value| value.get("dominant_stage"))
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({"stage": "unknown", "p95_ms": 0.0}));
 
         let pass = large_wait_ratio <= LARGE_WAIT_RATIO_MAX
             && large_completion_ratio <= LARGE_COMPLETION_RATIO_MAX
@@ -8055,6 +8270,10 @@ mod tests {
             "rates": {
                 "large_completion_cancelled_rate": large_cancelled_rate,
                 "small_completion_cancelled_rate": small_cancelled_rate
+            },
+            "dominant_stage": {
+                "large_warm": large_warm_dominant_stage,
+                "small_warm": small_warm_dominant_stage
             },
             "counts": {
                 "large_completion_total": large_completion_total,
@@ -8152,6 +8371,8 @@ mod tests {
                 iterations: 50,
             },
         ];
+        let churn_mode = scale_aware_churn_mode_from_env();
+        let churn_every = scale_aware_churn_every_from_env();
 
         let large_profile = run_scale_aware_profile(
             "large",
@@ -8159,6 +8380,8 @@ mod tests {
             large_text,
             large_position,
             &phases,
+            churn_mode,
+            churn_every,
         )
         .await;
         let small_profile = run_scale_aware_profile(
@@ -8167,6 +8390,8 @@ mod tests {
             small_text,
             small_position,
             &phases,
+            churn_mode,
+            churn_every,
         )
         .await;
 
@@ -8181,6 +8406,10 @@ mod tests {
                     "iterations": phase.iterations
                 })
             }).collect::<Vec<_>>(),
+            "churn": {
+                "mode": churn_mode.as_str(),
+                "every": churn_every
+            },
             "profiles": {
                 "large": large_profile,
                 "small": small_profile

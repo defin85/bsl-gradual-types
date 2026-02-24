@@ -12,5 +12,5 @@
 
 ## 4. Validation
 - [x] 4.1 Добавить/обновить integration tests на переключение policy и приоритет интерактивного пути.
-- [ ] 4.2 Прогнать scale-aware perf сценарий (`large/small`, `start/cold/warm`) и приложить JSON-отчет с pass/fail.
+- [x] 4.2 Прогнать scale-aware perf сценарий (`large/small`, `start/cold/warm`) и приложить JSON-отчет с pass/fail.
 - [x] 4.3 Выполнить `openspec validate prioritize-completion-under-large-module-churn --strict --no-interactive`.

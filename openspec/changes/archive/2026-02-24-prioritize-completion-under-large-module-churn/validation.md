@@ -10,8 +10,8 @@
 - `cargo test -p bsl-backend --bin bsl-lsp-server large_churn_` ✅
 - `cargo test -p bsl-backend --bin bsl-lsp-server p7_completion_after_did_change_does_not_hang` ✅
 
-## Pending perf gate
-`p31_scale_aware_large_small_completion_gate_live` was started in enforce mode with:
+## Perf gate (completed)
+`p31_scale_aware_large_small_completion_gate_live` was run in enforce mode:
 
 ```bash
 BSL_V2_SCALE_AWARE_GATE_ENFORCE=1 \
@@ -19,5 +19,10 @@ BSL_V2_SCALE_AWARE_GATE_REPORT=openspec/changes/prioritize-completion-under-larg
 cargo test -p bsl-backend --bin bsl-lsp-server p31_scale_aware_large_small_completion_gate_live -- --nocapture
 ```
 
-The test did not finish in this environment within a 12-minute timeout window,
-so `tasks.md` item `4.2` remains open and no final JSON report was produced.
+- JSON report attached: `openspec/changes/prioritize-completion-under-large-module-churn/validation/scale-aware-large-small-live.json`.
+- Result: `gate.pass=false`.
+- Key ratios from report:
+  - `large_completion_ratio=9.7148` (threshold `<=0.75`, fail)
+  - `large_wait_ratio=0.0400` (threshold `<=0.6`, pass)
+  - `small_completion_ratio=0.0140` (threshold `<=1.25`, pass)
+- Dominant large warm stage: `ir_query_completion` (`p95=37768ms`), with `syntax_diagnostics_query` also high (`p95=37518ms`).

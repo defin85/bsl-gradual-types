@@ -1,33 +1,43 @@
-В индустрии обычно разделяют “валидировать конструкции языка” на несколько уровней (и делают это разными инструментами):
+Рекомендую такой порядок реализации (от самого блокирующего к менее блокирующему).
 
-  1. Синтаксис (parsing)
+  1. Закрыть текущий почти завершённый change
 
-  - Источник истины: формальная грамматика (EBNF/PEG/GLR и т.п.) + лексер.
-  - Реализация: parser generator (ANTLR/bison/menhir) или hand-written parser; в IDE часто tree-sitter (инкрементальный парсер).
-  - Результат: AST (или parse tree) + синтаксические ошибки. Здесь проверяется “можно ли это прочитать как программу”.
+  1. prioritize-completion-under-large-module-churn
+     Причина: уже 8/9, нужно формально закрыть 4.2 (отчёт уже есть: backend/openspec/changes/prioritize-completion-under-large-module-churn/validation/scale-aware-large-small-live.json).
 
-  2. Структурные/контекстные ограничения (AST validation)
+  2. Сначала зафиксировать контрактную инфраструктуру
+  2. add-versioned-contracts-layer
+  Причина: дальше будет много изменений в completion/diagnostics/observability; без versioned contracts вырастет риск дрейфа интерфейсов.
 
-  - Это уже “почти синтаксис”, но удобнее делать после парсинга отдельным проходом:
-      - например: “break только внутри цикла”, “return только внутри функции”, “директивы только в начале файла”.
-  - Обычно это отдельный валидатор по AST/IR, потому что в грамматике такие правила либо громоздки, либо невозможны.
+  3. Критический perf-путь (зависимости уже указаны в proposals)
+  3. add-incremental-parse-snapshot-for-analysis-v2
+  Основание: это фундамент для следующих двух (Dependencies в openspec/changes/add-incremental-parse-snapshot-for-analysis-v2/proposal.md).
+  4. add-cancellable-diagnostics-supersession
+  Основание: снижает waste CPU на superseded heavy задачах; опирается на п.3 (openspec/changes/add-cancellable-diagnostics-supersession/proposal.md).
+  5. add-bounded-stale-completion-fastpath
+  Основание: зависит от 3+4 (openspec/changes/add-bounded-stale-completion-fastpath/proposal.md).
 
-  3. Семантика (type checking / name resolution)
+  4. Затем закрепить гейты и убрать дубли
+  6. add-large-module-completion-acceleration-gate
+  Причина: сделать окончательный enforce/CI после 3–5.
+  7. add-incremental-syntax-diagnostics-for-large-modules
+  Причина: сейчас пересекается с add-incremental-parse-snapshot-for-analysis-v2 по сути. Рекомендация: не реализовывать отдельно “как есть”, а сузить до остатка или заархивировать как superseded после п.3.
 
-  - Разрешение имён, областей видимости, типов, перегрузок, доступов, flow analysis.
-  - Это то, что в компиляторах называется “front-end semantic analysis”.
+  5. Функциональная точность IntelliSense (доменные типы)
+  8. update-form-thisobject-platform-context-filtering
+  9. add-v2-valuetable-column-resolution
+  10. add-v2-structure-field-schema-resolution
+  11. add-v2-map-index-value-resolution
 
-  4. Lint / style / “quality rules”
+  6. Исследование покрытия типов (можно параллельно с п.8–11, но лучше перед финальным GA)
+  12. add-platform-config-parser-type-coverage-research
+  Причина: даст объективную карту пробелов для финальной стабилизации.
 
-  - Формально код может быть корректен, но нежелателен: “подозрительные конструкции”, “плохие паттерны”, “ошибки новичков/LLM”.
-  - Это отдельные правила, часто эвристические, и обычно их не смешивают с “ParseError”, а дают отдельные коды/категории.
+  7. GA/коммерческий слой в конце
+  13. add-lsp-functional-ga-readiness
+  Важно: в tasks ссылка на update-v2-contextual-implicit-variables, а активный change у вас update-form-thisobject-platform-context-filtering — лучше синхронизировать зависимость до старта.
+  14. add-tpm-lease-licensing
+  15. add-sales-readiness-ga
+  Причина: sales readiness логично закрывать после функционального GA + licensing policy.
 
-  5. UX-диагностики для IDE (error recovery + message rewriting)
-
-  - В LSP/IDE почти всегда добавляют слой “улучшения сообщений” и точности подсветки:
-      - парсер мог упасть “на 0”, но правило может подсказать “на самом деле вы написали несуществующий синтаксис Шаг в Для”.
-  - Это принято делать либо как:
-      - post-processing списка синтаксических ошибок (переписывание/добавление diagnostics),
-      - либо как отдельные lint-диагностики, которые срабатывают только при наличии parse error на строке.
-
-  Как правило: “что является конструкцией языка” фиксируется грамматикой/спеком, а всё, что про “подсказать человеку” (включая LLM-ошибки) — это lint/IDE-layer поверх синтаксиса.
+  Если хочешь, следующим шагом могу сделать конкретный execution-план по неделям/итерациям (что в какой PR, какие тесты-гейты на каждом шаге).

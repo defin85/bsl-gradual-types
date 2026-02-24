@@ -48,6 +48,23 @@ pub struct TextEdit {
     pub new_text: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseChangedRange {
+    pub start_byte: u32,
+    pub old_end_byte: u32,
+    pub new_end_byte: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ParseSnapshotReport {
+    pub parse_result: ParseResult,
+    pub line_index: Arc<bsl_line_index::LineIndex>,
+    pub changed_ranges: Vec<ParseChangedRange>,
+    pub backend_tree_hash: u64,
+    pub incremental: bool,
+    pub fallback_reason: Option<String>,
+}
+
 /// Координатор Tree-sitter парсера (Milestone 2.8: без regex fallback)
 pub struct ParserCoordinator {
     tree_sitter: TreeSitterParser,
@@ -200,8 +217,19 @@ impl ParserCoordinator {
         new_content: String,
         edits: Vec<TextEdit>,
     ) -> Result<ParseResult, String> {
+        self.parse_incremental_with_report(file_path, new_content, edits)
+            .map(|report| report.parse_result)
+    }
+
+    pub fn parse_incremental_with_report(
+        &self,
+        file_path: PathBuf,
+        new_content: String,
+        edits: Vec<TextEdit>,
+    ) -> Result<ParseSnapshotReport, String> {
         let new_hash = ast_cache_key(&new_content);
         let new_tree_hash = hash_content(&new_content);
+        let line_index = Arc::new(bsl_line_index::LineIndex::new(&new_content));
 
         // Попытка получить старое дерево из кеша
         if let Some((old_tree, old_source, old_hash)) = self.tree_cache.get(&file_path) {
@@ -211,7 +239,14 @@ impl ParserCoordinator {
                 let result = TreeSitterAdapter::convert_tree(&old_tree, &new_content)?;
                 self.store_ast_memory(new_hash, &result);
                 self.update_symbol_index(&file_path, &result);
-                return Ok(result);
+                return Ok(ParseSnapshotReport {
+                    parse_result: result,
+                    line_index,
+                    changed_ranges: Vec::new(),
+                    backend_tree_hash: new_tree_hash,
+                    incremental: true,
+                    fallback_reason: None,
+                });
             }
 
             // Применяем инкрементальное обновление
@@ -223,7 +258,7 @@ impl ParserCoordinator {
                 edits,
                 &old_source,
             ) {
-                Ok((new_tree, program)) => {
+                Ok((new_tree, program, changed_ranges)) => {
                     // Кешируем новое дерево
                     self.tree_cache.update(
                         &file_path,
@@ -237,13 +272,55 @@ impl ParserCoordinator {
                         Some(file_path.as_path()),
                         &new_content,
                     );
-                    return Ok(program);
+                    return Ok(ParseSnapshotReport {
+                        parse_result: program,
+                        line_index,
+                        changed_ranges,
+                        backend_tree_hash: new_tree_hash,
+                        incremental: true,
+                        fallback_reason: None,
+                    });
                 }
                 Err(e) => {
                     warn!(
                         "Incremental parsing failed: {}, falling back to full parse",
                         e
                     );
+                    let fallback_reason = if e == "No edits provided for incremental parsing" {
+                        Some("no_edits_provided".to_string())
+                    } else {
+                        Some(format!("incremental_failed:{e}"))
+                    };
+                    // Fallback: полный парсинг (Milestone 2.8: только Tree-sitter)
+                    debug!("Full parse for file (fallback): {:?}", file_path);
+                    return match self.tree_sitter.parse_with_tree(&new_content) {
+                        Ok((tree, program)) => {
+                            self.store_ast_cache(
+                                new_hash,
+                                &program,
+                                Some(file_path.as_path()),
+                                &new_content,
+                            );
+                            self.tree_cache.set(
+                                file_path,
+                                tree,
+                                new_content.clone(),
+                                new_tree_hash,
+                            );
+                            Ok(ParseSnapshotReport {
+                                parse_result: program,
+                                line_index,
+                                changed_ranges: Vec::new(),
+                                backend_tree_hash: new_tree_hash,
+                                incremental: false,
+                                fallback_reason,
+                            })
+                        }
+                        Err(parse_err) => {
+                            error!("TreeSitter parsing failed after fallback: {}", parse_err);
+                            Err(format!("Tree-sitter parsing failed: {}", parse_err))
+                        }
+                    };
                 }
             }
         }
@@ -255,7 +332,14 @@ impl ParserCoordinator {
                 self.store_ast_cache(new_hash, &program, Some(file_path.as_path()), &new_content);
                 self.tree_cache
                     .set(file_path, tree, new_content.clone(), new_tree_hash);
-                Ok(program)
+                Ok(ParseSnapshotReport {
+                    parse_result: program,
+                    line_index,
+                    changed_ranges: Vec::new(),
+                    backend_tree_hash: new_tree_hash,
+                    incremental: false,
+                    fallback_reason: Some("no_previous_tree".to_string()),
+                })
             }
             Err(e) => {
                 error!("TreeSitter parsing failed: {}", e);
@@ -722,7 +806,7 @@ impl TreeSitterParser {
         old_tree: Option<&tree_sitter::Tree>,
         edits: Vec<TextEdit>,
         old_source: &str,
-    ) -> Result<(tree_sitter::Tree, ParseResult), String> {
+    ) -> Result<(tree_sitter::Tree, ParseResult, Vec<ParseChangedRange>), String> {
         let mut parser = self
             .parser
             .lock()
@@ -735,11 +819,17 @@ impl TreeSitterParser {
             }
 
             let mut current_source = old_source.to_string();
+            let mut changed_ranges = Vec::with_capacity(edits.len());
             for edit in edits {
                 let (input_edit, start_byte, old_end_byte) =
                     Self::text_edit_to_input_edit(&edit, &current_source)?;
                 tree.edit(&input_edit);
                 debug!("Applied edit: {:?}", input_edit);
+                changed_ranges.push(ParseChangedRange {
+                    start_byte: start_byte as u32,
+                    old_end_byte: old_end_byte as u32,
+                    new_end_byte: input_edit.new_end_byte as u32,
+                });
 
                 current_source =
                     apply_edit_to_source(&current_source, start_byte, old_end_byte, &edit.new_text);
@@ -761,7 +851,7 @@ impl TreeSitterParser {
             );
 
             let program = TreeSitterAdapter::convert_tree(&new_tree, new_content)?;
-            Ok((new_tree, program))
+            Ok((new_tree, program, changed_ranges))
         } else {
             // Нет старого дерева — полный парсинг
             let tree = parser
@@ -769,7 +859,7 @@ impl TreeSitterParser {
                 .ok_or_else(|| "Tree-sitter parsing failed".to_string())?;
 
             let program = TreeSitterAdapter::convert_tree(&tree, new_content)?;
-            Ok((tree, program))
+            Ok((tree, program, Vec::new()))
         }
     }
 
@@ -1122,5 +1212,110 @@ mod symbol_index_tests {
             SymbolKind::Variable,
             SymbolScope::Local
         ));
+    }
+}
+
+#[cfg(test)]
+mod parse_snapshot_tests {
+    use super::*;
+
+    #[test]
+    fn incremental_snapshot_matches_full_parse_result() {
+        let parser = ParserCoordinator::with_fallback();
+        let file_path = PathBuf::from("snapshot-parity.bsl");
+        let base = "Процедура Тест()\n    x = 1;\nКонецПроцедуры".to_string();
+        let updated = "Процедура Тест()\n    x = 2;\nКонецПроцедуры".to_string();
+
+        let seed = parser
+            .parse_incremental_with_report(file_path.clone(), base, Vec::new())
+            .expect("seed snapshot");
+        assert!(!seed.incremental);
+
+        let report = parser
+            .parse_incremental_with_report(
+                file_path,
+                updated.clone(),
+                vec![TextEdit {
+                    start_line: 1,
+                    start_utf16_column: 0,
+                    old_end_line: 1,
+                    old_end_utf16_column: 10,
+                    new_text: "    x = 2;".to_string(),
+                }],
+            )
+            .expect("incremental report");
+
+        assert!(report.incremental);
+        assert!(report.fallback_reason.is_none());
+        assert!(!report.changed_ranges.is_empty());
+
+        let full = ParserCoordinator::with_fallback()
+            .parse(&updated)
+            .expect("full parse");
+        let incremental_json =
+            serde_json::to_string(&report.parse_result).expect("serialize incremental parse");
+        let full_json = serde_json::to_string(&full).expect("serialize full parse");
+        assert_eq!(incremental_json, full_json);
+    }
+
+    #[test]
+    fn incremental_snapshot_reports_fallback_reason_when_edits_missing() {
+        let parser = ParserCoordinator::with_fallback();
+        let file_path = PathBuf::from("snapshot-fallback.bsl");
+
+        parser
+            .parse_incremental_with_report(
+                file_path.clone(),
+                "Процедура Тест()\n    x = 1;\nКонецПроцедуры".to_string(),
+                Vec::new(),
+            )
+            .expect("seed snapshot");
+
+        let report = parser
+            .parse_incremental_with_report(
+                file_path,
+                "Процедура Тест()\n    x = 2;\nКонецПроцедуры".to_string(),
+                Vec::new(),
+            )
+            .expect("fallback parse report");
+        assert!(!report.incremental);
+        assert_eq!(report.fallback_reason.as_deref(), Some("no_edits_provided"));
+    }
+
+    #[test]
+    fn incremental_snapshot_handles_edit_burst_without_drift() {
+        let parser = ParserCoordinator::with_fallback();
+        let file_path = PathBuf::from("snapshot-burst.bsl");
+        let initial_text = "Процедура Тест()\n    x = 0;\nКонецПроцедуры".to_string();
+
+        parser
+            .parse_incremental_with_report(file_path.clone(), initial_text, Vec::new())
+            .expect("seed snapshot");
+
+        for step in 1..=32_u8 {
+            let next_digit = char::from(b'0' + (step % 10));
+            let updated = format!("Процедура Тест()\n    x = {};\nКонецПроцедуры", next_digit);
+
+            let report = parser
+                .parse_incremental_with_report(
+                    file_path.clone(),
+                    updated.clone(),
+                    vec![TextEdit {
+                        start_line: 1,
+                        start_utf16_column: 8,
+                        old_end_line: 1,
+                        old_end_utf16_column: 9,
+                        new_text: next_digit.to_string(),
+                    }],
+                )
+                .expect("incremental burst parse");
+
+            assert!(report.incremental, "step {step} should stay incremental");
+            assert!(
+                report.fallback_reason.is_none(),
+                "step {step} must not fallback"
+            );
+            assert_eq!(report.changed_ranges.len(), 1);
+        }
     }
 }

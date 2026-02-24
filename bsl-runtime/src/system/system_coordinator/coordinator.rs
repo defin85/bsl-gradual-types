@@ -680,6 +680,25 @@ impl SystemCoordinator {
             .record_intellisense_v2_heavy_diagnostics_deferred(origin, profile, reason);
     }
 
+    pub fn record_intellisense_v2_parse_snapshot(
+        &self,
+        origin: &str,
+        mode: &str,
+        changed_ranges_count: usize,
+        changed_ranges_bytes: usize,
+        fallback_reason: Option<&str>,
+        build_duration: std::time::Duration,
+    ) {
+        self.observability.record_intellisense_v2_parse_snapshot(
+            origin,
+            mode,
+            changed_ranges_count,
+            changed_ranges_bytes,
+            fallback_reason,
+            build_duration,
+        );
+    }
+
     pub fn record_intellisense_v2_deps_update_build_latency(&self, duration: std::time::Duration) {
         self.observability
             .record_intellisense_v2_deps_update_build_latency(duration);

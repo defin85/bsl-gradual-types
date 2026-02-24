@@ -120,6 +120,13 @@ pub enum Change {
         version: i32,
         path: Arc<str>,
     },
+    SetFileWithSnapshot {
+        file_id: FileId,
+        text: Arc<str>,
+        version: i32,
+        path: Arc<str>,
+        parse_snapshot: ParseSnapshot,
+    },
     RemoveFile {
         file_id: FileId,
     },
@@ -148,6 +155,26 @@ fn cancellable<T>(op: impl FnOnce() -> T) -> Cancellable<T> {
 #[inline(always)]
 fn cancellation_checkpoint(db: &dyn salsa::Database) {
     db.unwind_if_revision_cancelled();
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseChangedRange {
+    pub start_byte: u32,
+    pub old_end_byte: u32,
+    pub new_end_byte: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ParseSnapshot {
+    pub file_id: FileId,
+    pub file_version: i32,
+    pub parse_result: Arc<bsl_syntax::ast::ParseResult>,
+    pub line_index: Arc<LineIndex>,
+    pub changed_ranges: Arc<Vec<ParseChangedRange>>,
+    pub produced_at_millis: u128,
+    pub backend_tree_hash: u64,
+    pub incremental: bool,
+    pub fallback_reason: Option<Arc<str>>,
 }
 
 #[salsa::input]
@@ -326,22 +353,7 @@ pub fn ir(
     let file_path = file.path(db).to_string();
     cancellation_checkpoint(db);
 
-    match AstToIrConverter::convert_with_resolver(
-        parsed.program.clone(),
-        source,
-        file_path.clone(),
-        deps_data.repository.clone(),
-        deps_data.signature_index.clone(),
-        deps_data.resolver.clone(),
-    ) {
-        Ok(program) => SemanticProgramSnapshot(Arc::new(program)),
-        Err(_err) => {
-            let mut program = SemanticProgram::new();
-            program.source_info.path = file_path;
-            program.source_info.content_hash = hash_content(file.text(db));
-            SemanticProgramSnapshot(Arc::new(program))
-        }
-    }
+    SemanticProgramSnapshot(build_ir_from_parsed(parsed, &source, &file_path, deps_data))
 }
 
 #[salsa::tracked]
@@ -381,53 +393,14 @@ pub fn semantic_diagnostics(
     let program = ir(db, file, deps, settings).0;
     let type_index = type_index(db, file, deps, settings).0;
     cancellation_checkpoint(db);
-
-    let mut type_hints = SemanticTypeHints::default();
-    populate_assignment_value_hints(&program, &type_index, &mut type_hints);
-    populate_call_and_member_hints(&parsed.program, &type_index, &mut type_hints);
-
-    let resolver = deps_data
-        .resolver
-        .clone()
-        .unwrap_or_else(|| Arc::new(TypeResolver::new(deps_data.repository.clone())));
-    let metadata_lookup = TypeMetadataLookup::new(deps_data.repository.clone());
-    let validator = TypeValidator::new(&metadata_lookup);
-
     let detail_level = settings.diagnostics_detail_level(db);
-    let mut visitor = SemanticValidationVisitor::with_detail_level(
-        &validator,
-        &program,
-        resolver.as_ref(),
-        &deps_data.signature_index,
+    let diagnostics = collect_semantic_diagnostics_from_program(
+        parsed,
+        program,
+        type_index,
+        deps_data,
         detail_level,
     );
-    cancellation_checkpoint(db);
-    visitor.set_platform_signatures_loaded(deps_data.platform_signatures_loaded);
-    visitor.set_type_hints(Some(&type_hints));
-    walk_program(&program, &mut visitor);
-
-    let mut diagnostics = visitor.into_errors();
-    diagnostics.sort_by(|a, b| {
-        let severity_key = |severity: DiagnosticSeverity| match severity {
-            DiagnosticSeverity::Error => 0_u8,
-            DiagnosticSeverity::Warning => 1_u8,
-            DiagnosticSeverity::Info => 2_u8,
-            DiagnosticSeverity::Hint => 3_u8,
-        };
-        (
-            a.span.start,
-            a.span.end,
-            severity_key(a.severity),
-            &a.message,
-        )
-            .cmp(&(
-                b.span.start,
-                b.span.end,
-                severity_key(b.severity),
-                &b.message,
-            ))
-    });
-
     SemanticDiagnosticsSnapshot(Arc::new(diagnostics))
 }
 
@@ -944,6 +917,83 @@ fn syntax_errors_only_in_directives(code: &str, errors: &[ParseError]) -> bool {
     })
 }
 
+fn build_ir_from_parsed(
+    parsed: Arc<bsl_syntax::ast::ParseResult>,
+    source: &str,
+    file_path: &str,
+    deps_data: Arc<SemanticDeps>,
+) -> Arc<SemanticProgram> {
+    match AstToIrConverter::convert_with_resolver(
+        parsed.program.clone(),
+        source.to_string(),
+        file_path.to_string(),
+        deps_data.repository.clone(),
+        deps_data.signature_index.clone(),
+        deps_data.resolver.clone(),
+    ) {
+        Ok(program) => Arc::new(program),
+        Err(_err) => {
+            let mut program = SemanticProgram::new();
+            program.source_info.path = file_path.to_string();
+            program.source_info.content_hash = hash_content(source);
+            Arc::new(program)
+        }
+    }
+}
+
+fn collect_semantic_diagnostics_from_program(
+    parsed: Arc<bsl_syntax::ast::ParseResult>,
+    program: Arc<SemanticProgram>,
+    type_index: Arc<type_inference_v2::TypeIndex>,
+    deps_data: Arc<SemanticDeps>,
+    detail_level: DetailLevel,
+) -> Vec<TypeDiagnostic> {
+    let mut type_hints = SemanticTypeHints::default();
+    populate_assignment_value_hints(&program, &type_index, &mut type_hints);
+    populate_call_and_member_hints(&parsed.program, &type_index, &mut type_hints);
+
+    let resolver = deps_data
+        .resolver
+        .clone()
+        .unwrap_or_else(|| Arc::new(TypeResolver::new(deps_data.repository.clone())));
+    let metadata_lookup = TypeMetadataLookup::new(deps_data.repository.clone());
+    let validator = TypeValidator::new(&metadata_lookup);
+
+    let mut visitor = SemanticValidationVisitor::with_detail_level(
+        &validator,
+        &program,
+        resolver.as_ref(),
+        &deps_data.signature_index,
+        detail_level,
+    );
+    visitor.set_platform_signatures_loaded(deps_data.platform_signatures_loaded);
+    visitor.set_type_hints(Some(&type_hints));
+    walk_program(&program, &mut visitor);
+
+    let mut diagnostics = visitor.into_errors();
+    diagnostics.sort_by(|a, b| {
+        let severity_key = |severity: DiagnosticSeverity| match severity {
+            DiagnosticSeverity::Error => 0_u8,
+            DiagnosticSeverity::Warning => 1_u8,
+            DiagnosticSeverity::Info => 2_u8,
+            DiagnosticSeverity::Hint => 3_u8,
+        };
+        (
+            a.span.start,
+            a.span.end,
+            severity_key(a.severity),
+            &a.message,
+        )
+            .cmp(&(
+                b.span.start,
+                b.span.end,
+                severity_key(b.severity),
+                &b.message,
+            ))
+    });
+    diagnostics
+}
+
 #[salsa::db]
 #[derive(Clone, Default)]
 pub struct AnalysisDatabase {
@@ -956,6 +1006,7 @@ impl salsa::Database for AnalysisDatabase {}
 pub struct AnalysisHostV2 {
     db: AnalysisDatabase,
     files: HashMap<FileId, SourceFile>,
+    parse_snapshots: HashMap<FileId, ParseSnapshot>,
     deps: DepsSnapshot,
     settings: SettingsSnapshot,
 }
@@ -980,6 +1031,7 @@ impl Default for AnalysisHostV2 {
         Self {
             db,
             files: HashMap::new(),
+            parse_snapshots: HashMap::new(),
             deps,
             settings,
         }
@@ -995,8 +1047,16 @@ impl AnalysisHostV2 {
                 version,
                 path,
             } => self.set_file(file_id, text, version, path),
+            Change::SetFileWithSnapshot {
+                file_id,
+                text,
+                version,
+                path,
+                parse_snapshot,
+            } => self.set_file_with_snapshot(file_id, text, version, path, parse_snapshot),
             Change::RemoveFile { file_id } => {
                 self.files.remove(&file_id);
+                self.parse_snapshots.remove(&file_id);
             }
             Change::SetDepsSnapshot { deps_id, deps } => {
                 self.deps.set_id(&mut self.db).to(deps_id);
@@ -1025,6 +1085,22 @@ impl AnalysisHostV2 {
                 self.files.insert(file_id, file);
             }
         }
+        self.parse_snapshots.remove(&file_id);
+    }
+
+    pub fn set_file_with_snapshot(
+        &mut self,
+        file_id: FileId,
+        text: Arc<str>,
+        version: i32,
+        path: Arc<str>,
+        parse_snapshot: ParseSnapshot,
+    ) {
+        self.set_file(file_id, text, version, path);
+        if parse_snapshot.file_id != file_id || parse_snapshot.file_version != version {
+            return;
+        }
+        self.parse_snapshots.insert(file_id, parse_snapshot);
     }
 
     pub fn has_file(&self, file_id: FileId) -> bool {
@@ -1043,6 +1119,7 @@ impl AnalysisHostV2 {
         AnalysisV2 {
             db: self.db.clone(),
             files: self.files.clone(),
+            parse_snapshots: self.parse_snapshots.clone(),
             deps: self.deps,
             settings: self.settings,
         }
@@ -1056,11 +1133,18 @@ impl AnalysisHostV2 {
 pub struct AnalysisV2 {
     db: AnalysisDatabase,
     files: HashMap<FileId, SourceFile>,
+    parse_snapshots: HashMap<FileId, ParseSnapshot>,
     deps: DepsSnapshot,
     settings: SettingsSnapshot,
 }
 
 impl AnalysisV2 {
+    fn parse_snapshot_for_file(&self, file_id: FileId, file: SourceFile) -> Option<&ParseSnapshot> {
+        let snapshot = self.parse_snapshots.get(&file_id)?;
+        let file_version = file.version(&self.db);
+        (snapshot.file_version == file_version).then_some(snapshot)
+    }
+
     pub fn file_text(&self, file_id: FileId) -> Cancellable<Option<Arc<str>>> {
         let Some(&file) = self.files.get(&file_id) else {
             return Ok(None);
@@ -1093,6 +1177,9 @@ impl AnalysisV2 {
         let Some(&file) = self.files.get(&file_id) else {
             return Ok(None);
         };
+        if let Some(snapshot) = self.parse_snapshot_for_file(file_id, file) {
+            return Ok(Some(snapshot.line_index.clone()));
+        }
         cancellable(|| line_index(&self.db, file)).map(Some)
     }
 
@@ -1103,6 +1190,9 @@ impl AnalysisV2 {
         let Some(&file) = self.files.get(&file_id) else {
             return Ok(None);
         };
+        if let Some(snapshot) = self.parse_snapshot_for_file(file_id, file) {
+            return Ok(Some(snapshot.parse_result.clone()));
+        }
         cancellable(|| parse_result(&self.db, file, self.settings).0).map(Some)
     }
 
@@ -1110,6 +1200,17 @@ impl AnalysisV2 {
         let Some(&file) = self.files.get(&file_id) else {
             return Ok(None);
         };
+        if let Some(snapshot) = self.parse_snapshot_for_file(file_id, file) {
+            let deps_data = self.deps.data(&self.db).0.clone();
+            let source = file.text(&self.db);
+            let file_path = file.path(&self.db);
+            return Ok(Some(build_ir_from_parsed(
+                snapshot.parse_result.clone(),
+                source.as_ref(),
+                file_path.as_ref(),
+                deps_data,
+            )));
+        }
         cancellable(|| ir(&self.db, file, self.deps, self.settings).0).map(Some)
     }
 
@@ -1117,6 +1218,9 @@ impl AnalysisV2 {
         let Some(&file) = self.files.get(&file_id) else {
             return Ok(None);
         };
+        if let Some(snapshot) = self.parse_snapshot_for_file(file_id, file) {
+            return Ok(Some(Arc::new(snapshot.parse_result.syntax_errors.clone())));
+        }
         cancellable(|| syntax_diagnostics(&self.db, file, self.settings).0).map(Some)
     }
 
@@ -1127,6 +1231,37 @@ impl AnalysisV2 {
         let Some(&file) = self.files.get(&file_id) else {
             return Ok(None);
         };
+        if let Some(snapshot) = self.parse_snapshot_for_file(file_id, file) {
+            let parsed = snapshot.parse_result.clone();
+            let source = file.text(&self.db).clone();
+            if !parsed.syntax_errors.is_empty()
+                && !syntax_errors_only_in_directives(source.as_ref(), &parsed.syntax_errors)
+            {
+                return Ok(Some(Arc::new(Vec::new())));
+            }
+            let file_path = file.path(&self.db).clone();
+            let deps_data = self.deps.data(&self.db).0.clone();
+            let program = build_ir_from_parsed(
+                parsed.clone(),
+                source.as_ref(),
+                file_path.as_ref(),
+                deps_data.clone(),
+            );
+            let type_index = Arc::new(type_inference_v2::build_type_index_with_path(
+                &parsed.program,
+                file_path.as_ref(),
+                deps_data.clone(),
+            ));
+            let detail_level = self.settings.diagnostics_detail_level(&self.db);
+            let diagnostics = collect_semantic_diagnostics_from_program(
+                parsed,
+                program,
+                type_index,
+                deps_data,
+                detail_level,
+            );
+            return Ok(Some(Arc::new(diagnostics)));
+        }
         cancellable(|| semantic_diagnostics(&self.db, file, self.deps, self.settings).0).map(Some)
     }
 
@@ -1137,6 +1272,60 @@ impl AnalysisV2 {
         let Some(&file) = self.files.get(&file_id) else {
             return Ok(None);
         };
+        if let Some(snapshot) = self.parse_snapshot_for_file(file_id, file) {
+            let base = self
+                .semantic_diagnostics(file_id)?
+                .unwrap_or_else(|| Arc::new(Vec::new()));
+            if base.is_empty() {
+                return Ok(Some(base));
+            }
+            let parsed = snapshot.parse_result.clone();
+            let source = file.text(&self.db).clone();
+            let file_path = file.path(&self.db).clone();
+            let deps_data = self.deps.data(&self.db).0.clone();
+            let program = build_ir_from_parsed(
+                parsed.clone(),
+                source.as_ref(),
+                file_path.as_ref(),
+                deps_data.clone(),
+            );
+            let type_index = Arc::new(type_inference_v2::build_type_index_with_path(
+                &parsed.program,
+                file_path.as_ref(),
+                deps_data.clone(),
+            ));
+            let resolver = deps_data
+                .resolver
+                .clone()
+                .unwrap_or_else(|| Arc::new(TypeResolver::new(deps_data.repository.clone())));
+            let mut diagnostics = (*base).clone();
+            diagnostics.extend(flow_sensitive_null_safety_diagnostics(
+                &program,
+                &type_index,
+                resolver.as_ref(),
+            ));
+            diagnostics.sort_by(|a, b| {
+                let severity_key = |severity: DiagnosticSeverity| match severity {
+                    DiagnosticSeverity::Error => 0_u8,
+                    DiagnosticSeverity::Warning => 1_u8,
+                    DiagnosticSeverity::Info => 2_u8,
+                    DiagnosticSeverity::Hint => 3_u8,
+                };
+                (
+                    a.span.start,
+                    a.span.end,
+                    severity_key(a.severity),
+                    &a.message,
+                )
+                    .cmp(&(
+                        b.span.start,
+                        b.span.end,
+                        severity_key(b.severity),
+                        &b.message,
+                    ))
+            });
+            return Ok(Some(Arc::new(diagnostics)));
+        }
         cancellable(|| {
             semantic_diagnostics_flow_sensitive(&self.db, file, self.deps, self.settings).0
         })
@@ -1407,6 +1596,79 @@ mod tests {
         assert_eq!(
             analysis.utf16_position_to_point(file_id, 0, 999).unwrap(),
             Some((0, 3))
+        );
+    }
+
+    #[test]
+    fn set_file_with_snapshot_uses_snapshot_parse_result_and_line_index() {
+        let mut host = AnalysisHostV2::default();
+        let file_id = FileId(7);
+        let text: Arc<str> = Arc::from("Процедура Тест()\nКонецПроцедуры");
+        let parsed = Arc::new(
+            bsl_syntax::parse(text.as_ref(), &ParseOptions::default()).expect("snapshot parse"),
+        );
+        let index = Arc::new(LineIndex::new(text.as_ref()));
+        let snapshot = ParseSnapshot {
+            file_id,
+            file_version: 3,
+            parse_result: parsed.clone(),
+            line_index: index.clone(),
+            changed_ranges: Arc::new(Vec::new()),
+            produced_at_millis: 0,
+            backend_tree_hash: 0,
+            incremental: false,
+            fallback_reason: None,
+        };
+
+        host.apply_change(Change::SetFileWithSnapshot {
+            file_id,
+            text: text.clone(),
+            version: 3,
+            path: Arc::from("snapshot-test.bsl"),
+            parse_snapshot: snapshot,
+        });
+
+        let analysis = host.snapshot();
+        let parse_result = analysis.parse_result(file_id).unwrap().unwrap();
+        let line_index = analysis.line_index(file_id).unwrap().unwrap();
+
+        assert!(Arc::ptr_eq(&parsed, &parse_result));
+        assert!(Arc::ptr_eq(&index, &line_index));
+    }
+
+    #[test]
+    fn set_file_with_snapshot_ignores_mismatched_snapshot_version() {
+        let mut host = AnalysisHostV2::default();
+        let file_id = FileId(8);
+        let text: Arc<str> = Arc::from("Процедура Тест()\nКонецПроцедуры");
+        let snapshot_parsed = Arc::new(
+            bsl_syntax::parse(text.as_ref(), &ParseOptions::default()).expect("snapshot parse"),
+        );
+        let snapshot = ParseSnapshot {
+            file_id,
+            file_version: 99,
+            parse_result: snapshot_parsed.clone(),
+            line_index: Arc::new(LineIndex::new(text.as_ref())),
+            changed_ranges: Arc::new(Vec::new()),
+            produced_at_millis: 0,
+            backend_tree_hash: 0,
+            incremental: true,
+            fallback_reason: Some(Arc::from("version_mismatch")),
+        };
+
+        host.apply_change(Change::SetFileWithSnapshot {
+            file_id,
+            text,
+            version: 1,
+            path: Arc::from("snapshot-mismatch.bsl"),
+            parse_snapshot: snapshot,
+        });
+
+        let analysis = host.snapshot();
+        let parsed = analysis.parse_result(file_id).unwrap().unwrap();
+        assert!(
+            !Arc::ptr_eq(&parsed, &snapshot_parsed),
+            "snapshot with mismatched version must not be used"
         );
     }
 

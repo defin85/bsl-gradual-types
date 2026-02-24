@@ -90,6 +90,26 @@ fn should_defer_heavy_diagnostics_for_large_churn(
         && !matches!(profile, bsl_runtime::application::DiagnosticsProfile::Fast)
 }
 
+fn lsp_range_change_to_parser_edit(
+    change: &TextDocumentContentChangeEvent,
+) -> Option<bsl_runtime::system::parser_coordinator::TextEdit> {
+    let range = change.range?;
+    Some(bsl_runtime::system::parser_coordinator::TextEdit {
+        start_line: range.start.line,
+        start_utf16_column: range.start.character,
+        old_end_line: range.end.line,
+        old_end_utf16_column: range.end.character,
+        new_text: change.text.clone(),
+    })
+}
+
+fn unix_time_millis() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0)
+}
+
 fn advance_large_churn_state(
     state: &mut super::ScaleAwareChurnStateV2,
     now: Instant,
@@ -1320,6 +1340,69 @@ impl LanguageServer for BslLanguageServer {
         };
         let text: Arc<str> = Arc::from(text);
         let path: Arc<str> = Arc::from(path);
+        let parse_snapshot = self
+            .coordinator
+            .parser_coordinator()
+            .and_then(|parser| {
+                let parse_started = Instant::now();
+                let report = parser
+                    .parse_incremental_with_report(
+                        PathBuf::from(path.as_ref()),
+                        text.to_string(),
+                        Vec::new(),
+                    )
+                    .ok()?;
+                Some((report, parse_started.elapsed()))
+            })
+            .map(|(report, parse_elapsed)| {
+                let mode = if report.incremental {
+                    if report.changed_ranges.is_empty() {
+                        "reused"
+                    } else {
+                        "incremental"
+                    }
+                } else {
+                    "full"
+                };
+                let changed_ranges_count = report.changed_ranges.len();
+                let changed_ranges_bytes: usize = report
+                    .changed_ranges
+                    .iter()
+                    .map(|range| {
+                        usize::try_from(range.new_end_byte.saturating_sub(range.start_byte))
+                            .unwrap_or(0)
+                    })
+                    .sum();
+                self.coordinator.record_intellisense_v2_parse_snapshot(
+                    bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                    mode,
+                    changed_ranges_count,
+                    changed_ranges_bytes,
+                    report.fallback_reason.as_deref(),
+                    parse_elapsed,
+                );
+                bsl_analysis_v2::ParseSnapshot {
+                    file_id,
+                    file_version: version,
+                    parse_result: Arc::new(report.parse_result),
+                    line_index: report.line_index,
+                    changed_ranges: Arc::new(
+                        report
+                            .changed_ranges
+                            .into_iter()
+                            .map(|range| bsl_analysis_v2::ParseChangedRange {
+                                start_byte: range.start_byte,
+                                old_end_byte: range.old_end_byte,
+                                new_end_byte: range.new_end_byte,
+                            })
+                            .collect(),
+                    ),
+                    produced_at_millis: unix_time_millis(),
+                    backend_tree_hash: report.backend_tree_hash,
+                    incremental: report.incremental,
+                    fallback_reason: report.fallback_reason.map(Arc::from),
+                }
+            });
 
         self.latest_received_file_versions_v2
             .write()
@@ -1334,11 +1417,21 @@ impl LanguageServer for BslLanguageServer {
         );
 
         self.analysis_v2
-            .apply_changes(vec![bsl_analysis_v2::Change::SetFile {
-                file_id,
-                text,
-                version,
-                path,
+            .apply_changes(vec![if let Some(parse_snapshot) = parse_snapshot {
+                bsl_analysis_v2::Change::SetFileWithSnapshot {
+                    file_id,
+                    text,
+                    version,
+                    path,
+                    parse_snapshot,
+                }
+            } else {
+                bsl_analysis_v2::Change::SetFile {
+                    file_id,
+                    text,
+                    version,
+                    path,
+                }
             }]);
 
         let diagnostics_generation = self.bump_diagnostics_generation_v2(file_id).await;
@@ -1402,46 +1495,51 @@ impl LanguageServer for BslLanguageServer {
         };
 
         // Apply changes
-        let updated_text = if let Some(full_change) = changes.iter().find(|c| c.range.is_none()) {
-            full_change.text.clone()
-        } else {
-            let shadow_state = {
-                let shadow = self.latest_document_shadow_state_v2.read().await;
-                shadow.get(&file_id).cloned()
-            };
-            if let Some(state) = shadow_state.as_ref() {
-                if version < state.version {
-                    warn!(
-                        uri = %uri,
-                        file_id = file_id.0,
-                        requested_version = version,
-                        shadow_version = state.version,
-                        "Skipping out-of-order didChange for older version"
-                    );
-                    return;
-                }
-            }
-            let base_text = if let Some(state) = shadow_state {
-                state.text.to_string()
+        let (updated_text, parser_edits) =
+            if let Some(full_change) = changes.iter().find(|c| c.range.is_none()) {
+                (full_change.text.clone(), Vec::new())
             } else {
-                self.analysis_v2
-                    .snapshot()
-                    .await
-                    .file_text(file_id)
-                    .ok()
-                    .flatten()
-                    .map(|text| text.to_string())
-                    .unwrap_or_default()
-            };
-
-            let mut current_text = base_text;
-            for change in &changes {
-                if let Some(range) = change.range {
-                    current_text = apply_text_edit(&current_text, range, &change.text);
+                let shadow_state = {
+                    let shadow = self.latest_document_shadow_state_v2.read().await;
+                    shadow.get(&file_id).cloned()
+                };
+                if let Some(state) = shadow_state.as_ref() {
+                    if version < state.version {
+                        warn!(
+                            uri = %uri,
+                            file_id = file_id.0,
+                            requested_version = version,
+                            shadow_version = state.version,
+                            "Skipping out-of-order didChange for older version"
+                        );
+                        return;
+                    }
                 }
-            }
-            current_text
-        };
+                let base_text = if let Some(state) = shadow_state {
+                    state.text.to_string()
+                } else {
+                    self.analysis_v2
+                        .snapshot()
+                        .await
+                        .file_text(file_id)
+                        .ok()
+                        .flatten()
+                        .map(|text| text.to_string())
+                        .unwrap_or_default()
+                };
+
+                let mut current_text = base_text;
+                let mut parser_edits = Vec::new();
+                for change in &changes {
+                    if let Some(range) = change.range {
+                        if let Some(edit) = lsp_range_change_to_parser_edit(change) {
+                            parser_edits.push(edit);
+                        }
+                        current_text = apply_text_edit(&current_text, range, &change.text);
+                    }
+                }
+                (current_text, parser_edits)
+            };
 
         let scale_aware_knobs =
             bsl_runtime::application::ScaleAwareDiagnosticsKnobs::from_runtime_config();
@@ -1510,13 +1608,85 @@ impl LanguageServer for BslLanguageServer {
                 text: updated_text.clone(),
             },
         );
-
+        let parse_snapshot = self
+            .coordinator
+            .parser_coordinator()
+            .and_then(|parser| {
+                let parse_started = Instant::now();
+                let report = parser
+                    .parse_incremental_with_report(
+                        PathBuf::from(path.as_ref()),
+                        updated_text.to_string(),
+                        parser_edits,
+                    )
+                    .ok()?;
+                Some((report, parse_started.elapsed()))
+            })
+            .map(|(report, parse_elapsed)| {
+                let mode = if report.incremental {
+                    if report.changed_ranges.is_empty() {
+                        "reused"
+                    } else {
+                        "incremental"
+                    }
+                } else {
+                    "full"
+                };
+                let changed_ranges_count = report.changed_ranges.len();
+                let changed_ranges_bytes: usize = report
+                    .changed_ranges
+                    .iter()
+                    .map(|range| {
+                        usize::try_from(range.new_end_byte.saturating_sub(range.start_byte))
+                            .unwrap_or(0)
+                    })
+                    .sum();
+                self.coordinator.record_intellisense_v2_parse_snapshot(
+                    bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                    mode,
+                    changed_ranges_count,
+                    changed_ranges_bytes,
+                    report.fallback_reason.as_deref(),
+                    parse_elapsed,
+                );
+                bsl_analysis_v2::ParseSnapshot {
+                    file_id,
+                    file_version: version,
+                    parse_result: Arc::new(report.parse_result),
+                    line_index: report.line_index,
+                    changed_ranges: Arc::new(
+                        report
+                            .changed_ranges
+                            .into_iter()
+                            .map(|range| bsl_analysis_v2::ParseChangedRange {
+                                start_byte: range.start_byte,
+                                old_end_byte: range.old_end_byte,
+                                new_end_byte: range.new_end_byte,
+                            })
+                            .collect(),
+                    ),
+                    produced_at_millis: unix_time_millis(),
+                    backend_tree_hash: report.backend_tree_hash,
+                    incremental: report.incremental,
+                    fallback_reason: report.fallback_reason.map(Arc::from),
+                }
+            });
         self.analysis_v2
-            .apply_changes(vec![bsl_analysis_v2::Change::SetFile {
-                file_id,
-                text: updated_text,
-                version,
-                path,
+            .apply_changes(vec![if let Some(parse_snapshot) = parse_snapshot {
+                bsl_analysis_v2::Change::SetFileWithSnapshot {
+                    file_id,
+                    text: updated_text,
+                    version,
+                    path,
+                    parse_snapshot,
+                }
+            } else {
+                bsl_analysis_v2::Change::SetFile {
+                    file_id,
+                    text: updated_text,
+                    version,
+                    path,
+                }
             }]);
 
         let flow_sensitive_enabled = {

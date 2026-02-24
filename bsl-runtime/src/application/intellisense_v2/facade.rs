@@ -488,7 +488,10 @@ impl IntellisenseV2Facade {
 
                             for change in changes {
                                 match &change {
-                                    Change::SetFile { file_id, version, .. } => {
+                                    Change::SetFile { file_id, version, .. }
+                                    | Change::SetFileWithSnapshot {
+                                        file_id, version, ..
+                                    } => {
                                         applied_file_revisions.insert(
                                             *file_id,
                                             FileRevisionState {

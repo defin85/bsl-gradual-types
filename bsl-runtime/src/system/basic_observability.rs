@@ -1910,6 +1910,42 @@ impl BasicObservability {
         self.metrics.increment(&key);
     }
 
+    pub fn record_intellisense_v2_parse_snapshot(
+        &self,
+        origin: &str,
+        mode: &str,
+        changed_ranges_count: usize,
+        changed_ranges_bytes: usize,
+        fallback_reason: Option<&str>,
+        build_duration: Duration,
+    ) {
+        let origin = normalize_observability_origin_label(origin);
+        let mode = normalize_parse_snapshot_mode_label(mode);
+        let mode_key = format!("intellisense_v2_parse_snapshot_total_origin_{origin}_mode_{mode}");
+        self.metrics.increment(&mode_key);
+        let latency_key =
+            format!("intellisense_v2_parse_snapshot_build_ms_origin_{origin}_mode_{mode}");
+        self.metrics
+            .observe_histogram(&latency_key, build_duration.as_millis() as f64);
+
+        let changed_ranges_histogram =
+            format!("intellisense_v2_parse_snapshot_changed_ranges_count_origin_{origin}");
+        let changed_bytes_histogram =
+            format!("intellisense_v2_parse_snapshot_changed_ranges_bytes_origin_{origin}");
+        self.metrics
+            .observe_histogram(&changed_ranges_histogram, changed_ranges_count as f64);
+        self.metrics
+            .observe_histogram(&changed_bytes_histogram, changed_ranges_bytes as f64);
+
+        if let Some(reason) = fallback_reason {
+            let reason = normalize_parse_snapshot_fallback_reason_label(reason);
+            let fallback_key = format!(
+                "intellisense_v2_parse_snapshot_fallback_total_origin_{origin}_reason_{reason}"
+            );
+            self.metrics.increment(&fallback_key);
+        }
+    }
+
     pub fn record_intellisense_v2_deps_update_build_latency(&self, duration: Duration) {
         self.metrics
             .increment("intellisense_v2_deps_update_build_total");
@@ -2340,6 +2376,26 @@ fn normalize_large_churn_state_label(state: &str) -> &'static str {
 fn normalize_heavy_deferred_reason_label(reason: &str) -> &'static str {
     match reason {
         "large_and_churn" => "large_and_churn",
+        _ => "other",
+    }
+}
+
+fn normalize_parse_snapshot_mode_label(mode: &str) -> &'static str {
+    match mode {
+        "incremental" => "incremental",
+        "reused" => "reused",
+        "full" => "full",
+        _ => "other",
+    }
+}
+
+fn normalize_parse_snapshot_fallback_reason_label(reason: &str) -> &'static str {
+    if reason.starts_with("incremental_failed:") {
+        return "incremental_failed";
+    }
+    match reason {
+        "no_previous_tree" => "no_previous_tree",
+        "no_edits_provided" => "no_edits_provided",
         _ => "other",
     }
 }

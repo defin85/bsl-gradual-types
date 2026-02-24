@@ -60,6 +60,7 @@ pub struct ParseSnapshotReport {
     pub parse_result: ParseResult,
     pub line_index: Arc<bsl_line_index::LineIndex>,
     pub changed_ranges: Vec<ParseChangedRange>,
+    pub backend_tree: Arc<tree_sitter::Tree>,
     pub backend_tree_hash: u64,
     pub incremental: bool,
     pub fallback_reason: Option<String>,
@@ -243,6 +244,7 @@ impl ParserCoordinator {
                     parse_result: result,
                     line_index,
                     changed_ranges: Vec::new(),
+                    backend_tree: old_tree.clone(),
                     backend_tree_hash: new_tree_hash,
                     incremental: true,
                     fallback_reason: None,
@@ -259,6 +261,7 @@ impl ParserCoordinator {
                 &old_source,
             ) {
                 Ok((new_tree, program, changed_ranges)) => {
+                    let backend_tree = Arc::new(new_tree.clone());
                     // Кешируем новое дерево
                     self.tree_cache.update(
                         &file_path,
@@ -276,6 +279,7 @@ impl ParserCoordinator {
                         parse_result: program,
                         line_index,
                         changed_ranges,
+                        backend_tree,
                         backend_tree_hash: new_tree_hash,
                         incremental: true,
                         fallback_reason: None,
@@ -295,6 +299,7 @@ impl ParserCoordinator {
                     debug!("Full parse for file (fallback): {:?}", file_path);
                     return match self.tree_sitter.parse_with_tree(&new_content) {
                         Ok((tree, program)) => {
+                            let backend_tree = Arc::new(tree.clone());
                             self.store_ast_cache(
                                 new_hash,
                                 &program,
@@ -311,6 +316,7 @@ impl ParserCoordinator {
                                 parse_result: program,
                                 line_index,
                                 changed_ranges: Vec::new(),
+                                backend_tree,
                                 backend_tree_hash: new_tree_hash,
                                 incremental: false,
                                 fallback_reason,
@@ -329,6 +335,7 @@ impl ParserCoordinator {
         debug!("Full parse for file: {:?}", file_path);
         match self.tree_sitter.parse_with_tree(&new_content) {
             Ok((tree, program)) => {
+                let backend_tree = Arc::new(tree.clone());
                 self.store_ast_cache(new_hash, &program, Some(file_path.as_path()), &new_content);
                 self.tree_cache
                     .set(file_path, tree, new_content.clone(), new_tree_hash);
@@ -336,6 +343,7 @@ impl ParserCoordinator {
                     parse_result: program,
                     line_index,
                     changed_ranges: Vec::new(),
+                    backend_tree,
                     backend_tree_hash: new_tree_hash,
                     incremental: false,
                     fallback_reason: Some("no_previous_tree".to_string()),

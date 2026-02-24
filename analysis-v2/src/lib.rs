@@ -27,6 +27,7 @@ use bsl_shared::ir::SemanticProgram;
 use bsl_shared::ir::{CfgNodeKind, NodeAtByteOffsetBias};
 use bsl_shared::utils::hash::hash_content;
 use bsl_syntax::ParseOptions;
+use tree_sitter::Tree;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FileId(pub u32);
@@ -170,6 +171,7 @@ pub struct ParseSnapshot {
     pub file_version: i32,
     pub parse_result: Arc<bsl_syntax::ast::ParseResult>,
     pub line_index: Arc<LineIndex>,
+    pub backend_tree: Arc<Tree>,
     pub changed_ranges: Arc<Vec<ParseChangedRange>>,
     pub produced_at_millis: u128,
     pub backend_tree_hash: u64,
@@ -1212,8 +1214,7 @@ impl AnalysisV2 {
         current_text: &str,
         deps_id: &DepsSnapshotId,
     ) -> Option<Arc<SemanticProgram>> {
-        if file_version <= 0
-            || !Self::parse_snapshot_can_reuse_previous_ir(snapshot, current_text)
+        if file_version <= 0 || !Self::parse_snapshot_can_reuse_previous_ir(snapshot, current_text)
         {
             return None;
         }
@@ -1551,6 +1552,19 @@ impl AnalysisV2 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tree_sitter::Parser as TreeSitterParser;
+
+    fn parse_backend_tree_for_test(text: &str) -> Arc<Tree> {
+        let mut parser = TreeSitterParser::new();
+        parser
+            .set_language(&tree_sitter_bsl::LANGUAGE.into())
+            .expect("tree-sitter-bsl language");
+        Arc::new(
+            parser
+                .parse(text, None)
+                .expect("tree-sitter parse for snapshot"),
+        )
+    }
 
     fn normalize_json(value: &mut serde_json::Value) {
         match value {
@@ -1590,6 +1604,7 @@ mod tests {
                 bsl_syntax::parse(text, &ParseOptions::default()).expect("snapshot parse"),
             ),
             line_index: Arc::new(LineIndex::new(text)),
+            backend_tree: parse_backend_tree_for_test(text),
             changed_ranges: Arc::new(changed_ranges),
             produced_at_millis: 0,
             backend_tree_hash: 0,
@@ -1759,6 +1774,7 @@ mod tests {
             file_version: 3,
             parse_result: parsed.clone(),
             line_index: index.clone(),
+            backend_tree: parse_backend_tree_for_test(text.as_ref()),
             changed_ranges: Arc::new(Vec::new()),
             produced_at_millis: 0,
             backend_tree_hash: 0,
@@ -1795,6 +1811,7 @@ mod tests {
             file_version: 99,
             parse_result: snapshot_parsed.clone(),
             line_index: Arc::new(LineIndex::new(text.as_ref())),
+            backend_tree: parse_backend_tree_for_test(text.as_ref()),
             changed_ranges: Arc::new(Vec::new()),
             produced_at_millis: 0,
             backend_tree_hash: 0,
@@ -2015,6 +2032,117 @@ mod tests {
             !Arc::ptr_eq(&ir_v1, &ir_v2),
             "non-tail change must trigger full IR recompute"
         );
+    }
+
+    fn build_large_burst_module(marker: u32) -> String {
+        let mut text = String::from("Процедура СтрессТест()\n");
+        text.push_str("    ЛокМассив = Новый Массив;\n");
+        for idx in 0..800_u32 {
+            text.push_str(&format!("    ЛокПер{idx} = {idx};\n"));
+        }
+        text.push_str(&format!("    Маркер = {marker};\n"));
+        text.push_str("    ЛокМассив.НесуществующийМетод();\n");
+        text.push_str("КонецПроцедуры\n");
+        text
+    }
+
+    #[test]
+    fn large_module_snapshot_edit_burst_preserves_semantic_diagnostics_parity() {
+        let file_id = FileId(77);
+        let path: Arc<str> = Arc::from("large-burst-parity.bsl");
+        let mut host_snapshot = AnalysisHostV2::default();
+        let mut host_full = AnalysisHostV2::default();
+        let mut current_text = build_large_burst_module(0);
+
+        host_snapshot.apply_change(Change::SetFile {
+            file_id,
+            text: Arc::from(current_text.clone()),
+            version: 1,
+            path: path.clone(),
+        });
+        host_full.apply_change(Change::SetFile {
+            file_id,
+            text: Arc::from(current_text.clone()),
+            version: 1,
+            path: path.clone(),
+        });
+
+        for step in 1..=16_i32 {
+            let previous_marker = format!("    Маркер = {};", step - 1);
+            let next_marker = format!("    Маркер = {step};");
+            let start = current_text
+                .find(&previous_marker)
+                .expect("marker from previous step");
+            let old_end = start + previous_marker.len();
+            let updated_text = current_text.replacen(&previous_marker, &next_marker, 1);
+            let new_end = start + next_marker.len();
+            let version = step + 1;
+
+            host_snapshot.apply_change(Change::SetFileWithSnapshot {
+                file_id,
+                text: Arc::from(updated_text.clone()),
+                version,
+                path: path.clone(),
+                parse_snapshot: parse_snapshot_for_test(
+                    file_id,
+                    version,
+                    updated_text.as_ref(),
+                    vec![ParseChangedRange {
+                        start_byte: start as u32,
+                        old_end_byte: old_end as u32,
+                        new_end_byte: new_end as u32,
+                    }],
+                    true,
+                    None,
+                ),
+            });
+            host_full.apply_change(Change::SetFile {
+                file_id,
+                text: Arc::from(updated_text.clone()),
+                version,
+                path: path.clone(),
+            });
+
+            let snapshot_analysis = host_snapshot.snapshot();
+            let full_analysis = host_full.snapshot();
+
+            let syntax_snapshot = snapshot_analysis
+                .syntax_diagnostics(file_id)
+                .unwrap()
+                .unwrap();
+            let syntax_full = full_analysis.syntax_diagnostics(file_id).unwrap().unwrap();
+            let mut syntax_snapshot_json =
+                serde_json::to_value(syntax_snapshot.as_ref()).expect("serialize snapshot syntax");
+            let mut syntax_full_json =
+                serde_json::to_value(syntax_full.as_ref()).expect("serialize full syntax");
+            normalize_json(&mut syntax_snapshot_json);
+            normalize_json(&mut syntax_full_json);
+            assert_eq!(
+                syntax_snapshot_json, syntax_full_json,
+                "syntax diagnostics drift at burst step {step}"
+            );
+
+            let semantic_snapshot = snapshot_analysis
+                .semantic_diagnostics(file_id)
+                .unwrap()
+                .unwrap();
+            let semantic_full = full_analysis
+                .semantic_diagnostics(file_id)
+                .unwrap()
+                .unwrap();
+            let mut semantic_snapshot_json = serde_json::to_value(semantic_snapshot.as_ref())
+                .expect("serialize snapshot semantic diagnostics");
+            let mut semantic_full_json = serde_json::to_value(semantic_full.as_ref())
+                .expect("serialize full semantic diagnostics");
+            normalize_json(&mut semantic_snapshot_json);
+            normalize_json(&mut semantic_full_json);
+            assert_eq!(
+                semantic_snapshot_json, semantic_full_json,
+                "semantic diagnostics drift at burst step {step}"
+            );
+
+            current_text = updated_text;
+        }
     }
 
     #[test]

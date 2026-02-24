@@ -422,6 +422,8 @@ dependencies = [
  "salsa",
  "serde_json",
  "tracing",
+ "tree-sitter",
+ "tree-sitter-bsl",
 ]
 
 [[package]]

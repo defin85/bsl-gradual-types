@@ -1544,6 +1544,14 @@ mod tests {
         "intellisense_v2_runtime_wait_for_file_version_exec_total",
         "intellisense_v2_runtime_snapshot_with_deps_queue_wait_total",
         "intellisense_v2_runtime_snapshot_with_deps_exec_total",
+        "intellisense_v2_parse_snapshot_total_origin_lsp_mode_incremental",
+        "intellisense_v2_parse_snapshot_total_origin_lsp_mode_reused",
+        "intellisense_v2_parse_snapshot_total_origin_lsp_mode_full",
+        "intellisense_v2_parse_snapshot_total_origin_lsp_mode_other",
+        "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_incremental_failed",
+        "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_no_previous_tree",
+        "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_no_edits_provided",
+        "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_other",
         "intellisense_v2_wait_for_file_version_diagnostics_total",
         "intellisense_v2_snapshot_diagnostics_total",
         "intellisense_v2_ir_query_other_total",
@@ -1576,6 +1584,12 @@ mod tests {
         "intellisense_v2_runtime_wait_for_file_version_exec_ms",
         "intellisense_v2_runtime_snapshot_with_deps_queue_wait_ms",
         "intellisense_v2_runtime_snapshot_with_deps_exec_ms",
+        "intellisense_v2_parse_snapshot_build_ms_origin_lsp_mode_incremental",
+        "intellisense_v2_parse_snapshot_build_ms_origin_lsp_mode_reused",
+        "intellisense_v2_parse_snapshot_build_ms_origin_lsp_mode_full",
+        "intellisense_v2_parse_snapshot_build_ms_origin_lsp_mode_other",
+        "intellisense_v2_parse_snapshot_changed_ranges_count_origin_lsp",
+        "intellisense_v2_parse_snapshot_changed_ranges_bytes_origin_lsp",
         "intellisense_v2_wait_for_file_version_diagnostics_ms",
         "intellisense_v2_snapshot_diagnostics_ms",
         "intellisense_v2_ir_query_other_ms",
@@ -2018,6 +2032,9 @@ mod tests {
     fn stage_from_metric_key(key: &str) -> Option<&'static str> {
         if !key.starts_with("intellisense_v2_") {
             return None;
+        }
+        if key.contains("parse_snapshot_") {
+            return Some("parse_snapshot_build");
         }
         if key.contains("runtime_wait_for_file_version") || key.contains("wait_for_file_version_") {
             return Some("runtime_wait_for_file_version");
@@ -7471,6 +7488,66 @@ mod tests {
             serde_json::Value::Object(by_mode)
         }
 
+        fn parse_snapshot_mode_counter_total(
+            counters: &serde_json::Map<String, serde_json::Value>,
+            mode: &str,
+        ) -> u64 {
+            counters
+                .get(&format!(
+                    "intellisense_v2_parse_snapshot_total_origin_lsp_mode_{mode}"
+                ))
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0)
+        }
+
+        fn parse_snapshot_mode_latency_p95(
+            histograms: &serde_json::Map<String, serde_json::Value>,
+            mode: &str,
+        ) -> f64 {
+            histograms
+                .get(&format!(
+                    "intellisense_v2_parse_snapshot_build_ms_origin_lsp_mode_{mode}"
+                ))
+                .and_then(|value| value.as_object())
+                .map(|hist| metric_as_f64(hist.get("p95")))
+                .unwrap_or(0.0)
+        }
+
+        fn collect_parse_snapshot_mode_metrics(
+            counters: &serde_json::Map<String, serde_json::Value>,
+            histograms: &serde_json::Map<String, serde_json::Value>,
+        ) -> serde_json::Value {
+            const PARSE_MODES: &[&str] = &["incremental", "reused", "full", "other"];
+
+            let changed_ranges_count_p95 = histograms
+                .get("intellisense_v2_parse_snapshot_changed_ranges_count_origin_lsp")
+                .and_then(|value| value.as_object())
+                .map(|hist| metric_as_f64(hist.get("p95")))
+                .unwrap_or(0.0);
+            let changed_ranges_bytes_p95 = histograms
+                .get("intellisense_v2_parse_snapshot_changed_ranges_bytes_origin_lsp")
+                .and_then(|value| value.as_object())
+                .map(|hist| metric_as_f64(hist.get("p95")))
+                .unwrap_or(0.0);
+
+            let mut by_mode = serde_json::Map::new();
+            for mode in PARSE_MODES {
+                by_mode.insert(
+                    (*mode).to_string(),
+                    serde_json::json!({
+                        "total": parse_snapshot_mode_counter_total(counters, mode),
+                        "p95_ms": parse_snapshot_mode_latency_p95(histograms, mode),
+                    }),
+                );
+            }
+
+            serde_json::json!({
+                "by_mode": by_mode,
+                "changed_ranges_count_p95": changed_ranges_count_p95,
+                "changed_ranges_bytes_p95": changed_ranges_bytes_p95,
+            })
+        }
+
         let coordinator = Arc::new(SystemCoordinator::new());
         let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
             Arc::new(std::sync::Mutex::new(None));
@@ -7614,6 +7691,7 @@ mod tests {
         let completion_p95 = metric_as_f64(completion_hist.get("p95"));
         let completion_p99 = metric_as_f64(completion_hist.get("p99"));
         let mode_split_stage_metrics = collect_mode_split_stage_metrics(counters, histograms);
+        let parse_snapshot_mode_metrics = collect_parse_snapshot_mode_metrics(counters, histograms);
 
         let first_trigger_success_rate =
             first_trigger_success_total as f64 / first_trigger_total.max(1) as f64;
@@ -7673,7 +7751,8 @@ mod tests {
                 "parity_drift_total": parity_drift_total,
                 "parity_pairs_total": parity_pairs_total,
                 "parity_mismatch_rate": parity_mismatch_rate,
-                "mode_split_stage_metrics": mode_split_stage_metrics
+                "mode_split_stage_metrics": mode_split_stage_metrics,
+                "parse_snapshot_mode_metrics": parse_snapshot_mode_metrics
             },
             "pass": pass
         });

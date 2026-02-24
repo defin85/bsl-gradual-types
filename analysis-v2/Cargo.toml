@@ -18,6 +18,8 @@ bsl-diagnostics = { workspace = true }
 bsl-shared = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
+tree-sitter = { workspace = true }
+tree-sitter-bsl = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

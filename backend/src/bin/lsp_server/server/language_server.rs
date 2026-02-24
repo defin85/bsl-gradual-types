@@ -110,6 +110,16 @@ fn unix_time_millis() -> u128 {
         .unwrap_or(0)
 }
 
+fn changed_range_footprint_bytes(
+    range: &bsl_runtime::system::parser_coordinator::ParseChangedRange,
+) -> usize {
+    let old_span =
+        usize::try_from(range.old_end_byte.saturating_sub(range.start_byte)).unwrap_or(0);
+    let new_span =
+        usize::try_from(range.new_end_byte.saturating_sub(range.start_byte)).unwrap_or(0);
+    old_span.max(new_span)
+}
+
 fn advance_large_churn_state(
     state: &mut super::ScaleAwareChurnStateV2,
     now: Instant,
@@ -1368,10 +1378,7 @@ impl LanguageServer for BslLanguageServer {
                 let changed_ranges_bytes: usize = report
                     .changed_ranges
                     .iter()
-                    .map(|range| {
-                        usize::try_from(range.new_end_byte.saturating_sub(range.start_byte))
-                            .unwrap_or(0)
-                    })
+                    .map(changed_range_footprint_bytes)
                     .sum();
                 self.coordinator.record_intellisense_v2_parse_snapshot(
                     bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
@@ -1386,6 +1393,7 @@ impl LanguageServer for BslLanguageServer {
                     file_version: version,
                     parse_result: Arc::new(report.parse_result),
                     line_index: report.line_index,
+                    backend_tree: report.backend_tree,
                     changed_ranges: Arc::new(
                         report
                             .changed_ranges
@@ -1636,10 +1644,7 @@ impl LanguageServer for BslLanguageServer {
                 let changed_ranges_bytes: usize = report
                     .changed_ranges
                     .iter()
-                    .map(|range| {
-                        usize::try_from(range.new_end_byte.saturating_sub(range.start_byte))
-                            .unwrap_or(0)
-                    })
+                    .map(changed_range_footprint_bytes)
                     .sum();
                 self.coordinator.record_intellisense_v2_parse_snapshot(
                     bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
@@ -1654,6 +1659,7 @@ impl LanguageServer for BslLanguageServer {
                     file_version: version,
                     parse_result: Arc::new(report.parse_result),
                     line_index: report.line_index,
+                    backend_tree: report.backend_tree,
                     changed_ranges: Arc::new(
                         report
                             .changed_ranges

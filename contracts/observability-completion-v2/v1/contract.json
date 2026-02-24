@@ -1,0 +1,27 @@
+{
+  "surface": "observability-completion-v2",
+  "major_version": 1,
+  "schema_version": 1,
+  "compatibility": {
+    "breaking_change_requires_major_bump": true,
+    "breaking_change_requires_migration_note": true
+  },
+  "metrics": {
+    "trigger_mode_counter_prefix": "intellisense_v2_completion_trigger_mode_total_mode_",
+    "parity_drift_counter_prefix": "intellisense_v2_completion_parity_drift_total_mode_",
+    "member_access_terminal_empty_counter_prefix": "intellisense_v2_completion_member_access_terminal_empty_total_mode_",
+    "fallback_unavailable_counter": "intellisense_v2_completion_result_total_fallback_unavailable",
+    "allowed_trigger_modes": [
+      "trigger_character",
+      "invoked",
+      "trigger_for_incomplete",
+      "none"
+    ],
+    "allowed_terminal_empty_reasons": [
+      "ok_empty",
+      "fallback_unavailable",
+      "missing_ir",
+      "wait_not_ready"
+    ]
+  }
+}

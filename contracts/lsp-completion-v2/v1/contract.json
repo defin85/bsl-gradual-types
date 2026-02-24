@@ -1,0 +1,33 @@
+{
+  "surface": "lsp-completion-v2",
+  "major_version": 1,
+  "schema_version": 1,
+  "compatibility": {
+    "breaking_change_requires_major_bump": true,
+    "breaking_change_requires_migration_note": true
+  },
+  "completion": {
+    "trigger_modes": [
+      "trigger_character",
+      "invoked",
+      "trigger_for_incomplete",
+      "none"
+    ],
+    "outcomes": [
+      "ok_non_empty",
+      "ok_empty",
+      "degraded_incomplete",
+      "fallback_unavailable"
+    ]
+  },
+  "examples": {
+    "member_access_trigger_character": {
+      "trigger_mode": "trigger_character",
+      "expected_outcome": "ok_non_empty"
+    },
+    "member_access_invoked": {
+      "trigger_mode": "invoked",
+      "expected_outcome": "ok_non_empty"
+    }
+  }
+}

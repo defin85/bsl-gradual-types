@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "lsp-completion-v2 contract v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "surface",
+    "major_version",
+    "schema_version",
+    "compatibility",
+    "completion",
+    "examples"
+  ],
+  "properties": {
+    "surface": {
+      "type": "string",
+      "const": "lsp-completion-v2"
+    },
+    "major_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "breaking_change_requires_major_bump",
+        "breaking_change_requires_migration_note"
+      ],
+      "properties": {
+        "breaking_change_requires_major_bump": {
+          "type": "boolean",
+          "const": true
+        },
+        "breaking_change_requires_migration_note": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    },
+    "completion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trigger_modes",
+        "outcomes"
+      ],
+      "properties": {
+        "trigger_modes": {
+          "type": "array",
+          "minItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "trigger_character",
+              "invoked",
+              "trigger_for_incomplete",
+              "none"
+            ]
+          }
+        },
+        "outcomes": {
+          "type": "array",
+          "minItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "ok_non_empty",
+              "ok_empty",
+              "degraded_incomplete",
+              "fallback_unavailable"
+            ]
+          }
+        }
+      }
+    },
+    "examples": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "member_access_trigger_character",
+        "member_access_invoked"
+      ],
+      "properties": {
+        "member_access_trigger_character": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "trigger_mode",
+            "expected_outcome"
+          ],
+          "properties": {
+            "trigger_mode": {
+              "type": "string",
+              "const": "trigger_character"
+            },
+            "expected_outcome": {
+              "type": "string",
+              "enum": [
+                "ok_non_empty",
+                "ok_empty",
+                "degraded_incomplete",
+                "fallback_unavailable"
+              ]
+            }
+          }
+        },
+        "member_access_invoked": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "trigger_mode",
+            "expected_outcome"
+          ],
+          "properties": {
+            "trigger_mode": {
+              "type": "string",
+              "const": "invoked"
+            },
+            "expected_outcome": {
+              "type": "string",
+              "enum": [
+                "ok_non_empty",
+                "ok_empty",
+                "degraded_incomplete",
+                "fallback_unavailable"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

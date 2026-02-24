@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "observability-completion-v2 contract v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "surface",
+    "major_version",
+    "schema_version",
+    "compatibility",
+    "metrics"
+  ],
+  "properties": {
+    "surface": {
+      "type": "string",
+      "const": "observability-completion-v2"
+    },
+    "major_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "breaking_change_requires_major_bump",
+        "breaking_change_requires_migration_note"
+      ],
+      "properties": {
+        "breaking_change_requires_major_bump": {
+          "type": "boolean",
+          "const": true
+        },
+        "breaking_change_requires_migration_note": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trigger_mode_counter_prefix",
+        "parity_drift_counter_prefix",
+        "member_access_terminal_empty_counter_prefix",
+        "fallback_unavailable_counter",
+        "allowed_trigger_modes",
+        "allowed_terminal_empty_reasons"
+      ],
+      "properties": {
+        "trigger_mode_counter_prefix": {
+          "type": "string",
+          "const": "intellisense_v2_completion_trigger_mode_total_mode_"
+        },
+        "parity_drift_counter_prefix": {
+          "type": "string",
+          "const": "intellisense_v2_completion_parity_drift_total_mode_"
+        },
+        "member_access_terminal_empty_counter_prefix": {
+          "type": "string",
+          "const": "intellisense_v2_completion_member_access_terminal_empty_total_mode_"
+        },
+        "fallback_unavailable_counter": {
+          "type": "string",
+          "const": "intellisense_v2_completion_result_total_fallback_unavailable"
+        },
+        "allowed_trigger_modes": {
+          "type": "array",
+          "minItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "trigger_character",
+              "invoked",
+              "trigger_for_incomplete",
+              "none"
+            ]
+          }
+        },
+        "allowed_terminal_empty_reasons": {
+          "type": "array",
+          "minItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "ok_empty",
+              "fallback_unavailable",
+              "missing_ir",
+              "wait_not_ready"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

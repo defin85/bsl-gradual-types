@@ -2555,6 +2555,8 @@ fn percentile_sorted(values: &[f64], percentile: f64) -> f64 {
 #[cfg(test)]
 mod observability_contract_tests {
     use super::*;
+    use std::collections::BTreeSet;
+    use std::path::PathBuf;
 
     fn counters(metrics: &serde_json::Value) -> &serde_json::Map<String, serde_json::Value> {
         metrics
@@ -2590,6 +2592,19 @@ mod observability_contract_tests {
             .and_then(|value| value.get("count"))
             .and_then(|value| value.as_u64())
             .unwrap_or(0)
+    }
+
+    fn contract_path(relative: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("contracts")
+            .join(relative)
+    }
+
+    fn contract_json(relative: &str) -> serde_json::Value {
+        let path = contract_path(relative);
+        let raw = std::fs::read_to_string(&path).expect("contract file must be readable");
+        serde_json::from_str(&raw).expect("contract file must be valid json")
     }
 
     #[test]
@@ -3108,6 +3123,216 @@ mod observability_contract_tests {
             ),
             1,
             "terminal-empty metric must normalize unknown reason"
+        );
+    }
+
+    #[test]
+    fn completion_v1_contract_matches_runtime_outcomes_and_modes() {
+        let contract = contract_json("lsp-completion-v2/v1/contract.json");
+        let completion = contract
+            .get("completion")
+            .and_then(|value| value.as_object())
+            .expect("completion contract section");
+
+        let trigger_modes: BTreeSet<String> = completion
+            .get("trigger_modes")
+            .and_then(|value| value.as_array())
+            .expect("trigger_modes array")
+            .iter()
+            .map(|value| value.as_str().expect("trigger mode string").to_string())
+            .collect();
+        let expected_modes: BTreeSet<String> = [
+            "trigger_character",
+            "invoked",
+            "trigger_for_incomplete",
+            "none",
+        ]
+        .iter()
+        .map(|value| value.to_string())
+        .collect();
+        assert_eq!(
+            trigger_modes, expected_modes,
+            "contract trigger modes must match bounded runtime label set"
+        );
+        for mode in &trigger_modes {
+            assert_eq!(
+                normalize_completion_trigger_mode_label(mode),
+                mode,
+                "contract mode must be accepted by runtime normalization"
+            );
+        }
+
+        let outcomes: BTreeSet<String> = completion
+            .get("outcomes")
+            .and_then(|value| value.as_array())
+            .expect("outcomes array")
+            .iter()
+            .map(|value| value.as_str().expect("outcome string").to_string())
+            .collect();
+        let expected_outcomes: BTreeSet<String> = [
+            "ok_non_empty",
+            "ok_empty",
+            "degraded_incomplete",
+            "fallback_unavailable",
+        ]
+        .iter()
+        .map(|value| value.to_string())
+        .collect();
+        assert_eq!(
+            outcomes, expected_outcomes,
+            "contract outcomes must match v1 completion baseline"
+        );
+
+        let observability = BasicObservability::default();
+        for outcome in &outcomes {
+            observability.record_intellisense_v2_completion_outcome(outcome);
+        }
+
+        let exported = observability.get_metrics().export_metrics();
+        let counters = counters(&exported);
+        for (outcome, metric) in [
+            (
+                "ok_non_empty",
+                "intellisense_v2_completion_result_total_ok_non_empty",
+            ),
+            (
+                "ok_empty",
+                "intellisense_v2_completion_result_total_ok_empty",
+            ),
+            (
+                "degraded_incomplete",
+                "intellisense_v2_completion_result_total_degraded_incomplete",
+            ),
+            (
+                "fallback_unavailable",
+                "intellisense_v2_completion_result_total_fallback_unavailable",
+            ),
+        ] {
+            assert!(
+                outcomes.contains(outcome),
+                "contract must include outcome {outcome}"
+            );
+            assert!(
+                counter_value(counters, metric) > 0,
+                "runtime must export contract outcome metric {metric}"
+            );
+        }
+    }
+
+    #[test]
+    fn observability_completion_v1_contract_matches_runtime_metric_labels() {
+        let contract = contract_json("observability-completion-v2/v1/contract.json");
+        let metrics_contract = contract
+            .get("metrics")
+            .and_then(|value| value.as_object())
+            .expect("metrics contract section");
+
+        assert_eq!(
+            metrics_contract
+                .get("trigger_mode_counter_prefix")
+                .and_then(|value| value.as_str())
+                .expect("trigger mode prefix"),
+            "intellisense_v2_completion_trigger_mode_total_mode_"
+        );
+        assert_eq!(
+            metrics_contract
+                .get("parity_drift_counter_prefix")
+                .and_then(|value| value.as_str())
+                .expect("parity drift prefix"),
+            "intellisense_v2_completion_parity_drift_total_mode_"
+        );
+        assert_eq!(
+            metrics_contract
+                .get("member_access_terminal_empty_counter_prefix")
+                .and_then(|value| value.as_str())
+                .expect("terminal empty prefix"),
+            "intellisense_v2_completion_member_access_terminal_empty_total_mode_"
+        );
+        assert_eq!(
+            metrics_contract
+                .get("fallback_unavailable_counter")
+                .and_then(|value| value.as_str())
+                .expect("fallback_unavailable counter"),
+            "intellisense_v2_completion_result_total_fallback_unavailable"
+        );
+
+        let trigger_modes: Vec<String> = metrics_contract
+            .get("allowed_trigger_modes")
+            .and_then(|value| value.as_array())
+            .expect("allowed_trigger_modes")
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .expect("allowed trigger mode string")
+                    .to_string()
+            })
+            .collect();
+        let terminal_reasons: Vec<String> = metrics_contract
+            .get("allowed_terminal_empty_reasons")
+            .and_then(|value| value.as_array())
+            .expect("allowed_terminal_empty_reasons")
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .expect("allowed terminal reason string")
+                    .to_string()
+            })
+            .collect();
+
+        let observability = BasicObservability::default();
+        for mode in &trigger_modes {
+            observability.record_intellisense_v2_completion_trigger_mode(mode);
+            observability.record_intellisense_v2_completion_parity_drift(mode);
+            assert_eq!(
+                normalize_completion_trigger_mode_label(mode),
+                mode,
+                "contract mode must remain in bounded normalization set"
+            );
+        }
+        for reason in &terminal_reasons {
+            observability.record_intellisense_v2_completion_member_access_terminal_empty(
+                "trigger_character",
+                reason,
+            );
+            assert_eq!(
+                normalize_completion_terminal_reason_label(reason),
+                reason,
+                "contract terminal reason must remain in bounded normalization set"
+            );
+        }
+        observability.record_intellisense_v2_completion_outcome("fallback_unavailable");
+
+        let exported = observability.get_metrics().export_metrics();
+        let counters = counters(&exported);
+        for mode in &trigger_modes {
+            let trigger_key = format!("intellisense_v2_completion_trigger_mode_total_mode_{mode}");
+            let drift_key = format!("intellisense_v2_completion_parity_drift_total_mode_{mode}");
+            assert!(
+                counter_value(counters, &trigger_key) > 0,
+                "trigger-mode counter must be exported for {mode}"
+            );
+            assert!(
+                counter_value(counters, &drift_key) > 0,
+                "parity-drift counter must be exported for {mode}"
+            );
+        }
+        for reason in &terminal_reasons {
+            let terminal_key = format!(
+                "intellisense_v2_completion_member_access_terminal_empty_total_mode_trigger_character_reason_{reason}"
+            );
+            assert!(
+                counter_value(counters, &terminal_key) > 0,
+                "terminal-empty counter must be exported for reason {reason}"
+            );
+        }
+        assert!(
+            counter_value(
+                counters,
+                "intellisense_v2_completion_result_total_fallback_unavailable"
+            ) > 0,
+            "fallback_unavailable counter must be exported"
         );
     }
 

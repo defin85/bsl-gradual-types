@@ -70,6 +70,49 @@ fn should_schedule_profile(
     true
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LargeChurnTransition {
+    None,
+    Entered,
+    Exited,
+}
+
+fn should_defer_heavy_diagnostics_for_large_churn(
+    trigger: bsl_runtime::application::DiagnosticsTrigger,
+    profile: bsl_runtime::application::DiagnosticsProfile,
+    large_churn_active: bool,
+) -> bool {
+    large_churn_active
+        && matches!(
+            trigger,
+            bsl_runtime::application::DiagnosticsTrigger::DidChange
+        )
+        && !matches!(profile, bsl_runtime::application::DiagnosticsProfile::Fast)
+}
+
+fn advance_large_churn_state(
+    state: &mut super::ScaleAwareChurnStateV2,
+    now: Instant,
+    is_large_document: bool,
+    knobs: bsl_runtime::application::ScaleAwareDiagnosticsKnobs,
+) -> LargeChurnTransition {
+    if now.duration_since(state.window_started_at) > knobs.churn_window {
+        state.window_started_at = now;
+        state.changes_in_window = 0;
+    }
+
+    state.changes_in_window = state.changes_in_window.saturating_add(1);
+    let was_active = state.large_churn_active;
+    let is_churn = state.changes_in_window >= knobs.churn_min_changes;
+    state.large_churn_active = knobs.enabled && is_large_document && is_churn;
+
+    match (was_active, state.large_churn_active) {
+        (false, true) => LargeChurnTransition::Entered,
+        (true, false) => LargeChurnTransition::Exited,
+        _ => LargeChurnTransition::None,
+    }
+}
+
 fn completion_trigger_mode_label(context: Option<&CompletionContext>) -> &'static str {
     match context.map(|ctx| ctx.trigger_kind) {
         Some(CompletionTriggerKind::TRIGGER_CHARACTER) => "trigger_character",
@@ -1400,6 +1443,60 @@ impl LanguageServer for BslLanguageServer {
             current_text
         };
 
+        let scale_aware_knobs =
+            bsl_runtime::application::ScaleAwareDiagnosticsKnobs::from_runtime_config();
+        let mut large_churn_active = false;
+        if scale_aware_knobs.enabled {
+            let is_large_document = bsl_runtime::application::scale_aware_document_is_large(
+                &updated_text,
+                scale_aware_knobs,
+            );
+            let now = Instant::now();
+            let transition = {
+                let mut churn_state = self.scale_aware_churn_state_v2.write().await;
+                let state = churn_state
+                    .entry(file_id)
+                    .or_insert(super::ScaleAwareChurnStateV2 {
+                        window_started_at: now,
+                        changes_in_window: 0,
+                        large_churn_active: false,
+                    });
+                let transition =
+                    advance_large_churn_state(state, now, is_large_document, scale_aware_knobs);
+                large_churn_active = state.large_churn_active;
+                transition
+            };
+            match transition {
+                LargeChurnTransition::Entered => self
+                    .coordinator
+                    .record_intellisense_v2_large_churn_transition(
+                        bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                        "enter",
+                    ),
+                LargeChurnTransition::Exited => self
+                    .coordinator
+                    .record_intellisense_v2_large_churn_transition(
+                        bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                        "exit",
+                    ),
+                LargeChurnTransition::None => {}
+            }
+        } else {
+            let was_active = self
+                .scale_aware_churn_state_v2
+                .write()
+                .await
+                .remove(&file_id)
+                .is_some_and(|state| state.large_churn_active);
+            if was_active {
+                self.coordinator
+                    .record_intellisense_v2_large_churn_transition(
+                        bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                        "exit",
+                    );
+            }
+        }
+
         self.latest_received_file_versions_v2
             .write()
             .await
@@ -1435,6 +1532,30 @@ impl LanguageServer for BslLanguageServer {
                 *profile,
                 flow_sensitive_enabled,
             ) {
+                continue;
+            }
+            if should_defer_heavy_diagnostics_for_large_churn(
+                bsl_runtime::application::DiagnosticsTrigger::DidChange,
+                *profile,
+                large_churn_active,
+            ) {
+                self.coordinator
+                    .record_intellisense_v2_heavy_diagnostics_deferred(
+                        bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                        profile.as_str(),
+                        bsl_runtime::application::DeferredHeavyDiagnosticsReason::LargeAndChurn
+                            .as_str(),
+                    );
+                self.schedule_diagnostics_profile_v2(
+                    uri.clone(),
+                    file_id,
+                    version,
+                    diagnostics_generation,
+                    bsl_runtime::application::DiagnosticsTrigger::Idle,
+                    *profile,
+                    true,
+                )
+                .await;
                 continue;
             }
             match profile {
@@ -1569,6 +1690,19 @@ impl LanguageServer for BslLanguageServer {
                 .write()
                 .await
                 .remove(&file_id);
+            let had_large_churn = self
+                .scale_aware_churn_state_v2
+                .write()
+                .await
+                .remove(&file_id)
+                .is_some_and(|state| state.large_churn_active);
+            if had_large_churn {
+                self.coordinator
+                    .record_intellisense_v2_large_churn_transition(
+                        bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                        "exit",
+                    );
+            }
             self.analysis_v2
                 .apply_changes(vec![bsl_analysis_v2::Change::RemoveFile { file_id }]);
         }
@@ -4056,12 +4190,17 @@ fn normalize_optional_string(value: Option<String>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        completion_canary_routing_key, completion_dispatch_enabled_for_mode,
-        completion_publish_allowed, completion_route_canary_event_driven, completion_routing_plan,
+        advance_large_churn_state, completion_canary_routing_key,
+        completion_dispatch_enabled_for_mode, completion_publish_allowed,
+        completion_route_canary_event_driven, completion_routing_plan,
         completion_shadow_internal_trigger_payload, completion_shadow_internal_trigger_value,
-        should_schedule_profile, CompletionResponseRoute,
+        should_defer_heavy_diagnostics_for_large_churn, should_schedule_profile,
+        CompletionResponseRoute, LargeChurnTransition,
     };
-    use bsl_runtime::application::{CompletionMode, DiagnosticsProfile, DiagnosticsTrigger};
+    use bsl_runtime::application::{
+        CompletionMode, DiagnosticsProfile, DiagnosticsTrigger, ScaleAwareDiagnosticsKnobs,
+    };
+    use std::time::{Duration, Instant};
     use tower_lsp::lsp_types::{Position, Url};
 
     #[test]
@@ -4096,6 +4235,74 @@ mod tests {
             DiagnosticsProfile::DebouncedFull,
             false
         ));
+    }
+
+    #[test]
+    fn large_churn_defers_heavy_profiles_for_did_change_only() {
+        assert!(should_defer_heavy_diagnostics_for_large_churn(
+            DiagnosticsTrigger::DidChange,
+            DiagnosticsProfile::DebouncedFull,
+            true
+        ));
+        assert!(should_defer_heavy_diagnostics_for_large_churn(
+            DiagnosticsTrigger::DidChange,
+            DiagnosticsProfile::IdleHeavy,
+            true
+        ));
+        assert!(!should_defer_heavy_diagnostics_for_large_churn(
+            DiagnosticsTrigger::DidChange,
+            DiagnosticsProfile::Fast,
+            true
+        ));
+        assert!(!should_defer_heavy_diagnostics_for_large_churn(
+            DiagnosticsTrigger::DidSave,
+            DiagnosticsProfile::DebouncedFull,
+            true
+        ));
+        assert!(!should_defer_heavy_diagnostics_for_large_churn(
+            DiagnosticsTrigger::DidChange,
+            DiagnosticsProfile::DebouncedFull,
+            false
+        ));
+    }
+
+    #[test]
+    fn large_churn_state_enters_on_threshold_and_exits_after_window_reset() {
+        let knobs = ScaleAwareDiagnosticsKnobs {
+            enabled: true,
+            large_doc_bytes: 64 * 1024,
+            large_doc_lines: 2_000,
+            churn_window: Duration::from_millis(150),
+            churn_min_changes: 3,
+        };
+        let start = Instant::now();
+        let mut state = crate::server::ScaleAwareChurnStateV2 {
+            window_started_at: start,
+            changes_in_window: 0,
+            large_churn_active: false,
+        };
+
+        assert_eq!(
+            advance_large_churn_state(&mut state, start, true, knobs),
+            LargeChurnTransition::None
+        );
+        assert_eq!(
+            advance_large_churn_state(&mut state, start + Duration::from_millis(40), true, knobs),
+            LargeChurnTransition::None
+        );
+        assert_eq!(
+            advance_large_churn_state(&mut state, start + Duration::from_millis(80), true, knobs),
+            LargeChurnTransition::Entered
+        );
+        assert!(state.large_churn_active);
+        assert_eq!(state.changes_in_window, 3);
+
+        assert_eq!(
+            advance_large_churn_state(&mut state, start + Duration::from_millis(300), true, knobs),
+            LargeChurnTransition::Exited
+        );
+        assert!(!state.large_churn_active);
+        assert_eq!(state.changes_in_window, 1);
     }
 
     #[test]

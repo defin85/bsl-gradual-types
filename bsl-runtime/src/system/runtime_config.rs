@@ -651,6 +651,11 @@ pub enum RuntimeKey {
     IntellisenseV2InteractiveWaitBudgetMs,
     IntellisenseV2InteractiveMaxStaleVersionGap,
     IntellisenseV2InteractiveMaxStaleAgeMs,
+    IntellisenseV2ScaleAwarePolicyEnabled,
+    IntellisenseV2ScaleAwareLargeDocBytes,
+    IntellisenseV2ScaleAwareLargeDocLines,
+    IntellisenseV2ScaleAwareChurnWindowMs,
+    IntellisenseV2ScaleAwareChurnMinChanges,
     IntellisenseV2CompletionMode,
     IntellisenseV2CompletionCanaryPercent,
     IntellisenseV2CompletionQueueCapacity,
@@ -697,6 +702,11 @@ impl RuntimeKey {
         RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs,
         RuntimeKey::IntellisenseV2InteractiveMaxStaleVersionGap,
         RuntimeKey::IntellisenseV2InteractiveMaxStaleAgeMs,
+        RuntimeKey::IntellisenseV2ScaleAwarePolicyEnabled,
+        RuntimeKey::IntellisenseV2ScaleAwareLargeDocBytes,
+        RuntimeKey::IntellisenseV2ScaleAwareLargeDocLines,
+        RuntimeKey::IntellisenseV2ScaleAwareChurnWindowMs,
+        RuntimeKey::IntellisenseV2ScaleAwareChurnMinChanges,
         RuntimeKey::IntellisenseV2CompletionMode,
         RuntimeKey::IntellisenseV2CompletionCanaryPercent,
         RuntimeKey::IntellisenseV2CompletionQueueCapacity,
@@ -927,6 +937,53 @@ impl RuntimeKey {
                 },
                 tier: ConfigTier::Stable,
                 default: Some(ConfigValue::U64(1000)),
+                mutability: self.mutability(),
+            },
+            RuntimeKey::IntellisenseV2ScaleAwarePolicyEnabled => KeySpec {
+                env: "BSL_INTELLISENSE_V2_SCALE_AWARE_POLICY_ENABLED",
+                kind: ValueKind::Bool {
+                    mode: BoolMode::Truthy,
+                },
+                tier: ConfigTier::Stable,
+                default: Some(ConfigValue::Bool(true)),
+                mutability: self.mutability(),
+            },
+            RuntimeKey::IntellisenseV2ScaleAwareLargeDocBytes => KeySpec {
+                env: "BSL_INTELLISENSE_V2_SCALE_AWARE_LARGE_DOC_BYTES",
+                kind: ValueKind::Usize {
+                    positive_only: false,
+                },
+                tier: ConfigTier::Stable,
+                default: Some(ConfigValue::Usize(64 * 1024)),
+                mutability: self.mutability(),
+            },
+            RuntimeKey::IntellisenseV2ScaleAwareLargeDocLines => KeySpec {
+                env: "BSL_INTELLISENSE_V2_SCALE_AWARE_LARGE_DOC_LINES",
+                kind: ValueKind::Usize {
+                    positive_only: false,
+                },
+                tier: ConfigTier::Stable,
+                default: Some(ConfigValue::Usize(2_000)),
+                mutability: self.mutability(),
+            },
+            RuntimeKey::IntellisenseV2ScaleAwareChurnWindowMs => KeySpec {
+                env: "BSL_INTELLISENSE_V2_SCALE_AWARE_CHURN_WINDOW_MS",
+                kind: ValueKind::U64 {
+                    positive_only: false,
+                    zero_means_none: false,
+                },
+                tier: ConfigTier::Stable,
+                default: Some(ConfigValue::U64(1_500)),
+                mutability: self.mutability(),
+            },
+            RuntimeKey::IntellisenseV2ScaleAwareChurnMinChanges => KeySpec {
+                env: "BSL_INTELLISENSE_V2_SCALE_AWARE_CHURN_MIN_CHANGES",
+                kind: ValueKind::U64 {
+                    positive_only: false,
+                    zero_means_none: false,
+                },
+                tier: ConfigTier::Stable,
+                default: Some(ConfigValue::U64(6)),
                 mutability: self.mutability(),
             },
             RuntimeKey::IntellisenseV2CompletionMode => KeySpec {
@@ -1253,6 +1310,36 @@ mod tests {
         let snapshot = store.snapshot();
 
         assert_eq!(
+            snapshot
+                .tiers
+                .get("BSL_INTELLISENSE_V2_SCALE_AWARE_POLICY_ENABLED"),
+            Some(&ConfigTier::Stable)
+        );
+        assert_eq!(
+            snapshot
+                .tiers
+                .get("BSL_INTELLISENSE_V2_SCALE_AWARE_LARGE_DOC_BYTES"),
+            Some(&ConfigTier::Stable)
+        );
+        assert_eq!(
+            snapshot
+                .tiers
+                .get("BSL_INTELLISENSE_V2_SCALE_AWARE_LARGE_DOC_LINES"),
+            Some(&ConfigTier::Stable)
+        );
+        assert_eq!(
+            snapshot
+                .tiers
+                .get("BSL_INTELLISENSE_V2_SCALE_AWARE_CHURN_WINDOW_MS"),
+            Some(&ConfigTier::Stable)
+        );
+        assert_eq!(
+            snapshot
+                .tiers
+                .get("BSL_INTELLISENSE_V2_SCALE_AWARE_CHURN_MIN_CHANGES"),
+            Some(&ConfigTier::Stable)
+        );
+        assert_eq!(
             snapshot.tiers.get("BSL_INTELLISENSE_V2_COMPLETION_MODE"),
             Some(&ConfigTier::Stable)
         );
@@ -1272,6 +1359,26 @@ mod tests {
         assert_eq!(
             store.get_string(RuntimeKey::IntellisenseV2CompletionMode),
             Some("on".to_string())
+        );
+        assert_eq!(
+            store.get_bool(RuntimeKey::IntellisenseV2ScaleAwarePolicyEnabled),
+            Some(true)
+        );
+        assert_eq!(
+            store.get_usize(RuntimeKey::IntellisenseV2ScaleAwareLargeDocBytes),
+            Some(64 * 1024)
+        );
+        assert_eq!(
+            store.get_usize(RuntimeKey::IntellisenseV2ScaleAwareLargeDocLines),
+            Some(2_000)
+        );
+        assert_eq!(
+            store.get_u64(RuntimeKey::IntellisenseV2ScaleAwareChurnWindowMs),
+            Some(1_500)
+        );
+        assert_eq!(
+            store.get_u64(RuntimeKey::IntellisenseV2ScaleAwareChurnMinChanges),
+            Some(6)
         );
         assert_eq!(
             store.get_u64(RuntimeKey::IntellisenseV2CompletionCanaryPercent),

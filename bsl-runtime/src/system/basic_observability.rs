@@ -1888,6 +1888,28 @@ impl BasicObservability {
         self.metrics.increment(&key);
     }
 
+    pub fn record_intellisense_v2_large_churn_transition(&self, origin: &str, state: &str) {
+        let origin = normalize_observability_origin_label(origin);
+        let state = normalize_large_churn_state_label(state);
+        let key = format!("intellisense_v2_large_churn_state_total_origin_{origin}_state_{state}");
+        self.metrics.increment(&key);
+    }
+
+    pub fn record_intellisense_v2_heavy_diagnostics_deferred(
+        &self,
+        origin: &str,
+        profile: &str,
+        reason: &str,
+    ) {
+        let origin = normalize_observability_origin_label(origin);
+        let profile = normalize_diagnostics_profile_label(profile);
+        let reason = normalize_heavy_deferred_reason_label(reason);
+        let key = format!(
+            "intellisense_v2_heavy_diagnostics_deferred_total_origin_{origin}_profile_{profile}_reason_{reason}"
+        );
+        self.metrics.increment(&key);
+    }
+
     pub fn record_intellisense_v2_deps_update_build_latency(&self, duration: Duration) {
         self.metrics
             .increment("intellisense_v2_deps_update_build_total");
@@ -2304,6 +2326,21 @@ fn normalize_diagnostics_reason_label(reason: &str) -> &'static str {
         "superseded_generation" => "superseded_generation",
         "cancelled" => "cancelled",
         _ => "cancelled",
+    }
+}
+
+fn normalize_large_churn_state_label(state: &str) -> &'static str {
+    match state {
+        "enter" => "enter",
+        "exit" => "exit",
+        _ => "enter",
+    }
+}
+
+fn normalize_heavy_deferred_reason_label(reason: &str) -> &'static str {
+    match reason {
+        "large_and_churn" => "large_and_churn",
+        _ => "other",
     }
 }
 
@@ -2887,6 +2924,45 @@ mod observability_contract_tests {
             1,
             "invalid labels must collapse into bounded fallback dimensions"
         );
+    }
+
+    #[test]
+    fn large_churn_transition_metric_is_low_cardinality() {
+        let observability = BasicObservability::default();
+        observability.record_intellisense_v2_large_churn_transition("lsp", "enter");
+        observability.record_intellisense_v2_large_churn_transition("lsp", "exit");
+
+        let exported = observability.get_metrics().export_metrics();
+        let counters = counters(&exported);
+        assert_eq!(
+            counter_value(
+                counters,
+                "intellisense_v2_large_churn_state_total_origin_lsp_state_enter"
+            ),
+            1
+        );
+        assert_eq!(
+            counter_value(
+                counters,
+                "intellisense_v2_large_churn_state_total_origin_lsp_state_exit"
+            ),
+            1
+        );
+    }
+
+    #[test]
+    fn heavy_diagnostics_deferred_metric_normalizes_reason_and_profile() {
+        let observability = BasicObservability::default();
+        observability.record_intellisense_v2_heavy_diagnostics_deferred(
+            "unknown-origin",
+            "unknown-profile",
+            "unknown-reason",
+        );
+
+        let exported = observability.get_metrics().export_metrics();
+        let counters = counters(&exported);
+        let normalized_key = "intellisense_v2_heavy_diagnostics_deferred_total_origin_runtime_profile_debounced_full_reason_other";
+        assert_eq!(counter_value(counters, normalized_key), 1);
     }
 
     #[test]

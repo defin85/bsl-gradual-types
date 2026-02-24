@@ -665,6 +665,21 @@ impl SystemCoordinator {
             .record_intellisense_v2_diagnostics_pipeline_event(origin, trigger, profile, reason);
     }
 
+    pub fn record_intellisense_v2_large_churn_transition(&self, origin: &str, state: &str) {
+        self.observability
+            .record_intellisense_v2_large_churn_transition(origin, state);
+    }
+
+    pub fn record_intellisense_v2_heavy_diagnostics_deferred(
+        &self,
+        origin: &str,
+        profile: &str,
+        reason: &str,
+    ) {
+        self.observability
+            .record_intellisense_v2_heavy_diagnostics_deferred(origin, profile, reason);
+    }
+
     pub fn record_intellisense_v2_deps_update_build_latency(&self, duration: std::time::Duration) {
         self.observability
             .record_intellisense_v2_deps_update_build_latency(duration);

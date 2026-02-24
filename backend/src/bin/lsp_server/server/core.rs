@@ -168,6 +168,7 @@ impl BslLanguageServer {
             diagnostics_generation_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_received_file_versions_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_document_shadow_state_v2: Arc::new(RwLock::new(HashMap::new())),
+            scale_aware_churn_state_v2: Arc::new(RwLock::new(HashMap::new())),
             completion_seen_files_v2: Arc::new(RwLock::new(std::collections::HashSet::new())),
             completion_stale_fallback_cache_v2: Arc::new(RwLock::new(HashMap::new())),
             completion_parity_state_v2: Arc::new(RwLock::new(HashMap::new())),

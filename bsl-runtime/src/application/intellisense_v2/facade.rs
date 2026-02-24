@@ -51,12 +51,27 @@ impl SemanticOperation {
     }
 }
 
-fn runtime_work_class_for_operation(operation: SemanticOperation) -> &'static str {
-    match operation {
-        SemanticOperation::Completion
-        | SemanticOperation::Hover
-        | SemanticOperation::SignatureHelp => "interactive",
-        _ => "background",
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeQueuePriority {
+    Interactive,
+    Background,
+}
+
+impl RuntimeQueuePriority {
+    fn for_operation(operation: SemanticOperation) -> Self {
+        match operation {
+            SemanticOperation::Completion
+            | SemanticOperation::Hover
+            | SemanticOperation::SignatureHelp => RuntimeQueuePriority::Interactive,
+            _ => RuntimeQueuePriority::Background,
+        }
+    }
+
+    fn as_work_class(self) -> &'static str {
+        match self {
+            RuntimeQueuePriority::Interactive => "interactive",
+            RuntimeQueuePriority::Background => "background",
+        }
     }
 }
 
@@ -195,7 +210,8 @@ pub struct IntellisenseV2Facade {
 }
 
 struct Inner {
-    tx: std::sync::mpsc::Sender<Command>,
+    interactive_tx: std::sync::mpsc::Sender<Command>,
+    background_tx: std::sync::mpsc::Sender<Command>,
     #[cfg(test)]
     join_handle: std::sync::Mutex<Option<std::thread::JoinHandle<()>>>,
 }
@@ -214,10 +230,12 @@ enum Command {
         reply: oneshot::Sender<AnalysisV2>,
     },
     GetSnapshotWithDeps {
+        origin: ObservabilityOrigin,
         enqueued_at: Instant,
         reply: oneshot::Sender<(AnalysisV2, Arc<IndexSnapshot>, DepsSnapshotId)>,
     },
     WaitForFileVersion {
+        origin: ObservabilityOrigin,
         enqueued_at: Instant,
         file_id: FileId,
         min_version: i32,
@@ -228,9 +246,91 @@ enum Command {
         reply: oneshot::Sender<Option<FileRevisionState>>,
     },
     #[cfg(test)]
+    TestSleep {
+        duration: Duration,
+        ack: oneshot::Sender<()>,
+    },
+    #[cfg(test)]
+    TestNoop {
+        ack: oneshot::Sender<()>,
+    },
+    #[cfg(test)]
     Shutdown {
         ack: oneshot::Sender<()>,
     },
+}
+
+const INTERACTIVE_BURST_QUOTA: usize = 8;
+
+fn recv_next_writer_command(
+    interactive_rx: &std::sync::mpsc::Receiver<Command>,
+    background_rx: &std::sync::mpsc::Receiver<Command>,
+    interactive_streak: &mut usize,
+    interactive_closed: &mut bool,
+    background_closed: &mut bool,
+) -> Option<(RuntimeQueuePriority, Command)> {
+    use std::sync::mpsc::{RecvTimeoutError, TryRecvError};
+
+    loop {
+        if *interactive_streak >= INTERACTIVE_BURST_QUOTA {
+            *interactive_streak = 0;
+            if !*background_closed {
+                match background_rx.try_recv() {
+                    Ok(command) => return Some((RuntimeQueuePriority::Background, command)),
+                    Err(TryRecvError::Disconnected) => *background_closed = true,
+                    Err(TryRecvError::Empty) => {}
+                }
+            }
+        }
+
+        if !*interactive_closed {
+            match interactive_rx.try_recv() {
+                Ok(command) => {
+                    *interactive_streak = interactive_streak.saturating_add(1);
+                    return Some((RuntimeQueuePriority::Interactive, command));
+                }
+                Err(TryRecvError::Disconnected) => *interactive_closed = true,
+                Err(TryRecvError::Empty) => {}
+            }
+        }
+
+        if !*background_closed {
+            match background_rx.try_recv() {
+                Ok(command) => {
+                    *interactive_streak = 0;
+                    return Some((RuntimeQueuePriority::Background, command));
+                }
+                Err(TryRecvError::Disconnected) => *background_closed = true,
+                Err(TryRecvError::Empty) => {}
+            }
+        }
+
+        if *interactive_closed && *background_closed {
+            return None;
+        }
+
+        if !*interactive_closed {
+            match interactive_rx.recv_timeout(Duration::from_millis(2)) {
+                Ok(command) => {
+                    *interactive_streak = interactive_streak.saturating_add(1);
+                    return Some((RuntimeQueuePriority::Interactive, command));
+                }
+                Err(RecvTimeoutError::Disconnected) => *interactive_closed = true,
+                Err(RecvTimeoutError::Timeout) => {}
+            }
+        }
+
+        if !*background_closed {
+            match background_rx.recv_timeout(Duration::from_millis(2)) {
+                Ok(command) => {
+                    *interactive_streak = 0;
+                    return Some((RuntimeQueuePriority::Background, command));
+                }
+                Err(RecvTimeoutError::Disconnected) => *background_closed = true,
+                Err(RecvTimeoutError::Timeout) => {}
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -308,7 +408,8 @@ impl IntellisenseV2Facade {
         initial_index_snapshot: Arc<IndexSnapshot>,
         observability: Option<Arc<SystemCoordinator>>,
     ) -> Self {
-        let (tx, rx) = std::sync::mpsc::channel::<Command>();
+        let (interactive_tx, interactive_rx) = std::sync::mpsc::channel::<Command>();
+        let (background_tx, background_rx) = std::sync::mpsc::channel::<Command>();
 
         let join_handle = std::thread::Builder::new()
             .name("analysis-v2-writer".to_string())
@@ -319,6 +420,9 @@ impl IntellisenseV2Facade {
                 let mut applied_file_revisions: HashMap<FileId, FileRevisionState> =
                     HashMap::new();
                 let mut waiters: HashMap<FileId, Vec<PendingWaiter>> = HashMap::new();
+                let mut interactive_streak = 0usize;
+                let mut interactive_closed = false;
+                let mut background_closed = false;
 
                 let wake_waiters_for_file =
                     |file_id: FileId,
@@ -339,6 +443,11 @@ impl IntellisenseV2Facade {
                                             "wait_for_file_version",
                                             exec_elapsed,
                                         );
+                                        coordinator.record_intellisense_v2_runtime_exec_class_latency_with_origin(
+                                            waiter.origin.as_str(),
+                                            waiter.priority.as_work_class(),
+                                            exec_elapsed,
+                                        );
                                     }
                                     let _ = waiter.reply.send(false);
                                 }
@@ -347,6 +456,11 @@ impl IntellisenseV2Facade {
                                     if let Some(coordinator) = observability {
                                         coordinator.record_intellisense_v2_runtime_exec_latency(
                                             "wait_for_file_version",
+                                            exec_elapsed,
+                                        );
+                                        coordinator.record_intellisense_v2_runtime_exec_class_latency_with_origin(
+                                            waiter.origin.as_str(),
+                                            waiter.priority.as_work_class(),
                                             exec_elapsed,
                                         );
                                     }
@@ -361,7 +475,13 @@ impl IntellisenseV2Facade {
                         }
                     };
 
-                while let Ok(cmd) = rx.recv() {
+                while let Some((queue_priority, cmd)) = recv_next_writer_command(
+                    &interactive_rx,
+                    &background_rx,
+                    &mut interactive_streak,
+                    &mut interactive_closed,
+                    &mut background_closed,
+                ) {
                     match cmd {
                         Command::ApplyChanges { changes } => {
                             let mut changed_files = Vec::new();
@@ -418,11 +538,20 @@ impl IntellisenseV2Facade {
                         Command::GetSnapshot { reply } => {
                             let _ = reply.send(host.snapshot());
                         }
-                        Command::GetSnapshotWithDeps { enqueued_at, reply } => {
+                        Command::GetSnapshotWithDeps {
+                            origin,
+                            enqueued_at,
+                            reply,
+                        } => {
                             let queue_wait_elapsed = enqueued_at.elapsed();
                             if let Some(coordinator) = &observability {
                                 coordinator.record_intellisense_v2_runtime_queue_wait_latency(
                                     "snapshot_with_deps",
+                                    queue_wait_elapsed,
+                                );
+                                coordinator.record_intellisense_v2_runtime_queue_wait_class_latency_with_origin(
+                                    origin.as_str(),
+                                    queue_priority.as_work_class(),
                                     queue_wait_elapsed,
                                 );
                             }
@@ -439,10 +568,16 @@ impl IntellisenseV2Facade {
                                     "snapshot_with_deps",
                                     exec_elapsed,
                                 );
+                                coordinator.record_intellisense_v2_runtime_exec_class_latency_with_origin(
+                                    origin.as_str(),
+                                    queue_priority.as_work_class(),
+                                    exec_elapsed,
+                                );
                             }
                             let _ = reply.send(response);
                         }
                         Command::WaitForFileVersion {
+                            origin,
                             enqueued_at,
                             file_id,
                             min_version,
@@ -452,6 +587,11 @@ impl IntellisenseV2Facade {
                             if let Some(coordinator) = &observability {
                                 coordinator.record_intellisense_v2_runtime_queue_wait_latency(
                                     "wait_for_file_version",
+                                    queue_wait_elapsed,
+                                );
+                                coordinator.record_intellisense_v2_runtime_queue_wait_class_latency_with_origin(
+                                    origin.as_str(),
+                                    queue_priority.as_work_class(),
                                     queue_wait_elapsed,
                                 );
                             }
@@ -466,6 +606,11 @@ impl IntellisenseV2Facade {
                                             "wait_for_file_version",
                                             exec_elapsed,
                                         );
+                                        coordinator.record_intellisense_v2_runtime_exec_class_latency_with_origin(
+                                            origin.as_str(),
+                                            queue_priority.as_work_class(),
+                                            exec_elapsed,
+                                        );
                                     }
                                 }
                                 _ => {
@@ -473,12 +618,23 @@ impl IntellisenseV2Facade {
                                         min_version,
                                         reply,
                                         started_waiting_at: Instant::now(),
+                                        origin,
+                                        priority: queue_priority,
                                     });
                                 }
                             }
                         }
                         Command::GetFileRevisionState { file_id, reply } => {
                             let _ = reply.send(applied_file_revisions.get(&file_id).copied());
+                        }
+                        #[cfg(test)]
+                        Command::TestSleep { duration, ack } => {
+                            std::thread::sleep(duration);
+                            let _ = ack.send(());
+                        }
+                        #[cfg(test)]
+                        Command::TestNoop { ack } => {
+                            let _ = ack.send(());
                         }
                         #[cfg(test)]
                         Command::Shutdown { ack } => {
@@ -488,6 +644,11 @@ impl IntellisenseV2Facade {
                                     if let Some(coordinator) = &observability {
                                         coordinator.record_intellisense_v2_runtime_exec_latency(
                                             "wait_for_file_version",
+                                            exec_elapsed,
+                                        );
+                                        coordinator.record_intellisense_v2_runtime_exec_class_latency_with_origin(
+                                            waiter.origin.as_str(),
+                                            waiter.priority.as_work_class(),
                                             exec_elapsed,
                                         );
                                     }
@@ -507,11 +668,30 @@ impl IntellisenseV2Facade {
 
         Self {
             inner: Arc::new(Inner {
-                tx,
+                interactive_tx,
+                background_tx,
                 #[cfg(test)]
                 join_handle: std::sync::Mutex::new(Some(join_handle)),
             }),
         }
+    }
+
+    fn send_command_with_priority(
+        &self,
+        priority: RuntimeQueuePriority,
+        command: Command,
+    ) -> Result<(), std::sync::mpsc::SendError<Command>> {
+        match priority {
+            RuntimeQueuePriority::Interactive => self.inner.interactive_tx.send(command),
+            RuntimeQueuePriority::Background => self.inner.background_tx.send(command),
+        }
+    }
+
+    fn send_background_command(
+        &self,
+        command: Command,
+    ) -> Result<(), std::sync::mpsc::SendError<Command>> {
+        self.send_command_with_priority(RuntimeQueuePriority::Background, command)
     }
 
     pub fn apply_changes(&self, changes: Vec<Change>) {
@@ -519,9 +699,7 @@ impl IntellisenseV2Facade {
             return;
         }
         if self
-            .inner
-            .tx
-            .send(Command::ApplyChanges { changes })
+            .send_background_command(Command::ApplyChanges { changes })
             .is_err()
         {
             warn!("analysis_v2_runtime: failed to send ApplyChanges (writer thread is gone)");
@@ -536,9 +714,7 @@ impl IntellisenseV2Facade {
     ) -> bool {
         let (reply, rx) = oneshot::channel::<bool>();
         if self
-            .inner
-            .tx
-            .send(Command::ApplyDepsBundle {
+            .send_background_command(Command::ApplyDepsBundle {
                 deps_id,
                 deps,
                 index_snapshot,
@@ -554,7 +730,10 @@ impl IntellisenseV2Facade {
 
     pub async fn snapshot(&self) -> AnalysisV2 {
         let (reply, rx) = oneshot::channel::<AnalysisV2>();
-        if self.inner.tx.send(Command::GetSnapshot { reply }).is_err() {
+        if self
+            .send_background_command(Command::GetSnapshot { reply })
+            .is_err()
+        {
             warn!("analysis_v2_runtime: failed to send GetSnapshot (writer thread is gone)");
             return AnalysisHostV2::default().snapshot();
         }
@@ -568,14 +747,28 @@ impl IntellisenseV2Facade {
     }
 
     pub async fn snapshot_with_deps(&self) -> (AnalysisV2, Arc<IndexSnapshot>, DepsSnapshotId) {
+        self.snapshot_with_deps_with_priority(
+            ObservabilityOrigin::Runtime,
+            RuntimeQueuePriority::Background,
+        )
+        .await
+    }
+
+    async fn snapshot_with_deps_with_priority(
+        &self,
+        origin: ObservabilityOrigin,
+        priority: RuntimeQueuePriority,
+    ) -> (AnalysisV2, Arc<IndexSnapshot>, DepsSnapshotId) {
         let (reply, rx) = oneshot::channel::<(AnalysisV2, Arc<IndexSnapshot>, DepsSnapshotId)>();
         if self
-            .inner
-            .tx
-            .send(Command::GetSnapshotWithDeps {
-                enqueued_at: Instant::now(),
-                reply,
-            })
+            .send_command_with_priority(
+                priority,
+                Command::GetSnapshotWithDeps {
+                    origin,
+                    enqueued_at: Instant::now(),
+                    reply,
+                },
+            )
             .is_err()
         {
             warn!(
@@ -604,8 +797,11 @@ impl IntellisenseV2Facade {
     /// Returns a consistent analysis/index/deps snapshot for a semantic operation.
     /// Operation kind is part of the canonical facade contract and is reserved for
     /// shared policy/observability branching in subsequent migration steps.
-    pub async fn snapshot_for_operation(&self, _operation: SemanticOperation) -> SemanticSnapshot {
-        let (analysis, index_snapshot, deps_id) = self.snapshot_with_deps().await;
+    pub async fn snapshot_for_operation(&self, operation: SemanticOperation) -> SemanticSnapshot {
+        let queue_priority = RuntimeQueuePriority::for_operation(operation);
+        let (analysis, index_snapshot, deps_id) = self
+            .snapshot_with_deps_with_priority(ObservabilityOrigin::Runtime, queue_priority)
+            .await;
         SemanticSnapshot {
             analysis,
             index_snapshot,
@@ -621,6 +817,7 @@ impl IntellisenseV2Facade {
         observability: Option<&SystemCoordinator>,
     ) -> Result<PreparedOperationSnapshot, SemanticOutcome> {
         let interactive_knobs = interactive_freshness_knobs(context.operation, observability);
+        let queue_priority = RuntimeQueuePriority::for_operation(context.operation);
         let mut wait_budget_exhausted = false;
         let mut stale_served = false;
 
@@ -629,7 +826,12 @@ impl IntellisenseV2Facade {
             let wait_ok = if let Some(knobs) = interactive_knobs {
                 match tokio::time::timeout(
                     knobs.wait_budget,
-                    self.wait_for_file_version(context.file_id, min_file_version),
+                    self.wait_for_file_version_with_priority(
+                        context.origin,
+                        queue_priority,
+                        context.file_id,
+                        min_file_version,
+                    ),
                 )
                 .await
                 {
@@ -643,8 +845,13 @@ impl IntellisenseV2Facade {
                     }
                 }
             } else {
-                self.wait_for_file_version(context.file_id, min_file_version)
-                    .await
+                self.wait_for_file_version_with_priority(
+                    context.origin,
+                    queue_priority,
+                    context.file_id,
+                    min_file_version,
+                )
+                .await
             };
             let elapsed = started.elapsed();
             if let Some(coordinator) = observability {
@@ -664,23 +871,15 @@ impl IntellisenseV2Facade {
         };
 
         let snapshot_started = Instant::now();
-        let (analysis, index_snapshot, deps_id) = self.snapshot_with_deps().await;
+        let (analysis, index_snapshot, deps_id) = self
+            .snapshot_with_deps_with_priority(context.origin, queue_priority)
+            .await;
         let snapshot_elapsed = snapshot_started.elapsed();
         if let Some(coordinator) = observability {
             coordinator.record_intellisense_v2_snapshot_latency_with_origin_and_mode(
                 context.origin.as_str(),
                 context.operation.as_str(),
                 context.completion_mode,
-                snapshot_elapsed,
-            );
-            coordinator.record_intellisense_v2_runtime_queue_wait_class_latency_with_origin(
-                context.origin.as_str(),
-                runtime_work_class_for_operation(context.operation),
-                wait_elapsed.unwrap_or(Duration::ZERO),
-            );
-            coordinator.record_intellisense_v2_runtime_exec_class_latency_with_origin(
-                context.origin.as_str(),
-                runtime_work_class_for_operation(context.operation),
                 snapshot_elapsed,
             );
         }
@@ -1253,16 +1452,34 @@ impl IntellisenseV2Facade {
     }
 
     pub async fn wait_for_file_version(&self, file_id: FileId, min_version: i32) -> bool {
+        self.wait_for_file_version_with_priority(
+            ObservabilityOrigin::Runtime,
+            RuntimeQueuePriority::Background,
+            file_id,
+            min_version,
+        )
+        .await
+    }
+
+    async fn wait_for_file_version_with_priority(
+        &self,
+        origin: ObservabilityOrigin,
+        priority: RuntimeQueuePriority,
+        file_id: FileId,
+        min_version: i32,
+    ) -> bool {
         let (reply, rx) = oneshot::channel::<bool>();
         if self
-            .inner
-            .tx
-            .send(Command::WaitForFileVersion {
-                enqueued_at: Instant::now(),
-                file_id,
-                min_version,
-                reply,
-            })
+            .send_command_with_priority(
+                priority,
+                Command::WaitForFileVersion {
+                    origin,
+                    enqueued_at: Instant::now(),
+                    file_id,
+                    min_version,
+                    reply,
+                },
+            )
             .is_err()
         {
             warn!("analysis_v2_runtime: failed to send WaitForFileVersion (writer thread is gone)");
@@ -1274,9 +1491,7 @@ impl IntellisenseV2Facade {
     pub async fn file_revision_state(&self, file_id: FileId) -> Option<FileRevisionState> {
         let (reply, rx) = oneshot::channel::<Option<FileRevisionState>>();
         if self
-            .inner
-            .tx
-            .send(Command::GetFileRevisionState { file_id, reply })
+            .send_background_command(Command::GetFileRevisionState { file_id, reply })
             .is_err()
         {
             warn!(
@@ -1296,7 +1511,7 @@ impl IntellisenseV2Facade {
     #[cfg(test)]
     pub(crate) async fn shutdown_for_test(&self) {
         let (ack, rx) = oneshot::channel::<()>();
-        let _ = self.inner.tx.send(Command::Shutdown { ack });
+        let _ = self.send_background_command(Command::Shutdown { ack });
         let _ = rx.await;
 
         let join_handle = self.inner.join_handle.lock().unwrap().take();
@@ -1304,12 +1519,32 @@ impl IntellisenseV2Facade {
             let _ = handle.join();
         }
     }
+
+    #[cfg(test)]
+    fn enqueue_test_sleep(
+        &self,
+        priority: RuntimeQueuePriority,
+        duration: Duration,
+    ) -> oneshot::Receiver<()> {
+        let (ack, rx) = oneshot::channel::<()>();
+        let _ = self.send_command_with_priority(priority, Command::TestSleep { duration, ack });
+        rx
+    }
+
+    #[cfg(test)]
+    fn enqueue_test_noop(&self, priority: RuntimeQueuePriority) -> oneshot::Receiver<()> {
+        let (ack, rx) = oneshot::channel::<()>();
+        let _ = self.send_command_with_priority(priority, Command::TestNoop { ack });
+        rx
+    }
 }
 
 struct PendingWaiter {
     min_version: i32,
     reply: oneshot::Sender<bool>,
     started_waiting_at: Instant,
+    origin: ObservabilityOrigin,
+    priority: RuntimeQueuePriority,
 }
 
 #[cfg(test)]
@@ -1373,6 +1608,77 @@ mod tests {
             .expect("wait task timeout")
             .expect("wait task join");
         assert!(!ok, "expected waiter to return false on shutdown");
+    }
+
+    #[tokio::test]
+    async fn interactive_commands_preempt_background_backlog() {
+        let runtime = IntellisenseV2Facade::new(
+            AnalysisHostV2::default(),
+            Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p7"))),
+            None,
+        );
+        let mut sleepers = Vec::new();
+        for _ in 0..6 {
+            sleepers.push(
+                runtime.enqueue_test_sleep(
+                    RuntimeQueuePriority::Background,
+                    Duration::from_millis(40),
+                ),
+            );
+        }
+
+        let started = Instant::now();
+        let interactive_ack = runtime.enqueue_test_noop(RuntimeQueuePriority::Interactive);
+        timeout(Duration::from_millis(120), interactive_ack)
+            .await
+            .expect("interactive noop must not wait for full background backlog")
+            .expect("interactive noop ack");
+        assert!(
+            started.elapsed() < Duration::from_millis(120),
+            "interactive noop should complete before background backlog drains"
+        );
+
+        for sleeper_ack in sleepers {
+            timeout(Duration::from_secs(1), sleeper_ack)
+                .await
+                .expect("background sleeper ack timeout")
+                .expect("background sleeper ack");
+        }
+
+        runtime.shutdown_for_test().await;
+    }
+
+    #[tokio::test]
+    async fn background_commands_make_progress_under_interactive_flood() {
+        let runtime = IntellisenseV2Facade::new(
+            AnalysisHostV2::default(),
+            Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p7"))),
+            None,
+        );
+
+        let mut interactive_sleep_acks = Vec::new();
+        for _ in 0..100 {
+            interactive_sleep_acks.push(
+                runtime.enqueue_test_sleep(
+                    RuntimeQueuePriority::Interactive,
+                    Duration::from_millis(5),
+                ),
+            );
+        }
+        let background_ack = runtime.enqueue_test_noop(RuntimeQueuePriority::Background);
+        timeout(Duration::from_millis(200), background_ack)
+            .await
+            .expect("background command should make progress despite interactive flood")
+            .expect("background noop ack");
+
+        for interactive_ack in interactive_sleep_acks {
+            timeout(Duration::from_secs(2), interactive_ack)
+                .await
+                .expect("interactive sleeper ack timeout")
+                .expect("interactive sleeper ack");
+        }
+
+        runtime.shutdown_for_test().await;
     }
 
     fn make_deps() -> Arc<SemanticDeps> {

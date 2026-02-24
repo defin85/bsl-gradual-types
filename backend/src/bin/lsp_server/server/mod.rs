@@ -19,7 +19,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tower_lsp::lsp_types::CompletionItem;
@@ -82,6 +82,13 @@ pub(crate) struct DocumentShadowStateV2 {
     pub text: Arc<str>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct ScaleAwareChurnStateV2 {
+    pub window_started_at: Instant,
+    pub changes_in_window: u32,
+    pub large_churn_active: bool,
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CompletionParityStateV2 {
     pub trigger_character_non_empty: Option<bool>,
@@ -121,6 +128,7 @@ pub struct BslLanguageServer {
     pub(crate) latest_received_file_versions_v2: Arc<RwLock<HashMap<V2FileId, i32>>>,
     pub(crate) latest_document_shadow_state_v2:
         Arc<RwLock<HashMap<V2FileId, DocumentShadowStateV2>>>,
+    pub(crate) scale_aware_churn_state_v2: Arc<RwLock<HashMap<V2FileId, ScaleAwareChurnStateV2>>>,
     pub(crate) completion_seen_files_v2: Arc<RwLock<HashSet<V2FileId>>>,
     pub(crate) completion_stale_fallback_cache_v2:
         Arc<RwLock<HashMap<V2FileId, CompletionStaleFallbackCacheEntryV2>>>,

@@ -80,6 +80,68 @@ pub struct CompletionPipelineKnobs {
     pub queue_capacity: usize,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct ScaleAwareDiagnosticsKnobs {
+    pub enabled: bool,
+    pub large_doc_bytes: usize,
+    pub large_doc_lines: usize,
+    pub churn_window: Duration,
+    pub churn_min_changes: u32,
+}
+
+impl ScaleAwareDiagnosticsKnobs {
+    pub fn from_runtime_config() -> Self {
+        let enabled = global_runtime_config()
+            .get_bool(RuntimeKey::IntellisenseV2ScaleAwarePolicyEnabled)
+            .unwrap_or(true);
+        let (large_doc_bytes, _) = read_clamped_usize(
+            RuntimeKey::IntellisenseV2ScaleAwareLargeDocBytes,
+            64 * 1024,
+            1024,
+            10 * 1024 * 1024,
+        );
+        let (large_doc_lines, _) = read_clamped_usize(
+            RuntimeKey::IntellisenseV2ScaleAwareLargeDocLines,
+            2_000,
+            50,
+            100_000,
+        );
+        let (churn_window, _) = read_clamped_duration(
+            RuntimeKey::IntellisenseV2ScaleAwareChurnWindowMs,
+            Duration::from_millis(1_500),
+            Duration::from_millis(100),
+            Duration::from_millis(10_000),
+        );
+        let (churn_min_changes, _) = read_clamped_u32(
+            RuntimeKey::IntellisenseV2ScaleAwareChurnMinChanges,
+            6,
+            2,
+            200,
+        );
+
+        Self {
+            enabled,
+            large_doc_bytes,
+            large_doc_lines,
+            churn_window,
+            churn_min_changes,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeferredHeavyDiagnosticsReason {
+    LargeAndChurn,
+}
+
+impl DeferredHeavyDiagnosticsReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DeferredHeavyDiagnosticsReason::LargeAndChurn => "large_and_churn",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompletionMissingIrPolicyDecision {
     StrictCacheIncomplete,
@@ -143,6 +205,10 @@ impl RuntimePerfKnobs {
     }
 }
 
+pub fn scale_aware_document_is_large(text: &str, knobs: ScaleAwareDiagnosticsKnobs) -> bool {
+    text.len() >= knobs.large_doc_bytes || text.lines().count() >= knobs.large_doc_lines
+}
+
 fn read_duration(key: RuntimeKey) -> Option<Duration> {
     global_runtime_config()
         .get_u64(key)
@@ -192,6 +258,19 @@ fn read_clamped_u8(key: RuntimeKey, default: u8, min: u8, max: u8) -> (u8, bool)
     };
     let clamped = raw_u8.clamp(min, max);
     (clamped, clamped != raw_u8)
+}
+
+fn read_clamped_u32(key: RuntimeKey, default: u32, min: u32, max: u32) -> (u32, bool) {
+    let raw = global_runtime_config()
+        .get_u64(key)
+        .unwrap_or(default as u64);
+    let raw_u32 = if raw > u32::MAX as u64 {
+        u32::MAX
+    } else {
+        raw as u32
+    };
+    let clamped = raw_u32.clamp(min, max);
+    (clamped, clamped != raw_u32)
 }
 
 fn read_clamped_usize(key: RuntimeKey, default: usize, min: usize, max: usize) -> (usize, bool) {
@@ -1212,6 +1291,52 @@ mod tests {
         let _mode_guard = EnvVarGuard::set("BSL_INTELLISENSE_V2_COMPLETION_MODE", "legacy_like");
         let knobs = CompletionPipelineKnobs::from_runtime_config();
         assert_eq!(knobs.mode, CompletionMode::Off);
+    }
+
+    #[test]
+    fn scale_aware_knobs_use_defaults_when_env_missing() {
+        let _env_guard = ENV_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("env lock should not be poisoned");
+
+        let _enabled_guard = EnvVarGuard::unset("BSL_INTELLISENSE_V2_SCALE_AWARE_POLICY_ENABLED");
+        let _bytes_guard = EnvVarGuard::unset("BSL_INTELLISENSE_V2_SCALE_AWARE_LARGE_DOC_BYTES");
+        let _lines_guard = EnvVarGuard::unset("BSL_INTELLISENSE_V2_SCALE_AWARE_LARGE_DOC_LINES");
+        let _window_guard = EnvVarGuard::unset("BSL_INTELLISENSE_V2_SCALE_AWARE_CHURN_WINDOW_MS");
+        let _min_changes_guard =
+            EnvVarGuard::unset("BSL_INTELLISENSE_V2_SCALE_AWARE_CHURN_MIN_CHANGES");
+
+        let knobs = ScaleAwareDiagnosticsKnobs::from_runtime_config();
+        assert!(knobs.enabled);
+        assert_eq!(knobs.large_doc_bytes, 64 * 1024);
+        assert_eq!(knobs.large_doc_lines, 2_000);
+        assert_eq!(knobs.churn_window, Duration::from_millis(1_500));
+        assert_eq!(knobs.churn_min_changes, 6);
+    }
+
+    #[test]
+    fn scale_aware_document_classification_uses_bytes_or_lines_threshold() {
+        let knobs = ScaleAwareDiagnosticsKnobs {
+            enabled: true,
+            large_doc_bytes: 10,
+            large_doc_lines: 3,
+            churn_window: Duration::from_millis(1_500),
+            churn_min_changes: 6,
+        };
+
+        assert!(
+            !scale_aware_document_is_large("abc", knobs),
+            "tiny one-line document should stay small"
+        );
+        assert!(
+            scale_aware_document_is_large("0123456789", knobs),
+            "byte threshold should classify document as large"
+        );
+        assert!(
+            scale_aware_document_is_large("a\nb\nc", knobs),
+            "line threshold should classify document as large"
+        );
     }
 
     #[test]

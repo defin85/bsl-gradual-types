@@ -9,7 +9,7 @@
 
 ## 3. analysis-v2 Integration
 - [x] 3.1 Подключить `parse_result/syntax_diagnostics/ir` к snapshot input вместо обязательного full parse на каждую ревизию.
-- [ ] 3.2 Ограничить recompute до затронутых диапазонов, где это возможно без нарушения корректности.
+- [x] 3.2 Ограничить recompute до затронутых диапазонов, где это возможно без нарушения корректности.
 
 ## 4. Observability
 - [x] 4.1 Добавить low-cardinality метрики reuse/fallback/reason и changed-range size.

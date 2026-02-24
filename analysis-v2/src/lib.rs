@@ -177,6 +177,18 @@ pub struct ParseSnapshot {
     pub fallback_reason: Option<Arc<str>>,
 }
 
+const DERIVED_CACHE_KEEP_VERSIONS: i32 = 2;
+
+#[derive(Clone, Default)]
+struct DerivedVersionArtifacts {
+    ir_by_deps_id: HashMap<DepsSnapshotId, Arc<SemanticProgram>>,
+}
+
+#[derive(Clone, Default)]
+struct DerivedArtifactsCache {
+    by_file: HashMap<FileId, HashMap<i32, DerivedVersionArtifacts>>,
+}
+
 #[salsa::input]
 pub struct SourceFile {
     pub id: u32,
@@ -1007,6 +1019,7 @@ pub struct AnalysisHostV2 {
     db: AnalysisDatabase,
     files: HashMap<FileId, SourceFile>,
     parse_snapshots: HashMap<FileId, ParseSnapshot>,
+    derived_cache: Arc<std::sync::Mutex<DerivedArtifactsCache>>,
     deps: DepsSnapshot,
     settings: SettingsSnapshot,
 }
@@ -1032,6 +1045,7 @@ impl Default for AnalysisHostV2 {
             db,
             files: HashMap::new(),
             parse_snapshots: HashMap::new(),
+            derived_cache: Arc::new(std::sync::Mutex::new(DerivedArtifactsCache::default())),
             deps,
             settings,
         }
@@ -1057,6 +1071,11 @@ impl AnalysisHostV2 {
             Change::RemoveFile { file_id } => {
                 self.files.remove(&file_id);
                 self.parse_snapshots.remove(&file_id);
+                self.derived_cache
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .by_file
+                    .remove(&file_id);
             }
             Change::SetDepsSnapshot { deps_id, deps } => {
                 self.deps.set_id(&mut self.db).to(deps_id);
@@ -1086,6 +1105,19 @@ impl AnalysisHostV2 {
             }
         }
         self.parse_snapshots.remove(&file_id);
+        let min_version_to_keep = version.saturating_sub(DERIVED_CACHE_KEEP_VERSIONS);
+        let mut cache = self
+            .derived_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut remove_file_entry = false;
+        if let Some(versioned) = cache.by_file.get_mut(&file_id) {
+            versioned.retain(|cached_version, _| *cached_version >= min_version_to_keep);
+            remove_file_entry = versioned.is_empty();
+        }
+        if remove_file_entry {
+            cache.by_file.remove(&file_id);
+        }
     }
 
     pub fn set_file_with_snapshot(
@@ -1120,6 +1152,7 @@ impl AnalysisHostV2 {
             db: self.db.clone(),
             files: self.files.clone(),
             parse_snapshots: self.parse_snapshots.clone(),
+            derived_cache: self.derived_cache.clone(),
             deps: self.deps,
             settings: self.settings,
         }
@@ -1134,6 +1167,7 @@ pub struct AnalysisV2 {
     db: AnalysisDatabase,
     files: HashMap<FileId, SourceFile>,
     parse_snapshots: HashMap<FileId, ParseSnapshot>,
+    derived_cache: Arc<std::sync::Mutex<DerivedArtifactsCache>>,
     deps: DepsSnapshot,
     settings: SettingsSnapshot,
 }
@@ -1143,6 +1177,79 @@ impl AnalysisV2 {
         let snapshot = self.parse_snapshots.get(&file_id)?;
         let file_version = file.version(&self.db);
         (snapshot.file_version == file_version).then_some(snapshot)
+    }
+
+    fn parse_snapshot_can_reuse_previous_ir(snapshot: &ParseSnapshot, current_text: &str) -> bool {
+        if !snapshot.incremental || snapshot.fallback_reason.is_some() {
+            return false;
+        }
+        if snapshot.changed_ranges.is_empty() {
+            return true;
+        }
+        if snapshot.changed_ranges.len() != 1 {
+            return false;
+        }
+        let range = &snapshot.changed_ranges[0];
+        if range.start_byte != range.old_end_byte {
+            return false;
+        }
+        let start = range.start_byte as usize;
+        let new_end = range.new_end_byte as usize;
+        if new_end != current_text.len() || start > new_end {
+            return false;
+        }
+        let Ok(inserted) = std::str::from_utf8(&current_text.as_bytes()[start..new_end]) else {
+            return false;
+        };
+        !inserted.is_empty() && inserted.chars().all(char::is_whitespace)
+    }
+
+    fn try_reuse_ir_from_previous_version(
+        &self,
+        file_id: FileId,
+        file_version: i32,
+        snapshot: &ParseSnapshot,
+        current_text: &str,
+        deps_id: &DepsSnapshotId,
+    ) -> Option<Arc<SemanticProgram>> {
+        if file_version <= 0
+            || !Self::parse_snapshot_can_reuse_previous_ir(snapshot, current_text)
+        {
+            return None;
+        }
+        let previous_version = file_version.saturating_sub(1);
+        let cache = self
+            .derived_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        cache
+            .by_file
+            .get(&file_id)?
+            .get(&previous_version)?
+            .ir_by_deps_id
+            .get(deps_id)
+            .cloned()
+    }
+
+    fn remember_ir_artifact(
+        &self,
+        file_id: FileId,
+        file_version: i32,
+        deps_id: DepsSnapshotId,
+        program: Arc<SemanticProgram>,
+    ) {
+        let min_version_to_keep = file_version.saturating_sub(DERIVED_CACHE_KEEP_VERSIONS);
+        let mut cache = self
+            .derived_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let file_cache = cache.by_file.entry(file_id).or_default();
+        file_cache.retain(|version, _| *version >= min_version_to_keep);
+        file_cache
+            .entry(file_version)
+            .or_default()
+            .ir_by_deps_id
+            .insert(deps_id, program);
     }
 
     pub fn file_text(&self, file_id: FileId) -> Cancellable<Option<Arc<str>>> {
@@ -1200,18 +1307,34 @@ impl AnalysisV2 {
         let Some(&file) = self.files.get(&file_id) else {
             return Ok(None);
         };
+        let file_version = file.version(&self.db);
+        let deps_id = self.deps.id(&self.db).clone();
         if let Some(snapshot) = self.parse_snapshot_for_file(file_id, file) {
-            let deps_data = self.deps.data(&self.db).0.clone();
             let source = file.text(&self.db);
+            if let Some(reused) = self.try_reuse_ir_from_previous_version(
+                file_id,
+                file_version,
+                snapshot,
+                source.as_ref(),
+                &deps_id,
+            ) {
+                self.remember_ir_artifact(file_id, file_version, deps_id, reused.clone());
+                return Ok(Some(reused));
+            }
+            let deps_data = self.deps.data(&self.db).0.clone();
             let file_path = file.path(&self.db);
-            return Ok(Some(build_ir_from_parsed(
+            let program = build_ir_from_parsed(
                 snapshot.parse_result.clone(),
                 source.as_ref(),
                 file_path.as_ref(),
                 deps_data,
-            )));
+            );
+            self.remember_ir_artifact(file_id, file_version, deps_id, program.clone());
+            return Ok(Some(program));
         }
-        cancellable(|| ir(&self.db, file, self.deps, self.settings).0).map(Some)
+        let program = cancellable(|| ir(&self.db, file, self.deps, self.settings).0)?;
+        self.remember_ir_artifact(file_id, file_version, deps_id, program.clone());
+        Ok(Some(program))
     }
 
     pub fn syntax_diagnostics(&self, file_id: FileId) -> Cancellable<Option<Arc<Vec<ParseError>>>> {
@@ -1449,6 +1572,29 @@ mod tests {
                 }
             }
             _ => {}
+        }
+    }
+
+    fn parse_snapshot_for_test(
+        file_id: FileId,
+        file_version: i32,
+        text: &str,
+        changed_ranges: Vec<ParseChangedRange>,
+        incremental: bool,
+        fallback_reason: Option<&str>,
+    ) -> ParseSnapshot {
+        ParseSnapshot {
+            file_id,
+            file_version,
+            parse_result: Arc::new(
+                bsl_syntax::parse(text, &ParseOptions::default()).expect("snapshot parse"),
+            ),
+            line_index: Arc::new(LineIndex::new(text)),
+            changed_ranges: Arc::new(changed_ranges),
+            produced_at_millis: 0,
+            backend_tree_hash: 0,
+            incremental,
+            fallback_reason: fallback_reason.map(Arc::from),
         }
     }
 
@@ -1783,6 +1929,92 @@ mod tests {
         };
 
         assert!(!Arc::ptr_eq(&ir_a, &ir_b));
+    }
+
+    #[test]
+    fn ir_reuses_previous_version_for_tail_whitespace_append_snapshot() {
+        let mut host = AnalysisHostV2::default();
+        let file_id = FileId(11);
+        let text_v1: Arc<str> = Arc::from("Procedure Test()\n    x = 1;\nEndProcedure");
+
+        host.apply_change(Change::SetFile {
+            file_id,
+            text: text_v1.clone(),
+            version: 1,
+            path: Arc::from("tail-whitespace.bsl"),
+        });
+
+        let ir_v1 = host.analysis().ir(file_id).unwrap().unwrap();
+
+        let text_v2 = Arc::<str>::from(format!("{}\n", text_v1.as_ref()));
+        let old_len = text_v1.len() as u32;
+        host.apply_change(Change::SetFileWithSnapshot {
+            file_id,
+            text: text_v2.clone(),
+            version: 2,
+            path: Arc::from("tail-whitespace.bsl"),
+            parse_snapshot: parse_snapshot_for_test(
+                file_id,
+                2,
+                text_v2.as_ref(),
+                vec![ParseChangedRange {
+                    start_byte: old_len,
+                    old_end_byte: old_len,
+                    new_end_byte: text_v2.len() as u32,
+                }],
+                true,
+                None,
+            ),
+        });
+
+        let ir_v2 = host.analysis().ir(file_id).unwrap().unwrap();
+        assert!(
+            Arc::ptr_eq(&ir_v1, &ir_v2),
+            "tail whitespace append must reuse previous IR"
+        );
+    }
+
+    #[test]
+    fn ir_does_not_reuse_previous_version_for_non_tail_snapshot_change() {
+        let mut host = AnalysisHostV2::default();
+        let file_id = FileId(12);
+        let text_v1: Arc<str> = Arc::from("Procedure Test()\n    x = 1;\nEndProcedure");
+
+        host.apply_change(Change::SetFile {
+            file_id,
+            text: text_v1.clone(),
+            version: 1,
+            path: Arc::from("non-tail-change.bsl"),
+        });
+
+        let ir_v1 = host.analysis().ir(file_id).unwrap().unwrap();
+
+        let edit_start = text_v1.find('1').expect("edit marker") as u32;
+        let text_v2: Arc<str> = Arc::from(text_v1.replacen('1', "2", 1));
+        host.apply_change(Change::SetFileWithSnapshot {
+            file_id,
+            text: text_v2.clone(),
+            version: 2,
+            path: Arc::from("non-tail-change.bsl"),
+            parse_snapshot: parse_snapshot_for_test(
+                file_id,
+                2,
+                text_v2.as_ref(),
+                vec![ParseChangedRange {
+                    start_byte: edit_start,
+                    old_end_byte: edit_start + 1,
+                    new_end_byte: edit_start + 1,
+                }],
+                true,
+                None,
+            ),
+        });
+
+        let ir_v2 = host.analysis().ir(file_id).unwrap().unwrap();
+        assert!(
+            !Arc::ptr_eq(&ir_v1, &ir_v2),
+            "non-tail change must trigger full IR recompute"
+        );
     }
 
     #[test]

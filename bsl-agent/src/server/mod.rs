@@ -1099,7 +1099,7 @@ impl BslAgentHandler {
                     &session_id,
                     DiagnosticsTrigger::JobStart,
                     profile,
-                    DiagnosticsDisposition::Cancelled,
+                    DiagnosticsDisposition::ClientCancel,
                 )
                 .await;
             }
@@ -1266,7 +1266,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn job_cancel_records_cancelled_reason_for_tracked_batch_job() {
+    async fn job_cancel_records_client_cancel_reason_for_tracked_batch_job() {
         let session_manager = Arc::new(SessionManager::new());
         let job_manager = Arc::new(JobManager::new_in_memory());
         let handler =
@@ -1331,14 +1331,14 @@ mod tests {
             .get("counters")
             .and_then(|value| value.as_object())
             .expect("metrics.counters object");
-        let key = "intellisense_v2_diagnostics_pipeline_total_origin_agent_trigger_job_start_profile_debounced_full_reason_cancelled";
+        let key = "intellisense_v2_diagnostics_pipeline_total_origin_agent_trigger_job_start_profile_debounced_full_reason_client_cancel";
         let value = counters
             .get(key)
             .and_then(|value| value.as_u64())
             .unwrap_or(0);
         assert!(
             value > 0,
-            "expected diagnostics pipeline cancelled metric key {key} to be incremented"
+            "expected diagnostics pipeline client_cancel metric key {key} to be incremented"
         );
     }
 

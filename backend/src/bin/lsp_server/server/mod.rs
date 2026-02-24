@@ -17,7 +17,7 @@ pub(crate) mod request_context;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, RwLock};
@@ -146,9 +146,97 @@ pub(crate) struct DiagnosticsTaskKeyV2 {
     pub profile: bsl_runtime::application::DiagnosticsProfile,
 }
 
-pub(crate) struct DiagnosticsTaskV2 {
-    pub requested_version: i32,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct DiagnosticsSupersessionKeyV2 {
+    pub file_id: V2FileId,
+    pub profile: bsl_runtime::application::DiagnosticsProfile,
     pub diagnostics_generation: u64,
+    pub requested_version: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DiagnosticsCancellationReasonV2 {
+    SupersededGeneration = 1,
+    SupersededVersion = 2,
+    ClientCancel = 3,
+    OtherCancel = 4,
+}
+
+impl DiagnosticsCancellationReasonV2 {
+    fn from_code(code: u8) -> Self {
+        match code {
+            x if x == Self::SupersededGeneration as u8 => Self::SupersededGeneration,
+            x if x == Self::SupersededVersion as u8 => Self::SupersededVersion,
+            x if x == Self::ClientCancel as u8 => Self::ClientCancel,
+            _ => Self::OtherCancel,
+        }
+    }
+
+    pub(crate) fn for_supersession(
+        previous: DiagnosticsSupersessionKeyV2,
+        next_generation: u64,
+        next_version: i32,
+    ) -> Self {
+        if next_generation != previous.diagnostics_generation {
+            Self::SupersededGeneration
+        } else if next_version != previous.requested_version {
+            Self::SupersededVersion
+        } else {
+            Self::OtherCancel
+        }
+    }
+
+    pub(crate) fn to_disposition(self) -> bsl_runtime::application::DiagnosticsDisposition {
+        match self {
+            Self::SupersededGeneration => {
+                bsl_runtime::application::DiagnosticsDisposition::SupersededGeneration
+            }
+            Self::SupersededVersion => {
+                bsl_runtime::application::DiagnosticsDisposition::SupersededVersion
+            }
+            Self::ClientCancel => bsl_runtime::application::DiagnosticsDisposition::ClientCancel,
+            Self::OtherCancel => bsl_runtime::application::DiagnosticsDisposition::OtherCancel,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct DiagnosticsCancellationTokenV2 {
+    cancelled: Arc<AtomicBool>,
+    reason_code: Arc<AtomicU8>,
+}
+
+impl DiagnosticsCancellationTokenV2 {
+    pub(crate) fn new() -> Self {
+        Self {
+            cancelled: Arc::new(AtomicBool::new(false)),
+            reason_code: Arc::new(AtomicU8::new(
+                DiagnosticsCancellationReasonV2::OtherCancel as u8,
+            )),
+        }
+    }
+
+    pub(crate) fn cancel(&self, reason: DiagnosticsCancellationReasonV2) {
+        self.reason_code.store(reason as u8, Ordering::SeqCst);
+        self.cancelled.store(true, Ordering::SeqCst);
+    }
+
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn reason(&self) -> DiagnosticsCancellationReasonV2 {
+        DiagnosticsCancellationReasonV2::from_code(self.reason_code.load(Ordering::SeqCst))
+    }
+
+    pub(crate) fn same_inner(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.cancelled, &other.cancelled)
+    }
+}
+
+pub(crate) struct DiagnosticsTaskV2 {
+    pub supersession_key: DiagnosticsSupersessionKeyV2,
+    pub cancel_token: DiagnosticsCancellationTokenV2,
     pub trigger: bsl_runtime::application::DiagnosticsTrigger,
     pub debounce: bool,
     pub handle: JoinHandle<()>,

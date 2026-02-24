@@ -1900,6 +1900,12 @@ impl BasicObservability {
             "intellisense_v2_diagnostics_pipeline_total_origin_{origin}_trigger_{trigger}_profile_{profile}_reason_{reason}"
         );
         self.metrics.increment(&key);
+        if diagnostics_reason_is_cancellation(reason) {
+            let key = format!(
+                "intellisense_v2_diagnostics_pipeline_cancel_sample_origin_{origin}_trigger_{trigger}_profile_{profile}_reason_{reason}"
+            );
+            self.metrics.observe_histogram(&key, 1.0);
+        }
     }
 
     pub fn record_intellisense_v2_large_churn_transition(&self, origin: &str, state: &str) {
@@ -2374,9 +2380,17 @@ fn normalize_diagnostics_reason_label(reason: &str) -> &'static str {
         "published" => "published",
         "superseded_version" => "superseded_version",
         "superseded_generation" => "superseded_generation",
-        "cancelled" => "cancelled",
-        _ => "cancelled",
+        "client_cancel" => "client_cancel",
+        "other_cancel" | "cancelled" => "other_cancel",
+        _ => "other_cancel",
     }
+}
+
+fn diagnostics_reason_is_cancellation(reason: &str) -> bool {
+    matches!(
+        reason,
+        "superseded_version" | "superseded_generation" | "client_cancel" | "other_cancel"
+    )
 }
 
 fn normalize_large_churn_state_label(state: &str) -> &'static str {
@@ -2983,11 +2997,17 @@ mod observability_contract_tests {
 
         let exported = observability.get_metrics().export_metrics();
         let counters = counters(&exported);
+        let histograms = histograms(&exported);
         let key = "intellisense_v2_diagnostics_pipeline_total_origin_agent_trigger_documents_set_profile_idle_heavy_reason_superseded_generation";
+        let histogram_key = "intellisense_v2_diagnostics_pipeline_cancel_sample_origin_agent_trigger_documents_set_profile_idle_heavy_reason_superseded_generation";
         assert_eq!(
             counter_value(counters, key),
             1,
             "diagnostics pipeline counter must include canonical trigger/profile/reason dimensions"
+        );
+        assert!(
+            histogram_count(histograms, histogram_key) > 0,
+            "diagnostics pipeline cancel histogram must include normalized reason dimensions"
         );
     }
 
@@ -3003,11 +3023,17 @@ mod observability_contract_tests {
 
         let exported = observability.get_metrics().export_metrics();
         let counters = counters(&exported);
-        let normalized_key = "intellisense_v2_diagnostics_pipeline_total_origin_runtime_trigger_idle_profile_debounced_full_reason_cancelled";
+        let histograms = histograms(&exported);
+        let normalized_key = "intellisense_v2_diagnostics_pipeline_total_origin_runtime_trigger_idle_profile_debounced_full_reason_other_cancel";
+        let normalized_histogram_key = "intellisense_v2_diagnostics_pipeline_cancel_sample_origin_runtime_trigger_idle_profile_debounced_full_reason_other_cancel";
         assert_eq!(
             counter_value(counters, normalized_key),
             1,
             "invalid labels must collapse into bounded fallback dimensions"
+        );
+        assert!(
+            histogram_count(histograms, normalized_histogram_key) > 0,
+            "unknown dimensions must normalize to bounded cancellation histogram labels"
         );
     }
 
@@ -3404,6 +3430,172 @@ mod observability_contract_tests {
             ) > 0,
             "fallback_unavailable counter must be exported"
         );
+    }
+
+    #[test]
+    fn observability_diagnostics_v1_contract_matches_runtime_metric_labels() {
+        let contract = contract_json("observability-diagnostics-v2/v1/contract.json");
+        let metrics_contract = contract
+            .get("metrics")
+            .and_then(|value| value.as_object())
+            .expect("metrics contract section");
+
+        let counter_prefix = metrics_contract
+            .get("pipeline_counter_prefix")
+            .and_then(|value| value.as_str())
+            .expect("pipeline counter prefix");
+        let histogram_prefix = metrics_contract
+            .get("cancellation_histogram_prefix")
+            .and_then(|value| value.as_str())
+            .expect("cancellation histogram prefix");
+        assert_eq!(
+            counter_prefix,
+            "intellisense_v2_diagnostics_pipeline_total_origin_"
+        );
+        assert_eq!(
+            histogram_prefix,
+            "intellisense_v2_diagnostics_pipeline_cancel_sample_origin_"
+        );
+
+        let origins: Vec<String> = metrics_contract
+            .get("allowed_origins")
+            .and_then(|value| value.as_array())
+            .expect("allowed_origins")
+            .iter()
+            .map(|value| value.as_str().expect("allowed origin string").to_string())
+            .collect();
+        let triggers: Vec<String> = metrics_contract
+            .get("allowed_triggers")
+            .and_then(|value| value.as_array())
+            .expect("allowed_triggers")
+            .iter()
+            .map(|value| value.as_str().expect("allowed trigger string").to_string())
+            .collect();
+        let profiles: Vec<String> = metrics_contract
+            .get("allowed_profiles")
+            .and_then(|value| value.as_array())
+            .expect("allowed_profiles")
+            .iter()
+            .map(|value| value.as_str().expect("allowed profile string").to_string())
+            .collect();
+        let reasons: Vec<String> = metrics_contract
+            .get("allowed_reasons")
+            .and_then(|value| value.as_array())
+            .expect("allowed_reasons")
+            .iter()
+            .map(|value| value.as_str().expect("allowed reason string").to_string())
+            .collect();
+        let cancellation_reasons: Vec<String> = metrics_contract
+            .get("allowed_cancellation_reasons")
+            .and_then(|value| value.as_array())
+            .expect("allowed_cancellation_reasons")
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .expect("allowed cancellation reason string")
+                    .to_string()
+            })
+            .collect();
+
+        let reasons_set: BTreeSet<String> = reasons.iter().cloned().collect();
+        let cancellation_reasons_set: BTreeSet<String> =
+            cancellation_reasons.iter().cloned().collect();
+        assert!(
+            !cancellation_reasons_set.is_empty(),
+            "contract must define cancellation reasons"
+        );
+        for reason in &cancellation_reasons_set {
+            assert!(
+                reasons_set.contains(reason),
+                "cancellation reason {reason} must be present in allowed_reasons"
+            );
+        }
+
+        for origin in &origins {
+            assert_eq!(
+                normalize_observability_origin_label(origin),
+                origin,
+                "contract origin must remain in bounded normalization set"
+            );
+        }
+        for trigger in &triggers {
+            assert_eq!(
+                normalize_diagnostics_trigger_label(trigger),
+                trigger,
+                "contract trigger must remain in bounded normalization set"
+            );
+        }
+        for profile in &profiles {
+            assert_eq!(
+                normalize_diagnostics_profile_label(profile),
+                profile,
+                "contract profile must remain in bounded normalization set"
+            );
+        }
+        for reason in &reasons {
+            assert_eq!(
+                normalize_diagnostics_reason_label(reason),
+                reason,
+                "contract reason must remain in bounded normalization set"
+            );
+            assert_eq!(
+                diagnostics_reason_is_cancellation(reason),
+                cancellation_reasons_set.contains(reason),
+                "contract reason cancellation classification drifted for {reason}"
+            );
+        }
+
+        let observability = BasicObservability::default();
+        let origin = origins
+            .iter()
+            .find(|origin| origin.as_str() == "lsp")
+            .map(String::as_str)
+            .unwrap_or(origins[0].as_str());
+        let trigger = triggers
+            .iter()
+            .find(|trigger| trigger.as_str() == "did_change")
+            .map(String::as_str)
+            .unwrap_or(triggers[0].as_str());
+        let profile = profiles
+            .iter()
+            .find(|profile| profile.as_str() == "debounced_full")
+            .map(String::as_str)
+            .unwrap_or(profiles[0].as_str());
+        for reason in &reasons {
+            observability.record_intellisense_v2_diagnostics_pipeline_event(
+                origin, trigger, profile, reason,
+            );
+        }
+
+        let exported = observability.get_metrics().export_metrics();
+        let counters = counters(&exported);
+        let histograms = histograms(&exported);
+        for reason in &reasons {
+            let counter_key = format!(
+                "{counter_prefix}{origin}_trigger_{trigger}_profile_{profile}_reason_{reason}"
+            );
+            assert!(
+                counter_value(counters, &counter_key) > 0,
+                "diagnostics pipeline counter must be exported for reason {reason}"
+            );
+
+            let histogram_key = format!(
+                "{histogram_prefix}{origin}_trigger_{trigger}_profile_{profile}_reason_{reason}"
+            );
+            if cancellation_reasons_set.contains(reason) {
+                assert!(
+                    histogram_count(histograms, &histogram_key) > 0,
+                    "diagnostics pipeline cancellation histogram must be exported for reason {reason}"
+                );
+            } else {
+                assert_eq!(
+                    histogram_count(histograms, &histogram_key),
+                    0,
+                    "non-cancellation reason {reason} must not emit cancellation histogram sample"
+                );
+            }
+        }
     }
 
     #[test]

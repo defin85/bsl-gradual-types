@@ -19,6 +19,7 @@ Current baseline surfaces:
 
 - `lsp-completion-v2`
 - `observability-completion-v2`
+- `observability-diagnostics-v2`
 
 ## Compatibility-Diff Gate (manual)
 

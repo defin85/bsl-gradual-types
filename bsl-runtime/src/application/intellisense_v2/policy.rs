@@ -380,7 +380,8 @@ pub enum DiagnosticsDisposition {
     Published,
     SupersededVersion,
     SupersededGeneration,
-    Cancelled,
+    ClientCancel,
+    OtherCancel,
 }
 
 impl DiagnosticsDisposition {
@@ -389,7 +390,8 @@ impl DiagnosticsDisposition {
             DiagnosticsDisposition::Published => "published",
             DiagnosticsDisposition::SupersededVersion => "superseded_version",
             DiagnosticsDisposition::SupersededGeneration => "superseded_generation",
-            DiagnosticsDisposition::Cancelled => "cancelled",
+            DiagnosticsDisposition::ClientCancel => "client_cancel",
+            DiagnosticsDisposition::OtherCancel => "other_cancel",
         }
     }
 }

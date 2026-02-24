@@ -1,0 +1,45 @@
+{
+  "surface": "observability-diagnostics-v2",
+  "major_version": 1,
+  "schema_version": 1,
+  "compatibility": {
+    "breaking_change_requires_major_bump": true,
+    "breaking_change_requires_migration_note": true
+  },
+  "metrics": {
+    "pipeline_counter_prefix": "intellisense_v2_diagnostics_pipeline_total_origin_",
+    "cancellation_histogram_prefix": "intellisense_v2_diagnostics_pipeline_cancel_sample_origin_",
+    "allowed_origins": [
+      "lsp",
+      "web",
+      "agent",
+      "runtime"
+    ],
+    "allowed_triggers": [
+      "did_change",
+      "did_open",
+      "did_save",
+      "idle",
+      "documents_set",
+      "job_start"
+    ],
+    "allowed_profiles": [
+      "fast",
+      "debounced_full",
+      "idle_heavy"
+    ],
+    "allowed_reasons": [
+      "published",
+      "superseded_version",
+      "superseded_generation",
+      "client_cancel",
+      "other_cancel"
+    ],
+    "allowed_cancellation_reasons": [
+      "superseded_version",
+      "superseded_generation",
+      "client_cancel",
+      "other_cancel"
+    ]
+  }
+}

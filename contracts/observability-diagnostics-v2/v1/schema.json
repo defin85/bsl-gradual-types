@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "observability-diagnostics-v2 contract v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "surface",
+    "major_version",
+    "schema_version",
+    "compatibility",
+    "metrics"
+  ],
+  "properties": {
+    "surface": {
+      "type": "string",
+      "const": "observability-diagnostics-v2"
+    },
+    "major_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "breaking_change_requires_major_bump",
+        "breaking_change_requires_migration_note"
+      ],
+      "properties": {
+        "breaking_change_requires_major_bump": {
+          "type": "boolean",
+          "const": true
+        },
+        "breaking_change_requires_migration_note": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pipeline_counter_prefix",
+        "cancellation_histogram_prefix",
+        "allowed_origins",
+        "allowed_triggers",
+        "allowed_profiles",
+        "allowed_reasons",
+        "allowed_cancellation_reasons"
+      ],
+      "properties": {
+        "pipeline_counter_prefix": {
+          "type": "string",
+          "const": "intellisense_v2_diagnostics_pipeline_total_origin_"
+        },
+        "cancellation_histogram_prefix": {
+          "type": "string",
+          "const": "intellisense_v2_diagnostics_pipeline_cancel_sample_origin_"
+        },
+        "allowed_origins": {
+          "type": "array",
+          "minItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "lsp",
+              "web",
+              "agent",
+              "runtime"
+            ]
+          }
+        },
+        "allowed_triggers": {
+          "type": "array",
+          "minItems": 6,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "did_change",
+              "did_open",
+              "did_save",
+              "idle",
+              "documents_set",
+              "job_start"
+            ]
+          }
+        },
+        "allowed_profiles": {
+          "type": "array",
+          "minItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "debounced_full",
+              "idle_heavy"
+            ]
+          }
+        },
+        "allowed_reasons": {
+          "type": "array",
+          "minItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "published",
+              "superseded_version",
+              "superseded_generation",
+              "client_cancel",
+              "other_cancel"
+            ]
+          }
+        },
+        "allowed_cancellation_reasons": {
+          "type": "array",
+          "minItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "superseded_version",
+              "superseded_generation",
+              "client_cancel",
+              "other_cancel"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

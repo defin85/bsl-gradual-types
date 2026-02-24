@@ -820,6 +820,13 @@ impl BslLanguageServer {
             .collect();
         for key in keys {
             if let Some(task) = tasks.remove(&key) {
+                task.cancel_token
+                    .cancel(super::DiagnosticsCancellationReasonV2::ClientCancel);
+                self.record_diagnostics_pipeline_event_v2(
+                    task.trigger,
+                    task.supersession_key.profile,
+                    bsl_runtime::application::DiagnosticsDisposition::ClientCancel,
+                );
                 task.handle.abort();
             }
         }
@@ -859,6 +866,114 @@ impl BslLanguageServer {
             );
     }
 
+    fn diagnostics_cancelled_disposition_v2(
+        &self,
+        cancel_token: Option<&super::DiagnosticsCancellationTokenV2>,
+        current_generation: Option<u64>,
+        expected_generation: u64,
+        current_version: Option<i32>,
+        expected_version: i32,
+    ) -> bsl_runtime::application::DiagnosticsDisposition {
+        if let Some(token) = cancel_token {
+            if token.is_cancelled() {
+                return token.reason().to_disposition();
+            }
+        }
+        if current_generation != Some(expected_generation) {
+            return bsl_runtime::application::DiagnosticsDisposition::SupersededGeneration;
+        }
+        if current_version != Some(expected_version) {
+            return bsl_runtime::application::DiagnosticsDisposition::SupersededVersion;
+        }
+        bsl_runtime::application::DiagnosticsDisposition::OtherCancel
+    }
+
+    async fn diagnostics_checkpoint_v2(
+        &self,
+        key: &super::DiagnosticsSupersessionKeyV2,
+        trigger: bsl_runtime::application::DiagnosticsTrigger,
+        cancel_token: Option<&super::DiagnosticsCancellationTokenV2>,
+    ) -> Option<bsl_runtime::application::DiagnosticsDisposition> {
+        let current_generation = self.current_diagnostics_generation_v2(key.file_id).await;
+        let current_version = self
+            .latest_received_file_versions_v2
+            .read()
+            .await
+            .get(&key.file_id)
+            .copied();
+        let disposition = if let Some(token) = cancel_token {
+            if token.is_cancelled() {
+                token.reason().to_disposition()
+            } else {
+                self.diagnostics_cancelled_disposition_v2(
+                    None,
+                    current_generation,
+                    key.diagnostics_generation,
+                    current_version,
+                    key.requested_version,
+                )
+            }
+        } else {
+            self.diagnostics_cancelled_disposition_v2(
+                None,
+                current_generation,
+                key.diagnostics_generation,
+                current_version,
+                key.requested_version,
+            )
+        };
+        if matches!(
+            disposition,
+            bsl_runtime::application::DiagnosticsDisposition::OtherCancel
+        ) && current_generation == Some(key.diagnostics_generation)
+            && current_version == Some(key.requested_version)
+        {
+            return None;
+        }
+        self.record_diagnostics_pipeline_event_v2(trigger, key.profile, disposition);
+        Some(disposition)
+    }
+
+    async fn diagnostics_publish_checkpoint_v2(
+        &self,
+        key: &super::DiagnosticsSupersessionKeyV2,
+        trigger: bsl_runtime::application::DiagnosticsTrigger,
+        cancel_token: Option<&super::DiagnosticsCancellationTokenV2>,
+        observed_deps_id: Option<&str>,
+        observed_settings_id: Option<&str>,
+    ) -> Option<bsl_runtime::application::DiagnosticsDisposition> {
+        if let Some(disposition) = self
+            .diagnostics_checkpoint_v2(key, trigger, cancel_token)
+            .await
+        {
+            return Some(disposition);
+        }
+
+        let current_deps_id = self
+            .last_deps_id_v2
+            .read()
+            .await
+            .as_ref()
+            .map(|id| id.as_str().to_string());
+        let current_settings_id = self
+            .last_settings_id_v2
+            .read()
+            .await
+            .as_ref()
+            .map(|id| id.as_str().to_string());
+
+        if current_deps_id.as_deref() != observed_deps_id
+            || current_settings_id.as_deref() != observed_settings_id
+        {
+            let disposition =
+                bsl_runtime::application::DiagnosticsDisposition::SupersededGeneration;
+            self.record_diagnostics_pipeline_event_v2(trigger, key.profile, disposition);
+            return Some(disposition);
+        }
+
+        None
+    }
+
     pub(crate) async fn run_diagnostics_profile_immediate_v2(
         &self,
         uri: Url,
@@ -868,15 +983,14 @@ impl BslLanguageServer {
         trigger: bsl_runtime::application::DiagnosticsTrigger,
         profile: bsl_runtime::application::DiagnosticsProfile,
     ) {
+        let supersession_key = super::DiagnosticsSupersessionKeyV2 {
+            file_id,
+            profile,
+            diagnostics_generation,
+            requested_version: expected_version,
+        };
         let _ = self
-            .execute_diagnostics_profile_once_v2(
-                &uri,
-                file_id,
-                expected_version,
-                diagnostics_generation,
-                trigger,
-                profile,
-            )
+            .execute_diagnostics_profile_once_v2(&uri, supersession_key, trigger, None)
             .await;
     }
 
@@ -891,11 +1005,30 @@ impl BslLanguageServer {
         profile: bsl_runtime::application::DiagnosticsProfile,
         debounce: bool,
     ) {
-        let key = super::DiagnosticsTaskKeyV2 { file_id, profile };
+        let slot_key = super::DiagnosticsTaskKeyV2 { file_id, profile };
+        let supersession_key = super::DiagnosticsSupersessionKeyV2 {
+            file_id,
+            profile,
+            diagnostics_generation,
+            requested_version: expected_version,
+        };
         let mut tasks = self.diagnostics_tasks_v2.lock().await;
-        if let Some(task) = tasks.get_mut(&key) {
-            task.requested_version = expected_version;
-            task.diagnostics_generation = diagnostics_generation;
+        if let Some(task) = tasks.get_mut(&slot_key) {
+            if task.supersession_key != supersession_key {
+                let reason = super::DiagnosticsCancellationReasonV2::for_supersession(
+                    task.supersession_key,
+                    diagnostics_generation,
+                    expected_version,
+                );
+                task.cancel_token.cancel(reason);
+                self.record_diagnostics_pipeline_event_v2(
+                    task.trigger,
+                    task.supersession_key.profile,
+                    reason.to_disposition(),
+                );
+                task.cancel_token = super::DiagnosticsCancellationTokenV2::new();
+                task.supersession_key = supersession_key;
+            }
             task.trigger = trigger;
             task.debounce = debounce;
             return;
@@ -903,6 +1036,7 @@ impl BslLanguageServer {
 
         let server = self.clone();
         let uri_for_task = uri.clone();
+        let initial_cancel_token = super::DiagnosticsCancellationTokenV2::new();
         let handle = tokio::spawn(async move {
             loop {
                 // If the document is already closed, stop.
@@ -915,16 +1049,16 @@ impl BslLanguageServer {
                     break;
                 }
 
-                let (requested_version, requested_generation, trigger, debounce) = {
+                let (supersession_key, trigger, debounce, cancel_token) = {
                     let tasks = server.diagnostics_tasks_v2.lock().await;
-                    let Some(task) = tasks.get(&key) else {
+                    let Some(task) = tasks.get(&slot_key) else {
                         break;
                     };
                     (
-                        task.requested_version,
-                        task.diagnostics_generation,
+                        task.supersession_key,
                         task.trigger,
                         task.debounce,
+                        task.cancel_token.clone(),
                     )
                 };
 
@@ -937,45 +1071,51 @@ impl BslLanguageServer {
 
                     let current_requested = {
                         let tasks = server.diagnostics_tasks_v2.lock().await;
-                        let Some(task) = tasks.get(&key) else {
+                        let Some(task) = tasks.get(&slot_key) else {
                             break;
                         };
-                        (task.requested_version, task.diagnostics_generation)
+                        task.supersession_key
                     };
-                    if current_requested != (requested_version, requested_generation) {
+                    if current_requested != supersession_key {
                         continue;
                     }
+                }
+
+                if server
+                    .diagnostics_checkpoint_v2(&supersession_key, trigger, Some(&cancel_token))
+                    .await
+                    .is_some()
+                {
+                    continue;
                 }
 
                 let _ = server
                     .execute_diagnostics_profile_once_v2(
                         &uri_for_task,
-                        file_id,
-                        requested_version,
-                        requested_generation,
+                        supersession_key,
                         trigger,
-                        profile,
+                        Some(&cancel_token),
                     )
                     .await;
 
                 let mut tasks = server.diagnostics_tasks_v2.lock().await;
-                let Some(task) = tasks.get(&key) else {
+                let Some(task) = tasks.get(&slot_key) else {
                     break;
                 };
-                if task.requested_version == requested_version
-                    && task.diagnostics_generation == requested_generation
+                if task.supersession_key == supersession_key
+                    && task.cancel_token.same_inner(&cancel_token)
                 {
-                    tasks.remove(&key);
+                    tasks.remove(&slot_key);
                     break;
                 }
             }
         });
 
         tasks.insert(
-            key,
+            slot_key,
             super::DiagnosticsTaskV2 {
-                requested_version: expected_version,
-                diagnostics_generation,
+                supersession_key,
+                cancel_token: initial_cancel_token,
                 trigger,
                 debounce,
                 handle,
@@ -986,36 +1126,20 @@ impl BslLanguageServer {
     async fn execute_diagnostics_profile_once_v2(
         &self,
         uri: &Url,
-        file_id: V2FileId,
-        requested_version: i32,
-        requested_generation: u64,
+        supersession_key: super::DiagnosticsSupersessionKeyV2,
         trigger: bsl_runtime::application::DiagnosticsTrigger,
-        profile: bsl_runtime::application::DiagnosticsProfile,
+        cancel_token: Option<&super::DiagnosticsCancellationTokenV2>,
     ) -> bsl_runtime::application::DiagnosticsDisposition {
-        let current_generation = self.current_diagnostics_generation_v2(file_id).await;
-        if current_generation != Some(requested_generation) {
-            self.record_diagnostics_pipeline_event_v2(
-                trigger,
-                profile,
-                bsl_runtime::application::DiagnosticsDisposition::SupersededGeneration,
-            );
-            return bsl_runtime::application::DiagnosticsDisposition::SupersededGeneration;
-        }
-
-        let current_version = self
-            .latest_received_file_versions_v2
-            .read()
+        if let Some(disposition) = self
+            .diagnostics_checkpoint_v2(&supersession_key, trigger, cancel_token)
             .await
-            .get(&file_id)
-            .copied();
-        if current_version != Some(requested_version) {
-            self.record_diagnostics_pipeline_event_v2(
-                trigger,
-                profile,
-                bsl_runtime::application::DiagnosticsDisposition::SupersededVersion,
-            );
-            return bsl_runtime::application::DiagnosticsDisposition::SupersededVersion;
+        {
+            return disposition;
         }
+        let file_id = supersession_key.file_id;
+        let requested_version = supersession_key.requested_version;
+        let requested_generation = supersession_key.diagnostics_generation;
+        let profile = supersession_key.profile;
 
         let (show_hints, flow_sensitive_enabled) = {
             let settings = self.settings.read().await;
@@ -1056,7 +1180,20 @@ impl BslLanguageServer {
                 ) {
                     bsl_runtime::application::DiagnosticsDisposition::SupersededVersion
                 } else {
-                    bsl_runtime::application::DiagnosticsDisposition::Cancelled
+                    let current_generation = self.current_diagnostics_generation_v2(file_id).await;
+                    let current_version = self
+                        .latest_received_file_versions_v2
+                        .read()
+                        .await
+                        .get(&file_id)
+                        .copied();
+                    self.diagnostics_cancelled_disposition_v2(
+                        cancel_token,
+                        current_generation,
+                        requested_generation,
+                        current_version,
+                        requested_version,
+                    )
                 };
                 debug!(
                     uri = %uri,
@@ -1108,28 +1245,11 @@ impl BslLanguageServer {
             }
         }
 
-        let current_generation = self.current_diagnostics_generation_v2(file_id).await;
-        if current_generation != Some(requested_generation) {
-            self.record_diagnostics_pipeline_event_v2(
-                trigger,
-                profile,
-                bsl_runtime::application::DiagnosticsDisposition::SupersededGeneration,
-            );
-            return bsl_runtime::application::DiagnosticsDisposition::SupersededGeneration;
-        }
-        let current_version = self
-            .latest_received_file_versions_v2
-            .read()
+        if let Some(disposition) = self
+            .diagnostics_checkpoint_v2(&supersession_key, trigger, cancel_token)
             .await
-            .get(&file_id)
-            .copied();
-        if current_version != Some(requested_version) {
-            self.record_diagnostics_pipeline_event_v2(
-                trigger,
-                profile,
-                bsl_runtime::application::DiagnosticsDisposition::SupersededVersion,
-            );
-            return bsl_runtime::application::DiagnosticsDisposition::SupersededVersion;
+        {
+            return disposition;
         }
 
         let mut analysis = Some(prepared.snapshot.analysis);
@@ -1258,12 +1378,22 @@ impl BslLanguageServer {
         }
 
         if was_cancelled {
-            self.record_diagnostics_pipeline_event_v2(
-                trigger,
-                profile,
-                bsl_runtime::application::DiagnosticsDisposition::Cancelled,
+            let current_generation = self.current_diagnostics_generation_v2(file_id).await;
+            let current_version = self
+                .latest_received_file_versions_v2
+                .read()
+                .await
+                .get(&file_id)
+                .copied();
+            let disposition = self.diagnostics_cancelled_disposition_v2(
+                cancel_token,
+                current_generation,
+                requested_generation,
+                current_version,
+                requested_version,
             );
-            return bsl_runtime::application::DiagnosticsDisposition::Cancelled;
+            self.record_diagnostics_pipeline_event_v2(trigger, profile, disposition);
+            return disposition;
         }
 
         if plan.run_semantic {
@@ -1275,28 +1405,11 @@ impl BslLanguageServer {
                     file_bytes,
                     file_lines,
                 );
-            let current_generation = self.current_diagnostics_generation_v2(file_id).await;
-            if current_generation != Some(requested_generation) {
-                self.record_diagnostics_pipeline_event_v2(
-                    trigger,
-                    profile,
-                    bsl_runtime::application::DiagnosticsDisposition::SupersededGeneration,
-                );
-                return bsl_runtime::application::DiagnosticsDisposition::SupersededGeneration;
-            }
-            let current_version = self
-                .latest_received_file_versions_v2
-                .read()
+            if let Some(disposition) = self
+                .diagnostics_checkpoint_v2(&supersession_key, trigger, cancel_token)
                 .await
-                .get(&file_id)
-                .copied();
-            if current_version != Some(requested_version) {
-                self.record_diagnostics_pipeline_event_v2(
-                    trigger,
-                    profile,
-                    bsl_runtime::application::DiagnosticsDisposition::SupersededVersion,
-                );
-                return bsl_runtime::application::DiagnosticsDisposition::SupersededVersion;
+            {
+                return disposition;
             }
 
             let analysis_for_blocking = analysis
@@ -1427,13 +1540,19 @@ impl BslLanguageServer {
 
         if !is_current {
             let disposition = if was_cancelled {
-                bsl_runtime::application::DiagnosticsDisposition::Cancelled
+                self.diagnostics_cancelled_disposition_v2(
+                    cancel_token,
+                    current_generation,
+                    requested_generation,
+                    current_version,
+                    requested_version,
+                )
             } else if current_generation != Some(requested_generation) {
                 bsl_runtime::application::DiagnosticsDisposition::SupersededGeneration
             } else if current_version != Some(requested_version) {
                 bsl_runtime::application::DiagnosticsDisposition::SupersededVersion
             } else {
-                bsl_runtime::application::DiagnosticsDisposition::SupersededGeneration
+                bsl_runtime::application::DiagnosticsDisposition::OtherCancel
             };
             debug!(
                 uri = %uri,
@@ -1452,6 +1571,29 @@ impl BslLanguageServer {
                 "diagnostics_v2: skip publish (stale)"
             );
             self.record_diagnostics_pipeline_event_v2(trigger, profile, disposition);
+            return disposition;
+        }
+
+        if let Some(disposition) = self
+            .diagnostics_publish_checkpoint_v2(
+                &supersession_key,
+                trigger,
+                cancel_token,
+                observed_deps_id.as_deref(),
+                observed_settings_id.as_deref(),
+            )
+            .await
+        {
+            debug!(
+                uri = %uri,
+                file_id = file_id.0,
+                expected_version = requested_version,
+                expected_generation = requested_generation,
+                profile = profile.as_str(),
+                trigger = trigger.as_str(),
+                disposition = disposition.as_str(),
+                "diagnostics_v2: skip publish (final checkpoint)"
+            );
             return disposition;
         }
 
@@ -1526,15 +1668,16 @@ mod tests {
         ClientCapabilities, CodeActionContext, CodeActionOrCommand, CodeActionParams,
         CompletionContext, CompletionItemKind, CompletionParams, CompletionResponse,
         CompletionTriggerKind, DidChangeConfigurationParams, DidChangeTextDocumentParams,
-        DidOpenTextDocumentParams, DocumentFormattingParams, DocumentRangeFormattingParams,
-        DocumentSymbolParams, DocumentSymbolResponse, FormattingOptions, GotoDefinitionParams,
-        GotoDefinitionResponse, Hover, HoverContents, HoverParams, InitializeParams,
-        InitializedParams, InlayHint, InlayHintLabel, InlayHintParams, Location, MarkedString,
-        PartialResultParams, Position, PrepareRenameResponse, PublishDiagnosticsParams, Range,
-        ReferenceContext, ReferenceParams, RenameParams, SymbolInformation, SymbolKind,
-        TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
-        TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
-        WorkspaceEdit, WorkspaceSymbolParams,
+        DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams,
+        DocumentRangeFormattingParams, DocumentSymbolParams, DocumentSymbolResponse,
+        FormattingOptions, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents,
+        HoverParams, InitializeParams, InitializedParams, InlayHint, InlayHintLabel,
+        InlayHintParams, Location, MarkedString, PartialResultParams, Position,
+        PrepareRenameResponse, PublishDiagnosticsParams, Range, ReferenceContext, ReferenceParams,
+        RenameParams, SymbolInformation, SymbolKind, TextDocumentContentChangeEvent,
+        TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
+        VersionedTextDocumentIdentifier, WorkDoneProgressParams, WorkspaceEdit,
+        WorkspaceSymbolParams,
     };
     use tower_lsp::LanguageServer;
     use tower_lsp::LspService;
@@ -2343,7 +2486,7 @@ mod tests {
             saw_stale_or_cancelled
                 || counters.iter().any(|(key, value)| {
                     key.starts_with("intellisense_v2_diagnostics_pipeline_total_origin_lsp_trigger_")
-                        && key.contains("reason_cancelled")
+                        && key.contains("reason_other_cancel")
                         && metric_number(value) > 0.0
             }),
             "expected diagnostics pipeline metrics to record stale/cancelled runs after rapid didChange series"
@@ -2365,6 +2508,345 @@ mod tests {
         assert!(
             !saw_did_change_idle_heavy_profile,
             "idle_heavy diagnostics must not execute under trigger_did_change"
+        );
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
+    async fn p6_did_close_records_client_cancel_for_inflight_diagnostics() {
+        let coordinator = Arc::new(SystemCoordinator::new());
+
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            move |client| BslLanguageServer::new(client, coordinator.clone())
+        })
+        .finish();
+
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        let initialize_params = InitializeParams {
+            capabilities: ClientCapabilities::default(),
+            ..Default::default()
+        };
+        let initialize = Request::build("initialize")
+            .id(1)
+            .params(serde_json::to_value(initialize_params).expect("InitializeParams"))
+            .finish();
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialize)
+            .await
+            .expect("initialize request");
+        assert!(response.is_some(), "initialize should return a response");
+
+        let initialized = Request::build("initialized")
+            .params(serde_json::to_value(InitializedParams {}).expect("InitializedParams"))
+            .finish();
+        let initialized_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialized)
+            .await
+            .expect("initialized notification");
+        assert!(
+            initialized_response.is_none(),
+            "initialized is a notification"
+        );
+
+        let uri = Url::parse("file:///did-close-cancel.bsl").expect("test uri");
+
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: "Procedure Test()\nEndProcedure".to_string(),
+            },
+        };
+        let did_open_req = Request::build("textDocument/didOpen")
+            .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+            .finish();
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+
+        let did_change = DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: uri.clone(),
+                version: 2,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                range: None,
+                range_length: None,
+                text: "Procedure Test(\nEndProcedure".to_string(),
+            }],
+        };
+        let did_change_req = Request::build("textDocument/didChange")
+            .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+            .finish();
+        let did_change_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_change_req)
+            .await
+            .expect("didChange notification");
+        assert!(did_change_response.is_none(), "didChange is a notification");
+
+        let did_close = DidCloseTextDocumentParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+        };
+        let did_close_req = Request::build("textDocument/didClose")
+            .params(serde_json::to_value(did_close).expect("DidCloseTextDocumentParams"))
+            .finish();
+        let did_close_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_close_req)
+            .await
+            .expect("didClose notification");
+        assert!(did_close_response.is_none(), "didClose is a notification");
+
+        let metrics = coordinator.observability_metrics();
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        let saw_client_cancel = counters.iter().any(|(key, value)| {
+            key.starts_with("intellisense_v2_diagnostics_pipeline_total_origin_lsp_trigger_")
+                && key.contains("reason_client_cancel")
+                && metric_number(value) > 0.0
+        });
+        assert!(
+            saw_client_cancel,
+            "didClose must record diagnostics pipeline client_cancel for removed in-flight tasks"
+        );
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
+    async fn p6_idle_heavy_supersession_is_reported_for_burst_did_change() {
+        struct DiagnosticsDebounceEnvGuard {
+            previous_debounce_ms: Option<String>,
+        }
+
+        impl DiagnosticsDebounceEnvGuard {
+            fn new() -> Self {
+                Self {
+                    previous_debounce_ms: std::env::var("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS").ok(),
+                }
+            }
+
+            fn apply(&self, debounce_ms: u64) {
+                std::env::set_var("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", debounce_ms.to_string());
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+        }
+
+        impl Drop for DiagnosticsDebounceEnvGuard {
+            fn drop(&mut self) {
+                if let Some(value) = &self.previous_debounce_ms {
+                    std::env::set_var("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", value);
+                } else {
+                    std::env::remove_var("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS");
+                }
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+        }
+
+        let debounce_env_guard = DiagnosticsDebounceEnvGuard::new();
+        debounce_env_guard.apply(500);
+
+        let coordinator = Arc::new(SystemCoordinator::new());
+
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            move |client| BslLanguageServer::new(client, coordinator.clone())
+        })
+        .finish();
+
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        let initialize_params = InitializeParams {
+            capabilities: ClientCapabilities::default(),
+            ..Default::default()
+        };
+        let initialize = Request::build("initialize")
+            .id(1)
+            .params(serde_json::to_value(initialize_params).expect("InitializeParams"))
+            .finish();
+        let response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialize)
+            .await
+            .expect("initialize request");
+        assert!(response.is_some(), "initialize should return a response");
+
+        let initialized = Request::build("initialized")
+            .params(serde_json::to_value(InitializedParams {}).expect("InitializedParams"))
+            .finish();
+        let initialized_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialized)
+            .await
+            .expect("initialized notification");
+        assert!(
+            initialized_response.is_none(),
+            "initialized is a notification"
+        );
+
+        let settings = DidChangeConfigurationParams {
+            settings: serde_json::json!({
+                "bsl": {
+                    "hover": {
+                        "detailLevel": "full",
+                        "maxMethods": 10,
+                        "maxProperties": 5,
+                        "showCertainty": true
+                    },
+                    "diagnostics": {
+                        "detailLevel": "standard",
+                        "showHints": true
+                    },
+                    "formatting": {
+                        "enabled": false,
+                        "indentSize": 4
+                    },
+                    "typeHints": {
+                        "enabled": true,
+                        "showVariableTypes": true,
+                        "showReturnTypes": true,
+                        "showUnionDetails": true,
+                        "minCertainty": 0.5
+                    },
+                    "codeActions": {
+                        "enabled": false
+                    },
+                    "enableFlowSensitive": true
+                }
+            }),
+        };
+        let settings_req = Request::build("workspace/didChangeConfiguration")
+            .params(serde_json::to_value(settings).expect("DidChangeConfigurationParams"))
+            .finish();
+        let settings_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(settings_req)
+            .await
+            .expect("didChangeConfiguration notification");
+        assert!(
+            settings_response.is_none(),
+            "didChangeConfiguration is a notification"
+        );
+
+        let uri = Url::parse("file:///idle-heavy-supersession.bsl").expect("test uri");
+
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: "Procedure Test()\nEndProcedure".to_string(),
+            },
+        };
+        let did_open_req = Request::build("textDocument/didOpen")
+            .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+            .finish();
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+
+        let did_change_v2 = DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: uri.clone(),
+                version: 2,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                range: None,
+                range_length: None,
+                text: "Procedure Test(\nEndProcedure".to_string(),
+            }],
+        };
+        let did_change_req_v2 = Request::build("textDocument/didChange")
+            .params(serde_json::to_value(did_change_v2).expect("DidChangeTextDocumentParams"))
+            .finish();
+        let did_change_response_v2 = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_change_req_v2)
+            .await
+            .expect("didChange v2 notification");
+        assert!(
+            did_change_response_v2.is_none(),
+            "didChange is a notification"
+        );
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        let did_change_v3 = DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: uri.clone(),
+                version: 3,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                range: None,
+                range_length: None,
+                text: "Procedure Test()\nEndProcedure".to_string(),
+            }],
+        };
+        let did_change_req_v3 = Request::build("textDocument/didChange")
+            .params(serde_json::to_value(did_change_v3).expect("DidChangeTextDocumentParams"))
+            .finish();
+        let did_change_response_v3 = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_change_req_v3)
+            .await
+            .expect("didChange v3 notification");
+        assert!(
+            did_change_response_v3.is_none(),
+            "didChange is a notification"
+        );
+
+        tokio::time::sleep(Duration::from_millis(800)).await;
+
+        let metrics = coordinator.observability_metrics();
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        let saw_idle_heavy_superseded = counters.iter().any(|(key, value)| {
+            key.starts_with(
+                "intellisense_v2_diagnostics_pipeline_total_origin_lsp_trigger_idle_profile_idle_heavy_reason_superseded_",
+            ) && metric_number(value) > 0.0
+        });
+        assert!(
+            saw_idle_heavy_superseded,
+            "burst didChange must produce superseded cancellation in idle_heavy profile"
         );
 
         drain_task.abort();

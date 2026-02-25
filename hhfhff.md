@@ -41,3 +41,8 @@
   Причина: sales readiness логично закрывать после функционального GA + licensing policy.
 
   Если хочешь, следующим шагом могу сделать конкретный execution-план по неделям/итерациям (что в какой PR, какие тесты-гейты на каждом шаге).
+
+  Запусти так, в отдельном терминале, без tee:
+
+  BSL_V2_SCALE_AWARE_PROGRESS=1 BSL_V2_SCALE_AWARE_PROGRESS_EVERY=1 BSL_V2_SCALE_AWARE_GATE_BASELINE=/home/egor/code/bsl-gradual-types/backend/tests/perf/baselines/add-bounded-stale-completion-fastpath.json
+  BSL_V2_SCALE_AWARE_GATE_REPORT=/tmp/p31-live.json cargo test -p bsl-backend --bin bsl-lsp-server p31_scale_aware_large_small_completion_gate_live -- --nocapture --test-threads=1

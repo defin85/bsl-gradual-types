@@ -8822,6 +8822,35 @@ mod tests {
         }
     }
 
+    fn scale_aware_progress_enabled() -> bool {
+        std::env::var("BSL_V2_SCALE_AWARE_PROGRESS")
+            .map(|raw| {
+                let normalized = raw.trim().to_ascii_lowercase();
+                !matches!(normalized.as_str(), "0" | "false" | "off" | "no")
+            })
+            .unwrap_or(true)
+    }
+
+    fn scale_aware_progress_every() -> u64 {
+        std::env::var("BSL_V2_SCALE_AWARE_PROGRESS_EVERY")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(10)
+            .clamp(1, 10_000)
+    }
+
+    fn should_emit_scale_aware_progress(
+        request_index: u64,
+        total_requests: u64,
+        progress_every: u64,
+    ) -> bool {
+        if total_requests == 0 {
+            return false;
+        }
+        let completed = request_index.saturating_add(1);
+        completed == 1 || completed == total_requests || completed % progress_every == 0
+    }
+
     fn read_numeric_metric(value: Option<&serde_json::Value>) -> f64 {
         value
             .and_then(|v| v.as_f64().or_else(|| v.as_u64().map(|n| n as f64)))
@@ -8937,8 +8966,11 @@ mod tests {
         churn_every: u64,
     ) -> serde_json::Value {
         let mut profile_report = serde_json::Map::new();
+        let progress_enabled = scale_aware_progress_enabled();
+        let progress_every = scale_aware_progress_every();
 
         for phase in phases {
+            let phase_started = Instant::now();
             let coordinator = Arc::new(SystemCoordinator::new());
             let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
                 Arc::new(std::sync::Mutex::new(None));
@@ -8987,6 +9019,19 @@ mod tests {
             let mut churn_edits_applied = 0u64;
 
             let total_requests = phase.warmup + phase.iterations;
+            if progress_enabled {
+                println!(
+                    "[p31] profile={} phase={} start total={} warmup={} iterations={} churn_mode={} churn_every={} progress_every={}",
+                    profile_name,
+                    phase.name,
+                    total_requests,
+                    phase.warmup,
+                    phase.iterations,
+                    churn_mode.as_str(),
+                    churn_every,
+                    progress_every
+                );
+            }
             for request_index in 0..total_requests {
                 if should_apply_scale_aware_churn(
                     churn_mode,
@@ -9057,6 +9102,25 @@ mod tests {
                     "completion response expected for profile={profile_name}, phase={}",
                     phase.name
                 );
+
+                if progress_enabled
+                    && should_emit_scale_aware_progress(
+                        request_index,
+                        total_requests,
+                        progress_every,
+                    )
+                {
+                    let completed = request_index + 1;
+                    println!(
+                        "[p31] profile={} phase={} progress={}/{} elapsed_ms={} churn_edits={}",
+                        profile_name,
+                        phase.name,
+                        completed,
+                        total_requests,
+                        phase_started.elapsed().as_millis(),
+                        churn_edits_applied
+                    );
+                }
             }
 
             let metrics = coordinator.observability_metrics();
@@ -9133,6 +9197,18 @@ mod tests {
                 "metrics": phase_metrics,
                 "dominant_stage": dominant_stage
             });
+            if progress_enabled {
+                println!(
+                    "[p31] profile={} phase={} done elapsed_ms={} completion_total={} cancelled_total={} cancelled_rate={:.4} churn_edits={}",
+                    profile_name,
+                    phase.name,
+                    phase_started.elapsed().as_millis(),
+                    completion_total,
+                    completion_cancelled_total,
+                    completion_cancelled_rate,
+                    churn_edits_applied
+                );
+            }
             profile_report.insert(phase.name.to_string(), phase_report);
 
             drain_task.abort();
@@ -9479,6 +9555,21 @@ mod tests {
                 "stale_fallback_unavailable_per_budget_exhausted_max": MAX_STALE_FALLBACK_UNAVAILABLE_PER_BUDGET_EXHAUSTED
             }
         }))
+    }
+
+    #[test]
+    fn scale_aware_progress_emits_start_step_and_finish() {
+        assert!(should_emit_scale_aware_progress(0, 55, 10));
+        assert!(should_emit_scale_aware_progress(9, 55, 10));
+        assert!(should_emit_scale_aware_progress(54, 55, 10));
+    }
+
+    #[test]
+    fn scale_aware_progress_skips_intermediate_non_step_points() {
+        assert!(!should_emit_scale_aware_progress(1, 55, 10));
+        assert!(!should_emit_scale_aware_progress(8, 55, 10));
+        assert!(!should_emit_scale_aware_progress(53, 55, 10));
+        assert!(!should_emit_scale_aware_progress(0, 0, 10));
     }
 
     fn synthetic_scale_aware_profile(

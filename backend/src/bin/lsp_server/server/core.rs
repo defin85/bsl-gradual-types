@@ -8851,6 +8851,22 @@ mod tests {
         completed == 1 || completed == total_requests || completed % progress_every == 0
     }
 
+    fn scale_aware_progress_percent(completed: u64, total: u64) -> f64 {
+        if total == 0 {
+            return 0.0;
+        }
+        ((completed as f64) * 100.0) / (total as f64)
+    }
+
+    fn scale_aware_progress_eta_ms(elapsed: Duration, completed: u64, total: u64) -> u128 {
+        if completed == 0 || completed >= total {
+            return 0;
+        }
+        let avg_ms_per_request = elapsed.as_millis() / completed as u128;
+        let remaining = (total - completed) as u128;
+        avg_ms_per_request.saturating_mul(remaining)
+    }
+
     fn read_numeric_metric(value: Option<&serde_json::Value>) -> f64 {
         value
             .and_then(|v| v.as_f64().or_else(|| v.as_u64().map(|n| n as f64)))
@@ -9111,13 +9127,18 @@ mod tests {
                     )
                 {
                     let completed = request_index + 1;
+                    let elapsed = phase_started.elapsed();
+                    let progress_percent = scale_aware_progress_percent(completed, total_requests);
+                    let eta_ms = scale_aware_progress_eta_ms(elapsed, completed, total_requests);
                     println!(
-                        "[p31] profile={} phase={} progress={}/{} elapsed_ms={} churn_edits={}",
+                        "[p31] profile={} phase={} progress={}/{} ({:.1}%) elapsed_ms={} eta_ms={} churn_edits={}",
                         profile_name,
                         phase.name,
                         completed,
                         total_requests,
-                        phase_started.elapsed().as_millis(),
+                        progress_percent,
+                        elapsed.as_millis(),
+                        eta_ms,
                         churn_edits_applied
                     );
                 }
@@ -9570,6 +9591,19 @@ mod tests {
         assert!(!should_emit_scale_aware_progress(8, 55, 10));
         assert!(!should_emit_scale_aware_progress(53, 55, 10));
         assert!(!should_emit_scale_aware_progress(0, 0, 10));
+    }
+
+    #[test]
+    fn scale_aware_progress_percent_and_eta_are_stable() {
+        let elapsed = Duration::from_millis(2_500);
+        let completed = 5;
+        let total = 10;
+        let percent = scale_aware_progress_percent(completed, total);
+        let eta_ms = scale_aware_progress_eta_ms(elapsed, completed, total);
+        assert!((percent - 50.0).abs() < f64::EPSILON);
+        assert_eq!(eta_ms, 2_500);
+        assert_eq!(scale_aware_progress_eta_ms(elapsed, 0, total), 0);
+        assert_eq!(scale_aware_progress_eta_ms(elapsed, total, total), 0);
     }
 
     fn synthetic_scale_aware_profile(

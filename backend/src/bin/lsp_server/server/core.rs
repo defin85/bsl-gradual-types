@@ -8867,6 +8867,20 @@ mod tests {
         avg_ms_per_request.saturating_mul(remaining)
     }
 
+    fn emit_scale_aware_progress_line(line: &str, last_line_width: &mut usize) {
+        use std::io::Write as _;
+
+        let line_len = line.len();
+        let trailing_padding = last_line_width.saturating_sub(line_len);
+        if trailing_padding > 0 {
+            print!("\r{line}{:trailing_padding$}", "");
+        } else {
+            print!("\r{line}");
+        }
+        let _ = std::io::stdout().flush();
+        *last_line_width = line_len;
+    }
+
     fn read_numeric_metric(value: Option<&serde_json::Value>) -> f64 {
         value
             .and_then(|v| v.as_f64().or_else(|| v.as_u64().map(|n| n as f64)))
@@ -8987,6 +9001,7 @@ mod tests {
 
         for phase in phases {
             let phase_started = Instant::now();
+            let mut progress_line_width = 0usize;
             let coordinator = Arc::new(SystemCoordinator::new());
             let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
                 Arc::new(std::sync::Mutex::new(None));
@@ -9036,16 +9051,19 @@ mod tests {
 
             let total_requests = phase.warmup + phase.iterations;
             if progress_enabled {
-                println!(
-                    "[p31] profile={} phase={} start total={} warmup={} iterations={} churn_mode={} churn_every={} progress_every={}",
-                    profile_name,
-                    phase.name,
-                    total_requests,
-                    phase.warmup,
-                    phase.iterations,
-                    churn_mode.as_str(),
-                    churn_every,
-                    progress_every
+                emit_scale_aware_progress_line(
+                    &format!(
+                        "[p31] profile={} phase={} progress=0/{} (0.0%) elapsed_ms=0 eta_ms=0 churn_edits=0 warmup={} iterations={} churn_mode={} churn_every={} progress_every={}",
+                        profile_name,
+                        phase.name,
+                        total_requests,
+                        phase.warmup,
+                        phase.iterations,
+                        churn_mode.as_str(),
+                        churn_every,
+                        progress_every
+                    ),
+                    &mut progress_line_width,
                 );
             }
             for request_index in 0..total_requests {
@@ -9130,16 +9148,19 @@ mod tests {
                     let elapsed = phase_started.elapsed();
                     let progress_percent = scale_aware_progress_percent(completed, total_requests);
                     let eta_ms = scale_aware_progress_eta_ms(elapsed, completed, total_requests);
-                    println!(
-                        "[p31] profile={} phase={} progress={}/{} ({:.1}%) elapsed_ms={} eta_ms={} churn_edits={}",
-                        profile_name,
-                        phase.name,
-                        completed,
-                        total_requests,
-                        progress_percent,
-                        elapsed.as_millis(),
-                        eta_ms,
-                        churn_edits_applied
+                    emit_scale_aware_progress_line(
+                        &format!(
+                            "[p31] profile={} phase={} progress={}/{} ({:.1}%) elapsed_ms={} eta_ms={} churn_edits={}",
+                            profile_name,
+                            phase.name,
+                            completed,
+                            total_requests,
+                            progress_percent,
+                            elapsed.as_millis(),
+                            eta_ms,
+                            churn_edits_applied
+                        ),
+                        &mut progress_line_width,
                     );
                 }
             }
@@ -9219,16 +9240,22 @@ mod tests {
                 "dominant_stage": dominant_stage
             });
             if progress_enabled {
-                println!(
-                    "[p31] profile={} phase={} done elapsed_ms={} completion_total={} cancelled_total={} cancelled_rate={:.4} churn_edits={}",
-                    profile_name,
-                    phase.name,
-                    phase_started.elapsed().as_millis(),
-                    completion_total,
-                    completion_cancelled_total,
-                    completion_cancelled_rate,
-                    churn_edits_applied
+                emit_scale_aware_progress_line(
+                    &format!(
+                        "[p31] profile={} phase={} done progress={}/{} (100.0%) elapsed_ms={} eta_ms=0 completion_total={} cancelled_total={} cancelled_rate={:.4} churn_edits={}",
+                        profile_name,
+                        phase.name,
+                        total_requests,
+                        total_requests,
+                        phase_started.elapsed().as_millis(),
+                        completion_total,
+                        completion_cancelled_total,
+                        completion_cancelled_rate,
+                        churn_edits_applied
+                    ),
+                    &mut progress_line_width,
                 );
+                println!();
             }
             profile_report.insert(phase.name.to_string(), phase_report);
 

@@ -9166,6 +9166,54 @@ mod tests {
             .ok_or_else(|| format!("field '{}' must be u64", path.join(".")))
     }
 
+    fn get_report_bool(report: &serde_json::Value, path: &[&str]) -> Result<bool, String> {
+        let mut cursor = report;
+        for segment in path {
+            cursor = cursor
+                .get(*segment)
+                .ok_or_else(|| format!("missing field '{}'", path.join(".")))?;
+        }
+        cursor
+            .as_bool()
+            .ok_or_else(|| format!("field '{}' must be bool", path.join(".")))
+    }
+
+    fn validate_scale_aware_baseline_schema(
+        baseline_report: &serde_json::Value,
+    ) -> Result<(), String> {
+        const PROFILES: &[&str] = &["large", "small"];
+        const PHASES: &[&str] = &["start", "cold", "warm"];
+        const REQUIRED_METRICS: &[&str] = &[
+            "completion_duration_ms",
+            "intellisense_v2_wait_for_file_version_completion_ms",
+            "intellisense_v2_snapshot_completion_ms",
+            "intellisense_v2_ir_query_completion_ms",
+        ];
+
+        let schema_version = get_report_u64(baseline_report, &["schema_version"])?;
+        if schema_version == 0 {
+            return Err("field 'schema_version' must be >= 1".to_string());
+        }
+        get_report_bool(baseline_report, &["gate", "pass"])?;
+
+        for profile in PROFILES {
+            for phase in PHASES {
+                for metric in REQUIRED_METRICS {
+                    get_report_u64(
+                        baseline_report,
+                        &["profiles", profile, phase, "metrics", metric, "count"],
+                    )?;
+                    get_report_metric_f64(
+                        baseline_report,
+                        &["profiles", profile, phase, "metrics", metric, "p95"],
+                    )?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     fn evaluate_scale_aware_gate(
         current_report: &serde_json::Value,
         baseline_report: &serde_json::Value,
@@ -9433,10 +9481,130 @@ mod tests {
         }))
     }
 
+    fn synthetic_scale_aware_profile(
+        completion_p95: f64,
+        wait_p95: f64,
+        completion_total: u64,
+        completion_cancelled_total: u64,
+    ) -> serde_json::Value {
+        let phase = |completion_count: u64, completion_p95_value: f64, wait_p95_value: f64| {
+            serde_json::json!({
+                "completion_total": completion_count,
+                "completion_cancelled_total": 0,
+                "metrics": {
+                    "completion_duration_ms": {
+                        "count": completion_count,
+                        "p50": completion_p95_value,
+                        "p95": completion_p95_value,
+                        "p99": completion_p95_value
+                    },
+                    "intellisense_v2_wait_for_file_version_completion_ms": {
+                        "count": completion_count,
+                        "p50": wait_p95_value,
+                        "p95": wait_p95_value,
+                        "p99": wait_p95_value
+                    },
+                    "intellisense_v2_snapshot_completion_ms": {
+                        "count": completion_count,
+                        "p50": 0.0,
+                        "p95": 0.0,
+                        "p99": 0.0
+                    },
+                    "intellisense_v2_ir_query_completion_ms": {
+                        "count": completion_count,
+                        "p50": 0.0,
+                        "p95": 0.0,
+                        "p99": 0.0
+                    },
+                    "intellisense_v2_completion_stale_fallback_total": 0,
+                    "intellisense_v2_interactive_wait_budget_exhausted_total": 0,
+                    "intellisense_v2_completion_fallback_unavailable_total": 0,
+                    "intellisense_v2_interactive_stale_served_total": 0
+                }
+            })
+        };
+        serde_json::json!({
+            "start": phase(1, completion_p95, wait_p95),
+            "cold": phase(5, completion_p95, wait_p95),
+            "warm": {
+                "completion_total": completion_total,
+                "completion_cancelled_total": completion_cancelled_total,
+                "metrics": {
+                    "completion_duration_ms": {
+                        "count": completion_total,
+                        "p50": completion_p95,
+                        "p95": completion_p95,
+                        "p99": completion_p95
+                    },
+                    "intellisense_v2_wait_for_file_version_completion_ms": {
+                        "count": completion_total,
+                        "p50": wait_p95,
+                        "p95": wait_p95,
+                        "p99": wait_p95
+                    },
+                    "intellisense_v2_snapshot_completion_ms": {
+                        "count": completion_total,
+                        "p50": 0.0,
+                        "p95": 0.0,
+                        "p99": 0.0
+                    },
+                    "intellisense_v2_ir_query_completion_ms": {
+                        "count": completion_total,
+                        "p50": 0.0,
+                        "p95": 0.0,
+                        "p99": 0.0
+                    },
+                    "intellisense_v2_completion_stale_fallback_total": 0,
+                    "intellisense_v2_interactive_wait_budget_exhausted_total": 0,
+                    "intellisense_v2_completion_fallback_unavailable_total": 0,
+                    "intellisense_v2_interactive_stale_served_total": 0
+                }
+            }
+        })
+    }
+
+    fn synthetic_scale_aware_report(
+        change_id: &str,
+        large_completion_p95: f64,
+        large_wait_p95: f64,
+        small_completion_p95: f64,
+        small_wait_p95: f64,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "change_id": change_id,
+            "profile": "p31_scale_aware_large_small_completion_gate_live",
+            "schema_version": 1,
+            "profiles": {
+                "large": synthetic_scale_aware_profile(large_completion_p95, large_wait_p95, 60, 0),
+                "small": synthetic_scale_aware_profile(small_completion_p95, small_wait_p95, 60, 0)
+            }
+        })
+    }
+
+    #[test]
+    fn scale_aware_baseline_schema_requires_explicit_pass_fail_summary() {
+        let baseline = synthetic_scale_aware_report("baseline", 100.0, 100.0, 100.0, 0.0);
+        let err = validate_scale_aware_baseline_schema(&baseline)
+            .expect_err("baseline without gate.pass must be rejected");
+        assert!(
+            err.contains("gate.pass"),
+            "expected error mentioning gate.pass, got: {err}"
+        );
+    }
+
+    #[test]
+    fn scale_aware_baseline_schema_accepts_required_shape() {
+        let mut baseline = synthetic_scale_aware_report("baseline", 100.0, 100.0, 100.0, 0.0);
+        baseline["gate"] = serde_json::json!({
+            "pass": true
+        });
+        validate_scale_aware_baseline_schema(&baseline)
+            .expect("baseline with required gate summary and metrics should validate");
+    }
+
     #[tokio::test]
     async fn p31_scale_aware_large_small_completion_gate_live() {
         const CHANGE_ID: &str = "add-bounded-stale-completion-fastpath";
-        const LEGACY_BASELINE_CHANGE_ID: &str = "add-large-module-completion-acceleration-gate";
         let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
 
         let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -9564,61 +9732,47 @@ mod tests {
         let baseline_path = std::env::var("BSL_V2_SCALE_AWARE_GATE_BASELINE")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|_| {
-                let baseline_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                     .join("tests")
                     .join("perf")
-                    .join("baselines");
-                let change_baseline = baseline_dir.join(format!("{CHANGE_ID}.json"));
-                if change_baseline.exists() {
-                    change_baseline
-                } else {
-                    baseline_dir.join(format!("{LEGACY_BASELINE_CHANGE_ID}.json"))
-                }
+                    .join("baselines")
+                    .join(format!("{CHANGE_ID}.json"))
             });
         let enforce_gate = std::env::var("BSL_V2_SCALE_AWARE_GATE_ENFORCE")
             .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
 
-        if baseline_path.exists() {
-            let baseline_raw =
-                std::fs::read_to_string(&baseline_path).expect("read scale-aware baseline file");
-            let baseline_report: serde_json::Value =
-                serde_json::from_str(&baseline_raw).expect("parse scale-aware baseline json");
-            let gate = evaluate_scale_aware_gate(&report, &baseline_report)
-                .expect("evaluate scale-aware large/small gate");
-            report["baseline"] = serde_json::json!({
-                "path": baseline_path,
-                "present": true
-            });
-            report["gate"] = gate.clone();
+        if !baseline_path.exists() {
+            panic!(
+                "scale-aware baseline is required but missing: {}",
+                baseline_path.display()
+            );
+        }
 
-            if enforce_gate {
-                let pass = gate
-                    .get("pass")
-                    .and_then(|value| value.as_bool())
-                    .unwrap_or(false);
-                assert!(
-                    pass,
-                    "p31 scale-aware gate failed in enforce mode: {}",
-                    serde_json::to_string_pretty(&gate)
-                        .unwrap_or_else(|_| "<gate json>".to_string())
-                );
-            }
-        } else {
-            report["baseline"] = serde_json::json!({
-                "path": baseline_path,
-                "present": false
-            });
-            report["gate"] = serde_json::json!({
-                "evaluated": false,
-                "reason": "baseline_missing"
-            });
-            if enforce_gate {
-                panic!(
-                    "BSL_V2_SCALE_AWARE_GATE_ENFORCE is enabled, but baseline is missing: {}",
-                    baseline_path.display()
-                );
-            }
+        let baseline_raw =
+            std::fs::read_to_string(&baseline_path).expect("read scale-aware baseline file");
+        let baseline_report: serde_json::Value =
+            serde_json::from_str(&baseline_raw).expect("parse scale-aware baseline json");
+        validate_scale_aware_baseline_schema(&baseline_report)
+            .expect("validate scale-aware baseline schema");
+        let gate = evaluate_scale_aware_gate(&report, &baseline_report)
+            .expect("evaluate scale-aware large/small gate");
+        report["baseline"] = serde_json::json!({
+            "path": baseline_path,
+            "present": true
+        });
+        report["gate"] = gate.clone();
+
+        if enforce_gate {
+            let pass = gate
+                .get("pass")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false);
+            assert!(
+                pass,
+                "p31 scale-aware gate failed in enforce mode: {}",
+                serde_json::to_string_pretty(&gate).unwrap_or_else(|_| "<gate json>".to_string())
+            );
         }
 
         let report_path = std::env::var("BSL_V2_SCALE_AWARE_GATE_REPORT")

@@ -2,6 +2,16 @@
   "change_id": "add-large-module-completion-acceleration-gate",
   "profile": "p31_scale_aware_large_small_completion_gate_live_baseline",
   "schema_version": 1,
+  "gate": {
+    "pass": true,
+    "summary": {
+      "large_wait_ratio_max": 0.6,
+      "large_completion_ratio_max": 0.75,
+      "small_completion_ratio_max": 1.25,
+      "completion_cancelled_rate_max": 0.1,
+      "min_completion_total": 50
+    }
+  },
   "profiles": {
     "large": {
       "start": {

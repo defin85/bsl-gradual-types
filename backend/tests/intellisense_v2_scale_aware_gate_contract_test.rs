@@ -5,13 +5,20 @@ const LARGE_COMPLETION_RATIO_MAX: f64 = 0.75;
 const SMALL_COMPLETION_RATIO_MAX: f64 = 1.25;
 const MAX_CANCELLED_RATE: f64 = 0.10;
 const MIN_COMPLETION_TOTAL: u64 = 50;
+const MAX_STALE_FALLBACK_UNAVAILABLE_PER_BUDGET_EXHAUSTED: f64 = 0.20;
 
 const REQUIRED_PHASES: &[&str] = &["start", "cold", "warm"];
-const REQUIRED_METRICS: &[&str] = &[
+const REQUIRED_HISTOGRAM_METRICS: &[&str] = &[
     "completion_duration_ms",
     "intellisense_v2_wait_for_file_version_completion_ms",
     "intellisense_v2_snapshot_completion_ms",
     "intellisense_v2_ir_query_completion_ms",
+];
+const REQUIRED_COUNTER_METRICS: &[&str] = &[
+    "intellisense_v2_interactive_wait_budget_exhausted_total",
+    "intellisense_v2_interactive_stale_served_total",
+    "intellisense_v2_completion_stale_fallback_total",
+    "intellisense_v2_completion_fallback_unavailable_total",
 ];
 
 #[derive(Debug, Clone, Copy)]
@@ -20,6 +27,9 @@ struct WarmMetrics {
     wait_p95_ms: f64,
     completion_total: u64,
     completion_cancelled_total: u64,
+    warm_budget_exhausted_total: u64,
+    warm_stale_fallback_total: u64,
+    warm_fallback_unavailable_total: u64,
 }
 
 #[derive(Debug)]
@@ -29,6 +39,10 @@ struct GateVerdict {
     small_completion_ratio: f64,
     large_cancelled_rate: f64,
     small_cancelled_rate: f64,
+    stale_fastpath_exercised: bool,
+    stale_fastpath_pass: bool,
+    large_warm_fallback_unavailable_per_budget_exhausted: f64,
+    small_warm_fallback_unavailable_per_budget_exhausted: f64,
     pass: bool,
 }
 
@@ -58,11 +72,15 @@ fn read_u64(root: &Value, path: &[&str]) -> Result<u64, String> {
 
 fn validate_profile_shape(report: &Value, profile: &str) -> Result<(), String> {
     for phase in REQUIRED_PHASES {
-        for metric in REQUIRED_METRICS {
+        for metric in REQUIRED_HISTOGRAM_METRICS {
             let p95_path = ["profiles", profile, phase, "metrics", metric, "p95"];
             let count_path = ["profiles", profile, phase, "metrics", metric, "count"];
             let _ = read_f64(report, &p95_path)?;
             let _ = read_u64(report, &count_path)?;
+        }
+        for metric in REQUIRED_COUNTER_METRICS {
+            let path = ["profiles", profile, phase, "metrics", metric];
+            let _ = read_u64(report, &path)?;
         }
     }
     Ok(())
@@ -99,6 +117,36 @@ fn read_warm_metrics(report: &Value, profile: &str) -> Result<WarmMetrics, Strin
             report,
             &["profiles", profile, "warm", "completion_cancelled_total"],
         )?,
+        warm_budget_exhausted_total: read_u64(
+            report,
+            &[
+                "profiles",
+                profile,
+                "warm",
+                "metrics",
+                "intellisense_v2_interactive_wait_budget_exhausted_total",
+            ],
+        )?,
+        warm_stale_fallback_total: read_u64(
+            report,
+            &[
+                "profiles",
+                profile,
+                "warm",
+                "metrics",
+                "intellisense_v2_completion_stale_fallback_total",
+            ],
+        )?,
+        warm_fallback_unavailable_total: read_u64(
+            report,
+            &[
+                "profiles",
+                profile,
+                "warm",
+                "metrics",
+                "intellisense_v2_completion_fallback_unavailable_total",
+            ],
+        )?,
     })
 }
 
@@ -118,6 +166,19 @@ fn evaluate_scale_aware_gate(current: &Value, baseline: &Value) -> Result<GateVe
         / large_current.completion_total.max(1) as f64;
     let small_cancelled_rate = small_current.completion_cancelled_total as f64
         / small_current.completion_total.max(1) as f64;
+    let large_warm_fallback_unavailable_per_budget_exhausted =
+        large_current.warm_fallback_unavailable_total as f64
+            / large_current.warm_budget_exhausted_total.max(1) as f64;
+    let small_warm_fallback_unavailable_per_budget_exhausted =
+        small_current.warm_fallback_unavailable_total as f64
+            / small_current.warm_budget_exhausted_total.max(1) as f64;
+    let stale_fastpath_exercised =
+        large_current.warm_stale_fallback_total > 0 || small_current.warm_stale_fallback_total > 0;
+    let stale_fastpath_pass = !stale_fastpath_exercised
+        || (large_warm_fallback_unavailable_per_budget_exhausted
+            <= MAX_STALE_FALLBACK_UNAVAILABLE_PER_BUDGET_EXHAUSTED
+            && small_warm_fallback_unavailable_per_budget_exhausted
+                <= MAX_STALE_FALLBACK_UNAVAILABLE_PER_BUDGET_EXHAUSTED);
 
     let pass = large_wait_ratio <= LARGE_WAIT_RATIO_MAX
         && large_completion_ratio <= LARGE_COMPLETION_RATIO_MAX
@@ -125,7 +186,8 @@ fn evaluate_scale_aware_gate(current: &Value, baseline: &Value) -> Result<GateVe
         && large_cancelled_rate <= MAX_CANCELLED_RATE
         && small_cancelled_rate <= MAX_CANCELLED_RATE
         && large_current.completion_total >= MIN_COMPLETION_TOTAL
-        && small_current.completion_total >= MIN_COMPLETION_TOTAL;
+        && small_current.completion_total >= MIN_COMPLETION_TOTAL
+        && stale_fastpath_pass;
 
     Ok(GateVerdict {
         large_wait_ratio,
@@ -133,17 +195,50 @@ fn evaluate_scale_aware_gate(current: &Value, baseline: &Value) -> Result<GateVe
         small_completion_ratio,
         large_cancelled_rate,
         small_cancelled_rate,
+        stale_fastpath_exercised,
+        stale_fastpath_pass,
+        large_warm_fallback_unavailable_per_budget_exhausted,
+        small_warm_fallback_unavailable_per_budget_exhausted,
         pass,
     })
 }
 
 fn phase(completion_p95: f64, wait_p95: f64, snapshot_p95: f64, ir_p95: f64, count: u64) -> Value {
+    phase_with_counters(
+        completion_p95,
+        wait_p95,
+        snapshot_p95,
+        ir_p95,
+        count,
+        0,
+        0,
+        0,
+        0,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn phase_with_counters(
+    completion_p95: f64,
+    wait_p95: f64,
+    snapshot_p95: f64,
+    ir_p95: f64,
+    count: u64,
+    wait_budget_exhausted_total: u64,
+    stale_served_total: u64,
+    stale_fallback_total: u64,
+    fallback_unavailable_total: u64,
+) -> Value {
     json!({
         "metrics": {
             "completion_duration_ms": { "p95": completion_p95, "count": count },
             "intellisense_v2_wait_for_file_version_completion_ms": { "p95": wait_p95, "count": count },
             "intellisense_v2_snapshot_completion_ms": { "p95": snapshot_p95, "count": count },
-            "intellisense_v2_ir_query_completion_ms": { "p95": ir_p95, "count": count }
+            "intellisense_v2_ir_query_completion_ms": { "p95": ir_p95, "count": count },
+            "intellisense_v2_interactive_wait_budget_exhausted_total": wait_budget_exhausted_total,
+            "intellisense_v2_interactive_stale_served_total": stale_served_total,
+            "intellisense_v2_completion_stale_fallback_total": stale_fallback_total,
+            "intellisense_v2_completion_fallback_unavailable_total": fallback_unavailable_total
         }
     })
 }
@@ -311,5 +406,57 @@ fn scale_aware_gate_rejects_missing_required_metric() {
     assert!(
         error.contains("profiles.large.cold.metrics.intellisense_v2_ir_query_completion_ms"),
         "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn scale_aware_gate_fails_when_stale_fastpath_fallback_unavailable_rate_is_too_high() {
+    let baseline = make_report(
+        [
+            phase(4200.0, 3200.0, 700.0, 320.0, 60),
+            phase(4000.0, 3000.0, 680.0, 300.0, 80),
+            phase(4000.0, 3000.0, 650.0, 280.0, 120),
+        ],
+        [
+            phase(300.0, 8.0, 4.0, 180.0, 60),
+            phase(280.0, 6.0, 3.0, 170.0, 80),
+            phase(250.0, 5.0, 2.0, 160.0, 120),
+        ],
+        120,
+        6,
+        120,
+        3,
+    );
+    let current = make_report(
+        [
+            phase(3100.0, 1800.0, 600.0, 260.0, 60),
+            phase(2950.0, 1700.0, 560.0, 240.0, 80),
+            phase_with_counters(2900.0, 1700.0, 540.0, 220.0, 120, 10, 10, 10, 4),
+        ],
+        [
+            phase(300.0, 7.0, 3.0, 180.0, 60),
+            phase(290.0, 6.0, 3.0, 170.0, 80),
+            phase_with_counters(300.0, 5.0, 2.0, 165.0, 120, 10, 10, 10, 1),
+        ],
+        120,
+        8,
+        120,
+        5,
+    );
+
+    let verdict = evaluate_scale_aware_gate(&current, &baseline).expect("gate evaluation");
+    assert!(verdict.stale_fastpath_exercised);
+    assert!(!verdict.stale_fastpath_pass);
+    assert!(
+        !verdict.pass,
+        "gate must fail when stale fallback_unavailable exceeds threshold under exercised fastpath"
+    );
+    assert!(
+        verdict.large_warm_fallback_unavailable_per_budget_exhausted
+            > MAX_STALE_FALLBACK_UNAVAILABLE_PER_BUDGET_EXHAUSTED
+    );
+    assert!(
+        verdict.small_warm_fallback_unavailable_per_budget_exhausted
+            <= MAX_STALE_FALLBACK_UNAVAILABLE_PER_BUDGET_EXHAUSTED
     );
 }

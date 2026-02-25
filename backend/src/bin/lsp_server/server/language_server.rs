@@ -584,7 +584,10 @@ async fn completion_cached_stale_items(
         let settings_compatible = observed_settings_id
             .map(|settings_id| entry.settings_id == *settings_id)
             .unwrap_or(true);
-        if deps_compatible && settings_compatible {
+        let file_version_compatible = observed_file_version
+            .map(|file_version| entry.file_version == file_version)
+            .unwrap_or(true);
+        if deps_compatible && settings_compatible && file_version_compatible {
             Some(entry.items.clone())
         } else {
             None
@@ -2637,10 +2640,19 @@ impl LanguageServer for BslLanguageServer {
                             ));
                         }
 
+                        if !shadow_internal_request {
+                            spawn_completion_refresh_after_stale_fastpath(
+                                self.clone(),
+                                params.clone(),
+                                trigger_char_hint,
+                            );
+                        }
                         self.coordinator
                             .record_intellisense_v2_completion_fallback_unavailable();
                         completion_outcome.get_or_insert("fallback_unavailable");
-                        break 'completion_flow Some(completion_incomplete_empty_response());
+                        break 'completion_flow Some(
+                            crate::handlers::build_keyword_degraded_completion(snippet_support),
+                        );
                     }
 
                     let (

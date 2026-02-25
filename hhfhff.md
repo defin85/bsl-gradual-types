@@ -14,7 +14,7 @@
   Основание: это фундамент для следующих двух (Dependencies в openspec/changes/add-incremental-parse-snapshot-for-analysis-v2/proposal.md).
   4. add-cancellable-diagnostics-supersession
   Основание: снижает waste CPU на superseded heavy задачах; опирается на п.3 (openspec/changes/add-cancellable-diagnostics-supersession/proposal.md).
-  5. add-bounded-stale-completion-fastpath - current
+  5. add-bounded-stale-completion-fastpath
   Основание: зависит от 3+4 (openspec/changes/add-bounded-stale-completion-fastpath/proposal.md).
 
   4. Затем закрепить гейты и убрать дубли

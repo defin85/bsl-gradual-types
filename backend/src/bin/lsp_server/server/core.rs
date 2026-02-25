@@ -4735,6 +4735,236 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn p7_large_churn_budget_timeout_without_cache_returns_keyword_fallback_incomplete() {
+        const FILLER_LINES: usize = 2200;
+        let mut fixture = String::new();
+        fixture.push_str("Процедура Тест()\n");
+        fixture.push_str("    ЛокМассив = Новый Массив;\n");
+        for idx in 0..FILLER_LINES {
+            fixture.push_str(&format!("    // filler {idx}\n"));
+        }
+        fixture.push_str("    ЛокМассив.\n");
+        fixture.push_str("КонецПроцедуры\n");
+
+        let completion_line = (2 + FILLER_LINES) as u32;
+        let completion_character = "    ЛокМассив."
+            .chars()
+            .map(|ch| ch.len_utf16())
+            .sum::<usize>() as u32;
+
+        let coordinator = Arc::new(SystemCoordinator::new());
+        let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+            Arc::new(std::sync::Mutex::new(None));
+
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            let server_holder = server_holder.clone();
+            move |client| {
+                let server = BslLanguageServer::new(client, coordinator.clone());
+                *server_holder.lock().expect("server holder lock") = Some(server.clone());
+                server
+            }
+        })
+        .finish();
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        initialize_lsp_service(&mut service).await;
+
+        let uri = Url::parse("file:///test_p7_large_churn_stale_cache_miss.bsl").expect("test uri");
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: fixture.clone(),
+            },
+        };
+        let did_open_req = Request::build("textDocument/didOpen")
+            .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+            .finish();
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+
+        for version in 2..=7_i32 {
+            let did_change = DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: fixture.clone(),
+                }],
+            };
+            let did_change_req = Request::build("textDocument/didChange")
+                .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+                .finish();
+            let did_change_response = service
+                .ready()
+                .await
+                .unwrap()
+                .call(did_change_req)
+                .await
+                .expect("didChange notification");
+            assert!(did_change_response.is_none(), "didChange is a notification");
+        }
+
+        let server = server_holder
+            .lock()
+            .expect("server holder lock")
+            .clone()
+            .expect("server must be created");
+        server
+            .deps_update_v2("p7_large_churn_stale_cache_miss_setup", None, None)
+            .await;
+        server.sync_v2_globals().await;
+
+        let file_id = server.get_or_create_file_id_v2(&uri).await;
+        let large_churn_active = server
+            .scale_aware_churn_state_v2
+            .read()
+            .await
+            .get(&file_id)
+            .is_some_and(|state| state.large_churn_active);
+        assert!(
+            large_churn_active,
+            "expected large+churn state to be active after burst didChange on large document"
+        );
+
+        let warm_completion = server
+            .completion(CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: Position::new(completion_line, completion_character),
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: Some(CompletionContext {
+                    trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+                    trigger_character: Some(".".to_string()),
+                }),
+            })
+            .await
+            .expect("warm completion request")
+            .expect("warm completion response");
+        let warm_items_count = match &warm_completion {
+            CompletionResponse::Array(items) => items.len(),
+            CompletionResponse::List(list) => list.items.len(),
+        };
+        assert!(
+            warm_items_count > 0,
+            "warm completion should prime stale fallback cache before cache-miss simulation"
+        );
+
+        {
+            let mut cache = server.completion_stale_fallback_cache_v2.write().await;
+            cache.remove(&file_id);
+        }
+        {
+            let mut versions = server.latest_received_file_versions_v2.write().await;
+            versions.insert(file_id, 8);
+        }
+
+        let wait_budget_ms = bsl_runtime::system::global_runtime_config()
+            .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
+            .unwrap_or(120);
+        let started = Instant::now();
+        let stale_completion = server
+            .completion(CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: Position::new(completion_line, completion_character),
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: Some(CompletionContext {
+                    trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+                    trigger_character: Some(".".to_string()),
+                }),
+            })
+            .await
+            .expect("stale completion request")
+            .expect("stale completion response");
+        let elapsed = started.elapsed();
+
+        match stale_completion {
+            CompletionResponse::List(list) => {
+                assert!(
+                    list.is_incomplete,
+                    "stale fastpath fallback-unavailable response must stay incomplete"
+                );
+                assert!(
+                    !list.items.is_empty(),
+                    "stale fastpath cache-miss must return keyword degraded items instead of empty result"
+                );
+            }
+            CompletionResponse::Array(items) => {
+                assert!(
+                    !items.is_empty(),
+                    "stale fastpath cache-miss must not degrade to empty completion array"
+                );
+                panic!("stale fastpath fallback-unavailable response should use CompletionList");
+            }
+        }
+        assert!(
+            elapsed <= Duration::from_millis(wait_budget_ms.saturating_add(300)),
+            "stale fastpath cache-miss should remain bounded near wait budget (elapsed={elapsed:?}, budget_ms={wait_budget_ms})"
+        );
+
+        let refresh_epoch = tokio::time::timeout(Duration::from_millis(700), async {
+            loop {
+                let epoch = server
+                    .completion_dispatcher_v2
+                    .latest_request_epoch(file_id)
+                    .await
+                    .unwrap_or(0);
+                if epoch >= 3 {
+                    break epoch;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("background refresh should enqueue follow-up completion request after cache miss");
+        assert!(
+            refresh_epoch >= 3,
+            "expected background refresh to advance completion request epoch after cache miss, got {}",
+            refresh_epoch
+        );
+
+        let metrics = coordinator.observability_metrics();
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        let stale_fallback_total = counters
+            .get("intellisense_v2_completion_stale_fallback_total")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0);
+        assert!(
+            stale_fallback_total > 0,
+            "expected stale fallback counter to increment under churn fastpath cache miss"
+        );
+        let fallback_unavailable_total = counters
+            .get("intellisense_v2_completion_fallback_unavailable_total")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0);
+        assert!(
+            fallback_unavailable_total > 0,
+            "expected fallback_unavailable counter to increment for stale cache-miss"
+        );
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
     async fn p8_deps_update_is_atomic_and_completion_uses_runtime_index_snapshot() {
         fn make_index_snapshot(id: &str, type_name: &str) -> IndexSnapshot {
             let mut snapshot = IndexSnapshot::empty(IndexSnapshotId::from_hash(id.to_string()));
@@ -9205,7 +9435,8 @@ mod tests {
 
     #[tokio::test]
     async fn p31_scale_aware_large_small_completion_gate_live() {
-        const CHANGE_ID: &str = "add-large-module-completion-acceleration-gate";
+        const CHANGE_ID: &str = "add-bounded-stale-completion-fastpath";
+        const LEGACY_BASELINE_CHANGE_ID: &str = "add-large-module-completion-acceleration-gate";
         let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
 
         let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -9333,11 +9564,16 @@ mod tests {
         let baseline_path = std::env::var("BSL_V2_SCALE_AWARE_GATE_BASELINE")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|_| {
-                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                let baseline_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                     .join("tests")
                     .join("perf")
-                    .join("baselines")
-                    .join("add-large-module-completion-acceleration-gate.json")
+                    .join("baselines");
+                let change_baseline = baseline_dir.join(format!("{CHANGE_ID}.json"));
+                if change_baseline.exists() {
+                    change_baseline
+                } else {
+                    baseline_dir.join(format!("{LEGACY_BASELINE_CHANGE_ID}.json"))
+                }
             });
         let enforce_gate = std::env::var("BSL_V2_SCALE_AWARE_GATE_ENFORCE")
             .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))

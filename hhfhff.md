@@ -42,7 +42,14 @@
 
   Если хочешь, следующим шагом могу сделать конкретный execution-план по неделям/итерациям (что в какой PR, какие тесты-гейты на каждом шаге).
 
-  Запусти так, в отдельном терминале, без tee:
+  Что запускать теперь (один прогон):
 
-  BSL_V2_SCALE_AWARE_PROGRESS=1 BSL_V2_SCALE_AWARE_PROGRESS_EVERY=1 BSL_V2_SCALE_AWARE_GATE_BASELINE=/home/egor/code/bsl-gradual-types/backend/tests/perf/baselines/add-bounded-stale-completion-fastpath.json
-  BSL_V2_SCALE_AWARE_GATE_REPORT=/tmp/p31-live.json cargo test -p bsl-backend --bin bsl-lsp-server p31_scale_aware_large_small_completion_gate_live -- --nocapture --test-threads=1
+  BSL_V2_SCALE_AWARE_PROGRESS_EVERY=1 BSL_V2_SCALE_AWARE_GATE_REPORT=/tmp/p31-live-diag.json cargo test -p bsl-backend --bin bsl-lsp-server p31_scale_aware_large_small_completion_gate_live -- --nocapture
+  --test-threads=1
+
+  И сразу топ p95 по large warm:
+
+  jq -r '.profiles.large.warm.metrics | to_entries[] | select(.value|type=="object" and has("p95")) | [.key, .value.p95, .value.p99, .value.count] | @tsv' /tmp/p31-live-diag.json | sort -t $'\t' -k2,2nr | head
+  -n 25
+
+  Если хочешь, после этого я по выводу сразу укажу конкретный проблемный участок кода, уже без новых “часовых” угадываний.

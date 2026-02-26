@@ -2405,7 +2405,11 @@ impl LanguageServer for BslLanguageServer {
                 if completion_queue_enqueue_failed(completion_ticket.queue_outcome) {
                     super::completion_dispatcher::CompletionTurnOutcome::QueueRejected
                 } else if let Some(turn_waiter) = completion_dispatch.turn_waiter {
-                    turn_waiter.wait().await
+                    let turn_wait_started = Instant::now();
+                    let turn_outcome = turn_waiter.wait().await;
+                    self.coordinator
+                        .record_completion_stage_latency("turn_wait", turn_wait_started.elapsed());
+                    turn_outcome
                 } else {
                     super::completion_dispatcher::CompletionTurnOutcome::QueueRejected
                 };
@@ -2466,7 +2470,12 @@ impl LanguageServer for BslLanguageServer {
                 } else {
                     "warm"
                 });
+            let sync_globals_started = Instant::now();
             self.sync_v2_globals().await;
+            self.coordinator.record_completion_stage_latency(
+                "sync_globals",
+                sync_globals_started.elapsed(),
+            );
 
             let empty = || Some(completion_empty_response(false));
             let extract_non_empty_items =
@@ -2497,6 +2506,7 @@ impl LanguageServer for BslLanguageServer {
                 settings.enable_flow_sensitive
             };
 
+            let prepare_started = Instant::now();
             let prepared = self
                 .prepare_lsp_stateful_operation_v2_with_completion_mode(
                     &uri,
@@ -2506,6 +2516,10 @@ impl LanguageServer for BslLanguageServer {
                     Some(completion_observability_mode),
                 )
                 .await;
+            self.coordinator.record_completion_stage_latency(
+                "prepare_stateful",
+                prepare_started.elapsed(),
+            );
 
             match prepared {
                 Ok((context, prepared, expected_version)) => {
@@ -2655,6 +2669,7 @@ impl LanguageServer for BslLanguageServer {
                         );
                     }
 
+                    let query_bundle_started = Instant::now();
                     let (
                         file_content,
                         file_path,
@@ -3039,6 +3054,10 @@ impl LanguageServer for BslLanguageServer {
                             observed_file_version,
                         )
                     };
+                    self.coordinator.record_completion_stage_latency(
+                        "query_bundle",
+                        query_bundle_started.elapsed(),
+                    );
                     observed_file_version_for_completion = observed_file_version;
                     let member_access_context = file_content
                         .as_deref()
@@ -3067,6 +3086,7 @@ impl LanguageServer for BslLanguageServer {
                         break 'completion_flow Some(completion_incomplete_empty_response());
                     }
 
+                    let response_build_started = Instant::now();
                     let mut completion_response = match (file_content, file_path, deps, ir_program)
                     {
                         (Some(file_content), Some(file_path), Some(deps), Some(ir_program)) => {
@@ -3123,6 +3143,10 @@ impl LanguageServer for BslLanguageServer {
                             response
                         }
                     };
+                    self.coordinator.record_completion_stage_latency(
+                        "response_build",
+                        response_build_started.elapsed(),
+                    );
                     if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
                         event_driven_guards_enabled,
                         self,
@@ -3161,6 +3185,7 @@ impl LanguageServer for BslLanguageServer {
                         }
                     }
                     if !matches!(completion_outcome, Some("cancelled" | "superseded_epoch")) {
+                        let cache_store_started = Instant::now();
                         if let (Some(settings_id), Some(file_version), Some(response_items)) = (
                             observed_settings_id.clone(),
                             observed_file_version,
@@ -3181,6 +3206,10 @@ impl LanguageServer for BslLanguageServer {
                                     },
                                 );
                         }
+                        self.coordinator.record_completion_stage_latency(
+                            "cache_store",
+                            cache_store_started.elapsed(),
+                        );
                     }
                     completion_response
                 }

@@ -796,6 +796,12 @@ impl BasicObservability {
             "collect" => "completion_stage_collect_ms",
             "rank" => "completion_stage_rank_ms",
             "format" => "completion_stage_format_ms",
+            "turn_wait" => "completion_stage_turn_wait_ms",
+            "prepare_stateful" => "completion_stage_prepare_stateful_ms",
+            "sync_globals" => "completion_stage_sync_globals_ms",
+            "query_bundle" => "completion_stage_query_bundle_ms",
+            "response_build" => "completion_stage_response_build_ms",
+            "cache_store" => "completion_stage_cache_store_ms",
             _ => "completion_stage_other_ms",
         };
 

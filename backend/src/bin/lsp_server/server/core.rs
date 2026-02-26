@@ -8910,6 +8910,32 @@ mod tests {
         })
     }
 
+    fn histogram_metric_value_or_zero(
+        histograms: &serde_json::Map<String, serde_json::Value>,
+        primary_key: &str,
+        fallback_key: Option<&str>,
+    ) -> serde_json::Value {
+        let Some(histogram) = histograms
+            .get(primary_key)
+            .or_else(|| fallback_key.and_then(|key| histograms.get(key)))
+            .and_then(|value| value.as_object())
+        else {
+            return serde_json::json!({
+                "count": 0,
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 0.0,
+            });
+        };
+
+        serde_json::json!({
+            "count": read_u64_metric(histogram.get("count")),
+            "p50": read_numeric_metric(histogram.get("p50")),
+            "p95": read_numeric_metric(histogram.get("p95")),
+            "p99": read_numeric_metric(histogram.get("p99")),
+        })
+    }
+
     fn find_utf16_position_after_marker(source: &str, marker: &str) -> Position {
         let byte_index = source
             .find(marker)
@@ -8954,6 +8980,45 @@ mod tests {
                 "ir_query_completion",
                 "intellisense_v2_ir_query_completion_ms",
             ),
+            ("parse_result_query", "intellisense_v2_parse_result_query_ms"),
+            ("singleflight_wait", "intellisense_v2_singleflight_wait_ms"),
+            (
+                "runtime_exec_interactive",
+                "intellisense_v2_runtime_exec_interactive_ms",
+            ),
+            (
+                "runtime_wait_for_file_version_queue_wait",
+                "intellisense_v2_runtime_wait_for_file_version_queue_wait_ms",
+            ),
+            (
+                "runtime_snapshot_with_deps_queue_wait",
+                "intellisense_v2_runtime_snapshot_with_deps_queue_wait_ms",
+            ),
+            ("completion_stage_turn_wait", "completion_stage_turn_wait_ms"),
+            (
+                "completion_stage_prepare_stateful",
+                "completion_stage_prepare_stateful_ms",
+            ),
+            (
+                "completion_stage_sync_globals",
+                "completion_stage_sync_globals_ms",
+            ),
+            (
+                "completion_stage_query_bundle",
+                "completion_stage_query_bundle_ms",
+            ),
+            (
+                "completion_stage_response_build",
+                "completion_stage_response_build_ms",
+            ),
+            ("completion_stage_cache_store", "completion_stage_cache_store_ms"),
+            (
+                "completion_stage_snapshot_read",
+                "completion_stage_snapshot_read_ms",
+            ),
+            ("completion_stage_collect", "completion_stage_collect_ms"),
+            ("completion_stage_rank", "completion_stage_rank_ms"),
+            ("completion_stage_format", "completion_stage_format_ms"),
             (
                 "runtime_queue_wait_interactive",
                 "intellisense_v2_runtime_queue_wait_interactive_ms",
@@ -9197,6 +9262,81 @@ mod tests {
                     histograms,
                     "intellisense_v2_ir_query_completion_ms",
                     Some("intellisense_v2_ir_query_other_ms")
+                ),
+                "intellisense_v2_parse_result_query_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "intellisense_v2_parse_result_query_ms",
+                    None
+                ),
+                "intellisense_v2_singleflight_wait_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "intellisense_v2_singleflight_wait_ms",
+                    None
+                ),
+                "intellisense_v2_runtime_exec_interactive_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "intellisense_v2_runtime_exec_interactive_ms",
+                    None
+                ),
+                "intellisense_v2_runtime_wait_for_file_version_queue_wait_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "intellisense_v2_runtime_wait_for_file_version_queue_wait_ms",
+                    None
+                ),
+                "intellisense_v2_runtime_snapshot_with_deps_queue_wait_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "intellisense_v2_runtime_snapshot_with_deps_queue_wait_ms",
+                    None
+                ),
+                "completion_stage_turn_wait_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_turn_wait_ms",
+                    None
+                ),
+                "completion_stage_prepare_stateful_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_prepare_stateful_ms",
+                    None
+                ),
+                "completion_stage_sync_globals_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_sync_globals_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_ms",
+                    None
+                ),
+                "completion_stage_response_build_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_response_build_ms",
+                    None
+                ),
+                "completion_stage_cache_store_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_cache_store_ms",
+                    None
+                ),
+                "completion_stage_snapshot_read_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_snapshot_read_ms",
+                    None
+                ),
+                "completion_stage_collect_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_collect_ms",
+                    None
+                ),
+                "completion_stage_rank_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_rank_ms",
+                    None
+                ),
+                "completion_stage_format_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_format_ms",
+                    None
                 ),
                 "intellisense_v2_runtime_queue_wait_interactive_ms": histogram_metric_value(
                     histograms,
@@ -9631,6 +9771,102 @@ mod tests {
         assert_eq!(eta_ms, 2_500);
         assert_eq!(scale_aware_progress_eta_ms(elapsed, 0, total), 0);
         assert_eq!(scale_aware_progress_eta_ms(elapsed, total, total), 0);
+    }
+
+    #[test]
+    fn scale_aware_dominant_stage_includes_completion_pipeline_breakdown() {
+        let metrics = serde_json::json!({
+            "intellisense_v2_wait_for_file_version_completion_ms": {"p95": 2.0},
+            "intellisense_v2_snapshot_completion_ms": {"p95": 1.0},
+            "intellisense_v2_ir_query_completion_ms": {"p95": 3.0},
+            "intellisense_v2_runtime_queue_wait_interactive_ms": {"p95": 2.0},
+            "intellisense_v2_syntax_diagnostics_query_ms": {"p95": 0.0},
+            "intellisense_v2_semantic_diagnostics_query_ms": {"p95": 10.0},
+            "completion_stage_snapshot_read_ms": {"p95": 15.0},
+            "completion_stage_collect_ms": {"p95": 120.0},
+            "completion_stage_rank_ms": {"p95": 8.0},
+            "completion_stage_format_ms": {"p95": 6.0}
+        });
+
+        let dominant = dominant_stage_from_metrics(&metrics);
+        assert_eq!(
+            dominant
+                .get("stage")
+                .and_then(|value| value.as_str())
+                .unwrap_or(""),
+            "completion_stage_collect"
+        );
+        assert_eq!(
+            dominant
+                .get("p95_ms")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0),
+            120.0
+        );
+    }
+
+    #[test]
+    fn scale_aware_dominant_stage_includes_completion_turn_wait_breakdown() {
+        let metrics = serde_json::json!({
+            "intellisense_v2_wait_for_file_version_completion_ms": {"p95": 2.0},
+            "intellisense_v2_snapshot_completion_ms": {"p95": 1.0},
+            "intellisense_v2_ir_query_completion_ms": {"p95": 3.0},
+            "intellisense_v2_runtime_queue_wait_interactive_ms": {"p95": 2.0},
+            "intellisense_v2_syntax_diagnostics_query_ms": {"p95": 0.0},
+            "intellisense_v2_semantic_diagnostics_query_ms": {"p95": 280.0},
+            "completion_stage_turn_wait_ms": {"p95": 1500.0},
+            "completion_stage_prepare_stateful_ms": {"p95": 20.0},
+            "completion_stage_sync_globals_ms": {"p95": 5.0}
+        });
+
+        let dominant = dominant_stage_from_metrics(&metrics);
+        assert_eq!(
+            dominant
+                .get("stage")
+                .and_then(|value| value.as_str())
+                .unwrap_or(""),
+            "completion_stage_turn_wait"
+        );
+        assert_eq!(
+            dominant
+                .get("p95_ms")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0),
+            1500.0
+        );
+    }
+
+    #[test]
+    fn scale_aware_dominant_stage_includes_completion_query_bundle_breakdown() {
+        let metrics = serde_json::json!({
+            "intellisense_v2_wait_for_file_version_completion_ms": {"p95": 2.0},
+            "intellisense_v2_snapshot_completion_ms": {"p95": 1.0},
+            "intellisense_v2_ir_query_completion_ms": {"p95": 9.0},
+            "intellisense_v2_runtime_queue_wait_interactive_ms": {"p95": 2.0},
+            "intellisense_v2_semantic_diagnostics_query_ms": {"p95": 320.0},
+            "intellisense_v2_parse_result_query_ms": {"p95": 120.0},
+            "intellisense_v2_singleflight_wait_ms": {"p95": 40.0},
+            "intellisense_v2_runtime_exec_interactive_ms": {"p95": 25.0},
+            "completion_stage_query_bundle_ms": {"p95": 2400.0},
+            "completion_stage_response_build_ms": {"p95": 50.0},
+            "completion_stage_cache_store_ms": {"p95": 30.0}
+        });
+
+        let dominant = dominant_stage_from_metrics(&metrics);
+        assert_eq!(
+            dominant
+                .get("stage")
+                .and_then(|value| value.as_str())
+                .unwrap_or(""),
+            "completion_stage_query_bundle"
+        );
+        assert_eq!(
+            dominant
+                .get("p95_ms")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0),
+            2400.0
+        );
     }
 
     fn synthetic_scale_aware_profile(

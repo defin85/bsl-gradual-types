@@ -44,8 +44,7 @@
 
   Что запускать теперь (один прогон):
 
-  BSL_V2_SCALE_AWARE_PROGRESS_EVERY=1 BSL_V2_SCALE_AWARE_GATE_REPORT=/tmp/p31-live-diag.json cargo test -p bsl-backend --bin bsl-lsp-server p31_scale_aware_large_small_completion_gate_live -- --nocapture
-  --test-threads=1
+  BSL_V2_SCALE_AWARE_PROGRESS_EVERY=1 BSL_V2_SCALE_AWARE_GATE_REPORT=/tmp/p31-live-diag.json cargo test -p bsl-backend --bin bsl-lsp-server p31_scale_aware_large_small_completion_gate_live -- --nocapture --test-threads=1
 
   И сразу топ p95 по large warm:
 

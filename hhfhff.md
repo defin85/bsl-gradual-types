@@ -70,3 +70,24 @@ p31_scale_aware_gate_report=/tmp/p31-live-diag.json
 ok
 
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 112 filtered out; finished in 3694.63s
+
+Отлично, теперь причина локализована предметно.
+
+  1. Реальный узкий участок: query_bundle
+     completion_stage_query_bundle_ms.p95 = 35490ms при completion_duration_ms.p95 = 35500ms.
+  2. Это совпадает с runtime execution:
+     intellisense_v2_runtime_exec_interactive_ms.p95 = 35007ms.
+  3. Всё остальное маленькое и не объясняет 35с:
+     semantic_diagnostics_query.p95 = 285ms, ir_query.p95 = 10ms, response_build.p95 = 9ms, prepare_stateful.p95 = 2ms, queue-wait ~2ms.
+  4. Значит bottleneck внутри closure, который исполняется в spawn_bounded_blocking_with_class_observed_origin:
+
+  - вызов в language_server.rs (/home/egor/code/bsl-gradual-types/backend/src/bin/lsp_server/server/language_server.rs:2739)
+  - замер runtime_exec_interactive_ms делается в policy.rs (/home/egor/code/bsl-gradual-types/bsl-runtime/src/application/intellisense_v2/policy.rs:631)
+
+  5. По коду внутри этого closure уже измеренные куски (ir/parse) не тяжелые. Остаётся практически один кандидат: расчёт member_access_owner_type_hint (вызовы flow_type_at_byte_offset / type_at_byte_offset) в
+     language_server.rs (/home/egor/code/bsl-gradual-types/backend/src/bin/lsp_server/server/language_server.rs:2925).
+
+  Что делать дальше (чтобы не гонять много раз по часу):
+
+  1. Я добавлю ещё 2 подэтапа внутри query_bundle: owner_hint_ms и deps_and_file_snapshot_ms.
+  2. Один следующий p31 прогон даст точный виновник уже без догадок.

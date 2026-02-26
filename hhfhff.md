@@ -52,3 +52,21 @@
   -n 25
 
   Если хочешь, после этого я по выводу сразу укажу конкретный проблемный участок кода, уже без новых “часовых” угадываний.
+
+  [egor@DESKTOP-SS5D6MM bsl-gradual-types]$ BSL_V2_SCALE_AWARE_PROGRESS_EVERY=1 BSL_V2_SCALE_AWARE_GATE_REPORT=/tmp/p31-live-diag.json cargo test -p bsl-backend --bin bsl-lsp-server p31_scale_aware_large_small_c
+ompletion_gate_live -- --nocapture --test-threads=1
+   Compiling bsl-backend v0.4.105 (/home/egor/code/bsl-gradual-types/backend)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.54s
+     Running unittests src/bin/lsp_server/main.rs (target/debug/deps/bsl_lsp_server-cf9cd9861cbd5697)
+
+running 1 test
+[p31] profile=large phase=start done progress=1/1 (100.0%) elapsed_ms=71309 eta_ms=0 completion_total=1 cancelled_total=0 cancelled_rate=0.0000 churn_edits=0
+[p31] profile=large phase=cold done progress=5/5 (100.0%) elapsed_ms=70940 eta_ms=0 completion_total=5 cancelled_total=0 cancelled_rate=0.0000 churn_edits=0
+[p31] profile=large phase=warm done progress=55/55 (100.0%) elapsed_ms=3552202 eta_ms=0 completion_total=55 cancelled_total=0 cancelled_rate=0.0000 churn_edits=50
+[p31] profile=small phase=start done progress=1/1 (100.0%) elapsed_ms=12 eta_ms=0 completion_total=1 cancelled_total=0 cancelled_rate=0.0000 churn_edits=0
+[p31] profile=small phase=cold done progress=5/5 (100.0%) elapsed_ms=34 eta_ms=0 completion_total=5 cancelled_total=0 cancelled_rate=0.0000 churn_edits=0
+[p31] profile=small phase=warm done progress=55/55 (100.0%) elapsed_ms=112 eta_ms=0 completion_total=55 cancelled_total=0 cancelled_rate=0.0000 churn_edits=0
+p31_scale_aware_gate_report=/tmp/p31-live-diag.json
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 112 filtered out; finished in 3694.63s

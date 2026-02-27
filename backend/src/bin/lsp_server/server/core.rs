@@ -9008,6 +9008,14 @@ mod tests {
                 "completion_stage_query_bundle_ms",
             ),
             (
+                "completion_stage_query_bundle_owner_hint",
+                "completion_stage_query_bundle_owner_hint_ms",
+            ),
+            (
+                "completion_stage_query_bundle_deps_and_file_snapshot",
+                "completion_stage_query_bundle_deps_and_file_snapshot_ms",
+            ),
+            (
                 "completion_stage_response_build",
                 "completion_stage_response_build_ms",
             ),
@@ -9306,6 +9314,16 @@ mod tests {
                 "completion_stage_query_bundle_ms": histogram_metric_value_or_zero(
                     histograms,
                     "completion_stage_query_bundle_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_deps_and_file_snapshot_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_deps_and_file_snapshot_ms",
                     None
                 ),
                 "completion_stage_response_build_ms": histogram_metric_value_or_zero(
@@ -9866,6 +9884,36 @@ mod tests {
                 .and_then(|value| value.as_f64())
                 .unwrap_or(0.0),
             2400.0
+        );
+    }
+
+    #[test]
+    fn scale_aware_dominant_stage_includes_completion_query_bundle_owner_hint_breakdown() {
+        let metrics = serde_json::json!({
+            "intellisense_v2_wait_for_file_version_completion_ms": {"p95": 2.0},
+            "intellisense_v2_snapshot_completion_ms": {"p95": 1.0},
+            "intellisense_v2_ir_query_completion_ms": {"p95": 9.0},
+            "intellisense_v2_runtime_queue_wait_interactive_ms": {"p95": 2.0},
+            "intellisense_v2_semantic_diagnostics_query_ms": {"p95": 320.0},
+            "completion_stage_query_bundle_ms": {"p95": 2400.0},
+            "completion_stage_query_bundle_owner_hint_ms": {"p95": 3500.0},
+            "completion_stage_query_bundle_deps_and_file_snapshot_ms": {"p95": 100.0}
+        });
+
+        let dominant = dominant_stage_from_metrics(&metrics);
+        assert_eq!(
+            dominant
+                .get("stage")
+                .and_then(|value| value.as_str())
+                .unwrap_or(""),
+            "completion_stage_query_bundle_owner_hint"
+        );
+        assert_eq!(
+            dominant
+                .get("p95_ms")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0),
+            3500.0
         );
     }
 

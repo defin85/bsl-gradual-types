@@ -2747,9 +2747,14 @@ impl LanguageServer for BslLanguageServer {
                                 context_for_query.origin.as_str(),
                                 Some(self.coordinator.as_ref()),
                                 move || {
+                                    let deps_and_file_snapshot_started = Instant::now();
                                     let file_content = analysis.file_text(file_id).ok().flatten();
                                     let file_path = analysis.file_path(file_id).ok().flatten();
                                     let deps = analysis.deps_data().ok();
+                                    coordinator_for_query.record_completion_stage_latency(
+                                        "query_bundle_deps_and_file_snapshot",
+                                        deps_and_file_snapshot_started.elapsed(),
+                                    );
                                     if cancellation_token_for_query
                                         .as_ref()
                                         .is_some_and(|token| token.is_cancelled())
@@ -2923,6 +2928,7 @@ impl LanguageServer for BslLanguageServer {
                                         );
                                     }
 
+                                    let owner_hint_started = Instant::now();
                                     let member_access_owner_type_hint =
                                         if member_access_request_for_query {
                                         file_content.as_deref().and_then(|text| {
@@ -2984,6 +2990,10 @@ impl LanguageServer for BslLanguageServer {
                                     } else {
                                         None
                                     };
+                                    coordinator_for_query.record_completion_stage_latency(
+                                        "query_bundle_owner_hint",
+                                        owner_hint_started.elapsed(),
+                                    );
 
                                     (
                                         file_content,

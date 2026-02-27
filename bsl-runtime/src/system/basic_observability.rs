@@ -800,6 +800,10 @@ impl BasicObservability {
             "prepare_stateful" => "completion_stage_prepare_stateful_ms",
             "sync_globals" => "completion_stage_sync_globals_ms",
             "query_bundle" => "completion_stage_query_bundle_ms",
+            "query_bundle_owner_hint" => "completion_stage_query_bundle_owner_hint_ms",
+            "query_bundle_deps_and_file_snapshot" => {
+                "completion_stage_query_bundle_deps_and_file_snapshot_ms"
+            },
             "response_build" => "completion_stage_response_build_ms",
             "cache_store" => "completion_stage_cache_store_ms",
             _ => "completion_stage_other_ms",

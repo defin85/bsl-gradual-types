@@ -9012,6 +9012,58 @@ mod tests {
                 "completion_stage_query_bundle_owner_hint_ms",
             ),
             (
+                "completion_stage_query_bundle_owner_hint_extract",
+                "completion_stage_query_bundle_owner_hint_extract_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_offset",
+                "completion_stage_query_bundle_owner_hint_offset_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_flow_lookup",
+                "completion_stage_query_bundle_owner_hint_flow_lookup_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_type_lookup_direct",
+                "completion_stage_query_bundle_owner_hint_type_lookup_direct_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_type_lookup_fallback",
+                "completion_stage_query_bundle_owner_hint_type_lookup_fallback_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch",
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_parse_result",
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_parse_result_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_build_total",
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_build_total_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_build_seed_context",
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_build_seed_context_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_build_local_function_summaries",
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_build_local_function_summaries_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_build_visit_statements",
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_build_visit_statements_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_scan",
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_scan_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_type_lookup",
+                "completion_stage_query_bundle_owner_hint_type_lookup_ms",
+            ),
+            (
                 "completion_stage_query_bundle_deps_and_file_snapshot",
                 "completion_stage_query_bundle_deps_and_file_snapshot_ms",
             ),
@@ -9254,7 +9306,7 @@ mod tests {
             let completion_cancelled_rate =
                 completion_cancelled_total as f64 / completion_total.max(1) as f64;
 
-            let phase_metrics = serde_json::json!({
+            let mut phase_metrics = serde_json::json!({
                 "completion_duration_ms": histogram_metric_value(histograms, "completion_duration_ms", None),
                 "intellisense_v2_wait_for_file_version_completion_ms": histogram_metric_value(
                     histograms,
@@ -9321,6 +9373,71 @@ mod tests {
                     "completion_stage_query_bundle_owner_hint_ms",
                     None
                 ),
+                "completion_stage_query_bundle_owner_hint_extract_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_extract_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_offset_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_offset_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_flow_lookup_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_flow_lookup_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_direct_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_direct_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_fallback_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_fallback_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_parse_result_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_index_parse_result_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_build_total_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_index_build_total_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_build_seed_context_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_index_build_seed_context_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_build_local_function_summaries_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_index_build_local_function_summaries_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_build_visit_statements_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_index_build_visit_statements_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_scan_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_index_scan_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_ms",
+                    None
+                ),
                 "completion_stage_query_bundle_deps_and_file_snapshot_ms": histogram_metric_value_or_zero(
                     histograms,
                     "completion_stage_query_bundle_deps_and_file_snapshot_ms",
@@ -9356,6 +9473,16 @@ mod tests {
                     "completion_stage_format_ms",
                     None
                 ),
+                "intellisense_v2_completion_owner_hint_line_len_chars": histogram_metric_value_or_zero(
+                    histograms,
+                    "intellisense_v2_completion_owner_hint_line_len_chars",
+                    None
+                ),
+                "intellisense_v2_completion_owner_hint_receiver_len_chars": histogram_metric_value_or_zero(
+                    histograms,
+                    "intellisense_v2_completion_owner_hint_receiver_len_chars",
+                    None
+                ),
                 "intellisense_v2_runtime_queue_wait_interactive_ms": histogram_metric_value(
                     histograms,
                     "intellisense_v2_runtime_queue_wait_interactive_ms",
@@ -9383,6 +9510,75 @@ mod tests {
                 "intellisense_v2_completion_fallback_unavailable_total": read_u64_metric(
                     counters.get("intellisense_v2_completion_fallback_unavailable_total")
                 ),
+            });
+            phase_metrics["intellisense_v2_completion_owner_hint_result_total"] = serde_json::json!({
+                "not_member_access": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_result_total_reason_not_member_access")
+                ),
+                "no_file_content": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_result_total_reason_no_file_content")
+                ),
+                "no_line": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_result_total_reason_no_line")
+                ),
+                "no_dot": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_result_total_reason_no_dot")
+                ),
+                "no_receiver": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_result_total_reason_no_receiver")
+                ),
+                "offset_unresolved": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_result_total_reason_offset_unresolved")
+                ),
+                "flow_type_hit": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_result_total_reason_flow_type_hit")
+                ),
+                "flow_type_miss": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_result_total_reason_flow_type_miss")
+                ),
+                "type_hit": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_result_total_reason_type_hit")
+                ),
+                "type_miss": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_result_total_reason_type_miss")
+                ),
+                "cancelled": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_result_total_reason_cancelled")
+                ),
+                "other": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_result_total_reason_other")
+                )
+            });
+            phase_metrics["intellisense_v2_completion_owner_hint_lookup_path_total"] = serde_json::json!({
+                "direct": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_lookup_path_total_direct")
+                ),
+                "flow_only": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_lookup_path_total_flow_only")
+                ),
+                "flow_plus_fallback": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_lookup_path_total_flow_plus_fallback")
+                ),
+                "other": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_lookup_path_total_other")
+                )
+            });
+            phase_metrics["intellisense_v2_completion_owner_hint_lookup_result_total"] = serde_json::json!({
+                "hit": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_lookup_result_total_hit")
+                ),
+                "miss": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_lookup_result_total_miss")
+                ),
+                "cancelled": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_lookup_result_total_cancelled")
+                ),
+                "error": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_lookup_result_total_error")
+                ),
+                "other": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_lookup_result_total_other")
+                )
             });
             let dominant_stage = dominant_stage_from_metrics(&phase_metrics);
             let phase_report = serde_json::json!({

@@ -17,4 +17,4 @@
 ## 4. Validation
 - [x] 4.1 `openspec validate add-versioned-contract-compatibility-diff-gate --strict --no-interactive`.
 - [x] 4.2 Приложить sample compatibility report в `openspec/changes/add-versioned-contract-compatibility-diff-gate/validation/`.
-- [ ] 4.3 Провести архитектурный review policy с владельцами backend/runtime/extension.
+- [x] 4.3 Провести архитектурный review policy с владельцами backend/runtime/extension.

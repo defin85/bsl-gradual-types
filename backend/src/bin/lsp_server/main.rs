@@ -5,6 +5,7 @@
 
 #![allow(clippy::needless_borrow)]
 #![allow(clippy::only_used_in_recursion)]
+#![recursion_limit = "512"]
 
 mod commands;
 mod config;

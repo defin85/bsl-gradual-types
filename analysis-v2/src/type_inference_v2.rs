@@ -3,6 +3,7 @@ use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Instant;
 
 use bsl_shared::domain::is_configuration_type_pattern;
 use bsl_shared::domain::resolver::TypeResolver;
@@ -32,6 +33,23 @@ pub(crate) struct TypeIndexEntry {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TypeIndex {
     entries: Vec<TypeIndexEntry>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct TypeIndexBuildProfile {
+    pub seed_module_context_ms: u128,
+    pub local_function_summaries_ms: u128,
+    pub visit_statements_ms: u128,
+    pub total_ms: u128,
+    pub statement_count: u64,
+    pub local_function_summary_count: u64,
+    pub index_entry_count: u64,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct TypeIndexBuildProfiled {
+    pub index: TypeIndex,
+    pub profile: TypeIndexBuildProfile,
 }
 
 impl TypeIndex {
@@ -104,14 +122,42 @@ impl TypeInferencer {
     }
 
     fn build_index(&self, program: &Program, file_path: &str) -> TypeIndex {
+        self.build_index_profiled(program, file_path).index
+    }
+
+    fn build_index_profiled(&self, program: &Program, file_path: &str) -> TypeIndexBuildProfiled {
+        let started = Instant::now();
         let mut env = TypeEnv::default();
         let mut index = TypeIndex::default();
+
+        let seed_started = Instant::now();
         self.seed_module_context(file_path, &mut env);
-        env.local_function_summaries = Arc::new(self.infer_local_function_summaries(program, &env));
+        let seed_module_context_ms = seed_started.elapsed().as_millis();
+
+        let local_function_summaries_started = Instant::now();
+        let local_function_summaries = self.infer_local_function_summaries(program, &env);
+        let local_function_summary_count = local_function_summaries.len() as u64;
+        env.local_function_summaries = Arc::new(local_function_summaries);
+        let local_function_summaries_ms = local_function_summaries_started.elapsed().as_millis();
+
+        let visit_statements_started = Instant::now();
         for stmt in &program.statements {
             self.visit_statement(stmt, &mut env, &mut index);
         }
-        index
+        let visit_statements_ms = visit_statements_started.elapsed().as_millis();
+
+        TypeIndexBuildProfiled {
+            profile: TypeIndexBuildProfile {
+                seed_module_context_ms,
+                local_function_summaries_ms,
+                visit_statements_ms,
+                total_ms: started.elapsed().as_millis(),
+                statement_count: program.statements.len() as u64,
+                local_function_summary_count,
+                index_entry_count: index.entries.len() as u64,
+            },
+            index,
+        }
     }
 
     fn infer_local_function_summaries(
@@ -1433,6 +1479,14 @@ pub(crate) fn build_type_index_with_path(
     deps: Arc<SemanticDeps>,
 ) -> TypeIndex {
     TypeInferencer::new(deps).build_index(program, file_path)
+}
+
+pub(crate) fn build_type_index_with_path_profiled(
+    program: &Program,
+    file_path: &str,
+    deps: Arc<SemanticDeps>,
+) -> TypeIndexBuildProfiled {
+    TypeInferencer::new(deps).build_index_profiled(program, file_path)
 }
 
 #[cfg(test)]

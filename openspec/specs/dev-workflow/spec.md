@@ -95,3 +95,59 @@ GitHub Actions MUST прогонять базовые проверки каче�
 - **WHEN** разработчик запускает проверку документации (локально или в CI)
 - **THEN** проверка падает, если документ ссылается на путь, которого нет в репозитории
 
+### Requirement: Versioned внешние контракты хранятся в `contracts/**` (MUST)
+Система MUST хранить публичные внешние контракты в versioned каталоге `contracts/**`.
+
+Минимальная структура MUST включать:
+- surface идентификатор в пути (`contracts/<surface>/...`);
+- явную major версию (`contracts/<surface>/v1/...`);
+- артефакты контракта в рамках версии (schema и/или эквивалентный формализованный формат + примеры).
+
+#### Scenario: Контракт для внешней поверхности фиксируется как versioned артефакт
+- **GIVEN** команда вводит/меняет внешний интерфейс (LSP/Web/MCP/observability labels)
+- **WHEN** change подготавливается к merge
+- **THEN** в `contracts/**` существует versioned contract артефакт для этой поверхности
+- **AND** путь контракта содержит surface и номер major версии
+
+### Requirement: Breaking изменения контракта требуют version bump и migration note (MUST)
+Система MUST применять version policy к контрактам:
+- breaking change MUST сопровождаться major version bump (`vN -> vN+1`);
+- breaking change MUST содержать migration note в change/proposal или contract changelog.
+
+#### Scenario: Breaking контрактный change не проходит без version bump
+- **GIVEN** PR меняет contract shape/semantics обратно несовместимым образом
+- **WHEN** выполняется контрактная проверка
+- **THEN** проверка падает, если major версия не увеличена
+- **AND** проверка падает, если отсутствует миграционная заметка
+
+### Requirement: Versioned contracts проходят compatibility-diff проверку как manual gate (MUST)
+Система MUST иметь compatibility-diff проверку для `contracts/**`, которая сравнивает baseline и candidate версии контрактов на semantic совместимость.
+
+Проверка MUST:
+- классифицировать изменения как `non_breaking` или `breaking` по формальной policy;
+- выдавать machine-readable отчёт (`pass/fail`, `violations`, `compared_versions`);
+- запускаться в manual режиме (`workflow_dispatch`/ручная команда) на текущем этапе rollout.
+
+#### Scenario: Manual compatibility-diff gate формирует детерминированный отчёт
+- **GIVEN** разработчик меняет контракт в `contracts/<surface>/vN/...`
+- **WHEN** запускается manual compatibility-diff gate
+- **THEN** система формирует детерминированный отчёт с классификацией изменений
+- **AND** отчёт содержит `pass/fail` и список нарушений policy
+
+### Requirement: Breaking compatibility diff требует major bump и migration note (MUST)
+Если compatibility-diff классифицирует изменение как `breaking`, система MUST требовать major bump (`vN -> vN+1`).
+
+Если major bump выполнен, система MUST требовать migration note в `contracts/<surface>/vN/changelog.md`.
+
+#### Scenario: Breaking изменение без major bump отклоняется
+- **GIVEN** baseline и candidate контракт имеют breaking diff
+- **WHEN** major версия не увеличена
+- **THEN** compatibility-diff gate завершается fail
+- **AND** отчёт явно указывает причину: `breaking_without_major_bump`
+
+#### Scenario: Major bump без migration note отклоняется
+- **GIVEN** для contract surface выполнен major bump
+- **WHEN** в `changelog.md` отсутствует migration note
+- **THEN** compatibility-diff gate завершается fail
+- **AND** отчёт явно указывает причину: `missing_migration_note`
+

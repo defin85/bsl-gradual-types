@@ -207,6 +207,33 @@ impl SystemCoordinator {
             .record_intellisense_v2_completion_member_access_terminal_empty(mode, reason);
     }
 
+    pub fn record_intellisense_v2_completion_owner_hint_result(&self, reason: &str) {
+        self.observability
+            .record_intellisense_v2_completion_owner_hint_result(reason);
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_lookup_path(&self, path: &str) {
+        self.observability
+            .record_intellisense_v2_completion_owner_hint_lookup_path(path);
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_lookup_result(&self, result: &str) {
+        self.observability
+            .record_intellisense_v2_completion_owner_hint_lookup_result(result);
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_context(
+        &self,
+        line_len_chars: usize,
+        receiver_len_chars: usize,
+    ) {
+        self.observability
+            .record_intellisense_v2_completion_owner_hint_context(
+                line_len_chars,
+                receiver_len_chars,
+            );
+    }
+
     pub fn observability_metrics(&self) -> Value {
         self.observability.get_metrics().export_metrics()
     }

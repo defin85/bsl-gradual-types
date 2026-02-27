@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use salsa::Setter;
 
@@ -142,6 +143,24 @@ pub enum Change {
 }
 
 pub type Cancellable<T> = Result<T, salsa::Cancelled>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TypeAtByteOffsetProfile {
+    pub index_fetch_ms: u128,
+    pub index_parse_result_ms: u128,
+    pub index_build_total_ms: u128,
+    pub index_build_seed_module_context_ms: u128,
+    pub index_build_local_function_summaries_ms: u128,
+    pub index_build_visit_statements_ms: u128,
+    pub index_scan_ms: u128,
+    pub total_ms: u128,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeAtByteOffsetProfiledResult {
+    pub resolution: Option<TypeResolution>,
+    pub profile: TypeAtByteOffsetProfile,
+}
 
 fn cancellable<T>(op: impl FnOnce() -> T) -> Cancellable<T> {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(op)) {
@@ -295,11 +314,41 @@ unsafe impl salsa::Update for SemanticDiagnosticsSnapshot {
 }
 
 #[derive(Debug, Clone)]
-pub struct TypeIndexSnapshot(Arc<type_inference_v2::TypeIndex>);
+pub struct TypeIndexSnapshot {
+    index: Arc<type_inference_v2::TypeIndex>,
+    parse_result_ms: u128,
+    build_profile: type_inference_v2::TypeIndexBuildProfile,
+}
+
+impl TypeIndexSnapshot {
+    fn new(
+        index: Arc<type_inference_v2::TypeIndex>,
+        parse_result_ms: u128,
+        build_profile: type_inference_v2::TypeIndexBuildProfile,
+    ) -> Self {
+        Self {
+            index,
+            parse_result_ms,
+            build_profile,
+        }
+    }
+
+    fn index(&self) -> Arc<type_inference_v2::TypeIndex> {
+        self.index.clone()
+    }
+
+    fn parse_result_ms(&self) -> u128 {
+        self.parse_result_ms
+    }
+
+    fn build_profile(&self) -> type_inference_v2::TypeIndexBuildProfile {
+        self.build_profile
+    }
+}
 
 impl PartialEq for TypeIndexSnapshot {
     fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
+        Arc::ptr_eq(&self.index, &other.index)
     }
 }
 
@@ -405,7 +454,7 @@ pub fn semantic_diagnostics(
     }
 
     let program = ir(db, file, deps, settings).0;
-    let type_index = type_index(db, file, deps, settings).0;
+    let type_index = type_index(db, file, deps, settings).index();
     cancellation_checkpoint(db);
     let detail_level = settings.diagnostics_detail_level(db);
     let diagnostics = collect_semantic_diagnostics_from_program(
@@ -439,7 +488,7 @@ pub fn semantic_diagnostics_flow_sensitive(
 
     let deps_data = deps.data(db).0.clone();
     let program = ir(db, file, deps, settings).0;
-    let type_index = type_index(db, file, deps, settings).0;
+    let type_index = type_index(db, file, deps, settings).index();
     cancellation_checkpoint(db);
     let resolver = deps_data
         .resolver
@@ -909,17 +958,29 @@ pub fn type_index(
     deps: DepsSnapshot,
     settings: SettingsSnapshot,
 ) -> TypeIndexSnapshot {
+    let started = Instant::now();
     cancellation_checkpoint(db);
     let _deps_id = deps.id(db);
     let _settings_id = settings.id(db);
     let deps_data = deps.data(db).0.clone();
+    let parse_result_started = Instant::now();
     let parsed = parse_result(db, file, settings).0;
+    let parse_result_ms = parse_result_started.elapsed().as_millis();
     cancellation_checkpoint(db);
-    TypeIndexSnapshot(Arc::new(type_inference_v2::build_type_index_with_path(
+    let mut profiled = type_inference_v2::build_type_index_with_path_profiled(
         &parsed.program,
         file.path(db).as_ref(),
         deps_data,
-    )))
+    );
+    let total_ms = started.elapsed().as_millis();
+    if profiled.profile.total_ms < total_ms {
+        profiled.profile.total_ms = total_ms;
+    }
+    TypeIndexSnapshot::new(
+        Arc::new(profiled.index),
+        parse_result_ms,
+        profiled.profile,
+    )
 }
 
 fn syntax_errors_only_in_directives(code: &str, errors: &[ParseError]) -> bool {
@@ -1519,15 +1580,55 @@ impl AnalysisV2 {
         file_id: FileId,
         byte_offset: u32,
     ) -> Cancellable<Option<TypeResolution>> {
+        self.type_at_byte_offset_profiled(file_id, byte_offset)
+            .map(|profiled| profiled.resolution)
+    }
+
+    pub fn type_at_byte_offset_profiled(
+        &self,
+        file_id: FileId,
+        byte_offset: u32,
+    ) -> Cancellable<TypeAtByteOffsetProfiledResult> {
         let Some(&file) = self.files.get(&file_id) else {
-            return Ok(None);
+            return Ok(TypeAtByteOffsetProfiledResult {
+                resolution: None,
+                profile: TypeAtByteOffsetProfile::default(),
+            });
         };
-        cancellable(|| {
-            type_index(&self.db, file, self.deps, self.settings)
-                .0
-                .clone()
+        let started = Instant::now();
+        let index_fetch_started = Instant::now();
+        let index_snapshot = cancellable(|| type_index(&self.db, file, self.deps, self.settings))?;
+        let index_fetch_ms = index_fetch_started.elapsed().as_millis();
+        let index = index_snapshot.index();
+        let index_build_profile = index_snapshot.build_profile();
+        let clip_to_index_fetch = |value_ms: u128| value_ms.min(index_fetch_ms);
+        let index_parse_result_ms = clip_to_index_fetch(index_snapshot.parse_result_ms());
+        let index_build_total_ms = clip_to_index_fetch(index_build_profile.total_ms);
+        let index_build_seed_module_context_ms =
+            clip_to_index_fetch(index_build_profile.seed_module_context_ms);
+        let index_build_local_function_summaries_ms =
+            clip_to_index_fetch(index_build_profile.local_function_summaries_ms);
+        let index_build_visit_statements_ms =
+            clip_to_index_fetch(index_build_profile.visit_statements_ms);
+
+        let index_scan_started = Instant::now();
+        let resolution = index.type_at_byte_offset(byte_offset);
+        let index_scan_ms = index_scan_started.elapsed().as_millis();
+        let total_ms = started.elapsed().as_millis();
+
+        Ok(TypeAtByteOffsetProfiledResult {
+            resolution,
+            profile: TypeAtByteOffsetProfile {
+                index_fetch_ms,
+                index_parse_result_ms,
+                index_build_total_ms,
+                index_build_seed_module_context_ms,
+                index_build_local_function_summaries_ms,
+                index_build_visit_statements_ms,
+                index_scan_ms,
+                total_ms,
+            },
         })
-        .map(|index| index.type_at_byte_offset(byte_offset))
     }
 
     pub fn flow_type_at_byte_offset(
@@ -1540,7 +1641,7 @@ impl AnalysisV2 {
         };
         cancellable(|| {
             let program = ir(&self.db, file, self.deps, self.settings).0;
-            let index = type_index(&self.db, file, self.deps, self.settings).0;
+            let index = type_index(&self.db, file, self.deps, self.settings).index();
             let base = index
                 .type_at_byte_offset(byte_offset)
                 .unwrap_or_else(TypeResolution::unknown);

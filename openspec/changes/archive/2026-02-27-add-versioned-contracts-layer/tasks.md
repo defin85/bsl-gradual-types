@@ -15,4 +15,4 @@
 
 ## 4. Validation
 - [x] 4.1 `openspec validate add-versioned-contracts-layer --strict --no-interactive`.
-- [ ] 4.2 Провести архитектурный review с владельцами backend/runtime/extension.
+- [x] 4.2 Провести архитектурный review с владельцами backend/runtime/extension.

@@ -2759,6 +2759,10 @@ impl LanguageServer for BslLanguageServer {
                                         .as_ref()
                                         .is_some_and(|token| token.is_cancelled())
                                     {
+                                        coordinator_for_query
+                                            .record_intellisense_v2_completion_owner_hint_result(
+                                                "cancelled",
+                                            );
                                         return (
                                             file_content,
                                             file_path,
@@ -2850,6 +2854,10 @@ impl LanguageServer for BslLanguageServer {
                                         .as_ref()
                                         .is_some_and(|token| token.is_cancelled())
                                     {
+                                        coordinator_for_query
+                                            .record_intellisense_v2_completion_owner_hint_result(
+                                                "cancelled",
+                                            );
                                         return (
                                             file_content,
                                             file_path,
@@ -2916,6 +2924,10 @@ impl LanguageServer for BslLanguageServer {
                                         .as_ref()
                                         .is_some_and(|token| token.is_cancelled())
                                     {
+                                        coordinator_for_query
+                                            .record_intellisense_v2_completion_owner_hint_result(
+                                                "cancelled",
+                                            );
                                         return (
                                             file_content,
                                             file_path,
@@ -2929,67 +2941,310 @@ impl LanguageServer for BslLanguageServer {
                                     }
 
                                     let owner_hint_started = Instant::now();
+                                    let mut owner_hint_reason = "not_member_access";
+                                    let mut owner_hint_line_len_chars: Option<usize> = None;
+                                    let mut owner_hint_receiver_len_chars: Option<usize> = None;
+                                    let mut owner_hint_lookup_path: Option<&'static str> = None;
+                                    let mut owner_hint_lookup_result: Option<&'static str> = None;
+                                    let ms_to_duration = |value_ms: u128| {
+                                        std::time::Duration::from_millis(
+                                            value_ms.min(u64::MAX as u128) as u64,
+                                        )
+                                    };
+                                    let record_type_lookup_profile =
+                                        |profile: &bsl_analysis_v2::TypeAtByteOffsetProfile| {
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_fetch",
+                                            ms_to_duration(profile.index_fetch_ms),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_parse_result",
+                                            ms_to_duration(profile.index_parse_result_ms),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_build_total",
+                                            ms_to_duration(profile.index_build_total_ms),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_build_seed_context",
+                                            ms_to_duration(profile.index_build_seed_module_context_ms),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_build_local_function_summaries",
+                                            ms_to_duration(
+                                                profile
+                                                    .index_build_local_function_summaries_ms,
+                                            ),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_build_visit_statements",
+                                            ms_to_duration(profile.index_build_visit_statements_ms),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_scan",
+                                            ms_to_duration(profile.index_scan_ms),
+                                        );
+                                        };
                                     let member_access_owner_type_hint =
                                         if member_access_request_for_query {
-                                        file_content.as_deref().and_then(|text| {
-                                            let line_text = text.lines().nth(position.line as usize)?;
-                                            let cursor_byte =
-                                                bsl_backend::system::positioning::utf16_to_byte_offset(
-                                                    line_text,
-                                                    position.character,
-                                                );
-                                            let line_prefix = line_text.get(..cursor_byte)?;
-                                            // Some clients place cursor exactly on '.' when requesting completion.
-                                            // Include that char into prefix so owner hint can still be resolved.
-                                            let line_prefix = if line_text
-                                                .get(cursor_byte..)
-                                                .and_then(|tail| tail.chars().next())
-                                                == Some('.')
-                                            {
-                                                line_text.get(..cursor_byte + 1).unwrap_or(line_prefix)
-                                            } else {
-                                                line_prefix
-                                            };
-                                            let dot_in_line = line_prefix.rfind('.')?;
-                                            let receiver = line_prefix.get(..dot_in_line)?.trim_end();
-                                            let (probe_byte, _) = receiver
-                                                .char_indices()
-                                                .rev()
-                                                .find(|(_, ch)| !ch.is_whitespace())?;
-                                            let probe_utf16 =
-                                                bsl_backend::system::positioning::byte_offset_to_utf16(
-                                                    line_text, probe_byte,
-                                                );
-                                            let offset = analysis
-                                                .utf16_position_to_byte_offset(
-                                                    file_id,
-                                                    position.line,
-                                                    probe_utf16,
+                                            let owner_hint_extract_started = Instant::now();
+                                            let extracted_owner_hint = (|| {
+                                                let text = match file_content.as_deref() {
+                                                    Some(text) => text,
+                                                    None => {
+                                                        owner_hint_reason = "no_file_content";
+                                                        return None;
+                                                    }
+                                                };
+                                                let line_text = match text.lines().nth(position.line as usize) {
+                                                    Some(line_text) => line_text,
+                                                    None => {
+                                                        owner_hint_reason = "no_line";
+                                                        return None;
+                                                    }
+                                                };
+                                                owner_hint_line_len_chars =
+                                                    Some(line_text.chars().count());
+                                                let cursor_byte =
+                                                    bsl_backend::system::positioning::utf16_to_byte_offset(
+                                                        line_text,
+                                                        position.character,
+                                                    );
+                                                let line_prefix = match line_text.get(..cursor_byte) {
+                                                    Some(line_prefix) => line_prefix,
+                                                    None => {
+                                                        owner_hint_reason = "no_dot";
+                                                        return None;
+                                                    }
+                                                };
+                                                // Some clients place cursor exactly on '.' when requesting completion.
+                                                // Include that char into prefix so owner hint can still be resolved.
+                                                let line_prefix = if line_text
+                                                    .get(cursor_byte..)
+                                                    .and_then(|tail| tail.chars().next())
+                                                    == Some('.')
+                                                {
+                                                    line_text
+                                                        .get(..cursor_byte + 1)
+                                                        .unwrap_or(line_prefix)
+                                                } else {
+                                                    line_prefix
+                                                };
+                                                let dot_in_line = match line_prefix.rfind('.') {
+                                                    Some(dot_in_line) => dot_in_line,
+                                                    None => {
+                                                        owner_hint_reason = "no_dot";
+                                                        return None;
+                                                    }
+                                                };
+                                                let receiver = match line_prefix.get(..dot_in_line) {
+                                                    Some(receiver) => receiver.trim_end(),
+                                                    None => {
+                                                        owner_hint_reason = "no_receiver";
+                                                        return None;
+                                                    }
+                                                };
+                                                owner_hint_receiver_len_chars =
+                                                    Some(receiver.chars().count());
+                                                let (probe_byte, _) = match receiver
+                                                    .char_indices()
+                                                    .rev()
+                                                    .find(|(_, ch)| !ch.is_whitespace())
+                                                {
+                                                    Some(probe) => probe,
+                                                    None => {
+                                                        owner_hint_reason = "no_receiver";
+                                                        return None;
+                                                    }
+                                                };
+                                                Some(
+                                                    bsl_backend::system::positioning::byte_offset_to_utf16(
+                                                        line_text, probe_byte,
+                                                    ),
                                                 )
-                                                .ok()
-                                                .flatten()?;
-                                            let offset = offset.min(u32::MAX as usize) as u32;
-                                            if include_flow_sensitive {
-                                                analysis
-                                                    .flow_type_at_byte_offset(file_id, offset)
-                                                    .ok()
-                                                    .flatten()
-                                                    .or_else(|| {
-                                                        analysis
-                                                            .type_at_byte_offset(file_id, offset)
-                                                            .ok()
-                                                            .flatten()
-                                                    })
-                                            } else {
-                                                analysis
-                                                    .type_at_byte_offset(file_id, offset)
-                                                    .ok()
-                                                    .flatten()
+                                            })();
+                                            coordinator_for_query.record_completion_stage_latency(
+                                                "query_bundle_owner_hint_extract",
+                                                owner_hint_extract_started.elapsed(),
+                                            );
+                                            match extracted_owner_hint {
+                                                Some(probe_utf16) => {
+                                                    let owner_hint_offset_started = Instant::now();
+                                                    let offset = analysis
+                                                        .utf16_position_to_byte_offset(
+                                                            file_id,
+                                                            position.line,
+                                                            probe_utf16,
+                                                        )
+                                                        .ok()
+                                                        .flatten();
+                                                    coordinator_for_query
+                                                        .record_completion_stage_latency(
+                                                            "query_bundle_owner_hint_offset",
+                                                            owner_hint_offset_started.elapsed(),
+                                                        );
+                                                    match offset {
+                                                        Some(offset) => {
+                                                            let offset =
+                                                                offset.min(u32::MAX as usize) as u32;
+                                                            let owner_hint_type_lookup_started =
+                                                                Instant::now();
+                                                            let hint = if include_flow_sensitive {
+                                                                owner_hint_lookup_path =
+                                                                    Some("flow_only");
+                                                                let flow_lookup_started =
+                                                                    Instant::now();
+                                                                let flow_hint_result = analysis
+                                                                    .flow_type_at_byte_offset(
+                                                                        file_id, offset,
+                                                                    );
+                                                                coordinator_for_query.record_completion_stage_latency(
+                                                                    "query_bundle_owner_hint_flow_lookup",
+                                                                    flow_lookup_started.elapsed(),
+                                                                );
+                                                                match flow_hint_result {
+                                                                    Ok(Some(flow_hint)) => {
+                                                                        owner_hint_reason =
+                                                                            "flow_type_hit";
+                                                                        owner_hint_lookup_result =
+                                                                            Some("hit");
+                                                                        Some(flow_hint)
+                                                                    }
+                                                                    Ok(None) => {
+                                                                        owner_hint_lookup_path = Some(
+                                                                            "flow_plus_fallback",
+                                                                        );
+                                                                        let fallback_started =
+                                                                            Instant::now();
+                                                                        let fallback_hint_result =
+                                                                            analysis
+                                                                                .type_at_byte_offset_profiled(
+                                                                                    file_id, offset,
+                                                                                );
+                                                                        coordinator_for_query.record_completion_stage_latency(
+                                                                            "query_bundle_owner_hint_type_lookup_fallback",
+                                                                            fallback_started.elapsed(),
+                                                                        );
+                                                                        match fallback_hint_result {
+                                                                            Ok(profiled) => {
+                                                                                record_type_lookup_profile(
+                                                                                    &profiled.profile,
+                                                                                );
+                                                                                if let Some(type_hint) = profiled.resolution {
+                                                                                    owner_hint_reason =
+                                                                                        "type_hit";
+                                                                                    owner_hint_lookup_result = Some("hit");
+                                                                                    Some(type_hint)
+                                                                                } else {
+                                                                                    owner_hint_reason =
+                                                                                        "type_miss";
+                                                                                    owner_hint_lookup_result = Some("miss");
+                                                                                    None
+                                                                                }
+                                                                            }
+                                                                            Err(_) => {
+                                                                                owner_hint_reason =
+                                                                                    "cancelled";
+                                                                                owner_hint_lookup_result = Some("cancelled");
+                                                                                None
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                    Err(_) => {
+                                                                        owner_hint_reason =
+                                                                            "cancelled";
+                                                                        owner_hint_lookup_result =
+                                                                            Some("cancelled");
+                                                                        None
+                                                                    }
+                                                                }
+                                                            } else {
+                                                                owner_hint_lookup_path =
+                                                                    Some("direct");
+                                                                let direct_started = Instant::now();
+                                                                let type_hint_result = analysis
+                                                                    .type_at_byte_offset_profiled(
+                                                                        file_id, offset,
+                                                                    )
+                                                                ;
+                                                                coordinator_for_query
+                                                                    .record_completion_stage_latency(
+                                                                        "query_bundle_owner_hint_type_lookup_direct",
+                                                                        direct_started.elapsed(),
+                                                                );
+                                                                match type_hint_result {
+                                                                    Ok(profiled) => {
+                                                                        record_type_lookup_profile(
+                                                                            &profiled.profile,
+                                                                        );
+                                                                        if let Some(type_hint) = profiled.resolution {
+                                                                            owner_hint_reason =
+                                                                                "type_hit";
+                                                                            owner_hint_lookup_result =
+                                                                                Some("hit");
+                                                                            Some(type_hint)
+                                                                        } else {
+                                                                            owner_hint_reason =
+                                                                                "type_miss";
+                                                                            owner_hint_lookup_result =
+                                                                                Some("miss");
+                                                                            None
+                                                                        }
+                                                                    }
+                                                                    Err(_) => {
+                                                                        owner_hint_reason =
+                                                                            "cancelled";
+                                                                        owner_hint_lookup_result =
+                                                                            Some("cancelled");
+                                                                        None
+                                                                    }
+                                                                }
+                                                            };
+                                                            coordinator_for_query
+                                                                .record_completion_stage_latency(
+                                                                    "query_bundle_owner_hint_type_lookup",
+                                                                    owner_hint_type_lookup_started
+                                                                        .elapsed(),
+                                                                );
+                                                            hint
+                                                        }
+                                                        None => {
+                                                            owner_hint_reason = "offset_unresolved";
+                                                            None
+                                                        }
+                                                    }
+                                                }
+                                                None => None,
                                             }
-                                        })
                                     } else {
                                         None
                                     };
+                                    coordinator_for_query
+                                        .record_intellisense_v2_completion_owner_hint_result(
+                                            owner_hint_reason,
+                                        );
+                                    if let Some(path) = owner_hint_lookup_path {
+                                        coordinator_for_query
+                                            .record_intellisense_v2_completion_owner_hint_lookup_path(
+                                                path,
+                                            );
+                                    }
+                                    if let Some(result) = owner_hint_lookup_result {
+                                        coordinator_for_query
+                                            .record_intellisense_v2_completion_owner_hint_lookup_result(
+                                                result,
+                                            );
+                                    }
+                                    if let (Some(line_len_chars), Some(receiver_len_chars)) = (
+                                        owner_hint_line_len_chars,
+                                        owner_hint_receiver_len_chars,
+                                    ) {
+                                        coordinator_for_query
+                                            .record_intellisense_v2_completion_owner_hint_context(
+                                                line_len_chars,
+                                                receiver_len_chars,
+                                            );
+                                    }
                                     coordinator_for_query.record_completion_stage_latency(
                                         "query_bundle_owner_hint",
                                         owner_hint_started.elapsed(),

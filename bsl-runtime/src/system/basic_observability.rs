@@ -801,6 +801,45 @@ impl BasicObservability {
             "sync_globals" => "completion_stage_sync_globals_ms",
             "query_bundle" => "completion_stage_query_bundle_ms",
             "query_bundle_owner_hint" => "completion_stage_query_bundle_owner_hint_ms",
+            "query_bundle_owner_hint_extract" => {
+                "completion_stage_query_bundle_owner_hint_extract_ms"
+            }
+            "query_bundle_owner_hint_offset" => {
+                "completion_stage_query_bundle_owner_hint_offset_ms"
+            }
+            "query_bundle_owner_hint_flow_lookup" => {
+                "completion_stage_query_bundle_owner_hint_flow_lookup_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_direct" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_direct_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_fallback" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_fallback_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_index_fetch" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_index_parse_result" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_parse_result_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_index_build_total" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_build_total_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_index_build_seed_context" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_build_seed_context_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_index_build_local_function_summaries" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_build_local_function_summaries_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_index_build_visit_statements" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_build_visit_statements_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_index_scan" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_scan_ms"
+            }
+            "query_bundle_owner_hint_type_lookup" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_ms"
+            }
             "query_bundle_deps_and_file_snapshot" => {
                 "completion_stage_query_bundle_deps_and_file_snapshot_ms"
             },
@@ -909,6 +948,50 @@ impl BasicObservability {
             "intellisense_v2_completion_member_access_terminal_empty_total_mode_{mode}_reason_{reason}"
         );
         self.metrics.increment(&key);
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_result(&self, reason: &str) {
+        let reason = normalize_completion_owner_hint_reason_label(reason);
+        let key = format!("intellisense_v2_completion_owner_hint_result_total_reason_{reason}");
+        self.metrics.increment(&key);
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_lookup_path(&self, path: &str) {
+        let metric = match path {
+            "direct" => "intellisense_v2_completion_owner_hint_lookup_path_total_direct",
+            "flow_only" => "intellisense_v2_completion_owner_hint_lookup_path_total_flow_only",
+            "flow_plus_fallback" => {
+                "intellisense_v2_completion_owner_hint_lookup_path_total_flow_plus_fallback"
+            }
+            _ => "intellisense_v2_completion_owner_hint_lookup_path_total_other",
+        };
+        self.metrics.increment(metric);
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_lookup_result(&self, result: &str) {
+        let metric = match result {
+            "hit" => "intellisense_v2_completion_owner_hint_lookup_result_total_hit",
+            "miss" => "intellisense_v2_completion_owner_hint_lookup_result_total_miss",
+            "cancelled" => "intellisense_v2_completion_owner_hint_lookup_result_total_cancelled",
+            "error" => "intellisense_v2_completion_owner_hint_lookup_result_total_error",
+            _ => "intellisense_v2_completion_owner_hint_lookup_result_total_other",
+        };
+        self.metrics.increment(metric);
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_context(
+        &self,
+        line_len_chars: usize,
+        receiver_len_chars: usize,
+    ) {
+        self.metrics.observe_histogram(
+            "intellisense_v2_completion_owner_hint_line_len_chars",
+            line_len_chars as f64,
+        );
+        self.metrics.observe_histogram(
+            "intellisense_v2_completion_owner_hint_receiver_len_chars",
+            receiver_len_chars as f64,
+        );
     }
 
     pub fn record_intellisense_v2_payload_shape(
@@ -2467,6 +2550,23 @@ fn normalize_completion_terminal_reason_label(reason: &str) -> &'static str {
     }
 }
 
+fn normalize_completion_owner_hint_reason_label(reason: &str) -> &'static str {
+    match reason {
+        "not_member_access" => "not_member_access",
+        "no_file_content" => "no_file_content",
+        "no_line" => "no_line",
+        "no_dot" => "no_dot",
+        "no_receiver" => "no_receiver",
+        "offset_unresolved" => "offset_unresolved",
+        "flow_type_hit" => "flow_type_hit",
+        "flow_type_miss" => "flow_type_miss",
+        "type_hit" => "type_hit",
+        "type_miss" => "type_miss",
+        "cancelled" => "cancelled",
+        _ => "other",
+    }
+}
+
 fn normalize_completion_observability_mode_label(mode: &str) -> &'static str {
     match mode {
         "legacy" => "legacy",
@@ -3606,6 +3706,234 @@ mod observability_contract_tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn completion_owner_hint_metrics_are_exported_with_bounded_reasons() {
+        let observability = BasicObservability::default();
+        let reasons = [
+            "not_member_access",
+            "no_file_content",
+            "no_line",
+            "no_dot",
+            "no_receiver",
+            "offset_unresolved",
+            "flow_type_hit",
+            "flow_type_miss",
+            "type_hit",
+            "type_miss",
+            "cancelled",
+            "unexpected_reason",
+        ];
+        for reason in reasons {
+            observability.record_intellisense_v2_completion_owner_hint_result(reason);
+        }
+        for path in ["direct", "flow_only", "flow_plus_fallback", "unexpected_path"] {
+            observability.record_intellisense_v2_completion_owner_hint_lookup_path(path);
+        }
+        for result in ["hit", "miss", "cancelled", "error", "unexpected_result"] {
+            observability.record_intellisense_v2_completion_owner_hint_lookup_result(result);
+        }
+        observability.record_intellisense_v2_completion_owner_hint_context(240, 18);
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_flow_lookup",
+            std::time::Duration::from_millis(3),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_direct",
+            std::time::Duration::from_millis(5),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_fallback",
+            std::time::Duration::from_millis(7),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_fetch",
+            std::time::Duration::from_millis(2),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_parse_result",
+            std::time::Duration::from_millis(1),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_build_total",
+            std::time::Duration::from_millis(2),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_build_seed_context",
+            std::time::Duration::from_millis(1),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_build_local_function_summaries",
+            std::time::Duration::from_millis(1),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_build_visit_statements",
+            std::time::Duration::from_millis(1),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_scan",
+            std::time::Duration::from_millis(1),
+        );
+
+        let exported = observability.get_metrics().export_metrics();
+        let counters = counters(&exported);
+        let histograms = histograms(&exported);
+
+        for reason in [
+            "not_member_access",
+            "no_file_content",
+            "no_line",
+            "no_dot",
+            "no_receiver",
+            "offset_unresolved",
+            "flow_type_hit",
+            "flow_type_miss",
+            "type_hit",
+            "type_miss",
+            "cancelled",
+            "other",
+        ] {
+            let key = format!("intellisense_v2_completion_owner_hint_result_total_reason_{reason}");
+            assert!(
+                counter_value(counters, &key) > 0,
+                "owner-hint reason counter must be exported for {reason}"
+            );
+        }
+        for (label, key) in [
+            (
+                "direct",
+                "intellisense_v2_completion_owner_hint_lookup_path_total_direct",
+            ),
+            (
+                "flow_only",
+                "intellisense_v2_completion_owner_hint_lookup_path_total_flow_only",
+            ),
+            (
+                "flow_plus_fallback",
+                "intellisense_v2_completion_owner_hint_lookup_path_total_flow_plus_fallback",
+            ),
+            (
+                "other",
+                "intellisense_v2_completion_owner_hint_lookup_path_total_other",
+            ),
+        ] {
+            assert!(
+                counter_value(counters, key) > 0,
+                "owner-hint lookup-path counter must be exported for {label}"
+            );
+        }
+        for (label, key) in [
+            (
+                "hit",
+                "intellisense_v2_completion_owner_hint_lookup_result_total_hit",
+            ),
+            (
+                "miss",
+                "intellisense_v2_completion_owner_hint_lookup_result_total_miss",
+            ),
+            (
+                "cancelled",
+                "intellisense_v2_completion_owner_hint_lookup_result_total_cancelled",
+            ),
+            (
+                "error",
+                "intellisense_v2_completion_owner_hint_lookup_result_total_error",
+            ),
+            (
+                "other",
+                "intellisense_v2_completion_owner_hint_lookup_result_total_other",
+            ),
+        ] {
+            assert!(
+                counter_value(counters, key) > 0,
+                "owner-hint lookup-result counter must be exported for {label}"
+            );
+        }
+        assert!(
+            histogram_count(
+                histograms,
+                "intellisense_v2_completion_owner_hint_line_len_chars"
+            ) > 0,
+            "owner-hint line length histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "intellisense_v2_completion_owner_hint_receiver_len_chars"
+            ) > 0,
+            "owner-hint receiver length histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_flow_lookup_ms"
+            ) > 0,
+            "owner-hint flow lookup histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_direct_ms"
+            ) > 0,
+            "owner-hint direct lookup histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_fallback_ms"
+            ) > 0,
+            "owner-hint fallback lookup histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_ms"
+            ) > 0,
+            "owner-hint index fetch histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_parse_result_ms"
+            ) > 0,
+            "owner-hint index parse-result histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_build_total_ms"
+            ) > 0,
+            "owner-hint index build total histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_build_seed_context_ms"
+            ) > 0,
+            "owner-hint index build seed-context histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_build_local_function_summaries_ms"
+            ) > 0,
+            "owner-hint index build local-function-summaries histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_build_visit_statements_ms"
+            ) > 0,
+            "owner-hint index build visit-statements histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_scan_ms"
+            ) > 0,
+            "owner-hint index scan histogram must be exported"
+        );
     }
 
     #[test]

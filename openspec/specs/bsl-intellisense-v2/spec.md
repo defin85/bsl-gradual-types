@@ -748,18 +748,33 @@ Histogram keys:
 - **AND** `revision_lag_versions` и fallback counters отражают факт lag-driven ответа
 
 ### Requirement: Interactive latency quality gate фиксирует warm-path SLO (MUST)
-Система MUST удовлетворять интерактивным latency SLO на warm-path профиле `examples/conf_big` при предзагруженных deps/settings:
-- `p95(intellisense_v2_wait_for_file_version_completion_ms) <= intellisense_v2_interactive_wait_budget_ms + 20ms`;
-- `p95(completion_duration_ms) <= 1500ms`.
+Система MUST выполнять интерактивный latency gate для completion v2 в двух профилях одного тестового цикла:
+- `large` профиль (реальный тяжёлый модуль);
+- `small` профиль (контрольный лёгкий модуль).
 
-Дополнительно warm-path quality gate MUST проверять устойчивость completion outcomes:
+Gate MUST использовать versioned baseline artifact и рассчитывать ratio к baseline для каждого профиля.
+
+Для `large` warm-path MUST выполняться оба условия:
+- `p95(intellisense_v2_wait_for_file_version_completion_ms) <= 0.60 * baseline_large_wait_for_file_version_p95_ms`;
+- `p95(completion_duration_ms) <= 0.75 * baseline_large_completion_duration_p95_ms`.
+
+Для `small` warm-path MUST выполняться non-regression условие:
+- `p95(completion_duration_ms) <= 1.25 * baseline_small_completion_duration_p95_ms`.
+
+Дополнительно quality gate MUST проверять устойчивость completion outcomes для каждого профиля:
 - `completion_cancelled_rate <= 0.10`, где `completion_cancelled_rate = intellisense_v2_completion_result_total_cancelled / completion_total`;
-- тестовый прогон MUST включать не менее `50` последовательных completion-запросов в рамках одной сессии.
+- прогон каждого профиля MUST включать не менее `50` последовательных completion-запросов в рамках одной сессии.
 
-#### Scenario: Warm-path SLO и cancel-rate выдерживаются после latency fix
-- **GIVEN** сервис работает в warm состоянии на `examples/conf_big`
-- **WHEN** выполняется perf smoke из 50 последовательных completion-запросов
-- **THEN** `p95` wait-for-version и `p95` completion-duration укладываются в заявленные SLO
+#### Scenario: Large profile показывает objective ускорение относительно baseline
+- **GIVEN** выполнен warm-path прогон `large` профиля и доступен baseline artifact
+- **WHEN** рассчитываются ratio для `wait_for_file_version_completion_ms` и `completion_duration_ms`
+- **THEN** оба ratio укладываются в целевые границы (`<=0.60` и `<=0.75`)
+- **AND** `completion_cancelled_rate` не превышает 10%
+
+#### Scenario: Small profile не деградирует при оптимизации large profile
+- **GIVEN** выполнен warm-path прогон `small` профиля и доступен baseline artifact
+- **WHEN** рассчитывается `completion_duration_ms` ratio
+- **THEN** ratio не превышает `1.25`
 - **AND** `completion_cancelled_rate` не превышает 10%
 
 ### Requirement: LSP runtime отслеживает received и applied ревизии файла раздельно (MUST)
@@ -1405,4 +1420,85 @@ Gate MUST включать как минимум:
 - **WHEN** выполняется scale-aware gate
 - **THEN** gate явно помечает провал churn-aware части
 - **AND** отчет содержит stage-level root-cause данные для churn профиля
+
+### Requirement: Superseded diagnostics задачи отменяются до завершения heavy path (MUST)
+При появлении более новой ревизии документа система MUST помечать соответствующие in-flight diagnostics задачи как superseded и инициировать их отмену до завершения тяжелых стадий.
+
+`DebouncedFull` и `IdleHeavy` профили MUST поддерживать supersession cancellation.
+
+#### Scenario: Burst didChange отменяет устаревшие heavy diagnostics
+- **GIVEN** для файла запущена heavy diagnostics задача на ревизии `R`
+- **AND** приходит более новая ревизия `R+1`
+- **WHEN** scheduler пересчитывает очередность задач
+- **THEN** задача `R` переводится в superseded cancellation
+- **AND** heavy стадии для `R` не продолжаются до полного завершения, если достигнут cancel checkpoint
+
+### Requirement: Cancellation checkpoints обязательны между heavy diagnostics стадиями (MUST)
+Система MUST иметь кооперативные cancellation checkpoints как минимум:
+- перед запуском parse/syntax heavy стадии;
+- между syntax и semantic heavy стадиями;
+- перед publish diagnostics.
+
+Задача, получившая superseded cancel, MUST завершаться без publish.
+
+#### Scenario: Superseded задача не публикует diagnostics
+- **GIVEN** heavy diagnostics для ревизии `V` уже вычислена частично
+- **AND** до publish приходит ревизия `V+1`
+- **WHEN** выполняется финальный checkpoint перед publish
+- **THEN** результат `V` не публикуется
+- **AND** publish выполняется только для актуальной ревизии
+
+### Requirement: Observability различает superseded cancellation и прочие причины cancel (MUST)
+Система MUST публиковать low-cardinality signals для diagnostics cancellation с фиксированными причинами:
+- `superseded_generation`
+- `superseded_version`
+- `client_cancel`
+- `other_cancel`
+
+#### Scenario: Root-cause cancel виден в метриках
+- **GIVEN** под churn устаревшие diagnostics регулярно отменяются
+- **WHEN** анализируется observability snapshot
+- **THEN** в метриках видны отмены по `superseded_generation`/`superseded_version`
+- **AND** они не смешиваются с `client_cancel`
+
+### Requirement: Scale-aware baseline artifact для completion latency является обязательным и versioned (MUST)
+Система MUST сохранять и использовать versioned baseline artifact для latency gate completion v2.
+
+Baseline artifact MUST включать:
+- профили `large` и `small`;
+- фазы `start`, `cold`, `warm`;
+- минимум следующие метрики для completion-контура:
+  - `completion_duration_ms`;
+  - `intellisense_v2_wait_for_file_version_completion_ms`;
+  - `intellisense_v2_snapshot_completion_ms`;
+  - `intellisense_v2_ir_query_completion_ms`;
+- sample size (`n`) для каждой фазы/метрики;
+- явный `pass/fail` summary по gate-критериям.
+
+Gate MUST падать, если baseline artifact отсутствует, повреждён или не содержит обязательных полей.
+
+#### Scenario: Gate использует baseline artifact и даёт воспроизводимый verdict
+- **GIVEN** baseline artifact присутствует и валиден
+- **WHEN** выполняется scale-aware perf прогон
+- **THEN** система вычисляет ratio/threshold verdict детерминированно из baseline и текущих метрик
+- **AND** итоговый отчёт содержит `pass/fail` и все обязательные поля
+
+#### Scenario: Отсутствующий baseline блокирует принятие результата
+- **GIVEN** baseline artifact отсутствует или невалиден
+- **WHEN** запускается quality gate
+- **THEN** gate завершается ошибкой конфигурации
+- **AND** прогон не считается валидным доказательством ускорения
+
+### Requirement: Completion v2 и observability completion имеют versioned contract baseline (MUST)
+Система MUST поддерживать versioned contract baseline для интерактивного completion v2 в `contracts/**`.
+
+Baseline MUST покрывать как минимум:
+- completion surface: trigger context semantics (`TriggerCharacter`, `Invoked`, `TriggerForIncompleteCompletions`, `None`) и outcome классы (`ok_non_empty`, `ok_empty`, `degraded_incomplete`, `fallback_unavailable`);
+- observability surface: trigger mode метрики, parity drift, member-access terminal-empty и fallback_unavailable счётчики.
+
+#### Scenario: Изменение completion semantics требует обновления contract baseline
+- **GIVEN** разработчик меняет semantics интерактивного completion v2 или имена/лейблы связанных метрик
+- **WHEN** change проходит ревью
+- **THEN** соответствующий versioned contract baseline в `contracts/**` обновлён
+- **AND** для breaking изменения выполнен major version bump по policy
 

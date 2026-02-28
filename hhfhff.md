@@ -42,29 +42,35 @@
 
   Если хочешь, следующим шагом могу сделать конкретный execution-план по неделям/итерациям (что в какой PR, какие тесты-гейты на каждом шаге).
 
-  Что запускать теперь (один прогон):
+  Результат однозначный: bottleneck не в построении индекса, а в ожидании при его получении.
 
-  BSL_V2_SCALE_AWARE_PROGRESS_EVERY=1 BSL_V2_SCALE_AWARE_GATE_REPORT=/tmp/p31-live-diag.json cargo test -p bsl-backend --bin bsl-lsp-server p31_scale_aware_large_small_completion_gate_live -- --nocapture --test-threads=1
+  - large/warm:
+      - completion_duration_ms p95 = 156302
+      - ...type_lookup_index_fetch_ms p95 = 156207
+      - ...index_build_total_ms p95 = 97
+      - ...index_build_visit_statements_ms p95 = 87
+      - ...index_parse_result_ms p95 = 0
+      - ...index_scan_ms p95 = 0
+  - Оценка «чистого ожидания» внутри fetch: 156207 - 97 - 0 = 156110 ms (p95).
+  - Путь owner_hint стабильный: direct=55, hit=55, fallback=0, cancelled=0.
+  - Gate закономерно pass=false, large_completion_ratio ≈ 39.97.
 
-  И сразу топ p95 по large warm:
+  Вывод: under churn мы в основном ждём выдачу type_index (контеншн/синхронизация/инвалидации), а не тратим время на сам build_type_index.
 
-  jq -r '.profiles.large.warm.metrics | to_entries[] | select(.value|type=="object" and has("p95")) | [.key, .value.p95, .value.p99, .value.count] | @tsv' /tmp/p31-live-diag.json | sort -t $'\t' -k2,2nr | head
-  -n 25
+  Если нужна одна команда именно для проверки новой метрики под churn, запускай эту:
 
-  [egor@DESKTOP-SS5D6MM bsl-gradual-types]$ BSL_V2_SCALE_AWARE_PROGRESS_EVERY=1 BSL_V2_SCALE_AWARE_GATE_REPORT=/tmp/p31-live-diag.json cargo test -p bsl-backend --bin bsl-lsp-server p31_scale_aware_large_small_completion_gate_live -- --nocapture --test-threads=1
-   Compiling bsl-agent v0.4.105 (/home/egor/code/bsl-gradual-types/bsl-agent)
-   Compiling bsl-backend v0.4.105 (/home/egor/code/bsl-gradual-types/backend)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.46s
-     Running unittests src/bin/lsp_server/main.rs (target/debug/deps/bsl_lsp_server-cf9cd9861cbd5697)
+  BSL_V2_SCALE_AWARE_CHURN_MODE=large_warm BSL_V2_SCALE_AWARE_CHURN_EVERY=10 BSL_V2_SCALE_AWARE_PROGRESS_EVERY=1 BSL_V2_SCALE_AWARE_GATE_REPORT=/tmp/p31-churn10.json cargo test -p bsl-backend --bin bsl-lsp-
+  server p31_scale_aware_large_small_completion_gate_live -- --nocapture --test-threads=1
 
-running 1 test
-[p31] profile=large phase=start done progress=1/1 (100.0%) elapsed_ms=70032 eta_ms=0 completion_total=1 cancelled_total=0 cancelled_rate=0.0000 churn_edits=0
-[p31] profile=large phase=cold done progress=5/5 (100.0%) elapsed_ms=70100 eta_ms=0 completion_total=5 cancelled_total=0 cancelled_rate=0.0000 churn_edits=0
-[p31] profile=large phase=warm done progress=55/55 (100.0%) elapsed_ms=3547369 eta_ms=0 completion_total=55 cancelled_total=0 cancelled_rate=0.0000 churn_edits=50
-[p31] profile=small phase=start done progress=1/1 (100.0%) elapsed_ms=13 eta_ms=0 completion_total=1 cancelled_total=0 cancelled_rate=0.0000 churn_edits=0
-[p31] profile=small phase=cold done progress=5/5 (100.0%) elapsed_ms=33 eta_ms=0 completion_total=5 cancelled_total=0 cancelled_rate=0.0000 churn_edits=0
-[p31] profile=small phase=warm done progress=55/55 (100.0%) elapsed_ms=212 eta_ms=0 completion_total=55 cancelled_total=0 cancelled_rate=0.0000 churn_edits=0
-p31_scale_aware_gate_report=/tmp/p31-live-diag.json
-ok
+  Потом смотри новую метрику так:
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 113 filtered out; finished in 3687.78s
+  jq '.profiles.large.warm.metrics.completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_wait_ms' /tmp/p31-churn10.json
+
+  Если хочешь сравнение с baseline без churn, запускай ещё и это:
+
+  BSL_V2_SCALE_AWARE_CHURN_MODE=off BSL_V2_SCALE_AWARE_PROGRESS_EVERY=1 BSL_V2_SCALE_AWARE_GATE_REPORT=/tmp/p31-no-churn.json cargo test -p bsl-backend --bin bsl-lsp-server
+  p31_scale_aware_large_small_completion_gate_live -- --nocapture --test-threads=1
+
+  И смотри:
+
+  jq '.profiles.large.warm.metrics.completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_wait_ms' /tmp/p31-no-churn.json

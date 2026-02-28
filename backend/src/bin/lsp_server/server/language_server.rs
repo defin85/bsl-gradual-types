@@ -2472,10 +2472,8 @@ impl LanguageServer for BslLanguageServer {
                 });
             let sync_globals_started = Instant::now();
             self.sync_v2_globals().await;
-            self.coordinator.record_completion_stage_latency(
-                "sync_globals",
-                sync_globals_started.elapsed(),
-            );
+            self.coordinator
+                .record_completion_stage_latency("sync_globals", sync_globals_started.elapsed());
 
             let empty = || Some(completion_empty_response(false));
             let extract_non_empty_items =
@@ -2516,10 +2514,8 @@ impl LanguageServer for BslLanguageServer {
                     Some(completion_observability_mode),
                 )
                 .await;
-            self.coordinator.record_completion_stage_latency(
-                "prepare_stateful",
-                prepare_started.elapsed(),
-            );
+            self.coordinator
+                .record_completion_stage_latency("prepare_stateful", prepare_started.elapsed());
 
             match prepared {
                 Ok((context, prepared, expected_version)) => {
@@ -2956,6 +2952,10 @@ impl LanguageServer for BslLanguageServer {
                                         coordinator_for_query.record_completion_stage_latency(
                                             "query_bundle_owner_hint_type_lookup_index_fetch",
                                             ms_to_duration(profile.index_fetch_ms),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_fetch_wait",
+                                            ms_to_duration(profile.index_fetch_wait_ms),
                                         );
                                         coordinator_for_query.record_completion_stage_latency(
                                             "query_bundle_owner_hint_type_lookup_index_parse_result",

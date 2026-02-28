@@ -147,6 +147,7 @@ pub type Cancellable<T> = Result<T, salsa::Cancelled>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct TypeAtByteOffsetProfile {
     pub index_fetch_ms: u128,
+    pub index_fetch_wait_ms: u128,
     pub index_parse_result_ms: u128,
     pub index_build_total_ms: u128,
     pub index_build_seed_module_context_ms: u128,
@@ -175,6 +176,14 @@ fn cancellable<T>(op: impl FnOnce() -> T) -> Cancellable<T> {
 #[inline(always)]
 fn cancellation_checkpoint(db: &dyn salsa::Database) {
     db.unwind_if_revision_cancelled();
+}
+
+fn compute_index_fetch_wait_ms(
+    index_fetch_ms: u128,
+    index_parse_result_ms: u128,
+    index_build_total_ms: u128,
+) -> u128 {
+    index_fetch_ms.saturating_sub(index_parse_result_ms.saturating_add(index_build_total_ms))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -976,11 +985,7 @@ pub fn type_index(
     if profiled.profile.total_ms < total_ms {
         profiled.profile.total_ms = total_ms;
     }
-    TypeIndexSnapshot::new(
-        Arc::new(profiled.index),
-        parse_result_ms,
-        profiled.profile,
-    )
+    TypeIndexSnapshot::new(Arc::new(profiled.index), parse_result_ms, profiled.profile)
 }
 
 fn syntax_errors_only_in_directives(code: &str, errors: &[ParseError]) -> bool {
@@ -1604,6 +1609,11 @@ impl AnalysisV2 {
         let clip_to_index_fetch = |value_ms: u128| value_ms.min(index_fetch_ms);
         let index_parse_result_ms = clip_to_index_fetch(index_snapshot.parse_result_ms());
         let index_build_total_ms = clip_to_index_fetch(index_build_profile.total_ms);
+        let index_fetch_wait_ms = compute_index_fetch_wait_ms(
+            index_fetch_ms,
+            index_parse_result_ms,
+            index_build_total_ms,
+        );
         let index_build_seed_module_context_ms =
             clip_to_index_fetch(index_build_profile.seed_module_context_ms);
         let index_build_local_function_summaries_ms =
@@ -1620,6 +1630,7 @@ impl AnalysisV2 {
             resolution,
             profile: TypeAtByteOffsetProfile {
                 index_fetch_ms,
+                index_fetch_wait_ms,
                 index_parse_result_ms,
                 index_build_total_ms,
                 index_build_seed_module_context_ms,
@@ -1712,6 +1723,12 @@ mod tests {
             incremental,
             fallback_reason: fallback_reason.map(Arc::from),
         }
+    }
+
+    #[test]
+    fn compute_index_fetch_wait_ms_subtracts_parse_and_build_time() {
+        assert_eq!(compute_index_fetch_wait_ms(156_207, 0, 97), 156_110);
+        assert_eq!(compute_index_fetch_wait_ms(10, 8, 5), 0);
     }
 
     #[test]

@@ -819,6 +819,9 @@ impl BasicObservability {
             "query_bundle_owner_hint_type_lookup_index_fetch" => {
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_ms"
             }
+            "query_bundle_owner_hint_type_lookup_index_fetch_wait" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_wait_ms"
+            }
             "query_bundle_owner_hint_type_lookup_index_parse_result" => {
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_parse_result_ms"
             }
@@ -3728,7 +3731,12 @@ mod observability_contract_tests {
         for reason in reasons {
             observability.record_intellisense_v2_completion_owner_hint_result(reason);
         }
-        for path in ["direct", "flow_only", "flow_plus_fallback", "unexpected_path"] {
+        for path in [
+            "direct",
+            "flow_only",
+            "flow_plus_fallback",
+            "unexpected_path",
+        ] {
             observability.record_intellisense_v2_completion_owner_hint_lookup_path(path);
         }
         for result in ["hit", "miss", "cancelled", "error", "unexpected_result"] {
@@ -3749,6 +3757,10 @@ mod observability_contract_tests {
         );
         observability.record_completion_stage_latency(
             "query_bundle_owner_hint_type_lookup_index_fetch",
+            std::time::Duration::from_millis(2),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_fetch_wait",
             std::time::Duration::from_millis(2),
         );
         observability.record_completion_stage_latency(
@@ -3891,6 +3903,13 @@ mod observability_contract_tests {
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_ms"
             ) > 0,
             "owner-hint index fetch histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_wait_ms"
+            ) > 0,
+            "owner-hint index fetch wait histogram must be exported"
         );
         assert!(
             histogram_count(

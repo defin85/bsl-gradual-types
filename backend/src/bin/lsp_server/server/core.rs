@@ -1726,6 +1726,19 @@ mod tests {
         "intellisense_v2_runtime_exec_background_total",
         "intellisense_v2_completion_stale_fallback_total",
         "intellisense_v2_completion_fallback_unavailable_total",
+        "intellisense_v2_completion_owner_hint_index_fetch_block_on_total",
+        "intellisense_v2_completion_owner_hint_index_fetch_block_on_type_index_total",
+        "intellisense_v2_completion_owner_hint_index_fetch_block_on_parse_result_total",
+        "intellisense_v2_completion_owner_hint_index_fetch_block_on_other_total",
+        "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_total",
+        "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_type_index_total",
+        "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_parse_result_total",
+        "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_other_total",
+        "intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_total",
+        "intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_type_index_total",
+        "intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_parse_result_total",
+        "intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_other_total",
+        "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_check_cancellation_total",
         "intellisense_v2_revision_lag_sample_total",
         "intellisense_v2_observability_contract_violation_total",
         "intellisense_v2_projection_missing_total",
@@ -9519,6 +9532,45 @@ mod tests {
                 "intellisense_v2_completion_fallback_unavailable_total": read_u64_metric(
                     counters.get("intellisense_v2_completion_fallback_unavailable_total")
                 ),
+                "intellisense_v2_completion_owner_hint_index_fetch_block_on_total": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_index_fetch_block_on_total")
+                ),
+                "intellisense_v2_completion_owner_hint_index_fetch_block_on_type_index_total": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_index_fetch_block_on_type_index_total")
+                ),
+                "intellisense_v2_completion_owner_hint_index_fetch_block_on_parse_result_total": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_index_fetch_block_on_parse_result_total")
+                ),
+                "intellisense_v2_completion_owner_hint_index_fetch_block_on_other_total": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_index_fetch_block_on_other_total")
+                ),
+                "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_total": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_total")
+                ),
+                "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_type_index_total": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_type_index_total")
+                ),
+                "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_parse_result_total": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_parse_result_total")
+                ),
+                "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_other_total": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_other_total")
+                ),
+                "intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_total": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_total")
+                ),
+                "intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_type_index_total": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_type_index_total")
+                ),
+                "intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_parse_result_total": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_parse_result_total")
+                ),
+                "intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_other_total": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_other_total")
+                ),
+                "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_check_cancellation_total": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_index_fetch_salsa_will_check_cancellation_total")
+                ),
             });
             phase_metrics["intellisense_v2_completion_owner_hint_result_total"] = serde_json::json!({
                 "not_member_access": read_u64_metric(
@@ -9587,6 +9639,51 @@ mod tests {
                 ),
                 "other": read_u64_metric(
                     counters.get("intellisense_v2_completion_owner_hint_lookup_result_total_other")
+                )
+            });
+            phase_metrics
+                ["intellisense_v2_completion_owner_hint_index_fetch_block_on_total_by_kind"] = serde_json::json!({
+                "total": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_index_fetch_block_on_total")
+                ),
+                "type_index": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_index_fetch_block_on_type_index_total")
+                ),
+                "parse_result": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_index_fetch_block_on_parse_result_total")
+                ),
+                "other": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_index_fetch_block_on_other_total")
+                )
+            });
+            phase_metrics
+                ["intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_total_by_kind"] = serde_json::json!({
+                "total": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_total")
+                ),
+                "type_index": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_type_index_total")
+                ),
+                "parse_result": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_parse_result_total")
+                ),
+                "other": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_other_total")
+                )
+            });
+            phase_metrics
+                ["intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_total_by_kind"] = serde_json::json!({
+                "total": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_total")
+                ),
+                "type_index": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_type_index_total")
+                ),
+                "parse_result": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_parse_result_total")
+                ),
+                "other": read_u64_metric(
+                    counters.get("intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_other_total")
                 )
             });
             let dominant_stage = dominant_stage_from_metrics(&phase_metrics);

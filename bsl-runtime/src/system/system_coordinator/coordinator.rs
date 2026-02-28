@@ -12,7 +12,9 @@ use super::types::{
     CacheClearReport, CacheScope, CacheStatsReport, CacheToggleResult, ConfigIndexCache,
     DiskCacheStatsReport, DomainBundle,
 };
-use crate::system::basic_observability::BasicObservability;
+use crate::system::basic_observability::{
+    BasicObservability, CompletionOwnerHintIndexFetchSalsaCounters,
+};
 use crate::system::disk_cache::DiskCache;
 use crate::system::intellisense_index::IntellisenseIndexStore;
 use crate::system::intellisense_index_store::IntellisenseIndexDiskStore;
@@ -232,6 +234,32 @@ impl SystemCoordinator {
                 line_len_chars,
                 receiver_len_chars,
             );
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_block_on(
+        &self,
+        total: u64,
+        type_index: u64,
+        parse_result: u64,
+        other: u64,
+    ) {
+        self.record_intellisense_v2_completion_owner_hint_index_fetch_salsa_counters(
+            CompletionOwnerHintIndexFetchSalsaCounters {
+                block_on_total: total,
+                block_on_type_index_total: type_index,
+                block_on_parse_result_total: parse_result,
+                block_on_other_total: other,
+                ..CompletionOwnerHintIndexFetchSalsaCounters::default()
+            },
+        );
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_salsa_counters(
+        &self,
+        counters: CompletionOwnerHintIndexFetchSalsaCounters,
+    ) {
+        self.observability
+            .record_intellisense_v2_completion_owner_hint_index_fetch_salsa_counters(counters);
     }
 
     pub fn observability_metrics(&self) -> Value {

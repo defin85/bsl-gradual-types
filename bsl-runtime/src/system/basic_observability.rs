@@ -43,6 +43,23 @@ pub struct ComponentHealth {
     pub details: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CompletionOwnerHintIndexFetchSalsaCounters {
+    pub block_on_total: u64,
+    pub block_on_type_index_total: u64,
+    pub block_on_parse_result_total: u64,
+    pub block_on_other_total: u64,
+    pub will_execute_total: u64,
+    pub will_execute_type_index_total: u64,
+    pub will_execute_parse_result_total: u64,
+    pub will_execute_other_total: u64,
+    pub did_validate_memoized_total: u64,
+    pub did_validate_memoized_type_index_total: u64,
+    pub did_validate_memoized_parse_result_total: u64,
+    pub did_validate_memoized_other_total: u64,
+    pub will_check_cancellation_total: u64,
+}
+
 const UNIFIED_INTELLISENSE_V2_COUNTER_KEYS: &[&str] = &[
     "intellisense_v2_runtime_wait_for_file_version_queue_wait_total",
     "intellisense_v2_runtime_wait_for_file_version_exec_total",
@@ -77,6 +94,19 @@ const UNIFIED_INTELLISENSE_V2_COUNTER_KEYS: &[&str] = &[
     "intellisense_v2_runtime_exec_background_total",
     "intellisense_v2_completion_stale_fallback_total",
     "intellisense_v2_completion_fallback_unavailable_total",
+    "intellisense_v2_completion_owner_hint_index_fetch_block_on_total",
+    "intellisense_v2_completion_owner_hint_index_fetch_block_on_type_index_total",
+    "intellisense_v2_completion_owner_hint_index_fetch_block_on_parse_result_total",
+    "intellisense_v2_completion_owner_hint_index_fetch_block_on_other_total",
+    "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_total",
+    "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_type_index_total",
+    "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_parse_result_total",
+    "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_other_total",
+    "intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_total",
+    "intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_type_index_total",
+    "intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_parse_result_total",
+    "intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_other_total",
+    "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_check_cancellation_total",
     "intellisense_v2_revision_lag_sample_total",
     "intellisense_v2_observability_contract_violation_total",
     "intellisense_v2_projection_missing_total",
@@ -994,6 +1024,82 @@ impl BasicObservability {
         self.metrics.observe_histogram(
             "intellisense_v2_completion_owner_hint_receiver_len_chars",
             receiver_len_chars as f64,
+        );
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_block_on(
+        &self,
+        total: u64,
+        type_index: u64,
+        parse_result: u64,
+        other: u64,
+    ) {
+        self.record_intellisense_v2_completion_owner_hint_index_fetch_salsa_counters(
+            CompletionOwnerHintIndexFetchSalsaCounters {
+                block_on_total: total,
+                block_on_type_index_total: type_index,
+                block_on_parse_result_total: parse_result,
+                block_on_other_total: other,
+                ..CompletionOwnerHintIndexFetchSalsaCounters::default()
+            },
+        );
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_salsa_counters(
+        &self,
+        counters: CompletionOwnerHintIndexFetchSalsaCounters,
+    ) {
+        self.metrics.add_counter(
+            "intellisense_v2_completion_owner_hint_index_fetch_block_on_total",
+            counters.block_on_total,
+        );
+        self.metrics.add_counter(
+            "intellisense_v2_completion_owner_hint_index_fetch_block_on_type_index_total",
+            counters.block_on_type_index_total,
+        );
+        self.metrics.add_counter(
+            "intellisense_v2_completion_owner_hint_index_fetch_block_on_parse_result_total",
+            counters.block_on_parse_result_total,
+        );
+        self.metrics.add_counter(
+            "intellisense_v2_completion_owner_hint_index_fetch_block_on_other_total",
+            counters.block_on_other_total,
+        );
+        self.metrics.add_counter(
+            "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_total",
+            counters.will_execute_total,
+        );
+        self.metrics.add_counter(
+            "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_type_index_total",
+            counters.will_execute_type_index_total,
+        );
+        self.metrics.add_counter(
+            "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_parse_result_total",
+            counters.will_execute_parse_result_total,
+        );
+        self.metrics.add_counter(
+            "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_other_total",
+            counters.will_execute_other_total,
+        );
+        self.metrics.add_counter(
+            "intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_total",
+            counters.did_validate_memoized_total,
+        );
+        self.metrics.add_counter(
+            "intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_type_index_total",
+            counters.did_validate_memoized_type_index_total,
+        );
+        self.metrics.add_counter(
+            "intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_parse_result_total",
+            counters.did_validate_memoized_parse_result_total,
+        );
+        self.metrics.add_counter(
+            "intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_other_total",
+            counters.did_validate_memoized_other_total,
+        );
+        self.metrics.add_counter(
+            "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_check_cancellation_total",
+            counters.will_check_cancellation_total,
         );
     }
 
@@ -3743,6 +3849,23 @@ mod observability_contract_tests {
             observability.record_intellisense_v2_completion_owner_hint_lookup_result(result);
         }
         observability.record_intellisense_v2_completion_owner_hint_context(240, 18);
+        observability.record_intellisense_v2_completion_owner_hint_index_fetch_salsa_counters(
+            CompletionOwnerHintIndexFetchSalsaCounters {
+                block_on_total: 7,
+                block_on_type_index_total: 4,
+                block_on_parse_result_total: 2,
+                block_on_other_total: 1,
+                will_execute_total: 11,
+                will_execute_type_index_total: 5,
+                will_execute_parse_result_total: 3,
+                will_execute_other_total: 3,
+                did_validate_memoized_total: 13,
+                did_validate_memoized_type_index_total: 6,
+                did_validate_memoized_parse_result_total: 4,
+                did_validate_memoized_other_total: 3,
+                will_check_cancellation_total: 9,
+            },
+        );
         observability.record_completion_stage_latency(
             "query_bundle_owner_hint_flow_lookup",
             std::time::Duration::from_millis(3),
@@ -3953,6 +4076,72 @@ mod observability_contract_tests {
             ) > 0,
             "owner-hint index scan histogram must be exported"
         );
+        for (label, key) in [
+            (
+                "total",
+                "intellisense_v2_completion_owner_hint_index_fetch_block_on_total",
+            ),
+            (
+                "type_index",
+                "intellisense_v2_completion_owner_hint_index_fetch_block_on_type_index_total",
+            ),
+            (
+                "parse_result",
+                "intellisense_v2_completion_owner_hint_index_fetch_block_on_parse_result_total",
+            ),
+            (
+                "other",
+                "intellisense_v2_completion_owner_hint_index_fetch_block_on_other_total",
+            ),
+        ] {
+            assert!(
+                counter_value(counters, key) > 0,
+                "owner-hint block-on counter must be exported for {label}"
+            );
+        }
+        for (label, key) in [
+            (
+                "will_execute_total",
+                "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_total",
+            ),
+            (
+                "will_execute_type_index_total",
+                "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_type_index_total",
+            ),
+            (
+                "will_execute_parse_result_total",
+                "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_parse_result_total",
+            ),
+            (
+                "will_execute_other_total",
+                "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_other_total",
+            ),
+            (
+                "did_validate_memoized_total",
+                "intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_total",
+            ),
+            (
+                "did_validate_memoized_type_index_total",
+                "intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_type_index_total",
+            ),
+            (
+                "did_validate_memoized_parse_result_total",
+                "intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_parse_result_total",
+            ),
+            (
+                "did_validate_memoized_other_total",
+                "intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_other_total",
+            ),
+            (
+                "will_check_cancellation_total",
+                "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_check_cancellation_total",
+            ),
+        ] {
+            assert!(
+                counter_value(counters, key) > 0,
+                "owner-hint salsa counter must be exported for {label}"
+            );
+        }
     }
 
     #[test]

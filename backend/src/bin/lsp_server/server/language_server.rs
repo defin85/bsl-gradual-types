@@ -2984,6 +2984,23 @@ impl LanguageServer for BslLanguageServer {
                                             "query_bundle_owner_hint_type_lookup_index_scan",
                                             ms_to_duration(profile.index_scan_ms),
                                         );
+                                        coordinator_for_query.record_intellisense_v2_completion_owner_hint_index_fetch_salsa_counters(
+                                            bsl_runtime::system::basic_observability::CompletionOwnerHintIndexFetchSalsaCounters {
+                                                block_on_total: profile.index_fetch_will_block_on_total,
+                                                block_on_type_index_total: profile.index_fetch_will_block_on_type_index_total,
+                                                block_on_parse_result_total: profile.index_fetch_will_block_on_parse_result_total,
+                                                block_on_other_total: profile.index_fetch_will_block_on_other_total,
+                                                will_execute_total: profile.index_fetch_will_execute_total,
+                                                will_execute_type_index_total: profile.index_fetch_will_execute_type_index_total,
+                                                will_execute_parse_result_total: profile.index_fetch_will_execute_parse_result_total,
+                                                will_execute_other_total: profile.index_fetch_will_execute_other_total,
+                                                did_validate_memoized_total: profile.index_fetch_did_validate_memoized_total,
+                                                did_validate_memoized_type_index_total: profile.index_fetch_did_validate_memoized_type_index_total,
+                                                did_validate_memoized_parse_result_total: profile.index_fetch_did_validate_memoized_parse_result_total,
+                                                did_validate_memoized_other_total: profile.index_fetch_did_validate_memoized_other_total,
+                                                will_check_cancellation_total: profile.index_fetch_will_check_cancellation_total,
+                                            },
+                                        );
                                         };
                                     let member_access_owner_type_hint =
                                         if member_access_request_for_query {

@@ -59,8 +59,7 @@
 
   Если нужна одна команда именно для проверки новой метрики под churn, запускай эту:
 
-  BSL_V2_SCALE_AWARE_CHURN_MODE=large_warm BSL_V2_SCALE_AWARE_CHURN_EVERY=10 BSL_V2_SCALE_AWARE_PROGRESS_EVERY=1 BSL_V2_SCALE_AWARE_GATE_REPORT=/tmp/p31-churn10.json cargo test -p bsl-backend --bin bsl-lsp-
-  server p31_scale_aware_large_small_completion_gate_live -- --nocapture --test-threads=1
+  BSL_V2_SCALE_AWARE_CHURN_MODE=large_warm BSL_V2_SCALE_AWARE_CHURN_EVERY=10 BSL_V2_SCALE_AWARE_PROGRESS_EVERY=1 BSL_V2_SCALE_AWARE_GATE_REPORT=/tmp/p31-churn10.json cargo test -p bsl-backend --bin bsl-lsp-server p31_scale_aware_large_small_completion_gate_live -- --nocapture --test-threads=1
 
   Потом смотри новую метрику так:
 

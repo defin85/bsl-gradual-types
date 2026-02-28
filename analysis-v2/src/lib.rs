@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
@@ -148,6 +149,19 @@ pub type Cancellable<T> = Result<T, salsa::Cancelled>;
 pub struct TypeAtByteOffsetProfile {
     pub index_fetch_ms: u128,
     pub index_fetch_wait_ms: u128,
+    pub index_fetch_will_block_on_total: u64,
+    pub index_fetch_will_block_on_type_index_total: u64,
+    pub index_fetch_will_block_on_parse_result_total: u64,
+    pub index_fetch_will_block_on_other_total: u64,
+    pub index_fetch_will_execute_total: u64,
+    pub index_fetch_will_execute_type_index_total: u64,
+    pub index_fetch_will_execute_parse_result_total: u64,
+    pub index_fetch_will_execute_other_total: u64,
+    pub index_fetch_did_validate_memoized_total: u64,
+    pub index_fetch_did_validate_memoized_type_index_total: u64,
+    pub index_fetch_did_validate_memoized_parse_result_total: u64,
+    pub index_fetch_did_validate_memoized_other_total: u64,
+    pub index_fetch_will_check_cancellation_total: u64,
     pub index_parse_result_ms: u128,
     pub index_build_total_ms: u128,
     pub index_build_seed_module_context_ms: u128,
@@ -184,6 +198,140 @@ fn compute_index_fetch_wait_ms(
     index_build_total_ms: u128,
 ) -> u128 {
     index_fetch_ms.saturating_sub(index_parse_result_ms.saturating_add(index_build_total_ms))
+}
+
+fn compute_index_fetch_key_kind_other_total(
+    total: u64,
+    type_index_total: u64,
+    parse_result_total: u64,
+) -> u64 {
+    total.saturating_sub(type_index_total.saturating_add(parse_result_total))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct SalsaEventCounters {
+    will_block_on_total: u64,
+    will_block_on_type_index: u64,
+    will_block_on_parse_result: u64,
+    will_execute_total: u64,
+    will_execute_type_index: u64,
+    will_execute_parse_result: u64,
+    did_validate_memoized_total: u64,
+    did_validate_memoized_type_index: u64,
+    did_validate_memoized_parse_result: u64,
+    will_check_cancellation_total: u64,
+}
+
+thread_local! {
+    static ANALYSIS_V2_SALSA_EVENT_COUNTERS: Cell<SalsaEventCounters> = const {
+        Cell::new(SalsaEventCounters {
+            will_block_on_total: 0,
+            will_block_on_type_index: 0,
+            will_block_on_parse_result: 0,
+            will_execute_total: 0,
+            will_execute_type_index: 0,
+            will_execute_parse_result: 0,
+            did_validate_memoized_total: 0,
+            did_validate_memoized_type_index: 0,
+            did_validate_memoized_parse_result: 0,
+            will_check_cancellation_total: 0,
+        })
+    };
+}
+
+fn salsa_event_counters_snapshot() -> SalsaEventCounters {
+    ANALYSIS_V2_SALSA_EVENT_COUNTERS.with(Cell::get)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SalsaEventKeyKind {
+    TypeIndex,
+    ParseResult,
+    Other,
+}
+
+fn salsa_event_key_kind(database_key: salsa::DatabaseKeyIndex) -> SalsaEventKeyKind {
+    let database_key_debug = format!("{database_key:?}").to_ascii_lowercase();
+    if database_key_debug.contains("type_index") {
+        SalsaEventKeyKind::TypeIndex
+    } else if database_key_debug.contains("parse_result") {
+        SalsaEventKeyKind::ParseResult
+    } else {
+        SalsaEventKeyKind::Other
+    }
+}
+
+fn update_salsa_event_counters(op: impl FnOnce(&mut SalsaEventCounters)) {
+    ANALYSIS_V2_SALSA_EVENT_COUNTERS.with(|cell| {
+        let mut counters = cell.get();
+        op(&mut counters);
+        cell.set(counters);
+    });
+}
+
+fn record_analysis_database_salsa_event(event: salsa::Event) {
+    match event.kind {
+        salsa::EventKind::WillBlockOn { database_key, .. } => {
+            let kind = salsa_event_key_kind(database_key);
+            update_salsa_event_counters(|counters| {
+                counters.will_block_on_total = counters.will_block_on_total.saturating_add(1);
+                match kind {
+                    SalsaEventKeyKind::TypeIndex => {
+                        counters.will_block_on_type_index =
+                            counters.will_block_on_type_index.saturating_add(1);
+                    }
+                    SalsaEventKeyKind::ParseResult => {
+                        counters.will_block_on_parse_result =
+                            counters.will_block_on_parse_result.saturating_add(1);
+                    }
+                    SalsaEventKeyKind::Other => {}
+                }
+            });
+        }
+        salsa::EventKind::WillExecute { database_key } => {
+            let kind = salsa_event_key_kind(database_key);
+            update_salsa_event_counters(|counters| {
+                counters.will_execute_total = counters.will_execute_total.saturating_add(1);
+                match kind {
+                    SalsaEventKeyKind::TypeIndex => {
+                        counters.will_execute_type_index =
+                            counters.will_execute_type_index.saturating_add(1);
+                    }
+                    SalsaEventKeyKind::ParseResult => {
+                        counters.will_execute_parse_result =
+                            counters.will_execute_parse_result.saturating_add(1);
+                    }
+                    SalsaEventKeyKind::Other => {}
+                }
+            });
+        }
+        salsa::EventKind::DidValidateMemoizedValue { database_key } => {
+            let kind = salsa_event_key_kind(database_key);
+            update_salsa_event_counters(|counters| {
+                counters.did_validate_memoized_total =
+                    counters.did_validate_memoized_total.saturating_add(1);
+                match kind {
+                    SalsaEventKeyKind::TypeIndex => {
+                        counters.did_validate_memoized_type_index =
+                            counters.did_validate_memoized_type_index.saturating_add(1);
+                    }
+                    SalsaEventKeyKind::ParseResult => {
+                        counters.did_validate_memoized_parse_result = counters
+                            .did_validate_memoized_parse_result
+                            .saturating_add(1);
+                    }
+                    SalsaEventKeyKind::Other => {}
+                }
+            });
+        }
+        salsa::EventKind::WillCheckCancellation => {
+            update_salsa_event_counters(|counters| {
+                counters.will_check_cancellation_total =
+                    counters.will_check_cancellation_total.saturating_add(1);
+            });
+        }
+        _ => {}
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1075,13 +1223,22 @@ fn collect_semantic_diagnostics_from_program(
 }
 
 #[salsa::db]
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct AnalysisDatabase {
     storage: salsa::Storage<Self>,
 }
 
 #[salsa::db]
 impl salsa::Database for AnalysisDatabase {}
+
+impl Default for AnalysisDatabase {
+    fn default() -> Self {
+        let storage = salsa::Storage::<Self>::builder()
+            .event_callback(Box::new(record_analysis_database_salsa_event))
+            .build();
+        Self { storage }
+    }
+}
 
 pub struct AnalysisHostV2 {
     db: AnalysisDatabase,
@@ -1602,8 +1759,56 @@ impl AnalysisV2 {
         };
         let started = Instant::now();
         let index_fetch_started = Instant::now();
+        let event_counters_before = salsa_event_counters_snapshot();
         let index_snapshot = cancellable(|| type_index(&self.db, file, self.deps, self.settings))?;
+        let event_counters_after = salsa_event_counters_snapshot();
         let index_fetch_ms = index_fetch_started.elapsed().as_millis();
+        let index_fetch_will_block_on_total = event_counters_after
+            .will_block_on_total
+            .saturating_sub(event_counters_before.will_block_on_total);
+        let index_fetch_will_block_on_type_index_total = event_counters_after
+            .will_block_on_type_index
+            .saturating_sub(event_counters_before.will_block_on_type_index);
+        let index_fetch_will_block_on_parse_result_total = event_counters_after
+            .will_block_on_parse_result
+            .saturating_sub(event_counters_before.will_block_on_parse_result);
+        let index_fetch_will_block_on_other_total = compute_index_fetch_key_kind_other_total(
+            index_fetch_will_block_on_total,
+            index_fetch_will_block_on_type_index_total,
+            index_fetch_will_block_on_parse_result_total,
+        );
+        let index_fetch_will_execute_total = event_counters_after
+            .will_execute_total
+            .saturating_sub(event_counters_before.will_execute_total);
+        let index_fetch_will_execute_type_index_total = event_counters_after
+            .will_execute_type_index
+            .saturating_sub(event_counters_before.will_execute_type_index);
+        let index_fetch_will_execute_parse_result_total = event_counters_after
+            .will_execute_parse_result
+            .saturating_sub(event_counters_before.will_execute_parse_result);
+        let index_fetch_will_execute_other_total = compute_index_fetch_key_kind_other_total(
+            index_fetch_will_execute_total,
+            index_fetch_will_execute_type_index_total,
+            index_fetch_will_execute_parse_result_total,
+        );
+        let index_fetch_did_validate_memoized_total = event_counters_after
+            .did_validate_memoized_total
+            .saturating_sub(event_counters_before.did_validate_memoized_total);
+        let index_fetch_did_validate_memoized_type_index_total = event_counters_after
+            .did_validate_memoized_type_index
+            .saturating_sub(event_counters_before.did_validate_memoized_type_index);
+        let index_fetch_did_validate_memoized_parse_result_total = event_counters_after
+            .did_validate_memoized_parse_result
+            .saturating_sub(event_counters_before.did_validate_memoized_parse_result);
+        let index_fetch_did_validate_memoized_other_total =
+            compute_index_fetch_key_kind_other_total(
+                index_fetch_did_validate_memoized_total,
+                index_fetch_did_validate_memoized_type_index_total,
+                index_fetch_did_validate_memoized_parse_result_total,
+            );
+        let index_fetch_will_check_cancellation_total = event_counters_after
+            .will_check_cancellation_total
+            .saturating_sub(event_counters_before.will_check_cancellation_total);
         let index = index_snapshot.index();
         let index_build_profile = index_snapshot.build_profile();
         let clip_to_index_fetch = |value_ms: u128| value_ms.min(index_fetch_ms);
@@ -1631,6 +1836,19 @@ impl AnalysisV2 {
             profile: TypeAtByteOffsetProfile {
                 index_fetch_ms,
                 index_fetch_wait_ms,
+                index_fetch_will_block_on_total,
+                index_fetch_will_block_on_type_index_total,
+                index_fetch_will_block_on_parse_result_total,
+                index_fetch_will_block_on_other_total,
+                index_fetch_will_execute_total,
+                index_fetch_will_execute_type_index_total,
+                index_fetch_will_execute_parse_result_total,
+                index_fetch_will_execute_other_total,
+                index_fetch_did_validate_memoized_total,
+                index_fetch_did_validate_memoized_type_index_total,
+                index_fetch_did_validate_memoized_parse_result_total,
+                index_fetch_did_validate_memoized_other_total,
+                index_fetch_will_check_cancellation_total,
                 index_parse_result_ms,
                 index_build_total_ms,
                 index_build_seed_module_context_ms,
@@ -1729,6 +1947,12 @@ mod tests {
     fn compute_index_fetch_wait_ms_subtracts_parse_and_build_time() {
         assert_eq!(compute_index_fetch_wait_ms(156_207, 0, 97), 156_110);
         assert_eq!(compute_index_fetch_wait_ms(10, 8, 5), 0);
+    }
+
+    #[test]
+    fn compute_index_fetch_block_on_other_total_subtracts_known_query_kinds() {
+        assert_eq!(compute_index_fetch_key_kind_other_total(7, 3, 2), 2);
+        assert_eq!(compute_index_fetch_key_kind_other_total(2, 3, 2), 0);
     }
 
     #[test]

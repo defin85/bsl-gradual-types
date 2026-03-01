@@ -270,6 +270,26 @@ impl SystemCoordinator {
             .record_intellisense_v2_completion_owner_hint_index_fetch_active_gauge(active);
     }
 
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_will_check_cancellation_per_fetch(
+        &self,
+        count: u64,
+    ) {
+        self.observability
+            .record_intellisense_v2_completion_owner_hint_index_fetch_will_check_cancellation_per_fetch(
+                count,
+            );
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_will_execute_other_per_fetch(
+        &self,
+        count: u64,
+    ) {
+        self.observability
+            .record_intellisense_v2_completion_owner_hint_index_fetch_will_execute_other_per_fetch(
+                count,
+            );
+    }
+
     pub fn observability_metrics(&self) -> Value {
         self.observability.get_metrics().export_metrics()
     }

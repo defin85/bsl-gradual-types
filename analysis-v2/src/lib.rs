@@ -158,8 +158,11 @@ pub struct TypeAtByteOffsetProfile {
     pub index_fetch_last_will_execute_type_index_ms: u128,
     pub index_fetch_first_will_execute_parse_result_ms: u128,
     pub index_fetch_last_will_execute_parse_result_ms: u128,
+    pub index_fetch_first_will_execute_other_ms: u128,
+    pub index_fetch_last_will_execute_other_ms: u128,
     pub index_fetch_first_will_check_cancellation_ms: u128,
     pub index_fetch_last_will_check_cancellation_ms: u128,
+    pub index_fetch_first_will_check_to_first_will_execute_type_index_ms: u128,
     pub index_fetch_active_at_entry: u64,
     pub index_fetch_will_block_on_total: u64,
     pub index_fetch_will_block_on_type_index_total: u64,
@@ -243,6 +246,19 @@ fn compute_index_fetch_inside_salsa_window_ms(
         .saturating_sub(post_last_salsa_event_tail_ms)
 }
 
+fn compute_index_fetch_event_delta_ms(
+    index_fetch_ms: u128,
+    from_elapsed_ms: Option<u128>,
+    to_elapsed_ms: Option<u128>,
+) -> u128 {
+    match (from_elapsed_ms, to_elapsed_ms) {
+        (Some(from_elapsed_ms), Some(to_elapsed_ms)) => to_elapsed_ms
+            .min(index_fetch_ms)
+            .saturating_sub(from_elapsed_ms.min(index_fetch_ms)),
+        _ => 0,
+    }
+}
+
 fn slow_index_fetch_log_threshold_ms() -> Option<u128> {
     static THRESHOLD: OnceLock<Option<u128>> = OnceLock::new();
     *THRESHOLD.get_or_init(|| {
@@ -285,6 +301,8 @@ struct SalsaEventTimeline {
     last_will_execute_type_index_elapsed_ms: Option<u128>,
     first_will_execute_parse_result_elapsed_ms: Option<u128>,
     last_will_execute_parse_result_elapsed_ms: Option<u128>,
+    first_will_execute_other_elapsed_ms: Option<u128>,
+    last_will_execute_other_elapsed_ms: Option<u128>,
     first_will_check_cancellation_elapsed_ms: Option<u128>,
     last_will_check_cancellation_elapsed_ms: Option<u128>,
 }
@@ -297,6 +315,8 @@ struct SalsaEventTimelineSnapshot {
     last_will_execute_type_index_elapsed_ms: Option<u128>,
     first_will_execute_parse_result_elapsed_ms: Option<u128>,
     last_will_execute_parse_result_elapsed_ms: Option<u128>,
+    first_will_execute_other_elapsed_ms: Option<u128>,
+    last_will_execute_other_elapsed_ms: Option<u128>,
     first_will_check_cancellation_elapsed_ms: Option<u128>,
     last_will_check_cancellation_elapsed_ms: Option<u128>,
 }
@@ -306,6 +326,7 @@ enum SalsaEventTimelineMarker {
     Generic,
     WillExecuteTypeIndex,
     WillExecuteParseResult,
+    WillExecuteOther,
     WillCheckCancellation,
 }
 
@@ -350,6 +371,8 @@ thread_local! {
             last_will_execute_type_index_elapsed_ms: None,
             first_will_execute_parse_result_elapsed_ms: None,
             last_will_execute_parse_result_elapsed_ms: None,
+            first_will_execute_other_elapsed_ms: None,
+            last_will_execute_other_elapsed_ms: None,
             first_will_check_cancellation_elapsed_ms: None,
             last_will_check_cancellation_elapsed_ms: None,
         })
@@ -399,6 +422,8 @@ fn begin_salsa_event_timeline() {
             last_will_execute_type_index_elapsed_ms: None,
             first_will_execute_parse_result_elapsed_ms: None,
             last_will_execute_parse_result_elapsed_ms: None,
+            first_will_execute_other_elapsed_ms: None,
+            last_will_execute_other_elapsed_ms: None,
             first_will_check_cancellation_elapsed_ms: None,
             last_will_check_cancellation_elapsed_ms: None,
         });
@@ -420,6 +445,8 @@ fn finish_salsa_event_timeline() -> SalsaEventTimelineSnapshot {
                 .first_will_execute_parse_result_elapsed_ms,
             last_will_execute_parse_result_elapsed_ms: timeline
                 .last_will_execute_parse_result_elapsed_ms,
+            first_will_execute_other_elapsed_ms: timeline.first_will_execute_other_elapsed_ms,
+            last_will_execute_other_elapsed_ms: timeline.last_will_execute_other_elapsed_ms,
             first_will_check_cancellation_elapsed_ms: timeline
                 .first_will_check_cancellation_elapsed_ms,
             last_will_check_cancellation_elapsed_ms: timeline
@@ -459,6 +486,12 @@ fn record_salsa_event_timeline_marker(marker: SalsaEventTimelineMarker) {
                 }
                 timeline.last_will_execute_parse_result_elapsed_ms = Some(elapsed_ms);
             }
+            SalsaEventTimelineMarker::WillExecuteOther => {
+                if timeline.first_will_execute_other_elapsed_ms.is_none() {
+                    timeline.first_will_execute_other_elapsed_ms = Some(elapsed_ms);
+                }
+                timeline.last_will_execute_other_elapsed_ms = Some(elapsed_ms);
+            }
             SalsaEventTimelineMarker::WillCheckCancellation => {
                 if timeline.first_will_check_cancellation_elapsed_ms.is_none() {
                     timeline.first_will_check_cancellation_elapsed_ms = Some(elapsed_ms);
@@ -495,7 +528,7 @@ fn record_analysis_database_salsa_event(event: salsa::Event) {
             let marker = match kind {
                 SalsaEventKeyKind::TypeIndex => SalsaEventTimelineMarker::WillExecuteTypeIndex,
                 SalsaEventKeyKind::ParseResult => SalsaEventTimelineMarker::WillExecuteParseResult,
-                SalsaEventKeyKind::Other => SalsaEventTimelineMarker::Generic,
+                SalsaEventKeyKind::Other => SalsaEventTimelineMarker::WillExecuteOther,
             };
             record_salsa_event_timeline_marker(marker);
             update_salsa_event_counters(|counters| {
@@ -2084,10 +2117,20 @@ impl AnalysisV2 {
             clip_event_elapsed_ms(event_timeline.first_will_execute_parse_result_elapsed_ms);
         let index_fetch_last_will_execute_parse_result_ms =
             clip_event_elapsed_ms(event_timeline.last_will_execute_parse_result_elapsed_ms);
+        let index_fetch_first_will_execute_other_ms =
+            clip_event_elapsed_ms(event_timeline.first_will_execute_other_elapsed_ms);
+        let index_fetch_last_will_execute_other_ms =
+            clip_event_elapsed_ms(event_timeline.last_will_execute_other_elapsed_ms);
         let index_fetch_first_will_check_cancellation_ms =
             clip_event_elapsed_ms(event_timeline.first_will_check_cancellation_elapsed_ms);
         let index_fetch_last_will_check_cancellation_ms =
             clip_event_elapsed_ms(event_timeline.last_will_check_cancellation_elapsed_ms);
+        let index_fetch_first_will_check_to_first_will_execute_type_index_ms =
+            compute_index_fetch_event_delta_ms(
+                index_fetch_ms,
+                event_timeline.first_will_check_cancellation_elapsed_ms,
+                event_timeline.first_will_execute_type_index_elapsed_ms,
+            );
         let index_parse_result_ms = clip_to_index_fetch(index_snapshot.parse_result_ms());
         let index_build_total_ms = clip_to_index_fetch(index_build_profile.total_ms);
         let index_fetch_wait_ms = compute_index_fetch_wait_ms(
@@ -2123,8 +2166,11 @@ impl AnalysisV2 {
                     index_fetch_last_will_execute_type_index_ms,
                     index_fetch_first_will_execute_parse_result_ms,
                     index_fetch_last_will_execute_parse_result_ms,
+                    index_fetch_first_will_execute_other_ms,
+                    index_fetch_last_will_execute_other_ms,
                     index_fetch_first_will_check_cancellation_ms,
                     index_fetch_last_will_check_cancellation_ms,
+                    index_fetch_first_will_check_to_first_will_execute_type_index_ms,
                     index_fetch_active_at_entry,
                     index_query_total_ms,
                     index_query_inputs_ms,
@@ -2156,8 +2202,11 @@ impl AnalysisV2 {
                 index_fetch_last_will_execute_type_index_ms,
                 index_fetch_first_will_execute_parse_result_ms,
                 index_fetch_last_will_execute_parse_result_ms,
+                index_fetch_first_will_execute_other_ms,
+                index_fetch_last_will_execute_other_ms,
                 index_fetch_first_will_check_cancellation_ms,
                 index_fetch_last_will_check_cancellation_ms,
+                index_fetch_first_will_check_to_first_will_execute_type_index_ms,
                 index_fetch_active_at_entry,
                 index_fetch_will_block_on_total,
                 index_fetch_will_block_on_type_index_total,
@@ -2297,6 +2346,20 @@ mod tests {
         assert_eq!(compute_index_fetch_inside_salsa_window_ms(200, 40, 30), 130);
         assert_eq!(compute_index_fetch_inside_salsa_window_ms(200, 200, 0), 0);
         assert_eq!(compute_index_fetch_inside_salsa_window_ms(200, 150, 100), 0);
+    }
+
+    #[test]
+    fn compute_index_fetch_event_delta_ms_returns_zero_when_marker_is_missing() {
+        assert_eq!(
+            compute_index_fetch_event_delta_ms(200, Some(30), Some(150)),
+            120
+        );
+        assert_eq!(
+            compute_index_fetch_event_delta_ms(200, Some(250), Some(300)),
+            0
+        );
+        assert_eq!(compute_index_fetch_event_delta_ms(200, None, Some(150)), 0);
+        assert_eq!(compute_index_fetch_event_delta_ms(200, Some(30), None), 0);
     }
 
     #[test]

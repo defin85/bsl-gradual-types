@@ -1764,6 +1764,8 @@ mod tests {
         "intellisense_v2_runtime_apply_change_set_settings_snapshot_exec_ms",
         "intellisense_v2_runtime_apply_changes_batch_size",
         "intellisense_v2_runtime_apply_changes_changed_files_count",
+        "intellisense_v2_completion_owner_hint_index_fetch_will_check_cancellation_per_fetch",
+        "intellisense_v2_completion_owner_hint_index_fetch_will_execute_other_per_fetch",
         "intellisense_v2_parse_snapshot_build_ms_origin_lsp_mode_incremental",
         "intellisense_v2_parse_snapshot_build_ms_origin_lsp_mode_reused",
         "intellisense_v2_parse_snapshot_build_ms_origin_lsp_mode_full",
@@ -9120,8 +9122,16 @@ mod tests {
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_parse_result_ms",
             ),
             (
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_other",
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_other_ms",
+            ),
+            (
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_parse_result",
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_parse_result_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_other",
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_other_ms",
             ),
             (
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_cancellation",
@@ -9130,6 +9140,10 @@ mod tests {
             (
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_check_cancellation",
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_check_cancellation_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_to_first_will_execute_type_index",
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_to_first_will_execute_type_index_ms",
             ),
             (
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_query_total",
@@ -9599,9 +9613,19 @@ mod tests {
                     "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_parse_result_ms",
                     None
                 ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_other_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_other_ms",
+                    None
+                ),
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_parse_result_ms": histogram_metric_value_or_zero(
                     histograms,
                     "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_parse_result_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_other_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_other_ms",
                     None
                 ),
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_cancellation_ms": histogram_metric_value_or_zero(
@@ -9612,6 +9636,11 @@ mod tests {
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_check_cancellation_ms": histogram_metric_value_or_zero(
                     histograms,
                     "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_check_cancellation_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_to_first_will_execute_type_index_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_to_first_will_execute_type_index_ms",
                     None
                 ),
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_query_total_ms": histogram_metric_value_or_zero(
@@ -9782,6 +9811,16 @@ mod tests {
                 ),
                 "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_check_cancellation_total": read_u64_metric(
                     counters.get("intellisense_v2_completion_owner_hint_index_fetch_salsa_will_check_cancellation_total")
+                ),
+                "intellisense_v2_completion_owner_hint_index_fetch_will_check_cancellation_per_fetch": histogram_metric_value_or_zero(
+                    histograms,
+                    "intellisense_v2_completion_owner_hint_index_fetch_will_check_cancellation_per_fetch",
+                    None
+                ),
+                "intellisense_v2_completion_owner_hint_index_fetch_will_execute_other_per_fetch": histogram_metric_value_or_zero(
+                    histograms,
+                    "intellisense_v2_completion_owner_hint_index_fetch_will_execute_other_per_fetch",
+                    None
                 ),
             });
             phase_metrics["intellisense_v2_completion_owner_hint_result_total"] = serde_json::json!({
@@ -10482,6 +10521,59 @@ mod tests {
                 .and_then(|value| value.as_f64())
                 .unwrap_or(0.0),
             3100.0
+        );
+    }
+
+    #[test]
+    fn scale_aware_dominant_stage_includes_owner_hint_first_will_check_to_first_will_execute_breakdown(
+    ) {
+        let metrics = serde_json::json!({
+            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_wait_ms": {"p95": 2000.0},
+            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_cancellation_ms": {"p95": 1200.0},
+            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_type_index_ms": {"p95": 1500.0},
+            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_to_first_will_execute_type_index_ms": {"p95": 3300.0}
+        });
+
+        let dominant = dominant_stage_from_metrics(&metrics);
+        assert_eq!(
+            dominant
+                .get("stage")
+                .and_then(|value| value.as_str())
+                .unwrap_or(""),
+            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_to_first_will_execute_type_index"
+        );
+        assert_eq!(
+            dominant
+                .get("p95_ms")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0),
+            3300.0
+        );
+    }
+
+    #[test]
+    fn scale_aware_dominant_stage_includes_owner_hint_first_will_execute_other_breakdown() {
+        let metrics = serde_json::json!({
+            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_wait_ms": {"p95": 2000.0},
+            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_type_index_ms": {"p95": 1500.0},
+            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_parse_result_ms": {"p95": 1700.0},
+            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_other_ms": {"p95": 3400.0}
+        });
+
+        let dominant = dominant_stage_from_metrics(&metrics);
+        assert_eq!(
+            dominant
+                .get("stage")
+                .and_then(|value| value.as_str())
+                .unwrap_or(""),
+            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_other"
+        );
+        assert_eq!(
+            dominant
+                .get("p95_ms")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0),
+            3400.0
         );
     }
 

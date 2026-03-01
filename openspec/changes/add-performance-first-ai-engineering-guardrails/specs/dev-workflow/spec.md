@@ -57,6 +57,7 @@ ADR MUST содержать:
 - latency (`p50/p95/p99` для целевого interactive пути);
 - allocations (количество и/или bytes per operation);
 - lock contention / lock wait.
+- для latency одновременно MUST проверяться два условия: относительный порог к baseline и абсолютный ceiling (SLO/budget), утвержденный в ADR/spec.
 
 Gate MUST падать при отсутствии обязательных артефактов или выходе за утверждённые бюджеты.
 
@@ -65,3 +66,30 @@ Gate MUST падать при отсутствии обязательных ар
 - **WHEN** perf merge gate анализирует resource evidence
 - **THEN** gate завершается fail, если allocations выходят за budget
 - **AND** change не принимается до корректировки реализации или явного обновления budget через ADR
+
+#### Scenario: Ratio к baseline проходит, но абсолютный latency ceiling нарушен
+- **GIVEN** ratio latency к baseline укладывается в относительный порог
+- **AND** абсолютный `p95` или `p99` превышает утвержденный ceiling
+- **WHEN** perf merge gate анализирует отчёт
+- **THEN** gate завершается fail с причиной превышения абсолютного latency budget
+- **AND** merge блокируется до оптимизации или явного обновления budget через ADR
+
+### Requirement: Option B является единственной архитектурой perf-gate (MUST)
+Система MUST реализовывать perf-gate только через dedicated perf-gate module и versioned schema contract.
+
+Нормативные требования:
+- evaluator логика MUST находиться в одном выделенном модуле и вызываться всеми consumers (CI/harness/runtime checks);
+- пороги/правила verdict MUST NOT дублироваться inline в `lsp_server` core или в helper-скриптах;
+- schema contract для perf-gate MUST быть versioned в `contracts/intellisense-perf-gate/vN/**` и включать минимум `input`, `baseline`, `report`;
+- breaking schema change MUST сопровождаться major version bump и migration note.
+
+#### Scenario: Inline/per-script verdict логика блокируется
+- **GIVEN** PR добавляет новый порог perf-verdict только в CI скрипт, минуя dedicated evaluator module
+- **WHEN** выполняется workflow policy gate
+- **THEN** gate завершается fail с причиной `perf_gate_architecture_violation`
+- **AND** merge блокируется до переноса логики в dedicated module и schema contract
+
+#### Scenario: Breaking schema без version bump отклоняется
+- **GIVEN** изменена структура `report` schema для perf-gate обратно несовместимым способом
+- **WHEN** запускается compatibility-diff для `contracts/intellisense-perf-gate/vN/**`
+- **THEN** проверка завершается fail без major bump и migration note

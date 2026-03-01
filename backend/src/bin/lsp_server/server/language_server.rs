@@ -2999,9 +2999,21 @@ impl LanguageServer for BslLanguageServer {
                                             ),
                                         );
                                         coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_other",
+                                            ms_to_duration(
+                                                profile.index_fetch_first_will_execute_other_ms,
+                                            ),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
                                             "query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_parse_result",
                                             ms_to_duration(
                                                 profile.index_fetch_last_will_execute_parse_result_ms,
+                                            ),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_other",
+                                            ms_to_duration(
+                                                profile.index_fetch_last_will_execute_other_ms,
                                             ),
                                         );
                                         coordinator_for_query.record_completion_stage_latency(
@@ -3016,6 +3028,13 @@ impl LanguageServer for BslLanguageServer {
                                             ms_to_duration(
                                                 profile
                                                     .index_fetch_last_will_check_cancellation_ms,
+                                            ),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_to_first_will_execute_type_index",
+                                            ms_to_duration(
+                                                profile
+                                                    .index_fetch_first_will_check_to_first_will_execute_type_index_ms,
                                             ),
                                         );
                                         coordinator_for_query.record_completion_stage_latency(
@@ -3081,6 +3100,14 @@ impl LanguageServer for BslLanguageServer {
                                         coordinator_for_query
                                             .record_intellisense_v2_completion_owner_hint_index_fetch_active_gauge(
                                                 profile.index_fetch_active_at_entry,
+                                            );
+                                        coordinator_for_query
+                                            .record_intellisense_v2_completion_owner_hint_index_fetch_will_check_cancellation_per_fetch(
+                                                profile.index_fetch_will_check_cancellation_total,
+                                            );
+                                        coordinator_for_query
+                                            .record_intellisense_v2_completion_owner_hint_index_fetch_will_execute_other_per_fetch(
+                                                profile.index_fetch_will_execute_other_total,
                                             );
                                         };
                                     let member_access_owner_type_hint =

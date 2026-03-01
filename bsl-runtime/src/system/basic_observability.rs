@@ -132,6 +132,8 @@ const UNIFIED_INTELLISENSE_V2_HISTOGRAM_KEYS: &[&str] = &[
     "intellisense_v2_runtime_apply_change_set_settings_snapshot_exec_ms",
     "intellisense_v2_runtime_apply_changes_batch_size",
     "intellisense_v2_runtime_apply_changes_changed_files_count",
+    "intellisense_v2_completion_owner_hint_index_fetch_will_check_cancellation_per_fetch",
+    "intellisense_v2_completion_owner_hint_index_fetch_will_execute_other_per_fetch",
     "intellisense_v2_parse_snapshot_build_ms_origin_lsp_mode_incremental",
     "intellisense_v2_parse_snapshot_build_ms_origin_lsp_mode_reused",
     "intellisense_v2_parse_snapshot_build_ms_origin_lsp_mode_full",
@@ -893,14 +895,23 @@ impl BasicObservability {
             "query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_parse_result" => {
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_parse_result_ms"
             }
+            "query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_other" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_other_ms"
+            }
             "query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_parse_result" => {
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_parse_result_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_other" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_other_ms"
             }
             "query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_cancellation" => {
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_cancellation_ms"
             }
             "query_bundle_owner_hint_type_lookup_index_fetch_last_will_check_cancellation" => {
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_check_cancellation_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_to_first_will_execute_type_index" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_to_first_will_execute_type_index_ms"
             }
             "query_bundle_owner_hint_type_lookup_index_query_total" => {
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_query_total_ms"
@@ -1172,6 +1183,26 @@ impl BasicObservability {
         self.metrics.observe(
             "intellisense_v2_completion_owner_hint_index_fetch_active",
             active as f64,
+        );
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_will_check_cancellation_per_fetch(
+        &self,
+        count: u64,
+    ) {
+        self.metrics.observe_histogram(
+            "intellisense_v2_completion_owner_hint_index_fetch_will_check_cancellation_per_fetch",
+            count as f64,
+        );
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_will_execute_other_per_fetch(
+        &self,
+        count: u64,
+    ) {
+        self.metrics.observe_histogram(
+            "intellisense_v2_completion_owner_hint_index_fetch_will_execute_other_per_fetch",
+            count as f64,
         );
     }
 
@@ -4052,6 +4083,12 @@ mod observability_contract_tests {
             },
         );
         observability.record_intellisense_v2_completion_owner_hint_index_fetch_active_gauge(3);
+        observability
+            .record_intellisense_v2_completion_owner_hint_index_fetch_will_check_cancellation_per_fetch(9);
+        observability
+            .record_intellisense_v2_completion_owner_hint_index_fetch_will_execute_other_per_fetch(
+                3,
+            );
         observability.record_completion_stage_latency(
             "query_bundle_owner_hint_flow_lookup",
             std::time::Duration::from_millis(3),
@@ -4101,7 +4138,15 @@ mod observability_contract_tests {
             std::time::Duration::from_millis(2),
         );
         observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_other",
+            std::time::Duration::from_millis(2),
+        );
+        observability.record_completion_stage_latency(
             "query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_parse_result",
+            std::time::Duration::from_millis(2),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_other",
             std::time::Duration::from_millis(2),
         );
         observability.record_completion_stage_latency(
@@ -4110,6 +4155,10 @@ mod observability_contract_tests {
         );
         observability.record_completion_stage_latency(
             "query_bundle_owner_hint_type_lookup_index_fetch_last_will_check_cancellation",
+            std::time::Duration::from_millis(2),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_to_first_will_execute_type_index",
             std::time::Duration::from_millis(2),
         );
         observability.record_completion_stage_latency(
@@ -4329,9 +4378,23 @@ mod observability_contract_tests {
         assert!(
             histogram_count(
                 histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_other_ms"
+            ) > 0,
+            "owner-hint first WillExecute(other) histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_parse_result_ms"
             ) > 0,
             "owner-hint last WillExecute(parse_result) histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_other_ms"
+            ) > 0,
+            "owner-hint last WillExecute(other) histogram must be exported"
         );
         assert!(
             histogram_count(
@@ -4346,6 +4409,13 @@ mod observability_contract_tests {
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_check_cancellation_ms"
             ) > 0,
             "owner-hint last WillCheckCancellation histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_to_first_will_execute_type_index_ms"
+            ) > 0,
+            "owner-hint first WillCheckCancellation -> first WillExecute(type_index) histogram must be exported"
         );
         assert!(
             histogram_count(
@@ -4490,6 +4560,20 @@ mod observability_contract_tests {
                 .unwrap_or(0.0)
                 >= 1.0,
             "owner-hint index-fetch active gauge must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "intellisense_v2_completion_owner_hint_index_fetch_will_check_cancellation_per_fetch"
+            ) > 0,
+            "owner-hint WillCheckCancellation-per-fetch histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "intellisense_v2_completion_owner_hint_index_fetch_will_execute_other_per_fetch"
+            ) > 0,
+            "owner-hint WillExecute(other)-per-fetch histogram must be exported"
         );
     }
 

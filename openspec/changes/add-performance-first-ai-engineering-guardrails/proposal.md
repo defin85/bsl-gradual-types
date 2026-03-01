@@ -15,6 +15,7 @@
 - **ADDED (dev-workflow)**: doc-first non-MVP контракт (proposal/design/tasks/spec deltas + acceptance matrix) как обязательное условие для реализации.
 - **ADDED (dev-workflow)**: test-first цикл для backend/runtime behavioral changes с запретом ad-hoc изменений protected acceptance assets.
 - **ADDED (dev-workflow)**: merge-gate с обязательными perf evidence артефактами (`latency`, `allocations`, `lock contention`) и fail-closed политикой.
+- **ADDED (dev-workflow)**: `Option B` зафиксирован как единственный допустимый путь для perf-gate: dedicated perf-gate module + versioned schema contract (`contracts/intellisense-perf-gate/v1/**`) для input/baseline/report.
 - **ADDED (bsl-intellisense-v2)**: resource budgets для интерактивного completion (alloc/lock alongside latency).
 - **ADDED (bsl-intellisense-v2)**: low-cardinality observability контракт для root-cause по allocator/lock pressure.
 
@@ -25,11 +26,14 @@
 - Affected code (implementation follow-up):
   - `analysis-v2/**` (completion hot path instrumentation)
   - `bsl-runtime/src/system/basic_observability.rs`
-  - `backend/src/bin/lsp_server/**` (gate/report wiring)
-  - perf/benchmark harness и baseline artifacts (например `contracts/**` или `tests/perf/**`)
+  - `backend/src/bin/lsp_server/**` и `backend/src/bin/intellisense_perf.rs` (интеграция с dedicated perf-gate module)
+  - отдельный модуль perf gate evaluator (выделенная граница ответственности)
+  - versioned contract artifacts в `contracts/intellisense-perf-gate/v1/**`
+  - perf/benchmark harness и baseline artifacts в `tests/perf/**`
   - CI workflows и helper scripts для protected-assets/perf gates
 
 ## Non-Goals
 - Переписывание всей runtime архитектуры в рамках одного change.
 - Автоматическая "магическая" оптимизация всех hot paths без явных budget/measurement контрактов.
 - Отмена инженерного review: change усиливает его, а не заменяет.
+- Поддержка альтернативных архитектур perf-gate (inline/per-script дублирование логики вместо dedicated module + schema contract).

@@ -2958,6 +2958,83 @@ impl LanguageServer for BslLanguageServer {
                                             ms_to_duration(profile.index_fetch_wait_ms),
                                         );
                                         coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_fetch_unattributed",
+                                            ms_to_duration(profile.index_fetch_unattributed_ms),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_fetch_pre_first_salsa_event_wait",
+                                            ms_to_duration(
+                                                profile.index_fetch_pre_first_salsa_event_wait_ms,
+                                            ),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_fetch_post_last_salsa_event_tail",
+                                            ms_to_duration(
+                                                profile.index_fetch_post_last_salsa_event_tail_ms,
+                                            ),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_fetch_inside_salsa_window",
+                                            ms_to_duration(
+                                                profile.index_fetch_inside_salsa_window_ms,
+                                            ),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_type_index",
+                                            ms_to_duration(
+                                                profile.index_fetch_first_will_execute_type_index_ms,
+                                            ),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_type_index",
+                                            ms_to_duration(
+                                                profile.index_fetch_last_will_execute_type_index_ms,
+                                            ),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_parse_result",
+                                            ms_to_duration(
+                                                profile
+                                                    .index_fetch_first_will_execute_parse_result_ms,
+                                            ),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_parse_result",
+                                            ms_to_duration(
+                                                profile.index_fetch_last_will_execute_parse_result_ms,
+                                            ),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_cancellation",
+                                            ms_to_duration(
+                                                profile
+                                                    .index_fetch_first_will_check_cancellation_ms,
+                                            ),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_fetch_last_will_check_cancellation",
+                                            ms_to_duration(
+                                                profile
+                                                    .index_fetch_last_will_check_cancellation_ms,
+                                            ),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_query_total",
+                                            ms_to_duration(profile.index_query_total_ms),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_query_inputs",
+                                            ms_to_duration(profile.index_query_inputs_ms),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_query_parse_result_query",
+                                            ms_to_duration(profile.index_query_parse_result_query_ms),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_query_build",
+                                            ms_to_duration(profile.index_query_build_ms),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
                                             "query_bundle_owner_hint_type_lookup_index_parse_result",
                                             ms_to_duration(profile.index_parse_result_ms),
                                         );
@@ -3001,6 +3078,10 @@ impl LanguageServer for BslLanguageServer {
                                                 will_check_cancellation_total: profile.index_fetch_will_check_cancellation_total,
                                             },
                                         );
+                                        coordinator_for_query
+                                            .record_intellisense_v2_completion_owner_hint_index_fetch_active_gauge(
+                                                profile.index_fetch_active_at_entry,
+                                            );
                                         };
                                     let member_access_owner_type_hint =
                                         if member_access_request_for_query {

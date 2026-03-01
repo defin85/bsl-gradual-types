@@ -1697,6 +1697,12 @@ mod tests {
         "intellisense_v2_runtime_wait_for_file_version_exec_total",
         "intellisense_v2_runtime_snapshot_with_deps_queue_wait_total",
         "intellisense_v2_runtime_snapshot_with_deps_exec_total",
+        "intellisense_v2_runtime_apply_changes_queue_wait_total",
+        "intellisense_v2_runtime_apply_changes_exec_total",
+        "intellisense_v2_runtime_apply_change_set_file_exec_total",
+        "intellisense_v2_runtime_apply_change_set_file_with_snapshot_exec_total",
+        "intellisense_v2_runtime_apply_change_remove_file_exec_total",
+        "intellisense_v2_runtime_apply_change_set_settings_snapshot_exec_total",
         "intellisense_v2_parse_snapshot_total_origin_lsp_mode_incremental",
         "intellisense_v2_parse_snapshot_total_origin_lsp_mode_reused",
         "intellisense_v2_parse_snapshot_total_origin_lsp_mode_full",
@@ -1750,6 +1756,14 @@ mod tests {
         "intellisense_v2_runtime_wait_for_file_version_exec_ms",
         "intellisense_v2_runtime_snapshot_with_deps_queue_wait_ms",
         "intellisense_v2_runtime_snapshot_with_deps_exec_ms",
+        "intellisense_v2_runtime_apply_changes_queue_wait_ms",
+        "intellisense_v2_runtime_apply_changes_exec_ms",
+        "intellisense_v2_runtime_apply_change_set_file_exec_ms",
+        "intellisense_v2_runtime_apply_change_set_file_with_snapshot_exec_ms",
+        "intellisense_v2_runtime_apply_change_remove_file_exec_ms",
+        "intellisense_v2_runtime_apply_change_set_settings_snapshot_exec_ms",
+        "intellisense_v2_runtime_apply_changes_batch_size",
+        "intellisense_v2_runtime_apply_changes_changed_files_count",
         "intellisense_v2_parse_snapshot_build_ms_origin_lsp_mode_incremental",
         "intellisense_v2_parse_snapshot_build_ms_origin_lsp_mode_reused",
         "intellisense_v2_parse_snapshot_build_ms_origin_lsp_mode_full",
@@ -1785,6 +1799,7 @@ mod tests {
         "intellisense_v2_runtime_saturation_permits_background",
         "intellisense_v2_runtime_saturation_permits_shared",
         "intellisense_v2_runtime_saturation_queue_depth_total",
+        "intellisense_v2_completion_owner_hint_index_fetch_active",
     ];
 
     fn assert_unified_intellisense_v2_stage_contract(payload: &serde_json::Value) {
@@ -9007,6 +9022,30 @@ mod tests {
                 "runtime_snapshot_with_deps_queue_wait",
                 "intellisense_v2_runtime_snapshot_with_deps_queue_wait_ms",
             ),
+            (
+                "runtime_apply_changes_queue_wait",
+                "intellisense_v2_runtime_apply_changes_queue_wait_ms",
+            ),
+            (
+                "runtime_apply_changes_exec",
+                "intellisense_v2_runtime_apply_changes_exec_ms",
+            ),
+            (
+                "runtime_apply_change_set_file_exec",
+                "intellisense_v2_runtime_apply_change_set_file_exec_ms",
+            ),
+            (
+                "runtime_apply_change_set_file_with_snapshot_exec",
+                "intellisense_v2_runtime_apply_change_set_file_with_snapshot_exec_ms",
+            ),
+            (
+                "runtime_apply_change_remove_file_exec",
+                "intellisense_v2_runtime_apply_change_remove_file_exec_ms",
+            ),
+            (
+                "runtime_apply_change_set_settings_snapshot_exec",
+                "intellisense_v2_runtime_apply_change_set_settings_snapshot_exec_ms",
+            ),
             ("completion_stage_turn_wait", "completion_stage_turn_wait_ms"),
             (
                 "completion_stage_prepare_stateful",
@@ -9051,6 +9090,62 @@ mod tests {
             (
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_wait",
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_wait_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_unattributed",
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_unattributed_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_pre_first_salsa_event_wait",
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_pre_first_salsa_event_wait_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_post_last_salsa_event_tail",
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_post_last_salsa_event_tail_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_inside_salsa_window",
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_inside_salsa_window_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_type_index",
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_type_index_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_type_index",
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_type_index_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_parse_result",
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_parse_result_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_parse_result",
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_parse_result_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_cancellation",
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_cancellation_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_check_cancellation",
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_check_cancellation_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_query_total",
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_query_total_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_query_inputs",
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_query_inputs_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_query_parse_result_query",
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_query_parse_result_query_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_query_build",
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_query_build_ms",
             ),
             (
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_parse_result",
@@ -9316,6 +9411,10 @@ mod tests {
                 .get("histograms")
                 .and_then(|value| value.as_object())
                 .expect("metrics.histograms object");
+            let gauges = metrics
+                .get("gauges")
+                .and_then(|value| value.as_object())
+                .expect("metrics.gauges object");
 
             let completion_total = read_u64_metric(counters.get("completion_total"));
             let completion_cancelled_total =
@@ -9363,6 +9462,46 @@ mod tests {
                 "intellisense_v2_runtime_snapshot_with_deps_queue_wait_ms": histogram_metric_value_or_zero(
                     histograms,
                     "intellisense_v2_runtime_snapshot_with_deps_queue_wait_ms",
+                    None
+                ),
+                "intellisense_v2_runtime_apply_changes_queue_wait_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "intellisense_v2_runtime_apply_changes_queue_wait_ms",
+                    None
+                ),
+                "intellisense_v2_runtime_apply_changes_exec_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "intellisense_v2_runtime_apply_changes_exec_ms",
+                    None
+                ),
+                "intellisense_v2_runtime_apply_change_set_file_exec_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "intellisense_v2_runtime_apply_change_set_file_exec_ms",
+                    None
+                ),
+                "intellisense_v2_runtime_apply_change_set_file_with_snapshot_exec_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "intellisense_v2_runtime_apply_change_set_file_with_snapshot_exec_ms",
+                    None
+                ),
+                "intellisense_v2_runtime_apply_change_remove_file_exec_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "intellisense_v2_runtime_apply_change_remove_file_exec_ms",
+                    None
+                ),
+                "intellisense_v2_runtime_apply_change_set_settings_snapshot_exec_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "intellisense_v2_runtime_apply_change_set_settings_snapshot_exec_ms",
+                    None
+                ),
+                "intellisense_v2_runtime_apply_changes_batch_size": histogram_metric_value_or_zero(
+                    histograms,
+                    "intellisense_v2_runtime_apply_changes_batch_size",
+                    None
+                ),
+                "intellisense_v2_runtime_apply_changes_changed_files_count": histogram_metric_value_or_zero(
+                    histograms,
+                    "intellisense_v2_runtime_apply_changes_changed_files_count",
                     None
                 ),
                 "completion_stage_turn_wait_ms": histogram_metric_value_or_zero(
@@ -9423,6 +9562,76 @@ mod tests {
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_wait_ms": histogram_metric_value_or_zero(
                     histograms,
                     "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_wait_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_unattributed_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_unattributed_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_pre_first_salsa_event_wait_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_pre_first_salsa_event_wait_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_post_last_salsa_event_tail_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_post_last_salsa_event_tail_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_inside_salsa_window_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_inside_salsa_window_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_type_index_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_type_index_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_type_index_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_type_index_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_parse_result_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_parse_result_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_parse_result_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_parse_result_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_cancellation_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_cancellation_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_check_cancellation_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_check_cancellation_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_query_total_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_index_query_total_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_query_inputs_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_index_query_inputs_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_query_parse_result_query_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_index_query_parse_result_query_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_query_build_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_index_query_build_ms",
                     None
                 ),
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_parse_result_ms": histogram_metric_value_or_zero(
@@ -9504,6 +9713,9 @@ mod tests {
                     histograms,
                     "intellisense_v2_completion_owner_hint_receiver_len_chars",
                     None
+                ),
+                "intellisense_v2_completion_owner_hint_index_fetch_active": read_numeric_metric(
+                    gauges.get("intellisense_v2_completion_owner_hint_index_fetch_active")
                 ),
                 "intellisense_v2_runtime_queue_wait_interactive_ms": histogram_metric_value(
                     histograms,
@@ -10244,6 +10456,58 @@ mod tests {
                 .and_then(|value| value.as_f64())
                 .unwrap_or(0.0),
             2800.0
+        );
+    }
+
+    #[test]
+    fn scale_aware_dominant_stage_includes_owner_hint_index_fetch_inside_salsa_window_breakdown() {
+        let metrics = serde_json::json!({
+            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_wait_ms": {"p95": 2000.0},
+            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_inside_salsa_window_ms": {"p95": 3100.0},
+            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_pre_first_salsa_event_wait_ms": {"p95": 100.0},
+            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_post_last_salsa_event_tail_ms": {"p95": 50.0}
+        });
+
+        let dominant = dominant_stage_from_metrics(&metrics);
+        assert_eq!(
+            dominant
+                .get("stage")
+                .and_then(|value| value.as_str())
+                .unwrap_or(""),
+            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_inside_salsa_window"
+        );
+        assert_eq!(
+            dominant
+                .get("p95_ms")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0),
+            3100.0
+        );
+    }
+
+    #[test]
+    fn scale_aware_dominant_stage_includes_runtime_apply_changes_breakdown() {
+        let metrics = serde_json::json!({
+            "intellisense_v2_runtime_apply_changes_queue_wait_ms": {"p95": 3500.0},
+            "intellisense_v2_runtime_apply_changes_exec_ms": {"p95": 3200.0},
+            "intellisense_v2_runtime_apply_change_set_file_exec_ms": {"p95": 2800.0},
+            "completion_stage_query_bundle_ms": {"p95": 1200.0}
+        });
+
+        let dominant = dominant_stage_from_metrics(&metrics);
+        assert_eq!(
+            dominant
+                .get("stage")
+                .and_then(|value| value.as_str())
+                .unwrap_or(""),
+            "runtime_apply_changes_queue_wait"
+        );
+        assert_eq!(
+            dominant
+                .get("p95_ms")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0),
+            3500.0
         );
     }
 

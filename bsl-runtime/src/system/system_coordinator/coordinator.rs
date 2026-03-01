@@ -262,6 +262,14 @@ impl SystemCoordinator {
             .record_intellisense_v2_completion_owner_hint_index_fetch_salsa_counters(counters);
     }
 
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_active_gauge(
+        &self,
+        active: u64,
+    ) {
+        self.observability
+            .record_intellisense_v2_completion_owner_hint_index_fetch_active_gauge(active);
+    }
+
     pub fn observability_metrics(&self) -> Value {
         self.observability.get_metrics().export_metrics()
     }
@@ -691,6 +699,19 @@ impl SystemCoordinator {
     ) {
         self.observability
             .record_intellisense_v2_runtime_exec_latency_with_origin(origin, kind, duration);
+    }
+
+    pub fn record_intellisense_v2_runtime_apply_changes_batch_size(&self, batch_size: usize) {
+        self.observability
+            .record_intellisense_v2_runtime_apply_changes_batch_size(batch_size);
+    }
+
+    pub fn record_intellisense_v2_runtime_apply_changes_changed_files_count(
+        &self,
+        changed_files_count: usize,
+    ) {
+        self.observability
+            .record_intellisense_v2_runtime_apply_changes_changed_files_count(changed_files_count);
     }
 
     pub fn record_intellisense_v2_runtime_saturation_gauge_with_origin(

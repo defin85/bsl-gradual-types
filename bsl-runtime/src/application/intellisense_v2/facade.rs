@@ -222,6 +222,8 @@ struct Inner {
 
 enum Command {
     ApplyChanges {
+        origin: ObservabilityOrigin,
+        enqueued_at: Instant,
         changes: Vec<Change>,
     },
     ApplyDepsBundle {
@@ -487,10 +489,44 @@ impl IntellisenseV2Facade {
                     &mut background_closed,
                 ) {
                     match cmd {
-                        Command::ApplyChanges { changes } => {
+                        Command::ApplyChanges {
+                            origin,
+                            enqueued_at,
+                            changes,
+                        } => {
+                            let queue_wait_elapsed = enqueued_at.elapsed();
+                            if let Some(coordinator) = &observability {
+                                coordinator.record_intellisense_v2_runtime_queue_wait_latency_with_origin(
+                                    origin.as_str(),
+                                    "apply_changes_batch",
+                                    queue_wait_elapsed,
+                                );
+                                coordinator.record_intellisense_v2_runtime_queue_wait_class_latency_with_origin(
+                                    origin.as_str(),
+                                    queue_priority.as_work_class(),
+                                    queue_wait_elapsed,
+                                );
+                                coordinator.record_intellisense_v2_runtime_apply_changes_batch_size(
+                                    changes.len(),
+                                );
+                            }
+
+                            let exec_started = Instant::now();
                             let mut changed_files = Vec::new();
 
                             for change in changes {
+                                let per_change_started = Instant::now();
+                                let change_kind = match &change {
+                                    Change::SetFile { .. } => Some("apply_change_set_file"),
+                                    Change::SetFileWithSnapshot { .. } => {
+                                        Some("apply_change_set_file_with_snapshot")
+                                    }
+                                    Change::RemoveFile { .. } => Some("apply_change_remove_file"),
+                                    Change::SetSettingsSnapshot { .. } => {
+                                        Some("apply_change_set_settings_snapshot")
+                                    }
+                                    Change::SetDepsSnapshot { .. } => None,
+                                };
                                 match &change {
                                     Change::SetFile { file_id, version, .. }
                                     | Change::SetFileWithSnapshot {
@@ -517,8 +553,19 @@ impl IntellisenseV2Facade {
                                 }
 
                                 host.apply_change(change);
+                                if let Some(kind) = change_kind {
+                                    let exec_elapsed = per_change_started.elapsed();
+                                    if let Some(coordinator) = &observability {
+                                        coordinator.record_intellisense_v2_runtime_exec_latency_with_origin(
+                                            origin.as_str(),
+                                            kind,
+                                            exec_elapsed,
+                                        );
+                                    }
+                                }
                             }
 
+                            let changed_files_count = changed_files.len();
                             for file_id in changed_files {
                                 let version = applied_file_revisions
                                     .get(&file_id)
@@ -529,6 +576,24 @@ impl IntellisenseV2Facade {
                                     &mut waiters,
                                     &observability,
                                 );
+                            }
+
+                            let exec_elapsed = exec_started.elapsed();
+                            if let Some(coordinator) = &observability {
+                                coordinator.record_intellisense_v2_runtime_exec_latency_with_origin(
+                                    origin.as_str(),
+                                    "apply_changes_batch",
+                                    exec_elapsed,
+                                );
+                                coordinator.record_intellisense_v2_runtime_exec_class_latency_with_origin(
+                                    origin.as_str(),
+                                    queue_priority.as_work_class(),
+                                    exec_elapsed,
+                                );
+                                coordinator
+                                    .record_intellisense_v2_runtime_apply_changes_changed_files_count(
+                                        changed_files_count,
+                                    );
                             }
                         }
                         Command::ApplyDepsBundle {
@@ -706,7 +771,11 @@ impl IntellisenseV2Facade {
             return;
         }
         if self
-            .send_background_command(Command::ApplyChanges { changes })
+            .send_background_command(Command::ApplyChanges {
+                origin: ObservabilityOrigin::Runtime,
+                enqueued_at: Instant::now(),
+                changes,
+            })
             .is_err()
         {
             warn!("analysis_v2_runtime: failed to send ApplyChanges (writer thread is gone)");

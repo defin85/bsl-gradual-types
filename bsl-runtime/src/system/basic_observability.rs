@@ -65,6 +65,12 @@ const UNIFIED_INTELLISENSE_V2_COUNTER_KEYS: &[&str] = &[
     "intellisense_v2_runtime_wait_for_file_version_exec_total",
     "intellisense_v2_runtime_snapshot_with_deps_queue_wait_total",
     "intellisense_v2_runtime_snapshot_with_deps_exec_total",
+    "intellisense_v2_runtime_apply_changes_queue_wait_total",
+    "intellisense_v2_runtime_apply_changes_exec_total",
+    "intellisense_v2_runtime_apply_change_set_file_exec_total",
+    "intellisense_v2_runtime_apply_change_set_file_with_snapshot_exec_total",
+    "intellisense_v2_runtime_apply_change_remove_file_exec_total",
+    "intellisense_v2_runtime_apply_change_set_settings_snapshot_exec_total",
     "intellisense_v2_parse_snapshot_total_origin_lsp_mode_incremental",
     "intellisense_v2_parse_snapshot_total_origin_lsp_mode_reused",
     "intellisense_v2_parse_snapshot_total_origin_lsp_mode_full",
@@ -118,6 +124,14 @@ const UNIFIED_INTELLISENSE_V2_HISTOGRAM_KEYS: &[&str] = &[
     "intellisense_v2_runtime_wait_for_file_version_exec_ms",
     "intellisense_v2_runtime_snapshot_with_deps_queue_wait_ms",
     "intellisense_v2_runtime_snapshot_with_deps_exec_ms",
+    "intellisense_v2_runtime_apply_changes_queue_wait_ms",
+    "intellisense_v2_runtime_apply_changes_exec_ms",
+    "intellisense_v2_runtime_apply_change_set_file_exec_ms",
+    "intellisense_v2_runtime_apply_change_set_file_with_snapshot_exec_ms",
+    "intellisense_v2_runtime_apply_change_remove_file_exec_ms",
+    "intellisense_v2_runtime_apply_change_set_settings_snapshot_exec_ms",
+    "intellisense_v2_runtime_apply_changes_batch_size",
+    "intellisense_v2_runtime_apply_changes_changed_files_count",
     "intellisense_v2_parse_snapshot_build_ms_origin_lsp_mode_incremental",
     "intellisense_v2_parse_snapshot_build_ms_origin_lsp_mode_reused",
     "intellisense_v2_parse_snapshot_build_ms_origin_lsp_mode_full",
@@ -145,6 +159,7 @@ const UNIFIED_INTELLISENSE_V2_GAUGE_KEYS: &[&str] = &[
     "intellisense_v2_runtime_saturation_permits_background",
     "intellisense_v2_runtime_saturation_permits_shared",
     "intellisense_v2_runtime_saturation_queue_depth_total",
+    "intellisense_v2_completion_owner_hint_index_fetch_active",
 ];
 
 const ALLOWED_ORIGINS: &[&str] = &["lsp", "web", "agent", "runtime"];
@@ -162,6 +177,11 @@ const ALLOWED_OPERATIONS: &[&str] = &[
     "references",
     "wait_for_file_version",
     "snapshot_with_deps",
+    "apply_changes_batch",
+    "apply_change_set_file",
+    "apply_change_set_file_with_snapshot",
+    "apply_change_remove_file",
+    "apply_change_set_settings_snapshot",
     "other",
 ];
 const ALLOWED_STAGES: &[&str] = &[
@@ -852,6 +872,48 @@ impl BasicObservability {
             "query_bundle_owner_hint_type_lookup_index_fetch_wait" => {
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_wait_ms"
             }
+            "query_bundle_owner_hint_type_lookup_index_fetch_unattributed" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_unattributed_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_index_fetch_pre_first_salsa_event_wait" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_pre_first_salsa_event_wait_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_index_fetch_post_last_salsa_event_tail" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_post_last_salsa_event_tail_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_index_fetch_inside_salsa_window" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_inside_salsa_window_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_type_index" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_type_index_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_type_index" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_type_index_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_parse_result" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_parse_result_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_parse_result" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_parse_result_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_cancellation" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_cancellation_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_index_fetch_last_will_check_cancellation" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_check_cancellation_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_index_query_total" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_query_total_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_index_query_inputs" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_query_inputs_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_index_query_parse_result_query" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_query_parse_result_query_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_index_query_build" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_query_build_ms"
+            }
             "query_bundle_owner_hint_type_lookup_index_parse_result" => {
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_parse_result_ms"
             }
@@ -1100,6 +1162,16 @@ impl BasicObservability {
         self.metrics.add_counter(
             "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_check_cancellation_total",
             counters.will_check_cancellation_total,
+        );
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_active_gauge(
+        &self,
+        active: u64,
+    ) {
+        self.metrics.observe(
+            "intellisense_v2_completion_owner_hint_index_fetch_active",
+            active as f64,
         );
     }
 
@@ -2055,6 +2127,23 @@ impl BasicObservability {
         );
     }
 
+    pub fn record_intellisense_v2_runtime_apply_changes_batch_size(&self, batch_size: usize) {
+        self.metrics.observe_histogram(
+            "intellisense_v2_runtime_apply_changes_batch_size",
+            batch_size as f64,
+        );
+    }
+
+    pub fn record_intellisense_v2_runtime_apply_changes_changed_files_count(
+        &self,
+        changed_files_count: usize,
+    ) {
+        self.metrics.observe_histogram(
+            "intellisense_v2_runtime_apply_changes_changed_files_count",
+            changed_files_count as f64,
+        );
+    }
+
     pub fn record_intellisense_v2_runtime_saturation_gauge_with_origin(
         &self,
         origin: &str,
@@ -2518,6 +2607,11 @@ fn normalize_runtime_stage_kind(kind: &str) -> &'static str {
     match kind {
         "wait_for_file_version" => "wait_for_file_version",
         "snapshot_with_deps" => "snapshot_with_deps",
+        "apply_changes_batch" => "apply_changes_batch",
+        "apply_change_set_file" => "apply_change_set_file",
+        "apply_change_set_file_with_snapshot" => "apply_change_set_file_with_snapshot",
+        "apply_change_remove_file" => "apply_change_remove_file",
+        "apply_change_set_settings_snapshot" => "apply_change_set_settings_snapshot",
         _ => "other",
     }
 }
@@ -2776,6 +2870,10 @@ fn legacy_runtime_queue_wait_metrics(kind: &str) -> (&'static str, &'static str)
             "intellisense_v2_runtime_wait_for_file_version_queue_wait_total",
             "intellisense_v2_runtime_wait_for_file_version_queue_wait_ms",
         ),
+        "apply_changes_batch" => (
+            "intellisense_v2_runtime_apply_changes_queue_wait_total",
+            "intellisense_v2_runtime_apply_changes_queue_wait_ms",
+        ),
         _ => (
             "intellisense_v2_runtime_other_queue_wait_total",
             "intellisense_v2_runtime_other_queue_wait_ms",
@@ -2792,6 +2890,26 @@ fn legacy_runtime_exec_metrics(kind: &str) -> (&'static str, &'static str) {
         "wait_for_file_version" => (
             "intellisense_v2_runtime_wait_for_file_version_exec_total",
             "intellisense_v2_runtime_wait_for_file_version_exec_ms",
+        ),
+        "apply_changes_batch" => (
+            "intellisense_v2_runtime_apply_changes_exec_total",
+            "intellisense_v2_runtime_apply_changes_exec_ms",
+        ),
+        "apply_change_set_file" => (
+            "intellisense_v2_runtime_apply_change_set_file_exec_total",
+            "intellisense_v2_runtime_apply_change_set_file_exec_ms",
+        ),
+        "apply_change_set_file_with_snapshot" => (
+            "intellisense_v2_runtime_apply_change_set_file_with_snapshot_exec_total",
+            "intellisense_v2_runtime_apply_change_set_file_with_snapshot_exec_ms",
+        ),
+        "apply_change_remove_file" => (
+            "intellisense_v2_runtime_apply_change_remove_file_exec_total",
+            "intellisense_v2_runtime_apply_change_remove_file_exec_ms",
+        ),
+        "apply_change_set_settings_snapshot" => (
+            "intellisense_v2_runtime_apply_change_set_settings_snapshot_exec_total",
+            "intellisense_v2_runtime_apply_change_set_settings_snapshot_exec_ms",
         ),
         _ => (
             "intellisense_v2_runtime_other_exec_total",
@@ -3156,11 +3274,28 @@ mod observability_contract_tests {
             "wait_for_file_version",
             Duration::from_millis(7),
         );
+        observability.record_intellisense_v2_runtime_queue_wait_latency_with_origin(
+            "lsp",
+            "apply_changes_batch",
+            Duration::from_millis(6),
+        );
         observability.record_intellisense_v2_runtime_exec_latency_with_origin(
             "lsp",
             "snapshot_with_deps",
             Duration::from_millis(9),
         );
+        observability.record_intellisense_v2_runtime_exec_latency_with_origin(
+            "lsp",
+            "apply_changes_batch",
+            Duration::from_millis(10),
+        );
+        observability.record_intellisense_v2_runtime_exec_latency_with_origin(
+            "lsp",
+            "apply_change_set_file",
+            Duration::from_millis(3),
+        );
+        observability.record_intellisense_v2_runtime_apply_changes_batch_size(4);
+        observability.record_intellisense_v2_runtime_apply_changes_changed_files_count(2);
 
         let exported = observability.get_metrics().export_metrics();
         let counters = counters(&exported);
@@ -3189,6 +3324,24 @@ mod observability_contract_tests {
             "legacy runtime exec counter should be projected"
         );
         assert!(
+            counter_value(
+                counters,
+                "intellisense_v2_runtime_apply_changes_queue_wait_total"
+            ) > 0,
+            "legacy apply-changes queue wait counter should be projected"
+        );
+        assert!(
+            counter_value(counters, "intellisense_v2_runtime_apply_changes_exec_total") > 0,
+            "legacy apply-changes batch exec counter should be projected"
+        );
+        assert!(
+            counter_value(
+                counters,
+                "intellisense_v2_runtime_apply_change_set_file_exec_total"
+            ) > 0,
+            "legacy apply-change set_file exec counter should be projected"
+        );
+        assert!(
             histogram_count(
                 histograms,
                 "intellisense_v2_runtime_wait_for_file_version_queue_wait_ms"
@@ -3201,6 +3354,38 @@ mod observability_contract_tests {
                 "intellisense_v2_runtime_snapshot_with_deps_exec_ms"
             ) > 0,
             "legacy runtime exec histogram should be projected"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "intellisense_v2_runtime_apply_changes_queue_wait_ms"
+            ) > 0,
+            "legacy apply-changes queue wait histogram should be projected"
+        );
+        assert!(
+            histogram_count(histograms, "intellisense_v2_runtime_apply_changes_exec_ms") > 0,
+            "legacy apply-changes batch exec histogram should be projected"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "intellisense_v2_runtime_apply_change_set_file_exec_ms"
+            ) > 0,
+            "legacy apply-change set_file exec histogram should be projected"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "intellisense_v2_runtime_apply_changes_batch_size"
+            ) > 0,
+            "apply-changes batch-size histogram should be projected"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "intellisense_v2_runtime_apply_changes_changed_files_count"
+            ) > 0,
+            "apply-changes changed-files histogram should be projected"
         );
     }
 
@@ -3866,6 +4051,7 @@ mod observability_contract_tests {
                 will_check_cancellation_total: 9,
             },
         );
+        observability.record_intellisense_v2_completion_owner_hint_index_fetch_active_gauge(3);
         observability.record_completion_stage_latency(
             "query_bundle_owner_hint_flow_lookup",
             std::time::Duration::from_millis(3),
@@ -3885,6 +4071,62 @@ mod observability_contract_tests {
         observability.record_completion_stage_latency(
             "query_bundle_owner_hint_type_lookup_index_fetch_wait",
             std::time::Duration::from_millis(2),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_fetch_unattributed",
+            std::time::Duration::from_millis(2),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_fetch_pre_first_salsa_event_wait",
+            std::time::Duration::from_millis(2),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_fetch_post_last_salsa_event_tail",
+            std::time::Duration::from_millis(2),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_fetch_inside_salsa_window",
+            std::time::Duration::from_millis(2),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_type_index",
+            std::time::Duration::from_millis(2),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_type_index",
+            std::time::Duration::from_millis(2),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_parse_result",
+            std::time::Duration::from_millis(2),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_parse_result",
+            std::time::Duration::from_millis(2),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_cancellation",
+            std::time::Duration::from_millis(2),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_fetch_last_will_check_cancellation",
+            std::time::Duration::from_millis(2),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_query_total",
+            std::time::Duration::from_millis(4),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_query_inputs",
+            std::time::Duration::from_millis(1),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_query_parse_result_query",
+            std::time::Duration::from_millis(1),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_query_build",
+            std::time::Duration::from_millis(1),
         );
         observability.record_completion_stage_latency(
             "query_bundle_owner_hint_type_lookup_index_parse_result",
@@ -3913,6 +4155,7 @@ mod observability_contract_tests {
 
         let exported = observability.get_metrics().export_metrics();
         let counters = counters(&exported);
+        let gauges = gauges(&exported);
         let histograms = histograms(&exported);
 
         for reason in [
@@ -4037,6 +4280,104 @@ mod observability_contract_tests {
         assert!(
             histogram_count(
                 histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_unattributed_ms"
+            ) > 0,
+            "owner-hint index fetch unattributed histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_pre_first_salsa_event_wait_ms"
+            ) > 0,
+            "owner-hint index fetch pre-first-salsa-event histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_post_last_salsa_event_tail_ms"
+            ) > 0,
+            "owner-hint index fetch post-last-salsa-event histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_inside_salsa_window_ms"
+            ) > 0,
+            "owner-hint index fetch inside-salsa-window histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_type_index_ms"
+            ) > 0,
+            "owner-hint first WillExecute(type_index) histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_type_index_ms"
+            ) > 0,
+            "owner-hint last WillExecute(type_index) histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_parse_result_ms"
+            ) > 0,
+            "owner-hint first WillExecute(parse_result) histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_parse_result_ms"
+            ) > 0,
+            "owner-hint last WillExecute(parse_result) histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_cancellation_ms"
+            ) > 0,
+            "owner-hint first WillCheckCancellation histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_check_cancellation_ms"
+            ) > 0,
+            "owner-hint last WillCheckCancellation histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_query_total_ms"
+            ) > 0,
+            "owner-hint index query total histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_query_inputs_ms"
+            ) > 0,
+            "owner-hint index query inputs histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_query_parse_result_query_ms"
+            ) > 0,
+            "owner-hint index query parse-result histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_query_build_ms"
+            ) > 0,
+            "owner-hint index query build histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_parse_result_ms"
             ) > 0,
             "owner-hint index parse-result histogram must be exported"
@@ -4142,6 +4483,14 @@ mod observability_contract_tests {
                 "owner-hint salsa counter must be exported for {label}"
             );
         }
+        assert!(
+            gauges
+                .get("intellisense_v2_completion_owner_hint_index_fetch_active")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0)
+                >= 1.0,
+            "owner-hint index-fetch active gauge must be exported"
+        );
     }
 
     #[test]

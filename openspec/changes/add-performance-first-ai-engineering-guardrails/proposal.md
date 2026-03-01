@@ -10,14 +10,20 @@
 - неизменяемость acceptance-артефактов во время имплементации;
 - обязательные perf-доказательства не только по latency, но и по allocations/lock contention.
 
+Актуальные p31 исследования подтверждают эту потребность: в churn-нагрузке узкое место проявляется как длительное ожидание перед `WillExecute(type_index)`, а не как build-time индекса. Это прямой сигнал, что latency-only gate недостаточен без resource/queue/lock evidence.
+
 ## What Changes
 - **ADDED (dev-workflow)**: обязательный ADR gate для архитектурно-значимых/perf-critical изменений до начала реализации.
 - **ADDED (dev-workflow)**: doc-first non-MVP контракт (proposal/design/tasks/spec deltas + acceptance matrix) как обязательное условие для реализации.
 - **ADDED (dev-workflow)**: test-first цикл для backend/runtime behavioral changes с запретом ad-hoc изменений protected acceptance assets.
 - **ADDED (dev-workflow)**: merge-gate с обязательными perf evidence артефактами (`latency`, `allocations`, `lock contention`) и fail-closed политикой.
 - **ADDED (dev-workflow)**: `Option B` зафиксирован как единственный допустимый путь для perf-gate: dedicated perf-gate module + versioned schema contract (`contracts/intellisense-perf-gate/v1/**`) для input/baseline/report.
+- **ADDED (dev-workflow)**: обязательная machine-readable `change_criticality` классификация (`routine|behavioral|architectural|perf_critical`) как precondition для process-gates.
+- **ADDED (dev-workflow)**: machine-readable test-first evidence contract для backend/runtime behavioral changes.
+- **ADDED (dev-workflow)**: детерминированная bootstrap policy initial budgets до включения blocking mode.
 - **ADDED (bsl-intellisense-v2)**: resource budgets для интерактивного completion (alloc/lock alongside latency).
 - **ADDED (bsl-intellisense-v2)**: low-cardinality observability контракт для root-cause по allocator/lock pressure.
+- **ADDED (bsl-intellisense-v2)**: canonical resource metric keys (без "эквивалентов" в пределах major schema версии).
 
 ## Impact
 - Affected specs:

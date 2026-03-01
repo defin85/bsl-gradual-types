@@ -7,6 +7,12 @@
 
 Для non-MVP уровня нужен процесс, где архитектурное качество и производительность валидируются так же строго, как функциональная корректность.
 
+Текущие perf-исследования p31 (large_warm/churn) дополнительно показали устойчивый паттерн:
+- критический вклад в latency даёт не build индекса, а длительное ожидание до первого `WillExecute(type_index)`;
+- в проблемном режиме parse/build занимают миллисекунды, тогда как pre-execution gap может занимать десятки секунд.
+
+Это подтверждает, что process и gate-контур должен учитывать lock/contention/queue/resource сигналы alongside latency.
+
 ## Goals / Non-Goals
 - Goals:
   - Зафиксировать обязательный ADR/doc-first процесс для архитектурно-значимых/perf-critical изменений.
@@ -46,6 +52,34 @@
 
 - Decision: Использовать только low-cardinality resource observability labels.
   - Why: Высокая кардинальность ломает эксплуатационную ценность метрик и усложняет сравнение baseline vs candidate.
+
+- Decision: Классификация `change_criticality` обязательна и machine-readable до запуска process-gates.
+  - What:
+    - `change_criticality` ограничен enum: `routine`, `behavioral`, `architectural`, `perf_critical`;
+    - ADR/doc-first/perf gates обязательны для `architectural|perf_critical`;
+    - отсутствие/невалидность классификации трактуется fail-closed.
+  - Why: убирает неявные трактовки и спорные решения "подпадает/не подпадает".
+
+- Decision: Test-first evidence фиксируется в machine-readable контракте.
+  - What:
+    - evidence содержит минимум `failing_ref`, `passing_ref`, `scope`, `change_id`;
+    - gate валидирует evidence schema и связь с change scope.
+  - Why: превращает test-first из декларации в автоматизируемый и проверяемый контракт.
+
+- Decision: Bootstrap policy initial budgets формализована и обязательна до blocking mode.
+  - What:
+    - initial budgets вычисляются на репрезентативных профилях (`small|large|churn`) по фиксированной методике;
+    - sample size: минимум 5 прогонов на профиль;
+    - aggregation: median от profile-level p95 (и p99 для latency ceilings);
+    - budget фиксируется в versioned contract и утверждается ADR до включения blocking gate.
+  - Why: убирает недетерминированность первого включения fail-closed perf gate.
+
+- Decision: Canonical metric keys для resource gate фиксируются без эквивалентов в рамках major версии.
+  - What:
+    - обязательные keys: `allocations_per_completion`, `allocated_bytes_per_completion`,
+      `lock_wait_ms_per_completion`, `lock_contention_events_per_completion`;
+    - отсутствие любого key -> fail (`missing_required_metric_field`).
+  - Why: предотвращает schema drift между evaluator и consumers.
 
 ## Alternatives Considered
 - Альтернатива A: Inline/per-script perf gate (логика распределена между `lsp_server` core и shell/Python helpers).
@@ -88,4 +122,4 @@
 - AWS ADR process (accepted ADR immutability, supersede model): https://docs.aws.amazon.com/prescriptive-guidance/latest/architectural-decision-records/adr-process.html
 
 ## Open Questions
-- Какие стартовые budget thresholds принять для `allocations_per_completion` и `lock_wait_ms` до первого полного baseline цикла?
+- Нужен ли отдельный профиль `steady_parallel` (кроме `small|large|churn`) для фиксации process-global lock regressions в burst-сценариях?

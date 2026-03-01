@@ -134,6 +134,18 @@ const UNIFIED_INTELLISENSE_V2_HISTOGRAM_KEYS: &[&str] = &[
     "intellisense_v2_runtime_apply_changes_changed_files_count",
     "intellisense_v2_completion_owner_hint_index_fetch_will_check_cancellation_per_fetch",
     "intellisense_v2_completion_owner_hint_index_fetch_will_execute_other_per_fetch",
+    "intellisense_v2_completion_owner_hint_index_fetch_will_iterate_cycle_per_fetch",
+    "intellisense_v2_completion_owner_hint_index_fetch_did_set_cancellation_flag_per_fetch",
+    "intellisense_v2_completion_owner_hint_index_fetch_global_did_set_cancellation_flag_per_fetch",
+    "intellisense_v2_completion_owner_hint_index_fetch_did_discard_per_fetch",
+    "intellisense_v2_completion_owner_hint_index_fetch_did_discard_accumulated_per_fetch",
+    "intellisense_v2_completion_owner_hint_index_fetch_events_before_first_will_execute_type_index_per_fetch",
+    "intellisense_v2_completion_owner_hint_index_fetch_will_check_before_first_will_execute_type_index_per_fetch",
+    "intellisense_v2_completion_owner_hint_index_fetch_will_execute_parse_result_before_first_will_execute_type_index_per_fetch",
+    "intellisense_v2_completion_owner_hint_index_fetch_first_will_execute_type_index_seen_per_fetch",
+    "intellisense_v2_completion_owner_hint_index_fetch_revision_start",
+    "intellisense_v2_completion_owner_hint_index_fetch_revision_end",
+    "intellisense_v2_completion_owner_hint_index_fetch_revision_delta",
     "intellisense_v2_parse_snapshot_build_ms_origin_lsp_mode_incremental",
     "intellisense_v2_parse_snapshot_build_ms_origin_lsp_mode_reused",
     "intellisense_v2_parse_snapshot_build_ms_origin_lsp_mode_full",
@@ -904,6 +916,12 @@ impl BasicObservability {
             "query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_other" => {
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_other_ms"
             }
+            "query_bundle_owner_hint_type_lookup_index_fetch_first_will_iterate_cycle" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_iterate_cycle_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_index_fetch_last_will_iterate_cycle" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_iterate_cycle_ms"
+            }
             "query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_cancellation" => {
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_cancellation_ms"
             }
@@ -912,6 +930,15 @@ impl BasicObservability {
             }
             "query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_to_first_will_execute_type_index" => {
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_to_first_will_execute_type_index_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_index_fetch_last_will_check_to_first_will_execute_type_index" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_check_to_first_will_execute_type_index_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_parse_result_to_first_will_execute_type_index" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_parse_result_to_first_will_execute_type_index_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_index_fetch_idle_before_first_will_execute_type_index" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_idle_before_first_will_execute_type_index_ms"
             }
             "query_bundle_owner_hint_type_lookup_index_query_total" => {
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_query_total_ms"
@@ -1203,6 +1230,126 @@ impl BasicObservability {
         self.metrics.observe_histogram(
             "intellisense_v2_completion_owner_hint_index_fetch_will_execute_other_per_fetch",
             count as f64,
+        );
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_will_iterate_cycle_per_fetch(
+        &self,
+        count: u64,
+    ) {
+        self.metrics.observe_histogram(
+            "intellisense_v2_completion_owner_hint_index_fetch_will_iterate_cycle_per_fetch",
+            count as f64,
+        );
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_did_set_cancellation_flag_per_fetch(
+        &self,
+        count: u64,
+    ) {
+        self.metrics.observe_histogram(
+            "intellisense_v2_completion_owner_hint_index_fetch_did_set_cancellation_flag_per_fetch",
+            count as f64,
+        );
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_global_did_set_cancellation_flag_per_fetch(
+        &self,
+        count: u64,
+    ) {
+        self.metrics.observe_histogram(
+            "intellisense_v2_completion_owner_hint_index_fetch_global_did_set_cancellation_flag_per_fetch",
+            count as f64,
+        );
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_did_discard_per_fetch(
+        &self,
+        count: u64,
+    ) {
+        self.metrics.observe_histogram(
+            "intellisense_v2_completion_owner_hint_index_fetch_did_discard_per_fetch",
+            count as f64,
+        );
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_did_discard_accumulated_per_fetch(
+        &self,
+        count: u64,
+    ) {
+        self.metrics.observe_histogram(
+            "intellisense_v2_completion_owner_hint_index_fetch_did_discard_accumulated_per_fetch",
+            count as f64,
+        );
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_events_before_first_will_execute_type_index_per_fetch(
+        &self,
+        count: u64,
+    ) {
+        self.metrics.observe_histogram(
+            "intellisense_v2_completion_owner_hint_index_fetch_events_before_first_will_execute_type_index_per_fetch",
+            count as f64,
+        );
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_will_check_before_first_will_execute_type_index_per_fetch(
+        &self,
+        count: u64,
+    ) {
+        self.metrics.observe_histogram(
+            "intellisense_v2_completion_owner_hint_index_fetch_will_check_before_first_will_execute_type_index_per_fetch",
+            count as f64,
+        );
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_will_execute_parse_result_before_first_will_execute_type_index_per_fetch(
+        &self,
+        count: u64,
+    ) {
+        self.metrics.observe_histogram(
+            "intellisense_v2_completion_owner_hint_index_fetch_will_execute_parse_result_before_first_will_execute_type_index_per_fetch",
+            count as f64,
+        );
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_first_will_execute_type_index_seen_per_fetch(
+        &self,
+        count: u64,
+    ) {
+        self.metrics.observe_histogram(
+            "intellisense_v2_completion_owner_hint_index_fetch_first_will_execute_type_index_seen_per_fetch",
+            count as f64,
+        );
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_revision_start(
+        &self,
+        revision: u64,
+    ) {
+        self.metrics.observe_histogram(
+            "intellisense_v2_completion_owner_hint_index_fetch_revision_start",
+            revision as f64,
+        );
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_revision_end(
+        &self,
+        revision: u64,
+    ) {
+        self.metrics.observe_histogram(
+            "intellisense_v2_completion_owner_hint_index_fetch_revision_end",
+            revision as f64,
+        );
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_revision_delta(
+        &self,
+        delta: u64,
+    ) {
+        self.metrics.observe_histogram(
+            "intellisense_v2_completion_owner_hint_index_fetch_revision_delta",
+            delta as f64,
         );
     }
 
@@ -4089,6 +4236,29 @@ mod observability_contract_tests {
             .record_intellisense_v2_completion_owner_hint_index_fetch_will_execute_other_per_fetch(
                 3,
             );
+        observability
+            .record_intellisense_v2_completion_owner_hint_index_fetch_will_iterate_cycle_per_fetch(
+                5,
+            );
+        observability
+            .record_intellisense_v2_completion_owner_hint_index_fetch_did_set_cancellation_flag_per_fetch(1);
+        observability
+            .record_intellisense_v2_completion_owner_hint_index_fetch_global_did_set_cancellation_flag_per_fetch(2);
+        observability
+            .record_intellisense_v2_completion_owner_hint_index_fetch_did_discard_per_fetch(2);
+        observability
+            .record_intellisense_v2_completion_owner_hint_index_fetch_did_discard_accumulated_per_fetch(4);
+        observability
+            .record_intellisense_v2_completion_owner_hint_index_fetch_events_before_first_will_execute_type_index_per_fetch(5);
+        observability
+            .record_intellisense_v2_completion_owner_hint_index_fetch_will_check_before_first_will_execute_type_index_per_fetch(4);
+        observability
+            .record_intellisense_v2_completion_owner_hint_index_fetch_will_execute_parse_result_before_first_will_execute_type_index_per_fetch(1);
+        observability
+            .record_intellisense_v2_completion_owner_hint_index_fetch_first_will_execute_type_index_seen_per_fetch(1);
+        observability.record_intellisense_v2_completion_owner_hint_index_fetch_revision_start(17);
+        observability.record_intellisense_v2_completion_owner_hint_index_fetch_revision_end(19);
+        observability.record_intellisense_v2_completion_owner_hint_index_fetch_revision_delta(2);
         observability.record_completion_stage_latency(
             "query_bundle_owner_hint_flow_lookup",
             std::time::Duration::from_millis(3),
@@ -4150,6 +4320,14 @@ mod observability_contract_tests {
             std::time::Duration::from_millis(2),
         );
         observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_fetch_first_will_iterate_cycle",
+            std::time::Duration::from_millis(2),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_fetch_last_will_iterate_cycle",
+            std::time::Duration::from_millis(2),
+        );
+        observability.record_completion_stage_latency(
             "query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_cancellation",
             std::time::Duration::from_millis(2),
         );
@@ -4159,6 +4337,18 @@ mod observability_contract_tests {
         );
         observability.record_completion_stage_latency(
             "query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_to_first_will_execute_type_index",
+            std::time::Duration::from_millis(2),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_fetch_last_will_check_to_first_will_execute_type_index",
+            std::time::Duration::from_millis(2),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_parse_result_to_first_will_execute_type_index",
+            std::time::Duration::from_millis(2),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_fetch_idle_before_first_will_execute_type_index",
             std::time::Duration::from_millis(2),
         );
         observability.record_completion_stage_latency(
@@ -4399,6 +4589,20 @@ mod observability_contract_tests {
         assert!(
             histogram_count(
                 histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_iterate_cycle_ms"
+            ) > 0,
+            "owner-hint first WillIterateCycle histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_iterate_cycle_ms"
+            ) > 0,
+            "owner-hint last WillIterateCycle histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_cancellation_ms"
             ) > 0,
             "owner-hint first WillCheckCancellation histogram must be exported"
@@ -4416,6 +4620,27 @@ mod observability_contract_tests {
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_to_first_will_execute_type_index_ms"
             ) > 0,
             "owner-hint first WillCheckCancellation -> first WillExecute(type_index) histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_check_to_first_will_execute_type_index_ms"
+            ) > 0,
+            "owner-hint last WillCheckCancellation -> first WillExecute(type_index) histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_parse_result_to_first_will_execute_type_index_ms"
+            ) > 0,
+            "owner-hint last WillExecute(parse_result) -> first WillExecute(type_index) histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_idle_before_first_will_execute_type_index_ms"
+            ) > 0,
+            "owner-hint idle-before-first-WillExecute(type_index) histogram must be exported"
         );
         assert!(
             histogram_count(
@@ -4574,6 +4799,90 @@ mod observability_contract_tests {
                 "intellisense_v2_completion_owner_hint_index_fetch_will_execute_other_per_fetch"
             ) > 0,
             "owner-hint WillExecute(other)-per-fetch histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "intellisense_v2_completion_owner_hint_index_fetch_will_iterate_cycle_per_fetch"
+            ) > 0,
+            "owner-hint WillIterateCycle-per-fetch histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "intellisense_v2_completion_owner_hint_index_fetch_did_set_cancellation_flag_per_fetch"
+            ) > 0,
+            "owner-hint DidSetCancellationFlag-per-fetch histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "intellisense_v2_completion_owner_hint_index_fetch_global_did_set_cancellation_flag_per_fetch"
+            ) > 0,
+            "owner-hint global DidSetCancellationFlag-per-fetch histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "intellisense_v2_completion_owner_hint_index_fetch_did_discard_per_fetch"
+            ) > 0,
+            "owner-hint DidDiscard-per-fetch histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "intellisense_v2_completion_owner_hint_index_fetch_did_discard_accumulated_per_fetch"
+            ) > 0,
+            "owner-hint DidDiscardAccumulated-per-fetch histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "intellisense_v2_completion_owner_hint_index_fetch_events_before_first_will_execute_type_index_per_fetch"
+            ) > 0,
+            "owner-hint events-before-first-WillExecute(type_index)-per-fetch histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "intellisense_v2_completion_owner_hint_index_fetch_will_check_before_first_will_execute_type_index_per_fetch"
+            ) > 0,
+            "owner-hint WillCheck-before-first-WillExecute(type_index)-per-fetch histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "intellisense_v2_completion_owner_hint_index_fetch_will_execute_parse_result_before_first_will_execute_type_index_per_fetch"
+            ) > 0,
+            "owner-hint WillExecute(parse_result)-before-first-WillExecute(type_index)-per-fetch histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "intellisense_v2_completion_owner_hint_index_fetch_first_will_execute_type_index_seen_per_fetch"
+            ) > 0,
+            "owner-hint first-WillExecute(type_index)-seen-per-fetch histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "intellisense_v2_completion_owner_hint_index_fetch_revision_start"
+            ) > 0,
+            "owner-hint index-fetch revision-start histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "intellisense_v2_completion_owner_hint_index_fetch_revision_end"
+            ) > 0,
+            "owner-hint index-fetch revision-end histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "intellisense_v2_completion_owner_hint_index_fetch_revision_delta"
+            ) > 0,
+            "owner-hint index-fetch revision-delta histogram must be exported"
         );
     }
 

@@ -290,6 +290,108 @@ impl SystemCoordinator {
             );
     }
 
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_will_iterate_cycle_per_fetch(
+        &self,
+        count: u64,
+    ) {
+        self.observability
+            .record_intellisense_v2_completion_owner_hint_index_fetch_will_iterate_cycle_per_fetch(
+                count,
+            );
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_did_set_cancellation_flag_per_fetch(
+        &self,
+        count: u64,
+    ) {
+        self.observability
+            .record_intellisense_v2_completion_owner_hint_index_fetch_did_set_cancellation_flag_per_fetch(
+                count,
+            );
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_global_did_set_cancellation_flag_per_fetch(
+        &self,
+        count: u64,
+    ) {
+        self.observability
+            .record_intellisense_v2_completion_owner_hint_index_fetch_global_did_set_cancellation_flag_per_fetch(
+                count,
+            );
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_did_discard_per_fetch(
+        &self,
+        count: u64,
+    ) {
+        self.observability
+            .record_intellisense_v2_completion_owner_hint_index_fetch_did_discard_per_fetch(count);
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_did_discard_accumulated_per_fetch(
+        &self,
+        count: u64,
+    ) {
+        self.observability
+            .record_intellisense_v2_completion_owner_hint_index_fetch_did_discard_accumulated_per_fetch(count);
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_events_before_first_will_execute_type_index_per_fetch(
+        &self,
+        count: u64,
+    ) {
+        self.observability
+            .record_intellisense_v2_completion_owner_hint_index_fetch_events_before_first_will_execute_type_index_per_fetch(count);
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_will_check_before_first_will_execute_type_index_per_fetch(
+        &self,
+        count: u64,
+    ) {
+        self.observability
+            .record_intellisense_v2_completion_owner_hint_index_fetch_will_check_before_first_will_execute_type_index_per_fetch(count);
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_will_execute_parse_result_before_first_will_execute_type_index_per_fetch(
+        &self,
+        count: u64,
+    ) {
+        self.observability
+            .record_intellisense_v2_completion_owner_hint_index_fetch_will_execute_parse_result_before_first_will_execute_type_index_per_fetch(count);
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_first_will_execute_type_index_seen_per_fetch(
+        &self,
+        count: u64,
+    ) {
+        self.observability
+            .record_intellisense_v2_completion_owner_hint_index_fetch_first_will_execute_type_index_seen_per_fetch(count);
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_revision_start(
+        &self,
+        revision: u64,
+    ) {
+        self.observability
+            .record_intellisense_v2_completion_owner_hint_index_fetch_revision_start(revision);
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_revision_end(
+        &self,
+        revision: u64,
+    ) {
+        self.observability
+            .record_intellisense_v2_completion_owner_hint_index_fetch_revision_end(revision);
+    }
+
+    pub fn record_intellisense_v2_completion_owner_hint_index_fetch_revision_delta(
+        &self,
+        delta: u64,
+    ) {
+        self.observability
+            .record_intellisense_v2_completion_owner_hint_index_fetch_revision_delta(delta);
+    }
+
     pub fn observability_metrics(&self) -> Value {
         self.observability.get_metrics().export_metrics()
     }

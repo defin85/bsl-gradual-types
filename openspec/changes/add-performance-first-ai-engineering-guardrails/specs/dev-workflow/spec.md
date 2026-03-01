@@ -1,5 +1,23 @@
 ## ADDED Requirements
 
+### Requirement: Change criticality классифицируется детерминированно до запуска process-gates (MUST)
+Система MUST выполнять детерминированную классификацию каждого change перед применением ADR/doc-first/perf gates.
+
+Минимальный контракт классификации MUST включать:
+- `change_criticality` из фиксированного enum: `routine`, `behavioral`, `architectural`, `perf_critical`;
+- machine-readable артефакт (в change artifacts) с причиной классификации и rule-id;
+- fail-closed режим при `unknown`/`missing` классификации.
+
+Нормативное правило применения gate:
+- ADR/doc-first/perf-resource gates MUST быть обязательными для `architectural` и `perf_critical`;
+- для остальных классов применяются только соответствующие им обязательные workflow checks.
+
+#### Scenario: Неопределённая criticality блокирует implementation
+- **GIVEN** change не содержит валидный `change_criticality`
+- **WHEN** запускается pre-implementation workflow gate
+- **THEN** gate завершается fail с причиной `change_criticality_missing_or_unknown`
+- **AND** implementation этап не считается разрешённым
+
 ### Requirement: Архитектурно-значимые и perf-critical изменения проходят ADR gate до реализации (MUST)
 Для изменений, затрагивающих архитектурно-значимые решения (минимум: модель владения ресурсами, синхронизационные примитивы hot path, модель очередей/cancellation, IPC границы, cache topology), система MUST требовать утвержденный ADR до начала имплементации.
 
@@ -36,10 +54,22 @@ ADR MUST содержать:
 
 Система MUST рассматривать отсутствие test-first evidence как нарушение process gate.
 
+Test-first evidence MUST быть machine-readable и включать минимум:
+- ссылку на failing evidence до фикса (`failing_ref`);
+- ссылку на passing evidence после фикса (`passing_ref`);
+- связку `change_id` и `scope` проверяемого поведения;
+- deterministic reason-code при провале.
+
 #### Scenario: Реализация без воспроизводимого failing test отклоняется
 - **GIVEN** PR меняет поведение runtime анализа
 - **WHEN** проверяется trace change-to-test
 - **THEN** gate завершается fail, если нет зафиксированного failing test/contract baseline до фикса
+
+#### Scenario: Test-first evidence отсутствует в machine-readable формате
+- **GIVEN** backend/runtime behavioral change помечен как test-first required
+- **WHEN** workflow gate проверяет evidence artifact
+- **THEN** gate завершается fail с причиной `test_first_evidence_missing_or_invalid`
+- **AND** merge блокируется до предоставления валидного evidence
 
 ### Requirement: Protected acceptance assets immutable в implementation change (MUST)
 Система MUST защищать protected acceptance assets (ключевые acceptance tests, versioned contracts, perf baselines) от ad-hoc изменений в рамках implementation change.
@@ -73,6 +103,21 @@ Gate MUST падать при отсутствии обязательных ар
 - **WHEN** perf merge gate анализирует отчёт
 - **THEN** gate завершается fail с причиной превышения абсолютного latency budget
 - **AND** merge блокируется до оптимизации или явного обновления budget через ADR
+
+### Requirement: Bootstrap policy для initial perf budgets детерминирован и fail-closed (MUST)
+Система MUST иметь явную bootstrap policy для первичного включения blocking perf gate.
+
+Нормативные требования:
+- blocking perf gate MUST NOT включаться без зафиксированных budget thresholds в versioned baseline contract;
+- bootstrap расчёт initial budgets MUST быть формально описан (sample size, aggregation rule, профили `small|large|churn`);
+- итоговые budget значения MUST быть записаны в versioned contract artifact и утверждены через ADR;
+- при отсутствии bootstrap artifacts/verdict gate MUST завершаться fail-closed.
+
+#### Scenario: Blocking gate отклоняет change без зафиксированного initial budget
+- **GIVEN** perf-critical change пытается включить blocking mode
+- **WHEN** baseline contract не содержит утверждённых initial resource/latency budgets
+- **THEN** gate завершается fail с причиной `initial_budget_not_fixed`
+- **AND** blocking mode не активируется
 
 ### Requirement: Option B является единственной архитектурой perf-gate (MUST)
 Система MUST реализовывать perf-gate только через dedicated perf-gate module и versioned schema contract.

@@ -3017,6 +3017,18 @@ impl LanguageServer for BslLanguageServer {
                                             ),
                                         );
                                         coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_fetch_first_will_iterate_cycle",
+                                            ms_to_duration(
+                                                profile.index_fetch_first_will_iterate_cycle_ms,
+                                            ),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_fetch_last_will_iterate_cycle",
+                                            ms_to_duration(
+                                                profile.index_fetch_last_will_iterate_cycle_ms,
+                                            ),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
                                             "query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_cancellation",
                                             ms_to_duration(
                                                 profile
@@ -3035,6 +3047,27 @@ impl LanguageServer for BslLanguageServer {
                                             ms_to_duration(
                                                 profile
                                                     .index_fetch_first_will_check_to_first_will_execute_type_index_ms,
+                                            ),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_fetch_last_will_check_to_first_will_execute_type_index",
+                                            ms_to_duration(
+                                                profile
+                                                    .index_fetch_last_will_check_to_first_will_execute_type_index_ms,
+                                            ),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_parse_result_to_first_will_execute_type_index",
+                                            ms_to_duration(
+                                                profile
+                                                    .index_fetch_last_will_execute_parse_result_to_first_will_execute_type_index_ms,
+                                            ),
+                                        );
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            "query_bundle_owner_hint_type_lookup_index_fetch_idle_before_first_will_execute_type_index",
+                                            ms_to_duration(
+                                                profile
+                                                    .index_fetch_idle_before_first_will_execute_type_index_ms,
                                             ),
                                         );
                                         coordinator_for_query.record_completion_stage_latency(
@@ -3108,6 +3141,54 @@ impl LanguageServer for BslLanguageServer {
                                         coordinator_for_query
                                             .record_intellisense_v2_completion_owner_hint_index_fetch_will_execute_other_per_fetch(
                                                 profile.index_fetch_will_execute_other_total,
+                                            );
+                                        coordinator_for_query
+                                            .record_intellisense_v2_completion_owner_hint_index_fetch_will_iterate_cycle_per_fetch(
+                                                profile.index_fetch_will_iterate_cycle_total,
+                                            );
+                                        coordinator_for_query
+                                            .record_intellisense_v2_completion_owner_hint_index_fetch_did_set_cancellation_flag_per_fetch(
+                                                profile.index_fetch_did_set_cancellation_flag_total,
+                                            );
+                                        coordinator_for_query
+                                            .record_intellisense_v2_completion_owner_hint_index_fetch_global_did_set_cancellation_flag_per_fetch(
+                                                profile.index_fetch_global_did_set_cancellation_flag_total,
+                                            );
+                                        coordinator_for_query
+                                            .record_intellisense_v2_completion_owner_hint_index_fetch_did_discard_per_fetch(
+                                                profile.index_fetch_did_discard_total,
+                                            );
+                                        coordinator_for_query
+                                            .record_intellisense_v2_completion_owner_hint_index_fetch_did_discard_accumulated_per_fetch(
+                                                profile.index_fetch_did_discard_accumulated_total,
+                                            );
+                                        coordinator_for_query
+                                            .record_intellisense_v2_completion_owner_hint_index_fetch_events_before_first_will_execute_type_index_per_fetch(
+                                                profile.index_fetch_events_before_first_will_execute_type_index_total,
+                                            );
+                                        coordinator_for_query
+                                            .record_intellisense_v2_completion_owner_hint_index_fetch_will_check_before_first_will_execute_type_index_per_fetch(
+                                                profile.index_fetch_will_check_before_first_will_execute_type_index_total,
+                                            );
+                                        coordinator_for_query
+                                            .record_intellisense_v2_completion_owner_hint_index_fetch_will_execute_parse_result_before_first_will_execute_type_index_per_fetch(
+                                                profile.index_fetch_will_execute_parse_result_before_first_will_execute_type_index_total,
+                                            );
+                                        coordinator_for_query
+                                            .record_intellisense_v2_completion_owner_hint_index_fetch_first_will_execute_type_index_seen_per_fetch(
+                                                profile.index_fetch_first_will_execute_type_index_seen_total,
+                                            );
+                                        coordinator_for_query
+                                            .record_intellisense_v2_completion_owner_hint_index_fetch_revision_start(
+                                                profile.index_fetch_revision_start,
+                                            );
+                                        coordinator_for_query
+                                            .record_intellisense_v2_completion_owner_hint_index_fetch_revision_end(
+                                                profile.index_fetch_revision_end,
+                                            );
+                                        coordinator_for_query
+                                            .record_intellisense_v2_completion_owner_hint_index_fetch_revision_delta(
+                                                profile.index_fetch_revision_delta,
                                             );
                                         };
                                     let member_access_owner_type_hint =

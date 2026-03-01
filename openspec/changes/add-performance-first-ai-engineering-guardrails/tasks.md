@@ -8,6 +8,10 @@
 - [ ] 1.7 Добавить в `bsl-intellisense-v2` low-cardinality resource observability requirement.
 - [ ] 1.8 Добавить в `dev-workflow` и `bsl-intellisense-v2` dual latency gate requirement (relative ratio + absolute ceiling).
 - [ ] 1.9 Зафиксировать `Option B` как единственный путь: dedicated perf-gate module + versioned schema contract.
+- [ ] 1.10 Добавить в `dev-workflow` требование детерминированной `change_criticality` классификации с fail-closed policy.
+- [ ] 1.11 Добавить в `dev-workflow` machine-readable test-first evidence contract requirement.
+- [ ] 1.12 Добавить в `dev-workflow` bootstrap policy requirement для initial perf budgets.
+- [ ] 1.13 Ужесточить `bsl-intellisense-v2` до canonical metric keys без "или эквивалент".
 
 ## 2. Design And Tooling
 - [ ] 2.1 Утвердить ADR template и критерии "architecturally significant/perf-critical change".
@@ -16,6 +20,9 @@
 - [ ] 2.4 Зафиксировать ownership: кто утверждает ADR, кто владелец perf budgets, кто владелец protected-assets policy.
 - [ ] 2.5 Зафиксировать абсолютные latency ceilings (`p95/p99`) по профилям `small/large/churn` и policy их изменения через ADR.
 - [ ] 2.6 Спроектировать dedicated perf-gate module boundary (API, integration points, reason-code taxonomy).
+- [ ] 2.7 Определить schema для `change_criticality` классификации (enum + reason/rule-id + storage path).
+- [ ] 2.8 Определить schema для machine-readable test-first evidence (`failing_ref`, `passing_ref`, `scope`, reason-codes).
+- [ ] 2.9 Зафиксировать bootstrap методику initial budgets (sample size, aggregation rule, профили, approval path).
 
 ## 3. Implementation Rollout
 - [ ] 3.1 Реализовать process-gates (ADR/doc-first/protected-assets) как автоматические проверки в CI/локальном workflow.
@@ -24,12 +31,15 @@
 - [ ] 3.4 Зафиксировать и подключить `contracts/intellisense-perf-gate/v1/**` в pipeline с compatibility-diff проверкой.
 - [ ] 3.5 Реализовать extended perf gate в модуле: dual latency gate (relative ratio + absolute ceiling) + resource budgets + fail-closed deterministic report с reason-codes.
 - [ ] 3.6 Включить blocking-mode для unified Option B gate после фиксации baseline.
+- [ ] 3.7 Реализовать gate-проверки на обязательные canonical metric keys в contract input/report.
+- [ ] 3.8 Реализовать fail-closed проверку отсутствия `change_criticality` и отсутствия test-first evidence для соответствующих change-классов.
 
 ## 4. Validation
 - [ ] 4.1 `openspec validate add-performance-first-ai-engineering-guardrails --strict --no-interactive`.
 - [ ] 4.2 Dry-run на репрезентативных профилях (`small`, `large`, `churn`) и подтверждение воспроизводимости отчётов.
 - [ ] 4.3 Review с владельцами `analysis-v2`, `runtime`, `LSP`, и process ownership.
 - [ ] 4.4 Подтвердить, что в `lsp_server`/скриптах нет альтернативной inline логики perf-verdict вне dedicated module.
+- [ ] 4.5 Подтвердить, что bootstrap budgets зафиксированы в versioned contract до включения blocking mode.
 
 ## Dependencies / Parallelism
 - [ ] D1 Пункты 2.1 и 2.2 блокируют 3.1.

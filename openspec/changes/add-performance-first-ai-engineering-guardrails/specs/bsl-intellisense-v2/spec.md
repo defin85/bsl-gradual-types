@@ -4,10 +4,12 @@
 Система MUST расширить quality gate интерактивного completion v2: помимо latency, gate MUST учитывать ресурсные бюджеты для warm-path.
 
 Минимальный набор обязательных resource budget метрик:
-- `allocations_per_completion` (или эквивалентный детерминированный счётчик аллокаций);
-- `allocated_bytes_per_completion` (или эквивалентный memory pressure индикатор);
-- `lock_wait_ms_per_completion` и/или `lock_contention_events_per_completion`.
+- `allocations_per_completion`;
+- `allocated_bytes_per_completion`;
+- `lock_wait_ms_per_completion`;
+- `lock_contention_events_per_completion`.
 
+Указанные metric keys MUST использоваться в schema contract без замены на альтернативные имена в пределах одной major версии контракта.
 Бюджеты MUST быть versioned в baseline artifact и проверяться на профилях минимум `small`, `large`, `churn`.
 Latency часть completion gate MUST проверяться одновременно по относительным порогам к baseline и по абсолютным ceiling budget (`p95/p99`) для warm-path.
 
@@ -23,6 +25,12 @@ Latency часть completion gate MUST проверяться одноврем�
 - **WHEN** выполняется completion quality gate
 - **THEN** gate завершается fail, даже если relative ratio проходит
 - **AND** отчёт фиксирует нарушение абсолютного latency budget как блокирующее
+
+#### Scenario: Отсутствует обязательный canonical metric key
+- **GIVEN** perf report не содержит один из обязательных keys (`allocations_per_completion`, `allocated_bytes_per_completion`, `lock_wait_ms_per_completion`, `lock_contention_events_per_completion`)
+- **WHEN** evaluator module выполняет completion quality gate
+- **THEN** gate завершается fail с причиной `missing_required_metric_field`
+- **AND** отчёт не считается валидным input для verdict
 
 ### Requirement: Completion observability публикует low-cardinality allocator/lock pressure signals (MUST)
 Система MUST публиковать low-cardinality observability для root-cause анализа resource regressions completion пути.

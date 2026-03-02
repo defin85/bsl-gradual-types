@@ -2981,10 +2981,22 @@ impl LanguageServer for BslLanguageServer {
                                             "query_bundle_owner_hint_type_lookup_index_fetch_wait",
                                             ms_to_duration(profile.index_fetch_wait_ms),
                                         );
+                                        if profile.index_fetch_wait_ms > 0 {
+                                            coordinator_for_query.record_completion_resource_pressure(
+                                                "lock_wait",
+                                                ms_to_duration(profile.index_fetch_wait_ms),
+                                            );
+                                        }
                                         coordinator_for_query.record_completion_stage_latency(
                                             "query_bundle_owner_hint_type_lookup_index_fetch_unattributed",
                                             ms_to_duration(profile.index_fetch_unattributed_ms),
                                         );
+                                        if profile.index_fetch_unattributed_ms > 0 {
+                                            coordinator_for_query.record_completion_resource_pressure(
+                                                "other",
+                                                ms_to_duration(profile.index_fetch_unattributed_ms),
+                                            );
+                                        }
                                         coordinator_for_query.record_completion_stage_latency(
                                             "query_bundle_owner_hint_type_lookup_index_fetch_pre_first_salsa_event_wait",
                                             ms_to_duration(
@@ -3099,6 +3111,12 @@ impl LanguageServer for BslLanguageServer {
                                                 "query_bundle_owner_hint_type_lookup_index_fetch_apply_age_at_query_start",
                                                 ms_to_duration(apply_age_ms),
                                             );
+                                            if apply_age_ms > 0 {
+                                                coordinator_for_query.record_completion_resource_pressure(
+                                                    "queue_backpressure",
+                                                    ms_to_duration(apply_age_ms),
+                                                );
+                                            }
                                             coordinator_for_query.record_completion_stage_latency(
                                                 "query_bundle_owner_hint_type_lookup_index_fetch_apply_to_fetch_end",
                                                 ms_to_duration(
@@ -3146,6 +3164,12 @@ impl LanguageServer for BslLanguageServer {
                                             "query_bundle_owner_hint_type_lookup_index_build_total",
                                             ms_to_duration(profile.index_build_total_ms),
                                         );
+                                        if profile.index_build_total_ms > 0 {
+                                            coordinator_for_query.record_completion_resource_pressure(
+                                                "allocator_pressure",
+                                                ms_to_duration(profile.index_build_total_ms),
+                                            );
+                                        }
                                         coordinator_for_query.record_completion_stage_latency(
                                             "query_bundle_owner_hint_type_lookup_index_build_seed_context",
                                             ms_to_duration(profile.index_build_seed_module_context_ms),

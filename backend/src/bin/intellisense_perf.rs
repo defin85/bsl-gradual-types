@@ -160,6 +160,8 @@ struct Scenario {
     config_path: Option<PathBuf>,
     #[serde(default)]
     platform_version: Option<String>,
+    #[serde(default)]
+    churn: Option<ScenarioChurn>,
     cases: Vec<ScenarioCase>,
 }
 
@@ -172,6 +174,18 @@ struct ScenarioCase {
     label: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Clone, Copy)]
+struct ScenarioChurn {
+    #[serde(default = "default_churn_every")]
+    every: usize,
+    #[serde(default)]
+    target_case: Option<usize>,
+}
+
+fn default_churn_every() -> usize {
+    1
+}
+
 #[derive(Debug)]
 struct PreparedCase {
     file_id: V2FileId,
@@ -179,6 +193,36 @@ struct PreparedCase {
     content: Arc<str>,
     line: u32,
     column: u32,
+}
+
+#[derive(Debug, Clone)]
+struct ChurnPlan {
+    every: usize,
+    target_file_uri: String,
+    target_file_path: Arc<str>,
+    target_file_ids: Vec<V2FileId>,
+    base_content: Arc<str>,
+}
+
+#[derive(Debug)]
+struct ChurnRuntimeState {
+    plan: ChurnPlan,
+    next_version: i32,
+    revision: u64,
+}
+
+impl ChurnRuntimeState {
+    fn new(plan: ChurnPlan) -> Self {
+        Self {
+            plan,
+            next_version: 1,
+            revision: 0,
+        }
+    }
+
+    fn should_apply(&self, iteration: usize) -> bool {
+        iteration % self.plan.every == 0
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -315,16 +359,19 @@ async fn main() -> Result<()> {
         });
     }
 
-    let analysis = host.analysis();
+    let mut churn_state = build_churn_state(&scenario, &prepared)?;
+    let mut content_by_file = build_content_by_file_map(&prepared);
 
     if args.warmup > 0 {
         run_iterations(
-            &analysis,
+            &mut host,
             deps_bundle.index_snapshot.as_ref(),
             &metadata_lookup,
             resolver.as_ref(),
             &prepared,
             args.warmup,
+            &mut churn_state,
+            &mut content_by_file,
             None,
         )
         .await?;
@@ -338,12 +385,14 @@ async fn main() -> Result<()> {
     let mut lock_wait_ms_total = 0.0_f64;
     let mut lock_contention_events_total = 0_u64;
     run_iterations(
-        &analysis,
+        &mut host,
         deps_bundle.index_snapshot.as_ref(),
         &metadata_lookup,
         resolver.as_ref(),
         &prepared,
         args.iterations,
+        &mut churn_state,
+        &mut content_by_file,
         Some(OutputTargets {
             durations: &mut durations_ms,
             errors: &mut errors,
@@ -537,18 +586,26 @@ fn find_position(content: &str, marker: &str) -> Option<(u32, u32)> {
 }
 
 async fn run_iterations(
-    analysis: &bsl_analysis_v2::AnalysisV2,
+    host: &mut AnalysisHostV2,
     index_snapshot: &bsl_backend::system::IndexSnapshot,
     metadata_lookup: &TypeMetadataLookup,
     resolver: &TypeResolver,
     cases: &[PreparedCase],
     iterations: usize,
+    churn_state: &mut Option<ChurnRuntimeState>,
+    content_by_file: &mut HashMap<String, Arc<str>>,
     mut output: Option<OutputTargets<'_>>,
 ) -> Result<()> {
-    for _ in 0..iterations {
+    for iteration in 0..iterations {
+        maybe_apply_churn(host, churn_state, content_by_file, iteration)?;
+        let analysis = host.analysis();
         for case in cases {
             let started = Instant::now();
             let alloc_before = allocation_snapshot();
+            let case_content = content_by_file
+                .get(case.file_uri.as_str())
+                .cloned()
+                .unwrap_or_else(|| case.content.clone());
 
             let ir_started = Instant::now();
             let ir_program = analysis
@@ -558,7 +615,7 @@ async fn run_iterations(
             let ir_elapsed_ms = ir_started.elapsed().as_secs_f64() * 1000.0;
 
             let result = get_completion_with_semantic_program_snapshot(
-                case.content.as_ref(),
+                case_content.as_ref(),
                 case.line,
                 case.column,
                 Some(case.file_uri.as_str()),
@@ -597,6 +654,102 @@ async fn run_iterations(
         }
     }
     Ok(())
+}
+
+fn build_content_by_file_map(cases: &[PreparedCase]) -> HashMap<String, Arc<str>> {
+    let mut map = HashMap::new();
+    for case in cases {
+        map.entry(case.file_uri.clone())
+            .or_insert_with(|| case.content.clone());
+    }
+    map
+}
+
+fn build_churn_state(
+    scenario: &Scenario,
+    cases: &[PreparedCase],
+) -> Result<Option<ChurnRuntimeState>> {
+    let Some(churn) = scenario.churn else {
+        return Ok(None);
+    };
+    if churn.every == 0 {
+        bail!("Scenario churn.every must be greater than 0");
+    }
+    if cases.is_empty() {
+        bail!("Scenario must contain at least one case");
+    }
+
+    let target_case = churn.target_case.unwrap_or(0);
+    let target_case_ref = cases
+        .get(target_case)
+        .with_context(|| format!("Scenario churn.target_case out of range: {}", target_case))?;
+    let target_file_uri = target_case_ref.file_uri.clone();
+    let target_file_path: Arc<str> = Arc::from(target_file_uri.clone());
+    let target_file_ids = cases
+        .iter()
+        .filter(|case| case.file_uri == target_file_uri)
+        .map(|case| case.file_id)
+        .collect::<Vec<_>>();
+
+    if target_file_ids.is_empty() {
+        bail!(
+            "Scenario churn target file is not present in prepared cases: {}",
+            target_file_uri
+        );
+    }
+
+    let plan = ChurnPlan {
+        every: churn.every,
+        target_file_uri,
+        target_file_path,
+        target_file_ids,
+        base_content: target_case_ref.content.clone(),
+    };
+    Ok(Some(ChurnRuntimeState::new(plan)))
+}
+
+fn maybe_apply_churn(
+    host: &mut AnalysisHostV2,
+    churn_state: &mut Option<ChurnRuntimeState>,
+    content_by_file: &mut HashMap<String, Arc<str>>,
+    iteration: usize,
+) -> Result<()> {
+    let Some(state) = churn_state.as_mut() else {
+        return Ok(());
+    };
+    if !state.should_apply(iteration) {
+        return Ok(());
+    }
+
+    state.revision = state.revision.saturating_add(1);
+    let churned_content = build_churned_content(state.plan.base_content.as_ref(), state.revision);
+    let churned_content_arc: Arc<str> = Arc::from(churned_content);
+
+    for file_id in &state.plan.target_file_ids {
+        host.apply_change(ChangeV2::SetFile {
+            file_id: *file_id,
+            text: churned_content_arc.clone(),
+            version: state.next_version,
+            path: state.plan.target_file_path.clone(),
+        });
+    }
+    content_by_file.insert(state.plan.target_file_uri.clone(), churned_content_arc);
+    state.next_version = state.next_version.saturating_add(1);
+
+    Ok(())
+}
+
+fn build_churned_content(base_content: &str, revision: u64) -> String {
+    let mut content = String::with_capacity(base_content.len() + 64);
+    content.push_str(base_content);
+    if !content.ends_with('\n') {
+        content.push('\n');
+    }
+    let marker = if revision % 2 == 0 { "B" } else { "A" };
+    content.push_str("// __intellisense_perf_churn_marker__ ");
+    content.push_str(marker);
+    content.push('\n');
+    content
 }
 
 struct OutputTargets<'a> {
@@ -875,4 +1028,65 @@ fn write_summary(path: &Path, report: &PerfReport) -> Result<()> {
     fs::write(path, lines.join("\n"))
         .with_context(|| format!("Failed to write {}", path.display()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_churned_content_switches_marker_without_growth() {
+        let base = "Процедура Тест()\nКонецПроцедуры";
+        let first = build_churned_content(base, 1);
+        let second = build_churned_content(base, 2);
+
+        assert!(first.contains("__intellisense_perf_churn_marker__ A"));
+        assert!(second.contains("__intellisense_perf_churn_marker__ B"));
+        assert_eq!(
+            first.matches("__intellisense_perf_churn_marker__").count(),
+            1
+        );
+        assert_eq!(
+            second.matches("__intellisense_perf_churn_marker__").count(),
+            1
+        );
+    }
+
+    #[test]
+    fn build_churn_state_uses_target_case_file_for_all_matching_ids() {
+        let file_uri = "/tmp/test.bsl".to_string();
+        let cases = vec![
+            PreparedCase {
+                file_id: V2FileId(1),
+                file_uri: file_uri.clone(),
+                content: Arc::from("A"),
+                line: 0,
+                column: 0,
+            },
+            PreparedCase {
+                file_id: V2FileId(2),
+                file_uri: file_uri.clone(),
+                content: Arc::from("A"),
+                line: 0,
+                column: 1,
+            },
+        ];
+        let scenario = Scenario {
+            name: "churn".to_string(),
+            syntax_helper_path: None,
+            config_path: None,
+            platform_version: None,
+            churn: Some(ScenarioChurn {
+                every: 2,
+                target_case: Some(1),
+            }),
+            cases: Vec::new(),
+        };
+
+        let state = build_churn_state(&scenario, &cases)
+            .expect("churn state")
+            .expect("churn enabled");
+        assert_eq!(state.plan.every, 2);
+        assert_eq!(state.plan.target_file_ids, vec![V2FileId(1), V2FileId(2)]);
+    }
 }

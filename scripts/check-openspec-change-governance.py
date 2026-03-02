@@ -86,7 +86,70 @@ def validate_change_criticality(path: Path, expected_change_id: str) -> str:
     return criticality
 
 
-def validate_test_first_evidence(path: Path, expected_change_id: str) -> None:
+def validate_acceptance_matrix(change_root: Path) -> None:
+    candidates = [
+        change_root / "validation" / "acceptance_matrix.md",
+        change_root / "validation" / "acceptance-matrix.md",
+        change_root / "acceptance_matrix.md",
+        change_root / "acceptance-matrix.md",
+    ]
+    matrix_path = next(
+        (path for path in candidates if path.exists() and path.is_file()),
+        None,
+    )
+    ensure(
+        matrix_path is not None,
+        (
+            "doc_first_contract_missing: acceptance matrix is required for non-MVP "
+            "architectural/perf_critical changes "
+            f"(expected one of: {', '.join(str(path) for path in candidates)})"
+        ),
+    )
+    content = matrix_path.read_text(encoding="utf-8").lower()
+    has_pass = any(token in content for token in ("pass", "критерии успеха", "успех"))
+    has_fail = any(token in content for token in ("fail", "критерии провала", "провал"))
+    ensure(
+        has_pass and has_fail,
+        (
+            "doc_first_contract_missing: acceptance matrix must include explicit pass/fail "
+            f"criteria ({matrix_path})"
+        ),
+    )
+
+
+def resolve_evidence_ref(repo_root: Path, raw_ref: str) -> Path | None:
+    if "://" in raw_ref:
+        return None
+    ref_path = Path(raw_ref)
+    if not ref_path.is_absolute():
+        ref_path = (repo_root / ref_path).resolve()
+    return ref_path
+
+
+def validate_evidence_ref(
+    repo_root: Path,
+    ref_value: str,
+    *,
+    field_name: str,
+    reason_code: str,
+    source_path: Path,
+) -> None:
+    resolved = resolve_evidence_ref(repo_root, ref_value)
+    if resolved is None:
+        return
+    ensure(
+        resolved.exists(),
+        f"{reason_code}: {source_path} {field_name} does not exist: {ref_value}",
+    )
+    ensure(
+        resolved.is_file(),
+        f"{reason_code}: {source_path} {field_name} must point to a file: {ref_value}",
+    )
+
+
+def validate_test_first_evidence(
+    path: Path, expected_change_id: str, repo_root: Path
+) -> None:
     payload = parse_json(path)
     ensure(
         payload.get("schema_version") == "v1",
@@ -107,6 +170,20 @@ def validate_test_first_evidence(path: Path, expected_change_id: str) -> None:
     ensure(
         isinstance(payload.get("passing_ref"), str) and payload["passing_ref"].strip(),
         f"test_first_evidence_missing_or_invalid: {path} passing_ref is required",
+    )
+    validate_evidence_ref(
+        repo_root,
+        payload["failing_ref"],
+        field_name="failing_ref",
+        reason_code="test_first_evidence_missing_or_invalid",
+        source_path=path,
+    )
+    validate_evidence_ref(
+        repo_root,
+        payload["passing_ref"],
+        field_name="passing_ref",
+        reason_code="test_first_evidence_missing_or_invalid",
+        source_path=path,
     )
     reason_codes = payload.get("reason_codes")
     ensure(
@@ -159,6 +236,9 @@ def main() -> int:
             args.change_id,
         )
 
+        if criticality in ADR_REQUIRED_FOR:
+            validate_acceptance_matrix(change_root)
+
         if criticality in TEST_FIRST_REQUIRED_FOR:
             check_required_file(
                 governance_root / "test_first_evidence.json",
@@ -167,6 +247,7 @@ def main() -> int:
             validate_test_first_evidence(
                 governance_root / "test_first_evidence.json",
                 args.change_id,
+                repo_root,
             )
 
         if criticality in ADR_REQUIRED_FOR:

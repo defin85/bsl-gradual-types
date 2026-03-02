@@ -3,6 +3,10 @@
   "syntax_helper_path": "examples/syntax_helper",
   "config_path": "examples/conf/conf_test",
   "platform_version": "8.3.25",
+  "churn": {
+    "every": 1,
+    "target_case": 0
+  },
   "cases": [
     {
       "file": "examples/test_lsp.bsl",

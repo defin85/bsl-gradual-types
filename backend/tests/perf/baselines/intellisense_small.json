@@ -6,14 +6,14 @@
   "metrics": {
     "total_requests": 15,
     "count": 15,
-    "p50_ms": 0.112706,
-    "p95_ms": 0.19651,
-    "p99_ms": 0.20940999999999999,
+    "p50_ms": 0.10720600000000001,
+    "p95_ms": 0.120807,
+    "p99_ms": 0.14180900000000002,
     "error_rate": 0.0,
     "incomplete_rate": 0.0,
     "allocations_per_completion": 435.0,
     "allocated_bytes_per_completion": 80313.66666666667,
-    "lock_wait_ms_per_completion": 0.007900266666666666,
+    "lock_wait_ms_per_completion": 0.006467066666666668,
     "lock_contention_events_per_completion": 1.0
   },
   "thresholds": {
@@ -21,10 +21,10 @@
     "max_incomplete_rate": 0.0
   },
   "comparison": {
-    "baseline_p95_ms": 0.079707,
-    "baseline_p99_ms": 0.10651,
-    "ratio_p95": 2.4654045441429235,
-    "ratio_p99": 1.9661064688761618,
+    "baseline_p95_ms": 0.19651,
+    "baseline_p99_ms": 0.20941,
+    "ratio_p95": 0.6147626075008905,
+    "ratio_p99": 0.6771835155914235,
     "threshold_p95": 50.0,
     "threshold_p99": 50.0,
     "threshold_resource": 50.0,

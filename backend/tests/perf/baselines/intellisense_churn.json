@@ -6,14 +6,14 @@
   "metrics": {
     "total_requests": 25,
     "count": 25,
-    "p50_ms": 5.2559759999999995,
-    "p95_ms": 5.647696,
-    "p99_ms": 5.7379,
+    "p50_ms": 19.572574999999997,
+    "p95_ms": 20.237914999999997,
+    "p99_ms": 20.887854,
     "error_rate": 0.0,
     "incomplete_rate": 0.0,
-    "allocations_per_completion": 17533.0,
-    "allocated_bytes_per_completion": 3678428.0,
-    "lock_wait_ms_per_completion": 0.034969719999999996,
+    "allocations_per_completion": 81483.08,
+    "allocated_bytes_per_completion": 20326456.16,
+    "lock_wait_ms_per_completion": 13.769018560000001,
     "lock_contention_events_per_completion": 1.0
   },
   "thresholds": {
@@ -21,10 +21,10 @@
     "max_incomplete_rate": 0.0
   },
   "comparison": {
-    "baseline_p95_ms": 0.127031,
-    "baseline_p99_ms": 0.152137,
-    "ratio_p95": 44.45919499964575,
-    "ratio_p99": 37.715348666004985,
+    "baseline_p95_ms": 5.647696,
+    "baseline_p99_ms": 5.7379,
+    "ratio_p95": 3.583393121726098,
+    "ratio_p99": 3.6403307830390914,
     "threshold_p95": 50.0,
     "threshold_p99": 50.0,
     "threshold_resource": 50.0,
@@ -33,8 +33,10 @@
     "error_rate": 0.0,
     "incomplete_rate": 0.0,
     "contract_version": "v1",
-    "verdict": "pass",
-    "reason_codes": [],
-    "pass": true
+    "verdict": "fail",
+    "reason_codes": [
+      "lock_wait_budget_exceeded"
+    ],
+    "pass": false
   }
 }

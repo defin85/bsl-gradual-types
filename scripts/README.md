@@ -152,6 +152,13 @@ UPDATE_BASELINE=1 ./scripts/run-intellisense-perf.sh
 BSL_V2_PERF_GATE_BLOCKING=1 ./scripts/run-intellisense-perf.sh
 ```
 
+**CI-параметры (репрезентативный быстрый прогон small/large/churn):**
+```bash
+BSL_V2_PERF_GATE_BLOCKING=1 PERF_WARMUP=1 PERF_ITERATIONS=5 THRESHOLD_P95=50 THRESHOLD_P99=50 THRESHOLD_RESOURCE=50 PERF_PROFILES="small large churn" ./scripts/run-intellisense-perf.sh
+```
+
+`intellisense_churn` использует детерминированный `didChange`-churn (`every=1`), поэтому профиль устойчиво отличается от `large` по latency/resource.
+
 **Вывод:**
 - Baselines: `backend/tests/perf/baselines/`
 - Отчёты: `backend/tests/perf/reports/`
@@ -210,7 +217,9 @@ python3 scripts/test-contract-compatibility-diff.py
 **Назначение:** проверить machine-readable governance артефакты change:
 - `change_criticality` (обязателен);
 - `test_first_evidence` (обязателен для `behavioral|architectural|perf_critical`);
-- ADR/doc-first минимум для `architectural|perf_critical`.
+- ADR/doc-first минимум для `architectural|perf_critical`;
+- обязательную acceptance matrix с pass/fail критериями для `architectural|perf_critical`;
+- существование `failing_ref` / `passing_ref` (для файловых ссылок).
 
 **Использование:**
 ```bash
@@ -223,14 +232,17 @@ python3 scripts/check-openspec-change-governance.py \
 ### `check-protected-assets-gate.py` - Fail-closed protected assets gate
 
 **Назначение:** блокировать ad-hoc правки protected acceptance assets без явного
-approved override артефакта в change governance.
+approved override артефакта в change governance. Для диапазона diff используется:
+- явный `--base-ref`, если передан;
+- иначе auto-resolve через `merge-base HEAD <base-branch>` (по умолчанию `origin/master`) с fallback на `HEAD~1`.
 
 **Использование:**
 ```bash
 python3 scripts/check-protected-assets-gate.py \
   --change-id add-performance-first-ai-engineering-guardrails \
   --manifest openspec/changes/add-performance-first-ai-engineering-guardrails/governance/protected_assets_manifest.txt \
-  --override openspec/changes/add-performance-first-ai-engineering-guardrails/governance/protected_assets_override.json
+  --override openspec/changes/add-performance-first-ai-engineering-guardrails/governance/protected_assets_override.json \
+  --base-ref origin/master
 ```
 
 ---

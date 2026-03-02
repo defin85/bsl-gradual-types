@@ -1098,6 +1098,17 @@ impl BasicObservability {
         self.metrics.increment(&key);
     }
 
+    pub fn record_completion_resource_pressure(&self, reason: &str, duration: Duration) {
+        let reason = normalize_completion_resource_reason_label(reason);
+        let counter_key =
+            format!("intellisense_v2_completion_resource_pressure_total_reason_{reason}");
+        let histogram_key =
+            format!("intellisense_v2_completion_resource_pressure_ms_reason_{reason}");
+        self.metrics.increment(&counter_key);
+        self.metrics
+            .observe_histogram(&histogram_key, duration.as_millis() as f64);
+    }
+
     pub fn record_intellisense_v2_completion_owner_hint_lookup_path(&self, path: &str) {
         let metric = match path {
             "direct" => "intellisense_v2_completion_owner_hint_lookup_path_total_direct",
@@ -2957,6 +2968,15 @@ fn normalize_completion_owner_hint_reason_label(reason: &str) -> &'static str {
     }
 }
 
+fn normalize_completion_resource_reason_label(reason: &str) -> &'static str {
+    match reason {
+        "allocator_pressure" => "allocator_pressure",
+        "lock_wait" => "lock_wait",
+        "queue_backpressure" => "queue_backpressure",
+        _ => "other",
+    }
+}
+
 fn normalize_completion_observability_mode_label(mode: &str) -> &'static str {
     match mode {
         "legacy" => "legacy",
@@ -4220,6 +4240,17 @@ mod observability_contract_tests {
         for result in ["hit", "miss", "cancelled", "error", "unexpected_result"] {
             observability.record_intellisense_v2_completion_owner_hint_lookup_result(result);
         }
+        for (reason, millis) in [
+            ("allocator_pressure", 11_u64),
+            ("lock_wait", 13_u64),
+            ("queue_backpressure", 17_u64),
+            ("unexpected_reason", 19_u64),
+        ] {
+            observability.record_completion_resource_pressure(
+                reason,
+                std::time::Duration::from_millis(millis),
+            );
+        }
         observability.record_intellisense_v2_completion_owner_hint_context(240, 18);
         observability.record_intellisense_v2_completion_owner_hint_index_fetch_salsa_counters(
             CompletionOwnerHintIndexFetchSalsaCounters {
@@ -4486,6 +4517,37 @@ mod observability_contract_tests {
             assert!(
                 counter_value(counters, key) > 0,
                 "owner-hint lookup-result counter must be exported for {label}"
+            );
+        }
+        for (label, counter_key, histogram_key) in [
+            (
+                "allocator_pressure",
+                "intellisense_v2_completion_resource_pressure_total_reason_allocator_pressure",
+                "intellisense_v2_completion_resource_pressure_ms_reason_allocator_pressure",
+            ),
+            (
+                "lock_wait",
+                "intellisense_v2_completion_resource_pressure_total_reason_lock_wait",
+                "intellisense_v2_completion_resource_pressure_ms_reason_lock_wait",
+            ),
+            (
+                "queue_backpressure",
+                "intellisense_v2_completion_resource_pressure_total_reason_queue_backpressure",
+                "intellisense_v2_completion_resource_pressure_ms_reason_queue_backpressure",
+            ),
+            (
+                "other",
+                "intellisense_v2_completion_resource_pressure_total_reason_other",
+                "intellisense_v2_completion_resource_pressure_ms_reason_other",
+            ),
+        ] {
+            assert!(
+                counter_value(counters, counter_key) > 0,
+                "resource-pressure counter must be exported for {label}"
+            );
+            assert!(
+                histogram_count(histograms, histogram_key) > 0,
+                "resource-pressure histogram must be exported for {label}"
             );
         }
         assert!(

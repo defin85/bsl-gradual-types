@@ -1,16 +1,16 @@
 ## 1. Specification
-- [ ] 1.1 Добавить/уточнить требования `bsl-intellisense-v2` для event-driven precompute `type_index` и serve-only request path.
-- [ ] 1.2 Уточнить churn fastpath requirement: latest-path использует только precomputed artifacts, без sync parse/index.
-- [ ] 1.3 Зафиксировать observability контракт для precompute queue/exec и cache serving outcomes.
+- [x] 1.1 Добавить/уточнить требования `bsl-intellisense-v2` для event-driven precompute `type_index` и serve-only request path.
+- [x] 1.2 Уточнить churn fastpath requirement: latest-path использует только precomputed artifacts, без sync parse/index.
+- [x] 1.3 Зафиксировать observability контракт для precompute queue/exec и cache serving outcomes.
 
 ## 2. Architecture And Contracts
-- [ ] 2.1 Утвердить ADR для `perf_critical` перехода на serve-only model (с rollback стратегией).
-- [ ] 2.2 Зафиксировать модель ключей/инвалидации `TypeIndexArtifactKey(file_id, file_version, deps_id, settings_id)`.
-- [ ] 2.3 Определить retention/eviction policy для artifact cache (per-file window + global guard).
-- [ ] 2.4 Определить reason-code taxonomy для cache miss/degraded serve/superseded precompute.
+- [x] 2.1 Утвердить ADR для `perf_critical` перехода на serve-only model (с rollback стратегией).
+- [x] 2.2 Зафиксировать модель ключей/инвалидации `TypeIndexArtifactKey(file_id, file_version, deps_id, settings_id)`.
+- [x] 2.3 Определить retention/eviction policy для artifact cache (per-file window + global guard).
+- [x] 2.4 Определить reason-code taxonomy для cache miss/degraded serve/superseded precompute.
 
 ## 3. Implementation
-- [ ] 3.1 Выделить границу ответственности для snapshot-derived artifacts в `analysis-v2` (отдельный модуль).
+- [x] 3.1 Выделить границу ответственности для snapshot-derived artifacts в `analysis-v2` (отдельный модуль).
 - [ ] 3.2 Реализовать event-driven precompute pipeline на `didOpen/didChange` и latest-wins supersede.
 - [ ] 3.3 Перевести интерактивный type lookup на serve-only cache API.
 - [ ] 3.4 Запретить sync parse/index compute в интерактивном request path и покрыть это тестом/инвариантом.

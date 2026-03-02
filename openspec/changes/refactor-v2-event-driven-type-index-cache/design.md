@@ -29,6 +29,10 @@
   - `produced_at_millis`
   - `parse_snapshot_meta` (`incremental`, `fallback_reason`, `changed_ranges_count`)
 
+Нормативный ключ кэша:
+- `TypeIndexArtifactKey(file_id, file_version, deps_id, settings_id)` MUST быть единственным индексом exact serving.
+- Для всех interactive serving операций (`completion|hover|signatureHelp`) MUST использоваться только exact-key или policy fallback.
+
 ### 2) Ingest-Time Precompute
 - На `didOpen/didChange` после получения `ParseSnapshot(version=V)` orchestrator планирует precompute job.
 - Job вычисляет `TypeIndexArtifact(key(file_id, V, deps_id, settings_id))`.
@@ -45,6 +49,26 @@
 - Любое изменение `deps_id` или `settings_id` инвалидирует artifacts текущего файла для старых ключей.
 - Любая новая версия файла инвалидирует exact serving для старых `file_version`.
 - Внутри `file_id` публикация user-facing ответа возможна только для актуального epoch/version.
+
+### 4.1) Retention / Eviction Policy
+- Per-file window retention: хранить не более `N=2` последних `file_version` артефактов на `(file_id, deps_id, settings_id)`.
+- Global guard: суммарное число artifacts в процессе ограничивается `MAX_ARTIFACTS=10_000` с LRU-eviction по `produced_at_millis`.
+- MUST first-evict superseded artifacts старых версий файла, затем stale artifacts с неактуальным `deps_id/settings_id`.
+- Eviction MUST NOT удалять актуальный exact artifact для latest `(file_id, version, deps_id, settings_id)`.
+- При исчерпании global guard eviction MUST быть детерминированным и observability-visible (reason code + counters).
+
+### 4.2) Reason-Code Taxonomy (v1)
+- `type_index_exact_hit`
+- `type_index_stale_served`
+- `type_index_degraded_incomplete`
+- `type_index_fallback_unavailable`
+- `type_index_precompute_superseded`
+- `type_index_precompute_cancelled`
+- `type_index_precompute_queue_saturated`
+- `type_index_artifact_invalidated_deps`
+- `type_index_artifact_invalidated_settings`
+- `type_index_artifact_evicted_global_guard`
+- `type_index_artifact_evicted_per_file_window`
 
 ### 5) Rollout
 - `shadow`: считаем новый путь параллельно, ответ пользователю от legacy, собираем parity drift.

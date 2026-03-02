@@ -2964,6 +2964,10 @@ fn normalize_completion_owner_hint_reason_label(reason: &str) -> &'static str {
         "type_hit" => "type_hit",
         "type_miss" => "type_miss",
         "cancelled" => "cancelled",
+        "type_index_exact_hit" => "type_index_exact_hit",
+        "type_index_stale_served" => "type_index_stale_served",
+        "type_index_degraded_incomplete" => "type_index_degraded_incomplete",
+        "type_index_fallback_unavailable" => "type_index_fallback_unavailable",
         _ => "other",
     }
 }
@@ -4224,6 +4228,10 @@ mod observability_contract_tests {
             "type_hit",
             "type_miss",
             "cancelled",
+            "type_index_exact_hit",
+            "type_index_stale_served",
+            "type_index_degraded_incomplete",
+            "type_index_fallback_unavailable",
             "unexpected_reason",
         ];
         for reason in reasons {
@@ -4461,6 +4469,10 @@ mod observability_contract_tests {
             "type_hit",
             "type_miss",
             "cancelled",
+            "type_index_exact_hit",
+            "type_index_stale_served",
+            "type_index_degraded_incomplete",
+            "type_index_fallback_unavailable",
             "other",
         ] {
             let key = format!("intellisense_v2_completion_owner_hint_result_total_reason_{reason}");

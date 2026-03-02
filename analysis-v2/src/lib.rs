@@ -2,7 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use salsa::Setter;
 
@@ -11,8 +11,12 @@ pub use bsl_line_index::{byte_offset_to_utf16, utf16_to_byte_offset, LineIndex};
 pub mod ast_to_ir;
 pub use ast_to_ir::AstToIrConverter;
 
+mod derived_artifacts;
 mod implicit_bindings;
 mod type_inference_v2;
+use derived_artifacts::{
+    DerivedArtifactsCache, TypeIndexArtifact, TypeIndexArtifactKey, TypeIndexParseSnapshotMeta,
+};
 
 use bsl_diagnostics::{SemanticTypeHints, SemanticValidationVisitor};
 use bsl_shared::analysis::{detect_type_guards, NarrowingEngine};
@@ -211,6 +215,71 @@ pub struct TypeAtByteOffsetProfile {
 pub struct TypeAtByteOffsetProfiledResult {
     pub resolution: Option<TypeResolution>,
     pub profile: TypeAtByteOffsetProfile,
+    pub serve_reason_code: TypeIndexServeReasonCode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeIndexServeReasonCode {
+    TypeIndexExactHit,
+    TypeIndexStaleServed,
+    TypeIndexDegradedIncomplete,
+    TypeIndexFallbackUnavailable,
+}
+
+impl TypeIndexServeReasonCode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::TypeIndexExactHit => "type_index_exact_hit",
+            Self::TypeIndexStaleServed => "type_index_stale_served",
+            Self::TypeIndexDegradedIncomplete => "type_index_degraded_incomplete",
+            Self::TypeIndexFallbackUnavailable => "type_index_fallback_unavailable",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeIndexPrecomputeReasonCode {
+    TypeIndexPrecomputeExactStored,
+    TypeIndexPrecomputeSuperseded,
+    TypeIndexPrecomputeCancelled,
+    TypeIndexPrecomputeMissingFile,
+}
+
+impl TypeIndexPrecomputeReasonCode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::TypeIndexPrecomputeExactStored => "type_index_precompute_exact_stored",
+            Self::TypeIndexPrecomputeSuperseded => "type_index_precompute_superseded",
+            Self::TypeIndexPrecomputeCancelled => "type_index_precompute_cancelled",
+            Self::TypeIndexPrecomputeMissingFile => "type_index_precompute_missing_file",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TypeIndexPrecomputeStats {
+    pub queue_wait_ms: u128,
+    pub exec_ms: u128,
+    pub build_ms: u128,
+    pub evicted_per_file_window_total: u64,
+    pub evicted_global_guard_total: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TypeIndexPrecomputeResult {
+    pub reason_code: TypeIndexPrecomputeReasonCode,
+    pub file_version: Option<i32>,
+    pub stats: TypeIndexPrecomputeStats,
+}
+
+impl TypeIndexPrecomputeResult {
+    fn with_reason(reason_code: TypeIndexPrecomputeReasonCode) -> Self {
+        Self {
+            reason_code,
+            file_version: None,
+            stats: TypeIndexPrecomputeStats::default(),
+        }
+    }
 }
 
 fn cancellable<T>(op: impl FnOnce() -> T) -> Cancellable<T> {
@@ -226,6 +295,13 @@ fn cancellable<T>(op: impl FnOnce() -> T) -> Cancellable<T> {
 #[inline(always)]
 fn cancellation_checkpoint(db: &dyn salsa::Database) {
     db.unwind_if_revision_cancelled();
+}
+
+fn unix_time_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
 }
 
 fn compute_index_fetch_wait_ms(
@@ -901,18 +977,6 @@ pub struct ParseSnapshot {
     pub backend_tree_hash: u64,
     pub incremental: bool,
     pub fallback_reason: Option<Arc<str>>,
-}
-
-const DERIVED_CACHE_KEEP_VERSIONS: i32 = 2;
-
-#[derive(Clone, Default)]
-struct DerivedVersionArtifacts {
-    ir_by_deps_id: HashMap<DepsSnapshotId, Arc<SemanticProgram>>,
-}
-
-#[derive(Clone, Default)]
-struct DerivedArtifactsCache {
-    by_file: HashMap<FileId, HashMap<i32, DerivedVersionArtifacts>>,
 }
 
 #[salsa::input]
@@ -1876,21 +1940,28 @@ impl AnalysisHostV2 {
                 self.derived_cache
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .by_file
-                    .remove(&file_id);
+                    .clear_file(file_id);
             }
             Change::SetDepsSnapshot { deps_id, deps } => {
-                self.deps.set_id(&mut self.db).to(deps_id);
+                self.deps.set_id(&mut self.db).to(deps_id.clone());
                 self.deps.set_data(&mut self.db).to(DepsDataSnapshot(deps));
+                self.derived_cache
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .invalidate_type_index_for_deps(&deps_id);
             }
             Change::SetSettingsSnapshot {
                 settings_id,
                 diagnostics_detail_level,
             } => {
-                self.settings.set_id(&mut self.db).to(settings_id);
+                self.settings.set_id(&mut self.db).to(settings_id.clone());
                 self.settings
                     .set_diagnostics_detail_level(&mut self.db)
                     .to(diagnostics_detail_level);
+                self.derived_cache
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .invalidate_type_index_for_settings(&settings_id);
             }
         }
     }
@@ -1907,19 +1978,10 @@ impl AnalysisHostV2 {
             }
         }
         self.parse_snapshots.remove(&file_id);
-        let min_version_to_keep = version.saturating_sub(DERIVED_CACHE_KEEP_VERSIONS);
-        let mut cache = self
-            .derived_cache
+        self.derived_cache
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let mut remove_file_entry = false;
-        if let Some(versioned) = cache.by_file.get_mut(&file_id) {
-            versioned.retain(|cached_version, _| *cached_version >= min_version_to_keep);
-            remove_file_entry = versioned.is_empty();
-        }
-        if remove_file_entry {
-            cache.by_file.remove(&file_id);
-        }
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .retain_versions_for_file(file_id, version);
     }
 
     pub fn set_file_with_snapshot(
@@ -2023,13 +2085,7 @@ impl AnalysisV2 {
             .derived_cache
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        cache
-            .by_file
-            .get(&file_id)?
-            .get(&previous_version)?
-            .ir_by_deps_id
-            .get(deps_id)
-            .cloned()
+        cache.get_ir(file_id, previous_version, deps_id)
     }
 
     fn remember_ir_artifact(
@@ -2039,18 +2095,171 @@ impl AnalysisV2 {
         deps_id: DepsSnapshotId,
         program: Arc<SemanticProgram>,
     ) {
-        let min_version_to_keep = file_version.saturating_sub(DERIVED_CACHE_KEEP_VERSIONS);
-        let mut cache = self
+        self.derived_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .store_ir(file_id, file_version, deps_id, program);
+    }
+
+    fn make_type_index_artifact_key(
+        &self,
+        file_id: FileId,
+        file_version: i32,
+    ) -> TypeIndexArtifactKey {
+        TypeIndexArtifactKey::new(
+            file_id,
+            file_version,
+            self.deps.id(&self.db).clone(),
+            self.settings.id(&self.db).clone(),
+        )
+    }
+
+    pub fn precompute_type_index_for_file(
+        &self,
+        file_id: FileId,
+        expected_version: Option<i32>,
+        queue_wait_ms: u128,
+    ) -> Cancellable<TypeIndexPrecomputeResult> {
+        let Some(&file) = self.files.get(&file_id) else {
+            return Ok(TypeIndexPrecomputeResult::with_reason(
+                TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeMissingFile,
+            ));
+        };
+
+        let initial_version = file.version(&self.db);
+        if expected_version.is_some_and(|version| version != initial_version) {
+            return Ok(TypeIndexPrecomputeResult {
+                reason_code: TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeSuperseded,
+                file_version: Some(initial_version),
+                stats: TypeIndexPrecomputeStats {
+                    queue_wait_ms,
+                    ..TypeIndexPrecomputeStats::default()
+                },
+            });
+        }
+
+        let parse_snapshot_meta = self
+            .parse_snapshot_for_file(file_id, file)
+            .map(|snapshot| TypeIndexParseSnapshotMeta::from_snapshot(Some(snapshot)))
+            .unwrap_or_default();
+        let key = self.make_type_index_artifact_key(file_id, initial_version);
+        let exec_started = Instant::now();
+        let index_snapshot = cancellable(|| type_index(&self.db, file, self.deps, self.settings))?;
+        let exec_ms = exec_started.elapsed().as_millis();
+        let latest_version = file.version(&self.db);
+        if expected_version.is_some_and(|version| version != latest_version) {
+            return Ok(TypeIndexPrecomputeResult {
+                reason_code: TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeSuperseded,
+                file_version: Some(latest_version),
+                stats: TypeIndexPrecomputeStats {
+                    queue_wait_ms,
+                    exec_ms,
+                    build_ms: index_snapshot.build_profile().total_ms,
+                    ..TypeIndexPrecomputeStats::default()
+                },
+            });
+        }
+
+        let artifact = Arc::new(TypeIndexArtifact {
+            type_index: index_snapshot.index(),
+            build_profile: index_snapshot.build_profile(),
+            parse_snapshot_meta,
+            produced_at_millis: unix_time_millis(),
+        });
+        let store_outcome = self
             .derived_cache
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let file_cache = cache.by_file.entry(file_id).or_default();
-        file_cache.retain(|version, _| *version >= min_version_to_keep);
-        file_cache
-            .entry(file_version)
-            .or_default()
-            .ir_by_deps_id
-            .insert(deps_id, program);
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .store_type_index(key, artifact);
+
+        Ok(TypeIndexPrecomputeResult {
+            reason_code: TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeExactStored,
+            file_version: Some(latest_version),
+            stats: TypeIndexPrecomputeStats {
+                queue_wait_ms,
+                exec_ms,
+                build_ms: index_snapshot.build_profile().total_ms,
+                evicted_per_file_window_total: store_outcome.evicted_per_file_window_total,
+                evicted_global_guard_total: store_outcome.evicted_global_guard_total,
+            },
+        })
+    }
+
+    fn type_at_byte_offset_profiled_empty(
+        reason_code: TypeIndexServeReasonCode,
+    ) -> TypeAtByteOffsetProfiledResult {
+        TypeAtByteOffsetProfiledResult {
+            resolution: None,
+            profile: TypeAtByteOffsetProfile::default(),
+            serve_reason_code: reason_code,
+        }
+    }
+
+    pub fn type_at_byte_offset_serve_only(
+        &self,
+        file_id: FileId,
+        byte_offset: u32,
+    ) -> Cancellable<Option<TypeResolution>> {
+        self.type_at_byte_offset_serve_only_profiled(file_id, byte_offset)
+            .map(|profiled| profiled.resolution)
+    }
+
+    pub fn type_at_byte_offset_serve_only_profiled(
+        &self,
+        file_id: FileId,
+        byte_offset: u32,
+    ) -> Cancellable<TypeAtByteOffsetProfiledResult> {
+        let Some(&file) = self.files.get(&file_id) else {
+            return Ok(Self::type_at_byte_offset_profiled_empty(
+                TypeIndexServeReasonCode::TypeIndexFallbackUnavailable,
+            ));
+        };
+
+        let file_version = file.version(&self.db);
+        let key = self.make_type_index_artifact_key(file_id, file_version);
+        let lookup_started = Instant::now();
+        let (artifact, reason_code) = {
+            let cache = self
+                .derived_cache
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(artifact) = cache.get_type_index_exact(&key) {
+                let reason = if artifact.parse_snapshot_meta.fallback_reason_present {
+                    TypeIndexServeReasonCode::TypeIndexDegradedIncomplete
+                } else {
+                    TypeIndexServeReasonCode::TypeIndexExactHit
+                };
+                (Some(artifact), reason)
+            } else if let Some((artifact, _stale_version)) = cache.get_type_index_stale(&key) {
+                let reason = if artifact.parse_snapshot_meta.fallback_reason_present {
+                    TypeIndexServeReasonCode::TypeIndexDegradedIncomplete
+                } else {
+                    TypeIndexServeReasonCode::TypeIndexStaleServed
+                };
+                (Some(artifact), reason)
+            } else {
+                (None, TypeIndexServeReasonCode::TypeIndexFallbackUnavailable)
+            }
+        };
+
+        let Some(artifact) = artifact else {
+            return Ok(Self::type_at_byte_offset_profiled_empty(reason_code));
+        };
+        let scan_started = Instant::now();
+        let resolution = artifact.type_index.type_at_byte_offset(byte_offset);
+        let index_scan_ms = scan_started.elapsed().as_millis();
+        let total_ms = lookup_started.elapsed().as_millis();
+        Ok(TypeAtByteOffsetProfiledResult {
+            resolution,
+            profile: TypeAtByteOffsetProfile {
+                index_fetch_ms: total_ms,
+                index_build_total_ms: artifact.build_profile.total_ms,
+                index_scan_ms,
+                total_ms,
+                ..TypeAtByteOffsetProfile::default()
+            },
+            serve_reason_code: reason_code,
+        })
     }
 
     pub fn file_text(&self, file_id: FileId) -> Cancellable<Option<Arc<str>>> {
@@ -2332,6 +2541,7 @@ impl AnalysisV2 {
             return Ok(TypeAtByteOffsetProfiledResult {
                 resolution: None,
                 profile: TypeAtByteOffsetProfile::default(),
+                serve_reason_code: TypeIndexServeReasonCode::TypeIndexFallbackUnavailable,
             });
         };
         let started = Instant::now();
@@ -2644,6 +2854,7 @@ impl AnalysisV2 {
                 index_scan_ms,
                 total_ms,
             },
+            serve_reason_code: TypeIndexServeReasonCode::TypeIndexExactHit,
         })
     }
 
@@ -3754,6 +3965,318 @@ mod tests {
             flow.iter().any(|d| d.message.contains("может быть Null")),
             "flow-sensitive diagnostics should contain null-safety warning: {:?}",
             flow
+        );
+    }
+
+    fn marker_offset(text: &str, marker: &str) -> u32 {
+        text.find(marker)
+            .unwrap_or_else(|| panic!("marker `{marker}` not found"))
+            .min(u32::MAX as usize) as u32
+    }
+
+    fn default_semantic_deps() -> Arc<SemanticDeps> {
+        let repository = Arc::new(InMemoryTypeRepository::new()) as Arc<dyn TypeRepository>;
+        let platform_signatures_loaded = repository.platform_docs_loaded();
+        Arc::new(SemanticDeps {
+            signature_index: repository.get_signature_index_clone(),
+            resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
+            repository,
+            platform_signatures_loaded,
+        })
+    }
+
+    #[test]
+    fn serve_only_exact_hit_matches_legacy_for_same_snapshot() {
+        let mut host = AnalysisHostV2::default();
+        let file_id = FileId(201);
+        let text: Arc<str> = Arc::from(
+            "Procedure Test()\n\
+             x = 1;\n\
+             x = x + 1;\n\
+             EndProcedure",
+        );
+
+        host.apply_change(Change::SetFileWithSnapshot {
+            file_id,
+            text: text.clone(),
+            version: 1,
+            path: Arc::from("serve-only-exact-hit.bsl"),
+            parse_snapshot: parse_snapshot_for_test(
+                file_id,
+                1,
+                text.as_ref(),
+                Vec::new(),
+                true,
+                None,
+            ),
+        });
+
+        let analysis = host.snapshot();
+        let probe = marker_offset(text.as_ref(), "x = x + 1;");
+        let legacy = analysis
+            .type_at_byte_offset(file_id, probe)
+            .expect("legacy type lookup");
+        let precompute = analysis
+            .precompute_type_index_for_file(file_id, Some(1), 7)
+            .expect("precompute");
+        assert_eq!(
+            precompute.reason_code,
+            TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeExactStored
+        );
+        assert_eq!(precompute.file_version, Some(1));
+
+        let serve_only = analysis
+            .type_at_byte_offset_serve_only_profiled(file_id, probe)
+            .expect("serve-only lookup");
+        assert_eq!(
+            serve_only.serve_reason_code,
+            TypeIndexServeReasonCode::TypeIndexExactHit
+        );
+        assert_eq!(serve_only.resolution, legacy);
+    }
+
+    #[test]
+    fn serve_only_stale_served_for_new_version_without_exact_artifact() {
+        let mut host = AnalysisHostV2::default();
+        let file_id = FileId(202);
+        let text_v1: Arc<str> = Arc::from(
+            "Procedure Test()\n\
+             x = 1;\n\
+             x = x + 1;\n\
+             EndProcedure",
+        );
+        let text_v2: Arc<str> = Arc::from(
+            "Procedure Test()\n\
+             x = 2;\n\
+             x = x + 1;\n\
+             EndProcedure",
+        );
+
+        host.apply_change(Change::SetFileWithSnapshot {
+            file_id,
+            text: text_v1.clone(),
+            version: 1,
+            path: Arc::from("serve-only-stale-v1.bsl"),
+            parse_snapshot: parse_snapshot_for_test(
+                file_id,
+                1,
+                text_v1.as_ref(),
+                Vec::new(),
+                true,
+                None,
+            ),
+        });
+        {
+            let analysis_v1 = host.snapshot();
+            let precompute = analysis_v1
+                .precompute_type_index_for_file(file_id, Some(1), 0)
+                .expect("precompute v1");
+            assert_eq!(
+                precompute.reason_code,
+                TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeExactStored
+            );
+        }
+
+        host.apply_change(Change::SetFile {
+            file_id,
+            text: text_v2.clone(),
+            version: 2,
+            path: Arc::from("serve-only-stale-v2.bsl"),
+        });
+
+        let analysis_v2 = host.snapshot();
+        let probe = marker_offset(text_v2.as_ref(), "x = x + 1;");
+        let serve_only = analysis_v2
+            .type_at_byte_offset_serve_only_profiled(file_id, probe)
+            .expect("serve-only stale lookup");
+        assert_eq!(
+            serve_only.serve_reason_code,
+            TypeIndexServeReasonCode::TypeIndexStaleServed
+        );
+    }
+
+    #[test]
+    fn serve_only_returns_degraded_incomplete_for_snapshot_fallback_artifact() {
+        let mut host = AnalysisHostV2::default();
+        let file_id = FileId(203);
+        let text: Arc<str> = Arc::from(
+            "Procedure Test()\n\
+             x = 1;\n\
+             x = x + 1;\n\
+             EndProcedure",
+        );
+
+        host.apply_change(Change::SetFileWithSnapshot {
+            file_id,
+            text: text.clone(),
+            version: 1,
+            path: Arc::from("serve-only-degraded.bsl"),
+            parse_snapshot: parse_snapshot_for_test(
+                file_id,
+                1,
+                text.as_ref(),
+                vec![ParseChangedRange {
+                    start_byte: 0,
+                    old_end_byte: 0,
+                    new_end_byte: 0,
+                }],
+                true,
+                Some("incremental_fallback"),
+            ),
+        });
+
+        let analysis = host.snapshot();
+        analysis
+            .precompute_type_index_for_file(file_id, Some(1), 0)
+            .expect("precompute degraded artifact");
+        let probe = marker_offset(text.as_ref(), "x = x + 1;");
+        let serve_only = analysis
+            .type_at_byte_offset_serve_only_profiled(file_id, probe)
+            .expect("serve-only degraded lookup");
+        assert_eq!(
+            serve_only.serve_reason_code,
+            TypeIndexServeReasonCode::TypeIndexDegradedIncomplete
+        );
+    }
+
+    #[test]
+    fn serve_only_fallback_unavailable_on_miss_without_sync_compute() {
+        let mut host = AnalysisHostV2::default();
+        let file_id = FileId(204);
+        let text: Arc<str> = Arc::from(
+            "Procedure Test()\n\
+             x = 1;\n\
+             x = x + 1;\n\
+             EndProcedure",
+        );
+
+        host.apply_change(Change::SetFile {
+            file_id,
+            text: text.clone(),
+            version: 1,
+            path: Arc::from("serve-only-miss.bsl"),
+        });
+
+        let analysis = host.snapshot();
+        let probe = marker_offset(text.as_ref(), "x = x + 1;");
+        let serve_only = analysis
+            .type_at_byte_offset_serve_only_profiled(file_id, probe)
+            .expect("serve-only miss");
+        assert_eq!(
+            serve_only.serve_reason_code,
+            TypeIndexServeReasonCode::TypeIndexFallbackUnavailable
+        );
+        assert!(
+            serve_only.resolution.is_none(),
+            "cache miss must not return synthetic on-demand resolution"
+        );
+        assert_eq!(
+            serve_only.profile.index_fetch_will_execute_type_index_total, 0,
+            "serve-only miss must not execute salsa type_index query"
+        );
+        assert_eq!(
+            serve_only
+                .profile
+                .index_fetch_will_execute_parse_result_total,
+            0,
+            "serve-only miss must not execute salsa parse_result query"
+        );
+    }
+
+    #[test]
+    fn precompute_returns_superseded_when_expected_version_is_stale() {
+        let mut host = AnalysisHostV2::default();
+        let file_id = FileId(205);
+
+        host.apply_change(Change::SetFile {
+            file_id,
+            text: Arc::from("Procedure Test()\nEndProcedure"),
+            version: 1,
+            path: Arc::from("precompute-superseded-v1.bsl"),
+        });
+        host.apply_change(Change::SetFile {
+            file_id,
+            text: Arc::from("Procedure Test()\nx = 1;\nEndProcedure"),
+            version: 2,
+            path: Arc::from("precompute-superseded-v2.bsl"),
+        });
+
+        let analysis = host.snapshot();
+        let precompute = analysis
+            .precompute_type_index_for_file(file_id, Some(1), 11)
+            .expect("precompute superseded");
+        assert_eq!(
+            precompute.reason_code,
+            TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeSuperseded
+        );
+        assert_eq!(precompute.file_version, Some(2));
+        assert_eq!(precompute.stats.queue_wait_ms, 11);
+    }
+
+    #[test]
+    fn deps_and_settings_switch_invalidate_type_index_artifacts() {
+        let mut host = AnalysisHostV2::default();
+        let file_id = FileId(206);
+        let text: Arc<str> = Arc::from(
+            "Procedure Test()\n\
+             x = 1;\n\
+             x = x + 1;\n\
+             EndProcedure",
+        );
+
+        host.apply_change(Change::SetFileWithSnapshot {
+            file_id,
+            text: text.clone(),
+            version: 1,
+            path: Arc::from("invalidation.bsl"),
+            parse_snapshot: parse_snapshot_for_test(
+                file_id,
+                1,
+                text.as_ref(),
+                Vec::new(),
+                true,
+                None,
+            ),
+        });
+        let probe = marker_offset(text.as_ref(), "x = x + 1;");
+        {
+            let analysis_before = host.snapshot();
+            analysis_before
+                .precompute_type_index_for_file(file_id, Some(1), 0)
+                .expect("precompute before invalidation");
+            let exact_before = analysis_before
+                .type_at_byte_offset_serve_only_profiled(file_id, probe)
+                .expect("serve before invalidation");
+            assert_eq!(
+                exact_before.serve_reason_code,
+                TypeIndexServeReasonCode::TypeIndexExactHit
+            );
+        }
+
+        host.apply_change(Change::SetDepsSnapshot {
+            deps_id: DepsSnapshotId::from_hash("deps-new"),
+            deps: default_semantic_deps(),
+        });
+        let after_deps = host
+            .snapshot()
+            .type_at_byte_offset_serve_only_profiled(file_id, probe)
+            .expect("serve after deps switch");
+        assert_eq!(
+            after_deps.serve_reason_code,
+            TypeIndexServeReasonCode::TypeIndexFallbackUnavailable
+        );
+
+        host.apply_change(Change::SetSettingsSnapshot {
+            settings_id: SettingsId::from_hash("settings-new"),
+            diagnostics_detail_level: DetailLevel::Detailed,
+        });
+        let after_settings = host
+            .snapshot()
+            .type_at_byte_offset_serve_only_profiled(file_id, probe)
+            .expect("serve after settings switch");
+        assert_eq!(
+            after_settings.serve_reason_code,
+            TypeIndexServeReasonCode::TypeIndexFallbackUnavailable
         );
     }
 

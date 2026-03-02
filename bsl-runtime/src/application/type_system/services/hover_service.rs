@@ -80,9 +80,17 @@ fn compute_hover_info_from_ir(
                 .flow_type_at_byte_offset(file_id, offset)
                 .ok()
                 .flatten()
-                .or_else(|| analysis.type_at_byte_offset(file_id, offset).ok().flatten())
+                .or_else(|| {
+                    analysis
+                        .type_at_byte_offset_serve_only(file_id, offset)
+                        .ok()
+                        .flatten()
+                })
         } else {
-            analysis.type_at_byte_offset(file_id, offset).ok().flatten()
+            analysis
+                .type_at_byte_offset_serve_only(file_id, offset)
+                .ok()
+                .flatten()
         }
     });
 
@@ -209,7 +217,7 @@ fn type_at_span_start(
     span: Span,
 ) -> Option<TypeResolution> {
     analysis
-        .type_at_byte_offset(file_id, span.start)
+        .type_at_byte_offset_serve_only(file_id, span.start)
         .ok()
         .flatten()
 }
@@ -339,7 +347,7 @@ fn format_control_flow_hover(
 
     let probe_abs = line_start.checked_add(probe_in_line.try_into().ok()?)?;
     let actual_type = analysis
-        .type_at_byte_offset(file_id, probe_abs)
+        .type_at_byte_offset_serve_only(file_id, probe_abs)
         .ok()
         .flatten()
         .unwrap_or_else(TypeResolution::unknown);

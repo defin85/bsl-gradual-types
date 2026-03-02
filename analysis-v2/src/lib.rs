@@ -2000,7 +2000,7 @@ impl AnalysisV2 {
         if new_end != current_text.len() || start > new_end {
             return false;
         }
-        let Ok(inserted) = std::str::from_utf8(&current_text.as_bytes()[start..new_end]) else {
+        let Some(inserted) = current_text.get(start..new_end) else {
             return false;
         };
         !inserted.is_empty() && inserted.chars().all(char::is_whitespace)

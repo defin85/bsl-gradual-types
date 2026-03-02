@@ -9171,7 +9171,7 @@ mod tests {
             return false;
         }
         let measured_index = request_index - phase.warmup;
-        if measured_index % churn_every != 0 {
+        if !measured_index.is_multiple_of(churn_every) {
             return false;
         }
 
@@ -9209,7 +9209,7 @@ mod tests {
             return false;
         }
         let completed = request_index.saturating_add(1);
-        completed == 1 || completed == total_requests || completed % progress_every == 0
+        completed == 1 || completed == total_requests || completed.is_multiple_of(progress_every)
     }
 
     fn scale_aware_progress_percent(completed: u64, total: u64) -> f64 {
@@ -9587,7 +9587,7 @@ mod tests {
         for (name, key) in stage_keys {
             let p95 = histogram_p95(metrics, key);
             candidates.insert(name.to_string(), serde_json::json!(p95));
-            if p95 > 0.0 && dominant.map_or(true, |(_, value)| p95 > value) {
+            if p95 > 0.0 && dominant.is_none_or(|(_, value)| p95 > value) {
                 dominant = Some((name, p95));
             }
         }
@@ -9689,7 +9689,7 @@ mod tests {
                     churn_every,
                 ) {
                     let end_position = utf16_end_position(&current_text);
-                    let churn_payload = if churn_edits_applied % 2 == 0 {
+                    let churn_payload = if churn_edits_applied.is_multiple_of(2) {
                         " "
                     } else {
                         "\n"

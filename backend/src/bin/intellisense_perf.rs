@@ -221,7 +221,7 @@ impl ChurnRuntimeState {
     }
 
     fn should_apply(&self, iteration: usize) -> bool {
-        iteration % self.plan.every == 0
+        iteration.is_multiple_of(self.plan.every)
     }
 }
 
@@ -282,6 +282,17 @@ struct PerfComparison {
 struct PerfThresholds {
     max_error_rate: f64,
     max_incomplete_rate: f64,
+}
+
+#[derive(Default)]
+struct MeasuredResults {
+    durations_ms: Vec<f64>,
+    errors: usize,
+    incomplete: usize,
+    allocation_count_total: u64,
+    allocated_bytes_total: u64,
+    lock_wait_ms_total: f64,
+    lock_contention_events_total: u64,
 }
 
 #[tokio::main]
@@ -363,14 +374,17 @@ async fn main() -> Result<()> {
 
     let mut churn_state = build_churn_state(&scenario, &prepared)?;
     let mut content_by_file = build_content_by_file_map(&prepared);
+    let iteration_context = IterationContext {
+        index_snapshot: deps_bundle.index_snapshot.as_ref(),
+        metadata_lookup: &metadata_lookup,
+        resolver: resolver.as_ref(),
+        cases: &prepared,
+    };
 
     if args.warmup > 0 {
         run_iterations(
             &mut host,
-            deps_bundle.index_snapshot.as_ref(),
-            &metadata_lookup,
-            resolver.as_ref(),
-            &prepared,
+            &iteration_context,
             args.warmup,
             &mut churn_state,
             &mut content_by_file,
@@ -379,48 +393,38 @@ async fn main() -> Result<()> {
         .await?;
     }
 
-    let mut durations_ms = Vec::new();
-    let mut errors = 0usize;
-    let mut incomplete = 0usize;
-    let mut allocation_count_total = 0_u64;
-    let mut allocated_bytes_total = 0_u64;
-    let mut lock_wait_ms_total = 0.0_f64;
-    let mut lock_contention_events_total = 0_u64;
+    let mut measured = MeasuredResults::default();
     run_iterations(
         &mut host,
-        deps_bundle.index_snapshot.as_ref(),
-        &metadata_lookup,
-        resolver.as_ref(),
-        &prepared,
+        &iteration_context,
         args.iterations,
         &mut churn_state,
         &mut content_by_file,
         Some(OutputTargets {
-            durations: &mut durations_ms,
-            errors: &mut errors,
-            incomplete: &mut incomplete,
-            allocation_count_total: &mut allocation_count_total,
-            allocated_bytes_total: &mut allocated_bytes_total,
-            lock_wait_ms_total: &mut lock_wait_ms_total,
-            lock_contention_events_total: &mut lock_contention_events_total,
+            durations: &mut measured.durations_ms,
+            errors: &mut measured.errors,
+            incomplete: &mut measured.incomplete,
+            allocation_count_total: &mut measured.allocation_count_total,
+            allocated_bytes_total: &mut measured.allocated_bytes_total,
+            lock_wait_ms_total: &mut measured.lock_wait_ms_total,
+            lock_contention_events_total: &mut measured.lock_contention_events_total,
         }),
     )
     .await?;
 
     let total_requests = prepared.len() * args.iterations;
-    let metrics = build_metrics(
-        total_requests,
-        &durations_ms,
-        errors,
-        incomplete,
-        allocation_count_total,
-        allocated_bytes_total,
-        lock_wait_ms_total,
-        lock_contention_events_total,
-    );
+    let metrics = build_metrics(total_requests, &measured);
     let thresholds = PerfThresholds {
         max_error_rate: args.max_error_rate,
         max_incomplete_rate: args.max_incomplete_rate,
+    };
+    let gate_thresholds = PerfGateThresholds {
+        latency_ratio_p95_max: args.threshold_p95,
+        latency_ratio_p99_max: args.threshold_p99,
+        resource_ratio_max: args.threshold_resource,
+        max_error_rate: args.max_error_rate,
+        max_incomplete_rate: args.max_incomplete_rate,
+        blocking_mode: args.blocking_mode,
     };
     let mut report = PerfReport {
         scenario: scenario.name.clone(),
@@ -461,11 +465,11 @@ async fn main() -> Result<()> {
                 Some(build_missing_required_metric_comparison(
                     &contract,
                     &report,
-                    args.threshold_p95,
-                    args.threshold_p99,
-                    args.threshold_resource,
-                    args.max_error_rate,
-                    args.max_incomplete_rate,
+                    gate_thresholds.latency_ratio_p95_max,
+                    gate_thresholds.latency_ratio_p99_max,
+                    gate_thresholds.resource_ratio_max,
+                    gate_thresholds.max_error_rate,
+                    gate_thresholds.max_incomplete_rate,
                 ))
             } else {
                 let baseline: PerfReport =
@@ -475,12 +479,7 @@ async fn main() -> Result<()> {
                     &scenario.name,
                     &report,
                     &baseline,
-                    args.threshold_p95,
-                    args.threshold_p99,
-                    args.threshold_resource,
-                    args.max_error_rate,
-                    args.max_incomplete_rate,
-                    args.blocking_mode,
+                    gate_thresholds,
                 ))
             }
         } else if args.update_baseline {
@@ -620,12 +619,16 @@ fn find_position(content: &str, marker: &str) -> Option<(u32, u32)> {
     Some((line, character))
 }
 
+struct IterationContext<'a> {
+    index_snapshot: &'a bsl_backend::system::IndexSnapshot,
+    metadata_lookup: &'a TypeMetadataLookup,
+    resolver: &'a TypeResolver,
+    cases: &'a [PreparedCase],
+}
+
 async fn run_iterations(
     host: &mut AnalysisHostV2,
-    index_snapshot: &bsl_backend::system::IndexSnapshot,
-    metadata_lookup: &TypeMetadataLookup,
-    resolver: &TypeResolver,
-    cases: &[PreparedCase],
+    context: &IterationContext<'_>,
     iterations: usize,
     churn_state: &mut Option<ChurnRuntimeState>,
     content_by_file: &mut HashMap<String, Arc<str>>,
@@ -634,7 +637,7 @@ async fn run_iterations(
     for iteration in 0..iterations {
         maybe_apply_churn(host, churn_state, content_by_file, iteration)?;
         let analysis = host.analysis();
-        for case in cases {
+        for case in context.cases {
             let started = Instant::now();
             let alloc_before = allocation_snapshot();
             let case_content = content_by_file
@@ -654,10 +657,10 @@ async fn run_iterations(
                 case.line,
                 case.column,
                 Some(case.file_uri.as_str()),
-                index_snapshot,
-                metadata_lookup,
+                context.index_snapshot,
+                context.metadata_lookup,
                 case.file_uri.as_str(),
-                resolver,
+                context.resolver,
                 ir_program,
                 None,
                 false,
@@ -780,7 +783,7 @@ fn build_churned_content(base_content: &str, revision: u64) -> String {
     if !content.ends_with('\n') {
         content.push('\n');
     }
-    let marker = if revision % 2 == 0 { "B" } else { "A" };
+    let marker = if revision.is_multiple_of(2) { "B" } else { "A" };
     content.push_str("// __intellisense_perf_churn_marker__ ");
     content.push_str(marker);
     content.push('\n');
@@ -797,21 +800,12 @@ struct OutputTargets<'a> {
     lock_contention_events_total: &'a mut u64,
 }
 
-fn build_metrics(
-    total_requests: usize,
-    durations: &[f64],
-    errors: usize,
-    incomplete: usize,
-    allocation_count_total: u64,
-    allocated_bytes_total: u64,
-    lock_wait_ms_total: f64,
-    lock_contention_events_total: u64,
-) -> PerfMetrics {
-    let count = durations.len();
+fn build_metrics(total_requests: usize, measured: &MeasuredResults) -> PerfMetrics {
+    let count = measured.durations_ms.len();
     let (p50, p95, p99) = if count == 0 {
         (0.0, 0.0, 0.0)
     } else {
-        let mut sorted = durations.to_vec();
+        let mut sorted = measured.durations_ms.clone();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         (
             percentile_sorted(&sorted, 0.50),
@@ -824,32 +818,32 @@ fn build_metrics(
     let error_rate = if total_requests == 0 {
         0.0
     } else {
-        errors as f64 / total_requests_f
+        measured.errors as f64 / total_requests_f
     };
     let incomplete_rate = if total_requests == 0 {
         0.0
     } else {
-        incomplete as f64 / total_requests_f
+        measured.incomplete as f64 / total_requests_f
     };
     let allocations_per_completion = if total_requests == 0 {
         0.0
     } else {
-        allocation_count_total as f64 / total_requests_f
+        measured.allocation_count_total as f64 / total_requests_f
     };
     let allocated_bytes_per_completion = if total_requests == 0 {
         0.0
     } else {
-        allocated_bytes_total as f64 / total_requests_f
+        measured.allocated_bytes_total as f64 / total_requests_f
     };
     let lock_wait_ms_per_completion = if total_requests == 0 {
         0.0
     } else {
-        lock_wait_ms_total / total_requests_f
+        measured.lock_wait_ms_total / total_requests_f
     };
     let lock_contention_events_per_completion = if total_requests == 0 {
         0.0
     } else {
-        lock_contention_events_total as f64 / total_requests_f
+        measured.lock_contention_events_total as f64 / total_requests_f
     };
 
     PerfMetrics {
@@ -967,11 +961,7 @@ fn build_unsupported_contract_version_comparison(
     expected_contract_version: &str,
     current: &PerfReport,
     baseline: &PerfReport,
-    threshold_p95: f64,
-    threshold_p99: f64,
-    threshold_resource: f64,
-    max_error_rate: f64,
-    max_incomplete_rate: f64,
+    thresholds: PerfGateThresholds,
 ) -> PerfComparison {
     let baseline_p95 = baseline.metrics.p95_ms.max(0.000_001);
     let baseline_p99 = baseline.metrics.p99_ms.max(0.000_001);
@@ -980,11 +970,11 @@ fn build_unsupported_contract_version_comparison(
         baseline_p99_ms: baseline.metrics.p99_ms,
         ratio_p95: current.metrics.p95_ms / baseline_p95,
         ratio_p99: current.metrics.p99_ms / baseline_p99,
-        threshold_p95,
-        threshold_p99,
-        threshold_resource,
-        max_error_rate,
-        max_incomplete_rate,
+        threshold_p95: thresholds.latency_ratio_p95_max,
+        threshold_p99: thresholds.latency_ratio_p99_max,
+        threshold_resource: thresholds.resource_ratio_max,
+        max_error_rate: thresholds.max_error_rate,
+        max_incomplete_rate: thresholds.max_incomplete_rate,
         error_rate: current.metrics.error_rate,
         incomplete_rate: current.metrics.incomplete_rate,
         contract_version: expected_contract_version.to_string(),
@@ -1017,12 +1007,7 @@ fn compare_reports(
     profile: &str,
     current: &PerfReport,
     baseline: &PerfReport,
-    threshold_p95: f64,
-    threshold_p99: f64,
-    threshold_resource: f64,
-    max_error_rate: f64,
-    max_incomplete_rate: f64,
-    blocking_mode: bool,
+    thresholds: PerfGateThresholds,
 ) -> PerfComparison {
     let expected_contract_version = contract_version_from_contract(contract);
     if !is_report_contract_version_compatible(
@@ -1034,11 +1019,7 @@ fn compare_reports(
             &expected_contract_version,
             current,
             baseline,
-            threshold_p95,
-            threshold_p99,
-            threshold_resource,
-            max_error_rate,
-            max_incomplete_rate,
+            thresholds,
         );
     }
 
@@ -1073,14 +1054,7 @@ fn compare_reports(
                 .metrics
                 .lock_contention_events_per_completion,
         }),
-        PerfGateThresholds {
-            latency_ratio_p95_max: threshold_p95,
-            latency_ratio_p99_max: threshold_p99,
-            resource_ratio_max: threshold_resource,
-            max_error_rate,
-            max_incomplete_rate,
-            blocking_mode,
-        },
+        thresholds,
     );
     let verdict = evaluation
         .get("verdict")
@@ -1104,11 +1078,11 @@ fn compare_reports(
         baseline_p99_ms: baseline.metrics.p99_ms,
         ratio_p95,
         ratio_p99,
-        threshold_p95,
-        threshold_p99,
-        threshold_resource,
-        max_error_rate,
-        max_incomplete_rate,
+        threshold_p95: thresholds.latency_ratio_p95_max,
+        threshold_p99: thresholds.latency_ratio_p99_max,
+        threshold_resource: thresholds.resource_ratio_max,
+        max_error_rate: thresholds.max_error_rate,
+        max_incomplete_rate: thresholds.max_incomplete_rate,
         error_rate: current.metrics.error_rate,
         incomplete_rate: current.metrics.incomplete_rate,
         contract_version: evaluation
@@ -1402,9 +1376,15 @@ mod tests {
             ..current.clone()
         };
 
-        let comparison = compare_reports(
-            &contract, "small", &current, &baseline, 1.10, 1.15, 1.20, 0.0, 0.0, true,
-        );
+        let thresholds = PerfGateThresholds {
+            latency_ratio_p95_max: 1.10,
+            latency_ratio_p99_max: 1.15,
+            resource_ratio_max: 1.20,
+            max_error_rate: 0.0,
+            max_incomplete_rate: 0.0,
+            blocking_mode: true,
+        };
+        let comparison = compare_reports(&contract, "small", &current, &baseline, thresholds);
         assert_eq!(comparison.verdict, "fail");
         assert!(!comparison.pass);
         assert_eq!(

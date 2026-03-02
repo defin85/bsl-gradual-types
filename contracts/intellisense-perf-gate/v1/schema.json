@@ -101,7 +101,8 @@
       "additionalProperties": false,
       "required": [
         "absolute_latency_ceilings_ms",
-        "resource_budget_ceilings"
+        "resource_budget_ceilings",
+        "bootstrap_policy"
       ],
       "properties": {
         "absolute_latency_ceilings_ms": {
@@ -143,6 +144,9 @@
               "$ref": "#/$defs/resourceBudget"
             }
           }
+        },
+        "bootstrap_policy": {
+          "$ref": "#/$defs/bootstrapPolicy"
         }
       }
     },
@@ -258,6 +262,38 @@
         "lock_contention_events_per_completion": {
           "type": "integer",
           "minimum": 1
+        }
+      }
+    },
+    "bootstrapPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_profiles",
+        "sample_size_min",
+        "aggregation_rule"
+      ],
+      "properties": {
+        "required_profiles": {
+          "type": "array",
+          "minItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "small",
+              "large",
+              "churn"
+            ]
+          }
+        },
+        "sample_size_min": {
+          "type": "integer",
+          "minimum": 5
+        },
+        "aggregation_rule": {
+          "type": "string",
+          "const": "median"
         }
       }
     }

@@ -1,6 +1,8 @@
 {
   "schema_version": "v1",
   "change_id": "add-performance-first-ai-engineering-guardrails",
+  "approved_change_id": "refactor-v2-event-driven-type-index-cache",
   "reason": "Change intentionally updates protected assets to introduce dedicated perf-gate evaluator and governance CI checks.",
-  "approved_by": "Protected Assets Owner"
+  "approved_by": "Protected Assets Owner",
+  "migration_note": "Protected assets were updated via dedicated governance-approved change path and require synchronized contract/baseline migration notes."
 }

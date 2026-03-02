@@ -118,9 +118,13 @@ Protected-assets v1 (immutable в implementation change):
 
 ### 2.3 Schema contract v1 and format/version policy
 `Option B` contract root:
-- `contracts/intellisense-perf-gate/v1/input.schema.json`
-- `contracts/intellisense-perf-gate/v1/baseline.schema.json`
-- `contracts/intellisense-perf-gate/v1/report.schema.json`
+- `contracts/intellisense-perf-gate/v1/schema.json` (единый schema layout с секциями `input`, `baseline`, `report`)
+- `contracts/intellisense-perf-gate/v1/contract.json` (contract instance для evaluator/CI/harness)
+
+`baseline` в contract MUST включать bootstrap policy:
+- `required_profiles`: `small|large|churn`
+- `sample_size_min`: `>= 5`
+- `aggregation_rule`: `median`
 
 Version policy:
 - backward-compatible additive change: same major (`v1`);

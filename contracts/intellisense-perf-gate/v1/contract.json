@@ -59,6 +59,15 @@
         "lock_wait_ms_per_completion": 15000,
         "lock_contention_events_per_completion": 15000
       }
+    },
+    "bootstrap_policy": {
+      "required_profiles": [
+        "small",
+        "large",
+        "churn"
+      ],
+      "sample_size_min": 5,
+      "aggregation_rule": "median"
     }
   },
   "report": {

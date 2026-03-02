@@ -1,0 +1,12 @@
+{
+  "schema_version": "v1",
+  "change_id": "add-performance-first-ai-engineering-guardrails",
+  "required_profiles": [
+    "small",
+    "large",
+    "churn"
+  ],
+  "sample_size_min": 5,
+  "aggregation_rule": "median",
+  "approval_ref": "openspec/changes/add-performance-first-ai-engineering-guardrails/governance/adr.md"
+}

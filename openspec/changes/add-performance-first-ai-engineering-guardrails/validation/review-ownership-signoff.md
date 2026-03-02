@@ -9,6 +9,9 @@ Role-based review completed for:
 - LSP owner: inline verdict removal from `core.rs` and dedicated evaluator usage reviewed
 - process owner: governance gates (`change_criticality`, `test_first_evidence`, `protected-assets`) reviewed
 
+Machine-readable sign-off artifact:
+- `openspec/changes/add-performance-first-ai-engineering-guardrails/governance/ownership_signoff.json`
+
 Evidence commands:
 
 ```bash

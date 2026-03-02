@@ -133,6 +133,23 @@ def load_override(path: Path, expected_change_id: str) -> None:
         isinstance(payload.get("approved_by"), str) and payload["approved_by"].strip(),
         f"protected_acceptance_asset_modified: {path} approved_by is required",
     )
+    ensure(
+        isinstance(payload.get("approved_change_id"), str)
+        and payload["approved_change_id"].strip(),
+        f"protected_acceptance_asset_modified: {path} approved_change_id is required",
+    )
+    ensure(
+        payload.get("approved_change_id") != expected_change_id,
+        (
+            "protected_acceptance_asset_modified: "
+            f"{path} approved_change_id must reference a separate approved change"
+        ),
+    )
+    ensure(
+        isinstance(payload.get("migration_note"), str)
+        and payload["migration_note"].strip(),
+        f"protected_acceptance_asset_modified: {path} migration_note is required",
+    )
 
 
 def main() -> int:

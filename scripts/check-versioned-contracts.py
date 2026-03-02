@@ -305,6 +305,26 @@ def validate_surface_contract(surface_dir: Path) -> None:
                         f"{contract_path}: {profile}.{key} must be positive integer",
                     )
 
+            bootstrap_policy = baseline.get("bootstrap_policy")
+            ensure(
+                isinstance(bootstrap_policy, dict),
+                f"{contract_path}: baseline.bootstrap_policy must be object",
+            )
+            bootstrap_profiles = set(bootstrap_policy.get("required_profiles", []))
+            ensure(
+                REQUIRED_V1_PERF_GATE_PROFILES.issubset(bootstrap_profiles),
+                f"{contract_path}: baseline.bootstrap_policy.required_profiles must include {sorted(REQUIRED_V1_PERF_GATE_PROFILES)}",
+            )
+            sample_size_min = bootstrap_policy.get("sample_size_min")
+            ensure(
+                isinstance(sample_size_min, int) and sample_size_min >= 5,
+                f"{contract_path}: baseline.bootstrap_policy.sample_size_min must be integer >= 5",
+            )
+            ensure(
+                bootstrap_policy.get("aggregation_rule") == "median",
+                f"{contract_path}: baseline.bootstrap_policy.aggregation_rule must be 'median'",
+            )
+
             report = contract.get("report")
             ensure(isinstance(report, dict), f"{contract_path}: report must be object")
             required_report_fields = set(report.get("required_fields", []))

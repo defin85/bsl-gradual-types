@@ -231,11 +231,17 @@ struct PerfReport {
     cases: usize,
     iterations: usize,
     warmup: usize,
+    #[serde(default = "unknown_contract_version")]
+    contract_version: String,
     metrics: PerfMetrics,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     thresholds: Option<PerfThresholds>,
     #[serde(skip_serializing_if = "Option::is_none")]
     comparison: Option<PerfComparison>,
+}
+
+fn unknown_contract_version() -> String {
+    "unknown".to_string()
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -247,13 +253,9 @@ struct PerfMetrics {
     p99_ms: f64,
     error_rate: f64,
     incomplete_rate: f64,
-    #[serde(default)]
     allocations_per_completion: f64,
-    #[serde(default)]
     allocated_bytes_per_completion: f64,
-    #[serde(default)]
     lock_wait_ms_per_completion: f64,
-    #[serde(default)]
     lock_contention_events_per_completion: f64,
 }
 
@@ -425,6 +427,7 @@ async fn main() -> Result<()> {
         cases: prepared.len(),
         iterations: args.iterations,
         warmup: args.warmup,
+        contract_version: contract_version_from_contract(&contract),
         metrics,
         thresholds: Some(thresholds.clone()),
         comparison: None,
@@ -435,19 +438,51 @@ async fn main() -> Result<()> {
 
     let comparison = if let Some(baseline_path) = args.baseline.as_ref() {
         if baseline_path.exists() {
-            let baseline = read_report(baseline_path)?;
-            Some(compare_reports(
-                &contract,
-                &scenario.name,
-                &report,
-                &baseline,
-                args.threshold_p95,
-                args.threshold_p99,
-                args.threshold_resource,
-                args.max_error_rate,
-                args.max_incomplete_rate,
-                args.blocking_mode,
-            ))
+            let baseline_raw = read_json_value(baseline_path)?;
+            let current_raw =
+                serde_json::to_value(&report).context("failed to serialize current report")?;
+            let mut missing_fields = Vec::new();
+            missing_fields.extend(
+                missing_resource_metric_keys(&current_raw)
+                    .into_iter()
+                    .map(|field| format!("current.metrics.{field}")),
+            );
+            missing_fields.extend(
+                missing_resource_metric_keys(&baseline_raw)
+                    .into_iter()
+                    .map(|field| format!("baseline.metrics.{field}")),
+            );
+
+            if !missing_fields.is_empty() {
+                eprintln!(
+                    "missing_required_metric_field: {}",
+                    missing_fields.join(", ")
+                );
+                Some(build_missing_required_metric_comparison(
+                    &contract,
+                    &report,
+                    args.threshold_p95,
+                    args.threshold_p99,
+                    args.threshold_resource,
+                    args.max_error_rate,
+                    args.max_incomplete_rate,
+                ))
+            } else {
+                let baseline: PerfReport =
+                    serde_json::from_value(baseline_raw).context("Invalid baseline JSON")?;
+                Some(compare_reports(
+                    &contract,
+                    &scenario.name,
+                    &report,
+                    &baseline,
+                    args.threshold_p95,
+                    args.threshold_p99,
+                    args.threshold_resource,
+                    args.max_error_rate,
+                    args.max_incomplete_rate,
+                    args.blocking_mode,
+                ))
+            }
         } else if args.update_baseline {
             None
         } else {
@@ -841,11 +876,122 @@ fn percentile_sorted(values: &[f64], percentile: f64) -> f64 {
     values[rank]
 }
 
-fn read_report(path: &Path) -> Result<PerfReport> {
-    let data =
-        fs::read_to_string(path).with_context(|| format!("Failed to read {}", path.display()))?;
-    let report: PerfReport = serde_json::from_str(&data).context("Invalid baseline JSON")?;
-    Ok(report)
+const REQUIRED_RESOURCE_METRIC_KEYS: [&str; 4] = [
+    "allocations_per_completion",
+    "allocated_bytes_per_completion",
+    "lock_wait_ms_per_completion",
+    "lock_contention_events_per_completion",
+];
+
+fn is_numeric_json_value(value: &serde_json::Value) -> bool {
+    value.as_f64().is_some() || value.as_i64().is_some() || value.as_u64().is_some()
+}
+
+fn missing_resource_metric_keys(report: &serde_json::Value) -> Vec<&'static str> {
+    let Some(metrics) = report.get("metrics").and_then(|value| value.as_object()) else {
+        return REQUIRED_RESOURCE_METRIC_KEYS.into();
+    };
+
+    REQUIRED_RESOURCE_METRIC_KEYS
+        .iter()
+        .copied()
+        .filter(|key| {
+            metrics
+                .get(*key)
+                .is_none_or(|value| !is_numeric_json_value(value))
+        })
+        .collect()
+}
+
+fn contract_version_from_contract(contract: &serde_json::Value) -> String {
+    match (
+        contract.get("surface").and_then(|value| value.as_str()),
+        contract
+            .get("major_version")
+            .and_then(|value| value.as_u64()),
+    ) {
+        (Some("intellisense-perf-gate"), Some(1)) => "v1".to_string(),
+        _ => "unknown".to_string(),
+    }
+}
+
+fn normalize_report_contract_version(value: &str) -> &str {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        "unknown"
+    } else {
+        trimmed
+    }
+}
+
+fn is_report_contract_version_compatible(
+    expected_contract_version: &str,
+    current_contract_version: &str,
+    baseline_contract_version: &str,
+) -> bool {
+    let current = normalize_report_contract_version(current_contract_version);
+    let baseline = normalize_report_contract_version(baseline_contract_version);
+    current == expected_contract_version
+        && (baseline == expected_contract_version || baseline == "unknown")
+}
+
+fn build_missing_required_metric_comparison(
+    contract: &serde_json::Value,
+    current: &PerfReport,
+    threshold_p95: f64,
+    threshold_p99: f64,
+    threshold_resource: f64,
+    max_error_rate: f64,
+    max_incomplete_rate: f64,
+) -> PerfComparison {
+    PerfComparison {
+        baseline_p95_ms: current.metrics.p95_ms,
+        baseline_p99_ms: current.metrics.p99_ms,
+        ratio_p95: 1.0,
+        ratio_p99: 1.0,
+        threshold_p95,
+        threshold_p99,
+        threshold_resource,
+        max_error_rate,
+        max_incomplete_rate,
+        error_rate: current.metrics.error_rate,
+        incomplete_rate: current.metrics.incomplete_rate,
+        contract_version: contract_version_from_contract(contract),
+        verdict: "fail".to_string(),
+        reason_codes: vec!["missing_required_metric_field".to_string()],
+        pass: false,
+    }
+}
+
+fn build_unsupported_contract_version_comparison(
+    expected_contract_version: &str,
+    current: &PerfReport,
+    baseline: &PerfReport,
+    threshold_p95: f64,
+    threshold_p99: f64,
+    threshold_resource: f64,
+    max_error_rate: f64,
+    max_incomplete_rate: f64,
+) -> PerfComparison {
+    let baseline_p95 = baseline.metrics.p95_ms.max(0.000_001);
+    let baseline_p99 = baseline.metrics.p99_ms.max(0.000_001);
+    PerfComparison {
+        baseline_p95_ms: baseline.metrics.p95_ms,
+        baseline_p99_ms: baseline.metrics.p99_ms,
+        ratio_p95: current.metrics.p95_ms / baseline_p95,
+        ratio_p99: current.metrics.p99_ms / baseline_p99,
+        threshold_p95,
+        threshold_p99,
+        threshold_resource,
+        max_error_rate,
+        max_incomplete_rate,
+        error_rate: current.metrics.error_rate,
+        incomplete_rate: current.metrics.incomplete_rate,
+        contract_version: expected_contract_version.to_string(),
+        verdict: "fail".to_string(),
+        reason_codes: vec!["unsupported_contract_version".to_string()],
+        pass: false,
+    }
 }
 
 fn read_json_value(path: &Path) -> Result<serde_json::Value> {
@@ -878,6 +1024,24 @@ fn compare_reports(
     max_incomplete_rate: f64,
     blocking_mode: bool,
 ) -> PerfComparison {
+    let expected_contract_version = contract_version_from_contract(contract);
+    if !is_report_contract_version_compatible(
+        &expected_contract_version,
+        &current.contract_version,
+        &baseline.contract_version,
+    ) {
+        return build_unsupported_contract_version_comparison(
+            &expected_contract_version,
+            current,
+            baseline,
+            threshold_p95,
+            threshold_p99,
+            threshold_resource,
+            max_error_rate,
+            max_incomplete_rate,
+        );
+    }
+
     let baseline_p95 = baseline.metrics.p95_ms.max(0.000_001);
     let baseline_p99 = baseline.metrics.p99_ms.max(0.000_001);
     let ratio_p95 = current.metrics.p95_ms / baseline_p95;
@@ -1033,6 +1197,7 @@ fn write_summary(path: &Path, report: &PerfReport) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn build_churned_content_switches_marker_without_growth() {
@@ -1088,5 +1253,163 @@ mod tests {
             .expect("churn enabled");
         assert_eq!(state.plan.every, 2);
         assert_eq!(state.plan.target_file_ids, vec![V2FileId(1), V2FileId(2)]);
+    }
+
+    #[test]
+    fn missing_resource_metric_keys_reports_absent_fields() {
+        let report = json!({
+            "metrics": {
+                "allocations_per_completion": 10.0,
+                "allocated_bytes_per_completion": 20.0
+            }
+        });
+
+        let missing = missing_resource_metric_keys(&report);
+        assert_eq!(
+            missing,
+            vec![
+                "lock_wait_ms_per_completion",
+                "lock_contention_events_per_completion"
+            ]
+        );
+    }
+
+    #[test]
+    fn missing_resource_metric_keys_accepts_complete_numeric_metrics() {
+        let report = json!({
+            "metrics": {
+                "allocations_per_completion": 10.0,
+                "allocated_bytes_per_completion": 20,
+                "lock_wait_ms_per_completion": 1.5,
+                "lock_contention_events_per_completion": 2
+            }
+        });
+
+        let missing = missing_resource_metric_keys(&report);
+        assert!(missing.is_empty());
+    }
+
+    #[test]
+    fn missing_required_metric_comparison_is_fail_closed() {
+        let contract = json!({
+            "surface": "intellisense-perf-gate",
+            "major_version": 1
+        });
+        let report = PerfReport {
+            scenario: "small".to_string(),
+            cases: 1,
+            iterations: 1,
+            warmup: 0,
+            contract_version: "v1".to_string(),
+            metrics: PerfMetrics {
+                total_requests: 1,
+                count: 1,
+                p50_ms: 1.0,
+                p95_ms: 2.0,
+                p99_ms: 3.0,
+                error_rate: 0.0,
+                incomplete_rate: 0.0,
+                allocations_per_completion: 10.0,
+                allocated_bytes_per_completion: 20.0,
+                lock_wait_ms_per_completion: 1.0,
+                lock_contention_events_per_completion: 1.0,
+            },
+            thresholds: None,
+            comparison: None,
+        };
+
+        let comparison = build_missing_required_metric_comparison(
+            &contract, &report, 1.10, 1.15, 1.20, 0.0, 0.0,
+        );
+
+        assert_eq!(comparison.verdict, "fail");
+        assert!(!comparison.pass);
+        assert_eq!(
+            comparison.reason_codes,
+            vec!["missing_required_metric_field".to_string()]
+        );
+    }
+
+    #[test]
+    fn report_contract_version_compatibility_allows_unknown_baseline_only() {
+        assert!(is_report_contract_version_compatible("v1", "v1", "unknown"));
+        assert!(is_report_contract_version_compatible("v1", "v1", "v1"));
+        assert!(!is_report_contract_version_compatible("v1", "v2", "v1"));
+        assert!(!is_report_contract_version_compatible("v1", "v1", "v2"));
+    }
+
+    #[test]
+    fn compare_reports_fails_with_unsupported_contract_version() {
+        let contract = json!({
+            "surface": "intellisense-perf-gate",
+            "major_version": 1,
+            "input": {
+                "required_profiles": ["small", "large", "churn"]
+            },
+            "baseline": {
+                "absolute_latency_ceilings_ms": {
+                    "small": {"p95": 300, "p99": 600},
+                    "large": {"p95": 1500, "p99": 3000},
+                    "churn": {"p95": 1800, "p99": 3500}
+                },
+                "resource_budget_ceilings": {
+                    "small": {
+                        "allocations_per_completion": 2000000,
+                        "allocated_bytes_per_completion": 200000000,
+                        "lock_wait_ms_per_completion": 5000,
+                        "lock_contention_events_per_completion": 5000
+                    },
+                    "large": {
+                        "allocations_per_completion": 5000000,
+                        "allocated_bytes_per_completion": 500000000,
+                        "lock_wait_ms_per_completion": 10000,
+                        "lock_contention_events_per_completion": 10000
+                    },
+                    "churn": {
+                        "allocations_per_completion": 6000000,
+                        "allocated_bytes_per_completion": 600000000,
+                        "lock_wait_ms_per_completion": 15000,
+                        "lock_contention_events_per_completion": 15000
+                    }
+                }
+            }
+        });
+
+        let current = PerfReport {
+            scenario: "small".to_string(),
+            cases: 1,
+            iterations: 1,
+            warmup: 0,
+            contract_version: "v1".to_string(),
+            metrics: PerfMetrics {
+                total_requests: 1,
+                count: 1,
+                p50_ms: 1.0,
+                p95_ms: 2.0,
+                p99_ms: 3.0,
+                error_rate: 0.0,
+                incomplete_rate: 0.0,
+                allocations_per_completion: 10.0,
+                allocated_bytes_per_completion: 20.0,
+                lock_wait_ms_per_completion: 1.0,
+                lock_contention_events_per_completion: 1.0,
+            },
+            thresholds: None,
+            comparison: None,
+        };
+        let baseline = PerfReport {
+            contract_version: "v2".to_string(),
+            ..current.clone()
+        };
+
+        let comparison = compare_reports(
+            &contract, "small", &current, &baseline, 1.10, 1.15, 1.20, 0.0, 0.0, true,
+        );
+        assert_eq!(comparison.verdict, "fail");
+        assert!(!comparison.pass);
+        assert_eq!(
+            comparison.reason_codes,
+            vec!["unsupported_contract_version".to_string()]
+        );
     }
 }

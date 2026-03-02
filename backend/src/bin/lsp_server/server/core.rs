@@ -4141,6 +4141,312 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn p30_cross_file_did_change_parallel_completion_no_global_lock_bottleneck() {
+        const CHANGE_ID: &str = "add-performance-first-ai-engineering-guardrails";
+        const DID_CHANGE_BURST_PER_FILE: u32 = 8;
+        const COMPLETION_BURST_PER_FILE: usize = 20;
+        const REQUEST_TIMEOUT_SECS: u64 = 30;
+        const MAX_COMPLETION_LATENCY_MS: f64 = 10_000.0;
+        const MAX_QUEUE_WAIT_P95_MS: f64 = 2_000.0;
+        const MIN_CONCURRENCY_GAIN: f64 = 1.10;
+        const MIN_AVG_LATENCY_FOR_GAIN_CHECK_MS: f64 = 2.0;
+
+        fn completion_items_count(response: &CompletionResponse) -> usize {
+            match response {
+                CompletionResponse::Array(items) => items.len(),
+                CompletionResponse::List(list) => list.items.len(),
+            }
+        }
+
+        fn metric_as_f64(value: Option<&serde_json::Value>) -> f64 {
+            value
+                .and_then(|value| value.as_f64().or_else(|| value.as_u64().map(|v| v as f64)))
+                .unwrap_or(0.0)
+        }
+
+        fn build_document_text(function_name: &str) -> String {
+            format!(
+                "Процедура {function_name}()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.\nКонецПроцедуры\n"
+            )
+        }
+
+        struct DocumentState {
+            uri: Url,
+            version: i32,
+            text: String,
+        }
+
+        let coordinator = Arc::new(SystemCoordinator::new());
+        let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+            Arc::new(std::sync::Mutex::new(None));
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            let server_holder = server_holder.clone();
+            move |client| {
+                let server = BslLanguageServer::new(client, coordinator.clone());
+                *server_holder.lock().expect("server holder lock") = Some(server.clone());
+                server
+            }
+        })
+        .finish();
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        initialize_lsp_service(&mut service).await;
+
+        let mut documents = vec![
+            DocumentState {
+                uri: Url::parse("file:///test_p30_cross_file_a.bsl").expect("document uri A"),
+                version: 1,
+                text: build_document_text("ТестA"),
+            },
+            DocumentState {
+                uri: Url::parse("file:///test_p30_cross_file_b.bsl").expect("document uri B"),
+                version: 1,
+                text: build_document_text("ТестB"),
+            },
+        ];
+
+        for document in &documents {
+            let did_open = DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: document.uri.clone(),
+                    language_id: "bsl".to_string(),
+                    version: document.version,
+                    text: document.text.clone(),
+                },
+            };
+            let did_open_req = Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish();
+            let did_open_response = service
+                .ready()
+                .await
+                .unwrap()
+                .call(did_open_req)
+                .await
+                .expect("didOpen notification");
+            assert!(did_open_response.is_none(), "didOpen is a notification");
+        }
+
+        for burst_idx in 0..DID_CHANGE_BURST_PER_FILE {
+            for (doc_idx, document) in documents.iter_mut().enumerate() {
+                document.version += 1;
+                document
+                    .text
+                    .push_str(&format!("// churn doc={doc_idx} step={burst_idx}\n"));
+                let did_change = DidChangeTextDocumentParams {
+                    text_document: VersionedTextDocumentIdentifier {
+                        uri: document.uri.clone(),
+                        version: document.version,
+                    },
+                    content_changes: vec![TextDocumentContentChangeEvent {
+                        range: None,
+                        range_length: None,
+                        text: document.text.clone(),
+                    }],
+                };
+                let did_change_req = Request::build("textDocument/didChange")
+                    .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+                    .finish();
+                let did_change_response = service
+                    .ready()
+                    .await
+                    .unwrap()
+                    .call(did_change_req)
+                    .await
+                    .expect("didChange notification");
+                assert!(did_change_response.is_none(), "didChange is a notification");
+            }
+        }
+
+        let server = server_holder
+            .lock()
+            .expect("server holder lock")
+            .as_ref()
+            .cloned()
+            .expect("server instance");
+        let member_character = "    ЛокМассив."
+            .chars()
+            .map(|ch| ch.len_utf16())
+            .sum::<usize>() as u32;
+
+        let mut handles =
+            Vec::with_capacity(documents.len().saturating_mul(COMPLETION_BURST_PER_FILE));
+        let wall_started = Instant::now();
+        for document in &documents {
+            for _ in 0..COMPLETION_BURST_PER_FILE {
+                let server = server.clone();
+                let uri = document.uri.clone();
+                handles.push(tokio::spawn(async move {
+                    let started = Instant::now();
+                    let response = server
+                        .completion(CompletionParams {
+                            text_document_position: TextDocumentPositionParams {
+                                text_document: TextDocumentIdentifier { uri },
+                                position: Position::new(2, member_character),
+                            },
+                            work_done_progress_params: WorkDoneProgressParams::default(),
+                            partial_result_params: PartialResultParams::default(),
+                            context: Some(CompletionContext {
+                                trigger_kind: CompletionTriggerKind::INVOKED,
+                                trigger_character: None,
+                            }),
+                        })
+                        .await;
+                    (response, started.elapsed().as_secs_f64() * 1000.0)
+                }));
+            }
+        }
+        let completion_outcomes =
+            tokio::time::timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS), async move {
+                let mut outcomes = Vec::with_capacity(handles.len());
+                for handle in handles {
+                    outcomes.push(handle.await.expect("parallel completion task join"));
+                }
+                outcomes
+            })
+            .await
+            .expect("parallel completion burst timed out");
+        let wall_time_ms = wall_started.elapsed().as_secs_f64() * 1000.0;
+
+        let mut success_total = 0_u64;
+        let mut non_empty_total = 0_u64;
+        let mut sum_latency_ms = 0.0_f64;
+        let mut max_latency_ms = 0.0_f64;
+        for (response, latency_ms) in completion_outcomes {
+            sum_latency_ms += latency_ms;
+            max_latency_ms = max_latency_ms.max(latency_ms);
+            if let Ok(Some(completion)) = response {
+                success_total += 1;
+                if completion_items_count(&completion) > 0 {
+                    non_empty_total += 1;
+                }
+            }
+        }
+
+        let total_requests = (documents.len() * COMPLETION_BURST_PER_FILE) as u64;
+        let average_latency_ms = sum_latency_ms / total_requests.max(1) as f64;
+        let concurrency_gain = if wall_time_ms > 0.0 {
+            sum_latency_ms / wall_time_ms
+        } else {
+            1.0
+        };
+
+        assert_eq!(
+            success_total, total_requests,
+            "parallel completion burst must complete successfully for all cross-file requests"
+        );
+        assert!(
+            non_empty_total > 0,
+            "parallel completion burst produced only empty completion payloads after didChange burst"
+        );
+        assert!(
+            max_latency_ms <= MAX_COMPLETION_LATENCY_MS,
+            "cross-file completion max latency exceeded: {max_latency_ms:.2}ms > {MAX_COMPLETION_LATENCY_MS:.2}ms"
+        );
+        if average_latency_ms >= MIN_AVG_LATENCY_FOR_GAIN_CHECK_MS {
+            assert!(
+                concurrency_gain >= MIN_CONCURRENCY_GAIN,
+                "parallel completion behaved as serialized workload after didChange burst: gain={concurrency_gain:.2} (sum={sum_latency_ms:.2}ms wall={wall_time_ms:.2}ms)"
+            );
+        }
+
+        let metrics = coordinator.observability_metrics();
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        let histograms = metrics
+            .get("histograms")
+            .and_then(|value| value.as_object())
+            .expect("metrics.histograms object");
+        let queue_wait_interactive_p95 = histograms
+            .get("intellisense_v2_runtime_queue_wait_interactive_ms")
+            .and_then(|value| value.as_object())
+            .map(|hist| metric_as_f64(hist.get("p95")))
+            .unwrap_or(0.0);
+        let completion_total_counter = counters
+            .get("completion_total")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0);
+        let interactive_exec_total = counters
+            .get("intellisense_v2_runtime_exec_interactive_total")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0);
+
+        assert!(
+            completion_total_counter > 0,
+            "completion_total counter must be populated for cross-file parallel burst"
+        );
+        assert!(
+            interactive_exec_total > 0,
+            "interactive exec counter must be populated for cross-file parallel burst"
+        );
+        assert!(
+            queue_wait_interactive_p95 <= MAX_QUEUE_WAIT_P95_MS,
+            "interactive queue-wait p95 regression after didChange burst: {queue_wait_interactive_p95:.2}ms > {MAX_QUEUE_WAIT_P95_MS:.2}ms"
+        );
+
+        let report = serde_json::json!({
+            "change_id": CHANGE_ID,
+            "profile": "p30_cross_file_did_change_parallel_completion_no_global_lock_bottleneck",
+            "inputs": {
+                "documents_total": documents.len(),
+                "did_change_burst_per_file": DID_CHANGE_BURST_PER_FILE,
+                "parallel_completion_burst_per_file": COMPLETION_BURST_PER_FILE,
+            },
+            "thresholds": {
+                "request_timeout_secs": REQUEST_TIMEOUT_SECS,
+                "max_completion_latency_ms": MAX_COMPLETION_LATENCY_MS,
+                "max_queue_wait_interactive_p95_ms": MAX_QUEUE_WAIT_P95_MS,
+                "min_concurrency_gain": MIN_CONCURRENCY_GAIN,
+                "min_avg_latency_for_gain_check_ms": MIN_AVG_LATENCY_FOR_GAIN_CHECK_MS,
+            },
+            "results": {
+                "total_requests": total_requests,
+                "success_total": success_total,
+                "non_empty_total": non_empty_total,
+                "sum_latency_ms": sum_latency_ms,
+                "wall_time_ms": wall_time_ms,
+                "average_latency_ms": average_latency_ms,
+                "max_latency_ms": max_latency_ms,
+                "concurrency_gain": concurrency_gain,
+                "queue_wait_interactive_p95_ms": queue_wait_interactive_p95,
+                "completion_total_counter": completion_total_counter,
+                "interactive_exec_total": interactive_exec_total,
+            },
+            "pass": true
+        });
+        let report_path = std::env::var("BSL_V2_COMPLETION_CROSS_FILE_DID_CHANGE_REPORT")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests")
+                    .join("perf")
+                    .join("reports")
+                    .join(format!(
+                        "{CHANGE_ID}-didchange-parallel-completion-cross-file.json"
+                    ))
+            });
+        if let Some(parent) = report_path.parent() {
+            std::fs::create_dir_all(parent)
+                .expect("failed to create directory for cross-file completion report");
+        }
+        std::fs::write(
+            &report_path,
+            serde_json::to_string_pretty(&report)
+                .expect("failed to serialize cross-file completion report"),
+        )
+        .expect("failed to write cross-file completion report");
+        println!(
+            "v2_completion_cross_file_did_change_report={}",
+            report_path.display()
+        );
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
     async fn p7_trigger_character_and_invoked_member_access_keep_semantic_parity() {
         let coordinator = Arc::new(SystemCoordinator::new());
         let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =

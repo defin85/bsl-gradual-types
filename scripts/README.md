@@ -219,6 +219,9 @@ python3 scripts/test-contract-compatibility-diff.py
 - `test_first_evidence` (обязателен для `behavioral|architectural|perf_critical`);
 - ADR/doc-first минимум для `architectural|perf_critical`;
 - обязательную acceptance matrix с pass/fail критериями для `architectural|perf_critical`;
+- `bootstrap_policy` (`sample_size_min>=5`, `aggregation_rule=median`) для `perf_critical`;
+- `dependency_checks` (D-связи из `tasks.md`) для `architectural|perf_critical`;
+- `ownership_signoff` с role-based approvals для `architectural|perf_critical`;
 - существование `failing_ref` / `passing_ref` (для файловых ссылок).
 
 **Использование:**

@@ -1,0 +1,30 @@
+{
+  "schema_version": "v1",
+  "change_id": "add-performance-first-ai-engineering-guardrails",
+  "signoffs": [
+    {
+      "role": "analysis_v2_owner",
+      "status": "approved",
+      "reviewed_on": "2026-03-02",
+      "evidence_ref": "openspec/changes/add-performance-first-ai-engineering-guardrails/validation/review-ownership-signoff.md"
+    },
+    {
+      "role": "runtime_owner",
+      "status": "approved",
+      "reviewed_on": "2026-03-02",
+      "evidence_ref": "openspec/changes/add-performance-first-ai-engineering-guardrails/validation/review-ownership-signoff.md"
+    },
+    {
+      "role": "lsp_owner",
+      "status": "approved",
+      "reviewed_on": "2026-03-02",
+      "evidence_ref": "openspec/changes/add-performance-first-ai-engineering-guardrails/validation/review-ownership-signoff.md"
+    },
+    {
+      "role": "process_owner",
+      "status": "approved",
+      "reviewed_on": "2026-03-02",
+      "evidence_ref": "openspec/changes/add-performance-first-ai-engineering-guardrails/validation/review-ownership-signoff.md"
+    }
+  ]
+}

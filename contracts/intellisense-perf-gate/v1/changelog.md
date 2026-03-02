@@ -6,4 +6,5 @@ Initial contract baseline for dedicated perf-gate evaluator (`Option B`).
 - Input contract for profiles and required metric keys.
 - Baseline contract for absolute latency ceilings.
 - Baseline contract for resource budget ceilings.
+- Baseline bootstrap policy (`required_profiles`, `sample_size_min>=5`, `aggregation_rule=median`).
 - Report contract for deterministic verdict/reason-codes.

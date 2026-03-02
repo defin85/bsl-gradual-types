@@ -940,6 +940,15 @@ impl BasicObservability {
             "query_bundle_owner_hint_type_lookup_index_fetch_idle_before_first_will_execute_type_index" => {
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_idle_before_first_will_execute_type_index_ms"
             }
+            "query_bundle_owner_hint_type_lookup_index_fetch_apply_age_at_query_start" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_apply_age_at_query_start_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_index_fetch_apply_to_first_will_execute_type_index" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_apply_to_first_will_execute_type_index_ms"
+            }
+            "query_bundle_owner_hint_type_lookup_index_fetch_apply_to_fetch_end" => {
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_apply_to_fetch_end_ms"
+            }
             "query_bundle_owner_hint_type_lookup_index_query_total" => {
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_query_total_ms"
             }
@@ -4352,6 +4361,18 @@ mod observability_contract_tests {
             std::time::Duration::from_millis(2),
         );
         observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_fetch_apply_age_at_query_start",
+            std::time::Duration::from_millis(2),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_fetch_apply_to_first_will_execute_type_index",
+            std::time::Duration::from_millis(2),
+        );
+        observability.record_completion_stage_latency(
+            "query_bundle_owner_hint_type_lookup_index_fetch_apply_to_fetch_end",
+            std::time::Duration::from_millis(2),
+        );
+        observability.record_completion_stage_latency(
             "query_bundle_owner_hint_type_lookup_index_query_total",
             std::time::Duration::from_millis(4),
         );
@@ -4641,6 +4662,27 @@ mod observability_contract_tests {
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_idle_before_first_will_execute_type_index_ms"
             ) > 0,
             "owner-hint idle-before-first-WillExecute(type_index) histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_apply_age_at_query_start_ms"
+            ) > 0,
+            "owner-hint apply-age-at-query-start histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_apply_to_first_will_execute_type_index_ms"
+            ) > 0,
+            "owner-hint apply-to-first-WillExecute(type_index) histogram must be exported"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_apply_to_fetch_end_ms"
+            ) > 0,
+            "owner-hint apply-to-fetch-end histogram must be exported"
         );
         assert!(
             histogram_count(

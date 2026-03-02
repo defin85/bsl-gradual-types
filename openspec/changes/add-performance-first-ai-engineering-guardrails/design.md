@@ -81,6 +81,142 @@
     - отсутствие любого key -> fail (`missing_required_metric_field`).
   - Why: предотвращает schema drift между evaluator и consumers.
 
+## Concrete Contracts (Tasks 2.1-2.9)
+### 2.1 ADR template and classification criteria
+ADR обязателен для `change_criticality in {architectural, perf_critical}`.
+
+Минимальный шаблон ADR:
+1. `Title` и `Date`
+2. `Status` (`proposed|accepted|superseded`)
+3. `Change ID` + `change_criticality`
+4. `Context` (проблема, ограничения)
+5. `Options Considered` (минимум 2)
+6. `Decision` и `Rationale`
+7. `Budgets` (`latency`, `allocations`, `lock contention`)
+8. `Validation Plan` (tests/perf evidence)
+9. `Rollback / Supersede Plan`
+10. `Owners and Approvers`
+
+Критерии `architecturally significant/perf-critical`:
+- меняется модель синхронизации hot path;
+- добавляются/меняются process-global locks;
+- меняются cache topology или consistency границы;
+- меняется perf-gate evaluator/schema contract;
+- меняются SLO/budget ceilings.
+
+### 2.2 Protected-assets manifest
+Protected-assets v1 (immutable в implementation change):
+- `contracts/intellisense-perf-gate/**`
+- `openspec/specs/dev-workflow/spec.md`
+- `openspec/specs/bsl-intellisense-v2/spec.md`
+- `backend/src/bin/lsp_server/server/core.rs` (perf gate report/verdict path)
+- `backend/src/bin/intellisense_perf.rs`
+- `tests/perf/**`
+
+Нарушение без отдельного approved change -> fail reason:
+- `protected_acceptance_asset_modified`.
+
+### 2.3 Schema contract v1 and format/version policy
+`Option B` contract root:
+- `contracts/intellisense-perf-gate/v1/input.schema.json`
+- `contracts/intellisense-perf-gate/v1/baseline.schema.json`
+- `contracts/intellisense-perf-gate/v1/report.schema.json`
+
+Version policy:
+- backward-compatible additive change: same major (`v1`);
+- breaking change: mandatory new major (`v2`) + migration note;
+- compatibility-diff gate обязателен для всех изменений schema.
+
+Required report fields:
+- `contract_version`
+- `verdict` (`pass|fail`)
+- `reason_codes[]`
+- `profiles.small|large|churn`
+
+### 2.4 Ownership model
+Ownership фиксируется по роли (не по персоналии):
+- `ADR Owner`: архитектурная группа backend/runtime.
+- `Perf Budget Owner`: владелец `bsl-intellisense-v2` perf-SLO.
+- `Protected Assets Owner`: владелец `dev-workflow` и CI policy.
+- `Contract Owner`: владелец `contracts/intellisense-perf-gate/*`.
+
+Approval policy:
+- ADR acceptance требует `ADR Owner + Perf Budget Owner`.
+- Contract version bump требует `Contract Owner + Protected Assets Owner`.
+
+### 2.5 Absolute latency ceilings (approved initial values)
+Начальные абсолютные ceilings для warm-path completion:
+
+| Profile | p95 ceiling | p99 ceiling |
+| --- | --- | --- |
+| `small` | `300ms` | `600ms` |
+| `large` | `1500ms` | `3000ms` |
+| `churn` | `1800ms` | `3500ms` |
+
+Дополнительно к absolute ceilings всегда применяется relative ratio gate к versioned baseline.
+Изменение ceilings возможно только через ADR + update baseline contract.
+
+### 2.6 Dedicated perf-gate module boundary
+Единая boundary:
+- module: `backend/src/bin/lsp_server/server/perf_gate_evaluator.rs` (или эквивалентный выделенный модуль runtime/gate)
+- API:
+  - `evaluate(input, baseline) -> report`
+  - `validate_contract_version(input, baseline)`
+- Consumers:
+  - CI gate
+  - local perf harness
+  - runtime acceptance check
+
+Reason-code taxonomy (v1):
+- `missing_required_metric_field`
+- `unsupported_contract_version`
+- `latency_relative_ratio_exceeded`
+- `latency_absolute_ceiling_exceeded`
+- `allocation_budget_exceeded`
+- `lock_wait_budget_exceeded`
+- `lock_contention_budget_exceeded`
+- `protected_acceptance_asset_modified`
+- `change_criticality_missing_or_unknown`
+- `test_first_evidence_missing_or_invalid`
+- `initial_budget_not_fixed`
+- `perf_gate_architecture_violation`
+
+### 2.7 `change_criticality` schema (machine-readable)
+```json
+{
+  "schema_version": "v1",
+  "change_id": "add-performance-first-ai-engineering-guardrails",
+  "change_criticality": "perf_critical",
+  "rule_id": "criticality.rules.v1/perf_hot_path",
+  "reason": "Touches interactive completion hot path and perf-gate architecture"
+}
+```
+Enum is fixed: `routine|behavioral|architectural|perf_critical`.
+
+### 2.8 Test-first evidence schema
+```json
+{
+  "schema_version": "v1",
+  "change_id": "add-performance-first-ai-engineering-guardrails",
+  "scope": "backend/runtime",
+  "failing_ref": "path-or-ci-run-before",
+  "passing_ref": "path-or-ci-run-after",
+  "reason_codes": []
+}
+```
+Validation fails если любой из `change_id|scope|failing_ref|passing_ref` отсутствует.
+
+### 2.9 Bootstrap methodology for initial budgets
+Обязательная методика:
+1. Profiles: `small|large|churn`.
+2. Для каждого профиля минимум `N=5` валидных прогонов.
+3. Aggregation:
+   - budget `p95` = median(profile-level `p95`);
+   - budget `p99` = median(profile-level `p99`).
+4. Resource budgets рассчитываются аналогично (median per-profile).
+5. Результат фиксируется в versioned baseline contract.
+6. Blocking mode включается только после ADR approval и зафиксированного baseline.
+
 ## Alternatives Considered
 - Альтернатива A: Inline/per-script perf gate (логика распределена между `lsp_server` core и shell/Python helpers).
   - Rejected: пороги и reason-codes расходятся между entrypoints; сложно доказать единый fail-closed verdict.

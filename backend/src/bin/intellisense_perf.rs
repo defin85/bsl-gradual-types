@@ -1,8 +1,10 @@
 //! IntelliSense performance harness for completion latency regression checks.
 
+use std::alloc::{GlobalAlloc, Layout, System};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -12,10 +14,69 @@ use serde::{Deserialize, Serialize};
 
 use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, FileId as V2FileId, SettingsId};
 use bsl_backend::application::get_completion_with_semantic_program_snapshot;
+use bsl_backend::perf_gate_evaluator::{
+    evaluate_intellisense_perf_profile, PerfGateSample, PerfGateThresholds,
+};
 use bsl_backend::system::{build_deps_bundle_v2, SystemCoordinator};
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::formatting::DetailLevel;
+
+struct CountingAllocator;
+
+static ALLOCATION_COUNT: AtomicU64 = AtomicU64::new(0);
+static ALLOCATED_BYTES: AtomicU64 = AtomicU64::new(0);
+
+#[global_allocator]
+static GLOBAL_ALLOCATOR: CountingAllocator = CountingAllocator;
+
+// SAFETY: The wrapper delegates all allocation behavior to the standard system allocator
+// while only updating lock-free atomics for measurement.
+unsafe impl GlobalAlloc for CountingAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        let ptr = unsafe { System.alloc(layout) };
+        if !ptr.is_null() {
+            ALLOCATION_COUNT.fetch_add(1, Ordering::Relaxed);
+            ALLOCATED_BYTES.fetch_add(layout.size() as u64, Ordering::Relaxed);
+        }
+        ptr
+    }
+
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        let ptr = unsafe { System.alloc_zeroed(layout) };
+        if !ptr.is_null() {
+            ALLOCATION_COUNT.fetch_add(1, Ordering::Relaxed);
+            ALLOCATED_BYTES.fetch_add(layout.size() as u64, Ordering::Relaxed);
+        }
+        ptr
+    }
+
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        let new_ptr = unsafe { System.realloc(ptr, layout, new_size) };
+        if !new_ptr.is_null() {
+            ALLOCATION_COUNT.fetch_add(1, Ordering::Relaxed);
+            ALLOCATED_BYTES.fetch_add(new_size as u64, Ordering::Relaxed);
+        }
+        new_ptr
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        unsafe { System.dealloc(ptr, layout) };
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AllocationSnapshot {
+    count: u64,
+    bytes: u64,
+}
+
+fn allocation_snapshot() -> AllocationSnapshot {
+    AllocationSnapshot {
+        count: ALLOCATION_COUNT.load(Ordering::Relaxed),
+        bytes: ALLOCATED_BYTES.load(Ordering::Relaxed),
+    }
+}
 
 #[derive(Debug, Parser)]
 #[command(name = "intellisense-perf")]
@@ -61,6 +122,10 @@ struct Args {
     #[arg(long, default_value_t = 1.15)]
     threshold_p99: f64,
 
+    /// Regression threshold for resource metrics (ratio vs baseline).
+    #[arg(long, default_value_t = 1.15)]
+    threshold_resource: f64,
+
     /// Maximum allowed error rate (0.0..1.0).
     #[arg(long, default_value_t = 0.0)]
     max_error_rate: f64,
@@ -76,6 +141,14 @@ struct Args {
     /// Output summary markdown path.
     #[arg(long)]
     summary: Option<PathBuf>,
+
+    /// Versioned contract path for intellisense perf gate.
+    #[arg(long)]
+    contract_path: Option<PathBuf>,
+
+    /// Enable fail-closed blocking mode for missing baseline budgets.
+    #[arg(long, default_value_t = false)]
+    blocking_mode: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -130,6 +203,14 @@ struct PerfMetrics {
     p99_ms: f64,
     error_rate: f64,
     incomplete_rate: f64,
+    #[serde(default)]
+    allocations_per_completion: f64,
+    #[serde(default)]
+    allocated_bytes_per_completion: f64,
+    #[serde(default)]
+    lock_wait_ms_per_completion: f64,
+    #[serde(default)]
+    lock_contention_events_per_completion: f64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -140,10 +221,14 @@ struct PerfComparison {
     ratio_p99: f64,
     threshold_p95: f64,
     threshold_p99: f64,
+    threshold_resource: f64,
     max_error_rate: f64,
     max_incomplete_rate: f64,
     error_rate: f64,
     incomplete_rate: f64,
+    contract_version: String,
+    verdict: String,
+    reason_codes: Vec<String>,
     pass: bool,
 }
 
@@ -161,6 +246,14 @@ async fn main() -> Result<()> {
         .canonicalize()
         .with_context(|| format!("Scenario not found: {}", args.scenario.to_string_lossy()))?;
     let workspace_root = workspace_root();
+    let contract_path = args.contract_path.clone().unwrap_or_else(|| {
+        workspace_root
+            .join("contracts")
+            .join("intellisense-perf-gate")
+            .join("v1")
+            .join("contract.json")
+    });
+    let contract = read_json_value(&contract_path)?;
     let scenario = read_scenario(&scenario_path)?;
 
     let syntax_helper_path = resolve_override(
@@ -240,6 +333,10 @@ async fn main() -> Result<()> {
     let mut durations_ms = Vec::new();
     let mut errors = 0usize;
     let mut incomplete = 0usize;
+    let mut allocation_count_total = 0_u64;
+    let mut allocated_bytes_total = 0_u64;
+    let mut lock_wait_ms_total = 0.0_f64;
+    let mut lock_contention_events_total = 0_u64;
     run_iterations(
         &analysis,
         deps_bundle.index_snapshot.as_ref(),
@@ -251,12 +348,25 @@ async fn main() -> Result<()> {
             durations: &mut durations_ms,
             errors: &mut errors,
             incomplete: &mut incomplete,
+            allocation_count_total: &mut allocation_count_total,
+            allocated_bytes_total: &mut allocated_bytes_total,
+            lock_wait_ms_total: &mut lock_wait_ms_total,
+            lock_contention_events_total: &mut lock_contention_events_total,
         }),
     )
     .await?;
 
     let total_requests = prepared.len() * args.iterations;
-    let metrics = build_metrics(total_requests, &durations_ms, errors, incomplete);
+    let metrics = build_metrics(
+        total_requests,
+        &durations_ms,
+        errors,
+        incomplete,
+        allocation_count_total,
+        allocated_bytes_total,
+        lock_wait_ms_total,
+        lock_contention_events_total,
+    );
     let thresholds = PerfThresholds {
         max_error_rate: args.max_error_rate,
         max_incomplete_rate: args.max_incomplete_rate,
@@ -278,13 +388,16 @@ async fn main() -> Result<()> {
         if baseline_path.exists() {
             let baseline = read_report(baseline_path)?;
             Some(compare_reports(
+                &contract,
+                &scenario.name,
                 &report,
                 &baseline,
                 args.threshold_p95,
                 args.threshold_p99,
+                args.threshold_resource,
                 args.max_error_rate,
                 args.max_incomplete_rate,
-                rate_pass,
+                args.blocking_mode,
             ))
         } else if args.update_baseline {
             None
@@ -316,7 +429,9 @@ async fn main() -> Result<()> {
     if let Some(comparison) = comparison {
         if !comparison.pass {
             bail!(
-                "Regression detected: ratio_p95={:.3} (<= {:.2}), ratio_p99={:.3} (<= {:.2}), error_rate={:.3} (<= {:.3}), incomplete_rate={:.3} (<= {:.3})",
+                "Regression detected: verdict={}, reason_codes={:?}, ratio_p95={:.3} (<= {:.2}), ratio_p99={:.3} (<= {:.2}), error_rate={:.3} (<= {:.3}), incomplete_rate={:.3} (<= {:.3})",
+                comparison.verdict,
+                comparison.reason_codes,
                 comparison.ratio_p95,
                 comparison.threshold_p95,
                 comparison.ratio_p99,
@@ -433,11 +548,14 @@ async fn run_iterations(
     for _ in 0..iterations {
         for case in cases {
             let started = Instant::now();
+            let alloc_before = allocation_snapshot();
 
+            let ir_started = Instant::now();
             let ir_program = analysis
                 .ir(case.file_id)
                 .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
                 .context("ir unavailable")?;
+            let ir_elapsed_ms = ir_started.elapsed().as_secs_f64() * 1000.0;
 
             let result = get_completion_with_semantic_program_snapshot(
                 case.content.as_ref(),
@@ -454,6 +572,10 @@ async fn run_iterations(
             )
             .await;
             let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+            let alloc_after = allocation_snapshot();
+            let alloc_delta = alloc_after.count.saturating_sub(alloc_before.count);
+            let bytes_delta = alloc_after.bytes.saturating_sub(alloc_before.bytes);
+            let lock_contention_event = if ir_elapsed_ms > 0.0 { 1_u64 } else { 0_u64 };
 
             if let Some(targets) = output.as_mut() {
                 match result {
@@ -467,6 +589,10 @@ async fn run_iterations(
                         *targets.errors += 1;
                     }
                 }
+                *targets.allocation_count_total += alloc_delta;
+                *targets.allocated_bytes_total += bytes_delta;
+                *targets.lock_wait_ms_total += ir_elapsed_ms;
+                *targets.lock_contention_events_total += lock_contention_event;
             }
         }
     }
@@ -477,6 +603,10 @@ struct OutputTargets<'a> {
     durations: &'a mut Vec<f64>,
     errors: &'a mut usize,
     incomplete: &'a mut usize,
+    allocation_count_total: &'a mut u64,
+    allocated_bytes_total: &'a mut u64,
+    lock_wait_ms_total: &'a mut f64,
+    lock_contention_events_total: &'a mut u64,
 }
 
 fn build_metrics(
@@ -484,6 +614,10 @@ fn build_metrics(
     durations: &[f64],
     errors: usize,
     incomplete: usize,
+    allocation_count_total: u64,
+    allocated_bytes_total: u64,
+    lock_wait_ms_total: f64,
+    lock_contention_events_total: u64,
 ) -> PerfMetrics {
     let count = durations.len();
     let (p50, p95, p99) = if count == 0 {
@@ -509,6 +643,26 @@ fn build_metrics(
     } else {
         incomplete as f64 / total_requests_f
     };
+    let allocations_per_completion = if total_requests == 0 {
+        0.0
+    } else {
+        allocation_count_total as f64 / total_requests_f
+    };
+    let allocated_bytes_per_completion = if total_requests == 0 {
+        0.0
+    } else {
+        allocated_bytes_total as f64 / total_requests_f
+    };
+    let lock_wait_ms_per_completion = if total_requests == 0 {
+        0.0
+    } else {
+        lock_wait_ms_total / total_requests_f
+    };
+    let lock_contention_events_per_completion = if total_requests == 0 {
+        0.0
+    } else {
+        lock_contention_events_total as f64 / total_requests_f
+    };
 
     PerfMetrics {
         total_requests,
@@ -518,6 +672,10 @@ fn build_metrics(
         p99_ms: p99,
         error_rate,
         incomplete_rate,
+        allocations_per_completion,
+        allocated_bytes_per_completion,
+        lock_wait_ms_per_completion,
+        lock_contention_events_per_completion,
     }
 }
 
@@ -537,6 +695,13 @@ fn read_report(path: &Path) -> Result<PerfReport> {
     Ok(report)
 }
 
+fn read_json_value(path: &Path) -> Result<serde_json::Value> {
+    let data =
+        fs::read_to_string(path).with_context(|| format!("Failed to read {}", path.display()))?;
+    let value: serde_json::Value = serde_json::from_str(&data).context("Invalid JSON")?;
+    Ok(value)
+}
+
 fn write_report(path: &Path, report: &PerfReport) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| {
@@ -549,19 +714,73 @@ fn write_report(path: &Path, report: &PerfReport) -> Result<()> {
 }
 
 fn compare_reports(
+    contract: &serde_json::Value,
+    profile: &str,
     current: &PerfReport,
     baseline: &PerfReport,
     threshold_p95: f64,
     threshold_p99: f64,
+    threshold_resource: f64,
     max_error_rate: f64,
     max_incomplete_rate: f64,
-    rate_pass: bool,
+    blocking_mode: bool,
 ) -> PerfComparison {
     let baseline_p95 = baseline.metrics.p95_ms.max(0.000_001);
     let baseline_p99 = baseline.metrics.p99_ms.max(0.000_001);
     let ratio_p95 = current.metrics.p95_ms / baseline_p95;
     let ratio_p99 = current.metrics.p99_ms / baseline_p99;
-    let pass = ratio_p95 <= threshold_p95 && ratio_p99 <= threshold_p99 && rate_pass;
+    let evaluation = evaluate_intellisense_perf_profile(
+        contract,
+        profile,
+        PerfGateSample {
+            p95_ms: current.metrics.p95_ms,
+            p99_ms: current.metrics.p99_ms,
+            error_rate: current.metrics.error_rate,
+            incomplete_rate: current.metrics.incomplete_rate,
+            allocations_per_completion: current.metrics.allocations_per_completion,
+            allocated_bytes_per_completion: current.metrics.allocated_bytes_per_completion,
+            lock_wait_ms_per_completion: current.metrics.lock_wait_ms_per_completion,
+            lock_contention_events_per_completion: current
+                .metrics
+                .lock_contention_events_per_completion,
+        },
+        Some(PerfGateSample {
+            p95_ms: baseline.metrics.p95_ms,
+            p99_ms: baseline.metrics.p99_ms,
+            error_rate: baseline.metrics.error_rate,
+            incomplete_rate: baseline.metrics.incomplete_rate,
+            allocations_per_completion: baseline.metrics.allocations_per_completion,
+            allocated_bytes_per_completion: baseline.metrics.allocated_bytes_per_completion,
+            lock_wait_ms_per_completion: baseline.metrics.lock_wait_ms_per_completion,
+            lock_contention_events_per_completion: baseline
+                .metrics
+                .lock_contention_events_per_completion,
+        }),
+        PerfGateThresholds {
+            latency_ratio_p95_max: threshold_p95,
+            latency_ratio_p99_max: threshold_p99,
+            resource_ratio_max: threshold_resource,
+            max_error_rate,
+            max_incomplete_rate,
+            blocking_mode,
+        },
+    );
+    let verdict = evaluation
+        .get("verdict")
+        .and_then(|value| value.as_str())
+        .unwrap_or("fail")
+        .to_string();
+    let reason_codes = evaluation
+        .get("reason_codes")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(ToString::to_string))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_else(|| vec!["missing_required_metric_field".to_string()]);
+    let pass = verdict == "pass";
 
     PerfComparison {
         baseline_p95_ms: baseline.metrics.p95_ms,
@@ -570,10 +789,18 @@ fn compare_reports(
         ratio_p99,
         threshold_p95,
         threshold_p99,
+        threshold_resource,
         max_error_rate,
         max_incomplete_rate,
         error_rate: current.metrics.error_rate,
         incomplete_rate: current.metrics.incomplete_rate,
+        contract_version: evaluation
+            .get("contract_version")
+            .and_then(|value| value.as_str())
+            .unwrap_or("unknown")
+            .to_string(),
+        verdict,
+        reason_codes,
         pass,
     }
 }
@@ -588,6 +815,13 @@ fn write_summary(path: &Path, report: &PerfReport) -> Result<()> {
     lines.push(format!(
         "- p50/p95/p99 (ms): {:.3} / {:.3} / {:.3}",
         report.metrics.p50_ms, report.metrics.p95_ms, report.metrics.p99_ms
+    ));
+    lines.push(format!(
+        "- resource per completion (allocs/bytes/lock_wait_ms/lock_contention): {:.3} / {:.3} / {:.3} / {:.3}",
+        report.metrics.allocations_per_completion,
+        report.metrics.allocated_bytes_per_completion,
+        report.metrics.lock_wait_ms_per_completion,
+        report.metrics.lock_contention_events_per_completion
     ));
     lines.push(format!("- error_rate: {:.3}", report.metrics.error_rate));
     lines.push(format!(
@@ -612,6 +846,19 @@ fn write_summary(path: &Path, report: &PerfReport) -> Result<()> {
         lines.push(format!(
             "- thresholds p95/p99: {:.2} / {:.2}",
             comparison.threshold_p95, comparison.threshold_p99
+        ));
+        lines.push(format!(
+            "- resource_ratio_threshold: {:.2}",
+            comparison.threshold_resource
+        ));
+        lines.push(format!(
+            "- contract_version: {}",
+            comparison.contract_version
+        ));
+        lines.push(format!("- verdict: {}", comparison.verdict));
+        lines.push(format!(
+            "- reason_codes: {}",
+            comparison.reason_codes.join(", ")
         ));
         lines.push(format!(
             "- pass: {}",

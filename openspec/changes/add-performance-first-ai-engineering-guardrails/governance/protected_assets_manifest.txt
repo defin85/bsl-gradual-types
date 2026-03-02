@@ -1,0 +1,8 @@
+# Protected acceptance assets (v1)
+contracts/intellisense-perf-gate/**
+tests/perf/**
+backend/src/bin/lsp_server/server/core.rs
+backend/src/bin/intellisense_perf.rs
+openspec/specs/dev-workflow/spec.md
+openspec/specs/bsl-intellisense-v2/spec.md
+

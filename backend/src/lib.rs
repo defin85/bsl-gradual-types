@@ -6,6 +6,8 @@
 #[cfg(not(target_arch = "wasm32"))]
 pub mod config;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod perf_gate_evaluator;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod presentation;
 #[cfg(not(target_arch = "wasm32"))]
 pub use bsl_runtime::{application, data, domain, helpers, parsing, system};

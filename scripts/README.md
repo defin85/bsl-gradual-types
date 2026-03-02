@@ -134,7 +134,8 @@ cargo build --release --bin bsl-lsp-server
 
 ### `run-intellisense-perf.sh` - Perf suite для IntelliSense
 
-**Назначение:** регрессионные замеры completion latency (P95/P99) на профилях `small` и `medium`.
+**Назначение:** регрессионные замеры completion perf-gate (latency + resource budgets)
+на профилях `small`, `large`, `churn`.
 
 **Использование:**
 ```bash
@@ -146,15 +147,9 @@ cargo build --release --bin bsl-lsp-server
 UPDATE_BASELINE=1 ./scripts/run-intellisense-perf.sh
 ```
 
-**Large профиль (ручной запуск):**
+**Blocking mode (fail-closed) после фиксации baseline budgets:**
 ```bash
-cargo run -p bsl-backend --bin intellisense_perf -- \
-  --scenario backend/tests/perf/scenarios/intellisense_large.json \
-  --baseline backend/tests/perf/baselines/intellisense_large.json \
-  --update-baseline \
-  --threshold-p95 1.10 \
-  --threshold-p99 1.15 \
-  --output backend/tests/perf/reports/intellisense_large.json
+BSL_V2_PERF_GATE_BLOCKING=1 ./scripts/run-intellisense-perf.sh
 ```
 
 **Вывод:**
@@ -207,6 +202,48 @@ python3 scripts/test-contract-compatibility-diff.py
 ```
 
 Фикстуры лежат в `scripts/fixtures/contracts-compatibility-diff/`.
+
+---
+
+### `check-openspec-change-governance.py` - Fail-closed governance gate для OpenSpec change
+
+**Назначение:** проверить machine-readable governance артефакты change:
+- `change_criticality` (обязателен);
+- `test_first_evidence` (обязателен для `behavioral|architectural|perf_critical`);
+- ADR/doc-first минимум для `architectural|perf_critical`.
+
+**Использование:**
+```bash
+python3 scripts/check-openspec-change-governance.py \
+  --change-id add-performance-first-ai-engineering-guardrails
+```
+
+---
+
+### `check-protected-assets-gate.py` - Fail-closed protected assets gate
+
+**Назначение:** блокировать ad-hoc правки protected acceptance assets без явного
+approved override артефакта в change governance.
+
+**Использование:**
+```bash
+python3 scripts/check-protected-assets-gate.py \
+  --change-id add-performance-first-ai-engineering-guardrails \
+  --manifest openspec/changes/add-performance-first-ai-engineering-guardrails/governance/protected_assets_manifest.txt \
+  --override openspec/changes/add-performance-first-ai-engineering-guardrails/governance/protected_assets_override.json
+```
+
+---
+
+### `check-perf-gate-architecture.py` - Option B architecture boundary check
+
+**Назначение:** fail-closed валидация, что perf-verdict логика не размазана inline и
+используется dedicated evaluator module.
+
+**Использование:**
+```bash
+python3 scripts/check-perf-gate-architecture.py
+```
 
 ---
 

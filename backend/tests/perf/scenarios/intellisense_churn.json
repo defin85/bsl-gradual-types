@@ -1,5 +1,5 @@
 {
-  "name": "large",
+  "name": "churn",
   "syntax_helper_path": "examples/syntax_helper",
   "config_path": "examples/conf/conf_test",
   "platform_version": "8.3.25",

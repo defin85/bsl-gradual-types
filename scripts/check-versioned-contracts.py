@@ -14,6 +14,7 @@ RE_VERSION_DIR = re.compile(r"^v([1-9]\d*)$")
 
 REQUIRED_SURFACES = {
     "lsp-completion-v2",
+    "intellisense-perf-gate",
     "observability-completion-v2",
 }
 
@@ -36,6 +37,41 @@ REQUIRED_V1_TERMINAL_EMPTY_REASONS = {
     "fallback_unavailable",
     "missing_ir",
     "wait_not_ready",
+}
+
+REQUIRED_V1_PERF_GATE_PROFILES = {
+    "small",
+    "large",
+    "churn",
+}
+
+REQUIRED_V1_PERF_GATE_LATENCY_METRICS = {
+    "completion_duration_ms",
+    "intellisense_v2_wait_for_file_version_completion_ms",
+    "intellisense_v2_snapshot_completion_ms",
+    "intellisense_v2_ir_query_completion_ms",
+}
+
+REQUIRED_V1_PERF_GATE_RESOURCE_METRICS = {
+    "allocations_per_completion",
+    "allocated_bytes_per_completion",
+    "lock_wait_ms_per_completion",
+    "lock_contention_events_per_completion",
+}
+
+REQUIRED_V1_PERF_GATE_REASON_CODES = {
+    "missing_required_metric_field",
+    "unsupported_contract_version",
+    "latency_relative_ratio_exceeded",
+    "latency_absolute_ceiling_exceeded",
+    "allocation_budget_exceeded",
+    "lock_wait_budget_exceeded",
+    "lock_contention_budget_exceeded",
+    "protected_acceptance_asset_modified",
+    "change_criticality_missing_or_unknown",
+    "test_first_evidence_missing_or_invalid",
+    "initial_budget_not_fixed",
+    "perf_gate_architecture_violation",
 }
 
 
@@ -205,6 +241,86 @@ def validate_surface_contract(surface_dir: Path) -> None:
                 metrics.get("fallback_unavailable_counter")
                 == "intellisense_v2_completion_result_total_fallback_unavailable",
                 f"{contract_path}: fallback_unavailable_counter mismatch",
+            )
+
+        if surface_dir.name == "intellisense-perf-gate" and major == 1:
+            input_obj = contract.get("input")
+            ensure(isinstance(input_obj, dict), f"{contract_path}: input must be object")
+            required_profiles = set(input_obj.get("required_profiles", []))
+            required_latency_metrics = set(input_obj.get("required_latency_metrics", []))
+            required_resource_metrics = set(input_obj.get("required_resource_metrics", []))
+
+            ensure(
+                REQUIRED_V1_PERF_GATE_PROFILES.issubset(required_profiles),
+                f"{contract_path}: required_profiles must include {sorted(REQUIRED_V1_PERF_GATE_PROFILES)}",
+            )
+            ensure(
+                REQUIRED_V1_PERF_GATE_LATENCY_METRICS.issubset(required_latency_metrics),
+                f"{contract_path}: required_latency_metrics must include {sorted(REQUIRED_V1_PERF_GATE_LATENCY_METRICS)}",
+            )
+            ensure(
+                REQUIRED_V1_PERF_GATE_RESOURCE_METRICS.issubset(required_resource_metrics),
+                f"{contract_path}: required_resource_metrics must include {sorted(REQUIRED_V1_PERF_GATE_RESOURCE_METRICS)}",
+            )
+
+            baseline = contract.get("baseline")
+            ensure(isinstance(baseline, dict), f"{contract_path}: baseline must be object")
+            ceilings = baseline.get("absolute_latency_ceilings_ms")
+            ensure(
+                isinstance(ceilings, dict),
+                f"{contract_path}: baseline.absolute_latency_ceilings_ms must be object",
+            )
+            for profile in sorted(REQUIRED_V1_PERF_GATE_PROFILES):
+                profile_ceiling = ceilings.get(profile)
+                ensure(
+                    isinstance(profile_ceiling, dict),
+                    f"{contract_path}: missing ceiling for profile {profile!r}",
+                )
+                p95 = profile_ceiling.get("p95")
+                p99 = profile_ceiling.get("p99")
+                ensure(
+                    isinstance(p95, int) and p95 > 0,
+                    f"{contract_path}: {profile}.p95 must be positive integer",
+                )
+                ensure(
+                    isinstance(p99, int) and p99 > 0,
+                    f"{contract_path}: {profile}.p99 must be positive integer",
+                )
+
+            resource_ceilings = baseline.get("resource_budget_ceilings")
+            ensure(
+                isinstance(resource_ceilings, dict),
+                f"{contract_path}: baseline.resource_budget_ceilings must be object",
+            )
+            for profile in sorted(REQUIRED_V1_PERF_GATE_PROFILES):
+                profile_budget = resource_ceilings.get(profile)
+                ensure(
+                    isinstance(profile_budget, dict),
+                    f"{contract_path}: missing resource budget for profile {profile!r}",
+                )
+                for key in sorted(REQUIRED_V1_PERF_GATE_RESOURCE_METRICS):
+                    value = profile_budget.get(key)
+                    ensure(
+                        isinstance(value, int) and value > 0,
+                        f"{contract_path}: {profile}.{key} must be positive integer",
+                    )
+
+            report = contract.get("report")
+            ensure(isinstance(report, dict), f"{contract_path}: report must be object")
+            required_report_fields = set(report.get("required_fields", []))
+            ensure(
+                {"contract_version", "verdict", "reason_codes", "profiles"}.issubset(
+                    required_report_fields
+                ),
+                f"{contract_path}: report.required_fields must include contract_version/verdict/reason_codes/profiles",
+            )
+
+            evaluator = contract.get("evaluator")
+            ensure(isinstance(evaluator, dict), f"{contract_path}: evaluator must be object")
+            reason_codes = set(evaluator.get("reason_codes", []))
+            ensure(
+                REQUIRED_V1_PERF_GATE_REASON_CODES.issubset(reason_codes),
+                f"{contract_path}: evaluator.reason_codes must include {sorted(REQUIRED_V1_PERF_GATE_REASON_CODES)}",
             )
 
 

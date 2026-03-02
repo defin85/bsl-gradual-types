@@ -1445,6 +1445,10 @@ impl LanguageServer for BslLanguageServer {
                 text: text.clone(),
             },
         );
+        self.latest_apply_enqueued_at_v2
+            .write()
+            .await
+            .insert(file_id, Instant::now());
 
         self.analysis_v2
             .apply_changes(vec![if let Some(parse_snapshot) = parse_snapshot {
@@ -1699,6 +1703,10 @@ impl LanguageServer for BslLanguageServer {
                     fallback_reason: report.fallback_reason.map(Arc::from),
                 }
             });
+        self.latest_apply_enqueued_at_v2
+            .write()
+            .await
+            .insert(file_id, Instant::now());
         self.analysis_v2
             .apply_changes(vec![if let Some(parse_snapshot) = parse_snapshot {
                 bsl_analysis_v2::Change::SetFileWithSnapshot {
@@ -1873,6 +1881,10 @@ impl LanguageServer for BslLanguageServer {
                 .await
                 .remove(&file_id);
             self.latest_document_shadow_state_v2
+                .write()
+                .await
+                .remove(&file_id);
+            self.latest_apply_enqueued_at_v2
                 .write()
                 .await
                 .remove(&file_id);
@@ -2682,6 +2694,18 @@ impl LanguageServer for BslLanguageServer {
                         let index_snapshot = prepared.snapshot.index_snapshot;
                         let parse_result_without_ir = member_access_request;
                         let member_access_request_for_query = member_access_request;
+                        let last_apply_enqueued_at = self
+                            .latest_apply_enqueued_at_v2
+                            .read()
+                            .await
+                            .get(&file_id)
+                            .copied();
+                        let apply_age_at_query_start_ms =
+                            last_apply_enqueued_at.map(|started_at| {
+                                query_bundle_started
+                                    .saturating_duration_since(started_at)
+                                    .as_millis()
+                            });
 
                         let observed_file_version = analysis.file_version(file_id).ok().flatten();
                         let observed_deps_id = prepared.snapshot.deps_id;
@@ -3070,6 +3094,34 @@ impl LanguageServer for BslLanguageServer {
                                                     .index_fetch_idle_before_first_will_execute_type_index_ms,
                                             ),
                                         );
+                                        if let Some(apply_age_ms) = apply_age_at_query_start_ms {
+                                            coordinator_for_query.record_completion_stage_latency(
+                                                "query_bundle_owner_hint_type_lookup_index_fetch_apply_age_at_query_start",
+                                                ms_to_duration(apply_age_ms),
+                                            );
+                                            coordinator_for_query.record_completion_stage_latency(
+                                                "query_bundle_owner_hint_type_lookup_index_fetch_apply_to_fetch_end",
+                                                ms_to_duration(
+                                                    apply_age_ms
+                                                        .saturating_add(profile.index_fetch_ms),
+                                                ),
+                                            );
+                                            if profile
+                                                .index_fetch_first_will_execute_type_index_seen_total
+                                                > 0
+                                            {
+                                                coordinator_for_query
+                                                    .record_completion_stage_latency(
+                                                    "query_bundle_owner_hint_type_lookup_index_fetch_apply_to_first_will_execute_type_index",
+                                                    ms_to_duration(
+                                                        apply_age_ms.saturating_add(
+                                                            profile
+                                                                .index_fetch_first_will_execute_type_index_ms,
+                                                        ),
+                                                    ),
+                                                );
+                                            }
+                                        }
                                         coordinator_for_query.record_completion_stage_latency(
                                             "query_bundle_owner_hint_type_lookup_index_query_total",
                                             ms_to_duration(profile.index_query_total_ms),

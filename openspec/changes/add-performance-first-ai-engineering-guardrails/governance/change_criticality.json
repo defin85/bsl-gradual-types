@@ -1,0 +1,8 @@
+{
+  "schema_version": "v1",
+  "change_id": "add-performance-first-ai-engineering-guardrails",
+  "change_criticality": "perf_critical",
+  "rule_id": "criticality.rules.v1/perf_hot_path_and_gate_architecture",
+  "reason": "Изменение затрагивает interactive completion perf-gate архитектуру, resource budgets и fail-closed policy."
+}
+

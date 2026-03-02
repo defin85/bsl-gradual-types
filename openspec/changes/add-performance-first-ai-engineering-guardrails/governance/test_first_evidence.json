@@ -1,0 +1,9 @@
+{
+  "schema_version": "v1",
+  "change_id": "add-performance-first-ai-engineering-guardrails",
+  "scope": "backend/runtime",
+  "failing_ref": "openspec/changes/add-performance-first-ai-engineering-guardrails/validation/p31-before-resource-gate.md",
+  "passing_ref": "openspec/changes/add-performance-first-ai-engineering-guardrails/validation/p31-after-contract-bootstrap.md",
+  "reason_codes": []
+}
+

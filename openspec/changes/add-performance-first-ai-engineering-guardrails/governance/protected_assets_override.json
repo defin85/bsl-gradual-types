@@ -1,0 +1,6 @@
+{
+  "schema_version": "v1",
+  "change_id": "add-performance-first-ai-engineering-guardrails",
+  "reason": "Change intentionally updates protected assets to introduce dedicated perf-gate evaluator and governance CI checks.",
+  "approved_by": "Protected Assets Owner"
+}

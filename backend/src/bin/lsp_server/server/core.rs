@@ -168,6 +168,7 @@ impl BslLanguageServer {
             diagnostics_generation_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_received_file_versions_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_document_shadow_state_v2: Arc::new(RwLock::new(HashMap::new())),
+            latest_apply_enqueued_at_v2: Arc::new(RwLock::new(HashMap::new())),
             scale_aware_churn_state_v2: Arc::new(RwLock::new(HashMap::new())),
             completion_seen_files_v2: Arc::new(RwLock::new(std::collections::HashSet::new())),
             completion_stale_fallback_cache_v2: Arc::new(RwLock::new(HashMap::new())),
@@ -1663,6 +1664,9 @@ mod tests {
     };
     use bsl_agent::session::SessionManager;
     use bsl_agent::types::JobStateDto;
+    use bsl_backend::perf_gate_evaluator::{
+        evaluate_scale_aware_gate, get_report_u64, validate_scale_aware_baseline_schema,
+    };
     use bsl_backend::presentation::web::{create_router, AppState};
     use bsl_backend::system::{
         build_deps_bundle_v2, EffectiveStartupInputs, IndexItem, IndexItemKind, IndexKind,
@@ -9187,6 +9191,18 @@ mod tests {
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_idle_before_first_will_execute_type_index_ms",
             ),
             (
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_apply_age_at_query_start",
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_apply_age_at_query_start_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_apply_to_first_will_execute_type_index",
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_apply_to_first_will_execute_type_index_ms",
+            ),
+            (
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_apply_to_fetch_end",
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_apply_to_fetch_end_ms",
+            ),
+            (
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_query_total",
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_query_total_ms",
             ),
@@ -9709,6 +9725,21 @@ mod tests {
                     "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_idle_before_first_will_execute_type_index_ms",
                     None
                 ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_apply_age_at_query_start_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_apply_age_at_query_start_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_apply_to_first_will_execute_type_index_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_apply_to_first_will_execute_type_index_ms",
+                    None
+                ),
+                "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_apply_to_fetch_end_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_apply_to_fetch_end_ms",
+                    None
+                ),
                 "completion_stage_query_bundle_owner_hint_type_lookup_index_query_total_ms": histogram_metric_value_or_zero(
                     histograms,
                     "completion_stage_query_bundle_owner_hint_type_lookup_index_query_total_ms",
@@ -10100,346 +10131,6 @@ mod tests {
         }
 
         serde_json::Value::Object(profile_report)
-    }
-
-    fn get_report_metric_f64(report: &serde_json::Value, path: &[&str]) -> Result<f64, String> {
-        let mut cursor = report;
-        for segment in path {
-            cursor = cursor
-                .get(*segment)
-                .ok_or_else(|| format!("missing field '{}'", path.join(".")))?;
-        }
-        cursor
-            .as_f64()
-            .or_else(|| cursor.as_u64().map(|n| n as f64))
-            .ok_or_else(|| format!("field '{}' must be numeric", path.join(".")))
-    }
-
-    fn get_report_u64(report: &serde_json::Value, path: &[&str]) -> Result<u64, String> {
-        let mut cursor = report;
-        for segment in path {
-            cursor = cursor
-                .get(*segment)
-                .ok_or_else(|| format!("missing field '{}'", path.join(".")))?;
-        }
-        cursor
-            .as_u64()
-            .ok_or_else(|| format!("field '{}' must be u64", path.join(".")))
-    }
-
-    fn get_report_bool(report: &serde_json::Value, path: &[&str]) -> Result<bool, String> {
-        let mut cursor = report;
-        for segment in path {
-            cursor = cursor
-                .get(*segment)
-                .ok_or_else(|| format!("missing field '{}'", path.join(".")))?;
-        }
-        cursor
-            .as_bool()
-            .ok_or_else(|| format!("field '{}' must be bool", path.join(".")))
-    }
-
-    fn validate_scale_aware_baseline_schema(
-        baseline_report: &serde_json::Value,
-    ) -> Result<(), String> {
-        const PROFILES: &[&str] = &["large", "small"];
-        const PHASES: &[&str] = &["start", "cold", "warm"];
-        const REQUIRED_METRICS: &[&str] = &[
-            "completion_duration_ms",
-            "intellisense_v2_wait_for_file_version_completion_ms",
-            "intellisense_v2_snapshot_completion_ms",
-            "intellisense_v2_ir_query_completion_ms",
-        ];
-
-        let schema_version = get_report_u64(baseline_report, &["schema_version"])?;
-        if schema_version == 0 {
-            return Err("field 'schema_version' must be >= 1".to_string());
-        }
-        get_report_bool(baseline_report, &["gate", "pass"])?;
-
-        for profile in PROFILES {
-            for phase in PHASES {
-                for metric in REQUIRED_METRICS {
-                    get_report_u64(
-                        baseline_report,
-                        &["profiles", profile, phase, "metrics", metric, "count"],
-                    )?;
-                    get_report_metric_f64(
-                        baseline_report,
-                        &["profiles", profile, phase, "metrics", metric, "p95"],
-                    )?;
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    fn evaluate_scale_aware_gate(
-        current_report: &serde_json::Value,
-        baseline_report: &serde_json::Value,
-    ) -> Result<serde_json::Value, String> {
-        const LARGE_WAIT_RATIO_MAX: f64 = 0.60;
-        const LARGE_COMPLETION_RATIO_MAX: f64 = 0.75;
-        const SMALL_COMPLETION_RATIO_MAX: f64 = 1.25;
-        const MAX_CANCELLED_RATE: f64 = 0.10;
-        const MIN_COMPLETION_TOTAL: u64 = 50;
-        const MAX_STALE_FALLBACK_UNAVAILABLE_PER_BUDGET_EXHAUSTED: f64 = 0.20;
-
-        let large_current_wait = get_report_metric_f64(
-            current_report,
-            &[
-                "profiles",
-                "large",
-                "warm",
-                "metrics",
-                "intellisense_v2_wait_for_file_version_completion_ms",
-                "p95",
-            ],
-        )?;
-        let large_current_completion = get_report_metric_f64(
-            current_report,
-            &[
-                "profiles",
-                "large",
-                "warm",
-                "metrics",
-                "completion_duration_ms",
-                "p95",
-            ],
-        )?;
-        let small_current_completion = get_report_metric_f64(
-            current_report,
-            &[
-                "profiles",
-                "small",
-                "warm",
-                "metrics",
-                "completion_duration_ms",
-                "p95",
-            ],
-        )?;
-
-        let large_baseline_wait = get_report_metric_f64(
-            baseline_report,
-            &[
-                "profiles",
-                "large",
-                "warm",
-                "metrics",
-                "intellisense_v2_wait_for_file_version_completion_ms",
-                "p95",
-            ],
-        )?;
-        let large_baseline_completion = get_report_metric_f64(
-            baseline_report,
-            &[
-                "profiles",
-                "large",
-                "warm",
-                "metrics",
-                "completion_duration_ms",
-                "p95",
-            ],
-        )?;
-        let small_baseline_completion = get_report_metric_f64(
-            baseline_report,
-            &[
-                "profiles",
-                "small",
-                "warm",
-                "metrics",
-                "completion_duration_ms",
-                "p95",
-            ],
-        )?;
-
-        let large_completion_total = get_report_u64(
-            current_report,
-            &["profiles", "large", "warm", "completion_total"],
-        )?;
-        let small_completion_total = get_report_u64(
-            current_report,
-            &["profiles", "small", "warm", "completion_total"],
-        )?;
-        let large_cancelled_total = get_report_u64(
-            current_report,
-            &["profiles", "large", "warm", "completion_cancelled_total"],
-        )?;
-        let small_cancelled_total = get_report_u64(
-            current_report,
-            &["profiles", "small", "warm", "completion_cancelled_total"],
-        )?;
-
-        let large_wait_ratio = large_current_wait / large_baseline_wait.max(0.000_001);
-        let large_completion_ratio =
-            large_current_completion / large_baseline_completion.max(0.000_001);
-        let small_completion_ratio =
-            small_current_completion / small_baseline_completion.max(0.000_001);
-
-        let large_cancelled_rate =
-            large_cancelled_total as f64 / large_completion_total.max(1) as f64;
-        let small_cancelled_rate =
-            small_cancelled_total as f64 / small_completion_total.max(1) as f64;
-
-        let phase_counter = |profile: &str, phase: &str, metric: &str| -> Result<u64, String> {
-            get_report_u64(
-                current_report,
-                &["profiles", profile, phase, "metrics", metric],
-            )
-        };
-
-        let large_start_stale_fallback_total = phase_counter(
-            "large",
-            "start",
-            "intellisense_v2_completion_stale_fallback_total",
-        )?;
-        let large_cold_stale_fallback_total = phase_counter(
-            "large",
-            "cold",
-            "intellisense_v2_completion_stale_fallback_total",
-        )?;
-        let large_warm_stale_fallback_total = phase_counter(
-            "large",
-            "warm",
-            "intellisense_v2_completion_stale_fallback_total",
-        )?;
-        let small_start_stale_fallback_total = phase_counter(
-            "small",
-            "start",
-            "intellisense_v2_completion_stale_fallback_total",
-        )?;
-        let small_cold_stale_fallback_total = phase_counter(
-            "small",
-            "cold",
-            "intellisense_v2_completion_stale_fallback_total",
-        )?;
-        let small_warm_stale_fallback_total = phase_counter(
-            "small",
-            "warm",
-            "intellisense_v2_completion_stale_fallback_total",
-        )?;
-
-        let large_warm_budget_exhausted_total = phase_counter(
-            "large",
-            "warm",
-            "intellisense_v2_interactive_wait_budget_exhausted_total",
-        )?;
-        let small_warm_budget_exhausted_total = phase_counter(
-            "small",
-            "warm",
-            "intellisense_v2_interactive_wait_budget_exhausted_total",
-        )?;
-        let large_warm_fallback_unavailable_total = phase_counter(
-            "large",
-            "warm",
-            "intellisense_v2_completion_fallback_unavailable_total",
-        )?;
-        let small_warm_fallback_unavailable_total = phase_counter(
-            "small",
-            "warm",
-            "intellisense_v2_completion_fallback_unavailable_total",
-        )?;
-        let large_warm_stale_served_total = phase_counter(
-            "large",
-            "warm",
-            "intellisense_v2_interactive_stale_served_total",
-        )?;
-        let small_warm_stale_served_total = phase_counter(
-            "small",
-            "warm",
-            "intellisense_v2_interactive_stale_served_total",
-        )?;
-
-        let large_warm_fallback_unavailable_rate = large_warm_fallback_unavailable_total as f64
-            / large_warm_budget_exhausted_total.max(1) as f64;
-        let small_warm_fallback_unavailable_rate = small_warm_fallback_unavailable_total as f64
-            / small_warm_budget_exhausted_total.max(1) as f64;
-        let stale_fastpath_exercised =
-            large_warm_stale_fallback_total > 0 || small_warm_stale_fallback_total > 0;
-        let stale_fastpath_pass = !stale_fastpath_exercised
-            || (large_warm_fallback_unavailable_rate
-                <= MAX_STALE_FALLBACK_UNAVAILABLE_PER_BUDGET_EXHAUSTED
-                && small_warm_fallback_unavailable_rate
-                    <= MAX_STALE_FALLBACK_UNAVAILABLE_PER_BUDGET_EXHAUSTED);
-        let large_warm_dominant_stage = current_report
-            .get("profiles")
-            .and_then(|value| value.get("large"))
-            .and_then(|value| value.get("warm"))
-            .and_then(|value| value.get("dominant_stage"))
-            .cloned()
-            .unwrap_or_else(|| serde_json::json!({"stage": "unknown", "p95_ms": 0.0}));
-        let small_warm_dominant_stage = current_report
-            .get("profiles")
-            .and_then(|value| value.get("small"))
-            .and_then(|value| value.get("warm"))
-            .and_then(|value| value.get("dominant_stage"))
-            .cloned()
-            .unwrap_or_else(|| serde_json::json!({"stage": "unknown", "p95_ms": 0.0}));
-
-        let pass = large_wait_ratio <= LARGE_WAIT_RATIO_MAX
-            && large_completion_ratio <= LARGE_COMPLETION_RATIO_MAX
-            && small_completion_ratio <= SMALL_COMPLETION_RATIO_MAX
-            && large_cancelled_rate <= MAX_CANCELLED_RATE
-            && small_cancelled_rate <= MAX_CANCELLED_RATE
-            && large_completion_total >= MIN_COMPLETION_TOTAL
-            && small_completion_total >= MIN_COMPLETION_TOTAL
-            && stale_fastpath_pass;
-
-        Ok(serde_json::json!({
-            "pass": pass,
-            "ratios": {
-                "large_wait_ratio": large_wait_ratio,
-                "large_completion_ratio": large_completion_ratio,
-                "small_completion_ratio": small_completion_ratio
-            },
-            "rates": {
-                "large_completion_cancelled_rate": large_cancelled_rate,
-                "small_completion_cancelled_rate": small_cancelled_rate
-            },
-            "dominant_stage": {
-                "large_warm": large_warm_dominant_stage,
-                "small_warm": small_warm_dominant_stage
-            },
-            "stale_fastpath": {
-                "evaluated": stale_fastpath_exercised,
-                "pass": stale_fastpath_pass,
-                "counts": {
-                    "large": {
-                        "start_stale_fallback_total": large_start_stale_fallback_total,
-                        "cold_stale_fallback_total": large_cold_stale_fallback_total,
-                        "warm_stale_fallback_total": large_warm_stale_fallback_total,
-                        "warm_budget_exhausted_total": large_warm_budget_exhausted_total,
-                        "warm_stale_served_total": large_warm_stale_served_total,
-                        "warm_fallback_unavailable_total": large_warm_fallback_unavailable_total
-                    },
-                    "small": {
-                        "start_stale_fallback_total": small_start_stale_fallback_total,
-                        "cold_stale_fallback_total": small_cold_stale_fallback_total,
-                        "warm_stale_fallback_total": small_warm_stale_fallback_total,
-                        "warm_budget_exhausted_total": small_warm_budget_exhausted_total,
-                        "warm_stale_served_total": small_warm_stale_served_total,
-                        "warm_fallback_unavailable_total": small_warm_fallback_unavailable_total
-                    }
-                },
-                "rates": {
-                    "large_warm_fallback_unavailable_per_budget_exhausted": large_warm_fallback_unavailable_rate,
-                    "small_warm_fallback_unavailable_per_budget_exhausted": small_warm_fallback_unavailable_rate
-                }
-            },
-            "counts": {
-                "large_completion_total": large_completion_total,
-                "small_completion_total": small_completion_total
-            },
-            "thresholds": {
-                "large_wait_ratio_max": LARGE_WAIT_RATIO_MAX,
-                "large_completion_ratio_max": LARGE_COMPLETION_RATIO_MAX,
-                "small_completion_ratio_max": SMALL_COMPLETION_RATIO_MAX,
-                "completion_cancelled_rate_max": MAX_CANCELLED_RATE,
-                "min_completion_total": MIN_COMPLETION_TOTAL,
-                "stale_fallback_unavailable_per_budget_exhausted_max": MAX_STALE_FALLBACK_UNAVAILABLE_PER_BUDGET_EXHAUSTED
-            }
-        }))
     }
 
     #[test]

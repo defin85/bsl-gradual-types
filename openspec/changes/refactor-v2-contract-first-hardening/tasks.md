@@ -5,6 +5,7 @@
 - [ ] 1.4 Добавить requirement для perf-gate traceability по `change_id` с fail-fast на mismatch.
 
 ## 2. Architecture And Contracts
+- [ ] 2.0 Явно зафиксировать decision statement: `Contract-first hardening with registry-driven materialization and fail-closed provenance` (recommended) и зафиксировать, что full rewrite observability/perf pipeline вне scope данного change.
 - [ ] 2.1 Утвердить design решения по единому источнику truth для `stage/reason` taxonomy и projection completeness.
 - [ ] 2.2 Зафиксировать точную retention semantics (`max versions` как count-based контракт, без неоднозначности version-gap).
 - [ ] 2.3 Определить migration policy для observability dual-write без ломки legacy keys.

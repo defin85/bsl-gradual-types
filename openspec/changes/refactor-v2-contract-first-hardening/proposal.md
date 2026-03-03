@@ -9,6 +9,14 @@
 
 Нужен follow-up change уровня контракта, который делает эти классы регрессий невозможными по конструкции, а не через точечные патчи.
 
+## Selected Approach
+В этом change явно фиксируется подход:
+- **Contract-first hardening** (рекомендуемый путь для текущего этапа);
+- **registry-driven materialization** для canonical/legacy observability mapping;
+- **fail-closed provenance** для perf evidence (`change_id` mismatch/absence => invalid evidence).
+
+Полный rewrite observability/perf pipeline для этого change является **вне scope** и ведётся отдельным change.
+
 ## What Changes
 - **MODIFIED**: observability requirements для канонического event model и dual-write проекций:
   - typed registry как единственный источник truth для stage/reason taxonomy;

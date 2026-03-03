@@ -12,9 +12,18 @@
   - Унифицировать emission serve outcomes для всех interactive операций.
   - Сделать perf artifacts воспроизводимо привязанными к активному `change_id`.
 - Non-Goals:
+  - Полный rewrite observability/perf pipeline (выделен в отдельный change).
   - Редизайн алгоритмов type inference / completion ranking.
   - Изменение пользовательского LSP wire-контракта.
   - Массовый рефакторинг несвязанных diagnostics/components.
+
+## Decision Statement
+Для этого change выбран и зафиксирован подход:
+- `Contract-first hardening` как целевая стратегия текущего этапа;
+- `registry-driven materialization` для канонической нормализации и legacy projection;
+- `fail-closed provenance` для perf evidence (`change_id` mismatch/absence MUST invalidate artifact).
+
+Этот change не выполняет полный rewrite pipeline; rewrite ведётся отдельным планом с отдельным scope/рисками.
 
 ## Architecture
 ### 1) Observability Taxonomy Hardening

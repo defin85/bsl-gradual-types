@@ -77,6 +77,17 @@
       "reason_codes",
       "profiles"
     ],
+    "optional_provenance_fields": [
+      "change_id",
+      "generated_at",
+      "profile",
+      "schema_version",
+      "contract_version"
+    ],
+    "change_id_source_priority": [
+      "--change-id",
+      "OPENSPEC_CHANGE_ID"
+    ],
     "verdict_enum": [
       "pass",
       "fail"
@@ -95,7 +106,12 @@
       "change_criticality_missing_or_unknown",
       "test_first_evidence_missing_or_invalid",
       "initial_budget_not_fixed",
-      "perf_gate_architecture_violation"
+      "perf_gate_architecture_violation",
+      "provenance_missing_for_authoritative_run",
+      "provenance_mismatch_expected_change_id",
+      "provenance_invalid",
+      "parity_evidence_insufficient",
+      "parity_drift_threshold_exceeded"
     ]
   }
 }

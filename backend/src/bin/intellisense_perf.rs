@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
@@ -15,7 +16,8 @@ use serde::{Deserialize, Serialize};
 use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, FileId as V2FileId, SettingsId};
 use bsl_backend::application::get_completion_with_semantic_program_snapshot;
 use bsl_backend::perf_gate_evaluator::{
-    evaluate_intellisense_perf_profile, PerfGateSample, PerfGateThresholds,
+    evaluate_intellisense_perf_profile, validate_perf_report_provenance, PerfGateSample,
+    PerfGateThresholds,
 };
 use bsl_backend::system::{build_deps_bundle_v2, SystemCoordinator};
 use bsl_shared::domain::resolver::TypeResolver;
@@ -149,6 +151,10 @@ struct Args {
     /// Enable fail-closed blocking mode for missing baseline budgets.
     #[arg(long, default_value_t = false)]
     blocking_mode: bool,
+
+    /// Authoritative OpenSpec change-id for perf artifact provenance.
+    #[arg(long)]
+    change_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -231,6 +237,10 @@ struct PerfReport {
     cases: usize,
     iterations: usize,
     warmup: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    change_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provenance: Option<PerfReportProvenance>,
     #[serde(default = "unknown_contract_version")]
     contract_version: String,
     metrics: PerfMetrics,
@@ -242,6 +252,20 @@ struct PerfReport {
 
 fn unknown_contract_version() -> String {
     "unknown".to_string()
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+struct PerfReportProvenance {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    change_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    generated_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    profile: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    schema_version: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    contract_version: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -278,6 +302,40 @@ struct PerfComparison {
     pass: bool,
 }
 
+fn resolve_expected_change_id_from_sources(
+    cli_change_id: Option<&str>,
+    env_change_id: Option<&str>,
+) -> Option<String> {
+    if let Some(value) = cli_change_id {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+    env_change_id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn resolve_expected_change_id(cli_change_id: Option<&str>) -> Option<String> {
+    let env_change_id = std::env::var("OPENSPEC_CHANGE_ID").ok();
+    resolve_expected_change_id_from_sources(cli_change_id, env_change_id.as_deref())
+}
+
+fn now_unix_millis_string() -> String {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .to_string()
+}
+
+fn contract_schema_version(contract: &serde_json::Value) -> Option<u64> {
+    contract
+        .get("schema_version")
+        .and_then(serde_json::Value::as_u64)
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct PerfThresholds {
     max_error_rate: f64,
@@ -312,6 +370,7 @@ async fn main() -> Result<()> {
     });
     let contract = read_json_value(&contract_path)?;
     let scenario = read_scenario(&scenario_path)?;
+    let expected_change_id = resolve_expected_change_id(args.change_id.as_deref());
 
     let syntax_helper_path = resolve_override(
         args.syntax_helper_path.as_ref(),
@@ -431,17 +490,36 @@ async fn main() -> Result<()> {
         cases: prepared.len(),
         iterations: args.iterations,
         warmup: args.warmup,
+        change_id: expected_change_id.clone(),
+        provenance: Some(PerfReportProvenance {
+            change_id: expected_change_id.clone(),
+            generated_at: Some(now_unix_millis_string()),
+            profile: Some(scenario.name.clone()),
+            schema_version: contract_schema_version(&contract),
+            contract_version: Some(contract_version_from_contract(&contract)),
+        }),
         contract_version: contract_version_from_contract(&contract),
         metrics,
         thresholds: Some(thresholds.clone()),
         comparison: None,
+    };
+    let provenance_validation_error = {
+        let report_value = serde_json::to_value(&report)
+            .context("failed to serialize report for provenance validation")?;
+        validate_perf_report_provenance(&report_value, expected_change_id.as_deref()).err()
     };
 
     let rate_pass = report.metrics.error_rate <= args.max_error_rate
         && report.metrics.incomplete_rate <= args.max_incomplete_rate;
 
     let comparison = if let Some(baseline_path) = args.baseline.as_ref() {
-        if baseline_path.exists() {
+        if let Some(reason_code) = provenance_validation_error.as_ref() {
+            Some(build_provenance_failure_comparison(
+                &report,
+                reason_code,
+                gate_thresholds,
+            ))
+        } else if baseline_path.exists() {
             let baseline_raw = read_json_value(baseline_path)?;
             let current_raw =
                 serde_json::to_value(&report).context("failed to serialize current report")?;
@@ -525,6 +603,11 @@ async fn main() -> Result<()> {
                 comparison.max_incomplete_rate
             );
         }
+    } else if let Some(reason_code) = provenance_validation_error {
+        bail!(
+            "Perf report provenance validation failed: reason_code={}",
+            reason_code
+        );
     } else if !rate_pass {
         bail!(
             "Rates exceeded: error_rate={:.3} (<= {:.3}), incomplete_rate={:.3} (<= {:.3})",
@@ -957,6 +1040,30 @@ fn build_missing_required_metric_comparison(
     }
 }
 
+fn build_provenance_failure_comparison(
+    current: &PerfReport,
+    reason_code: &str,
+    thresholds: PerfGateThresholds,
+) -> PerfComparison {
+    PerfComparison {
+        baseline_p95_ms: current.metrics.p95_ms,
+        baseline_p99_ms: current.metrics.p99_ms,
+        ratio_p95: 1.0,
+        ratio_p99: 1.0,
+        threshold_p95: thresholds.latency_ratio_p95_max,
+        threshold_p99: thresholds.latency_ratio_p99_max,
+        threshold_resource: thresholds.resource_ratio_max,
+        max_error_rate: thresholds.max_error_rate,
+        max_incomplete_rate: thresholds.max_incomplete_rate,
+        error_rate: current.metrics.error_rate,
+        incomplete_rate: current.metrics.incomplete_rate,
+        contract_version: current.contract_version.clone(),
+        verdict: "fail".to_string(),
+        reason_codes: vec![reason_code.to_string()],
+        pass: false,
+    }
+}
+
 fn build_unsupported_contract_version_comparison(
     expected_contract_version: &str,
     current: &PerfReport,
@@ -1274,6 +1381,8 @@ mod tests {
             cases: 1,
             iterations: 1,
             warmup: 0,
+            change_id: None,
+            provenance: None,
             contract_version: "v1".to_string(),
             metrics: PerfMetrics {
                 total_requests: 1,
@@ -1354,6 +1463,8 @@ mod tests {
             cases: 1,
             iterations: 1,
             warmup: 0,
+            change_id: None,
+            provenance: None,
             contract_version: "v1".to_string(),
             metrics: PerfMetrics {
                 total_requests: 1,
@@ -1390,6 +1501,64 @@ mod tests {
         assert_eq!(
             comparison.reason_codes,
             vec!["unsupported_contract_version".to_string()]
+        );
+    }
+
+    #[test]
+    fn resolve_expected_change_id_prefers_cli_over_env() {
+        let from_cli =
+            resolve_expected_change_id_from_sources(Some("cli-change-id"), Some("env-change-id"));
+        assert_eq!(from_cli.as_deref(), Some("cli-change-id"));
+
+        let from_env = resolve_expected_change_id_from_sources(None, Some("env-change-id"));
+        assert_eq!(from_env.as_deref(), Some("env-change-id"));
+    }
+
+    #[test]
+    fn provenance_failure_comparison_is_fail_closed() {
+        let report = PerfReport {
+            scenario: "small".to_string(),
+            cases: 1,
+            iterations: 1,
+            warmup: 0,
+            change_id: Some("refactor-v2-contract-first-hardening".to_string()),
+            provenance: None,
+            contract_version: "v1".to_string(),
+            metrics: PerfMetrics {
+                total_requests: 1,
+                count: 1,
+                p50_ms: 1.0,
+                p95_ms: 2.0,
+                p99_ms: 3.0,
+                error_rate: 0.0,
+                incomplete_rate: 0.0,
+                allocations_per_completion: 10.0,
+                allocated_bytes_per_completion: 20.0,
+                lock_wait_ms_per_completion: 1.0,
+                lock_contention_events_per_completion: 1.0,
+            },
+            thresholds: None,
+            comparison: None,
+        };
+        let thresholds = PerfGateThresholds {
+            latency_ratio_p95_max: 1.10,
+            latency_ratio_p99_max: 1.15,
+            resource_ratio_max: 1.20,
+            max_error_rate: 0.0,
+            max_incomplete_rate: 0.0,
+            blocking_mode: true,
+        };
+
+        let comparison = build_provenance_failure_comparison(
+            &report,
+            "provenance_missing_for_authoritative_run",
+            thresholds,
+        );
+        assert_eq!(comparison.verdict, "fail");
+        assert!(!comparison.pass);
+        assert_eq!(
+            comparison.reason_codes,
+            vec!["provenance_missing_for_authoritative_run".to_string()]
         );
     }
 }

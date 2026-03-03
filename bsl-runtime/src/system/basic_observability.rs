@@ -2798,70 +2798,367 @@ fn sanitize_identifier(value: &str) -> String {
     out.trim_matches('_').to_string()
 }
 
+fn registry_label(
+    value: &str,
+    registry: &[(&'static str, &'static str)],
+    fallback: &'static str,
+) -> &'static str {
+    registry
+        .iter()
+        .find_map(|(raw, normalized)| (*raw == value).then_some(*normalized))
+        .unwrap_or(fallback)
+}
+
+fn registry_metric_pair(
+    value: &str,
+    registry: &[(&'static str, (&'static str, &'static str))],
+    fallback: (&'static str, &'static str),
+) -> (&'static str, &'static str) {
+    registry
+        .iter()
+        .find_map(|(raw, metrics)| (*raw == value).then_some(*metrics))
+        .unwrap_or(fallback)
+}
+
+fn registry_metric_single(
+    value: &str,
+    registry: &[(&'static str, &'static str)],
+    fallback: &'static str,
+) -> &'static str {
+    registry
+        .iter()
+        .find_map(|(raw, metric)| (*raw == value).then_some(*metric))
+        .unwrap_or(fallback)
+}
+
+const OPERATION_LABEL_REGISTRY: &[(&str, &str)] = &[
+    ("completion", "completion"),
+    ("hover", "hover"),
+    ("signature_help", "signature_help"),
+    ("definition", "definition"),
+    ("document_symbol", "document_symbol"),
+    ("rename", "rename"),
+    ("diagnostics", "diagnostics"),
+    ("members", "members"),
+    ("type_at_position", "type_at_position"),
+    ("symbol_search", "symbol_search"),
+    ("references", "references"),
+];
+
+const RUNTIME_STAGE_KIND_REGISTRY: &[(&str, &str)] = &[
+    ("wait_for_file_version", "wait_for_file_version"),
+    ("snapshot_with_deps", "snapshot_with_deps"),
+    ("apply_changes_batch", "apply_changes_batch"),
+    ("apply_change_set_file", "apply_change_set_file"),
+    (
+        "apply_change_set_file_with_snapshot",
+        "apply_change_set_file_with_snapshot",
+    ),
+    ("apply_change_remove_file", "apply_change_remove_file"),
+    (
+        "apply_change_set_settings_snapshot",
+        "apply_change_set_settings_snapshot",
+    ),
+    ("type_index_precompute", "type_index_precompute"),
+    ("type_index_precompute_build", "type_index_precompute_build"),
+];
+
+const QUERY_KIND_REGISTRY: &[(&str, &str)] = &[
+    ("parse_result", "parse_result"),
+    ("syntax_diagnostics", "syntax_diagnostics"),
+    ("ir", "ir"),
+];
+
+const REASON_LABEL_REGISTRY: &[(&str, &str)] = &[("syntax", "syntax"), ("semantic", "semantic")];
+
+const WORK_CLASS_REGISTRY: &[(&str, &str)] = &[("background", "background")];
+
+const OBSERVABILITY_ORIGIN_REGISTRY: &[(&str, &str)] = &[
+    ("lsp", "lsp"),
+    ("web", "web"),
+    ("agent", "agent"),
+    ("runtime", "runtime"),
+];
+
+const TYPE_INDEX_REASON_REGISTRY: &[(&str, &str)] = &[
+    ("type_index_exact_hit", "type_index_exact_hit"),
+    ("type_index_stale_served", "type_index_stale_served"),
+    (
+        "type_index_degraded_incomplete",
+        "type_index_degraded_incomplete",
+    ),
+    (
+        "type_index_fallback_unavailable",
+        "type_index_fallback_unavailable",
+    ),
+    (
+        "type_index_precompute_exact_stored",
+        "type_index_precompute_exact_stored",
+    ),
+    (
+        "type_index_precompute_superseded",
+        "type_index_precompute_superseded",
+    ),
+    (
+        "type_index_precompute_cancelled",
+        "type_index_precompute_cancelled",
+    ),
+    (
+        "type_index_precompute_missing_file",
+        "type_index_precompute_missing_file",
+    ),
+    (
+        "type_index_precompute_queue_saturated",
+        "type_index_precompute_queue_saturated",
+    ),
+    (
+        "type_index_artifact_invalidated_deps",
+        "type_index_artifact_invalidated_deps",
+    ),
+    (
+        "type_index_artifact_invalidated_settings",
+        "type_index_artifact_invalidated_settings",
+    ),
+    (
+        "type_index_artifact_evicted_global_guard",
+        "type_index_artifact_evicted_global_guard",
+    ),
+    (
+        "type_index_artifact_evicted_per_file_window",
+        "type_index_artifact_evicted_per_file_window",
+    ),
+];
+
+const COMPLETION_OWNER_HINT_REASON_REGISTRY: &[(&str, &str)] = &[
+    ("not_member_access", "not_member_access"),
+    ("no_file_content", "no_file_content"),
+    ("no_line", "no_line"),
+    ("no_dot", "no_dot"),
+    ("no_receiver", "no_receiver"),
+    ("offset_unresolved", "offset_unresolved"),
+    ("flow_type_hit", "flow_type_hit"),
+    ("flow_type_miss", "flow_type_miss"),
+    ("type_hit", "type_hit"),
+    ("type_miss", "type_miss"),
+    ("cancelled", "cancelled"),
+    ("type_index_exact_hit", "type_index_exact_hit"),
+    ("type_index_stale_served", "type_index_stale_served"),
+    (
+        "type_index_degraded_incomplete",
+        "type_index_degraded_incomplete",
+    ),
+    (
+        "type_index_fallback_unavailable",
+        "type_index_fallback_unavailable",
+    ),
+];
+
+const LEGACY_WAIT_FOR_FILE_VERSION_METRICS_REGISTRY: &[(&str, (&str, &str))] = &[
+    (
+        "completion",
+        (
+            "intellisense_v2_wait_for_file_version_completion_total",
+            "intellisense_v2_wait_for_file_version_completion_ms",
+        ),
+    ),
+    (
+        "hover",
+        (
+            "intellisense_v2_wait_for_file_version_hover_total",
+            "intellisense_v2_wait_for_file_version_hover_ms",
+        ),
+    ),
+    (
+        "signature_help",
+        (
+            "intellisense_v2_wait_for_file_version_signature_help_total",
+            "intellisense_v2_wait_for_file_version_signature_help_ms",
+        ),
+    ),
+    (
+        "diagnostics",
+        (
+            "intellisense_v2_wait_for_file_version_diagnostics_total",
+            "intellisense_v2_wait_for_file_version_diagnostics_ms",
+        ),
+    ),
+];
+
+const LEGACY_SNAPSHOT_METRICS_REGISTRY: &[(&str, (&str, &str))] = &[
+    (
+        "completion",
+        (
+            "intellisense_v2_snapshot_completion_total",
+            "intellisense_v2_snapshot_completion_ms",
+        ),
+    ),
+    (
+        "hover",
+        (
+            "intellisense_v2_snapshot_hover_total",
+            "intellisense_v2_snapshot_hover_ms",
+        ),
+    ),
+    (
+        "signature_help",
+        (
+            "intellisense_v2_snapshot_signature_help_total",
+            "intellisense_v2_snapshot_signature_help_ms",
+        ),
+    ),
+    (
+        "diagnostics",
+        (
+            "intellisense_v2_snapshot_diagnostics_total",
+            "intellisense_v2_snapshot_diagnostics_ms",
+        ),
+    ),
+];
+
+const LEGACY_RUNTIME_QUEUE_WAIT_METRICS_REGISTRY: &[(&str, (&str, &str))] = &[
+    (
+        "snapshot_with_deps",
+        (
+            "intellisense_v2_runtime_snapshot_with_deps_queue_wait_total",
+            "intellisense_v2_runtime_snapshot_with_deps_queue_wait_ms",
+        ),
+    ),
+    (
+        "wait_for_file_version",
+        (
+            "intellisense_v2_runtime_wait_for_file_version_queue_wait_total",
+            "intellisense_v2_runtime_wait_for_file_version_queue_wait_ms",
+        ),
+    ),
+    (
+        "apply_changes_batch",
+        (
+            "intellisense_v2_runtime_apply_changes_queue_wait_total",
+            "intellisense_v2_runtime_apply_changes_queue_wait_ms",
+        ),
+    ),
+    (
+        "type_index_precompute",
+        (
+            "intellisense_v2_runtime_type_index_precompute_queue_wait_total",
+            "intellisense_v2_runtime_type_index_precompute_queue_wait_ms",
+        ),
+    ),
+];
+
+const LEGACY_RUNTIME_EXEC_METRICS_REGISTRY: &[(&str, (&str, &str))] = &[
+    (
+        "snapshot_with_deps",
+        (
+            "intellisense_v2_runtime_snapshot_with_deps_exec_total",
+            "intellisense_v2_runtime_snapshot_with_deps_exec_ms",
+        ),
+    ),
+    (
+        "wait_for_file_version",
+        (
+            "intellisense_v2_runtime_wait_for_file_version_exec_total",
+            "intellisense_v2_runtime_wait_for_file_version_exec_ms",
+        ),
+    ),
+    (
+        "apply_changes_batch",
+        (
+            "intellisense_v2_runtime_apply_changes_exec_total",
+            "intellisense_v2_runtime_apply_changes_exec_ms",
+        ),
+    ),
+    (
+        "apply_change_set_file",
+        (
+            "intellisense_v2_runtime_apply_change_set_file_exec_total",
+            "intellisense_v2_runtime_apply_change_set_file_exec_ms",
+        ),
+    ),
+    (
+        "apply_change_set_file_with_snapshot",
+        (
+            "intellisense_v2_runtime_apply_change_set_file_with_snapshot_exec_total",
+            "intellisense_v2_runtime_apply_change_set_file_with_snapshot_exec_ms",
+        ),
+    ),
+    (
+        "apply_change_remove_file",
+        (
+            "intellisense_v2_runtime_apply_change_remove_file_exec_total",
+            "intellisense_v2_runtime_apply_change_remove_file_exec_ms",
+        ),
+    ),
+    (
+        "apply_change_set_settings_snapshot",
+        (
+            "intellisense_v2_runtime_apply_change_set_settings_snapshot_exec_total",
+            "intellisense_v2_runtime_apply_change_set_settings_snapshot_exec_ms",
+        ),
+    ),
+    (
+        "type_index_precompute",
+        (
+            "intellisense_v2_runtime_type_index_precompute_exec_total",
+            "intellisense_v2_runtime_type_index_precompute_exec_ms",
+        ),
+    ),
+    (
+        "type_index_precompute_build",
+        (
+            "intellisense_v2_runtime_type_index_precompute_build_exec_total",
+            "intellisense_v2_runtime_type_index_precompute_build_exec_ms",
+        ),
+    ),
+];
+
+const LEGACY_IR_QUERY_METRICS_REGISTRY: &[(&str, (&str, &str))] = &[
+    (
+        "completion",
+        (
+            "intellisense_v2_ir_query_completion_total",
+            "intellisense_v2_ir_query_completion_ms",
+        ),
+    ),
+    (
+        "hover",
+        (
+            "intellisense_v2_ir_query_hover_total",
+            "intellisense_v2_ir_query_hover_ms",
+        ),
+    ),
+];
+
+const LEGACY_IR_QUERY_CANCELLED_METRIC_REGISTRY: &[(&str, &str)] = &[
+    (
+        "completion",
+        "intellisense_v2_ir_query_cancelled_total_completion",
+    ),
+    ("hover", "intellisense_v2_ir_query_cancelled_total_hover"),
+];
+
 fn normalize_operation_label(kind: &str) -> &'static str {
-    match kind {
-        "completion" => "completion",
-        "hover" => "hover",
-        "signature_help" => "signature_help",
-        "definition" => "definition",
-        "document_symbol" => "document_symbol",
-        "rename" => "rename",
-        "diagnostics" => "diagnostics",
-        "members" => "members",
-        "type_at_position" => "type_at_position",
-        "symbol_search" => "symbol_search",
-        "references" => "references",
-        _ => "other",
-    }
+    registry_label(kind, OPERATION_LABEL_REGISTRY, "other")
 }
 
 fn normalize_runtime_stage_kind(kind: &str) -> &'static str {
-    match kind {
-        "wait_for_file_version" => "wait_for_file_version",
-        "snapshot_with_deps" => "snapshot_with_deps",
-        "apply_changes_batch" => "apply_changes_batch",
-        "apply_change_set_file" => "apply_change_set_file",
-        "apply_change_set_file_with_snapshot" => "apply_change_set_file_with_snapshot",
-        "apply_change_remove_file" => "apply_change_remove_file",
-        "apply_change_set_settings_snapshot" => "apply_change_set_settings_snapshot",
-        "type_index_precompute" => "type_index_precompute",
-        "type_index_precompute_build" => "type_index_precompute_build",
-        _ => "other",
-    }
+    registry_label(kind, RUNTIME_STAGE_KIND_REGISTRY, "other")
 }
 
 fn normalize_query_kind_label(kind: &str) -> &'static str {
-    match kind {
-        "parse_result" => "parse_result",
-        "syntax_diagnostics" => "syntax_diagnostics",
-        "ir" => "ir",
-        _ => "other",
-    }
+    registry_label(kind, QUERY_KIND_REGISTRY, "other")
 }
 
 fn normalize_reason_label(kind: &str) -> &'static str {
-    match kind {
-        "syntax" => "syntax",
-        "semantic" => "semantic",
-        _ => "other",
-    }
+    registry_label(kind, REASON_LABEL_REGISTRY, "other")
 }
 
 fn normalize_work_class_label(class: &str) -> &'static str {
-    match class {
-        "background" => "background",
-        _ => "interactive",
-    }
+    registry_label(class, WORK_CLASS_REGISTRY, "interactive")
 }
 
 fn normalize_observability_origin_label(origin: &str) -> &'static str {
-    match origin {
-        "lsp" => "lsp",
-        "web" => "web",
-        "agent" => "agent",
-        "runtime" => "runtime",
-        _ => "runtime",
-    }
+    registry_label(origin, OBSERVABILITY_ORIGIN_REGISTRY, "runtime")
 }
 
 fn normalize_diagnostics_trigger_label(trigger: &str) -> &'static str {
@@ -2968,45 +3265,11 @@ fn normalize_completion_terminal_reason_label(reason: &str) -> &'static str {
 }
 
 fn normalize_completion_owner_hint_reason_label(reason: &str) -> &'static str {
-    match reason {
-        "not_member_access" => "not_member_access",
-        "no_file_content" => "no_file_content",
-        "no_line" => "no_line",
-        "no_dot" => "no_dot",
-        "no_receiver" => "no_receiver",
-        "offset_unresolved" => "offset_unresolved",
-        "flow_type_hit" => "flow_type_hit",
-        "flow_type_miss" => "flow_type_miss",
-        "type_hit" => "type_hit",
-        "type_miss" => "type_miss",
-        "cancelled" => "cancelled",
-        "type_index_exact_hit" => "type_index_exact_hit",
-        "type_index_stale_served" => "type_index_stale_served",
-        "type_index_degraded_incomplete" => "type_index_degraded_incomplete",
-        "type_index_fallback_unavailable" => "type_index_fallback_unavailable",
-        _ => "other",
-    }
+    registry_label(reason, COMPLETION_OWNER_HINT_REASON_REGISTRY, "other")
 }
 
 fn normalize_type_index_reason_label(reason: &str) -> &'static str {
-    match reason {
-        "type_index_exact_hit" => "type_index_exact_hit",
-        "type_index_stale_served" => "type_index_stale_served",
-        "type_index_degraded_incomplete" => "type_index_degraded_incomplete",
-        "type_index_fallback_unavailable" => "type_index_fallback_unavailable",
-        "type_index_precompute_exact_stored" => "type_index_precompute_exact_stored",
-        "type_index_precompute_superseded" => "type_index_precompute_superseded",
-        "type_index_precompute_cancelled" => "type_index_precompute_cancelled",
-        "type_index_precompute_missing_file" => "type_index_precompute_missing_file",
-        "type_index_precompute_queue_saturated" => "type_index_precompute_queue_saturated",
-        "type_index_artifact_invalidated_deps" => "type_index_artifact_invalidated_deps",
-        "type_index_artifact_invalidated_settings" => "type_index_artifact_invalidated_settings",
-        "type_index_artifact_evicted_global_guard" => "type_index_artifact_evicted_global_guard",
-        "type_index_artifact_evicted_per_file_window" => {
-            "type_index_artifact_evicted_per_file_window"
-        }
-        _ => "other",
-    }
+    registry_label(reason, TYPE_INDEX_REASON_REGISTRY, "other")
 }
 
 fn normalize_completion_resource_reason_label(reason: &str) -> &'static str {
@@ -3059,148 +3322,66 @@ fn payload_line_bucket(line_count: usize) -> &'static str {
 }
 
 fn legacy_wait_for_file_version_metrics(kind: &str) -> (&'static str, &'static str) {
-    match kind {
-        "completion" => (
-            "intellisense_v2_wait_for_file_version_completion_total",
-            "intellisense_v2_wait_for_file_version_completion_ms",
-        ),
-        "hover" => (
-            "intellisense_v2_wait_for_file_version_hover_total",
-            "intellisense_v2_wait_for_file_version_hover_ms",
-        ),
-        "signature_help" => (
-            "intellisense_v2_wait_for_file_version_signature_help_total",
-            "intellisense_v2_wait_for_file_version_signature_help_ms",
-        ),
-        "diagnostics" => (
-            "intellisense_v2_wait_for_file_version_diagnostics_total",
-            "intellisense_v2_wait_for_file_version_diagnostics_ms",
-        ),
-        _ => (
+    registry_metric_pair(
+        kind,
+        LEGACY_WAIT_FOR_FILE_VERSION_METRICS_REGISTRY,
+        (
             "intellisense_v2_wait_for_file_version_other_total",
             "intellisense_v2_wait_for_file_version_other_ms",
         ),
-    }
+    )
 }
 
 fn legacy_snapshot_metrics(kind: &str) -> (&'static str, &'static str) {
-    match kind {
-        "completion" => (
-            "intellisense_v2_snapshot_completion_total",
-            "intellisense_v2_snapshot_completion_ms",
-        ),
-        "hover" => (
-            "intellisense_v2_snapshot_hover_total",
-            "intellisense_v2_snapshot_hover_ms",
-        ),
-        "signature_help" => (
-            "intellisense_v2_snapshot_signature_help_total",
-            "intellisense_v2_snapshot_signature_help_ms",
-        ),
-        "diagnostics" => (
-            "intellisense_v2_snapshot_diagnostics_total",
-            "intellisense_v2_snapshot_diagnostics_ms",
-        ),
-        _ => (
+    registry_metric_pair(
+        kind,
+        LEGACY_SNAPSHOT_METRICS_REGISTRY,
+        (
             "intellisense_v2_snapshot_other_total",
             "intellisense_v2_snapshot_other_ms",
         ),
-    }
+    )
 }
 
 fn legacy_runtime_queue_wait_metrics(kind: &str) -> (&'static str, &'static str) {
-    match kind {
-        "snapshot_with_deps" => (
-            "intellisense_v2_runtime_snapshot_with_deps_queue_wait_total",
-            "intellisense_v2_runtime_snapshot_with_deps_queue_wait_ms",
-        ),
-        "wait_for_file_version" => (
-            "intellisense_v2_runtime_wait_for_file_version_queue_wait_total",
-            "intellisense_v2_runtime_wait_for_file_version_queue_wait_ms",
-        ),
-        "apply_changes_batch" => (
-            "intellisense_v2_runtime_apply_changes_queue_wait_total",
-            "intellisense_v2_runtime_apply_changes_queue_wait_ms",
-        ),
-        "type_index_precompute" => (
-            "intellisense_v2_runtime_type_index_precompute_queue_wait_total",
-            "intellisense_v2_runtime_type_index_precompute_queue_wait_ms",
-        ),
-        _ => (
+    registry_metric_pair(
+        kind,
+        LEGACY_RUNTIME_QUEUE_WAIT_METRICS_REGISTRY,
+        (
             "intellisense_v2_runtime_other_queue_wait_total",
             "intellisense_v2_runtime_other_queue_wait_ms",
         ),
-    }
+    )
 }
 
 fn legacy_runtime_exec_metrics(kind: &str) -> (&'static str, &'static str) {
-    match kind {
-        "snapshot_with_deps" => (
-            "intellisense_v2_runtime_snapshot_with_deps_exec_total",
-            "intellisense_v2_runtime_snapshot_with_deps_exec_ms",
-        ),
-        "wait_for_file_version" => (
-            "intellisense_v2_runtime_wait_for_file_version_exec_total",
-            "intellisense_v2_runtime_wait_for_file_version_exec_ms",
-        ),
-        "apply_changes_batch" => (
-            "intellisense_v2_runtime_apply_changes_exec_total",
-            "intellisense_v2_runtime_apply_changes_exec_ms",
-        ),
-        "apply_change_set_file" => (
-            "intellisense_v2_runtime_apply_change_set_file_exec_total",
-            "intellisense_v2_runtime_apply_change_set_file_exec_ms",
-        ),
-        "apply_change_set_file_with_snapshot" => (
-            "intellisense_v2_runtime_apply_change_set_file_with_snapshot_exec_total",
-            "intellisense_v2_runtime_apply_change_set_file_with_snapshot_exec_ms",
-        ),
-        "apply_change_remove_file" => (
-            "intellisense_v2_runtime_apply_change_remove_file_exec_total",
-            "intellisense_v2_runtime_apply_change_remove_file_exec_ms",
-        ),
-        "apply_change_set_settings_snapshot" => (
-            "intellisense_v2_runtime_apply_change_set_settings_snapshot_exec_total",
-            "intellisense_v2_runtime_apply_change_set_settings_snapshot_exec_ms",
-        ),
-        "type_index_precompute" => (
-            "intellisense_v2_runtime_type_index_precompute_exec_total",
-            "intellisense_v2_runtime_type_index_precompute_exec_ms",
-        ),
-        "type_index_precompute_build" => (
-            "intellisense_v2_runtime_type_index_precompute_build_exec_total",
-            "intellisense_v2_runtime_type_index_precompute_build_exec_ms",
-        ),
-        _ => (
+    registry_metric_pair(
+        kind,
+        LEGACY_RUNTIME_EXEC_METRICS_REGISTRY,
+        (
             "intellisense_v2_runtime_other_exec_total",
             "intellisense_v2_runtime_other_exec_ms",
         ),
-    }
+    )
 }
 
 fn legacy_ir_query_metrics(kind: &str) -> (&'static str, &'static str) {
-    match kind {
-        "completion" => (
-            "intellisense_v2_ir_query_completion_total",
-            "intellisense_v2_ir_query_completion_ms",
-        ),
-        "hover" => (
-            "intellisense_v2_ir_query_hover_total",
-            "intellisense_v2_ir_query_hover_ms",
-        ),
-        _ => (
+    registry_metric_pair(
+        kind,
+        LEGACY_IR_QUERY_METRICS_REGISTRY,
+        (
             "intellisense_v2_ir_query_other_total",
             "intellisense_v2_ir_query_other_ms",
         ),
-    }
+    )
 }
 
 fn legacy_ir_query_cancelled_metric(kind: &str) -> &'static str {
-    match kind {
-        "completion" => "intellisense_v2_ir_query_cancelled_total_completion",
-        "hover" => "intellisense_v2_ir_query_cancelled_total_hover",
-        _ => "intellisense_v2_ir_query_cancelled_total_other",
-    }
+    registry_metric_single(
+        kind,
+        LEGACY_IR_QUERY_CANCELLED_METRIC_REGISTRY,
+        "intellisense_v2_ir_query_cancelled_total_other",
+    )
 }
 
 fn compute_rate(

@@ -3389,6 +3389,12 @@ impl LanguageServer for BslLanguageServer {
                                                                         record_type_lookup_profile(
                                                                             &profiled.profile,
                                                                         );
+                                                                        coordinator_for_query
+                                                                            .record_intellisense_v2_type_index_reason(
+                                                                                profiled
+                                                                                    .serve_reason_code
+                                                                                    .as_str(),
+                                                                            );
                                                                         coordinator_for_query.record_intellisense_v2_completion_owner_hint_result(
                                                                             profiled.serve_reason_code.as_str(),
                                                                         );
@@ -3965,6 +3971,16 @@ impl LanguageServer for BslLanguageServer {
                     observed_byte_offset,
                     observed_point,
                 );
+                if let Some(offset) = observed_byte_offset {
+                    let offset = offset.min(u32::MAX as usize) as u32;
+                    if let Ok(profiled) =
+                        analysis.type_at_byte_offset_serve_only_profiled(file_id, offset)
+                    {
+                        self.coordinator.record_intellisense_v2_type_index_reason(
+                            profiled.serve_reason_code.as_str(),
+                        );
+                    }
+                }
 
                 let file_content = analysis.file_text(file_id).ok().flatten();
                 let file_path = analysis.file_path(file_id).ok().flatten();
@@ -4308,10 +4324,15 @@ impl LanguageServer for BslLanguageServer {
                         let offset = offset.min(u32::MAX as usize) as u32;
                         // Strict serve-only: definition type hints must not trigger
                         // on-demand flow/type-index compute in request path.
-                        analysis
-                            .type_at_byte_offset_serve_only(file_id, offset)
-                            .ok()
-                            .flatten()
+                        match analysis.type_at_byte_offset_serve_only_profiled(file_id, offset) {
+                            Ok(profiled) => {
+                                self.coordinator.record_intellisense_v2_type_index_reason(
+                                    profiled.serve_reason_code.as_str(),
+                                );
+                                profiled.resolution
+                            }
+                            Err(_) => None,
+                        }
                     })
                 };
                 let receiver_type_hint = ir_program.as_ref().and_then(|program| {
@@ -4335,10 +4356,17 @@ impl LanguageServer for BslLanguageServer {
 
                     // Strict serve-only: definition receiver hints must not trigger
                     // on-demand flow/type-index compute in request path.
-                    analysis
-                        .type_at_byte_offset_serve_only(file_id, object_span.start)
-                        .ok()
-                        .flatten()
+                    match analysis
+                        .type_at_byte_offset_serve_only_profiled(file_id, object_span.start)
+                    {
+                        Ok(profiled) => {
+                            self.coordinator.record_intellisense_v2_type_index_reason(
+                                profiled.serve_reason_code.as_str(),
+                            );
+                            profiled.resolution
+                        }
+                        Err(_) => None,
+                    }
                 });
 
                 (
@@ -4488,10 +4516,15 @@ impl LanguageServer for BslLanguageServer {
                     let offset = offset.min(u32::MAX as usize) as u32;
                     // Strict serve-only: interactive signatureHelp must not run
                     // flow-sensitive on-demand parse/type_index compute.
-                    analysis
-                        .type_at_byte_offset_serve_only(file_id, offset)
-                        .ok()
-                        .flatten()
+                    match analysis.type_at_byte_offset_serve_only_profiled(file_id, offset) {
+                        Ok(profiled) => {
+                            self.coordinator.record_intellisense_v2_type_index_reason(
+                                profiled.serve_reason_code.as_str(),
+                            );
+                            profiled.resolution
+                        }
+                        Err(_) => None,
+                    }
                 });
 
                 (file_content, deps, receiver_type_hint)

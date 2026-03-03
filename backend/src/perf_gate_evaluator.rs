@@ -19,6 +19,111 @@ fn get_report_metric_f64(report: &Value, path: &[&str]) -> Result<f64, String> {
         .ok_or_else(|| format!("field '{}' must be numeric", path.join(".")))
 }
 
+pub const PARITY_DRIFT_RATE_MAX_FOR_CUTOVER: f64 = 0.01;
+pub const PARITY_PAIRS_TOTAL_MIN_FOR_CUTOVER: u64 = 100;
+
+fn is_valid_change_id(value: &str) -> bool {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    trimmed
+        .bytes()
+        .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        && !trimmed.starts_with('-')
+        && !trimmed.ends_with('-')
+        && !trimmed.contains("--")
+}
+
+pub fn validate_perf_report_provenance(
+    report: &Value,
+    expected_change_id: Option<&str>,
+) -> Result<(), String> {
+    let top_level_change_id = match report.get("change_id") {
+        Some(value) => value
+            .as_str()
+            .map(str::to_string)
+            .ok_or_else(|| "provenance_invalid".to_string())?,
+        None => String::new(),
+    };
+
+    let provenance_obj = match report.get("provenance") {
+        Some(value) => Some(
+            value
+                .as_object()
+                .ok_or_else(|| "provenance_invalid".to_string())?,
+        ),
+        None => None,
+    };
+
+    let provenance_change_id = match provenance_obj.and_then(|obj| obj.get("change_id")) {
+        Some(value) => value
+            .as_str()
+            .map(str::to_string)
+            .ok_or_else(|| "provenance_invalid".to_string())?,
+        None => String::new(),
+    };
+    let effective_change_id = if !provenance_change_id.is_empty() {
+        if !top_level_change_id.is_empty() && top_level_change_id != provenance_change_id {
+            return Err("provenance_invalid".to_string());
+        }
+        provenance_change_id
+    } else {
+        top_level_change_id
+    };
+
+    if !effective_change_id.is_empty() && !is_valid_change_id(&effective_change_id) {
+        return Err("provenance_invalid".to_string());
+    }
+
+    if let Some(expected_change_id) = expected_change_id {
+        if !is_valid_change_id(expected_change_id) {
+            return Err("provenance_invalid".to_string());
+        }
+        if effective_change_id.is_empty() {
+            return Err("provenance_missing_for_authoritative_run".to_string());
+        }
+        if effective_change_id != expected_change_id {
+            return Err("provenance_mismatch_expected_change_id".to_string());
+        }
+    }
+
+    for field in ["generated_at", "profile", "contract_version"] {
+        if let Some(value) = provenance_obj.and_then(|obj| obj.get(field)) {
+            if value.as_str().is_none_or(|string| string.trim().is_empty()) {
+                return Err("provenance_invalid".to_string());
+            }
+        }
+    }
+    if let Some(value) = provenance_obj.and_then(|obj| obj.get("schema_version")) {
+        if value.as_u64().is_none_or(|number| number == 0) {
+            return Err("provenance_invalid".to_string());
+        }
+    }
+
+    Ok(())
+}
+
+pub fn validate_parity_cutover_evidence(report: &Value) -> Result<(), String> {
+    let parity_pairs_total = get_report_u64(report, &["results", "parity_pairs_total"])
+        .map_err(|_| "parity_evidence_insufficient".to_string())?;
+    if parity_pairs_total < PARITY_PAIRS_TOTAL_MIN_FOR_CUTOVER {
+        return Err("parity_evidence_insufficient".to_string());
+    }
+
+    let parity_drift_rate = get_report_metric_f64(report, &["results", "parity_mismatch_rate"])
+        .or_else(|_| get_report_metric_f64(report, &["results", "parity_drift_rate"]))
+        .map_err(|_| "parity_evidence_insufficient".to_string())?;
+    if !parity_drift_rate.is_finite() {
+        return Err("parity_evidence_insufficient".to_string());
+    }
+    if parity_drift_rate > PARITY_DRIFT_RATE_MAX_FOR_CUTOVER {
+        return Err("parity_drift_threshold_exceeded".to_string());
+    }
+
+    Ok(())
+}
+
 pub fn get_report_u64(report: &Value, path: &[&str]) -> Result<u64, String> {
     let mut cursor = report;
     for segment in path {
@@ -619,6 +724,7 @@ pub fn evaluate_intellisense_perf_profile(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn contract_fixture() -> Value {
         serde_json::json!({
@@ -752,5 +858,108 @@ mod tests {
             .iter()
             .filter_map(Value::as_str)
             .any(|code| code == "initial_budget_not_fixed"));
+    }
+
+    #[test]
+    fn provenance_allows_legacy_local_without_expected_change_id() {
+        let report = json!({
+            "contract_version": "v1",
+            "metrics": {}
+        });
+
+        validate_perf_report_provenance(&report, None).expect("legacy-local should pass");
+    }
+
+    #[test]
+    fn provenance_requires_change_id_when_expected_is_provided() {
+        let report = json!({
+            "contract_version": "v1",
+            "metrics": {}
+        });
+
+        let err =
+            validate_perf_report_provenance(&report, Some("refactor-v2-contract-first-hardening"))
+                .expect_err("missing provenance must fail");
+        assert_eq!(err, "provenance_missing_for_authoritative_run");
+    }
+
+    #[test]
+    fn provenance_rejects_mismatch_with_expected_change_id() {
+        let report = json!({
+            "change_id": "refactor-v2-event-driven-type-index-cache"
+        });
+
+        let err =
+            validate_perf_report_provenance(&report, Some("refactor-v2-contract-first-hardening"))
+                .expect_err("mismatch must fail");
+        assert_eq!(err, "provenance_mismatch_expected_change_id");
+    }
+
+    #[test]
+    fn provenance_rejects_invalid_change_id_format() {
+        let report = json!({
+            "change_id": "Refactor_V2"
+        });
+
+        let err =
+            validate_perf_report_provenance(&report, None).expect_err("invalid format must fail");
+        assert_eq!(err, "provenance_invalid");
+    }
+
+    #[test]
+    fn provenance_accepts_optional_v1_provenance_payload() {
+        let report = json!({
+            "change_id": "refactor-v2-contract-first-hardening",
+            "provenance": {
+                "change_id": "refactor-v2-contract-first-hardening",
+                "generated_at": "2026-03-03T19:00:00Z",
+                "profile": "small",
+                "schema_version": 1,
+                "contract_version": "v1"
+            }
+        });
+
+        validate_perf_report_provenance(&report, Some("refactor-v2-contract-first-hardening"))
+            .expect("matching provenance should pass");
+    }
+
+    #[test]
+    fn parity_cutover_rejects_insufficient_pairs_total() {
+        let report = json!({
+            "results": {
+                "parity_pairs_total": 99,
+                "parity_mismatch_rate": 0.0
+            }
+        });
+
+        let err =
+            validate_parity_cutover_evidence(&report).expect_err("insufficient pairs must fail");
+        assert_eq!(err, "parity_evidence_insufficient");
+    }
+
+    #[test]
+    fn parity_cutover_rejects_drift_over_threshold() {
+        let report = json!({
+            "results": {
+                "parity_pairs_total": 120,
+                "parity_mismatch_rate": 0.02
+            }
+        });
+
+        let err =
+            validate_parity_cutover_evidence(&report).expect_err("drift over threshold must fail");
+        assert_eq!(err, "parity_drift_threshold_exceeded");
+    }
+
+    #[test]
+    fn parity_cutover_accepts_valid_evidence() {
+        let report = json!({
+            "results": {
+                "parity_pairs_total": 120,
+                "parity_mismatch_rate": 0.005
+            }
+        });
+
+        validate_parity_cutover_evidence(&report).expect("valid parity evidence should pass");
     }
 }

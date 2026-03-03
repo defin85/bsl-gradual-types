@@ -29,6 +29,11 @@ run_profile() {
   local scenario="${ROOT_DIR}/backend/tests/perf/scenarios/intellisense_${name}.json"
   local baseline="${BASELINE_DIR}/intellisense_${name}.json"
   local report="${REPORT_DIR}/intellisense_${name}.json"
+  local -a change_id_args=()
+  local resolved_change_id="${CHANGE_ID:-${OPENSPEC_CHANGE_ID:-}}"
+  if [[ -n "${resolved_change_id}" ]]; then
+    change_id_args=(--change-id "${resolved_change_id}")
+  fi
 
   RAYON_NUM_THREADS=1 \
   cargo run -p bsl-backend --bin intellisense_perf -- \
@@ -44,6 +49,7 @@ run_profile() {
     --contract-path "${CONTRACT_PATH}" \
     --max-error-rate 0.0 \
     --max-incomplete-rate 0.0 \
+    "${change_id_args[@]}" \
     --output "${report}" \
     --summary "${REPORT_DIR}/intellisense_${name}.md"
 }

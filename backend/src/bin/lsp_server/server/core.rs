@@ -1901,7 +1901,9 @@ mod tests {
     use bsl_agent::session::SessionManager;
     use bsl_agent::types::JobStateDto;
     use bsl_backend::perf_gate_evaluator::{
-        evaluate_scale_aware_gate, get_report_u64, validate_scale_aware_baseline_schema,
+        evaluate_scale_aware_gate, get_report_u64, validate_parity_cutover_evidence,
+        validate_scale_aware_baseline_schema, PARITY_DRIFT_RATE_MAX_FOR_CUTOVER,
+        PARITY_PAIRS_TOTAL_MIN_FOR_CUTOVER,
     };
     use bsl_backend::presentation::web::{create_router, AppState};
     use bsl_backend::system::{
@@ -9567,6 +9569,13 @@ mod tests {
             "intellisense_v2_completion_parity_drift_total_mode_",
         );
         let parity_mismatch_rate = parity_drift_total as f64 / parity_pairs_total.max(1) as f64;
+        let parity_evidence = serde_json::json!({
+            "results": {
+                "parity_pairs_total": parity_pairs_total,
+                "parity_mismatch_rate": parity_mismatch_rate
+            }
+        });
+        let parity_evidence_verdict = validate_parity_cutover_evidence(&parity_evidence);
         let completion_mode = bsl_runtime::system::global_runtime_config()
             .get_string(bsl_runtime::system::RuntimeKey::IntellisenseV2CompletionMode)
             .unwrap_or_else(|| "on".to_string())
@@ -9585,7 +9594,8 @@ mod tests {
             && completion_p99 <= MAX_P99_MS
             && first_trigger_success_rate >= MIN_FIRST_TRIGGER_SUCCESS_RATE
             && terminal_empty_rate <= MAX_TERMINAL_EMPTY_RATE
-            && parity_mismatch_rate <= MAX_PARITY_MISMATCH_RATE;
+            && parity_mismatch_rate <= MAX_PARITY_MISMATCH_RATE
+            && parity_evidence_verdict.is_ok();
 
         let report = serde_json::json!({
             "change_id": CHANGE_ID,
@@ -9598,7 +9608,9 @@ mod tests {
                 "completion_p99_ms_max": MAX_P99_MS,
                 "first_trigger_success_rate_min": MIN_FIRST_TRIGGER_SUCCESS_RATE,
                 "terminal_empty_missing_ir_rate_max": MAX_TERMINAL_EMPTY_RATE,
-                "parity_mismatch_rate_max": MAX_PARITY_MISMATCH_RATE
+                "parity_mismatch_rate_max": MAX_PARITY_MISMATCH_RATE,
+                "parity_pairs_total_min": PARITY_PAIRS_TOTAL_MIN_FOR_CUTOVER,
+                "parity_drift_rate_max": PARITY_DRIFT_RATE_MAX_FOR_CUTOVER
             },
             "results": {
                 "completion_p95_ms": completion_p95,
@@ -9667,6 +9679,19 @@ mod tests {
             "acceptance gate failed: parity mismatch rate={:.4} > {:.4}",
             parity_mismatch_rate,
             MAX_PARITY_MISMATCH_RATE
+        );
+        assert!(
+            parity_pairs_total >= PARITY_PAIRS_TOTAL_MIN_FOR_CUTOVER,
+            "acceptance gate failed: parity pairs total={} < {}",
+            parity_pairs_total,
+            PARITY_PAIRS_TOTAL_MIN_FOR_CUTOVER
+        );
+        assert!(
+            parity_evidence_verdict.is_ok(),
+            "acceptance gate failed: parity evidence invalid: {}",
+            parity_evidence_verdict
+                .err()
+                .unwrap_or_else(|| "unknown".to_string())
         );
 
         drain_task.abort();

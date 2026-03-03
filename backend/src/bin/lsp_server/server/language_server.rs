@@ -2697,7 +2697,6 @@ impl LanguageServer for BslLanguageServer {
                     ) = {
                         let analysis = prepared.snapshot.analysis;
                         let index_snapshot = prepared.snapshot.index_snapshot;
-                        let parse_result_without_ir = member_access_request;
                         let member_access_request_for_query = member_access_request;
                         let last_apply_enqueued_at = self
                             .latest_apply_enqueued_at_v2
@@ -2894,16 +2893,10 @@ impl LanguageServer for BslLanguageServer {
                                             true,
                                         );
                                     }
-                                    let parse_result =
-                                        bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query_singleflight(
-                                            &context_for_query,
-                                            &analysis,
-                                            ir_program.is_some() || parse_result_without_ir,
-                                            Some(coordinator_for_query.as_ref()),
-                                            file_id,
-                                        )
-                                        .ok()
-                                        .flatten();
+                                    // Strict serve-only completion path: do not run
+                                    // parse_result query in interactive request flow.
+                                    let parse_result: Option<Arc<bsl_syntax::ast::ParseResult>> =
+                                        None;
 
                                     if bsl_runtime::system::global_runtime_config()
                                         .get_bool(

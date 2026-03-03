@@ -5810,6 +5810,13 @@ mod tests {
             0,
             "flow+fallback owner-hint lookup path must not run in strict serve-only mode"
         );
+        assert_eq!(
+            read_u64_metric(counters.get(
+                "intellisense_v2_drilldown_stage_total_origin_lsp_mode_event_driven_operation_completion_stage_parse_result_query",
+            )),
+            0,
+            "strict serve-only completion path must not execute parse_result query stage"
+        );
 
         assert_eq!(
             read_u64_metric(

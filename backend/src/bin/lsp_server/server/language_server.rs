@@ -3376,79 +3376,9 @@ impl LanguageServer for BslLanguageServer {
                                                                 offset.min(u32::MAX as usize) as u32;
                                                             let owner_hint_type_lookup_started =
                                                                 Instant::now();
-                                                            let hint = if include_flow_sensitive {
-                                                                owner_hint_lookup_path =
-                                                                    Some("flow_only");
-                                                                let flow_lookup_started =
-                                                                    Instant::now();
-                                                                let flow_hint_result = analysis
-                                                                    .flow_type_at_byte_offset(
-                                                                        file_id, offset,
-                                                                    );
-                                                                coordinator_for_query.record_completion_stage_latency(
-                                                                    "query_bundle_owner_hint_flow_lookup",
-                                                                    flow_lookup_started.elapsed(),
-                                                                );
-                                                                match flow_hint_result {
-                                                                    Ok(Some(flow_hint)) => {
-                                                                        owner_hint_reason =
-                                                                            "flow_type_hit";
-                                                                        owner_hint_lookup_result =
-                                                                            Some("hit");
-                                                                        Some(flow_hint)
-                                                                    }
-                                                                    Ok(None) => {
-                                                                        owner_hint_lookup_path = Some(
-                                                                            "flow_plus_fallback",
-                                                                        );
-                                                                        let fallback_started =
-                                                                            Instant::now();
-                                                                        let fallback_hint_result =
-                                                                            analysis
-                                                                                .type_at_byte_offset_serve_only_profiled(
-                                                                                    file_id, offset,
-                                                                                );
-                                                                        coordinator_for_query.record_completion_stage_latency(
-                                                                            "query_bundle_owner_hint_type_lookup_fallback",
-                                                                            fallback_started.elapsed(),
-                                                                        );
-                                                                        match fallback_hint_result {
-                                                                            Ok(profiled) => {
-                                                                                record_type_lookup_profile(
-                                                                                    &profiled.profile,
-                                                                                );
-                                                                                coordinator_for_query.record_intellisense_v2_completion_owner_hint_result(
-                                                                                    profiled.serve_reason_code.as_str(),
-                                                                                );
-                                                                                if let Some(type_hint) = profiled.resolution {
-                                                                                    owner_hint_reason =
-                                                                                        "type_hit";
-                                                                                    owner_hint_lookup_result = Some("hit");
-                                                                                    Some(type_hint)
-                                                                                } else {
-                                                                                    owner_hint_reason =
-                                                                                        "type_miss";
-                                                                                    owner_hint_lookup_result = Some("miss");
-                                                                                    None
-                                                                                }
-                                                                            }
-                                                                            Err(_) => {
-                                                                                owner_hint_reason =
-                                                                                    "cancelled";
-                                                                                owner_hint_lookup_result = Some("cancelled");
-                                                                                None
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                    Err(_) => {
-                                                                        owner_hint_reason =
-                                                                            "cancelled";
-                                                                        owner_hint_lookup_result =
-                                                                            Some("cancelled");
-                                                                        None
-                                                                    }
-                                                                }
-                                                            } else {
+                                                            let hint = {
+                                                                // Strict serve-only: flow-sensitive mode must not trigger
+                                                                // on-demand parse/type_index compute in request path.
                                                                 owner_hint_lookup_path =
                                                                     Some("direct");
                                                                 let direct_started = Instant::now();
@@ -4383,17 +4313,12 @@ impl LanguageServer for BslLanguageServer {
                         .flatten();
                     offset.and_then(|offset| {
                         let offset = offset.min(u32::MAX as usize) as u32;
-                        if include_flow_sensitive {
-                            analysis
-                                .flow_type_at_byte_offset(file_id, offset)
-                                .ok()
-                                .flatten()
-                                .or_else(|| {
-                                    analysis.type_at_byte_offset(file_id, offset).ok().flatten()
-                                })
-                        } else {
-                            analysis.type_at_byte_offset(file_id, offset).ok().flatten()
-                        }
+                        // Strict serve-only: definition type hints must not trigger
+                        // on-demand flow/type-index compute in request path.
+                        analysis
+                            .type_at_byte_offset_serve_only(file_id, offset)
+                            .ok()
+                            .flatten()
                     })
                 };
                 let receiver_type_hint = ir_program.as_ref().and_then(|program| {
@@ -4415,23 +4340,12 @@ impl LanguageServer for BslLanguageServer {
                         _ => None,
                     }?;
 
-                    if include_flow_sensitive {
-                        analysis
-                            .flow_type_at_byte_offset(file_id, object_span.start)
-                            .ok()
-                            .flatten()
-                            .or_else(|| {
-                                analysis
-                                    .type_at_byte_offset(file_id, object_span.start)
-                                    .ok()
-                                    .flatten()
-                            })
-                    } else {
-                        analysis
-                            .type_at_byte_offset(file_id, object_span.start)
-                            .ok()
-                            .flatten()
-                    }
+                    // Strict serve-only: definition receiver hints must not trigger
+                    // on-demand flow/type-index compute in request path.
+                    analysis
+                        .type_at_byte_offset_serve_only(file_id, object_span.start)
+                        .ok()
+                        .flatten()
                 });
 
                 (
@@ -4579,23 +4493,12 @@ impl LanguageServer for BslLanguageServer {
                         .ok()
                         .flatten()?;
                     let offset = offset.min(u32::MAX as usize) as u32;
-                    if include_flow_sensitive {
-                        analysis
-                            .flow_type_at_byte_offset(file_id, offset)
-                            .ok()
-                            .flatten()
-                            .or_else(|| {
-                                analysis
-                                    .type_at_byte_offset_serve_only(file_id, offset)
-                                    .ok()
-                                    .flatten()
-                            })
-                    } else {
-                        analysis
-                            .type_at_byte_offset_serve_only(file_id, offset)
-                            .ok()
-                            .flatten()
-                    }
+                    // Strict serve-only: interactive signatureHelp must not run
+                    // flow-sensitive on-demand parse/type_index compute.
+                    analysis
+                        .type_at_byte_offset_serve_only(file_id, offset)
+                        .ok()
+                        .flatten()
                 });
 
                 (file_content, deps, receiver_type_hint)

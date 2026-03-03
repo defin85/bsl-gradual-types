@@ -59,7 +59,7 @@ fn compute_hover_info_from_ir(
     file_content: &str,
     line: u32,
     column: u32,
-    include_flow_sensitive: bool,
+    _include_flow_sensitive: bool,
     hover_config: Option<HoverFormatConfig>,
 ) -> Option<String> {
     // Milestone 2.11 Task B1: DEBUG logs for node search
@@ -75,23 +75,11 @@ fn compute_hover_info_from_ir(
         byte_offset.and_then(|offset| ir_program.find_node_at_byte_offset(offset));
     let word_under_cursor = extract_word_at_position(file_content, line, column);
     let type_at_cursor = byte_offset.and_then(|offset| {
-        if include_flow_sensitive {
-            analysis
-                .flow_type_at_byte_offset(file_id, offset)
-                .ok()
-                .flatten()
-                .or_else(|| {
-                    analysis
-                        .type_at_byte_offset_serve_only(file_id, offset)
-                        .ok()
-                        .flatten()
-                })
-        } else {
-            analysis
-                .type_at_byte_offset_serve_only(file_id, offset)
-                .ok()
-                .flatten()
-        }
+        // Strict serve-only: hover must not trigger on-demand flow/type-index compute.
+        analysis
+            .type_at_byte_offset_serve_only(file_id, offset)
+            .ok()
+            .flatten()
     });
 
     let formatter = if let Some(config) = hover_config.clone() {

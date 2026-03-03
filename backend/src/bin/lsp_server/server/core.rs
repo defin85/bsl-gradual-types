@@ -5666,7 +5666,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn p7_completion_owner_hint_type_lookup_is_serve_only_without_on_demand_compute() {
+    async fn p7_completion_owner_hint_type_lookup_is_serve_only_even_when_flow_sensitive_enabled()
+    {
         let coordinator = Arc::new(SystemCoordinator::new());
 
         let (mut service, mut socket) = LspService::build({
@@ -5677,6 +5678,52 @@ mod tests {
         let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
 
         initialize_lsp_service(&mut service).await;
+
+        let settings = DidChangeConfigurationParams {
+            settings: serde_json::json!({
+                "bsl": {
+                    "hover": {
+                        "detailLevel": "full",
+                        "maxMethods": 10,
+                        "maxProperties": 5,
+                        "showCertainty": true
+                    },
+                    "diagnostics": {
+                        "detailLevel": "standard",
+                        "showHints": true
+                    },
+                    "formatting": {
+                        "enabled": false,
+                        "indentSize": 4
+                    },
+                    "typeHints": {
+                        "enabled": true,
+                        "showVariableTypes": true,
+                        "showReturnTypes": true,
+                        "showUnionDetails": true,
+                        "minCertainty": 0.5
+                    },
+                    "codeActions": {
+                        "enabled": false
+                    },
+                    "enableFlowSensitive": true
+                }
+            }),
+        };
+        let settings_req = Request::build("workspace/didChangeConfiguration")
+            .params(serde_json::to_value(settings).expect("DidChangeConfigurationParams"))
+            .finish();
+        let settings_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(settings_req)
+            .await
+            .expect("didChangeConfiguration notification");
+        assert!(
+            settings_response.is_none(),
+            "didChangeConfiguration is a notification"
+        );
 
         let fixture =
             "Процедура Тест()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.\nКонецПроцедуры\n";
@@ -5739,17 +5786,29 @@ mod tests {
             .and_then(|value| value.as_object())
             .expect("metrics.counters object");
 
-        let lookup_path_total = read_u64_metric(
+        let lookup_path_direct_total = read_u64_metric(
             counters.get("intellisense_v2_completion_owner_hint_lookup_path_total_direct"),
-        ) + read_u64_metric(
+        );
+        let lookup_path_flow_only_total = read_u64_metric(
             counters.get("intellisense_v2_completion_owner_hint_lookup_path_total_flow_only"),
-        ) + read_u64_metric(
+        );
+        let lookup_path_flow_plus_fallback_total = read_u64_metric(
             counters
                 .get("intellisense_v2_completion_owner_hint_lookup_path_total_flow_plus_fallback"),
         );
         assert!(
-            lookup_path_total > 0,
-            "owner-hint type lookup path metrics must confirm that type lookup executed"
+            lookup_path_direct_total > 0,
+            "owner-hint type lookup must stay on direct serve-only path under flow-sensitive mode"
+        );
+        assert_eq!(
+            lookup_path_flow_only_total,
+            0,
+            "flow-only owner-hint lookup path must not run in strict serve-only mode"
+        );
+        assert_eq!(
+            lookup_path_flow_plus_fallback_total,
+            0,
+            "flow+fallback owner-hint lookup path must not run in strict serve-only mode"
         );
 
         assert_eq!(

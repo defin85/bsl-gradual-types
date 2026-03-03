@@ -324,7 +324,8 @@ pub fn interactive_freshness_knobs(
     match operation {
         SemanticOperation::Completion
         | SemanticOperation::Hover
-        | SemanticOperation::SignatureHelp => Some(InteractiveFreshnessKnobs::from_runtime_config(
+        | SemanticOperation::SignatureHelp
+        | SemanticOperation::Definition => Some(InteractiveFreshnessKnobs::from_runtime_config(
             observability,
         )),
         _ => None,
@@ -1282,6 +1283,29 @@ mod tests {
         assert!(
             counters.contains_key("intellisense_v2_interactive_knob_clamped_total"),
             "clamped interactive knobs should emit metric"
+        );
+    }
+
+    #[test]
+    fn interactive_knobs_cover_all_interactive_operations() {
+        let coordinator = SystemCoordinator::new();
+
+        for operation in [
+            SemanticOperation::Completion,
+            SemanticOperation::Hover,
+            SemanticOperation::SignatureHelp,
+            SemanticOperation::Definition,
+        ] {
+            assert!(
+                interactive_freshness_knobs(operation, Some(&coordinator)).is_some(),
+                "{operation:?} must use interactive freshness knobs"
+            );
+        }
+
+        assert!(
+            interactive_freshness_knobs(SemanticOperation::DocumentSymbol, Some(&coordinator))
+                .is_none(),
+            "background operations must not use interactive freshness knobs"
         );
     }
 

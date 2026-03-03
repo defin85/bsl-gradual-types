@@ -1107,9 +1107,15 @@ impl BasicObservability {
     }
 
     pub fn record_intellisense_v2_type_index_reason(&self, reason: &str) {
+        let is_known_reason = TYPE_INDEX_REASON_REGISTRY
+            .iter()
+            .any(|(raw, _normalized)| *raw == reason);
         let reason = normalize_type_index_reason_label(reason);
         let key = format!("intellisense_v2_type_index_reason_total_reason_{reason}");
         self.metrics.increment(&key);
+        if !is_known_reason {
+            self.record_observability_contract_violation("unknown_type_index_reason");
+        }
     }
 
     pub fn record_completion_resource_pressure(&self, reason: &str, duration: Duration) {
@@ -3939,6 +3945,22 @@ mod observability_contract_tests {
         assert!(
             counter_value(counters, &other_key) > 0,
             "type-index reason counter must collapse unknown reasons into other"
+        );
+        assert_eq!(
+            counter_value(
+                counters,
+                "intellisense_v2_observability_contract_violation_total",
+            ),
+            1,
+            "unknown type-index reason must emit observability contract violation"
+        );
+        assert_eq!(
+            counter_value(
+                counters,
+                "intellisense_v2_observability_contract_violation_reason_unknown_type_index_reason",
+            ),
+            1,
+            "unknown type-index reason must emit dedicated contract-violation reason"
         );
     }
 

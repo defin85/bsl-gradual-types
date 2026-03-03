@@ -63,7 +63,8 @@ impl RuntimeQueuePriority {
         match operation {
             SemanticOperation::Completion
             | SemanticOperation::Hover
-            | SemanticOperation::SignatureHelp => RuntimeQueuePriority::Interactive,
+            | SemanticOperation::SignatureHelp
+            | SemanticOperation::Definition => RuntimeQueuePriority::Interactive,
             _ => RuntimeQueuePriority::Background,
         }
     }
@@ -1962,6 +1963,28 @@ mod tests {
         );
         assert_eq!(SemanticOperation::SymbolSearch.as_str(), "symbol_search");
         assert_eq!(SemanticOperation::References.as_str(), "references");
+    }
+
+    #[test]
+    fn runtime_queue_priority_aligns_definition_with_interactive_operations() {
+        for operation in [
+            SemanticOperation::Completion,
+            SemanticOperation::Hover,
+            SemanticOperation::SignatureHelp,
+            SemanticOperation::Definition,
+        ] {
+            assert_eq!(
+                RuntimeQueuePriority::for_operation(operation),
+                RuntimeQueuePriority::Interactive,
+                "{operation:?} must stay on interactive queue"
+            );
+        }
+
+        assert_eq!(
+            RuntimeQueuePriority::for_operation(SemanticOperation::DocumentSymbol),
+            RuntimeQueuePriority::Background,
+            "non-interactive operations must remain on background queue"
+        );
     }
 
     #[test]

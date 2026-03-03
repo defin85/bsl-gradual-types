@@ -952,6 +952,33 @@ mod tests {
     }
 
     #[test]
+    fn parity_cutover_canary_rollback_guard_blocks_drift_regression() {
+        let canary_regression = json!({
+            "mode": "canary",
+            "canary_percent": 100,
+            "results": {
+                "parity_pairs_total": 120,
+                "parity_drift_rate": PARITY_DRIFT_RATE_MAX_FOR_CUTOVER + 0.0001
+            }
+        });
+
+        let err = validate_parity_cutover_evidence(&canary_regression)
+            .expect_err("canary drift regression must fail-closed and block cutover");
+        assert_eq!(err, "parity_drift_threshold_exceeded");
+
+        let canary_at_threshold = json!({
+            "mode": "canary",
+            "canary_percent": 100,
+            "results": {
+                "parity_pairs_total": 120,
+                "parity_drift_rate": PARITY_DRIFT_RATE_MAX_FOR_CUTOVER
+            }
+        });
+        validate_parity_cutover_evidence(&canary_at_threshold)
+            .expect("exact threshold value must remain acceptable");
+    }
+
+    #[test]
     fn parity_cutover_accepts_valid_evidence() {
         let report = json!({
             "results": {

@@ -841,6 +841,10 @@ impl BslLanguageServer {
             .get(&file_id)
             .is_some_and(|task| task.supersession_key == supersession_key)
         {
+            self.coordinator.record_intellisense_v2_type_index_reason(
+                bsl_analysis_v2::TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeQueueSaturated
+                    .as_str(),
+            );
             return;
         }
 
@@ -853,6 +857,10 @@ impl BslLanguageServer {
                     bsl_analysis_v2::TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeCancelled
                         .as_str(),
                 "Event-driven type_index precompute superseded: abort previous task"
+            );
+            self.coordinator.record_intellisense_v2_type_index_reason(
+                bsl_analysis_v2::TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeCancelled
+                    .as_str(),
             );
             previous.handle.abort();
         }
@@ -891,6 +899,10 @@ impl BslLanguageServer {
                         .as_str(),
                 "Event-driven type_index precompute cancelled on file cleanup"
             );
+            self.coordinator.record_intellisense_v2_type_index_reason(
+                bsl_analysis_v2::TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeCancelled
+                    .as_str(),
+            );
             task.handle.abort();
         }
     }
@@ -918,6 +930,9 @@ impl BslLanguageServer {
                 bsl_analysis_v2::TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeSuperseded
                     .as_str(),
             "Event-driven type_index precompute checkpoint superseded"
+        );
+        self.coordinator.record_intellisense_v2_type_index_reason(
+            bsl_analysis_v2::TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeSuperseded.as_str(),
         );
         true
     }
@@ -969,6 +984,20 @@ impl BslLanguageServer {
         match precompute {
             Ok(Ok(result)) => {
                 self.coordinator
+                    .record_intellisense_v2_type_index_reason(result.reason_code.as_str());
+                if result.stats.evicted_per_file_window_total > 0 {
+                    self.coordinator.record_intellisense_v2_type_index_reason(
+                        bsl_analysis_v2::TypeIndexArtifactReasonCode::TypeIndexArtifactEvictedPerFileWindow
+                            .as_str(),
+                    );
+                }
+                if result.stats.evicted_global_guard_total > 0 {
+                    self.coordinator.record_intellisense_v2_type_index_reason(
+                        bsl_analysis_v2::TypeIndexArtifactReasonCode::TypeIndexArtifactEvictedGlobalGuard
+                            .as_str(),
+                    );
+                }
+                self.coordinator
                     .record_intellisense_v2_runtime_exec_latency_with_origin(
                         bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
                         "type_index_precompute",
@@ -994,6 +1023,10 @@ impl BslLanguageServer {
                 );
             }
             Ok(Err(_cancelled)) => {
+                self.coordinator.record_intellisense_v2_type_index_reason(
+                    bsl_analysis_v2::TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeCancelled
+                        .as_str(),
+                );
                 debug!(
                     file_id = key.file_id.0,
                     requested_version = key.requested_version,
@@ -5666,8 +5699,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn p7_completion_owner_hint_type_lookup_is_serve_only_even_when_flow_sensitive_enabled()
-    {
+    async fn p7_completion_owner_hint_type_lookup_is_serve_only_even_when_flow_sensitive_enabled() {
         let coordinator = Arc::new(SystemCoordinator::new());
 
         let (mut service, mut socket) = LspService::build({
@@ -5801,13 +5833,11 @@ mod tests {
             "owner-hint type lookup must stay on direct serve-only path under flow-sensitive mode"
         );
         assert_eq!(
-            lookup_path_flow_only_total,
-            0,
+            lookup_path_flow_only_total, 0,
             "flow-only owner-hint lookup path must not run in strict serve-only mode"
         );
         assert_eq!(
-            lookup_path_flow_plus_fallback_total,
-            0,
+            lookup_path_flow_plus_fallback_total, 0,
             "flow+fallback owner-hint lookup path must not run in strict serve-only mode"
         );
         assert_eq!(

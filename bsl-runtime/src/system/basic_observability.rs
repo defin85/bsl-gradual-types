@@ -71,6 +71,9 @@ const UNIFIED_INTELLISENSE_V2_COUNTER_KEYS: &[&str] = &[
     "intellisense_v2_runtime_apply_change_set_file_with_snapshot_exec_total",
     "intellisense_v2_runtime_apply_change_remove_file_exec_total",
     "intellisense_v2_runtime_apply_change_set_settings_snapshot_exec_total",
+    "intellisense_v2_runtime_type_index_precompute_queue_wait_total",
+    "intellisense_v2_runtime_type_index_precompute_exec_total",
+    "intellisense_v2_runtime_type_index_precompute_build_exec_total",
     "intellisense_v2_parse_snapshot_total_origin_lsp_mode_incremental",
     "intellisense_v2_parse_snapshot_total_origin_lsp_mode_reused",
     "intellisense_v2_parse_snapshot_total_origin_lsp_mode_full",
@@ -130,6 +133,9 @@ const UNIFIED_INTELLISENSE_V2_HISTOGRAM_KEYS: &[&str] = &[
     "intellisense_v2_runtime_apply_change_set_file_with_snapshot_exec_ms",
     "intellisense_v2_runtime_apply_change_remove_file_exec_ms",
     "intellisense_v2_runtime_apply_change_set_settings_snapshot_exec_ms",
+    "intellisense_v2_runtime_type_index_precompute_queue_wait_ms",
+    "intellisense_v2_runtime_type_index_precompute_exec_ms",
+    "intellisense_v2_runtime_type_index_precompute_build_exec_ms",
     "intellisense_v2_runtime_apply_changes_batch_size",
     "intellisense_v2_runtime_apply_changes_changed_files_count",
     "intellisense_v2_completion_owner_hint_index_fetch_will_check_cancellation_per_fetch",
@@ -196,6 +202,8 @@ const ALLOWED_OPERATIONS: &[&str] = &[
     "apply_change_set_file_with_snapshot",
     "apply_change_remove_file",
     "apply_change_set_settings_snapshot",
+    "type_index_precompute",
+    "type_index_precompute_build",
     "other",
 ];
 const ALLOWED_STAGES: &[&str] = &[
@@ -1095,6 +1103,12 @@ impl BasicObservability {
     pub fn record_intellisense_v2_completion_owner_hint_result(&self, reason: &str) {
         let reason = normalize_completion_owner_hint_reason_label(reason);
         let key = format!("intellisense_v2_completion_owner_hint_result_total_reason_{reason}");
+        self.metrics.increment(&key);
+    }
+
+    pub fn record_intellisense_v2_type_index_reason(&self, reason: &str) {
+        let reason = normalize_type_index_reason_label(reason);
+        let key = format!("intellisense_v2_type_index_reason_total_reason_{reason}");
         self.metrics.increment(&key);
     }
 
@@ -2810,6 +2824,8 @@ fn normalize_runtime_stage_kind(kind: &str) -> &'static str {
         "apply_change_set_file_with_snapshot" => "apply_change_set_file_with_snapshot",
         "apply_change_remove_file" => "apply_change_remove_file",
         "apply_change_set_settings_snapshot" => "apply_change_set_settings_snapshot",
+        "type_index_precompute" => "type_index_precompute",
+        "type_index_precompute_build" => "type_index_precompute_build",
         _ => "other",
     }
 }
@@ -2972,6 +2988,27 @@ fn normalize_completion_owner_hint_reason_label(reason: &str) -> &'static str {
     }
 }
 
+fn normalize_type_index_reason_label(reason: &str) -> &'static str {
+    match reason {
+        "type_index_exact_hit" => "type_index_exact_hit",
+        "type_index_stale_served" => "type_index_stale_served",
+        "type_index_degraded_incomplete" => "type_index_degraded_incomplete",
+        "type_index_fallback_unavailable" => "type_index_fallback_unavailable",
+        "type_index_precompute_exact_stored" => "type_index_precompute_exact_stored",
+        "type_index_precompute_superseded" => "type_index_precompute_superseded",
+        "type_index_precompute_cancelled" => "type_index_precompute_cancelled",
+        "type_index_precompute_missing_file" => "type_index_precompute_missing_file",
+        "type_index_precompute_queue_saturated" => "type_index_precompute_queue_saturated",
+        "type_index_artifact_invalidated_deps" => "type_index_artifact_invalidated_deps",
+        "type_index_artifact_invalidated_settings" => "type_index_artifact_invalidated_settings",
+        "type_index_artifact_evicted_global_guard" => "type_index_artifact_evicted_global_guard",
+        "type_index_artifact_evicted_per_file_window" => {
+            "type_index_artifact_evicted_per_file_window"
+        }
+        _ => "other",
+    }
+}
+
 fn normalize_completion_resource_reason_label(reason: &str) -> &'static str {
     match reason {
         "allocator_pressure" => "allocator_pressure",
@@ -3085,6 +3122,10 @@ fn legacy_runtime_queue_wait_metrics(kind: &str) -> (&'static str, &'static str)
             "intellisense_v2_runtime_apply_changes_queue_wait_total",
             "intellisense_v2_runtime_apply_changes_queue_wait_ms",
         ),
+        "type_index_precompute" => (
+            "intellisense_v2_runtime_type_index_precompute_queue_wait_total",
+            "intellisense_v2_runtime_type_index_precompute_queue_wait_ms",
+        ),
         _ => (
             "intellisense_v2_runtime_other_queue_wait_total",
             "intellisense_v2_runtime_other_queue_wait_ms",
@@ -3121,6 +3162,14 @@ fn legacy_runtime_exec_metrics(kind: &str) -> (&'static str, &'static str) {
         "apply_change_set_settings_snapshot" => (
             "intellisense_v2_runtime_apply_change_set_settings_snapshot_exec_total",
             "intellisense_v2_runtime_apply_change_set_settings_snapshot_exec_ms",
+        ),
+        "type_index_precompute" => (
+            "intellisense_v2_runtime_type_index_precompute_exec_total",
+            "intellisense_v2_runtime_type_index_precompute_exec_ms",
+        ),
+        "type_index_precompute_build" => (
+            "intellisense_v2_runtime_type_index_precompute_build_exec_total",
+            "intellisense_v2_runtime_type_index_precompute_build_exec_ms",
         ),
         _ => (
             "intellisense_v2_runtime_other_exec_total",
@@ -3490,6 +3539,11 @@ mod observability_contract_tests {
             "apply_changes_batch",
             Duration::from_millis(6),
         );
+        observability.record_intellisense_v2_runtime_queue_wait_latency_with_origin(
+            "lsp",
+            "type_index_precompute",
+            Duration::from_millis(5),
+        );
         observability.record_intellisense_v2_runtime_exec_latency_with_origin(
             "lsp",
             "snapshot_with_deps",
@@ -3504,6 +3558,16 @@ mod observability_contract_tests {
             "lsp",
             "apply_change_set_file",
             Duration::from_millis(3),
+        );
+        observability.record_intellisense_v2_runtime_exec_latency_with_origin(
+            "lsp",
+            "type_index_precompute",
+            Duration::from_millis(8),
+        );
+        observability.record_intellisense_v2_runtime_exec_latency_with_origin(
+            "lsp",
+            "type_index_precompute_build",
+            Duration::from_millis(4),
         );
         observability.record_intellisense_v2_runtime_apply_changes_batch_size(4);
         observability.record_intellisense_v2_runtime_apply_changes_changed_files_count(2);
@@ -3548,6 +3612,27 @@ mod observability_contract_tests {
         assert!(
             counter_value(
                 counters,
+                "intellisense_v2_runtime_type_index_precompute_queue_wait_total"
+            ) > 0,
+            "type_index precompute queue wait must not be projected into runtime_other_*"
+        );
+        assert!(
+            counter_value(
+                counters,
+                "intellisense_v2_runtime_type_index_precompute_exec_total"
+            ) > 0,
+            "type_index precompute exec must not be projected into runtime_other_*"
+        );
+        assert!(
+            counter_value(
+                counters,
+                "intellisense_v2_runtime_type_index_precompute_build_exec_total"
+            ) > 0,
+            "type_index precompute build exec must not be projected into runtime_other_*"
+        );
+        assert!(
+            counter_value(
+                counters,
                 "intellisense_v2_runtime_apply_change_set_file_exec_total"
             ) > 0,
             "legacy apply-change set_file exec counter should be projected"
@@ -3580,6 +3665,27 @@ mod observability_contract_tests {
         assert!(
             histogram_count(
                 histograms,
+                "intellisense_v2_runtime_type_index_precompute_queue_wait_ms"
+            ) > 0,
+            "type_index precompute queue wait histogram must be projected to dedicated metric"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "intellisense_v2_runtime_type_index_precompute_exec_ms"
+            ) > 0,
+            "type_index precompute exec histogram must be projected to dedicated metric"
+        );
+        assert!(
+            histogram_count(
+                histograms,
+                "intellisense_v2_runtime_type_index_precompute_build_exec_ms"
+            ) > 0,
+            "type_index precompute build exec histogram must be projected to dedicated metric"
+        );
+        assert!(
+            histogram_count(
+                histograms,
                 "intellisense_v2_runtime_apply_change_set_file_exec_ms"
             ) > 0,
             "legacy apply-change set_file exec histogram should be projected"
@@ -3597,6 +3703,61 @@ mod observability_contract_tests {
                 "intellisense_v2_runtime_apply_changes_changed_files_count"
             ) > 0,
             "apply-changes changed-files histogram should be projected"
+        );
+    }
+
+    #[test]
+    fn type_index_reason_metrics_are_exported_with_bounded_reasons() {
+        let contract = contract_json("observability-completion-v2/v1/contract.json");
+        let metrics_contract = contract
+            .get("metrics")
+            .and_then(|value| value.as_object())
+            .expect("metrics contract section");
+        let reason_prefix = metrics_contract
+            .get("type_index_reason_counter_prefix")
+            .and_then(|value| value.as_str())
+            .expect("type_index reason counter prefix");
+        assert_eq!(
+            reason_prefix,
+            "intellisense_v2_type_index_reason_total_reason_"
+        );
+        let contract_reasons: Vec<String> = metrics_contract
+            .get("allowed_type_index_reasons")
+            .and_then(|value| value.as_array())
+            .expect("allowed_type_index_reasons")
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .expect("allowed type_index reason string")
+                    .to_string()
+            })
+            .collect();
+
+        let observability = BasicObservability::default();
+        for reason in &contract_reasons {
+            assert_eq!(
+                normalize_type_index_reason_label(reason),
+                reason,
+                "contract type-index reason must stay in bounded normalization set"
+            );
+            observability.record_intellisense_v2_type_index_reason(reason);
+        }
+        observability.record_intellisense_v2_type_index_reason("unexpected_reason");
+
+        let exported = observability.get_metrics().export_metrics();
+        let counters = counters(&exported);
+        for reason in &contract_reasons {
+            let key = format!("{reason_prefix}{reason}");
+            assert!(
+                counter_value(counters, &key) > 0,
+                "type-index reason counter must be exported for {reason}"
+            );
+        }
+        let other_key = format!("{reason_prefix}other");
+        assert!(
+            counter_value(counters, &other_key) > 0,
+            "type-index reason counter must collapse unknown reasons into other"
         );
     }
 
@@ -3966,6 +4127,13 @@ mod observability_contract_tests {
                 .expect("fallback_unavailable counter"),
             "intellisense_v2_completion_result_total_fallback_unavailable"
         );
+        assert_eq!(
+            metrics_contract
+                .get("type_index_reason_counter_prefix")
+                .and_then(|value| value.as_str())
+                .expect("type_index reason counter prefix"),
+            "intellisense_v2_type_index_reason_total_reason_"
+        );
 
         let trigger_modes: Vec<String> = metrics_contract
             .get("allowed_trigger_modes")
@@ -3991,6 +4159,46 @@ mod observability_contract_tests {
                     .to_string()
             })
             .collect();
+        let type_index_reasons: Vec<String> = metrics_contract
+            .get("allowed_type_index_reasons")
+            .and_then(|value| value.as_array())
+            .expect("allowed_type_index_reasons")
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .expect("allowed type_index reason string")
+                    .to_string()
+            })
+            .collect();
+        let type_index_reason_prefix = metrics_contract
+            .get("type_index_reason_counter_prefix")
+            .and_then(|value| value.as_str())
+            .expect("type_index reason counter prefix");
+        let precompute_queue_wait_counter = metrics_contract
+            .get("type_index_precompute_queue_wait_counter")
+            .and_then(|value| value.as_str())
+            .expect("type_index precompute queue wait counter");
+        let precompute_exec_counter = metrics_contract
+            .get("type_index_precompute_exec_counter")
+            .and_then(|value| value.as_str())
+            .expect("type_index precompute exec counter");
+        let precompute_build_exec_counter = metrics_contract
+            .get("type_index_precompute_build_exec_counter")
+            .and_then(|value| value.as_str())
+            .expect("type_index precompute build exec counter");
+        let precompute_queue_wait_histogram = metrics_contract
+            .get("type_index_precompute_queue_wait_histogram")
+            .and_then(|value| value.as_str())
+            .expect("type_index precompute queue wait histogram");
+        let precompute_exec_histogram = metrics_contract
+            .get("type_index_precompute_exec_histogram")
+            .and_then(|value| value.as_str())
+            .expect("type_index precompute exec histogram");
+        let precompute_build_exec_histogram = metrics_contract
+            .get("type_index_precompute_build_exec_histogram")
+            .and_then(|value| value.as_str())
+            .expect("type_index precompute build exec histogram");
 
         let observability = BasicObservability::default();
         for mode in &trigger_modes {
@@ -4013,10 +4221,34 @@ mod observability_contract_tests {
                 "contract terminal reason must remain in bounded normalization set"
             );
         }
+        for reason in &type_index_reasons {
+            observability.record_intellisense_v2_type_index_reason(reason);
+            assert_eq!(
+                normalize_type_index_reason_label(reason),
+                reason,
+                "contract type_index reason must remain in bounded normalization set"
+            );
+        }
+        observability.record_intellisense_v2_runtime_queue_wait_latency_with_origin(
+            "lsp",
+            "type_index_precompute",
+            Duration::from_millis(3),
+        );
+        observability.record_intellisense_v2_runtime_exec_latency_with_origin(
+            "lsp",
+            "type_index_precompute",
+            Duration::from_millis(5),
+        );
+        observability.record_intellisense_v2_runtime_exec_latency_with_origin(
+            "lsp",
+            "type_index_precompute_build",
+            Duration::from_millis(2),
+        );
         observability.record_intellisense_v2_completion_outcome("fallback_unavailable");
 
         let exported = observability.get_metrics().export_metrics();
         let counters = counters(&exported);
+        let histograms = histograms(&exported);
         for mode in &trigger_modes {
             let trigger_key = format!("intellisense_v2_completion_trigger_mode_total_mode_{mode}");
             let drift_key = format!("intellisense_v2_completion_parity_drift_total_mode_{mode}");
@@ -4038,6 +4270,37 @@ mod observability_contract_tests {
                 "terminal-empty counter must be exported for reason {reason}"
             );
         }
+        for reason in &type_index_reasons {
+            let reason_key = format!("{type_index_reason_prefix}{reason}");
+            assert!(
+                counter_value(counters, &reason_key) > 0,
+                "type-index reason counter must be exported for reason {reason}"
+            );
+        }
+        assert!(
+            counter_value(counters, precompute_queue_wait_counter) > 0,
+            "precompute queue wait counter must be projected via contract key"
+        );
+        assert!(
+            counter_value(counters, precompute_exec_counter) > 0,
+            "precompute exec counter must be projected via contract key"
+        );
+        assert!(
+            counter_value(counters, precompute_build_exec_counter) > 0,
+            "precompute build exec counter must be projected via contract key"
+        );
+        assert!(
+            histogram_count(histograms, precompute_queue_wait_histogram) > 0,
+            "precompute queue wait histogram must be projected via contract key"
+        );
+        assert!(
+            histogram_count(histograms, precompute_exec_histogram) > 0,
+            "precompute exec histogram must be projected via contract key"
+        );
+        assert!(
+            histogram_count(histograms, precompute_build_exec_histogram) > 0,
+            "precompute build exec histogram must be projected via contract key"
+        );
         assert!(
             counter_value(
                 counters,

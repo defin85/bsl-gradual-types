@@ -219,6 +219,11 @@ impl SystemCoordinator {
             .record_intellisense_v2_completion_owner_hint_result(reason);
     }
 
+    pub fn record_intellisense_v2_type_index_reason(&self, reason: &str) {
+        self.observability
+            .record_intellisense_v2_type_index_reason(reason);
+    }
+
     pub fn record_intellisense_v2_completion_owner_hint_lookup_path(&self, path: &str) {
         self.observability
             .record_intellisense_v2_completion_owner_hint_lookup_path(path);

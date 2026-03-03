@@ -552,7 +552,27 @@ impl IntellisenseV2Facade {
                                     Change::SetSettingsSnapshot { .. } => {}
                                 }
 
-                                host.apply_change(change);
+                                let cache_effects = host.apply_change(change);
+                                if let Some(coordinator) = &observability {
+                                    if cache_effects.invalidated_deps_total > 0 {
+                                        coordinator.record_intellisense_v2_type_index_reason(
+                                            bsl_analysis_v2::TypeIndexArtifactReasonCode::TypeIndexArtifactInvalidatedDeps
+                                                .as_str(),
+                                        );
+                                    }
+                                    if cache_effects.invalidated_settings_total > 0 {
+                                        coordinator.record_intellisense_v2_type_index_reason(
+                                            bsl_analysis_v2::TypeIndexArtifactReasonCode::TypeIndexArtifactInvalidatedSettings
+                                                .as_str(),
+                                        );
+                                    }
+                                    if cache_effects.evicted_per_file_window_total > 0 {
+                                        coordinator.record_intellisense_v2_type_index_reason(
+                                            bsl_analysis_v2::TypeIndexArtifactReasonCode::TypeIndexArtifactEvictedPerFileWindow
+                                                .as_str(),
+                                        );
+                                    }
+                                }
                                 if let Some(kind) = change_kind {
                                     let exec_elapsed = per_change_started.elapsed();
                                     if let Some(coordinator) = &observability {
@@ -604,7 +624,16 @@ impl IntellisenseV2Facade {
                         } => {
                             current_deps_id = deps_id.clone();
                             index_snapshot = new_index_snapshot;
-                            host.apply_change(Change::SetDepsSnapshot { deps_id, deps });
+                            let cache_effects =
+                                host.apply_change(Change::SetDepsSnapshot { deps_id, deps });
+                            if let Some(coordinator) = &observability {
+                                if cache_effects.invalidated_deps_total > 0 {
+                                    coordinator.record_intellisense_v2_type_index_reason(
+                                        bsl_analysis_v2::TypeIndexArtifactReasonCode::TypeIndexArtifactInvalidatedDeps
+                                            .as_str(),
+                                    );
+                                }
+                            }
                             let _ = reply.send(true);
                         }
                         Command::GetSnapshot { reply } => {

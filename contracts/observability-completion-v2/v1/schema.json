@@ -49,8 +49,16 @@
         "parity_drift_counter_prefix",
         "member_access_terminal_empty_counter_prefix",
         "fallback_unavailable_counter",
+        "type_index_reason_counter_prefix",
+        "type_index_precompute_queue_wait_counter",
+        "type_index_precompute_exec_counter",
+        "type_index_precompute_build_exec_counter",
+        "type_index_precompute_queue_wait_histogram",
+        "type_index_precompute_exec_histogram",
+        "type_index_precompute_build_exec_histogram",
         "allowed_trigger_modes",
-        "allowed_terminal_empty_reasons"
+        "allowed_terminal_empty_reasons",
+        "allowed_type_index_reasons"
       ],
       "properties": {
         "trigger_mode_counter_prefix": {
@@ -68,6 +76,34 @@
         "fallback_unavailable_counter": {
           "type": "string",
           "const": "intellisense_v2_completion_result_total_fallback_unavailable"
+        },
+        "type_index_reason_counter_prefix": {
+          "type": "string",
+          "const": "intellisense_v2_type_index_reason_total_reason_"
+        },
+        "type_index_precompute_queue_wait_counter": {
+          "type": "string",
+          "const": "intellisense_v2_runtime_type_index_precompute_queue_wait_total"
+        },
+        "type_index_precompute_exec_counter": {
+          "type": "string",
+          "const": "intellisense_v2_runtime_type_index_precompute_exec_total"
+        },
+        "type_index_precompute_build_exec_counter": {
+          "type": "string",
+          "const": "intellisense_v2_runtime_type_index_precompute_build_exec_total"
+        },
+        "type_index_precompute_queue_wait_histogram": {
+          "type": "string",
+          "const": "intellisense_v2_runtime_type_index_precompute_queue_wait_ms"
+        },
+        "type_index_precompute_exec_histogram": {
+          "type": "string",
+          "const": "intellisense_v2_runtime_type_index_precompute_exec_ms"
+        },
+        "type_index_precompute_build_exec_histogram": {
+          "type": "string",
+          "const": "intellisense_v2_runtime_type_index_precompute_build_exec_ms"
         },
         "allowed_trigger_modes": {
           "type": "array",
@@ -94,6 +130,29 @@
               "fallback_unavailable",
               "missing_ir",
               "wait_not_ready"
+            ]
+          }
+        },
+        "allowed_type_index_reasons": {
+          "type": "array",
+          "minItems": 13,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "type_index_exact_hit",
+              "type_index_stale_served",
+              "type_index_degraded_incomplete",
+              "type_index_fallback_unavailable",
+              "type_index_precompute_exact_stored",
+              "type_index_precompute_superseded",
+              "type_index_precompute_cancelled",
+              "type_index_precompute_missing_file",
+              "type_index_precompute_queue_saturated",
+              "type_index_artifact_invalidated_deps",
+              "type_index_artifact_invalidated_settings",
+              "type_index_artifact_evicted_global_guard",
+              "type_index_artifact_evicted_per_file_window"
             ]
           }
         }

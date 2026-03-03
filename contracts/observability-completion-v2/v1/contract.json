@@ -11,6 +11,13 @@
     "parity_drift_counter_prefix": "intellisense_v2_completion_parity_drift_total_mode_",
     "member_access_terminal_empty_counter_prefix": "intellisense_v2_completion_member_access_terminal_empty_total_mode_",
     "fallback_unavailable_counter": "intellisense_v2_completion_result_total_fallback_unavailable",
+    "type_index_reason_counter_prefix": "intellisense_v2_type_index_reason_total_reason_",
+    "type_index_precompute_queue_wait_counter": "intellisense_v2_runtime_type_index_precompute_queue_wait_total",
+    "type_index_precompute_exec_counter": "intellisense_v2_runtime_type_index_precompute_exec_total",
+    "type_index_precompute_build_exec_counter": "intellisense_v2_runtime_type_index_precompute_build_exec_total",
+    "type_index_precompute_queue_wait_histogram": "intellisense_v2_runtime_type_index_precompute_queue_wait_ms",
+    "type_index_precompute_exec_histogram": "intellisense_v2_runtime_type_index_precompute_exec_ms",
+    "type_index_precompute_build_exec_histogram": "intellisense_v2_runtime_type_index_precompute_build_exec_ms",
     "allowed_trigger_modes": [
       "trigger_character",
       "invoked",
@@ -22,6 +29,21 @@
       "fallback_unavailable",
       "missing_ir",
       "wait_not_ready"
+    ],
+    "allowed_type_index_reasons": [
+      "type_index_exact_hit",
+      "type_index_stale_served",
+      "type_index_degraded_incomplete",
+      "type_index_fallback_unavailable",
+      "type_index_precompute_exact_stored",
+      "type_index_precompute_superseded",
+      "type_index_precompute_cancelled",
+      "type_index_precompute_missing_file",
+      "type_index_precompute_queue_saturated",
+      "type_index_artifact_invalidated_deps",
+      "type_index_artifact_invalidated_settings",
+      "type_index_artifact_evicted_global_guard",
+      "type_index_artifact_evicted_per_file_window"
     ]
   }
 }

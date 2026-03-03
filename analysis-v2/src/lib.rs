@@ -16,6 +16,7 @@ mod implicit_bindings;
 mod type_inference_v2;
 use derived_artifacts::{
     DerivedArtifactsCache, TypeIndexArtifact, TypeIndexArtifactKey, TypeIndexParseSnapshotMeta,
+    TypeIndexStoreOutcome,
 };
 
 use bsl_diagnostics::{SemanticTypeHints, SemanticValidationVisitor};
@@ -243,6 +244,7 @@ pub enum TypeIndexPrecomputeReasonCode {
     TypeIndexPrecomputeSuperseded,
     TypeIndexPrecomputeCancelled,
     TypeIndexPrecomputeMissingFile,
+    TypeIndexPrecomputeQueueSaturated,
 }
 
 impl TypeIndexPrecomputeReasonCode {
@@ -252,8 +254,39 @@ impl TypeIndexPrecomputeReasonCode {
             Self::TypeIndexPrecomputeSuperseded => "type_index_precompute_superseded",
             Self::TypeIndexPrecomputeCancelled => "type_index_precompute_cancelled",
             Self::TypeIndexPrecomputeMissingFile => "type_index_precompute_missing_file",
+            Self::TypeIndexPrecomputeQueueSaturated => "type_index_precompute_queue_saturated",
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeIndexArtifactReasonCode {
+    TypeIndexArtifactInvalidatedDeps,
+    TypeIndexArtifactInvalidatedSettings,
+    TypeIndexArtifactEvictedGlobalGuard,
+    TypeIndexArtifactEvictedPerFileWindow,
+}
+
+impl TypeIndexArtifactReasonCode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::TypeIndexArtifactInvalidatedDeps => "type_index_artifact_invalidated_deps",
+            Self::TypeIndexArtifactInvalidatedSettings => {
+                "type_index_artifact_invalidated_settings"
+            }
+            Self::TypeIndexArtifactEvictedGlobalGuard => "type_index_artifact_evicted_global_guard",
+            Self::TypeIndexArtifactEvictedPerFileWindow => {
+                "type_index_artifact_evicted_per_file_window"
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TypeIndexCacheChangeEffects {
+    pub invalidated_deps_total: u64,
+    pub invalidated_settings_total: u64,
+    pub evicted_per_file_window_total: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -1919,21 +1952,34 @@ impl Default for AnalysisHostV2 {
 }
 
 impl AnalysisHostV2 {
-    pub fn apply_change(&mut self, change: Change) {
+    pub fn apply_change(&mut self, change: Change) -> TypeIndexCacheChangeEffects {
+        let mut effects = TypeIndexCacheChangeEffects::default();
         match change {
             Change::SetFile {
                 file_id,
                 text,
                 version,
                 path,
-            } => self.set_file(file_id, text, version, path),
+            } => {
+                let outcome = self.set_file_with_outcome(file_id, text, version, path);
+                effects.evicted_per_file_window_total = outcome.evicted_per_file_window_total;
+            }
             Change::SetFileWithSnapshot {
                 file_id,
                 text,
                 version,
                 path,
                 parse_snapshot,
-            } => self.set_file_with_snapshot(file_id, text, version, path, parse_snapshot),
+            } => {
+                let outcome = self.set_file_with_snapshot_with_outcome(
+                    file_id,
+                    text,
+                    version,
+                    path,
+                    parse_snapshot,
+                );
+                effects.evicted_per_file_window_total = outcome.evicted_per_file_window_total;
+            }
             Change::RemoveFile { file_id } => {
                 self.files.remove(&file_id);
                 self.parse_snapshots.remove(&file_id);
@@ -1945,7 +1991,8 @@ impl AnalysisHostV2 {
             Change::SetDepsSnapshot { deps_id, deps } => {
                 self.deps.set_id(&mut self.db).to(deps_id.clone());
                 self.deps.set_data(&mut self.db).to(DepsDataSnapshot(deps));
-                self.derived_cache
+                effects.invalidated_deps_total = self
+                    .derived_cache
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     .invalidate_type_index_for_deps(&deps_id);
@@ -1958,15 +2005,23 @@ impl AnalysisHostV2 {
                 self.settings
                     .set_diagnostics_detail_level(&mut self.db)
                     .to(diagnostics_detail_level);
-                self.derived_cache
+                effects.invalidated_settings_total = self
+                    .derived_cache
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     .invalidate_type_index_for_settings(&settings_id);
             }
         }
+        effects
     }
 
-    pub fn set_file(&mut self, file_id: FileId, text: Arc<str>, version: i32, path: Arc<str>) {
+    fn set_file_with_outcome(
+        &mut self,
+        file_id: FileId,
+        text: Arc<str>,
+        version: i32,
+        path: Arc<str>,
+    ) -> TypeIndexStoreOutcome {
         match self.files.get(&file_id).copied() {
             Some(file) => {
                 file.set_text(&mut self.db).to(text);
@@ -1981,7 +2036,27 @@ impl AnalysisHostV2 {
         self.derived_cache
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .retain_versions_for_file(file_id, version);
+            .retain_versions_for_file(file_id, version)
+    }
+
+    pub fn set_file(&mut self, file_id: FileId, text: Arc<str>, version: i32, path: Arc<str>) {
+        let _ = self.set_file_with_outcome(file_id, text, version, path);
+    }
+
+    fn set_file_with_snapshot_with_outcome(
+        &mut self,
+        file_id: FileId,
+        text: Arc<str>,
+        version: i32,
+        path: Arc<str>,
+        parse_snapshot: ParseSnapshot,
+    ) -> TypeIndexStoreOutcome {
+        let outcome = self.set_file_with_outcome(file_id, text, version, path);
+        if parse_snapshot.file_id != file_id || parse_snapshot.file_version != version {
+            return outcome;
+        }
+        self.parse_snapshots.insert(file_id, parse_snapshot);
+        outcome
     }
 
     pub fn set_file_with_snapshot(
@@ -1992,11 +2067,8 @@ impl AnalysisHostV2 {
         path: Arc<str>,
         parse_snapshot: ParseSnapshot,
     ) {
-        self.set_file(file_id, text, version, path);
-        if parse_snapshot.file_id != file_id || parse_snapshot.file_version != version {
-            return;
-        }
-        self.parse_snapshots.insert(file_id, parse_snapshot);
+        let _ =
+            self.set_file_with_snapshot_with_outcome(file_id, text, version, path, parse_snapshot);
     }
 
     pub fn has_file(&self, file_id: FileId) -> bool {
@@ -4277,6 +4349,76 @@ mod tests {
         assert_eq!(
             after_settings.serve_reason_code,
             TypeIndexServeReasonCode::TypeIndexFallbackUnavailable
+        );
+    }
+
+    #[test]
+    fn type_index_reason_code_strings_match_contract() {
+        assert_eq!(
+            TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeQueueSaturated.as_str(),
+            "type_index_precompute_queue_saturated"
+        );
+        assert_eq!(
+            TypeIndexArtifactReasonCode::TypeIndexArtifactInvalidatedDeps.as_str(),
+            "type_index_artifact_invalidated_deps"
+        );
+        assert_eq!(
+            TypeIndexArtifactReasonCode::TypeIndexArtifactInvalidatedSettings.as_str(),
+            "type_index_artifact_invalidated_settings"
+        );
+        assert_eq!(
+            TypeIndexArtifactReasonCode::TypeIndexArtifactEvictedGlobalGuard.as_str(),
+            "type_index_artifact_evicted_global_guard"
+        );
+        assert_eq!(
+            TypeIndexArtifactReasonCode::TypeIndexArtifactEvictedPerFileWindow.as_str(),
+            "type_index_artifact_evicted_per_file_window"
+        );
+    }
+
+    #[test]
+    fn apply_change_reports_type_index_invalidation_effects() {
+        let mut host = AnalysisHostV2::default();
+        let file_id = FileId(207);
+        let text: Arc<str> = Arc::from("Procedure Test()\n    x = 1;\nEndProcedure");
+
+        host.apply_change(Change::SetFileWithSnapshot {
+            file_id,
+            text: text.clone(),
+            version: 1,
+            path: Arc::from("effects-invalidation.bsl"),
+            parse_snapshot: parse_snapshot_for_test(
+                file_id,
+                1,
+                text.as_ref(),
+                Vec::new(),
+                true,
+                None,
+            ),
+        });
+        host.snapshot()
+            .precompute_type_index_for_file(file_id, Some(1), 0)
+            .expect("precompute before deps invalidation");
+
+        let deps_effects = host.apply_change(Change::SetDepsSnapshot {
+            deps_id: DepsSnapshotId::from_hash("deps-effects-new"),
+            deps: default_semantic_deps(),
+        });
+        assert!(
+            deps_effects.invalidated_deps_total > 0,
+            "deps invalidation should report removed artifacts"
+        );
+
+        host.snapshot()
+            .precompute_type_index_for_file(file_id, Some(1), 0)
+            .expect("precompute before settings invalidation");
+        let settings_effects = host.apply_change(Change::SetSettingsSnapshot {
+            settings_id: SettingsId::from_hash("settings-effects-new"),
+            diagnostics_detail_level: DetailLevel::Detailed,
+        });
+        assert!(
+            settings_effects.invalidated_settings_total > 0,
+            "settings invalidation should report removed artifacts"
         );
     }
 

@@ -23,5 +23,6 @@ Initial contract baseline for dedicated perf-gate evaluator (`Option B`).
   - `provenance_missing_for_authoritative_run`
   - `provenance_mismatch_expected_change_id`
   - `provenance_invalid`
+  - `provenance_non_authoritative_cutover_evidence`
   - `parity_evidence_insufficient`
   - `parity_drift_threshold_exceeded`

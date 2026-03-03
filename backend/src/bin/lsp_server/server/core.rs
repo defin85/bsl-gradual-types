@@ -5701,6 +5701,106 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn p7_hover_cache_miss_emits_type_index_fallback_unavailable_reason() {
+        const FALLBACK_REASON_KEY: &str =
+            "intellisense_v2_type_index_reason_total_reason_type_index_fallback_unavailable";
+
+        let coordinator = Arc::new(SystemCoordinator::new());
+        let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+            Arc::new(std::sync::Mutex::new(None));
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            let server_holder = server_holder.clone();
+            move |client| {
+                let server = BslLanguageServer::new(client, coordinator.clone());
+                *server_holder.lock().unwrap() = Some(server.clone());
+                server
+            }
+        })
+        .finish();
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        initialize_lsp_service(&mut service).await;
+
+        let fixture = "Процедура Тест()\n\
+    МассивДляHover = Новый Массив;\n\
+    ЗначДляHover = МассивДляHover.Количество();\n\
+КонецПроцедуры\n";
+        let uri =
+            Url::parse("file:///test_p7_hover_type_index_fallback_unavailable.bsl").expect("uri");
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: fixture.to_string(),
+            },
+        };
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                Request::build("textDocument/didOpen")
+                    .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                    .finish(),
+            )
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+
+        let server = server_holder
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("server must be captured");
+        let file_id = server.get_or_create_file_id_v2(&uri).await;
+        server.cancel_type_index_precompute_v2(file_id).await;
+
+        let fallback_reason_total = |coordinator: &Arc<SystemCoordinator>| -> u64 {
+            let metrics = coordinator.observability_metrics();
+            let counters = metrics
+                .get("counters")
+                .and_then(|value| value.as_object())
+                .expect("metrics.counters object");
+            read_u64_metric(counters.get(FALLBACK_REASON_KEY))
+        };
+
+        let before_hover = fallback_reason_total(&coordinator);
+        let hover_position =
+            find_utf16_position_after_marker(fixture, "ЗначДляHover = МассивДляHover");
+        let hover_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                Request::build("textDocument/hover")
+                    .id(9107)
+                    .params(
+                        serde_json::to_value(HoverParams {
+                            text_document_position_params: TextDocumentPositionParams {
+                                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                                position: hover_position,
+                            },
+                            work_done_progress_params: WorkDoneProgressParams::default(),
+                        })
+                        .expect("HoverParams"),
+                    )
+                    .finish(),
+            )
+            .await
+            .expect("hover request");
+        assert!(hover_response.is_some(), "hover should return response envelope");
+        let after_hover = fallback_reason_total(&coordinator);
+        assert!(
+            after_hover > before_hover,
+            "hover cache miss must emit type_index_fallback_unavailable reason"
+        );
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
     async fn p7_completion_owner_hint_type_lookup_is_serve_only_even_when_flow_sensitive_enabled() {
         let coordinator = Arc::new(SystemCoordinator::new());
 

@@ -35,11 +35,11 @@
 ## 4. Validation
 - [x] 4.1 Добавить contract tests на полноту mapping (registry -> canonical -> legacy), включая unknown -> `other`.
 - [x] 4.2 Добавить retention invariants tests (`max versions`, eviction order, latest exact protection under global guard).
-- [ ] 4.3 Добавить integration tests, подтверждающие emission serve reasons для всех interactive операций.
+- [x] 4.3 Добавить integration tests, подтверждающие emission serve reasons для всех interactive операций.
 - [x] 4.4 Добавить/обновить tests для perf report traceability (`change_id` consistency).
 - [x] 4.5 Добавить тесты, что `missing optional provenance` в `v1` не валит только legacy-local прогон без `expected_change_id`.
 - [x] 4.6 Добавить тесты, что `provided provenance mismatch/invalid` в `v1` валит gate fail-closed.
-- [ ] 4.7 Добавить canary rollback test при parity drift выше утверждённого порога.
+- [x] 4.7 Добавить canary rollback test при parity drift выше утверждённого порога.
 - [x] 4.8 Добавить тесты, что отсутствие `expected_change_id` даёт only-local/non-authoritative evidence (без права на cutover).
 - [x] 4.9 Добавить тесты для fail-closed при `parity_pairs_total < 100` (insufficient evidence).
 - [x] 4.10 `openspec validate refactor-v2-contract-first-hardening --strict --no-interactive`.

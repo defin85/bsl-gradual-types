@@ -3894,6 +3894,93 @@ mod observability_contract_tests {
     }
 
     #[test]
+    fn runtime_stage_registry_and_projection_contract_require_explicit_updates() {
+        let registry_stage_kinds: BTreeSet<&str> = RUNTIME_STAGE_KIND_REGISTRY
+            .iter()
+            .map(|(raw, _normalized)| *raw)
+            .collect();
+        let expected_registry_stage_kinds: BTreeSet<&str> = [
+            "wait_for_file_version",
+            "snapshot_with_deps",
+            "apply_changes_batch",
+            "apply_change_set_file",
+            "apply_change_set_file_with_snapshot",
+            "apply_change_remove_file",
+            "apply_change_set_settings_snapshot",
+            "type_index_precompute",
+            "type_index_precompute_build",
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            registry_stage_kinds, expected_registry_stage_kinds,
+            "runtime stage taxonomy changed; update registry/projection tests and contract mappings explicitly"
+        );
+
+        let queue_projection_stage_kinds: BTreeSet<&str> = LEGACY_RUNTIME_QUEUE_WAIT_METRICS_REGISTRY
+            .iter()
+            .map(|(raw, _metrics)| *raw)
+            .collect();
+        let expected_queue_projection_stage_kinds: BTreeSet<&str> = [
+            "snapshot_with_deps",
+            "wait_for_file_version",
+            "apply_changes_batch",
+            "type_index_precompute",
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            queue_projection_stage_kinds, expected_queue_projection_stage_kinds,
+            "queue-stage projection mapping changed; update dedicated legacy keys explicitly"
+        );
+
+        let exec_projection_stage_kinds: BTreeSet<&str> = LEGACY_RUNTIME_EXEC_METRICS_REGISTRY
+            .iter()
+            .map(|(raw, _metrics)| *raw)
+            .collect();
+        let expected_exec_projection_stage_kinds: BTreeSet<&str> = [
+            "snapshot_with_deps",
+            "wait_for_file_version",
+            "apply_changes_batch",
+            "apply_change_set_file",
+            "apply_change_set_file_with_snapshot",
+            "apply_change_remove_file",
+            "apply_change_set_settings_snapshot",
+            "type_index_precompute",
+            "type_index_precompute_build",
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            exec_projection_stage_kinds, expected_exec_projection_stage_kinds,
+            "exec-stage projection mapping changed; update dedicated legacy keys explicitly"
+        );
+
+        for stage in &registry_stage_kinds {
+            assert!(
+                ALLOWED_OPERATIONS.iter().any(|operation| operation == stage),
+                "runtime stage '{stage}' must be present in allowed operation taxonomy"
+            );
+        }
+
+        for stage in &queue_projection_stage_kinds {
+            let (counter_key, histogram_key) = legacy_runtime_queue_wait_metrics(stage);
+            assert!(
+                !counter_key.contains("runtime_other") && !histogram_key.contains("runtime_other"),
+                "queue stage '{stage}' must map to dedicated metrics, not runtime_other_*"
+            );
+        }
+
+        for stage in &exec_projection_stage_kinds {
+            let (counter_key, histogram_key) = legacy_runtime_exec_metrics(stage);
+            assert!(
+                !counter_key.contains("runtime_other") && !histogram_key.contains("runtime_other"),
+                "exec stage '{stage}' must map to dedicated metrics, not runtime_other_*"
+            );
+        }
+    }
+
+    #[test]
     fn type_index_reason_metrics_are_exported_with_bounded_reasons() {
         let contract = contract_json("observability-completion-v2/v1/contract.json");
         let metrics_contract = contract

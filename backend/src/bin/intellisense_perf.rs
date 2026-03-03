@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, FileId as V2FileId, SettingsId};
 use bsl_backend::application::get_completion_with_semantic_program_snapshot;
 use bsl_backend::perf_gate_evaluator::{
-    evaluate_intellisense_perf_profile, validate_perf_report_provenance, PerfGateSample,
-    PerfGateThresholds,
+    evaluate_intellisense_perf_profile, validate_cutover_evidence_authority,
+    validate_perf_report_provenance, PerfGateSample, PerfGateThresholds,
 };
 use bsl_backend::system::{build_deps_bundle_v2, SystemCoordinator};
 use bsl_shared::domain::resolver::TypeResolver;
@@ -322,6 +322,14 @@ fn resolve_expected_change_id(cli_change_id: Option<&str>) -> Option<String> {
     resolve_expected_change_id_from_sources(cli_change_id, env_change_id.as_deref())
 }
 
+fn requires_authoritative_evidence_context(
+    baseline_present: bool,
+    update_baseline: bool,
+    blocking_mode: bool,
+) -> bool {
+    blocking_mode || (baseline_present && !update_baseline)
+}
+
 fn now_unix_millis_string() -> String {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -371,6 +379,11 @@ async fn main() -> Result<()> {
     let contract = read_json_value(&contract_path)?;
     let scenario = read_scenario(&scenario_path)?;
     let expected_change_id = resolve_expected_change_id(args.change_id.as_deref());
+    let requires_authoritative_evidence = requires_authoritative_evidence_context(
+        args.baseline.is_some(),
+        args.update_baseline,
+        args.blocking_mode,
+    );
 
     let syntax_helper_path = resolve_override(
         args.syntax_helper_path.as_ref(),
@@ -508,12 +521,23 @@ async fn main() -> Result<()> {
             .context("failed to serialize report for provenance validation")?;
         validate_perf_report_provenance(&report_value, expected_change_id.as_deref()).err()
     };
+    let cutover_authority_validation_error = if requires_authoritative_evidence {
+        validate_cutover_evidence_authority(expected_change_id.as_deref()).err()
+    } else {
+        None
+    };
 
     let rate_pass = report.metrics.error_rate <= args.max_error_rate
         && report.metrics.incomplete_rate <= args.max_incomplete_rate;
 
     let comparison = if let Some(baseline_path) = args.baseline.as_ref() {
-        if let Some(reason_code) = provenance_validation_error.as_ref() {
+        if let Some(reason_code) = cutover_authority_validation_error.as_ref() {
+            Some(build_provenance_failure_comparison(
+                &report,
+                reason_code,
+                gate_thresholds,
+            ))
+        } else if let Some(reason_code) = provenance_validation_error.as_ref() {
             Some(build_provenance_failure_comparison(
                 &report,
                 reason_code,
@@ -603,6 +627,11 @@ async fn main() -> Result<()> {
                 comparison.max_incomplete_rate
             );
         }
+    } else if let Some(reason_code) = cutover_authority_validation_error {
+        bail!(
+            "Perf report cutover evidence authority validation failed: reason_code={}",
+            reason_code
+        );
     } else if let Some(reason_code) = provenance_validation_error {
         bail!(
             "Perf report provenance validation failed: reason_code={}",
@@ -1512,6 +1541,14 @@ mod tests {
 
         let from_env = resolve_expected_change_id_from_sources(None, Some("env-change-id"));
         assert_eq!(from_env.as_deref(), Some("env-change-id"));
+    }
+
+    #[test]
+    fn cutover_context_requires_authoritative_change_id_unless_updating_baseline() {
+        assert!(requires_authoritative_evidence_context(true, false, false));
+        assert!(requires_authoritative_evidence_context(false, false, true));
+        assert!(!requires_authoritative_evidence_context(true, true, false));
+        assert!(!requires_authoritative_evidence_context(false, false, false));
     }
 
     #[test]

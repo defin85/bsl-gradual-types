@@ -21,6 +21,8 @@ fn get_report_metric_f64(report: &Value, path: &[&str]) -> Result<f64, String> {
 
 pub const PARITY_DRIFT_RATE_MAX_FOR_CUTOVER: f64 = 0.01;
 pub const PARITY_PAIRS_TOTAL_MIN_FOR_CUTOVER: u64 = 100;
+pub const NON_AUTHORITATIVE_CUTOVER_EVIDENCE_REASON: &str =
+    "provenance_non_authoritative_cutover_evidence";
 
 fn is_valid_change_id(value: &str) -> bool {
     let trimmed = value.trim();
@@ -101,6 +103,18 @@ pub fn validate_perf_report_provenance(
         }
     }
 
+    Ok(())
+}
+
+pub fn validate_cutover_evidence_authority(
+    expected_change_id: Option<&str>,
+) -> Result<(), String> {
+    let Some(change_id) = expected_change_id else {
+        return Err(NON_AUTHORITATIVE_CUTOVER_EVIDENCE_REASON.to_string());
+    };
+    if !is_valid_change_id(change_id) {
+        return Err("provenance_invalid".to_string());
+    }
     Ok(())
 }
 
@@ -921,6 +935,26 @@ mod tests {
 
         validate_perf_report_provenance(&report, Some("refactor-v2-contract-first-hardening"))
             .expect("matching provenance should pass");
+    }
+
+    #[test]
+    fn cutover_authority_requires_expected_change_id() {
+        let err = validate_cutover_evidence_authority(None)
+            .expect_err("cutover context without expected change id must fail-closed");
+        assert_eq!(err, NON_AUTHORITATIVE_CUTOVER_EVIDENCE_REASON);
+    }
+
+    #[test]
+    fn cutover_authority_accepts_valid_expected_change_id() {
+        validate_cutover_evidence_authority(Some("refactor-v2-contract-first-hardening"))
+            .expect("valid expected change id should mark evidence as authoritative");
+    }
+
+    #[test]
+    fn cutover_authority_rejects_invalid_expected_change_id() {
+        let err = validate_cutover_evidence_authority(Some("Refactor_V2"))
+            .expect_err("invalid expected change id must fail");
+        assert_eq!(err, "provenance_invalid");
     }
 
     #[test]

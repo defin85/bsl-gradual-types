@@ -78,12 +78,24 @@ Unknown reason labels MUST быть сведены в `other` и сопрово�
 
 ### Requirement: Perf-gate artifacts должны быть traceable к активному `change_id` (MUST)
 Perf reports и gate summaries MUST включать `change_id`, полученный из invocation context текущего прогона.
+Источник `expected_change_id` в invocation context MUST иметь фиксированный приоритет:
+1. `--change-id` CLI argument;
+2. `OPENSPEC_CHANGE_ID` environment variable.
 
 Hardcoded foreign `change_id` в runtime/perf path MUST NOT использоваться.
-Mismatch или отсутствие ожидаемого `change_id` MUST приводить к fail-fast validation результата.
+
+Правила валидации provenance:
+- если invocation context содержит `expected_change_id`, то missing/mismatch/invalid `change_id` в report MUST приводить к fail-fast validation результата (invalid evidence);
+- если invocation context НЕ содержит `expected_change_id` (legacy-local режим), отсутствие provenance-полей MAY быть допустимо только для локальной диагностики и MUST NOT использоваться как cutover evidence.
 
 #### Scenario: Mismatch `change_id` блокирует принятие perf evidence
 - **GIVEN** perf прогон выполняется для change `X`
 - **WHEN** сформированный report содержит другой `change_id` или не содержит его
 - **THEN** quality-gate validation завершает прогон как invalid evidence
 - **AND** артефакт не используется как доказательство прохождения gate
+
+#### Scenario: Отсутствие expected change-id помечает evidence как неавторитетный
+- **GIVEN** perf прогон запущен без `--change-id` и без `OPENSPEC_CHANGE_ID`
+- **WHEN** формируется report без provenance `change_id`
+- **THEN** локальный прогон не падает только из-за отсутствия provenance
+- **AND** такой артефакт не может быть использован как cutover evidence

@@ -57,12 +57,24 @@ Global guard eviction MUST NOT удалять latest exact artifact для те�
 - `contract_version`.
 
 ### DS-07 Fail semantics for optional provenance
-Для `v1` отсутствие provenance-полей не блокирует gate.
-Если provenance-поля присутствуют, validator MUST проверять формат/консистентность;
-mismatch/invalid provided provenance MUST приводить к fail-closed verdict.
+Для `v1` отсутствие provenance-полей допустимо только в legacy-local режиме, когда invocation context НЕ задаёт `expected_change_id`.
+Если `expected_change_id` задан, validator MUST требовать `change_id` в report и MUST проверять формат/консистентность;
+missing/mismatch/invalid provided provenance MUST приводить к fail-closed verdict.
 
-### DS-08 Rollout guardrail
-Cutover запрещён при parity drift выше утверждённого порога.
+### DS-08 Active change_id source
+Источником активного change-id объявляется invocation context с фиксированным приоритетом:
+1. `--change-id` CLI argument (authoritative для CI/gate);
+2. `OPENSPEC_CHANGE_ID` environment variable;
+3. отсутствие значения => legacy-local режим (артефакт невалиден для cutover evidence).
+
+Hardcoded `change_id` в production/perf report path запрещён.
+
+### DS-09 Rollout guardrail
+Cutover запрещён при `parity_drift_rate > 0.01` (1.0%) по warm-path gate.
+Определение:
+- `parity_drift_rate = parity_drift_total / parity_pairs_total`;
+- evidence валиден только при `parity_pairs_total >= 100` (иначе fail-closed как insufficient evidence).
+
 Rollback readiness MUST быть подтверждён canary-сценарием до merge.
 
 ## Architecture
@@ -102,7 +114,8 @@ Perf/gate артефакты получают provenance-контур с optiona
 - `contract_version`.
 
 Hardcoded foreign `change_id` в gate path запрещается.
-В `v1` отсутствие provenance поля допустимо, но provided mismatch/invalid MUST приводить к fail-fast validation.
+В `v1` отсутствие provenance поля допустимо только без `expected_change_id` (legacy-local, non-authoritative);
+при заданном `expected_change_id` missing/mismatch/invalid provenance MUST приводить к fail-fast validation.
 
 ## Alternatives Considered
 - Локальные точечные патчи по каждому найденному mismatch.
@@ -125,7 +138,3 @@ Hardcoded foreign `change_id` в gate path запрещается.
 4. Унифицировать serve outcome emission для всех interactive операций.
 5. Обновить perf gate traceability и validation.
 6. Обновить versioned contracts/changelog и пройти contract tests.
-
-## Open Questions
-- Нужен ли отдельный переходный этап `v1 optional provenance -> v1 stricter optional provenance` до возможного major bump.
-- Какой точный parity drift threshold считать блокирующим для обязательного rollback в canary.

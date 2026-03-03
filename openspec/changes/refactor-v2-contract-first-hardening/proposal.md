@@ -13,9 +13,14 @@
 В этом change явно фиксируется подход:
 - **Contract-first hardening** (рекомендуемый путь для текущего этапа);
 - **registry-driven materialization** для canonical/legacy observability mapping;
-- **fail-closed provenance** для perf evidence (`change_id` mismatch/absence => invalid evidence).
+- **fail-closed provenance** для perf evidence (`change_id` mismatch/invalid => invalid evidence; missing при `expected_change_id` => invalid evidence).
 
 Полный rewrite observability/perf pipeline для этого change является **вне scope** и ведётся отдельным change.
+
+## Resolved Blocking Decisions
+- **Parity drift threshold**: для cutover используется блокирующий порог `parity_drift_rate <= 0.01` (1.0%) при обязательном минимуме `parity_pairs_total >= 100`; нарушение любого условия => fail-closed, rollback-required.
+- **Active `change_id` source**: authoritative invocation context с приоритетом `--change-id` (CLI) > `OPENSPEC_CHANGE_ID` (env) > legacy-local режим без cutover authority.
+- **Provenance fail semantics**: в legacy-local режиме отсутствие provenance допустимо только для локальной диагностики; при наличии `expected_change_id` missing/mismatch/invalid provenance блокирует evidence (fail-closed).
 
 ## What Changes
 - **MODIFIED**: observability requirements для канонического event model и dual-write проекций:
@@ -25,6 +30,7 @@
 - **ADDED**: deterministic count-based retention contract для `TypeIndexArtifact` (фиксированная семантика max versions + latest protection при global guard).
 - **ADDED**: единый контракт emission `type_index` serve outcomes для всех interactive операций (`completion`, `hover`, `signatureHelp`, `definition`) в low-cardinality виде.
 - **ADDED**: traceability contract для perf-gate/report artifacts (`change_id` должен быть привязан к запуску и проверяться на mismatch).
+- **ADDED**: explicit cutover guardrail для parity drift (`<= 1.0%`, с minimum evidence threshold).
 - **ADDED**: инвариантные contract/parity тесты, блокирующие drift до merge.
 
 ## Impact

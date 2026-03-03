@@ -51,6 +51,10 @@ fn clamp_diagnostics_debounce_ms(raw: u64) -> u64 {
     raw.max(25)
 }
 
+fn duration_from_millis_u128(value_ms: u128) -> Duration {
+    Duration::from_millis(value_ms.min(u64::MAX as u128) as u64)
+}
+
 impl BslLanguageServer {
     pub fn new(client: Client, coordinator: Arc<SystemCoordinator>) -> Self {
         let default_settings = BslSettings::default();
@@ -165,6 +169,7 @@ impl BslLanguageServer {
             file_key_to_file_id_v2: Arc::new(RwLock::new(HashMap::new())),
             next_file_id_v2: Arc::new(std::sync::atomic::AtomicU32::new(1)),
             diagnostics_tasks_v2: Arc::new(Mutex::new(HashMap::new())),
+            type_index_precompute_tasks_v2: Arc::new(Mutex::new(HashMap::new())),
             diagnostics_generation_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_received_file_versions_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_document_shadow_state_v2: Arc::new(RwLock::new(HashMap::new())),
@@ -820,6 +825,204 @@ impl BslLanguageServer {
             bundle.meta.config_fingerprint.as_deref().unwrap_or("none"),
             bundle.meta.strict_fingerprint
         );
+    }
+
+    pub(crate) async fn schedule_type_index_precompute_v2(
+        &self,
+        file_id: V2FileId,
+        requested_version: i32,
+    ) {
+        let supersession_key = super::TypeIndexPrecomputeSupersessionKeyV2 {
+            file_id,
+            requested_version,
+        };
+        let mut tasks = self.type_index_precompute_tasks_v2.lock().await;
+        if tasks
+            .get(&file_id)
+            .is_some_and(|task| task.supersession_key == supersession_key)
+        {
+            return;
+        }
+
+        if let Some(previous) = tasks.remove(&file_id) {
+            debug!(
+                file_id = file_id.0,
+                previous_version = previous.supersession_key.requested_version,
+                requested_version,
+                reason_code =
+                    bsl_analysis_v2::TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeCancelled
+                        .as_str(),
+                "Event-driven type_index precompute superseded: abort previous task"
+            );
+            previous.handle.abort();
+        }
+
+        let server = self.clone();
+        let handle = tokio::spawn(async move {
+            let enqueued_at = Instant::now();
+            server
+                .execute_type_index_precompute_once_v2(supersession_key, enqueued_at)
+                .await;
+            server
+                .finalize_type_index_precompute_task_v2(supersession_key)
+                .await;
+        });
+        tasks.insert(
+            file_id,
+            super::TypeIndexPrecomputeTaskV2 {
+                supersession_key,
+                handle,
+            },
+        );
+    }
+
+    pub(crate) async fn cancel_type_index_precompute_v2(&self, file_id: V2FileId) {
+        let task = self
+            .type_index_precompute_tasks_v2
+            .lock()
+            .await
+            .remove(&file_id);
+        if let Some(task) = task {
+            debug!(
+                file_id = file_id.0,
+                requested_version = task.supersession_key.requested_version,
+                reason_code =
+                    bsl_analysis_v2::TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeCancelled
+                        .as_str(),
+                "Event-driven type_index precompute cancelled on file cleanup"
+            );
+            task.handle.abort();
+        }
+    }
+
+    async fn type_index_precompute_checkpoint_v2(
+        &self,
+        key: super::TypeIndexPrecomputeSupersessionKeyV2,
+        stage: &'static str,
+    ) -> bool {
+        let current_version = self
+            .latest_received_file_versions_v2
+            .read()
+            .await
+            .get(&key.file_id)
+            .copied();
+        if current_version == Some(key.requested_version) {
+            return false;
+        }
+        debug!(
+            file_id = key.file_id.0,
+            requested_version = key.requested_version,
+            current_version,
+            stage,
+            reason_code =
+                bsl_analysis_v2::TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeSuperseded
+                    .as_str(),
+            "Event-driven type_index precompute checkpoint superseded"
+        );
+        true
+    }
+
+    async fn execute_type_index_precompute_once_v2(
+        &self,
+        key: super::TypeIndexPrecomputeSupersessionKeyV2,
+        enqueued_at: Instant,
+    ) {
+        if self
+            .type_index_precompute_checkpoint_v2(key, "before_queue")
+            .await
+        {
+            return;
+        }
+
+        let queue_wait = enqueued_at.elapsed();
+        let queue_wait_ms = queue_wait.as_millis();
+        self.coordinator
+            .record_intellisense_v2_runtime_queue_wait_latency_with_origin(
+                bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                "type_index_precompute",
+                queue_wait,
+            );
+
+        let (analysis, _index_snapshot, _deps_id) = self.analysis_v2.snapshot_with_deps().await;
+        if self
+            .type_index_precompute_checkpoint_v2(key, "before_compute")
+            .await
+        {
+            return;
+        }
+
+        let precompute =
+            bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
+                bsl_runtime::application::CpuWorkClass::Background,
+                bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                Some(self.coordinator.as_ref()),
+                move || {
+                    analysis.precompute_type_index_for_file(
+                        key.file_id,
+                        Some(key.requested_version),
+                        queue_wait_ms,
+                    )
+                },
+            )
+            .await;
+
+        match precompute {
+            Ok(Ok(result)) => {
+                self.coordinator
+                    .record_intellisense_v2_runtime_exec_latency_with_origin(
+                        bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                        "type_index_precompute",
+                        duration_from_millis_u128(result.stats.exec_ms),
+                    );
+                self.coordinator
+                    .record_intellisense_v2_runtime_exec_latency_with_origin(
+                        bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                        "type_index_precompute_build",
+                        duration_from_millis_u128(result.stats.build_ms),
+                    );
+                debug!(
+                    file_id = key.file_id.0,
+                    requested_version = key.requested_version,
+                    observed_version = result.file_version,
+                    reason_code = result.reason_code.as_str(),
+                    queue_wait_ms = result.stats.queue_wait_ms,
+                    exec_ms = result.stats.exec_ms,
+                    build_ms = result.stats.build_ms,
+                    evicted_per_file_window_total = result.stats.evicted_per_file_window_total,
+                    evicted_global_guard_total = result.stats.evicted_global_guard_total,
+                    "Event-driven type_index precompute finished"
+                );
+            }
+            Ok(Err(_cancelled)) => {
+                debug!(
+                    file_id = key.file_id.0,
+                    requested_version = key.requested_version,
+                    reason_code = bsl_analysis_v2::TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeCancelled.as_str(),
+                    "Event-driven type_index precompute cancelled"
+                );
+            }
+            Err(join_error) => {
+                warn!(
+                    file_id = key.file_id.0,
+                    requested_version = key.requested_version,
+                    error = %join_error,
+                    "Event-driven type_index precompute task failed"
+                );
+            }
+        }
+    }
+
+    async fn finalize_type_index_precompute_task_v2(
+        &self,
+        key: super::TypeIndexPrecomputeSupersessionKeyV2,
+    ) {
+        let mut tasks = self.type_index_precompute_tasks_v2.lock().await;
+        if tasks
+            .get(&key.file_id)
+            .is_some_and(|task| task.supersession_key == key)
+        {
+            tasks.remove(&key.file_id);
+        }
     }
 
     pub(crate) async fn cancel_diagnostics_v2(&self, file_id: V2FileId) {
@@ -2574,6 +2777,143 @@ mod tests {
             !saw_did_change_idle_heavy_profile,
             "idle_heavy diagnostics must not execute under trigger_did_change"
         );
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
+    async fn p6_type_index_precompute_slot_tracks_latest_version_and_clears_on_did_close() {
+        let coordinator = Arc::new(SystemCoordinator::new());
+        let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+            Arc::new(std::sync::Mutex::new(None));
+
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            let server_holder = server_holder.clone();
+            move |client| {
+                let server = BslLanguageServer::new(client, coordinator.clone());
+                *server_holder.lock().expect("server holder lock") = Some(server.clone());
+                server
+            }
+        })
+        .finish();
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        initialize_lsp_service(&mut service).await;
+
+        let uri = Url::parse("file:///type-index-precompute-slot-v2.bsl").expect("test uri");
+        let base_text =
+            "Процедура Тест()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.\nКонецПроцедуры\n";
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: base_text.to_string(),
+            },
+        };
+        let did_open_req = Request::build("textDocument/didOpen")
+            .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+            .finish();
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+
+        let latest_version = 8_i32;
+        for version in 2..=latest_version {
+            let did_change = DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: base_text.to_string(),
+                }],
+            };
+            let did_change_req = Request::build("textDocument/didChange")
+                .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+                .finish();
+            let did_change_response = service
+                .ready()
+                .await
+                .unwrap()
+                .call(did_change_req)
+                .await
+                .expect("didChange notification");
+            assert!(did_change_response.is_none(), "didChange is a notification");
+        }
+
+        let server = server_holder
+            .lock()
+            .expect("server holder lock")
+            .clone()
+            .expect("server must be created");
+        let file_id = server.get_or_create_file_id_v2(&uri).await;
+
+        let observed_latest = server
+            .latest_received_file_versions_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied();
+        assert_eq!(
+            observed_latest,
+            Some(latest_version),
+            "latest received version must track the newest didChange"
+        );
+
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        {
+            let tasks = server.type_index_precompute_tasks_v2.lock().await;
+            assert!(
+                tasks.len() <= 1,
+                "precompute scheduler must keep at most one task slot per file"
+            );
+            if let Some(task) = tasks.get(&file_id) {
+                assert_eq!(
+                    task.supersession_key.requested_version, latest_version,
+                    "active precompute slot must target latest requested version"
+                );
+            }
+        }
+
+        let did_close = DidCloseTextDocumentParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+        };
+        let did_close_req = Request::build("textDocument/didClose")
+            .params(serde_json::to_value(did_close).expect("DidCloseTextDocumentParams"))
+            .finish();
+        let did_close_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_close_req)
+            .await
+            .expect("didClose notification");
+        assert!(did_close_response.is_none(), "didClose is a notification");
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if !server
+                    .type_index_precompute_tasks_v2
+                    .lock()
+                    .await
+                    .contains_key(&file_id)
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("type_index precompute slot must be cleared after didClose");
 
         drain_task.abort();
     }
@@ -5320,6 +5660,129 @@ mod tests {
         assert!(
             fallback_unavailable_total > 0,
             "expected fallback_unavailable counter to increment for stale cache-miss"
+        );
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
+    async fn p7_completion_owner_hint_type_lookup_is_serve_only_without_on_demand_compute() {
+        let coordinator = Arc::new(SystemCoordinator::new());
+
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            move |client| BslLanguageServer::new(client, coordinator.clone())
+        })
+        .finish();
+        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+        initialize_lsp_service(&mut service).await;
+
+        let fixture =
+            "Процедура Тест()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.\nКонецПроцедуры\n";
+        let uri = Url::parse("file:///test_p7_owner_hint_serve_only.bsl").expect("test uri");
+        let did_open = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: fixture.to_string(),
+            },
+        };
+        let did_open_req = Request::build("textDocument/didOpen")
+            .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+            .finish();
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+
+        let completion_character = "    ЛокМассив."
+            .chars()
+            .map(|ch| ch.len_utf16())
+            .sum::<usize>() as u32;
+        let completion = service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                Request::build("textDocument/completion")
+                    .id(9001)
+                    .params(
+                        serde_json::to_value(CompletionParams {
+                            text_document_position: TextDocumentPositionParams {
+                                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                                position: Position::new(2, completion_character),
+                            },
+                            work_done_progress_params: WorkDoneProgressParams::default(),
+                            partial_result_params: PartialResultParams::default(),
+                            context: Some(CompletionContext {
+                                trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+                                trigger_character: Some(".".to_string()),
+                            }),
+                        })
+                        .expect("CompletionParams"),
+                    )
+                    .finish(),
+            )
+            .await
+            .expect("completion request");
+        assert!(completion.is_some(), "completion must return a response");
+
+        let metrics = coordinator.observability_metrics();
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+
+        let lookup_path_total = read_u64_metric(
+            counters.get("intellisense_v2_completion_owner_hint_lookup_path_total_direct"),
+        ) + read_u64_metric(
+            counters.get("intellisense_v2_completion_owner_hint_lookup_path_total_flow_only"),
+        ) + read_u64_metric(
+            counters
+                .get("intellisense_v2_completion_owner_hint_lookup_path_total_flow_plus_fallback"),
+        );
+        assert!(
+            lookup_path_total > 0,
+            "owner-hint type lookup path metrics must confirm that type lookup executed"
+        );
+
+        assert_eq!(
+            read_u64_metric(
+                counters.get(
+                    "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_type_index_total",
+                ),
+            ),
+            0,
+            "serve-only owner-hint path must not execute type_index compute in request path"
+        );
+        assert_eq!(
+            read_u64_metric(
+                counters.get(
+                    "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_parse_result_total",
+                ),
+            ),
+            0,
+            "serve-only owner-hint path must not execute parse_result compute in request path"
+        );
+        assert_eq!(
+            read_u64_metric(counters.get(
+                "intellisense_v2_completion_owner_hint_index_fetch_block_on_type_index_total"
+            ),),
+            0,
+            "serve-only owner-hint path must not block on type_index compute"
+        );
+        assert_eq!(
+            read_u64_metric(counters.get(
+                "intellisense_v2_completion_owner_hint_index_fetch_block_on_parse_result_total",
+            ),),
+            0,
+            "serve-only owner-hint path must not block on parse_result compute"
         );
 
         drain_task.abort();

@@ -124,6 +124,7 @@ pub struct BslLanguageServer {
     pub(crate) file_key_to_file_id_v2: Arc<RwLock<HashMap<V2FileKey, V2FileId>>>,
     pub(crate) next_file_id_v2: Arc<AtomicU32>,
     pub(crate) diagnostics_tasks_v2: Arc<Mutex<DiagnosticsTasksV2>>,
+    pub(crate) type_index_precompute_tasks_v2: Arc<Mutex<TypeIndexPrecomputeTasksV2>>,
     pub(crate) diagnostics_generation_v2: Arc<RwLock<HashMap<V2FileId, u64>>>,
     pub(crate) latest_received_file_versions_v2: Arc<RwLock<HashMap<V2FileId, i32>>>,
     pub(crate) latest_document_shadow_state_v2:
@@ -244,6 +245,19 @@ pub(crate) struct DiagnosticsTaskV2 {
 }
 
 type DiagnosticsTasksV2 = HashMap<DiagnosticsTaskKeyV2, DiagnosticsTaskV2>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct TypeIndexPrecomputeSupersessionKeyV2 {
+    pub file_id: V2FileId,
+    pub requested_version: i32,
+}
+
+pub(crate) struct TypeIndexPrecomputeTaskV2 {
+    pub supersession_key: TypeIndexPrecomputeSupersessionKeyV2,
+    pub handle: JoinHandle<()>,
+}
+
+type TypeIndexPrecomputeTasksV2 = HashMap<V2FileId, TypeIndexPrecomputeTaskV2>;
 
 pub(crate) fn intellisense_v2_slow_wait_warn_threshold() -> Option<Duration> {
     bsl_runtime::application::RuntimePerfKnobs::from_runtime_config().slow_wait_warn_threshold

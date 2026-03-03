@@ -120,88 +120,6 @@ fn changed_range_footprint_bytes(
     old_span.max(new_span)
 }
 
-fn duration_from_millis_u128(value_ms: u128) -> std::time::Duration {
-    std::time::Duration::from_millis(value_ms.min(u64::MAX as u128) as u64)
-}
-
-fn schedule_type_index_precompute_v2(
-    server: BslLanguageServer,
-    file_id: bsl_analysis_v2::FileId,
-    version: i32,
-) {
-    let enqueued_at = Instant::now();
-    tokio::spawn(async move {
-        let queue_wait = enqueued_at.elapsed();
-        let queue_wait_ms = queue_wait.as_millis();
-        server
-            .coordinator
-            .record_intellisense_v2_runtime_queue_wait_latency_with_origin(
-                bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
-                "type_index_precompute",
-                queue_wait,
-            );
-
-        let (analysis, _index_snapshot, _deps_id) = server.analysis_v2.snapshot_with_deps().await;
-        let precompute =
-            bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
-                bsl_runtime::application::CpuWorkClass::Background,
-                bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
-                Some(server.coordinator.as_ref()),
-                move || {
-                    analysis.precompute_type_index_for_file(file_id, Some(version), queue_wait_ms)
-                },
-            )
-            .await;
-
-        match precompute {
-            Ok(Ok(result)) => {
-                server
-                    .coordinator
-                    .record_intellisense_v2_runtime_exec_latency_with_origin(
-                        bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
-                        "type_index_precompute",
-                        duration_from_millis_u128(result.stats.exec_ms),
-                    );
-                server
-                    .coordinator
-                    .record_intellisense_v2_runtime_exec_latency_with_origin(
-                        bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
-                        "type_index_precompute_build",
-                        duration_from_millis_u128(result.stats.build_ms),
-                    );
-                debug!(
-                    file_id = file_id.0,
-                    requested_version = version,
-                    observed_version = result.file_version,
-                    reason_code = result.reason_code.as_str(),
-                    queue_wait_ms = result.stats.queue_wait_ms,
-                    exec_ms = result.stats.exec_ms,
-                    build_ms = result.stats.build_ms,
-                    evicted_per_file_window_total = result.stats.evicted_per_file_window_total,
-                    evicted_global_guard_total = result.stats.evicted_global_guard_total,
-                    "Event-driven type_index precompute finished"
-                );
-            }
-            Ok(Err(_cancelled)) => {
-                debug!(
-                    file_id = file_id.0,
-                    requested_version = version,
-                    reason_code = bsl_analysis_v2::TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeCancelled.as_str(),
-                    "Event-driven type_index precompute cancelled"
-                );
-            }
-            Err(join_error) => {
-                warn!(
-                    file_id = file_id.0,
-                    requested_version = version,
-                    error = %join_error,
-                    "Event-driven type_index precompute task failed"
-                );
-            }
-        }
-    });
-}
-
 fn advance_large_churn_state(
     state: &mut super::ScaleAwareChurnStateV2,
     now: Instant,
@@ -1549,7 +1467,8 @@ impl LanguageServer for BslLanguageServer {
                     path,
                 }
             }]);
-        schedule_type_index_precompute_v2(self.clone(), file_id, version);
+        self.schedule_type_index_precompute_v2(file_id, version)
+            .await;
 
         let diagnostics_generation = self.bump_diagnostics_generation_v2(file_id).await;
         for profile in bsl_runtime::application::diagnostics_profiles_for_trigger(
@@ -1807,7 +1726,8 @@ impl LanguageServer for BslLanguageServer {
                     path,
                 }
             }]);
-        schedule_type_index_precompute_v2(self.clone(), file_id, version);
+        self.schedule_type_index_precompute_v2(file_id, version)
+            .await;
 
         let flow_sensitive_enabled = {
             let settings = self.settings.read().await;
@@ -1960,6 +1880,7 @@ impl LanguageServer for BslLanguageServer {
                 );
             }
             self.cancel_diagnostics_v2(file_id).await;
+            self.cancel_type_index_precompute_v2(file_id).await;
             self.latest_received_file_versions_v2
                 .write()
                 .await

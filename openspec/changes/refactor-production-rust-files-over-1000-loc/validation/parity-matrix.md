@@ -429,3 +429,49 @@ Conclusion for task `21s.5`:
 - analysis-v2, semantic-diagnostics and bsl-repository scopes satisfy "no inline test modules" policy;
 - migration is test-extraction-only and preserves runtime behavior;
 - remaining global violations are in other crates and require follow-up work items.
+
+## Progress evidence (Global task `21s.8` remaining crates test extraction)
+
+Executed on 2026-03-04:
+
+1. `cargo fmt --all` -> passed after extracting remaining inline test modules.
+2. `cargo test -p bsl-api-dtos --locked --no-run` -> passed.
+3. `cargo test -p bsl-types --locked --no-run` -> passed.
+4. `cargo test -p bsl-frontend --locked --no-run` -> passed.
+5. `cargo test -p bsl-line-index --locked --no-run` -> passed.
+6. `cargo test -p mcp-debug-server --locked --no-run` -> passed.
+7. `cargo test -p bsl-shared --locked --no-run` -> passed.
+8. `cargo test -p bsl-syntax --locked --no-run` -> passed.
+9. `cargo test -p bsl-type-visualization --locked --no-run` -> passed.
+10. `rg -n --glob '!**/tests/**' --glob '!**/tests.rs' --glob '!**/*_test.rs' '^\\s*mod\\s+[A-Za-z0-9_]*tests\\s*\\{' bsl-api-dtos/src bsl-types/src frontend/src line-index/src mcp-debug-server/src shared/src syntax/src type-visualization/src` -> no matches.
+11. `uv run --with tiktoken python3 scripts/check-rust-file-llm-budget.py --report openspec/changes/refactor-production-rust-files-over-1000-loc/validation/inventory.md --json` -> passed (`exit 0`) with:
+    - `inline_test_module_violations = 0`
+    - `hard_loc_violations = 0`
+    - `target_budget_violations = 0`
+
+Conclusion for task `21s.8`:
+
+- all remaining production scopes are migrated to separate test paths;
+- global fail-closed gate now passes in full pass-state;
+- change-level policy target for inline tests is fully satisfied.
+
+## Final verification set (task `7.3` + `7.4`)
+
+Executed on 2026-03-04:
+
+1. `cargo fmt --all --check` -> passed.
+2. `cargo check --workspace --locked` -> passed.
+3. `cargo clippy --workspace --all-targets --locked -- -D warnings` -> passed.
+4. `cargo test --workspace --locked --no-run` -> passed (all workspace test binaries compiled).
+5. `python3 scripts/check-versioned-contracts.py` -> passed.
+6. `uv run --with tiktoken python3 scripts/check-rust-file-llm-budget.py --report openspec/changes/refactor-production-rust-files-over-1000-loc/validation/inventory.md --json` -> passed (`exit 0`), report is in full pass-state:
+   - `hard_loc_violations = 0`
+   - `target_budget_violations = 0`
+   - `inline_test_module_violations = 0`
+7. `openspec validate refactor-production-rust-files-over-1000-loc --strict --no-interactive` -> passed (`Change 'refactor-production-rust-files-over-1000-loc' is valid`).
+
+Final conclusion:
+
+- verification set is complete and green;
+- validation artifacts are synchronized with current repository state;
+- final OpenSpec validation gate is satisfied.

@@ -72,3 +72,15 @@ For each decomposed file in batches A-E:
 
 The task is considered complete only when no inline test module remains in
 production files covered by this change.
+
+## Final status
+
+Final global gate run on 2026-03-04:
+
+`uv run --with tiktoken python3 scripts/check-rust-file-llm-budget.py --report openspec/changes/refactor-production-rust-files-over-1000-loc/validation/inventory.md --json`
+
+Result:
+
+- `inline_test_module_violations = 0`
+- `hard_loc_violations = 0`
+- `target_budget_violations = 0`

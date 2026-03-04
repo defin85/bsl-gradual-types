@@ -35,13 +35,13 @@
 - [x] 6.2 Прогнать parity matrix для Batch E и зафиксировать результаты.
 
 ## 7. Final Validation
-- [ ] 7.1 Подтвердить, что в production scope отсутствуют `.rs` файлы `>1000 LOC`, а все target files удовлетворяют LLM budgets (`<=800 LOC`, `<=80 KiB`, `<=12000 tokens(o200k_base)`).
-- [ ] 7.2 Подтвердить отсутствие inline `#[cfg(test)] mod tests` в production `.rs` (тесты вынесены в отдельные test paths).
-- [ ] 7.3 Запустить финальный verification set (`fmt`, `clippy`, `test`, релевантные интеграционные/контрактные проверки).
-- [ ] 7.4 `openspec validate refactor-production-rust-files-over-1000-loc --strict --no-interactive`.
+- [x] 7.1 Подтвердить, что в production scope отсутствуют `.rs` файлы `>1000 LOC`, а все target files удовлетворяют LLM budgets (`<=800 LOC`, `<=80 KiB`, `<=12000 tokens(o200k_base)`).
+- [x] 7.2 Подтвердить отсутствие inline `#[cfg(test)] mod tests` в production `.rs` (тесты вынесены в отдельные test paths).
+- [x] 7.3 Запустить финальный verification set (`fmt`, `clippy`, `test`, релевантные интеграционные/контрактные проверки).
+- [x] 7.4 `openspec validate refactor-production-rust-files-over-1000-loc --strict --no-interactive`.
 
 ## Dependencies / Parallelism
 - [x] D1 Пункты 1.1-1.4 блокируют старты batch’ей 2-6.
 - [x] D2 Batch’и 3, 4, 5, 6 могут выполняться параллельно после завершения Batch 2 (или при отсутствии конфликтов по файлам).
-- [ ] D3 Пункт 7.1 блокирует 7.2 и 7.3.
-- [ ] D4 Пункт 7.3 блокирует 7.4.
+- [x] D3 Пункт 7.1 блокирует 7.2 и 7.3.
+- [x] D4 Пункт 7.3 блокирует 7.4.

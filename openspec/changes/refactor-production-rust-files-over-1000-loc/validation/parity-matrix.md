@@ -412,3 +412,20 @@ Conclusion for task `21s.4`:
 - bsl-runtime production scope now satisfies "no inline test modules" policy;
 - extraction is behavior-preserving for runtime code path (test-only relocation + compile verification);
 - remaining violations are in other crates/scopes and covered by next task.
+
+## Progress evidence (Global task `21s.5` analysis-v2 + semantic-diagnostics + bsl-repository test extraction)
+
+Executed on 2026-03-04:
+
+1. `cargo fmt --all` -> passed after extracting inline test modules.
+2. `cargo test -p bsl-analysis-v2 --locked --no-run` -> passed.
+3. `cargo test -p bsl-diagnostics --locked --no-run` -> passed.
+4. `cargo test -p bsl-repository --locked --no-run` -> passed.
+5. `rg -n --glob '!**/tests/**' --glob '!**/tests.rs' --glob '!**/*_test.rs' '^\\s*mod\\s+[A-Za-z0-9_]*tests\\s*\\{' analysis-v2/src semantic-diagnostics/src bsl-repository/src` -> no matches (inline test modules removed from production files for these scopes).
+6. `uv run --with tiktoken python3 scripts/check-rust-file-llm-budget.py --report openspec/changes/refactor-production-rust-files-over-1000-loc/validation/inventory.md --json` -> executed in blocking mode; global inline-test violations reduced `45 -> 38`.
+
+Conclusion for task `21s.5`:
+
+- analysis-v2, semantic-diagnostics and bsl-repository scopes satisfy "no inline test modules" policy;
+- migration is test-extraction-only and preserves runtime behavior;
+- remaining global violations are in other crates and require follow-up work items.

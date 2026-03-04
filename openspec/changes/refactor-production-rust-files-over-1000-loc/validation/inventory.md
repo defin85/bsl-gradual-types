@@ -13,7 +13,7 @@
     "target_files_missing": 0,
     "hard_loc_violations": 0,
     "target_budget_violations": 0,
-    "inline_test_module_violations": 45
+    "inline_test_module_violations": 38
   },
   "violations": {
     "hard_loc": [],
@@ -21,38 +21,8 @@
     "target_budget": [],
     "inline_test_modules": [
       {
-        "path": "analysis-v2/src/ast_to_ir/global_collections.rs",
-        "line": 141,
-        "snippet": "mod tests {"
-      },
-      {
-        "path": "analysis-v2/src/derived_artifacts.rs",
-        "line": 475,
-        "snippet": "mod tests {"
-      },
-      {
-        "path": "analysis-v2/src/implicit_bindings.rs",
-        "line": 181,
-        "snippet": "mod tests {"
-      },
-      {
         "path": "bsl-api-dtos/src/semantic_dtos.rs",
         "line": 442,
-        "snippet": "mod tests {"
-      },
-      {
-        "path": "bsl-repository/src/signature_index/index.rs",
-        "line": 646,
-        "snippet": "mod tests {"
-      },
-      {
-        "path": "bsl-repository/src/signature_index/method_builder.rs",
-        "line": 403,
-        "snippet": "mod tests {"
-      },
-      {
-        "path": "bsl-repository/src/signature_registry.rs",
-        "line": 283,
         "snippet": "mod tests {"
       },
       {
@@ -128,11 +98,6 @@
       {
         "path": "mcp-debug-server/src/types/session_id.rs",
         "line": 54,
-        "snippet": "mod tests {"
-      },
-      {
-        "path": "semantic-diagnostics/src/helpers.rs",
-        "line": 87,
         "snippet": "mod tests {"
       },
       {

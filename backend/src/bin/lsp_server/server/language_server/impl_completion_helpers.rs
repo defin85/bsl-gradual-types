@@ -425,16 +425,28 @@ pub(super) fn compute_member_access_owner_hint(
     member_access_owner_type_hint
 }
 
+pub(super) struct CompletionResultMetricsContext<'a> {
+    pub(super) member_access_observed: bool,
+    pub(super) trigger_mode: &'a str,
+    pub(super) observed_file_version_for_completion: Option<i32>,
+    pub(super) file_id: bsl_analysis_v2::FileId,
+    pub(super) position: &'a Position,
+}
+
 pub(super) async fn observe_completion_result_metrics(
     server: &BslLanguageServer,
     completion: &Option<crate::handlers::CompletionResponseWithStats>,
     completion_outcome: &mut Option<&'static str>,
-    member_access_observed: bool,
-    trigger_mode: &str,
-    observed_file_version_for_completion: Option<i32>,
-    file_id: bsl_analysis_v2::FileId,
-    position: Position,
+    ctx: CompletionResultMetricsContext<'_>,
 ) {
+    let CompletionResultMetricsContext {
+        member_access_observed,
+        trigger_mode,
+        observed_file_version_for_completion,
+        file_id,
+        position,
+    } = ctx;
+
     if let Some(result) = completion {
         if result.had_error {
             server.coordinator.record_completion_error();

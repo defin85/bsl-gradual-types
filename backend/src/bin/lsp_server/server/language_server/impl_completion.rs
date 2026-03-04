@@ -934,11 +934,13 @@ impl BslLanguageServer {
             self,
             &completion,
             &mut completion_outcome,
-            member_access_observed,
-            trigger_mode,
-            observed_file_version_for_completion,
-            file_id,
-            position,
+            super::impl_completion_helpers::CompletionResultMetricsContext {
+                member_access_observed,
+                trigger_mode,
+                observed_file_version_for_completion,
+                file_id,
+                position: &position,
+            },
         )
         .await;
 

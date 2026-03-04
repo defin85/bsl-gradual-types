@@ -143,7 +143,7 @@ impl BslLanguageServer {
             if result.is_none() {
                 self.coordinator.record_signature_help_empty();
             }
-            return Ok(result);
+            Ok(result)
         }
     }
 

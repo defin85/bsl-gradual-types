@@ -170,7 +170,7 @@ impl BslLanguageServer {
                 _ => None,
             };
 
-            return Ok(result);
+            Ok(result)
         }
     }
 
@@ -539,7 +539,7 @@ impl BslLanguageServer {
                 _ => None,
             };
 
-            return Ok(result);
+            Ok(result)
         }
     }
 }

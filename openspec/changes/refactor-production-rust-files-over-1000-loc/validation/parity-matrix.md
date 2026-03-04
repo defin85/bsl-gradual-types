@@ -381,3 +381,19 @@ Conclusion for task `7.2` gate integration:
 - fail-closed gate is implemented and runnable with one command;
 - scope/exclusions are inherited from production-scope policy in `check-rust-file-llm-budget.py`;
 - merge remains blocked until inline test modules are migrated to separate test paths.
+
+## Progress evidence (Global task `21s.3` backend + bsl-agent test extraction)
+
+Executed on 2026-03-04:
+
+1. `cargo fmt --all` -> passed after extracting inline test modules.
+2. `cargo test -p bsl-backend --locked --no-run` -> passed (all backend test binaries compiled).
+3. `cargo test -p bsl-agent --locked --no-run` -> passed (all agent test binaries compiled).
+4. `rg -n --glob '!**/tests/**' --glob '!**/tests.rs' --glob '!**/*_test.rs' '^\\s*mod\\s+[A-Za-z0-9_]*tests\\s*\\{' backend/src bsl-agent/src` -> no matches (inline test modules removed from production files for these scopes).
+5. `uv run --with tiktoken python3 scripts/check-rust-file-llm-budget.py --report openspec/changes/refactor-production-rust-files-over-1000-loc/validation/inventory.md --json` -> executed in blocking mode; global inline-test violations reduced `87 -> 72`.
+
+Conclusion for task `21s.3`:
+
+- backend and bsl-agent production scopes now satisfy "no inline test modules" policy;
+- runtime code behavior preserved (test extraction only, compile checks green);
+- remaining violations are outside backend/bsl-agent and will be handled by next scope tasks.

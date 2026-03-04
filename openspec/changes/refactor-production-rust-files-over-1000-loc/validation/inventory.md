@@ -13,7 +13,7 @@
     "target_files_missing": 0,
     "hard_loc_violations": 0,
     "target_budget_violations": 0,
-    "inline_test_module_violations": 87
+    "inline_test_module_violations": 72
   },
   "violations": {
     "hard_loc": [],
@@ -33,81 +33,6 @@
       {
         "path": "analysis-v2/src/implicit_bindings.rs",
         "line": 181,
-        "snippet": "mod tests {"
-      },
-      {
-        "path": "backend/src/bin/lsp_server/config.rs",
-        "line": 96,
-        "snippet": "mod tests {"
-      },
-      {
-        "path": "backend/src/bin/lsp_server/converters/diagnostics.rs",
-        "line": 105,
-        "snippet": "mod tests {"
-      },
-      {
-        "path": "backend/src/bin/lsp_server/converters/position.rs",
-        "line": 48,
-        "snippet": "mod tests {"
-      },
-      {
-        "path": "backend/src/bin/lsp_server/handlers/code_actions.rs",
-        "line": 325,
-        "snippet": "mod tests {"
-      },
-      {
-        "path": "backend/src/bin/lsp_server/handlers/formatting.rs",
-        "line": 136,
-        "snippet": "mod tests {"
-      },
-      {
-        "path": "backend/src/bin/lsp_server/handlers/hover.rs",
-        "line": 102,
-        "snippet": "mod tests {"
-      },
-      {
-        "path": "backend/src/bin/lsp_server/handlers/inlay_hints.rs",
-        "line": 243,
-        "snippet": "mod tests {"
-      },
-      {
-        "path": "backend/src/bin/lsp_server/handlers/signature_help.rs",
-        "line": 54,
-        "snippet": "mod tests {"
-      },
-      {
-        "path": "backend/src/bin/lsp_server/progress_bridge.rs",
-        "line": 225,
-        "snippet": "mod tests {"
-      },
-      {
-        "path": "backend/src/bin/lsp_server/server/completion_cancellation.rs",
-        "line": 171,
-        "snippet": "mod tests {"
-      },
-      {
-        "path": "backend/src/bin/lsp_server/server/request_context.rs",
-        "line": 220,
-        "snippet": "mod tests {"
-      },
-      {
-        "path": "backend/src/presentation/semantic_html_generator/generator.rs",
-        "line": 143,
-        "snippet": "mod tests {"
-      },
-      {
-        "path": "backend/src/presentation/semantic_html_generator/utils.rs",
-        "line": 13,
-        "snippet": "mod tests {"
-      },
-      {
-        "path": "bsl-agent/src/jobs/mod.rs",
-        "line": 595,
-        "snippet": "mod tests {"
-      },
-      {
-        "path": "bsl-agent/src/semantic/mod.rs",
-        "line": 7,
         "snippet": "mod tests {"
       },
       {

@@ -1,12 +1,14 @@
 ## Context
-Change охватывает 26 production Rust файлов с размером >1000 LOC. Файлы распределены по нескольким подсистемам (`backend`, `bsl-runtime`, `analysis-v2`, `bsl-agent`, `semantic-diagnostics`, `bsl-repository`), поэтому требуется согласованный подход к декомпозиции с жёстким контролем поведения.
+Change охватывает 28 production Rust файлов с размером >1000 LOC. Файлы распределены по нескольким подсистемам (`backend`, `bsl-runtime`, `analysis-v2`, `bsl-agent`, `semantic-diagnostics`, `bsl-repository`), поэтому требуется согласованный подход к декомпозиции с жёстким контролем поведения.
 
 Ключевое ограничение от заказчика: refactor должен быть строго behavior-preserving.
 
 ## Goals / Non-Goals
 - Goals:
   - Декомпозировать все production `.rs` файлы >1000 LOC до `<=1000 LOC`.
+  - Довести целевые файлы до LLM-friendly budget: `<=800 LOC`, `<=80 KiB`, `<=12000 tokens (o200k_base)`.
   - Сохранить поведение без изменений (контракты, ответы, диагностики, completion, runtime semantics).
+  - Вынести тесты из production файлов в отдельные test paths (запрет inline `#[cfg(test)] mod tests` в production scope).
   - Ввести повторяемый workflow для кампаний декомпозиции крупных файлов.
 - Non-Goals:
   - Перепроектирование доменных алгоритмов.
@@ -17,6 +19,11 @@ Change охватывает 26 production Rust файлов с размером 
 - Scope только production Rust код:
   - include: `*.rs` в рабочих crate;
   - exclude: `third_party/**`, `**/target/**`, `**/node_modules/**`, `tests/benches/examples/fixtures/mocks`.
+- LLM-readability budgets для target files кампании:
+  - `LOC <= 800`;
+  - `bytes <= 80 KiB`;
+  - `tokens <= 12000` в `o200k_base`.
+- Enforcement по бюджетам выполняется отдельным script-based gate (локально), без обязательного CI workflow на текущем этапе.
 - Behavior-preserving:
   - одинаковые публичные ответы для одинаковых входов;
   - отсутствие intentional изменений в diagnosics/completion/API semantics.
@@ -35,6 +42,12 @@ Change охватывает 26 production Rust файлов с размером 
 
 - Decision: enforce size gate (`<=1000 LOC`) как объективный критерий завершения.
   - Why: исключает “частично разрезали, но red-zone осталась”.
+
+- Decision: enforce LLM-budget gate (`<=800 LOC`, `<=80 KiB`, `<=12000 o200k tokens`) для target files.
+  - Why: ключевая цель change — чтобы LLM могла читать/редактировать файл целиком без упора в лимиты.
+
+- Decision: inline test modules в production `.rs` запрещены; тесты выносятся в отдельные test paths.
+  - Why: снижение шумового объёма production файлов и стабилизация LLM-прохода по коду.
 
 ## Refactor Strategy
 1. Зафиксировать inventory и разбить на batch’и по подсистемам.
@@ -56,6 +69,8 @@ Change охватывает 26 production Rust файлов с размером 
    - `backend/src/bin/lsp_server/handlers/completion.rs`
    - `backend/src/bin/lsp_server/commands/configuration.rs`
    - `backend/src/presentation/web/handlers.rs`
+   - `backend/src/bin/intellisense_perf.rs`
+   - `backend/src/perf_gate_evaluator.rs`
 2. Runtime services and observability:
    - `bsl-runtime/src/system/basic_observability.rs`
    - `bsl-runtime/src/application/type_system/services/completion_service.rs`
@@ -81,6 +96,8 @@ Change охватывает 26 production Rust файлов с размером 
    - `bsl-agent/src/server/mod.rs`
 
 ## Validation Matrix (behavior-preserving)
+- LLM/readability gate:
+  - `python3 scripts/check-rust-file-llm-budget.py` (или эквивалентный специальный script-based gate)
 - Compilation/lint:
   - `cargo fmt --all -- --check`
   - `cargo clippy --workspace --all-targets -- -D warnings`
@@ -97,6 +114,8 @@ Change охватывает 26 production Rust файлов с размером 
   - Mitigation: parity matrix до/после и запрет изменения acceptance assets.
 - Риск: формальное снижение LOC без реального снижения связности.
   - Mitigation: требовать явные module responsibilities в каждом batch.
+- Риск: file укладывается в LOC, но остаётся тяжёлым по токенам/байтам для LLM.
+  - Mitigation: обязательный multi-metric budget gate (LOC + bytes + tokens).
 
 ## Rollback
 - Rollback на уровне batch/PR: откат последнего batch без затрагивания остальных.

@@ -1,12 +1,13 @@
 # Change: Декомпозиция production Rust файлов >1000 LOC (behavior-preserving)
 
 ## Why
-В репозитории сейчас 26 production Rust файлов (без `third_party/**`, `target/**`, `node_modules/**`, `tests/benches/examples`), которые превышают 1000 строк.
+В репозитории сейчас 28 production Rust файлов (без `third_party/**`, `target/**`, `node_modules/**`, `tests/benches/examples`), которые превышают 1000 строк.
 
 Это создаёт системные риски:
 - рост связности и смешение ответственностей;
 - усложнение безопасных изменений и code review;
 - локальные правки в hot paths становятся дороже и менее предсказуемыми.
+- LLM не может стабильно читать и править такие файлы целиком без упора в токен-бюджет.
 
 Запрошен независимый change со строгим требованием: декомпозировать все такие файлы без изменения поведения.
 
@@ -14,6 +15,8 @@
 - **ADDED (dev-workflow)**: policy, что production Rust файлы MUST быть `<=1000 LOC` (с явными исключениями только для generated/vendor paths вне production scope).
 - **ADDED (dev-workflow)**: behavior-preserving refactor contract для кампаний декомпозиции крупных файлов.
 - **ADDED (dev-workflow)**: обязательный inventory + parity validation matrix для декомпозиции крупных файлов.
+- **ADDED (dev-workflow)**: LLM-friendly budgets для целевых файлов large-file кампании: `<=800 LOC`, `<=80 KiB`, `<=12000 tokens (o200k_base)`.
+- **ADDED (dev-workflow)**: тесты из production файлов MUST выноситься в отдельные test paths (inline `#[cfg(test)] mod tests` в production scope не допускается).
 - **PLANNED REFACTOR SCOPE**: поэтапная декомпозиция всех текущих production `.rs` файлов >1000 LOC.
 
 Текущий target inventory (`LOC > 1000`):
@@ -43,6 +46,8 @@
 - `backend/src/presentation/web/handlers.rs`
 - `bsl-runtime/src/data/loaders/config_metadata_parser/discovery.rs`
 - `bsl-runtime/src/data/loaders/config_metadata_parser/converter.rs`
+- `backend/src/bin/intellisense_perf.rs`
+- `backend/src/perf_gate_evaluator.rs`
 
 ## Impact
 - Affected specs:
@@ -55,7 +60,7 @@
   - `semantic-diagnostics/src/**`
   - `bsl-repository/src/**`
 - Affected tooling:
-  - size-gate для production Rust файлов (`LOC <= 1000`)
+  - специальный script-based gate для budgets production Rust файлов (`LOC/bytes/tokens`)
   - parity validation matrix для behavior-preserving refactor
 
 ## Non-Goals

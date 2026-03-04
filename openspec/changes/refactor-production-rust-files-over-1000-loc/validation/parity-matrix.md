@@ -397,3 +397,18 @@ Conclusion for task `21s.3`:
 - backend and bsl-agent production scopes now satisfy "no inline test modules" policy;
 - runtime code behavior preserved (test extraction only, compile checks green);
 - remaining violations are outside backend/bsl-agent and will be handled by next scope tasks.
+
+## Progress evidence (Global task `21s.4` bsl-runtime test extraction)
+
+Executed on 2026-03-04:
+
+1. `cargo fmt --all` -> passed after extracting inline test modules.
+2. `cargo test -p bsl-runtime --locked --no-run` -> passed (runtime unit-test binary compiled).
+3. `rg -n --glob '!**/tests/**' --glob '!**/tests.rs' --glob '!**/*_test.rs' '^\\s*mod\\s+[A-Za-z0-9_]*tests\\s*\\{' bsl-runtime/src` -> no matches (inline test modules removed from bsl-runtime production files).
+4. `uv run --with tiktoken python3 scripts/check-rust-file-llm-budget.py --report openspec/changes/refactor-production-rust-files-over-1000-loc/validation/inventory.md --json` -> executed in blocking mode; global inline-test violations reduced `72 -> 45`.
+
+Conclusion for task `21s.4`:
+
+- bsl-runtime production scope now satisfies "no inline test modules" policy;
+- extraction is behavior-preserving for runtime code path (test-only relocation + compile verification);
+- remaining violations are in other crates/scopes and covered by next task.

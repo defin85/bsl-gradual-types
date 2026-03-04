@@ -269,6 +269,8 @@ python3 scripts/check-perf-gate-architecture.py
 - hard policy для production scope: `LOC <= 1000`;
 - LLM-friendly budget для target files: `LOC <= 800`, `bytes <= 80 KiB`,
   `tokens <= 12000` (`o200k_base`).
+- policy на перенос тестов: inline test modules (`mod tests { ... }`,
+  `mod *_tests { ... }`) в production `.rs` запрещены.
 
 **Важно:** скрипт требует `tiktoken`.
 
@@ -281,6 +283,10 @@ uv run --with tiktoken python3 scripts/check-rust-file-llm-budget.py
 ```bash
 uv run --with tiktoken python3 scripts/check-rust-file-llm-budget.py --report artifacts/rust-llm-budget-report.json --json
 ```
+
+В JSON-отчёте inline-test policy отражается в:
+- `counts.inline_test_module_violations`
+- `violations.inline_test_modules[]`
 
 ---
 

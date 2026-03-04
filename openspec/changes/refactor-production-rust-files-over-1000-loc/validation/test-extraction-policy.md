@@ -20,6 +20,15 @@ Required target state:
 
 `rg -n '^\\s*mod\\s+[A-Za-z0-9_]*tests\\s*\\{' backend/src/bin bsl-agent/src bsl-runtime/src analysis-v2/src semantic-diagnostics/src bsl-repository/src`
 
+## Policy gate (fail-closed)
+
+Single-command gate (production scope and exclusions aligned with
+`scripts/check-rust-file-llm-budget.py`):
+
+`uv run --with tiktoken python3 scripts/check-rust-file-llm-budget.py --json`
+
+Gate is blocking when `counts.inline_test_module_violations > 0`.
+
 ## Baseline in target inventory (current)
 
 Files in current large-file target inventory that still contain inline test module blocks:

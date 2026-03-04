@@ -364,3 +364,20 @@ Conclusion for Batch E parity in this change:
 - fail-set for validated backend parity checks matches baseline exactly;
 - no new regressions introduced by Batch E decomposition in validated parity set;
 - remaining failing backend tests are baseline drift outside current refactor scope.
+
+## Progress evidence (Global task `7.2` fail-closed inline-test gate)
+
+Executed on 2026-03-04:
+
+1. `python3 scripts/test-rust-file-llm-budget.py` -> passed (`2 passed`), including regression for inline-test detection.
+2. `uv run --with tiktoken python3 scripts/check-rust-file-llm-budget.py --report openspec/changes/refactor-production-rust-files-over-1000-loc/validation/inventory.md --json` -> failed as expected (blocking mode).
+3. Gate report (`validation/inventory.md`) confirms policy breach details:
+   - `counts.inline_test_module_violations = 87`
+   - `counts.hard_loc_violations = 0`
+   - `counts.target_budget_violations = 0`
+
+Conclusion for task `7.2` gate integration:
+
+- fail-closed gate is implemented and runnable with one command;
+- scope/exclusions are inherited from production-scope policy in `check-rust-file-llm-budget.py`;
+- merge remains blocked until inline test modules are migrated to separate test paths.

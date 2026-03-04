@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -51,6 +52,8 @@ TARGET_FILES = [
     "backend/src/perf_gate_evaluator.rs",
 ]
 
+INLINE_TEST_MODULE_PATTERN = re.compile(r"^\s*mod\s+[A-Za-z0-9_]*tests\s*\{")
+
 
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
@@ -79,6 +82,14 @@ def list_production_rs_files(root: Path) -> list[Path]:
             continue
         files.append(path)
     return files
+
+
+def detect_inline_test_modules(text: str) -> list[dict[str, Any]]:
+    violations: list[dict[str, Any]] = []
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        if INLINE_TEST_MODULE_PATTERN.match(line):
+            violations.append({"line": line_no, "snippet": line.strip()})
+    return violations
 
 
 def parse_args() -> argparse.Namespace:
@@ -157,6 +168,7 @@ def main() -> int:
     production_files = list_production_rs_files(root)
     production_metrics: dict[str, dict[str, Any]] = {}
     hard_loc_violations: list[dict[str, Any]] = []
+    inline_test_module_violations: list[dict[str, Any]] = []
 
     for file_path in production_files:
         rel = file_path.relative_to(root).as_posix()
@@ -173,6 +185,14 @@ def main() -> int:
                     "path": rel,
                     "loc": loc,
                     "max_loc": args.max_production_loc,
+                }
+            )
+        for violation in detect_inline_test_modules(text):
+            inline_test_module_violations.append(
+                {
+                    "path": rel,
+                    "line": violation["line"],
+                    "snippet": violation["snippet"],
                 }
             )
 
@@ -212,7 +232,12 @@ def main() -> int:
             )
 
     report = {
-        "pass": not hard_loc_violations and not target_missing and not target_budget_violations,
+        "pass": (
+            not hard_loc_violations
+            and not target_missing
+            and not target_budget_violations
+            and not inline_test_module_violations
+        ),
         "tokenizer": args.tokenizer,
         "limits": {
             "max_production_loc": args.max_production_loc,
@@ -226,11 +251,13 @@ def main() -> int:
             "target_files_missing": len(target_missing),
             "hard_loc_violations": len(hard_loc_violations),
             "target_budget_violations": len(target_budget_violations),
+            "inline_test_module_violations": len(inline_test_module_violations),
         },
         "violations": {
             "hard_loc": hard_loc_violations,
             "target_missing": target_missing,
             "target_budget": target_budget_violations,
+            "inline_test_modules": inline_test_module_violations,
         },
     }
 
@@ -250,11 +277,21 @@ def main() -> int:
         print(f"- Hard LOC violations: {report['counts']['hard_loc_violations']}")
         print(f"- Target files missing: {report['counts']['target_files_missing']}")
         print(f"- Target budget violations: {report['counts']['target_budget_violations']}")
+        print(
+            "- Inline test module violations: "
+            f"{report['counts']['inline_test_module_violations']}"
+        )
         if hard_loc_violations:
             print("\nHard LOC violations:")
             for item in hard_loc_violations:
                 print(
                     f"  - {item['path']}: loc={item['loc']} > {item['max_loc']}"
+                )
+        if inline_test_module_violations:
+            print("\nInline test module violations:")
+            for item in inline_test_module_violations:
+                print(
+                    f"  - {item['path']}:{item['line']} -> {item['snippet']}"
                 )
         if target_missing:
             print("\nMissing target files:")

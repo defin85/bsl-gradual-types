@@ -1,0 +1,905 @@
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseChangedRange {
+    pub start_byte: u32,
+    pub old_end_byte: u32,
+    pub new_end_byte: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ParseSnapshot {
+    pub file_id: FileId,
+    pub file_version: i32,
+    pub parse_result: Arc<bsl_syntax::ast::ParseResult>,
+    pub line_index: Arc<LineIndex>,
+    pub backend_tree: Arc<Tree>,
+    pub changed_ranges: Arc<Vec<ParseChangedRange>>,
+    pub produced_at_millis: u128,
+    pub backend_tree_hash: u64,
+    pub incremental: bool,
+    pub fallback_reason: Option<Arc<str>>,
+}
+
+#[salsa::input]
+pub struct SourceFile {
+    pub id: u32,
+    #[returns(ref)]
+    pub text: Arc<str>,
+    pub version: i32,
+    #[returns(ref)]
+    pub path: Arc<str>,
+}
+
+#[salsa::input]
+pub struct DepsSnapshot {
+    #[returns(ref)]
+    pub id: DepsSnapshotId,
+    #[returns(ref)]
+    pub data: DepsDataSnapshot,
+}
+
+#[salsa::input]
+pub struct SettingsSnapshot {
+    #[returns(ref)]
+    pub id: SettingsId,
+    pub diagnostics_detail_level: DetailLevel,
+}
+
+#[derive(Debug, Clone)]
+pub struct ParseResultSnapshot(Arc<bsl_syntax::ast::ParseResult>);
+
+impl PartialEq for ParseResultSnapshot {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for ParseResultSnapshot {}
+
+unsafe impl salsa::Update for ParseResultSnapshot {
+    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
+        // Always treat the parse result as updated. This avoids coupling the syntax layer
+        // to salsa (via `Update`/`PartialEq` requirements) and is safe for correctness.
+        let old_value: &mut Self = unsafe { &mut *old_pointer };
+        *old_value = new_value;
+        true
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SemanticProgramSnapshot(Arc<SemanticProgram>);
+
+impl PartialEq for SemanticProgramSnapshot {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for SemanticProgramSnapshot {}
+
+unsafe impl salsa::Update for SemanticProgramSnapshot {
+    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
+        let old_value: &mut Self = unsafe { &mut *old_pointer };
+        *old_value = new_value;
+        true
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SyntaxDiagnosticsSnapshot(Arc<Vec<ParseError>>);
+
+impl PartialEq for SyntaxDiagnosticsSnapshot {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for SyntaxDiagnosticsSnapshot {}
+
+unsafe impl salsa::Update for SyntaxDiagnosticsSnapshot {
+    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
+        let old_value: &mut Self = unsafe { &mut *old_pointer };
+        *old_value = new_value;
+        true
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SemanticDiagnosticsSnapshot(Arc<Vec<TypeDiagnostic>>);
+
+impl PartialEq for SemanticDiagnosticsSnapshot {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for SemanticDiagnosticsSnapshot {}
+
+unsafe impl salsa::Update for SemanticDiagnosticsSnapshot {
+    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
+        let old_value: &mut Self = unsafe { &mut *old_pointer };
+        *old_value = new_value;
+        true
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TypeIndexSnapshot {
+    index: Arc<type_inference_v2::TypeIndex>,
+    parse_result_ms: u128,
+    build_profile: type_inference_v2::TypeIndexBuildProfile,
+    query_profile: TypeIndexQueryProfile,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TypeIndexQueryProfile {
+    inputs_ms: u128,
+    parse_result_query_ms: u128,
+    build_ms: u128,
+    total_ms: u128,
+}
+
+impl TypeIndexSnapshot {
+    fn new(
+        index: Arc<type_inference_v2::TypeIndex>,
+        parse_result_ms: u128,
+        build_profile: type_inference_v2::TypeIndexBuildProfile,
+        query_profile: TypeIndexQueryProfile,
+    ) -> Self {
+        Self {
+            index,
+            parse_result_ms,
+            build_profile,
+            query_profile,
+        }
+    }
+
+    fn index(&self) -> Arc<type_inference_v2::TypeIndex> {
+        self.index.clone()
+    }
+
+    fn parse_result_ms(&self) -> u128 {
+        self.parse_result_ms
+    }
+
+    fn build_profile(&self) -> type_inference_v2::TypeIndexBuildProfile {
+        self.build_profile
+    }
+
+    fn query_profile(&self) -> TypeIndexQueryProfile {
+        self.query_profile
+    }
+}
+
+impl PartialEq for TypeIndexSnapshot {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.index, &other.index)
+    }
+}
+
+impl Eq for TypeIndexSnapshot {}
+
+unsafe impl salsa::Update for TypeIndexSnapshot {
+    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
+        let old_value: &mut Self = unsafe { &mut *old_pointer };
+        *old_value = new_value;
+        true
+    }
+}
+
+#[salsa::tracked]
+pub fn file_text_len(db: &dyn salsa::Database, file: SourceFile) -> usize {
+    file.text(db).len()
+}
+
+#[salsa::tracked]
+pub fn line_index(db: &dyn salsa::Database, file: SourceFile) -> Arc<LineIndex> {
+    Arc::new(LineIndex::new(file.text(db)))
+}
+
+#[salsa::tracked]
+pub fn parse_result(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    settings: SettingsSnapshot,
+) -> ParseResultSnapshot {
+    cancellation_checkpoint(db);
+    let _settings_id = settings.id(db);
+    let text = file.text(db);
+    cancellation_checkpoint(db);
+    let options = ParseOptions::default();
+    match bsl_syntax::parse(text, &options) {
+        Ok(parsed) => ParseResultSnapshot(Arc::new(parsed)),
+        Err(err) => ParseResultSnapshot(Arc::new(bsl_syntax::ast::ParseResult::with_errors(
+            bsl_syntax::ast::Program {
+                statements: Vec::new(),
+            },
+            vec![bsl_syntax::ast::ParseError {
+                message: err.to_string(),
+                span: bsl_syntax::ast::Span::stub(),
+                error_type: bsl_syntax::ast::ErrorType::ParseError,
+                related: Vec::new(),
+            }],
+        ))),
+    }
+}
+
+#[salsa::tracked]
+pub fn ir(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    deps: DepsSnapshot,
+    settings: SettingsSnapshot,
+) -> SemanticProgramSnapshot {
+    cancellation_checkpoint(db);
+    let _deps_id = deps.id(db);
+    let deps_data = deps.data(db).0.clone();
+
+    let parsed = parse_result(db, file, settings).0;
+    cancellation_checkpoint(db);
+    let source = file.text(db).to_string();
+    let file_path = file.path(db).to_string();
+    cancellation_checkpoint(db);
+
+    SemanticProgramSnapshot(build_ir_from_parsed(parsed, &source, &file_path, deps_data))
+}
+
+#[salsa::tracked]
+pub fn syntax_diagnostics(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    settings: SettingsSnapshot,
+) -> SyntaxDiagnosticsSnapshot {
+    cancellation_checkpoint(db);
+    let _settings_id = settings.id(db);
+    let parsed = parse_result(db, file, settings).0;
+    cancellation_checkpoint(db);
+    SyntaxDiagnosticsSnapshot(Arc::new(parsed.syntax_errors.clone()))
+}
+
+#[salsa::tracked]
+pub fn semantic_diagnostics(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    deps: DepsSnapshot,
+    settings: SettingsSnapshot,
+) -> SemanticDiagnosticsSnapshot {
+    cancellation_checkpoint(db);
+    let _deps_id = deps.id(db);
+    let _settings_id = settings.id(db);
+    let deps_data = deps.data(db).0.clone();
+    cancellation_checkpoint(db);
+
+    let parsed = parse_result(db, file, settings).0;
+    cancellation_checkpoint(db);
+    if !parsed.syntax_errors.is_empty()
+        && !syntax_errors_only_in_directives(file.text(db), &parsed.syntax_errors)
+    {
+        return SemanticDiagnosticsSnapshot(Arc::new(Vec::new()));
+    }
+
+    let program = ir(db, file, deps, settings).0;
+    let type_index = type_index(db, file, deps, settings).index();
+    cancellation_checkpoint(db);
+    let detail_level = settings.diagnostics_detail_level(db);
+    let diagnostics = collect_semantic_diagnostics_from_program(
+        parsed,
+        program,
+        type_index,
+        deps_data,
+        detail_level,
+    );
+    SemanticDiagnosticsSnapshot(Arc::new(diagnostics))
+}
+
+#[salsa::tracked]
+pub fn semantic_diagnostics_flow_sensitive(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    deps: DepsSnapshot,
+    settings: SettingsSnapshot,
+) -> SemanticDiagnosticsSnapshot {
+    cancellation_checkpoint(db);
+    let _deps_id = deps.id(db);
+    let _settings_id = settings.id(db);
+
+    let base = semantic_diagnostics(db, file, deps, settings).0;
+    cancellation_checkpoint(db);
+
+    // Если base пустой из-за синтаксических ошибок, всё равно не пытаемся добавлять flow-sensitive.
+    if base.is_empty() {
+        return SemanticDiagnosticsSnapshot(base);
+    }
+
+    let deps_data = deps.data(db).0.clone();
+    let program = ir(db, file, deps, settings).0;
+    let type_index = type_index(db, file, deps, settings).index();
+    cancellation_checkpoint(db);
+    let resolver = deps_data
+        .resolver
+        .clone()
+        .unwrap_or_else(|| Arc::new(TypeResolver::new(deps_data.repository.clone())));
+
+    let mut diagnostics = (*base).clone();
+    cancellation_checkpoint(db);
+    diagnostics.extend(flow_sensitive_null_safety_diagnostics(
+        &program,
+        &type_index,
+        resolver.as_ref(),
+    ));
+    diagnostics.sort_by(|a, b| {
+        let severity_key = |severity: DiagnosticSeverity| match severity {
+            DiagnosticSeverity::Error => 0_u8,
+            DiagnosticSeverity::Warning => 1_u8,
+            DiagnosticSeverity::Info => 2_u8,
+            DiagnosticSeverity::Hint => 3_u8,
+        };
+        (
+            a.span.start,
+            a.span.end,
+            severity_key(a.severity),
+            &a.message,
+        )
+            .cmp(&(
+                b.span.start,
+                b.span.end,
+                severity_key(b.severity),
+                &b.message,
+            ))
+    });
+
+    SemanticDiagnosticsSnapshot(Arc::new(diagnostics))
+}
+
+fn flow_type_at_byte_offset_impl(
+    program: &SemanticProgram,
+    byte_offset: u32,
+    base_type: TypeResolution,
+) -> Option<TypeResolution> {
+    let (variable_name, _) = program.find_variable_at_byte_offset(byte_offset)?;
+    let cfg = program.cfg.as_ref()?;
+    let node_id = cfg.node_at_byte_offset(byte_offset, NodeAtByteOffsetBias::PreferLeft)?;
+
+    let mut ctx = FlowAnalysisContext::new();
+    ctx.set_variable(variable_name.as_str(), base_type.clone());
+
+    // Убедимся, что все переменные из type-guards присутствуют в контексте (хотя бы как Unknown),
+    // иначе NarrowingEngine может не применить narrowing к нужной переменной.
+    for node in cfg.nodes() {
+        match &node.kind {
+            CfgNodeKind::Conditional { condition } | CfgNodeKind::LoopHeader { condition } => {
+                for guard in detect_type_guards(condition) {
+                    let var = guard.variable_name();
+                    if ctx.get_variable(var).is_none() {
+                        ctx.set_variable(var, TypeResolution::unknown());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut engine = NarrowingEngine::new(cfg.clone());
+    engine.build_narrowing_contexts(ctx);
+
+    let narrowed = engine
+        .get_context(node_id)
+        .and_then(|ctx| ctx.get_type(variable_name.as_str()))
+        .cloned()
+        .filter(|t| !t.is_unknown())?;
+
+    (narrowed.type_name() != base_type.type_name()).then_some(narrowed)
+}
+
+fn flow_sensitive_null_safety_diagnostics(
+    program: &SemanticProgram,
+    type_index: &type_inference_v2::TypeIndex,
+    resolver: &TypeResolver,
+) -> Vec<TypeDiagnostic> {
+    use bsl_shared::domain::types::{ConcreteType, PlatformType, ResolutionResult, SpecialType};
+    use bsl_shared::ir::CfgNodeKind;
+    use bsl_shared::ir::SemanticNodeKind;
+
+    let Some(cfg) = program.cfg.as_ref() else {
+        return Vec::new();
+    };
+
+    fn merge_var(ctx: &mut FlowAnalysisContext, name: &str, res: TypeResolution) {
+        let mut other = FlowAnalysisContext::new();
+        other.set_variable(name, res);
+        ctx.merge(&other);
+    }
+
+    let mut ctx = FlowAnalysisContext::new();
+
+    fn is_nullish_resolution(resolution: &TypeResolution) -> bool {
+        if resolution.result.is_nullable() {
+            return true;
+        }
+        matches!(
+            &resolution.result,
+            ResolutionResult::Concrete(ConcreteType::Special(SpecialType::Null))
+                | ResolutionResult::Concrete(ConcreteType::Special(SpecialType::Undefined))
+        ) || matches!(
+            &resolution.result,
+            ResolutionResult::Concrete(ConcreteType::Platform(PlatformType { name })) if {
+                let lower = name.to_lowercase();
+                lower == "null" || lower == "неопределено" || lower == "undefined"
+            }
+        )
+    }
+
+    fn leading_ident_token_lower(value: &str) -> Option<String> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        let token: String = trimmed
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        (!token.is_empty()).then(|| token.to_lowercase())
+    }
+
+    // Минимальная и надёжная база для null-safety: фиксируем явные присваивания
+    // `Null` / `Неопределено` из CFG (не завися от совпадения span-ов IR и type_index).
+    for node in cfg.nodes() {
+        let CfgNodeKind::Assignment { variable, value } = &node.kind else {
+            continue;
+        };
+
+        let Some(v) = leading_ident_token_lower(value) else {
+            continue;
+        };
+        if v == "null" {
+            merge_var(
+                &mut ctx,
+                variable.as_str(),
+                TypeResolution::primitive("Null"),
+            );
+        } else if v == "неопределено" || v == "undefined" {
+            merge_var(
+                &mut ctx,
+                variable.as_str(),
+                TypeResolution::primitive("Неопределено"),
+            );
+        }
+    }
+
+    // Инициализация контекста из type_index по rhs-span присваивания.
+    for node in &program.nodes {
+        let SemanticNodeKind::Assignment {
+            variable,
+            value_span,
+            ..
+        } = &node.kind
+        else {
+            continue;
+        };
+        let Some(resolution) = type_index_resolution_for_span(type_index, *value_span) else {
+            continue;
+        };
+        if is_nullish_resolution(&resolution) {
+            merge_var(&mut ctx, variable.as_str(), resolution);
+        }
+    }
+
+    for node in &program.nodes {
+        let SemanticNodeKind::VariableDeclaration {
+            name, type_hint, ..
+        } = &node.kind
+        else {
+            continue;
+        };
+        if let Some(hint) = type_hint
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            let resolved = resolver.resolve_expression_sync(hint);
+            if !resolved.is_unknown() {
+                merge_var(&mut ctx, name.as_str(), resolved);
+            }
+        }
+    }
+
+    let mut analyzer = NullSafetyAnalyzer::new(cfg.clone());
+    let result = analyzer.analyze(&ctx);
+
+    result
+        .warnings
+        .into_iter()
+        .filter_map(|w| {
+            let span = w.span.or_else(|| {
+                cfg.node_ir_node_index(w.node_id)
+                    .and_then(|idx| program.nodes.get(idx).map(|n| n.span))
+            })?;
+            Some(TypeDiagnostic {
+                severity: DiagnosticSeverity::Warning,
+                message: w.message,
+                span,
+            })
+        })
+        .collect()
+}
+
+fn populate_assignment_value_hints(
+    program: &SemanticProgram,
+    type_index: &type_inference_v2::TypeIndex,
+    out: &mut SemanticTypeHints,
+) {
+    use bsl_shared::ir::SemanticNodeKind;
+
+    for node in &program.nodes {
+        let SemanticNodeKind::Assignment { value_span, .. } = &node.kind else {
+            continue;
+        };
+        if let Some(resolution) = type_index_resolution_for_span(type_index, *value_span) {
+            out.assignment_value_type_by_span
+                .insert(node.span, resolution);
+        }
+    }
+}
+
+fn populate_call_and_member_hints(
+    program: &bsl_syntax::ast::Program,
+    type_index: &type_inference_v2::TypeIndex,
+    out: &mut SemanticTypeHints,
+) {
+    use bsl_syntax::ast::{Expression, Statement};
+
+    fn visit_statement(
+        stmt: &Statement,
+        type_index: &type_inference_v2::TypeIndex,
+        out: &mut SemanticTypeHints,
+    ) {
+        match stmt {
+            Statement::VarDeclaration { .. } => {}
+            Statement::Assignment { target, value, .. } => {
+                visit_expression(target, type_index, out);
+                visit_expression(value, type_index, out);
+            }
+            Statement::If {
+                condition,
+                then_body,
+                else_body,
+                ..
+            } => {
+                visit_expression(condition, type_index, out);
+                for stmt in then_body {
+                    visit_statement(stmt, type_index, out);
+                }
+                if let Some(else_body) = else_body {
+                    for stmt in else_body {
+                        visit_statement(stmt, type_index, out);
+                    }
+                }
+            }
+            Statement::While {
+                condition, body, ..
+            } => {
+                visit_expression(condition, type_index, out);
+                for stmt in body {
+                    visit_statement(stmt, type_index, out);
+                }
+            }
+            Statement::For {
+                start, end, body, ..
+            } => {
+                visit_expression(start, type_index, out);
+                visit_expression(end, type_index, out);
+                for stmt in body {
+                    visit_statement(stmt, type_index, out);
+                }
+            }
+            Statement::ForEach {
+                collection, body, ..
+            } => {
+                visit_expression(collection, type_index, out);
+                for stmt in body {
+                    visit_statement(stmt, type_index, out);
+                }
+            }
+            Statement::Return {
+                value: Some(value), ..
+            } => {
+                visit_expression(value, type_index, out);
+            }
+            Statement::Return { value: None, .. } => {}
+            Statement::Try {
+                try_body,
+                except_body,
+                ..
+            } => {
+                for stmt in try_body {
+                    visit_statement(stmt, type_index, out);
+                }
+                for stmt in except_body {
+                    visit_statement(stmt, type_index, out);
+                }
+            }
+            Statement::Call { expression, .. } => {
+                visit_expression(expression, type_index, out);
+            }
+            Statement::Execute { code, .. } => {
+                visit_expression(code, type_index, out);
+            }
+            Statement::RaiseError {
+                message: Some(message),
+                ..
+            } => {
+                visit_expression(message, type_index, out);
+            }
+            Statement::RaiseError { message: None, .. } => {}
+            Statement::AddHandler { event, handler, .. }
+            | Statement::RemoveHandler { event, handler, .. } => {
+                visit_expression(event, type_index, out);
+                visit_expression(handler, type_index, out);
+            }
+            Statement::Await { expression, .. } => {
+                visit_expression(expression, type_index, out);
+            }
+            Statement::FunctionDecl { body, .. } | Statement::ProcedureDecl { body, .. } => {
+                for stmt in body {
+                    visit_statement(stmt, type_index, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn visit_expression(
+        expr: &Expression,
+        type_index: &type_inference_v2::TypeIndex,
+        out: &mut SemanticTypeHints,
+    ) {
+        match expr {
+            Expression::Call {
+                function,
+                args,
+                span,
+            } => {
+                let key_span = call_ir_span(function, *span);
+
+                let arg_types: Vec<TypeResolution> = args
+                    .iter()
+                    .filter_map(|arg| {
+                        type_index_resolution_for_span(type_index, expression_span(arg))
+                    })
+                    .collect();
+                out.call_arg_types_by_span.insert(key_span, arg_types);
+
+                if let Expression::PropertyAccess { object, .. } = function.as_ref() {
+                    if let Some(receiver_type) =
+                        type_index_resolution_for_span(type_index, expression_span(object))
+                    {
+                        out.call_receiver_type_by_span
+                            .insert(key_span, receiver_type);
+                    }
+                }
+
+                visit_expression(function, type_index, out);
+                for arg in args {
+                    visit_expression(arg, type_index, out);
+                }
+            }
+            Expression::PropertyAccess { object, span, .. } => {
+                if let Some(receiver_type) =
+                    type_index_resolution_for_span(type_index, expression_span(object))
+                {
+                    out.member_access_object_type_by_span
+                        .insert(*span, receiver_type);
+                }
+                visit_expression(object, type_index, out);
+            }
+            Expression::New { args, .. } => {
+                for arg in args {
+                    visit_expression(arg, type_index, out);
+                }
+            }
+            Expression::Binary { left, right, .. } => {
+                visit_expression(left, type_index, out);
+                visit_expression(right, type_index, out);
+            }
+            Expression::Unary { operand, .. } => {
+                visit_expression(operand, type_index, out);
+            }
+            Expression::Ternary {
+                condition,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                visit_expression(condition, type_index, out);
+                visit_expression(then_expr, type_index, out);
+                visit_expression(else_expr, type_index, out);
+            }
+            Expression::IndexAccess { object, index, .. } => {
+                visit_expression(object, type_index, out);
+                visit_expression(index, type_index, out);
+            }
+            Expression::Await { expression, .. } => {
+                visit_expression(expression, type_index, out);
+            }
+            _ => {}
+        }
+    }
+
+    fn call_ir_span(function: &Expression, span: bsl_shared::ir::Span) -> bsl_shared::ir::Span {
+        match function {
+            Expression::PropertyAccess { object, .. } => match object.as_ref() {
+                Expression::Identifier { span: obj_span, .. } => {
+                    bsl_shared::ir::Span::new(obj_span.start, span.end)
+                }
+                _ => span,
+            },
+            _ => span,
+        }
+    }
+
+    fn expression_span(expr: &Expression) -> bsl_shared::ir::Span {
+        match expr {
+            Expression::Identifier { span, .. }
+            | Expression::String { span, .. }
+            | Expression::Number { span, .. }
+            | Expression::Boolean { span, .. }
+            | Expression::Date { span, .. }
+            | Expression::Call { span, .. }
+            | Expression::Binary { span, .. }
+            | Expression::Unary { span, .. }
+            | Expression::Ternary { span, .. }
+            | Expression::New { span, .. }
+            | Expression::PropertyAccess { span, .. }
+            | Expression::IndexAccess { span, .. }
+            | Expression::Await { span, .. } => *span,
+        }
+    }
+
+    for stmt in &program.statements {
+        visit_statement(stmt, type_index, out);
+    }
+}
+
+fn type_index_resolution_for_span(
+    type_index: &type_inference_v2::TypeIndex,
+    span: bsl_shared::ir::Span,
+) -> Option<TypeResolution> {
+    if let Some(exact) = type_index.type_for_exact_span(span) {
+        return Some(exact);
+    }
+    if span.start == span.end {
+        return type_index.type_at_byte_offset(span.start);
+    }
+    let end_inclusive = span.end.saturating_sub(1);
+    type_index
+        .type_at_byte_offset(end_inclusive)
+        .or_else(|| type_index.type_at_byte_offset(span.start))
+}
+
+#[salsa::tracked]
+pub fn type_index(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    deps: DepsSnapshot,
+    settings: SettingsSnapshot,
+) -> TypeIndexSnapshot {
+    let started = Instant::now();
+    cancellation_checkpoint(db);
+    let inputs_started = Instant::now();
+    let _deps_id = deps.id(db);
+    let _settings_id = settings.id(db);
+    let deps_data = deps.data(db).0.clone();
+    let inputs_ms = inputs_started.elapsed().as_millis();
+    let parse_result_started = Instant::now();
+    let parsed = parse_result(db, file, settings).0;
+    let parse_result_ms = parse_result_started.elapsed().as_millis();
+    cancellation_checkpoint(db);
+    let build_started = Instant::now();
+    let mut profiled = type_inference_v2::build_type_index_with_path_profiled(
+        &parsed.program,
+        file.path(db).as_ref(),
+        deps_data,
+    );
+    let build_ms = build_started.elapsed().as_millis();
+    let total_ms = started.elapsed().as_millis();
+    if profiled.profile.total_ms < total_ms {
+        profiled.profile.total_ms = total_ms;
+    }
+    TypeIndexSnapshot::new(
+        Arc::new(profiled.index),
+        parse_result_ms,
+        profiled.profile,
+        TypeIndexQueryProfile {
+            inputs_ms,
+            parse_result_query_ms: parse_result_ms,
+            build_ms,
+            total_ms,
+        },
+    )
+}
+
+fn syntax_errors_only_in_directives(code: &str, errors: &[ParseError]) -> bool {
+    let index = LineIndex::new(code);
+    errors.iter().all(|err| {
+        let (line_no, _) = index.byte_offset_to_utf16_position(code, err.span.start as usize);
+        let line = index.line_text(code, line_no as usize);
+        line.trim_start().starts_with('&')
+    })
+}
+
+fn build_ir_from_parsed(
+    parsed: Arc<bsl_syntax::ast::ParseResult>,
+    source: &str,
+    file_path: &str,
+    deps_data: Arc<SemanticDeps>,
+) -> Arc<SemanticProgram> {
+    match AstToIrConverter::convert_with_resolver(
+        parsed.program.clone(),
+        source.to_string(),
+        file_path.to_string(),
+        deps_data.repository.clone(),
+        deps_data.signature_index.clone(),
+        deps_data.resolver.clone(),
+    ) {
+        Ok(program) => Arc::new(program),
+        Err(_err) => {
+            let mut program = SemanticProgram::new();
+            program.source_info.path = file_path.to_string();
+            program.source_info.content_hash = hash_content(source);
+            Arc::new(program)
+        }
+    }
+}
+
+fn collect_semantic_diagnostics_from_program(
+    parsed: Arc<bsl_syntax::ast::ParseResult>,
+    program: Arc<SemanticProgram>,
+    type_index: Arc<type_inference_v2::TypeIndex>,
+    deps_data: Arc<SemanticDeps>,
+    detail_level: DetailLevel,
+) -> Vec<TypeDiagnostic> {
+    let mut type_hints = SemanticTypeHints::default();
+    populate_assignment_value_hints(&program, &type_index, &mut type_hints);
+    populate_call_and_member_hints(&parsed.program, &type_index, &mut type_hints);
+
+    let resolver = deps_data
+        .resolver
+        .clone()
+        .unwrap_or_else(|| Arc::new(TypeResolver::new(deps_data.repository.clone())));
+    let metadata_lookup = TypeMetadataLookup::new(deps_data.repository.clone());
+    let validator = TypeValidator::new(&metadata_lookup);
+
+    let mut visitor = SemanticValidationVisitor::with_detail_level(
+        &validator,
+        &program,
+        resolver.as_ref(),
+        &deps_data.signature_index,
+        detail_level,
+    );
+    visitor.set_platform_signatures_loaded(deps_data.platform_signatures_loaded);
+    visitor.set_type_hints(Some(&type_hints));
+    walk_program(&program, &mut visitor);
+
+    let mut diagnostics = visitor.into_errors();
+    diagnostics.sort_by(|a, b| {
+        let severity_key = |severity: DiagnosticSeverity| match severity {
+            DiagnosticSeverity::Error => 0_u8,
+            DiagnosticSeverity::Warning => 1_u8,
+            DiagnosticSeverity::Info => 2_u8,
+            DiagnosticSeverity::Hint => 3_u8,
+        };
+        (
+            a.span.start,
+            a.span.end,
+            severity_key(a.severity),
+            &a.message,
+        )
+            .cmp(&(
+                b.span.start,
+                b.span.end,
+                severity_key(b.severity),
+                &b.message,
+            ))
+    });
+    diagnostics
+}
+

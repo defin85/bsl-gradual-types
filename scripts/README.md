@@ -262,6 +262,28 @@ python3 scripts/check-perf-gate-architecture.py
 
 ---
 
+### `check-rust-file-llm-budget.py` - LLM-friendly gate для production Rust файлов
+
+**Назначение:** fail-closed проверка large-file budget для кампании
+`refactor-production-rust-files-over-1000-loc`:
+- hard policy для production scope: `LOC <= 1000`;
+- LLM-friendly budget для target files: `LOC <= 800`, `bytes <= 80 KiB`,
+  `tokens <= 12000` (`o200k_base`).
+
+**Важно:** скрипт требует `tiktoken`.
+
+**Использование (рекомендуется):**
+```bash
+uv run --with tiktoken python3 scripts/check-rust-file-llm-budget.py
+```
+
+**С JSON-отчётом:**
+```bash
+uv run --with tiktoken python3 scripts/check-rust-file-llm-budget.py --report artifacts/rust-llm-budget-report.json --json
+```
+
+---
+
 ### `run-intellisense-tests.sh` - Smoke/full тесты IntelliSense
 
 **Назначение:** стабильный набор тестов M8 для локального полного прогона; подходит для CI при подключении.

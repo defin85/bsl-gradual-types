@@ -1,0 +1,672 @@
+use super::*;
+
+impl IntellisenseV2Facade {
+    pub async fn snapshot_for_operation(&self, operation: SemanticOperation) -> SemanticSnapshot {
+        let queue_priority = RuntimeQueuePriority::for_operation(operation);
+        let (analysis, index_snapshot, deps_id) = self
+            .snapshot_with_deps_with_priority(ObservabilityOrigin::Runtime, queue_priority)
+            .await;
+        SemanticSnapshot {
+            analysis,
+            index_snapshot,
+            deps_id,
+        }
+    }
+
+    /// Canonical stateful operation preparation for adapters:
+    /// wait-for-version -> snapshot-with-deps -> deps guard check.
+    pub async fn prepare_stateful_operation(
+        &self,
+        context: &ExecutionContext,
+        observability: Option<&SystemCoordinator>,
+    ) -> Result<PreparedOperationSnapshot, SemanticOutcome> {
+        let interactive_knobs = interactive_freshness_knobs(context.operation, observability);
+        let fastpath_preconditions = completion_fastpath_preconditions(
+            context.operation,
+            context.completion_large_churn_active,
+            context.min_file_version,
+            context.expected_deps_id.is_some(),
+            interactive_knobs.is_some(),
+        );
+        let queue_priority = RuntimeQueuePriority::for_operation(context.operation);
+        let mut wait_budget_exhausted = false;
+        let mut stale_served = false;
+
+        let wait_elapsed = if let Some(min_file_version) = context.min_file_version {
+            let started = Instant::now();
+            let wait_ok = if let Some(knobs) = interactive_knobs {
+                match tokio::time::timeout(
+                    knobs.wait_budget,
+                    self.wait_for_file_version_with_priority(
+                        context.origin,
+                        queue_priority,
+                        context.file_id,
+                        min_file_version,
+                    ),
+                )
+                .await
+                {
+                    Ok(wait_ok) => wait_ok,
+                    Err(_) => {
+                        wait_budget_exhausted = true;
+                        if let Some(coordinator) = observability {
+                            coordinator.record_intellisense_v2_interactive_wait_budget_exhausted();
+                        }
+                        true
+                    }
+                }
+            } else {
+                self.wait_for_file_version_with_priority(
+                    context.origin,
+                    queue_priority,
+                    context.file_id,
+                    min_file_version,
+                )
+                .await
+            };
+            let elapsed = started.elapsed();
+            if let Some(coordinator) = observability {
+                coordinator.record_intellisense_v2_wait_for_file_version_with_origin_and_mode(
+                    context.origin.as_str(),
+                    context.operation.as_str(),
+                    context.completion_mode,
+                    elapsed,
+                );
+            }
+            if !wait_ok {
+                return Err(SemanticOutcome::StaleVersion);
+            }
+            Some(elapsed)
+        } else {
+            None
+        };
+
+        let snapshot_started = Instant::now();
+        let (analysis, index_snapshot, deps_id) = self
+            .snapshot_with_deps_with_priority(context.origin, queue_priority)
+            .await;
+        let snapshot_elapsed = snapshot_started.elapsed();
+        if let Some(coordinator) = observability {
+            coordinator.record_intellisense_v2_snapshot_latency_with_origin_and_mode(
+                context.origin.as_str(),
+                context.operation.as_str(),
+                context.completion_mode,
+                snapshot_elapsed,
+            );
+        }
+
+        if let Some(expected_deps_id) = context.expected_deps_id.as_ref() {
+            if expected_deps_id != &deps_id {
+                return Err(SemanticOutcome::MissingDeps);
+            }
+        }
+
+        let observed_file_version = analysis.file_version(context.file_id).ok().flatten();
+        let observed_settings_id = analysis.settings_id().ok();
+        if let (Some(min_file_version), Some(knobs)) = (context.min_file_version, interactive_knobs)
+        {
+            if wait_budget_exhausted {
+                let completion_fallback_metric_enabled =
+                    fastpath_preconditions.operation_is_completion;
+                let record_completion_fallback_unavailable = || {
+                    if completion_fallback_metric_enabled {
+                        if let Some(coordinator) = observability {
+                            coordinator.record_intellisense_v2_completion_fallback_unavailable();
+                        }
+                    }
+                };
+
+                if !fastpath_preconditions.can_attempt_bounded_stale_fallback() {
+                    record_completion_fallback_unavailable();
+                    return Err(SemanticOutcome::StaleVersion);
+                }
+                let Some(expected_deps_id) = context.expected_deps_id.as_ref() else {
+                    record_completion_fallback_unavailable();
+                    return Err(SemanticOutcome::StaleVersion);
+                };
+                if expected_deps_id != &deps_id {
+                    record_completion_fallback_unavailable();
+                    return Err(SemanticOutcome::StaleVersion);
+                }
+                if observed_settings_id.as_ref() != Some(&context.settings.settings_id) {
+                    record_completion_fallback_unavailable();
+                    return Err(SemanticOutcome::StaleVersion);
+                }
+                if let Some(observed_version) = observed_file_version {
+                    if observed_version < min_file_version {
+                        let lag_versions = min_file_version.saturating_sub(observed_version);
+                        if let Some(coordinator) = observability {
+                            coordinator.record_intellisense_v2_revision_lag(lag_versions);
+                        }
+
+                        if let Err(outcome) = self
+                            .validate_stale_fallback(
+                                context.file_id,
+                                min_file_version,
+                                observed_version,
+                                knobs,
+                            )
+                            .await
+                        {
+                            record_completion_fallback_unavailable();
+                            return Err(outcome);
+                        }
+                        stale_served = true;
+                        if let Some(coordinator) = observability {
+                            coordinator.record_intellisense_v2_interactive_stale_served();
+                            if completion_fallback_metric_enabled {
+                                coordinator.record_intellisense_v2_completion_stale_fallback();
+                            }
+                        }
+                    }
+                } else {
+                    record_completion_fallback_unavailable();
+                    return Err(SemanticOutcome::StaleVersion);
+                }
+            } else if observed_file_version.is_some_and(|version| version < min_file_version) {
+                return Err(SemanticOutcome::StaleVersion);
+            }
+        }
+
+        Ok(PreparedOperationSnapshot {
+            snapshot: SemanticSnapshot {
+                analysis,
+                index_snapshot,
+                deps_id,
+            },
+            wait_elapsed,
+            snapshot_elapsed,
+            wait_budget_exhausted,
+            stale_served,
+            completion_churn_fastpath_active: fastpath_preconditions.churn_aware_fastpath_active(),
+            observed_file_version,
+        })
+    }
+
+    async fn validate_stale_fallback(
+        &self,
+        file_id: FileId,
+        requested_version: i32,
+        observed_version: i32,
+        knobs: InteractiveFreshnessKnobs,
+    ) -> Result<(), SemanticOutcome> {
+        let version_gap = requested_version.saturating_sub(observed_version);
+        if version_gap > knobs.max_stale_version_gap {
+            return Err(SemanticOutcome::StaleVersion);
+        }
+
+        let Some(revision_state) = self.file_revision_state(file_id).await else {
+            return Err(SemanticOutcome::StaleVersion);
+        };
+        if revision_state.version != observed_version {
+            return Err(SemanticOutcome::StaleVersion);
+        }
+        if revision_state.updated_at.elapsed() > knobs.max_stale_age {
+            return Err(SemanticOutcome::StaleVersion);
+        }
+
+        Ok(())
+    }
+
+    /// Canonical ephemeral operation preparation for one-shot adapters:
+    /// snapshot build -> deps guard check.
+    #[allow(clippy::too_many_arguments)]
+    pub fn prepare_ephemeral_operation(
+        context: &ExecutionContext,
+        deps_id: DepsSnapshotId,
+        deps: Arc<SemanticDeps>,
+        index_snapshot: Arc<IndexSnapshot>,
+        file_text: Arc<str>,
+        file_version: i32,
+        file_path: Arc<str>,
+        observability: Option<&SystemCoordinator>,
+    ) -> Result<PreparedOperationSnapshot, SemanticOutcome> {
+        let snapshot_started = Instant::now();
+        let snapshot = Self::ephemeral_snapshot(
+            deps_id,
+            deps,
+            index_snapshot,
+            context.settings.clone(),
+            context.file_id,
+            file_text,
+            file_version,
+            file_path,
+        );
+        let snapshot_elapsed = snapshot_started.elapsed();
+        if let Some(coordinator) = observability {
+            coordinator.record_intellisense_v2_snapshot_latency_with_origin(
+                context.origin.as_str(),
+                context.operation.as_str(),
+                snapshot_elapsed,
+            );
+        }
+
+        if let Some(expected_deps_id) = context.expected_deps_id.as_ref() {
+            if expected_deps_id != &snapshot.deps_id {
+                return Err(SemanticOutcome::MissingDeps);
+            }
+        }
+
+        Ok(PreparedOperationSnapshot {
+            snapshot,
+            wait_elapsed: None,
+            snapshot_elapsed,
+            wait_budget_exhausted: false,
+            stale_served: false,
+            completion_churn_fastpath_active: false,
+            observed_file_version: Some(file_version),
+        })
+    }
+
+    /// Run an optional semantic query with shared stage-level observability hooks.
+    pub fn run_optional_query<T, E, F>(
+        context: &ExecutionContext,
+        stage: ObservabilityStage,
+        analysis: &AnalysisV2,
+        observability: Option<&SystemCoordinator>,
+        query: F,
+    ) -> Result<Option<T>, E>
+    where
+        F: FnOnce(&AnalysisV2) -> Result<Option<T>, E>,
+    {
+        let started = Instant::now();
+        let raw_result = query(analysis);
+        let elapsed = started.elapsed();
+        let query_cancelled = raw_result.is_err();
+        let report_cancelled =
+            query_cancelled && !matches!(context.cancellation, CancellationPolicy::Ignore);
+        let result = match raw_result {
+            Ok(value) => Ok(value),
+            Err(err) => match context.cancellation {
+                CancellationPolicy::RespectClientAbort => Err(err),
+                CancellationPolicy::BestEffort | CancellationPolicy::Ignore => Ok(None),
+            },
+        };
+
+        if let Some(coordinator) = observability {
+            match stage {
+                ObservabilityStage::IrQuery => {
+                    coordinator.record_intellisense_v2_ir_query_latency_with_origin_and_mode(
+                        context.origin.as_str(),
+                        context.operation.as_str(),
+                        context.completion_mode,
+                        elapsed,
+                    );
+                    if report_cancelled {
+                        coordinator.record_intellisense_v2_ir_query_cancelled_with_origin_and_mode(
+                            context.origin.as_str(),
+                            context.operation.as_str(),
+                            context.completion_mode,
+                        );
+                    }
+                }
+                ObservabilityStage::SyntaxDiagnosticsQuery => {
+                    coordinator
+                        .record_intellisense_v2_syntax_diagnostics_query_latency_with_origin(
+                            context.origin.as_str(),
+                            elapsed,
+                        );
+                    if report_cancelled {
+                        coordinator.record_intellisense_v2_query_cancelled_with_origin(
+                            context.origin.as_str(),
+                            "syntax",
+                        );
+                    }
+                }
+                ObservabilityStage::SemanticDiagnosticsQuery => {
+                    coordinator
+                        .record_intellisense_v2_semantic_diagnostics_query_latency_with_origin(
+                            context.origin.as_str(),
+                            elapsed,
+                        );
+                    if report_cancelled {
+                        coordinator.record_intellisense_v2_query_cancelled_with_origin(
+                            context.origin.as_str(),
+                            "semantic",
+                        );
+                    }
+                }
+                ObservabilityStage::ParseResultQuery => {
+                    coordinator
+                        .record_intellisense_v2_parse_result_query_latency_with_origin_operation_and_mode(
+                            context.origin.as_str(),
+                            context.operation.as_str(),
+                            context.completion_mode,
+                            elapsed,
+                        );
+                    if report_cancelled {
+                        coordinator.record_intellisense_v2_query_cancelled_with_origin_and_mode(
+                            context.origin.as_str(),
+                            "other",
+                            context.completion_mode,
+                        );
+                    }
+                }
+                ObservabilityStage::RuntimeQueueWait
+                | ObservabilityStage::RuntimeWaitForFileVersion
+                | ObservabilityStage::RuntimeSnapshotWithDeps => {}
+            }
+        }
+
+        result
+    }
+
+    /// Run parse_result according to centralized lazy policy and shared stage hooks.
+    pub fn run_parse_result_query<T, E, F>(
+        context: &ExecutionContext,
+        analysis: &AnalysisV2,
+        ir_available: bool,
+        observability: Option<&SystemCoordinator>,
+        query: F,
+    ) -> Result<Option<T>, E>
+    where
+        F: FnOnce(&AnalysisV2) -> Result<Option<T>, E>,
+    {
+        if !should_query_parse_result(context.operation, ir_available) {
+            return Ok(None);
+        }
+        Self::run_optional_query(
+            context,
+            ObservabilityStage::ParseResultQuery,
+            analysis,
+            observability,
+            query,
+        )
+    }
+
+    pub fn run_ir_query_singleflight(
+        context: &ExecutionContext,
+        analysis: &AnalysisV2,
+        observability: Option<&SystemCoordinator>,
+        file_id: FileId,
+    ) -> Result<Option<Arc<SemanticProgram>>, SingleflightQueryError> {
+        let key = Self::singleflight_revision_key(analysis, file_id, SingleflightQueryKind::Ir);
+        Self::run_optional_query(
+            context,
+            ObservabilityStage::IrQuery,
+            analysis,
+            observability,
+            |_analysis| {
+                if let Some(key) = key {
+                    Self::run_singleflight_query(
+                        &IR_FLIGHTS,
+                        key,
+                        context.origin,
+                        SingleflightQueryKind::Ir,
+                        observability,
+                        || {
+                            analysis
+                                .ir(file_id)
+                                .map_err(|_| SingleflightQueryError::Cancelled)
+                        },
+                    )
+                } else {
+                    if let Some(coordinator) = observability {
+                        coordinator
+                            .record_intellisense_v2_singleflight_key_unavailable_with_origin(
+                                context.origin.as_str(),
+                                SingleflightQueryKind::Ir.as_str(),
+                            );
+                    }
+                    analysis
+                        .ir(file_id)
+                        .map_err(|_| SingleflightQueryError::Cancelled)
+                }
+            },
+        )
+    }
+
+    pub fn run_parse_result_query_singleflight(
+        context: &ExecutionContext,
+        analysis: &AnalysisV2,
+        ir_available: bool,
+        observability: Option<&SystemCoordinator>,
+        file_id: FileId,
+    ) -> Result<Option<Arc<bsl_syntax::ast::ParseResult>>, SingleflightQueryError> {
+        if !should_query_parse_result(context.operation, ir_available) {
+            return Ok(None);
+        }
+        let key =
+            Self::singleflight_revision_key(analysis, file_id, SingleflightQueryKind::ParseResult);
+        Self::run_optional_query(
+            context,
+            ObservabilityStage::ParseResultQuery,
+            analysis,
+            observability,
+            |_analysis| {
+                if let Some(key) = key {
+                    Self::run_singleflight_query(
+                        &PARSE_RESULT_FLIGHTS,
+                        key,
+                        context.origin,
+                        SingleflightQueryKind::ParseResult,
+                        observability,
+                        || {
+                            analysis
+                                .parse_result(file_id)
+                                .map_err(|_| SingleflightQueryError::Cancelled)
+                        },
+                    )
+                } else {
+                    if let Some(coordinator) = observability {
+                        coordinator
+                            .record_intellisense_v2_singleflight_key_unavailable_with_origin(
+                                context.origin.as_str(),
+                                SingleflightQueryKind::ParseResult.as_str(),
+                            );
+                    }
+                    analysis
+                        .parse_result(file_id)
+                        .map_err(|_| SingleflightQueryError::Cancelled)
+                }
+            },
+        )
+    }
+
+    pub fn run_syntax_diagnostics_query_singleflight(
+        context: &ExecutionContext,
+        analysis: &AnalysisV2,
+        observability: Option<&SystemCoordinator>,
+        file_id: FileId,
+    ) -> Result<Option<Arc<Vec<ParseError>>>, SingleflightQueryError> {
+        let key = Self::singleflight_revision_key(
+            analysis,
+            file_id,
+            SingleflightQueryKind::SyntaxDiagnostics,
+        );
+        Self::run_optional_query(
+            context,
+            ObservabilityStage::SyntaxDiagnosticsQuery,
+            analysis,
+            observability,
+            |_analysis| {
+                if let Some(key) = key {
+                    Self::run_singleflight_query(
+                        &SYNTAX_DIAGNOSTICS_FLIGHTS,
+                        key,
+                        context.origin,
+                        SingleflightQueryKind::SyntaxDiagnostics,
+                        observability,
+                        || {
+                            analysis
+                                .syntax_diagnostics(file_id)
+                                .map_err(|_| SingleflightQueryError::Cancelled)
+                        },
+                    )
+                } else {
+                    if let Some(coordinator) = observability {
+                        coordinator
+                            .record_intellisense_v2_singleflight_key_unavailable_with_origin(
+                                context.origin.as_str(),
+                                SingleflightQueryKind::SyntaxDiagnostics.as_str(),
+                            );
+                    }
+                    analysis
+                        .syntax_diagnostics(file_id)
+                        .map_err(|_| SingleflightQueryError::Cancelled)
+                }
+            },
+        )
+    }
+
+    fn singleflight_revision_key(
+        analysis: &AnalysisV2,
+        file_id: FileId,
+        query_kind: SingleflightQueryKind,
+    ) -> Option<SingleflightRevisionKey> {
+        let file_version = analysis.file_version(file_id).ok().flatten()?;
+        let file_signature = Self::singleflight_file_signature(analysis, file_id)?;
+        let (deps_id, settings_id) = if Self::singleflight_requires_snapshot_identity(query_kind) {
+            (
+                Some(analysis.deps_id().ok()?),
+                Some(analysis.settings_id().ok()?),
+            )
+        } else {
+            (None, None)
+        };
+        Some(SingleflightRevisionKey {
+            file_id,
+            file_version,
+            file_signature,
+            deps_id,
+            settings_id,
+            query_kind,
+        })
+    }
+
+    pub(super) fn singleflight_requires_snapshot_identity(
+        query_kind: SingleflightQueryKind,
+    ) -> bool {
+        matches!(query_kind, SingleflightQueryKind::Ir)
+    }
+
+    fn singleflight_file_signature(analysis: &AnalysisV2, file_id: FileId) -> Option<String> {
+        if let Some(path) = analysis.file_path(file_id).ok().flatten() {
+            return Some(format!("path:{path}"));
+        }
+        let text = analysis.file_text(file_id).ok().flatten()?;
+        Some(format!("text:{}", blake3::hash(text.as_bytes()).to_hex()))
+    }
+
+    pub(super) fn run_singleflight_query<T>(
+        flights: &OnceLock<SingleflightMap<T>>,
+        key: SingleflightRevisionKey,
+        origin: ObservabilityOrigin,
+        query_kind: SingleflightQueryKind,
+        observability: Option<&SystemCoordinator>,
+        query: impl FnOnce() -> Result<Option<T>, SingleflightQueryError>,
+    ) -> Result<Option<T>, SingleflightQueryError>
+    where
+        T: Clone,
+    {
+        let flights = flights.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+        let (flight, is_leader) = {
+            let mut guard = flights
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(existing) = guard.get(&key) {
+                (existing.clone(), false)
+            } else {
+                let created = Arc::new(SingleflightFlight::new());
+                guard.insert(key.clone(), created.clone());
+                (created, true)
+            }
+        };
+
+        if is_leader {
+            if let Some(coordinator) = observability {
+                coordinator.record_intellisense_v2_singleflight_leader_with_origin(
+                    origin.as_str(),
+                    query_kind.as_str(),
+                );
+            }
+            let result = match catch_unwind(AssertUnwindSafe(query)) {
+                Ok(result) => result,
+                Err(_panic_payload) => Err(SingleflightQueryError::Cancelled),
+            };
+            {
+                let mut state = flight
+                    .state
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                state.terminal_outcome = Some(match &result {
+                    Ok(value) => SingleflightTerminalOutcome::Success(value.clone()),
+                    Err(err) => SingleflightTerminalOutcome::Error(*err),
+                });
+                state.in_progress = false;
+            }
+            flight.cv.notify_all();
+            let mut guard = flights
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            guard.remove(&key);
+            result
+        } else {
+            if let Some(coordinator) = observability {
+                coordinator.record_intellisense_v2_singleflight_shared_with_origin(
+                    origin.as_str(),
+                    query_kind.as_str(),
+                );
+            }
+            let wait_started = Instant::now();
+            let mut state = flight
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            while state.in_progress {
+                state = flight
+                    .cv
+                    .wait(state)
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+            }
+            if let Some(coordinator) = observability {
+                coordinator.record_intellisense_v2_singleflight_wait_latency_with_origin(
+                    origin.as_str(),
+                    query_kind.as_str(),
+                    wait_started.elapsed(),
+                );
+            }
+            match state.terminal_outcome.clone() {
+                Some(SingleflightTerminalOutcome::Success(shared)) => Ok(shared),
+                Some(SingleflightTerminalOutcome::Error(err)) => Err(err),
+                None => Err(SingleflightQueryError::Cancelled),
+            }
+        }
+    }
+
+    /// One-shot helper for ephemeral adapters (e.g. web handlers).
+    /// Builds a semantic snapshot without creating a long-lived writer-thread runtime.
+    #[allow(clippy::too_many_arguments)]
+    pub fn ephemeral_snapshot(
+        deps_id: DepsSnapshotId,
+        deps: Arc<SemanticDeps>,
+        index_snapshot: Arc<IndexSnapshot>,
+        settings: ExecutionSettings,
+        file_id: FileId,
+        file_text: Arc<str>,
+        file_version: i32,
+        file_path: Arc<str>,
+    ) -> SemanticSnapshot {
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(Change::SetDepsSnapshot {
+            deps_id: deps_id.clone(),
+            deps,
+        });
+        host.apply_change(Change::SetSettingsSnapshot {
+            settings_id: settings.settings_id,
+            diagnostics_detail_level: settings.diagnostics_detail_level,
+        });
+        host.apply_change(Change::SetFile {
+            file_id,
+            text: file_text,
+            version: file_version,
+            path: file_path,
+        });
+
+        SemanticSnapshot {
+            analysis: host.snapshot(),
+            index_snapshot,
+            deps_id,
+        }
+    }
+}

@@ -1,0 +1,710 @@
+use super::*;
+
+pub(super) fn effective_include_flow_sensitive(
+    request_override: Option<bool>,
+    enable_flow_sensitive_setting: bool,
+) -> bool {
+    request_override.unwrap_or(enable_flow_sensitive_setting)
+}
+
+pub(super) fn should_schedule_profile(
+    trigger: bsl_runtime::application::DiagnosticsTrigger,
+    profile: bsl_runtime::application::DiagnosticsProfile,
+    flow_sensitive_enabled: bool,
+) -> bool {
+    if matches!(
+        profile,
+        bsl_runtime::application::DiagnosticsProfile::IdleHeavy
+    ) && !flow_sensitive_enabled
+    {
+        return matches!(
+            trigger,
+            bsl_runtime::application::DiagnosticsTrigger::DidSave
+                | bsl_runtime::application::DiagnosticsTrigger::Idle
+        );
+    }
+    true
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum LargeChurnTransition {
+    None,
+    Entered,
+    Exited,
+}
+
+pub(super) fn should_defer_heavy_diagnostics_for_large_churn(
+    trigger: bsl_runtime::application::DiagnosticsTrigger,
+    profile: bsl_runtime::application::DiagnosticsProfile,
+    large_churn_active: bool,
+) -> bool {
+    large_churn_active
+        && matches!(
+            trigger,
+            bsl_runtime::application::DiagnosticsTrigger::DidChange
+        )
+        && !matches!(profile, bsl_runtime::application::DiagnosticsProfile::Fast)
+}
+
+pub(super) fn lsp_range_change_to_parser_edit(
+    change: &TextDocumentContentChangeEvent,
+) -> Option<bsl_runtime::system::parser_coordinator::TextEdit> {
+    let range = change.range?;
+    Some(bsl_runtime::system::parser_coordinator::TextEdit {
+        start_line: range.start.line,
+        start_utf16_column: range.start.character,
+        old_end_line: range.end.line,
+        old_end_utf16_column: range.end.character,
+        new_text: change.text.clone(),
+    })
+}
+
+pub(super) fn unix_time_millis() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0)
+}
+
+pub(super) fn changed_range_footprint_bytes(
+    range: &bsl_runtime::system::parser_coordinator::ParseChangedRange,
+) -> usize {
+    let old_span =
+        usize::try_from(range.old_end_byte.saturating_sub(range.start_byte)).unwrap_or(0);
+    let new_span =
+        usize::try_from(range.new_end_byte.saturating_sub(range.start_byte)).unwrap_or(0);
+    old_span.max(new_span)
+}
+
+pub(super) fn advance_large_churn_state(
+    state: &mut super::super::ScaleAwareChurnStateV2,
+    now: Instant,
+    is_large_document: bool,
+    knobs: bsl_runtime::application::ScaleAwareDiagnosticsKnobs,
+) -> LargeChurnTransition {
+    if now.duration_since(state.window_started_at) > knobs.churn_window {
+        state.window_started_at = now;
+        state.changes_in_window = 0;
+    }
+
+    state.changes_in_window = state.changes_in_window.saturating_add(1);
+    let was_active = state.large_churn_active;
+    let is_churn = state.changes_in_window >= knobs.churn_min_changes;
+    state.large_churn_active = knobs.enabled && is_large_document && is_churn;
+
+    match (was_active, state.large_churn_active) {
+        (false, true) => LargeChurnTransition::Entered,
+        (true, false) => LargeChurnTransition::Exited,
+        _ => LargeChurnTransition::None,
+    }
+}
+
+pub(super) fn completion_trigger_mode_label(context: Option<&CompletionContext>) -> &'static str {
+    match context.map(|ctx| ctx.trigger_kind) {
+        Some(CompletionTriggerKind::TRIGGER_CHARACTER) => "trigger_character",
+        Some(CompletionTriggerKind::INVOKED) => "invoked",
+        Some(CompletionTriggerKind::TRIGGER_FOR_INCOMPLETE_COMPLETIONS) => "trigger_for_incomplete",
+        Some(_) => "other",
+        None => "none",
+    }
+}
+
+pub(super) const COMPLETION_SHADOW_INTERNAL_TRIGGER_MARKER: &str = "__bsl_shadow_internal__";
+
+pub(super) fn completion_shadow_internal_trigger_payload(value: &str) -> Option<Option<char>> {
+    let payload = value.strip_prefix(COMPLETION_SHADOW_INTERNAL_TRIGGER_MARKER)?;
+    let payload = payload.strip_prefix(':')?;
+    let codepoint = payload.parse::<u32>().ok()?;
+    if codepoint == 0 {
+        Some(None)
+    } else {
+        char::from_u32(codepoint).map(Some)
+    }
+}
+
+pub(super) fn completion_shadow_internal_trigger_value(trigger_char_hint: Option<char>) -> String {
+    format!(
+        "{}:{}",
+        COMPLETION_SHADOW_INTERNAL_TRIGGER_MARKER,
+        trigger_char_hint.map(u32::from).unwrap_or(0),
+    )
+}
+
+pub(super) fn completion_is_shadow_internal_request(context: Option<&CompletionContext>) -> bool {
+    context
+        .and_then(|ctx| ctx.trigger_character.as_deref())
+        .is_some_and(|value| completion_shadow_internal_trigger_payload(value).is_some())
+}
+
+pub(super) fn completion_trigger_character(context: Option<&CompletionContext>) -> Option<char> {
+    context
+        .and_then(|ctx| ctx.trigger_character.as_deref())
+        .and_then(|value| {
+            completion_shadow_internal_trigger_payload(value)
+                .unwrap_or_else(|| value.chars().next())
+        })
+}
+
+pub(super) fn is_completion_identifier_char(ch: char) -> bool {
+    ch == '_' || ch.is_alphanumeric()
+}
+
+pub(super) fn completion_request_targets_member_access(
+    text: &str,
+    position: Position,
+    trigger_char_hint: Option<char>,
+) -> bool {
+    if trigger_char_hint == Some('.') {
+        return true;
+    }
+
+    let Some(line_text) = text.lines().nth(position.line as usize) else {
+        return false;
+    };
+    let column_index =
+        bsl_backend::system::positioning::utf16_to_byte_offset(line_text, position.character);
+    let line_prefix = line_text.get(..column_index).unwrap_or(line_text);
+    let line_prefix = if line_text
+        .get(column_index..)
+        .and_then(|tail| tail.chars().next())
+        == Some('.')
+    {
+        format!("{line_prefix}.")
+    } else {
+        line_prefix.to_string()
+    };
+
+    let trimmed = line_prefix.trim_end();
+    let Some(dot_pos) = trimmed.rfind('.') else {
+        return false;
+    };
+    let after_dot = trimmed[dot_pos + 1..].trim_start();
+    after_dot.is_empty() || after_dot.chars().all(is_completion_identifier_char)
+}
+
+pub(super) fn completion_labels_fingerprint(response: &CompletionResponse) -> Vec<String> {
+    const PARITY_LABELS_LIMIT: usize = 64;
+
+    let mut labels = BTreeSet::new();
+    let push_label = |set: &mut BTreeSet<String>, label: &str| {
+        if set.len() >= PARITY_LABELS_LIMIT {
+            return;
+        }
+        let normalized = label.trim().to_lowercase();
+        if normalized.is_empty() {
+            return;
+        }
+        set.insert(normalized);
+    };
+
+    match response {
+        CompletionResponse::List(list) => {
+            for item in &list.items {
+                push_label(&mut labels, &item.label);
+            }
+        }
+        CompletionResponse::Array(items) => {
+            for item in items {
+                push_label(&mut labels, &item.label);
+            }
+        }
+    }
+
+    labels.into_iter().collect()
+}
+
+pub(super) fn completion_labels_overlap_ratio(lhs: &[String], rhs: &[String]) -> f64 {
+    if lhs.is_empty() || rhs.is_empty() {
+        return 0.0;
+    }
+
+    let left: BTreeSet<&str> = lhs.iter().map(String::as_str).collect();
+    let right: BTreeSet<&str> = rhs.iter().map(String::as_str).collect();
+    let intersection = left.intersection(&right).count();
+    let union = left.union(&right).count();
+    if union == 0 {
+        0.0
+    } else {
+        intersection as f64 / union as f64
+    }
+}
+
+pub(super) fn completion_parity_overlap_bucket(overlap_ratio: f64) -> &'static str {
+    if overlap_ratio <= 0.0 {
+        "none"
+    } else if overlap_ratio < 0.3 {
+        "low"
+    } else {
+        "high"
+    }
+}
+
+pub(super) fn completion_publish_allowed(
+    request_epoch: u64,
+    latest_request_epoch: Option<u64>,
+) -> bool {
+    match latest_request_epoch {
+        Some(latest_epoch) => latest_epoch == request_epoch,
+        None => true,
+    }
+}
+
+pub(super) fn completion_queue_enqueue_failed(
+    outcome: super::super::completion_dispatcher::QueueEnqueueOutcome,
+) -> bool {
+    matches!(
+        outcome,
+        super::super::completion_dispatcher::QueueEnqueueOutcome::Full
+            | super::super::completion_dispatcher::QueueEnqueueOutcome::Closed
+    )
+}
+
+pub(super) fn completion_empty_response(
+    is_incomplete: bool,
+) -> crate::handlers::CompletionResponseWithStats {
+    crate::handlers::CompletionResponseWithStats {
+        response: CompletionResponse::List(CompletionList {
+            is_incomplete,
+            items: Vec::new(),
+        }),
+        stats: None,
+        had_error: false,
+    }
+}
+
+pub(super) fn completion_incomplete_empty_response() -> crate::handlers::CompletionResponseWithStats
+{
+    completion_empty_response(true)
+}
+
+pub(super) fn completion_response_with_cached_items(
+    items: Vec<CompletionItem>,
+) -> crate::handlers::CompletionResponseWithStats {
+    crate::handlers::CompletionResponseWithStats {
+        response: CompletionResponse::List(CompletionList {
+            is_incomplete: true,
+            items,
+        }),
+        stats: None,
+        had_error: false,
+    }
+}
+
+pub(super) fn spawn_completion_refresh_after_stale_fastpath(
+    server: BslLanguageServer,
+    mut params: CompletionParams,
+    trigger_char_hint: Option<char>,
+) {
+    let shadow_trigger = completion_shadow_internal_trigger_value(trigger_char_hint);
+    if let Some(context) = params.context.as_mut() {
+        context.trigger_character = Some(shadow_trigger);
+    } else {
+        params.context = Some(CompletionContext {
+            trigger_kind: CompletionTriggerKind::INVOKED,
+            trigger_character: Some(shadow_trigger),
+        });
+    }
+    tokio::spawn(async move {
+        let _ = server.completion(params).await;
+    });
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CompletionResponseRoute {
+    Legacy,
+    EventDriven,
+}
+
+impl CompletionResponseRoute {
+    pub(super) fn event_driven_guards_enabled(self) -> bool {
+        matches!(self, Self::EventDriven)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct CompletionRoutingPlan {
+    pub(super) response_route: CompletionResponseRoute,
+    pub(super) run_shadow_event_driven: bool,
+}
+
+pub(super) fn completion_dispatch_enabled_for_mode(
+    mode: bsl_runtime::application::CompletionMode,
+) -> bool {
+    !matches!(mode, bsl_runtime::application::CompletionMode::Off)
+}
+
+pub(super) fn completion_canary_routing_key(
+    uri: &Url,
+    position: Position,
+    trigger_mode: &str,
+    trigger_char_hint: Option<char>,
+    version_hint: Option<i32>,
+) -> String {
+    let trigger_char_code = trigger_char_hint.map(u32::from).unwrap_or(0);
+    format!(
+        "{}:{}:{}:{}:{}:{}",
+        uri,
+        position.line,
+        position.character,
+        trigger_mode,
+        trigger_char_code,
+        version_hint.unwrap_or(i32::MIN),
+    )
+}
+
+pub(super) fn completion_route_canary_event_driven(routing_key: &str, canary_percent: u8) -> bool {
+    if canary_percent == 0 {
+        return false;
+    }
+    if canary_percent >= 100 {
+        return true;
+    }
+    (hash_content(routing_key) % 100) < u64::from(canary_percent)
+}
+
+pub(super) fn completion_routing_plan(
+    mode: bsl_runtime::application::CompletionMode,
+    canary_percent: u8,
+    routing_key: &str,
+) -> CompletionRoutingPlan {
+    match mode {
+        bsl_runtime::application::CompletionMode::Off => CompletionRoutingPlan {
+            response_route: CompletionResponseRoute::Legacy,
+            run_shadow_event_driven: false,
+        },
+        bsl_runtime::application::CompletionMode::Shadow => CompletionRoutingPlan {
+            response_route: CompletionResponseRoute::Legacy,
+            run_shadow_event_driven: true,
+        },
+        bsl_runtime::application::CompletionMode::Canary => CompletionRoutingPlan {
+            response_route: if completion_route_canary_event_driven(routing_key, canary_percent) {
+                CompletionResponseRoute::EventDriven
+            } else {
+                CompletionResponseRoute::Legacy
+            },
+            run_shadow_event_driven: false,
+        },
+        bsl_runtime::application::CompletionMode::On => CompletionRoutingPlan {
+            response_route: CompletionResponseRoute::EventDriven,
+            run_shadow_event_driven: false,
+        },
+    }
+}
+
+pub(super) fn completion_observability_mode_label(
+    response_route: CompletionResponseRoute,
+    shadow_internal_request: bool,
+) -> &'static str {
+    if shadow_internal_request {
+        "shadow"
+    } else if response_route.event_driven_guards_enabled() {
+        "event_driven"
+    } else {
+        "legacy"
+    }
+}
+
+pub(super) struct CompletionRequestDropCancelGuard {
+    request_id: Option<String>,
+    cancellation_registry:
+        Arc<super::super::completion_cancellation::CompletionCancellationRegistry>,
+    dispatcher: Arc<super::super::completion_dispatcher::CompletionDispatcherRegistry>,
+    disarmed: bool,
+}
+
+impl CompletionRequestDropCancelGuard {
+    pub(super) fn new(
+        request_id: Option<String>,
+        cancellation_registry: Arc<
+            super::super::completion_cancellation::CompletionCancellationRegistry,
+        >,
+        dispatcher: Arc<super::super::completion_dispatcher::CompletionDispatcherRegistry>,
+    ) -> Self {
+        Self {
+            request_id,
+            cancellation_registry,
+            dispatcher,
+            disarmed: false,
+        }
+    }
+
+    pub(super) fn disarm(&mut self) {
+        self.disarmed = true;
+    }
+}
+
+impl Drop for CompletionRequestDropCancelGuard {
+    fn drop(&mut self) {
+        if self.disarmed {
+            return;
+        }
+        let Some(request_id) = self.request_id.clone() else {
+            return;
+        };
+        let Some(entry) = self.cancellation_registry.cancel_request(&request_id) else {
+            return;
+        };
+        let dispatcher = Arc::clone(&self.dispatcher);
+        tokio::spawn(async move {
+            let _ = dispatcher.emit_cancel(entry.file_id, request_id).await;
+        });
+    }
+}
+
+pub(super) async fn completion_checkpoint_outcome(
+    server: &BslLanguageServer,
+    file_id: bsl_analysis_v2::FileId,
+    request_id: Option<&str>,
+    request_epoch: u64,
+    cancellation_token: Option<&super::super::completion_cancellation::CompletionCancellationToken>,
+    checkpoint: &'static str,
+    cancel_event_emitted: &mut bool,
+) -> Option<&'static str> {
+    if cancellation_token.is_some_and(|token| token.is_cancelled()) {
+        if let Some(request_id) = request_id {
+            if !*cancel_event_emitted {
+                let cancel_ticket = server
+                    .completion_dispatcher_v2
+                    .emit_cancel(file_id, request_id.to_string())
+                    .await;
+                *cancel_event_emitted = true;
+                if completion_queue_enqueue_failed(cancel_ticket.queue_outcome) {
+                    debug!(
+                        file_id = file_id.0,
+                        file_seq = cancel_ticket.file_seq,
+                        request_epoch = cancel_ticket.request_epoch,
+                        request_id = request_id,
+                        queue_outcome = ?cancel_ticket.queue_outcome,
+                        checkpoint,
+                        "completion dispatcher dropped cancel checkpoint event"
+                    );
+                }
+            }
+        }
+        return Some("cancelled");
+    }
+
+    let latest_request_epoch = server
+        .completion_dispatcher_v2
+        .latest_request_epoch(file_id)
+        .await;
+    if !completion_publish_allowed(request_epoch, latest_request_epoch) {
+        return Some("superseded_epoch");
+    }
+
+    None
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn completion_checkpoint_outcome_if_enabled(
+    event_driven_guards_enabled: bool,
+    server: &BslLanguageServer,
+    file_id: bsl_analysis_v2::FileId,
+    request_id: Option<&str>,
+    request_epoch: u64,
+    cancellation_token: Option<&super::super::completion_cancellation::CompletionCancellationToken>,
+    checkpoint: &'static str,
+    cancel_event_emitted: &mut bool,
+) -> Option<&'static str> {
+    if !event_driven_guards_enabled {
+        return None;
+    }
+    completion_checkpoint_outcome(
+        server,
+        file_id,
+        request_id,
+        request_epoch,
+        cancellation_token,
+        checkpoint,
+        cancel_event_emitted,
+    )
+    .await
+}
+
+pub(super) async fn completion_cached_stale_items(
+    server: &BslLanguageServer,
+    file_id: bsl_analysis_v2::FileId,
+    observed_deps_id: &bsl_analysis_v2::DepsSnapshotId,
+    observed_settings_id: Option<&bsl_analysis_v2::SettingsId>,
+    observed_file_version: Option<i32>,
+) -> (Option<Vec<CompletionItem>>, Option<Vec<CompletionItem>>) {
+    let cache = server.completion_stale_fallback_cache_v2.read().await;
+    let strict = match (observed_settings_id, observed_file_version) {
+        (Some(settings_id), Some(file_version)) => cache.get(&file_id).and_then(|entry| {
+            let compatible = entry.deps_id == *observed_deps_id
+                && entry.settings_id == *settings_id
+                && entry.file_version == file_version
+                && !entry.items.is_empty();
+            if compatible {
+                Some(entry.items.clone())
+            } else {
+                None
+            }
+        }),
+        _ => None,
+    };
+    let relaxed = cache.get(&file_id).and_then(|entry| {
+        if entry.items.is_empty() {
+            return None;
+        }
+        let deps_compatible = entry.deps_id == *observed_deps_id;
+        let settings_compatible = observed_settings_id
+            .map(|settings_id| entry.settings_id == *settings_id)
+            .unwrap_or(true);
+        let file_version_compatible = observed_file_version
+            .map(|file_version| entry.file_version == file_version)
+            .unwrap_or(true);
+        if deps_compatible && settings_compatible && file_version_compatible {
+            Some(entry.items.clone())
+        } else {
+            None
+        }
+    });
+    (strict, relaxed)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn resolve_completion_without_ir(
+    server: &BslLanguageServer,
+    file_id: bsl_analysis_v2::FileId,
+    observed_deps_id: bsl_analysis_v2::DepsSnapshotId,
+    observed_settings_id: Option<bsl_analysis_v2::SettingsId>,
+    observed_file_version: Option<i32>,
+    member_access_context: bool,
+    file_content: Arc<str>,
+    file_path: Arc<str>,
+    parse_result: Option<Arc<bsl_syntax::ast::ParseResult>>,
+    member_access_owner_type_hint: Option<bsl_shared::domain::types::TypeResolution>,
+    deps: Arc<bsl_analysis_v2::SemanticDeps>,
+    position: Position,
+    uri: &Url,
+    index_snapshot: &bsl_backend::system::IndexSnapshot,
+    snippet_support: bool,
+    include_flow_sensitive: bool,
+    trigger_char_hint: Option<char>,
+) -> (
+    &'static str,
+    Option<crate::handlers::CompletionResponseWithStats>,
+) {
+    let (strict_stale_cached_items, relaxed_stale_cached_items) = completion_cached_stale_items(
+        server,
+        file_id,
+        &observed_deps_id,
+        observed_settings_id.as_ref(),
+        observed_file_version,
+    )
+    .await;
+
+    let mut degraded = if strict_stale_cached_items.is_none() && member_access_context {
+        crate::handlers::handle_completion_v2_degraded(
+            file_content,
+            file_path,
+            parse_result,
+            member_access_owner_type_hint,
+            deps,
+            position,
+            uri,
+            index_snapshot,
+            snippet_support,
+            include_flow_sensitive,
+            trigger_char_hint,
+        )
+        .await
+    } else {
+        None
+    };
+
+    if let Some(response) = degraded.as_mut() {
+        if let CompletionResponse::List(list) = &mut response.response {
+            list.is_incomplete = true;
+        }
+    }
+
+    let decision = bsl_runtime::application::completion_missing_ir_policy_decision(
+        strict_stale_cached_items.is_some(),
+        member_access_context,
+        degraded.is_some(),
+        relaxed_stale_cached_items.is_some(),
+    );
+
+    match decision {
+        bsl_runtime::application::CompletionMissingIrPolicyDecision::StrictCacheIncomplete => (
+            "degraded_incomplete",
+            Some(completion_response_with_cached_items(
+                strict_stale_cached_items.expect("strict cache decision requires strict items"),
+            )),
+        ),
+        bsl_runtime::application::CompletionMissingIrPolicyDecision::EmptyForNonMemberAccess => {
+            ("missing_ir", Some(completion_empty_response(false)))
+        }
+        bsl_runtime::application::CompletionMissingIrPolicyDecision::DegradedIncomplete => {
+            ("degraded_incomplete", degraded)
+        }
+        bsl_runtime::application::CompletionMissingIrPolicyDecision::RelaxedCacheIncomplete => {
+            server
+                .coordinator
+                .record_intellisense_v2_completion_stale_fallback();
+            (
+                "degraded_incomplete",
+                Some(completion_response_with_cached_items(
+                    relaxed_stale_cached_items
+                        .expect("relaxed cache decision requires relaxed items"),
+                )),
+            )
+        }
+        bsl_runtime::application::CompletionMissingIrPolicyDecision::KeywordFallbackUnavailable => {
+            server
+                .coordinator
+                .record_intellisense_v2_completion_fallback_unavailable();
+            (
+                "fallback_unavailable",
+                Some(crate::handlers::build_keyword_degraded_completion(
+                    snippet_support,
+                )),
+            )
+        }
+    }
+}
+
+pub(super) async fn resolve_cache_config_path(
+    params: &ExecuteCommandParams,
+    config: &tokio::sync::RwLock<Option<LspConfig>>,
+) -> JsonRpcResult<String> {
+    if !params.arguments.is_empty() {
+        let request: CacheCommandParams = serde_json::from_value(params.arguments[0].clone())
+            .map_err(|e| {
+                tower_lsp::jsonrpc::Error::invalid_params(format!("Invalid parameters: {}", e))
+            })?;
+        if let Some(path) = request.configuration_path {
+            return Ok(path);
+        }
+    }
+
+    let config_guard = config.read().await;
+    if let Some(cfg) = config_guard.as_ref() {
+        if let Some(path) = cfg.configuration_path.clone() {
+            return Ok(path);
+        }
+    }
+
+    Err(tower_lsp::jsonrpc::Error::invalid_params(
+        "Missing configuration path",
+    ))
+}
+
+pub(super) fn normalize_lsp_config(config: &mut LspConfig) {
+    config.platform_docs_archive = normalize_optional_string(config.platform_docs_archive.clone());
+    config.configuration_path = normalize_optional_string(config.configuration_path.clone());
+    config.platform_version = normalize_optional_string(config.platform_version.clone());
+}
+
+pub(super) fn normalize_optional_string(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}

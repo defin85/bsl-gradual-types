@@ -11,6 +11,7 @@ export const COMPLETION_TIMELINE_UNSUPPORTED_MESSAGE =
 export interface CompletionTimelineStageViewModel extends CompletionTimelineStageTrace {
     end_offset_ms: number;
     width_percent: number;
+    duration_percent: number;
     is_dominant: boolean;
 }
 
@@ -22,6 +23,8 @@ export interface CompletionTimelineTraceViewModel {
     outcome: string;
     started_at_ms: number;
     total_duration_ms: number;
+    max_stage_end_ms: number;
+    unattributed_overhead_ms: number;
     dominant_stage?: string;
     stages: CompletionTimelineStageViewModel[];
 }
@@ -61,6 +64,17 @@ function stageWidthPercent(
     return Math.min(100, Math.max(raw, 1));
 }
 
+function stageDurationPercent(
+    durationMs: number,
+    totalDurationMs: number
+): number {
+    if (durationMs <= 0 || totalDurationMs <= 0) {
+        return 0;
+    }
+    const raw = (durationMs / totalDurationMs) * 100;
+    return Math.min(100, Math.max(raw, 0));
+}
+
 function mapTrace(trace: CompletionTimelineTrace): CompletionTimelineTraceViewModel {
     const dominantStage = resolveDominantStageName(trace);
     const maxStageEnd = trace.stages.reduce(
@@ -68,6 +82,7 @@ function mapTrace(trace: CompletionTimelineTrace): CompletionTimelineTraceViewMo
         0
     );
     const totalDurationMs = Math.max(trace.total_duration_ms, maxStageEnd, 1);
+    const unattributedOverheadMs = Math.max(trace.total_duration_ms - maxStageEnd, 0);
 
     const stages = trace.stages.map((stage) => {
         const endOffsetMs = stage.started_offset_ms + stage.duration_ms;
@@ -75,12 +90,15 @@ function mapTrace(trace: CompletionTimelineTrace): CompletionTimelineTraceViewMo
             ...stage,
             end_offset_ms: endOffsetMs,
             width_percent: stageWidthPercent(stage.duration_ms, totalDurationMs),
+            duration_percent: stageDurationPercent(stage.duration_ms, totalDurationMs),
             is_dominant: stage.name === dominantStage,
         };
     });
 
     return {
         ...trace,
+        max_stage_end_ms: maxStageEnd,
+        unattributed_overhead_ms: unattributedOverheadMs,
         dominant_stage: dominantStage,
         total_duration_ms: trace.total_duration_ms,
         stages,
@@ -123,4 +141,3 @@ export function mapCompletionTimelineFetchResultToPanelState(
 
     return mapCompletionTimelineResponseToPanelState(result.response, updatedAtMs);
 }
-

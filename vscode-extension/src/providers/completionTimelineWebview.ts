@@ -248,6 +248,13 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             width: 44%;
             font-family: var(--vscode-editor-font-family, 'Cascadia Mono', monospace);
         }
+        .stage-hint {
+            margin-left: 6px;
+            color: var(--vscode-descriptionForeground);
+            cursor: help;
+            font-size: 10px;
+            vertical-align: middle;
+        }
         .stage-status {
             width: 20%;
         }
@@ -255,6 +262,10 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             width: 36%;
             color: var(--vscode-descriptionForeground);
             text-align: right;
+        }
+        .overhead {
+            margin-top: 4px;
+            color: var(--vscode-descriptionForeground);
         }
         .dominant-chip {
             margin-left: 6px;
@@ -307,17 +318,40 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             return 'badge-error';
         }
 
+        function stageDescription(stageName) {
+            const dictionary = {
+                turn_wait: 'Ожидание очереди запроса completion до получения активного turn.',
+                sync_globals: 'Синхронизация глобального состояния и зависимостей перед анализом.',
+                prepare_stateful: 'Подготовка stateful snapshot и runtime-контекста для completion.',
+                query_bundle: 'Основной запросный блок: чтение snapshot/IR и сбор контекста.',
+                snapshot_read: 'Чтение snapshot данных для completion pipeline.',
+                collect: 'Сбор кандидатов completion из доступных источников.',
+                rank: 'Ранжирование кандидатов по релевантности.',
+                format: 'Финальное форматирование кандидатов для LSP response.',
+                response_build: 'Агрегированная сборка LSP completion response.',
+                response_build_other: 'Оставшееся время сборки response, не вошедшее в snapshot/collect/rank/format.',
+                cache_store: 'Запись результата в fallback-кэш для устойчивости последующих запросов.',
+                terminal: 'Финальный terminal-чекпоинт outcome (ok/cancelled/failed).',
+            };
+            return dictionary[stageName] || ('Pipeline stage: ' + stageName);
+        }
+
         function renderStageRow(stage) {
             const dominant = stage.is_dominant
                 ? '<span class="dominant-chip">dominant</span>'
                 : '';
+            const description = stageDescription(stage.name);
             return '<tr>' +
-                '<td class="stage-name">' + escapeHtml(stage.name) + dominant + '</td>' +
+                '<td class="stage-name" title="' + escapeHtml(description) + '">' +
+                    escapeHtml(stage.name) + dominant +
+                    '<span class="stage-hint" title="' + escapeHtml(description) + '">?</span>' +
+                '</td>' +
                 '<td class="stage-status">' + escapeHtml(stage.status) + '</td>' +
                 '<td class="stage-time">' +
                     escapeHtml(stage.started_offset_ms) + 'ms -> ' +
                     escapeHtml(stage.end_offset_ms) + 'ms (' +
-                    escapeHtml(stage.duration_ms) + 'ms)' +
+                    escapeHtml(stage.duration_ms) + 'ms, ' +
+                    escapeHtml(stage.duration_percent.toFixed(1)) + '%)' +
                 '</td>' +
             '</tr>';
         }
@@ -330,13 +364,22 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                     'segment-' + stage.status,
                     stage.is_dominant ? 'segment-dominant' : '',
                 ].join(' ').trim();
-                const title = stage.name + ' (' + stage.duration_ms + 'ms, ' + stage.status + ')';
+                const title = stage.name + ' (' + stage.duration_ms + 'ms, ' +
+                    stage.duration_percent.toFixed(1) + '%, ' + stage.status + '). ' +
+                    stageDescription(stage.name);
                 return '<div class="' + classes + '" style="width:' + stage.width_percent.toFixed(2) + '%" title="' + escapeHtml(title) + '"></div>';
             }).join('');
 
             const stageRows = trace.stages.map(renderStageRow).join('');
             const requestId = trace.request_id || 'n/a';
             const startedAt = new Date(trace.started_at_ms).toLocaleTimeString();
+            const overhead = trace.unattributed_overhead_ms > 0
+                ? '<div class="overhead" title="Total duration minus max stage end offset">' +
+                    'Unattributed overhead: ' + escapeHtml(trace.unattributed_overhead_ms) + 'ms ' +
+                    '(total ' + escapeHtml(trace.total_duration_ms) + 'ms - max_stage_end ' +
+                    escapeHtml(trace.max_stage_end_ms) + 'ms)' +
+                '</div>'
+                : '';
 
             return '<section class="trace">' +
                 '<div class="trace-header">' +
@@ -351,6 +394,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 '</div>' +
                 '<div class="meta">request=' + escapeHtml(requestId) + ' | started=' + escapeHtml(startedAt) + '</div>' +
                 '<div class="timeline-track">' + stageSegments + '</div>' +
+                overhead +
                 '<table class="stage-table"><tbody>' + stageRows + '</tbody></table>' +
             '</section>';
         }

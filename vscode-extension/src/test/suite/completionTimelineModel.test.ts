@@ -39,6 +39,7 @@ suite('Completion Timeline Model Test Suite', () => {
         assert.strictEqual(state.traces[0].trace_id, 'trace-42');
         assert.strictEqual(state.traces[0].stages.length, 3);
         assert.ok(state.traces[0].stages.every((stage) => stage.width_percent >= 0));
+        assert.ok(state.traces[0].stages.every((stage) => stage.duration_percent >= 0));
     });
 
     test('Dominant stage highlight should fallback to max duration stage', () => {
@@ -74,6 +75,43 @@ suite('Completion Timeline Model Test Suite', () => {
         assert.strictEqual(dominant[0].name, 'query_bundle');
     });
 
+    test('Overhead and stage percent should be derived from total duration', () => {
+        const payload: CompletionTimelineResponse = {
+            version: 1,
+            traces: [
+                {
+                    trace_id: 'trace-overhead',
+                    request_id: 'req-overhead',
+                    uri: 'file:///tmp/test.bsl',
+                    trigger_mode: 'invoked',
+                    outcome: 'ok_non_empty',
+                    started_at_ms: 1_700_000_000_500,
+                    total_duration_ms: 50,
+                    dominant_stage: 'query_bundle',
+                    stages: [
+                        { name: 'prepare_stateful', status: 'completed', started_offset_ms: 0, duration_ms: 10 },
+                        { name: 'query_bundle', status: 'completed', started_offset_ms: 10, duration_ms: 30 },
+                        { name: 'response_build_other', status: 'completed', started_offset_ms: 40, duration_ms: 5 },
+                    ],
+                },
+            ],
+        };
+
+        const state = mapCompletionTimelineResponseToPanelState(payload);
+        assert.strictEqual(state.kind, 'ready');
+        if (state.kind !== 'ready') {
+            return;
+        }
+
+        const trace = state.traces[0];
+        assert.strictEqual(trace.max_stage_end_ms, 45);
+        assert.strictEqual(trace.unattributed_overhead_ms, 5);
+
+        const queryBundle = trace.stages.find((stage) => stage.name === 'query_bundle');
+        assert.ok(queryBundle, 'query_bundle stage should exist');
+        assert.ok(queryBundle!.duration_percent > 59.9 && queryBundle!.duration_percent < 60.1);
+    });
+
     test('Legacy unsupported path should map to explicit unsupported state', () => {
         const state = mapCompletionTimelineFetchResultToPanelState({ kind: 'unsupported' });
         assert.strictEqual(state.kind, 'unsupported');
@@ -83,4 +121,3 @@ suite('Completion Timeline Model Test Suite', () => {
         assert.ok(state.message.includes('bsl.getCompletionTimeline'));
     });
 });
-

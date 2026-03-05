@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "lsp-index-state contract v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "surface",
+    "major_version",
+    "schema_version",
+    "compatibility",
+    "request",
+    "response"
+  ],
+  "properties": {
+    "surface": {
+      "type": "string",
+      "const": "lsp-index-state"
+    },
+    "major_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "breaking_change_requires_major_bump",
+        "breaking_change_requires_migration_note"
+      ],
+      "properties": {
+        "breaking_change_requires_major_bump": {
+          "type": "boolean",
+          "const": true
+        },
+        "breaking_change_requires_migration_note": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "params_shape"
+      ],
+      "properties": {
+        "method": {
+          "type": "string",
+          "const": "bsl/getIndexState"
+        },
+        "params_shape": {
+          "type": "string",
+          "const": "empty_object"
+        }
+      }
+    },
+    "response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "states",
+        "active_operations",
+        "nullable_fields",
+        "nullable_fields_are_explicit_null"
+      ],
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "states": {
+          "type": "array",
+          "minItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "idle",
+              "running",
+              "ready",
+              "failed"
+            ]
+          }
+        },
+        "active_operations": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "startup",
+              "buildIndex"
+            ]
+          }
+        },
+        "nullable_fields": {
+          "type": "array",
+          "minItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "active_operation",
+              "operation_id",
+              "message"
+            ]
+          }
+        },
+        "nullable_fields_are_explicit_null": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    }
+  }
+}

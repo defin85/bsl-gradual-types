@@ -82,9 +82,9 @@ export interface GetIndexStateResponse {
     version: number;
     state: IndexStateKind;
     ready: boolean;
-    active_operation?: 'startup' | 'buildIndex';
-    operation_id?: string;
-    message?: string;
+    active_operation: 'startup' | 'buildIndex' | null;
+    operation_id: string | null;
+    message: string | null;
     updated_at_ms: number;
 }
 

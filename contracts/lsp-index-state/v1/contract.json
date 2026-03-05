@@ -1,0 +1,32 @@
+{
+  "surface": "lsp-index-state",
+  "major_version": 1,
+  "schema_version": 1,
+  "compatibility": {
+    "breaking_change_requires_major_bump": true,
+    "breaking_change_requires_migration_note": true
+  },
+  "request": {
+    "method": "bsl/getIndexState",
+    "params_shape": "empty_object"
+  },
+  "response": {
+    "version": 1,
+    "states": [
+      "idle",
+      "running",
+      "ready",
+      "failed"
+    ],
+    "active_operations": [
+      "startup",
+      "buildIndex"
+    ],
+    "nullable_fields": [
+      "active_operation",
+      "operation_id",
+      "message"
+    ],
+    "nullable_fields_are_explicit_null": true
+  }
+}

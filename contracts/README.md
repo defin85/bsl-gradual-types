@@ -18,6 +18,7 @@ Rules:
 Current baseline surfaces:
 
 - `lsp-completion-v2`
+- `lsp-index-state`
 - `observability-completion-v2`
 - `observability-diagnostics-v2`
 - `intellisense-perf-gate`

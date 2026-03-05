@@ -192,6 +192,9 @@ suite('LSP Custom Requests Test Suite', () => {
                     version: 1,
                     state: 'ready',
                     ready: true,
+                    active_operation: null,
+                    operation_id: null,
+                    message: null,
                     updated_at_ms: Date.now()
                 });
             } else if (method === 'bsl/validateMethod') {
@@ -288,6 +291,9 @@ suite('LSP Custom Requests Test Suite', () => {
         assert.strictEqual(result.version, 1, 'Version should be v1');
         assert.strictEqual(typeof result.state, 'string', 'State should be string');
         assert.strictEqual(typeof result.ready, 'boolean', 'Ready should be boolean');
+        assert.strictEqual(result.active_operation, null, 'active_operation should be nullable');
+        assert.strictEqual(result.operation_id, null, 'operation_id should be nullable');
+        assert.strictEqual(result.message, null, 'message should be nullable');
         assert.strictEqual(typeof result.updated_at_ms, 'number', 'updated_at_ms should be number');
     });
 

@@ -26,6 +26,8 @@ LSP MUST предоставлять custom request `bsl/getIndexState` с contra
 - `message`,
 - `updated_at_ms`.
 
+Поля `active_operation`, `operation_id`, `message` MUST присутствовать в ответе всегда; при отсутствии значения сервер MUST возвращать `null` (а не пропускать поле).
+
 Клиент MUST использовать этот контракт как источник истины для startup orchestration full-index.
 
 #### Scenario: Клиент получает `running` состояние активной операции
@@ -33,6 +35,12 @@ LSP MUST предоставлять custom request `bsl/getIndexState` с contra
 - **WHEN** extension вызывает `bsl/getIndexState`
 - **THEN** сервер возвращает `state=running`
 - **AND** указывает `active_operation` и `operation_id`
+
+#### Scenario: Клиент получает `idle` с явными nullable полями
+- **GIVEN** full-index не выполняется и состояние сервера `idle`
+- **WHEN** extension вызывает `bsl/getIndexState`
+- **THEN** сервер возвращает `active_operation=null`, `operation_id=null`, `message=null`
+- **AND** поля присутствуют в payload явно
 
 ### Requirement: Startup orchestration индекса в extension опирается на server-driven index state (MUST)
 VS Code extension MUST принимать решение о запуске full-index на старте по machine-readable состоянию индекса, предоставленному LSP.

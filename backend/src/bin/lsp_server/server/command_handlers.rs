@@ -499,7 +499,12 @@ fn count_bsl_files(root: &Path) -> usize {
 mod tests {
     use super::*;
     use bsl_backend::system::SystemCoordinator;
+    use futures::StreamExt;
     use std::sync::{Arc, Mutex as StdMutex};
+    use tower::Service;
+    use tower::ServiceExt;
+    use tower_lsp::lsp_types::{ClientCapabilities, InitializeParams, InitializedParams};
+    use tower_lsp::jsonrpc::Request;
     use tower_lsp::LspService;
 
     fn create_test_server() -> BslLanguageServer {
@@ -523,6 +528,79 @@ mod tests {
             .clone()
             .expect("test server must be captured");
         server
+    }
+
+    fn create_custom_service(
+    ) -> (
+        LspService<BslLanguageServer>,
+        tokio::task::JoinHandle<()>,
+        BslLanguageServer,
+    ) {
+        let coordinator = Arc::new(SystemCoordinator::new());
+        let holder: Arc<StdMutex<Option<BslLanguageServer>>> = Arc::new(StdMutex::new(None));
+        let (service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            let holder = holder.clone();
+            move |client| {
+                let server = BslLanguageServer::new(client, coordinator.clone());
+                *holder.lock().expect("test server holder lock") = Some(server.clone());
+                server
+            }
+        })
+        .custom_method("bsl/buildIndex", BslLanguageServer::handle_build_index)
+        .custom_method(
+            "bsl/getIndexState",
+            BslLanguageServer::handle_get_index_state,
+        )
+        .finish();
+
+        let drain_task =
+            tokio::spawn(async move { while let Some(_request) = socket.next().await {} });
+        let server = holder
+            .lock()
+            .expect("test server holder lock")
+            .clone()
+            .expect("test server must be captured");
+        (service, drain_task, server)
+    }
+
+    async fn initialize_custom_service(service: &mut LspService<BslLanguageServer>) {
+        let initialize = Request::build("initialize")
+            .id(100)
+            .params(
+                serde_json::to_value(InitializeParams {
+                    capabilities: ClientCapabilities::default(),
+                    ..Default::default()
+                })
+                .expect("InitializeParams"),
+            )
+            .finish();
+        let initialize_response = service
+            .ready()
+            .await
+            .expect("service ready")
+            .call(initialize)
+            .await
+            .expect("initialize request");
+        assert!(
+            initialize_response.is_some(),
+            "initialize should return a response"
+        );
+
+        let initialized = Request::build("initialized")
+            .params(serde_json::to_value(InitializedParams {}).expect("InitializedParams"))
+            .finish();
+        let initialized_response = service
+            .ready()
+            .await
+            .expect("service ready")
+            .call(initialized)
+            .await
+            .expect("initialized notification");
+        assert!(
+            initialized_response.is_none(),
+            "initialized is a notification"
+        );
     }
 
     #[tokio::test]
@@ -624,5 +702,122 @@ mod tests {
                 .is_some_and(|message| message.contains("timeout")),
             "timeout message must be present"
         );
+    }
+
+    #[tokio::test]
+    async fn get_index_state_rpc_returns_nullable_fields_as_explicit_nulls() {
+        let (mut service, drain_task, _server) = create_custom_service();
+        initialize_custom_service(&mut service).await;
+        let request = Request::build("bsl/getIndexState")
+            .id(1)
+            .params(serde_json::json!({}))
+            .finish();
+
+        let response = service
+            .ready()
+            .await
+            .expect("service ready")
+            .call(request)
+            .await
+            .expect("bsl/getIndexState request")
+            .expect("bsl/getIndexState response");
+
+        let value = serde_json::to_value(response).expect("serialize response");
+        let result = value.get("result").expect("result field");
+        let object = result.as_object().expect("result object");
+
+        for field in ["active_operation", "operation_id", "message"] {
+            assert!(
+                object.contains_key(field),
+                "field `{field}` must be present in response"
+            );
+            assert!(
+                object.get(field).is_some_and(|value| value.is_null()),
+                "field `{field}` must be null for idle state"
+            );
+        }
+
+        assert_eq!(
+            object
+                .get("version")
+                .and_then(|value| value.as_u64())
+                .expect("version"),
+            1
+        );
+        assert_eq!(
+            object
+                .get("state")
+                .and_then(|value| value.as_str())
+                .expect("state"),
+            "idle"
+        );
+        assert_eq!(
+            object
+                .get("ready")
+                .and_then(|value| value.as_bool())
+                .expect("ready"),
+            false
+        );
+
+        drain_task.abort();
+    }
+
+    #[tokio::test]
+    async fn build_index_rpc_attaches_to_running_startup_operation() {
+        let (mut service, drain_task, server) = create_custom_service();
+        initialize_custom_service(&mut service).await;
+        let startup_operation_id = match server
+            .begin_full_index_operation(FullIndexOperationKind::Startup, "startup")
+            .await
+        {
+            BeginFullIndexOutcome::Started { operation_id } => operation_id,
+            BeginFullIndexOutcome::AlreadyRunning { .. } => {
+                panic!("startup operation unexpectedly already running")
+            }
+        };
+
+        let request = Request::build("bsl/buildIndex")
+            .id(2)
+            .params(serde_json::json!({ "workspace_path": "/tmp/workspace" }))
+            .finish();
+        let response = service
+            .ready()
+            .await
+            .expect("service ready")
+            .call(request)
+            .await
+            .expect("bsl/buildIndex request")
+            .expect("bsl/buildIndex response");
+        let value = serde_json::to_value(response).expect("serialize response");
+        let result = value.get("result").expect("result field");
+        let object = result.as_object().expect("result object");
+        assert!(
+            object
+                .get("success")
+                .and_then(|value| value.as_bool())
+                .expect("success")
+        );
+        let message = object
+            .get("message")
+            .and_then(|value| value.as_str())
+            .expect("message");
+        assert!(
+            message.contains("already running (attached)"),
+            "unexpected attached message: {}",
+            message
+        );
+
+        let state = server.current_index_state().await;
+        assert_eq!(state.state, "running");
+        assert_eq!(state.active_operation.as_deref(), Some("startup"));
+        assert_eq!(
+            state.operation_id.as_deref(),
+            Some(startup_operation_id.as_str())
+        );
+
+        server
+            .finish_full_index_operation_failed(&startup_operation_id, "cleanup")
+            .await;
+        drain_task.abort();
     }
 }

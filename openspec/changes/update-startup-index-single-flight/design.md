@@ -55,9 +55,9 @@
     - `version: number`
     - `state: "idle" | "running" | "ready" | "failed"`
     - `ready: boolean` (`state == "ready"`)
-    - `active_operation: "startup" | "buildIndex" | null`
-    - `operation_id: string | null`
-    - `message: string | null`
+    - `active_operation: "startup" | "buildIndex" | null` (поле всегда присутствует)
+    - `operation_id: string | null` (поле всегда присутствует)
+    - `message: string | null` (поле всегда присутствует)
     - `updated_at_ms: number`
 
 - Decision 3: full-index должен быть single-flight.

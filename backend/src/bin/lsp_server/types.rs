@@ -71,11 +71,8 @@ pub struct GetIndexStateResponse {
     pub version: u32,
     pub state: String,
     pub ready: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub active_operation: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub operation_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
     pub updated_at_ms: u64,
 }

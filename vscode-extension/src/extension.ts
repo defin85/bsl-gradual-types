@@ -33,8 +33,7 @@ import {
     isMethodNotFoundError,
 } from './lsp/customRequests';
 import {
-    decideStartupIndexAction,
-    isAttachedBuildIndexResponse,
+    orchestrateStartupIndex,
 } from './indexStartupOrchestration';
 import {
     BslOverviewProvider,
@@ -223,96 +222,24 @@ async function initializeIndexIfNeeded() {
     const autoIndexBuild = BslAnalyzerConfig.autoIndexBuild;
     const configPath = BslAnalyzerConfig.configurationPath;
     const platformVersion = BslAnalyzerConfig.platformVersion;
-
-    if (!autoIndexBuild) {
-        outputChannel.appendLine('ℹ️ Auto-index build is disabled');
-        return;
-    }
-
-    if (!configPath) {
-        outputChannel.appendLine('⚠️ Configuration path not set - user must configure it');
-        updateStatusBar('BSL Analyzer: No Config');
-        return;
-    }
-
-    let indexState;
-    try {
-        indexState = await getIndexState({});
-    } catch (error) {
-        if (isMethodNotFoundError(error)) {
-            outputChannel.appendLine(
-                '⚠️ Legacy LSP: bsl/getIndexState is not supported; startup auto-index is fail-closed'
-            );
-            updateStatusBar('$(warning) BSL: Legacy LSP (manual Build Index)');
-            void vscode.window.showWarningMessage(
-                'BSL Analyzer: LSP server не поддерживает bsl/getIndexState. Авто-индексация на старте отключена (fail-closed), используйте Build Index вручную.'
-            );
-            return;
-        }
-
-        outputChannel.appendLine(`❌ Failed to query bsl/getIndexState: ${error}`);
-        updateStatusBar('$(warning) BSL: Index state unavailable');
-        return;
-    }
-
-    const decision = decideStartupIndexAction(indexState);
-    if (decision.action === 'skip') {
-        outputChannel.appendLine('✅ LSP reports ready index state, startup build skipped');
-        updateStatusBar('$(check) BSL: Index Ready');
-        return;
-    }
-
-    if (decision.action === 'attach') {
-        outputChannel.appendLine(
-            `ℹ️ LSP reports running full-index (${indexState.active_operation || 'unknown'}${indexState.operation_id ? `, operation_id=${indexState.operation_id}` : ''}), startup build attached`
-        );
-        updateStatusBar('$(sync~spin) BSL: Index already running');
-        return;
-    }
-
-    // Check if platform documentation is configured
     const platformDocsArchive = getPlatformDocsArchive();
-    if (!platformDocsArchive) {
-        outputChannel.appendLine('❌ Platform documentation not configured - cannot build full index');
-        outputChannel.appendLine('💡 User must specify platform documentation archive in settings');
-        updateStatusBar('BSL Analyzer: No Platform Docs');
-        // Don't build index without platform docs - it would be incomplete
-        return;
-    }
+    const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
 
-    outputChannel.appendLine(`🚀 Building BSL index (reason=${decision.reason})...`);
-
-    // Build index with user-provided configuration
-    try {
-        // P4: не дублируем локальный progress (Notification) поверх server-initiated $/progress.
-        updateStatusBar('$(sync~spin) BSL: Building index...');
-
-        outputChannel.appendLine(`📁 Configuration: ${configPath}`);
-        outputChannel.appendLine(`📚 Platform docs: ${platformDocsArchive}`);
-        outputChannel.appendLine(`🔢 Platform version: ${platformVersion}`);
-
-        // ✅ ЗАМЕНА CLI → LSP: build_unified_index #2
-        const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-        const response = await buildIndex({ workspace_path: workspacePath });
-
-        if (isAttachedBuildIndexResponse(response)) {
-            outputChannel.appendLine(`ℹ️ ${response.message}`);
-            updateStatusBar('$(sync~spin) BSL: Index already running');
-            return;
-        }
-
-        if (!response.success) {
-            updateStatusBar(`$(error) BSL: Index build failed: ${response.message}`);
-            outputChannel.appendLine(`❌ Index build failed: ${response.message}`);
-            return;
-        }
-
-        updateStatusBar('$(check) BSL: Index Ready');
-        outputChannel.appendLine(`✅ Index build completed successfully: ${response.message}`);
-    } catch (error) {
-        updateStatusBar(`$(error) BSL: Index build failed: ${error}`);
-        outputChannel.appendLine(`❌ Index build failed: ${error}`);
-    }
+    await orchestrateStartupIndex({
+        autoIndexBuild,
+        configPath,
+        platformVersion,
+        platformDocsArchive,
+        workspacePath,
+        getIndexState: () => getIndexState({}),
+        buildIndex,
+        isMethodNotFoundError,
+        log: (message) => outputChannel.appendLine(message),
+        setStatus: (status) => updateStatusBar(status),
+        showWarning: async (message) => {
+            await vscode.window.showWarningMessage(message);
+        },
+    });
 }
 
 function showWelcomeMessage() {

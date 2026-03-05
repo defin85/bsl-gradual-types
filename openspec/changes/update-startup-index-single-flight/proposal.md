@@ -18,6 +18,7 @@
 ## Resolved Decisions (2026-03-05)
 - Контракт `bsl/getIndexState` фиксируется в версии `v1` с machine-readable полями:
   - `version`, `state`, `ready`, `active_operation`, `operation_id`, `message`, `updated_at_ms`.
+  - `active_operation`, `operation_id`, `message` всегда присутствуют в payload; при отсутствии значения передаются как `null`.
 - Политика гонки `startup` vs `bsl/buildIndex` фиксируется как strict single-flight:
   - один leader;
   - повторные запросы `bsl/buildIndex` во время `running` attach к текущей операции и не запускают новый full-index.

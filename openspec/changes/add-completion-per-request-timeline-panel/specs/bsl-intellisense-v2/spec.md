@@ -1,7 +1,10 @@
 ## ADDED Requirements
 
 ### Requirement: LSP предоставляет versioned per-request completion timeline контракт (MUST)
-LSP MUST предоставлять custom request `bsl.getCompletionTimeline` с contract version `1`.
+LSP MUST предоставлять server-driven custom request `bsl.getCompletionTimeline` с contract version `1`.
+
+Для VS Code extension в текущей архитектуре этот контракт MUST быть доступен через `workspace/executeCommand` с `command: bsl.getCompletionTimeline`.
+Per-request timeline payload MUST формироваться на стороне LSP и MUST NOT требовать клиентской реконструкции из логов или агрегированных observability-метрик.
 
 Контракт `v1` MUST включать:
 - `version` (числовой номер контракта);
@@ -31,6 +34,12 @@ LSP MUST предоставлять custom request `bsl.getCompletionTimeline` �
 - **WHEN** клиент вызывает `bsl.getCompletionTimeline`
 - **THEN** response содержит partial trace с terminal outcome cancelled/superseded
 - **AND** trace не маркируется как успешный completed
+
+#### Scenario: VS Code клиент получает timeline через `workspace/executeCommand`
+- **GIVEN** VS Code extension запрашивает completion timeline
+- **WHEN** клиент вызывает `workspace/executeCommand` с `command: bsl.getCompletionTimeline`
+- **THEN** LSP возвращает response контракта `v1` с server-generated traces
+- **AND** клиент не строит timeline из текстовых логов или p95/p99 агрегатов
 
 ### Requirement: Timeline stage taxonomy bounded и совместима с completion observability (MUST)
 Stage names в per-request timeline MUST использовать bounded taxonomy, согласованную с completion stage observability.
@@ -65,4 +74,3 @@ Retention default MUST быть задан как `max_entries=200`.
 - **WHEN** completion pipeline формирует ответ пользователю
 - **THEN** completion response возвращается по обычному контракту
 - **AND** ошибка instrumentation не приводит к падению LSP completion handler
-

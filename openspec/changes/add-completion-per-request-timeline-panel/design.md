@@ -32,10 +32,10 @@
 - Плюсы: можно быстро прототипировать.
 - Минусы: хрупко, без контракта, зависит от log formatting, плохо тестируется, ломает deterministic UX.
 
-### Option C (Recommended): Server-side per-request trace buffer + LSP custom request + webview UI
+### Option C (Recommended): Server-side per-request trace buffer + `workspace/executeCommand` request + webview UI
 - Идея:
   - LSP формирует per-request completion traces в bounded ring buffer.
-  - Extension запрашивает traces через versioned custom request.
+  - Extension запрашивает traces через `workspace/executeCommand` с `command: bsl.getCompletionTimeline`.
   - Webview рисует timeline и выделяет dominant stage.
 - Плюсы:
   - точные per-request данные;
@@ -49,6 +49,7 @@
   - Why: только этот вариант обеспечивает корректный per-request UX и формальный контракт.
 
 - Decision 2: контракт `bsl.getCompletionTimeline` фиксируется в `v1`.
+  - Контракт в extension MUST вызываться через `workspace/executeCommand` (`command: bsl.getCompletionTimeline`) и является единственным источником per-request timeline данных.
   - Response v1:
     - `version: 1`;
     - `traces: CompletionTrace[]`.
@@ -74,8 +75,8 @@
 - Decision 5: dominant-stage вычисляется в backend.
   - Единый алгоритм для всех клиентов: максимальный `duration_ms` среди terminal stage entries.
 
-- Decision 6: UI — webview внутри существующего `bslAnalyzer` контейнера.
-  - Причина: timeline с полосами и статусными бейджами неудобно реализуется в tree view.
+- Decision 6: UI — только webview внутри существующего `bslAnalyzer` контейнера.
+  - Timeline capability MUST быть реализован через VS Code `WebviewViewProvider`; tree-based (`TreeDataProvider`) вариант не используется для этой capability.
 
 - Decision 7: legacy compatibility fail-closed.
   - Если `bsl.getCompletionTimeline` недоступен, extension показывает явное сообщение "unsupported by server" и не падает.
@@ -85,7 +86,7 @@
 2. Trace collector создаёт новый trace и фиксирует старт.
 3. На ключевых checkpoints/стадиях пишутся stage entries.
 4. При terminal outcome trace финализируется и кладётся в ring buffer.
-5. Extension запрашивает `bsl.getCompletionTimeline` (latest N или lookup по `request_id`).
+5. Extension запрашивает timeline только через `workspace/executeCommand` с `command: bsl.getCompletionTimeline` (latest N или lookup по `request_id`) и не реконструирует timeline из логов/агрегатов.
 6. Webview отображает timeline, dominant stage и outcome.
 
 ## Failure/Edge Cases
@@ -116,4 +117,3 @@
   - Mitigation: единый bounded taxonomy + контрактные тесты.
 - Риск UI шума при высокой частоте completion.
   - Mitigation: ограничение количества отображаемых traces и ручной/периодический refresh.
-

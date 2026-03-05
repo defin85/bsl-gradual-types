@@ -11,16 +11,18 @@
 - с корректной обработкой cancelled/superseded запросов.
 
 ## What Changes
-- Добавить versioned LSP-контракт per-request timeline для completion (`bsl.getCompletionTimeline`) с bounded retention последних операций.
+- Добавить versioned server-driven LSP-контракт per-request timeline для completion (`bsl.getCompletionTimeline`) с bounded retention последних операций; контракт доступен клиенту через `workspace/executeCommand` (`command: bsl.getCompletionTimeline`).
 - Зафиксировать stage taxonomy и статусную модель timeline (completed/cancelled/failed/skipped) как machine-readable contract.
-- Добавить в VS Code extension отдельное timeline-представление в Observability (webview) с визуальным сравнением этапов и dominant-stage highlight.
+- Добавить в VS Code extension отдельное timeline-представление в Observability именно как `webview` (WebviewViewProvider) с визуальным сравнением этапов и dominant-stage highlight; tree-based реализация для timeline не используется.
 - Зафиксировать fail-closed совместимость с legacy LSP (метод отсутствует): явное сообщение в UI без падения панели.
 
 ## Resolved Decisions (2026-03-05)
-- Источник данных для UI: только server-driven timeline контракт LSP, без парсинга текстовых логов.
+- Источник данных для UI: только server-driven timeline контракт LSP, без парсинга текстовых логов и без реконструкции per-request timeline из агрегированных метрик.
+- Транспорт timeline-контракта в текущей архитектуре: `workspace/executeCommand` с `command: bsl.getCompletionTimeline`.
 - Контракт timeline фиксируется в версии `v1`.
 - Retention политики timeline: count-based bounded ring buffer, default `max_entries=200`.
 - Dominant stage вычисляется на стороне LSP и возвращается в payload для консистентного UX между клиентами.
+- UI timeline фиксируется как `webview` в контейнере `bslAnalyzer`; `TreeDataProvider` не является допустимой реализацией этой capability.
 - Scope change: только completion timeline (без расширения на hover/signatureHelp/diagnostics в этом change).
 
 ## Impact
@@ -47,4 +49,3 @@
 - Полная переработка всех observability/perf контрактов.
 - Добавление per-request timeline для hover/signatureHelp/diagnostics.
 - Вынос timeline в внешнюю телеметрию/облачный backend.
-

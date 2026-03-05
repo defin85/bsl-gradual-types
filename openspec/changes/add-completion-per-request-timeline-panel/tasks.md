@@ -7,7 +7,7 @@
 - [ ] 2.1 Добавить contract types `CompletionTimelineRequest/Response` и DTO для trace/stage (v1) в LSP слой.
 - [ ] 2.2 Реализовать bounded ring-buffer retention (`max_entries=200` default) для completion trace history.
 - [ ] 2.3 Инструментировать completion pipeline для записи stage timeline с terminal outcome (`ok_non_empty|ok_empty|cancelled|superseded|handler_error|fallback_*`).
-- [ ] 2.4 Реализовать custom request `bsl.getCompletionTimeline` (latest list + optional lookup/filter по `request_id`).
+- [ ] 2.4 Реализовать server-driven request `bsl.getCompletionTimeline` через `workspace/executeCommand` (latest list + optional lookup/filter по `request_id`) как единственный источник timeline для extension.
 - [ ] 2.5 Добавить dominant-stage вычисление (max duration среди terminal stage entries) и сериализацию в response.
 - [ ] 2.6 Добавить backend тесты:
 - [ ] 2.6.1 Контракт response (`version`, `traces`, `stages`, outcome/status enums).
@@ -15,8 +15,8 @@
 - [ ] 2.6.3 Retention deterministic eviction oldest-first при переполнении.
 
 ## 3. VS Code Extension Timeline Panel
-- [ ] 3.1 Добавить LSP custom request client `getCompletionTimeline`.
-- [ ] 3.2 Добавить webview timeline view в container `bslAnalyzer` (Observability section) с визуальными барами этапов.
+- [ ] 3.1 Добавить LSP request client `getCompletionTimeline` с вызовом через `workspace/executeCommand` (`command: bsl.getCompletionTimeline`).
+- [ ] 3.2 Добавить timeline view в container `bslAnalyzer` как `webview` (`WebviewViewProvider`) с визуальными барами этапов; `TreeDataProvider` не использовать для timeline.
 - [ ] 3.3 Реализовать dominant-stage highlight и отображение total duration/outcome/request metadata.
 - [ ] 3.4 Добавить автообновление панели (асинхронное, bounded polling) только когда view активна.
 - [ ] 3.5 Добавить graceful degradation для legacy LSP (`Method not found`): явный UX-статус, без падения view.
@@ -28,4 +28,3 @@
 ## 4. Validation
 - [ ] 4.1 Выполнить минимальный релевантный набор тестов backend + extension для timeline контракта и UI.
 - [ ] 4.2 Выполнить `openspec validate add-completion-per-request-timeline-panel --strict --no-interactive`.
-

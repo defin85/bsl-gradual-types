@@ -489,7 +489,7 @@ pub(super) async fn completion_checkpoint_outcome(
         .latest_request_epoch(file_id)
         .await;
     if !completion_publish_allowed(request_epoch, latest_request_epoch) {
-        return Some("superseded_epoch");
+        return Some("superseded");
     }
 
     None

@@ -69,7 +69,7 @@ impl CompletionTimelineCapture {
 
     fn push_terminal_stage(&mut self, outcome: &str) {
         let status = match outcome {
-            "cancelled" | "superseded_epoch" => CompletionTimelineStageStatus::Cancelled,
+            "cancelled" | "superseded" => CompletionTimelineStageStatus::Cancelled,
             "handler_error" | "queue_rejected" | "wait_not_ready" | "missing_deps"
             | "missing_file_content" | "missing_file_path" => CompletionTimelineStageStatus::Failed,
             "skipped" => CompletionTimelineStageStatus::Skipped,
@@ -281,7 +281,7 @@ impl BslLanguageServer {
                 match turn_outcome {
                     super::super::completion_dispatcher::CompletionTurnOutcome::Ready => {}
                     super::super::completion_dispatcher::CompletionTurnOutcome::SupersededBeforeStart => {
-                        completion_outcome = Some("superseded_epoch");
+                        completion_outcome = Some("superseded");
                         break 'completion_flow Some(completion_incomplete_empty_response());
                     }
                     super::super::completion_dispatcher::CompletionTurnOutcome::QueueRejected => {
@@ -989,7 +989,7 @@ impl BslLanguageServer {
                             }
                         }
                     }
-                    if !matches!(completion_outcome, Some("cancelled" | "superseded_epoch")) {
+                    if !matches!(completion_outcome, Some("cancelled" | "superseded")) {
                         let cache_store_started = Instant::now();
                         if let (Some(settings_id), Some(file_version), Some(response_items)) = (
                             observed_settings_id.clone(),

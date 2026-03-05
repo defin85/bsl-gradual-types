@@ -1,0 +1,202 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "lsp-completion-timeline contract v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "surface",
+    "major_version",
+    "schema_version",
+    "compatibility",
+    "request",
+    "response"
+  ],
+  "properties": {
+    "surface": {
+      "type": "string",
+      "const": "lsp-completion-timeline"
+    },
+    "major_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "breaking_change_requires_major_bump",
+        "breaking_change_requires_migration_note"
+      ],
+      "properties": {
+        "breaking_change_requires_major_bump": {
+          "type": "boolean",
+          "const": true
+        },
+        "breaking_change_requires_migration_note": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "command",
+        "params_shape"
+      ],
+      "properties": {
+        "method": {
+          "type": "string",
+          "const": "workspace/executeCommand"
+        },
+        "command": {
+          "type": "string",
+          "const": "bsl.getCompletionTimeline"
+        },
+        "params_shape": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "optional_fields",
+            "limit_bounds"
+          ],
+          "properties": {
+            "optional_fields": {
+              "type": "array",
+              "minItems": 2,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "limit",
+                  "request_id"
+                ]
+              }
+            },
+            "limit_bounds": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "minimum",
+                "maximum",
+                "default"
+              ],
+              "properties": {
+                "minimum": {
+                  "type": "integer",
+                  "const": 1
+                },
+                "maximum": {
+                  "type": "integer",
+                  "const": 200
+                },
+                "default": {
+                  "type": "integer",
+                  "const": 200
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "retention_max_entries_default",
+        "trace_fields",
+        "stage_fields",
+        "stage_statuses",
+        "outcomes"
+      ],
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "retention_max_entries_default": {
+          "type": "integer",
+          "const": 200
+        },
+        "trace_fields": {
+          "type": "array",
+          "minItems": 9,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "trace_id",
+              "request_id",
+              "uri",
+              "trigger_mode",
+              "outcome",
+              "started_at_ms",
+              "total_duration_ms",
+              "dominant_stage",
+              "stages"
+            ]
+          }
+        },
+        "stage_fields": {
+          "type": "array",
+          "minItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "name",
+              "status",
+              "started_offset_ms",
+              "duration_ms"
+            ]
+          }
+        },
+        "stage_statuses": {
+          "type": "array",
+          "minItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "cancelled",
+              "failed",
+              "skipped"
+            ]
+          }
+        },
+        "outcomes": {
+          "type": "array",
+          "minItems": 13,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "ok_non_empty",
+              "ok_empty",
+              "cancelled",
+              "superseded",
+              "handler_error",
+              "degraded_incomplete",
+              "fallback_unavailable",
+              "queue_rejected",
+              "wait_not_ready",
+              "missing_deps",
+              "missing_file_content",
+              "missing_file_path",
+              "missing_ir"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

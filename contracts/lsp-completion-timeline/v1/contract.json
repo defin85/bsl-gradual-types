@@ -1,0 +1,66 @@
+{
+  "surface": "lsp-completion-timeline",
+  "major_version": 1,
+  "schema_version": 1,
+  "compatibility": {
+    "breaking_change_requires_major_bump": true,
+    "breaking_change_requires_migration_note": true
+  },
+  "request": {
+    "method": "workspace/executeCommand",
+    "command": "bsl.getCompletionTimeline",
+    "params_shape": {
+      "optional_fields": [
+        "limit",
+        "request_id"
+      ],
+      "limit_bounds": {
+        "minimum": 1,
+        "maximum": 200,
+        "default": 200
+      }
+    }
+  },
+  "response": {
+    "version": 1,
+    "retention_max_entries_default": 200,
+    "trace_fields": [
+      "trace_id",
+      "request_id",
+      "uri",
+      "trigger_mode",
+      "outcome",
+      "started_at_ms",
+      "total_duration_ms",
+      "dominant_stage",
+      "stages"
+    ],
+    "stage_fields": [
+      "name",
+      "status",
+      "started_offset_ms",
+      "duration_ms"
+    ],
+    "stage_statuses": [
+      "completed",
+      "cancelled",
+      "failed",
+      "skipped"
+    ],
+    "outcomes": [
+      "ok_non_empty",
+      "ok_empty",
+      "cancelled",
+      "superseded",
+      "handler_error",
+      "degraded_incomplete",
+      "fallback_unavailable",
+      "queue_rejected",
+      "wait_not_ready",
+      "missing_deps",
+      "missing_file_content",
+      "missing_file_path",
+      "missing_ir"
+    ]
+  }
+}

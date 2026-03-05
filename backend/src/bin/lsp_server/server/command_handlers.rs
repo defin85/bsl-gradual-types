@@ -15,7 +15,8 @@ use crate::commands::{
 use crate::handlers::{find_containing_function_in_dto, CurrentContextResponse};
 use crate::types::{
     AutoReindexCommandParams, AutoReindexStateResponse, BuildIndexParams, BuildIndexResponse,
-    GetCurrentContextParams, GetIndexStateParams, GetIndexStateResponse, IncrementalUpdateParams,
+    CompletionTimelineRequest, CompletionTimelineResponse, GetCurrentContextParams,
+    GetIndexStateParams, GetIndexStateResponse, IncrementalUpdateParams,
     IncrementalUpdateResponse, ObservabilityMetricsResponse, WorkspaceStatsResponse,
 };
 
@@ -447,6 +448,35 @@ impl BslLanguageServer {
             metrics: self.coordinator.observability_metrics(),
         })
     }
+
+    pub(crate) async fn handle_get_completion_timeline(
+        &self,
+        params: CompletionTimelineRequest,
+    ) -> JsonRpcResult<CompletionTimelineResponse> {
+        let default_limit = super::COMPLETION_TIMELINE_MAX_ENTRIES;
+        let limit = params
+            .limit
+            .unwrap_or(default_limit)
+            .clamp(1, super::COMPLETION_TIMELINE_MAX_ENTRIES);
+        let request_id_filter = params.request_id.as_deref();
+
+        let traces_guard = self.completion_timeline_traces.lock().await;
+        let traces = traces_guard
+            .iter()
+            .rev()
+            .filter(|trace| match request_id_filter {
+                Some(request_id) => trace.request_id.as_deref() == Some(request_id),
+                None => true,
+            })
+            .take(limit)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        Ok(CompletionTimelineResponse {
+            version: super::COMPLETION_TIMELINE_VERSION,
+            traces: traces.into_iter().rev().collect(),
+        })
+    }
 }
 
 fn resolve_workspace_root(config: Option<crate::config::LspConfig>) -> Option<PathBuf> {
@@ -819,5 +849,108 @@ mod tests {
             .finish_full_index_operation_failed(&startup_operation_id, "cleanup")
             .await;
         drain_task.abort();
+    }
+
+    fn sample_stage(
+        name: &str,
+        status: &str,
+        started_offset_ms: u64,
+        duration_ms: u64,
+    ) -> crate::types::CompletionTimelineStageTrace {
+        crate::types::CompletionTimelineStageTrace {
+            name: name.to_string(),
+            status: status.to_string(),
+            started_offset_ms,
+            duration_ms,
+        }
+    }
+
+    fn sample_trace(
+        trace_id: &str,
+        request_id: Option<&str>,
+        outcome: &str,
+        total_duration_ms: u64,
+        stages: Vec<crate::types::CompletionTimelineStageTrace>,
+    ) -> crate::types::CompletionTimelineTrace {
+        crate::types::CompletionTimelineTrace {
+            trace_id: trace_id.to_string(),
+            request_id: request_id.map(ToString::to_string),
+            uri: "file:///timeline.bsl".to_string(),
+            trigger_mode: "trigger_character".to_string(),
+            outcome: outcome.to_string(),
+            started_at_ms: 1_700_000_000_000,
+            total_duration_ms,
+            dominant_stage: stages
+                .iter()
+                .max_by_key(|stage| stage.duration_ms)
+                .map(|stage| stage.name.clone()),
+            stages,
+        }
+    }
+
+    #[tokio::test]
+    async fn completion_timeline_retention_evicts_oldest_first() {
+        let server = create_test_server();
+        for idx in 0..205_u64 {
+            let trace = sample_trace(
+                &format!("trace-{idx}"),
+                Some(&format!("req-{idx}")),
+                "ok_non_empty",
+                10 + idx,
+                vec![sample_stage("prepare_stateful", "completed", 0, 10 + idx)],
+            );
+            server.record_completion_timeline_trace(trace).await;
+        }
+
+        let response = server
+            .handle_get_completion_timeline(crate::types::CompletionTimelineRequest::default())
+            .await
+            .expect("timeline response");
+        assert_eq!(response.version, 1);
+        assert_eq!(response.traces.len(), 200);
+        assert_eq!(response.traces.first().map(|trace| trace.trace_id.as_str()), Some("trace-5"));
+        assert_eq!(
+            response.traces.last().map(|trace| trace.trace_id.as_str()),
+            Some("trace-204")
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_timeline_can_filter_by_request_id() {
+        let server = create_test_server();
+        server
+            .record_completion_timeline_trace(sample_trace(
+                "trace-a",
+                Some("req-a"),
+                "ok_non_empty",
+                30,
+                vec![sample_stage("query_bundle", "completed", 0, 30)],
+            ))
+            .await;
+        server
+            .record_completion_timeline_trace(sample_trace(
+                "trace-b",
+                Some("req-b"),
+                "cancelled",
+                5,
+                vec![sample_stage("query_bundle", "cancelled", 0, 5)],
+            ))
+            .await;
+
+        let response = server
+            .handle_get_completion_timeline(crate::types::CompletionTimelineRequest {
+                limit: Some(10),
+                request_id: Some("req-b".to_string()),
+            })
+            .await
+            .expect("timeline response");
+
+        assert_eq!(response.traces.len(), 1);
+        let trace = &response.traces[0];
+        assert_eq!(trace.trace_id, "trace-b");
+        assert_eq!(trace.request_id.as_deref(), Some("req-b"));
+        assert_eq!(trace.outcome, "cancelled");
+        assert_eq!(trace.stages.len(), 1);
+        assert_eq!(trace.stages[0].status, "cancelled");
     }
 }

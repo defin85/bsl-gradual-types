@@ -1,5 +1,111 @@
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompletionTimelineStageStatus {
+    Completed,
+    Cancelled,
+    Failed,
+    Skipped,
+}
+
+impl CompletionTimelineStageStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::Cancelled => "cancelled",
+            Self::Failed => "failed",
+            Self::Skipped => "skipped",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct CompletionTimelineCapture {
+    request_id: Option<String>,
+    uri: String,
+    trigger_mode: String,
+    started_at_ms: u64,
+    timeline_cursor_ms: u64,
+    stages: Vec<crate::types::CompletionTimelineStageTrace>,
+}
+
+impl CompletionTimelineCapture {
+    fn new(
+        request_id: Option<String>,
+        uri: &Url,
+        trigger_mode: &str,
+        started_at_ms: u64,
+    ) -> Self {
+        Self {
+            request_id,
+            uri: uri.to_string(),
+            trigger_mode: trigger_mode.to_string(),
+            started_at_ms,
+            timeline_cursor_ms: 0,
+            stages: Vec::new(),
+        }
+    }
+
+    fn push_stage(
+        &mut self,
+        name: &str,
+        status: CompletionTimelineStageStatus,
+        duration: std::time::Duration,
+    ) {
+        let duration_ms = duration.as_millis().min(u64::MAX as u128) as u64;
+        let stage = crate::types::CompletionTimelineStageTrace {
+            name: name.to_string(),
+            status: status.as_str().to_string(),
+            started_offset_ms: self.timeline_cursor_ms,
+            duration_ms,
+        };
+        self.timeline_cursor_ms = self.timeline_cursor_ms.saturating_add(duration_ms);
+        self.stages.push(stage);
+    }
+
+    fn push_completed_stage(&mut self, name: &str, duration: std::time::Duration) {
+        self.push_stage(name, CompletionTimelineStageStatus::Completed, duration);
+    }
+
+    fn push_terminal_stage(&mut self, outcome: &str) {
+        let status = match outcome {
+            "cancelled" | "superseded_epoch" => CompletionTimelineStageStatus::Cancelled,
+            "handler_error" | "queue_rejected" | "wait_not_ready" | "missing_deps"
+            | "missing_file_content" | "missing_file_path" => CompletionTimelineStageStatus::Failed,
+            "skipped" => CompletionTimelineStageStatus::Skipped,
+            _ => CompletionTimelineStageStatus::Completed,
+        };
+        self.push_stage("terminal", status, std::time::Duration::from_millis(0));
+    }
+
+    fn into_trace(
+        self,
+        trace_id: String,
+        total_duration: std::time::Duration,
+        outcome: &str,
+    ) -> crate::types::CompletionTimelineTrace {
+        let total_duration_ms = total_duration.as_millis().min(u64::MAX as u128) as u64;
+        let dominant_stage = self
+            .stages
+            .iter()
+            .filter(|stage| stage.status != "skipped")
+            .max_by_key(|stage| stage.duration_ms)
+            .map(|stage| stage.name.clone());
+
+        crate::types::CompletionTimelineTrace {
+            trace_id,
+            request_id: self.request_id,
+            uri: self.uri,
+            trigger_mode: self.trigger_mode,
+            outcome: outcome.to_string(),
+            started_at_ms: self.started_at_ms,
+            total_duration_ms,
+            dominant_stage,
+            stages: self.stages,
+        }
+    }
+}
+
 impl BslLanguageServer {
     pub(super) async fn lsp_completion(
         &self,
@@ -73,6 +179,12 @@ impl BslLanguageServer {
             shadow_internal_request,
         );
         let started = Instant::now();
+        let mut timeline_capture = CompletionTimelineCapture::new(
+            completion_request_id.clone(),
+            &uri,
+            trigger_mode,
+            super::super::unix_timestamp_ms(),
+        );
         let (
             completion_ticket,
             completion_turn_outcome,
@@ -122,8 +234,10 @@ impl BslLanguageServer {
                 } else if let Some(turn_waiter) = completion_dispatch.turn_waiter {
                     let turn_wait_started = Instant::now();
                     let turn_outcome = turn_waiter.wait().await;
+                    let turn_wait_elapsed = turn_wait_started.elapsed();
                     self.coordinator
-                        .record_completion_stage_latency("turn_wait", turn_wait_started.elapsed());
+                        .record_completion_stage_latency("turn_wait", turn_wait_elapsed);
+                    timeline_capture.push_completed_stage("turn_wait", turn_wait_elapsed);
                     turn_outcome
                 } else {
                     super::super::completion_dispatcher::CompletionTurnOutcome::QueueRejected
@@ -188,8 +302,10 @@ impl BslLanguageServer {
                 });
             let sync_globals_started = Instant::now();
             self.sync_v2_globals().await;
+            let sync_globals_elapsed = sync_globals_started.elapsed();
             self.coordinator
-                .record_completion_stage_latency("sync_globals", sync_globals_started.elapsed());
+                .record_completion_stage_latency("sync_globals", sync_globals_elapsed);
+            timeline_capture.push_completed_stage("sync_globals", sync_globals_elapsed);
 
             let empty = || Some(completion_empty_response(false));
             let extract_non_empty_items =
@@ -230,8 +346,10 @@ impl BslLanguageServer {
                     Some(completion_observability_mode),
                 )
                 .await;
+            let prepare_elapsed = prepare_started.elapsed();
             self.coordinator
-                .record_completion_stage_latency("prepare_stateful", prepare_started.elapsed());
+                .record_completion_stage_latency("prepare_stateful", prepare_elapsed);
+            timeline_capture.push_completed_stage("prepare_stateful", prepare_elapsed);
 
             match prepared {
                 Ok((context, prepared, expected_version)) => {
@@ -741,10 +859,10 @@ impl BslLanguageServer {
                             observed_file_version,
                         )
                     };
-                    self.coordinator.record_completion_stage_latency(
-                        "query_bundle",
-                        query_bundle_started.elapsed(),
-                    );
+                    let query_bundle_elapsed = query_bundle_started.elapsed();
+                    self.coordinator
+                        .record_completion_stage_latency("query_bundle", query_bundle_elapsed);
+                    timeline_capture.push_completed_stage("query_bundle", query_bundle_elapsed);
                     observed_file_version_for_completion = observed_file_version;
                     let member_access_context = file_content
                         .as_deref()
@@ -830,10 +948,10 @@ impl BslLanguageServer {
                             response
                         }
                     };
-                    self.coordinator.record_completion_stage_latency(
-                        "response_build",
-                        response_build_started.elapsed(),
-                    );
+                    let response_build_elapsed = response_build_started.elapsed();
+                    self.coordinator
+                        .record_completion_stage_latency("response_build", response_build_elapsed);
+                    timeline_capture.push_completed_stage("response_build", response_build_elapsed);
                     if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
                         event_driven_guards_enabled,
                         self,
@@ -893,10 +1011,10 @@ impl BslLanguageServer {
                                     },
                                 );
                         }
-                        self.coordinator.record_completion_stage_latency(
-                            "cache_store",
-                            cache_store_started.elapsed(),
-                        );
+                        let cache_store_elapsed = cache_store_started.elapsed();
+                        self.coordinator
+                            .record_completion_stage_latency("cache_store", cache_store_elapsed);
+                        timeline_capture.push_completed_stage("cache_store", cache_store_elapsed);
                     }
                     completion_response
                 }
@@ -943,6 +1061,26 @@ impl BslLanguageServer {
             },
         )
         .await;
+
+        if let Some(result) = completion.as_ref() {
+            if let Some(stats) = &result.stats {
+                timeline_capture.push_completed_stage("snapshot_read", stats.stage_snapshot_read);
+                timeline_capture.push_completed_stage("collect", stats.stage_collect);
+                timeline_capture.push_completed_stage("rank", stats.stage_rank);
+                timeline_capture.push_completed_stage("format", stats.stage_format);
+            }
+        }
+
+        let timeline_outcome = completion_outcome.unwrap_or("ok_empty");
+        timeline_capture.push_terminal_stage(timeline_outcome);
+        if !shadow_internal_request {
+            let trace = timeline_capture.into_trace(
+                self.next_completion_timeline_trace_id(),
+                elapsed,
+                timeline_outcome,
+            );
+            self.record_completion_timeline_trace(trace).await;
+        }
 
         if let Some(outcome) = completion_outcome {
             self.coordinator

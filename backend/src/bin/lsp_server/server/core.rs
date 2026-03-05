@@ -1,6 +1,6 @@
 //! Core functionality: constructor and helper methods
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -194,6 +194,26 @@ impl BslLanguageServer {
             full_index_state: Arc::new(Mutex::new(super::FullIndexRuntimeState::default())),
             next_full_index_operation_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
             full_index_watchdog_timeout: Duration::from_millis(1_200_000),
+            completion_timeline_traces: Arc::new(Mutex::new(VecDeque::new())),
+            next_completion_timeline_trace_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+        }
+    }
+
+    pub(crate) fn next_completion_timeline_trace_id(&self) -> String {
+        let id = self
+            .next_completion_timeline_trace_id
+            .fetch_add(1, Ordering::Relaxed);
+        format!("completion-trace-{id}")
+    }
+
+    pub(crate) async fn record_completion_timeline_trace(
+        &self,
+        trace: crate::types::CompletionTimelineTrace,
+    ) {
+        let mut traces = self.completion_timeline_traces.lock().await;
+        traces.push_back(trace);
+        while traces.len() > super::COMPLETION_TIMELINE_MAX_ENTRIES {
+            let _ = traces.pop_front();
         }
     }
 }

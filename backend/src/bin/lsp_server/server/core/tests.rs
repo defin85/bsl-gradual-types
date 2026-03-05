@@ -6716,6 +6716,178 @@ async fn p22_get_observability_metrics_exposes_unified_stage_contract() {
 }
 
 #[tokio::test]
+async fn p22_get_completion_timeline_exposes_versioned_contract() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        move |client| BslLanguageServer::new(client, coordinator.clone())
+    })
+    .finish();
+
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let execute = Request::build("workspace/executeCommand")
+        .id(2)
+        .params(serde_json::json!({
+            "command": "bsl.getCompletionTimeline",
+            "arguments": [{}],
+        }))
+        .finish();
+    let execute_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(execute)
+        .await
+        .expect("workspace/executeCommand request")
+        .expect("workspace/executeCommand response");
+
+    let value = serde_json::to_value(&execute_response).expect("serialize response");
+    let result = value.get("result").cloned().expect("result field");
+    assert_eq!(
+        result
+            .get("version")
+            .and_then(|value| value.as_u64())
+            .expect("version"),
+        1
+    );
+    assert!(
+        result
+            .get("traces")
+            .and_then(|value| value.as_array())
+            .is_some(),
+        "result must contain traces array, got {result}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p22_get_completion_timeline_contains_completion_trace() {
+    const FIXTURE: &str = "Процедура Тест()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.\nКонецПроцедуры\n";
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        move |client| BslLanguageServer::new(client, coordinator.clone())
+    })
+    .finish();
+
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let uri = Url::parse("file:///completion_timeline_fixture.bsl").expect("uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: FIXTURE.to_string(),
+        },
+    };
+    let did_open_req = Request::build("textDocument/didOpen")
+        .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+        .finish();
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(did_open_req)
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let completion = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position::new(2, 13),
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: Some(CompletionContext {
+            trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+            trigger_character: Some(".".to_string()),
+        }),
+    };
+    let completion_req = Request::build("textDocument/completion")
+        .id(2)
+        .params(serde_json::to_value(completion).expect("CompletionParams"))
+        .finish();
+    let completion_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(completion_req)
+        .await
+        .expect("completion request");
+    assert!(
+        completion_response.is_some(),
+        "completion should return a response"
+    );
+
+    let execute = Request::build("workspace/executeCommand")
+        .id(3)
+        .params(serde_json::json!({
+            "command": "bsl.getCompletionTimeline",
+            "arguments": [{ "limit": 10 }],
+        }))
+        .finish();
+    let execute_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(execute)
+        .await
+        .expect("workspace/executeCommand request")
+        .expect("workspace/executeCommand response");
+    let value = serde_json::to_value(&execute_response).expect("serialize response");
+    let result = value.get("result").cloned().expect("result field");
+    let traces = result
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("traces array");
+    assert!(
+        !traces.is_empty(),
+        "expected non-empty completion timeline traces after completion request"
+    );
+    let trace = traces.last().and_then(|value| value.as_object()).expect("trace");
+    for field in [
+        "trace_id",
+        "request_id",
+        "uri",
+        "trigger_mode",
+        "outcome",
+        "started_at_ms",
+        "total_duration_ms",
+        "dominant_stage",
+        "stages",
+    ] {
+        assert!(trace.contains_key(field), "missing field `{field}` in trace");
+    }
+    let stages = trace
+        .get("stages")
+        .and_then(|value| value.as_array())
+        .expect("trace stages array");
+    assert!(!stages.is_empty(), "trace stages must not be empty");
+    for stage in stages {
+        let stage = stage.as_object().expect("stage object");
+        for field in ["name", "status", "started_offset_ms", "duration_ms"] {
+            assert!(
+                stage.contains_key(field),
+                "missing field `{field}` in stage"
+            );
+        }
+    }
+
+    drain_task.abort();
+}
+
+#[tokio::test]
 async fn p23_cross_interface_semantic_parity_lsp_web_mcp_diagnostics() {
     const PARITY_FIXTURE: &str = "Процедура Тест()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.НесуществующийМетод();\nКонецПроцедуры\n";
 

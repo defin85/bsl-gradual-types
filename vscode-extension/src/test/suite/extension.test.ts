@@ -40,6 +40,7 @@ suite('Extension Test Suite', () => {
             'bslAnalyzer.refreshCacheDashboard',
             'bslAnalyzer.refreshDiagnostics',
             'bslAnalyzer.refreshTypeRepository',
+            'bslAnalyzer.refreshCompletionTimeline',
             'bslAnalyzer.goToDiagnostic',
         ];
 

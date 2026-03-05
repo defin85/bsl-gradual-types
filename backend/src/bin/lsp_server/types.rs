@@ -92,6 +92,42 @@ pub struct ObservabilityMetricsResponse {
     pub metrics: serde_json::Value,
 }
 
+/// Custom request: bsl/getCompletionTimeline - per-request completion timeline traces
+#[derive(Debug, Deserialize, Default)]
+pub struct CompletionTimelineRequest {
+    #[serde(default)]
+    pub limit: Option<usize>,
+    #[serde(default)]
+    pub request_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompletionTimelineStageTrace {
+    pub name: String,
+    pub status: String,
+    pub started_offset_ms: u64,
+    pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompletionTimelineTrace {
+    pub trace_id: String,
+    pub request_id: Option<String>,
+    pub uri: String,
+    pub trigger_mode: String,
+    pub outcome: String,
+    pub started_at_ms: u64,
+    pub total_duration_ms: u64,
+    pub dominant_stage: Option<String>,
+    pub stages: Vec<CompletionTimelineStageTrace>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CompletionTimelineResponse {
+    pub version: u32,
+    pub traces: Vec<CompletionTimelineTrace>,
+}
+
 /// Custom request: bsl/validateMethod - method call validation
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]

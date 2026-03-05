@@ -20,3 +20,4 @@ export { BslTypeIndexProvider } from './typeIndexProvider';
 export { HierarchicalTypeIndexProvider } from './hierarchicalTypeProvider';
 export { BslActionsWebviewProvider } from './actionsWebview';
 export { TypeDetailsWebviewProvider } from './typeDetailsWebview';
+export { CompletionTimelineWebviewProvider } from './completionTimelineWebview';

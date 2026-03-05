@@ -456,6 +456,42 @@ export interface ObservabilityMetricsResponse {
     metrics: any;
 }
 
+export type CompletionTimelineStageStatus = 'completed' | 'cancelled' | 'failed' | 'skipped';
+
+export interface CompletionTimelineRequest {
+    limit?: number;
+    request_id?: string;
+}
+
+export interface CompletionTimelineStageTrace {
+    name: string;
+    status: CompletionTimelineStageStatus;
+    started_offset_ms: number;
+    duration_ms: number;
+}
+
+export interface CompletionTimelineTrace {
+    trace_id: string;
+    request_id?: string;
+    uri: string;
+    trigger_mode: string;
+    outcome: string;
+    started_at_ms: number;
+    total_duration_ms: number;
+    dominant_stage?: string;
+    stages: CompletionTimelineStageTrace[];
+}
+
+export interface CompletionTimelineResponse {
+    version: number;
+    traces: CompletionTimelineTrace[];
+}
+
+export type CompletionTimelineFetchResult =
+    | { kind: 'ok'; response: CompletionTimelineResponse }
+    | { kind: 'unsupported' }
+    | { kind: 'error'; message: string };
+
 /**
  * Параметры запроса всех типов
  */
@@ -631,6 +667,52 @@ export async function getObservabilityMetrics(): Promise<ObservabilityMetricsRes
         }
         logger.error('Failed to get observability metrics', error);
         return null;
+    }
+}
+
+let completionTimelineUnsupported = false;
+
+/**
+ * Сброс кэша совместимости timeline-контракта (используется только в тестах).
+ */
+export function resetCompletionTimelineSupportCacheForTests(): void {
+    completionTimelineUnsupported = false;
+}
+
+/**
+ * Получить server-driven per-request completion timeline через executeCommand.
+ */
+export async function getCompletionTimeline(
+    request: CompletionTimelineRequest = {}
+): Promise<CompletionTimelineFetchResult> {
+    if (completionTimelineUnsupported) {
+        return { kind: 'unsupported' };
+    }
+
+    const client = (await import('./client')).getLanguageClient();
+    if (!client) {
+        return { kind: 'error', message: 'LSP client not available' };
+    }
+
+    const args = Object.keys(request).length > 0 ? [request] : [];
+    try {
+        const result = await client.sendRequest('workspace/executeCommand', {
+            command: 'bsl.getCompletionTimeline',
+            arguments: args
+        });
+        if (!result || typeof result !== 'object') {
+            return { kind: 'error', message: 'Invalid completion timeline response' };
+        }
+        return { kind: 'ok', response: result as CompletionTimelineResponse };
+    } catch (error) {
+        if (isMethodNotFoundError(error)) {
+            completionTimelineUnsupported = true;
+            logger.warn('[Completion Timeline] LSP server does not support bsl.getCompletionTimeline');
+            return { kind: 'unsupported' };
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error('Failed to get completion timeline', error);
+        return { kind: 'error', message };
     }
 }
 

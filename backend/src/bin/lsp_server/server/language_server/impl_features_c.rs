@@ -425,6 +425,22 @@ impl BslLanguageServer {
                     tower_lsp::jsonrpc::Error::internal_error()
                 })?))
             }
+            "bsl.getCompletionTimeline" => {
+                let request = if params.arguments.is_empty() {
+                    crate::types::CompletionTimelineRequest::default()
+                } else {
+                    serde_json::from_value(params.arguments[0].clone()).map_err(|e| {
+                        tower_lsp::jsonrpc::Error::invalid_params(format!(
+                            "Invalid parameters: {}",
+                            e
+                        ))
+                    })?
+                };
+                let result = self.handle_get_completion_timeline(request).await?;
+                Ok(Some(serde_json::to_value(result).map_err(|_| {
+                    tower_lsp::jsonrpc::Error::internal_error()
+                })?))
+            }
             "bsl.getRuntimeConfig" => {
                 let snapshot = bsl_runtime::system::global_runtime_config().snapshot();
                 Ok(Some(serde_json::to_value(snapshot).map_err(|_| {

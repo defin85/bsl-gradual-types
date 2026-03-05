@@ -5,6 +5,8 @@ import {
     queryType,
     buildIndex,
     getIndexState,
+    getCompletionTimeline,
+    resetCompletionTimelineSupportCacheForTests,
     validateMethod,
     checkTypeCompatibility,
     incrementalUpdate,
@@ -174,6 +176,32 @@ suite('LSP Custom Requests Test Suite', () => {
                         }
                     });
                 }
+
+                if (command === 'bsl.getCompletionTimeline') {
+                    return Promise.resolve({
+                        version: 1,
+                        traces: [
+                            {
+                                trace_id: 'trace-1',
+                                request_id: 'req-1',
+                                uri: 'file:///test.bsl',
+                                trigger_mode: 'invoked',
+                                outcome: 'ok_non_empty',
+                                started_at_ms: Date.now(),
+                                total_duration_ms: 18,
+                                dominant_stage: 'query_bundle',
+                                stages: [
+                                    {
+                                        name: 'query_bundle',
+                                        status: 'completed',
+                                        started_offset_ms: 0,
+                                        duration_ms: 18
+                                    }
+                                ]
+                            }
+                        ]
+                    });
+                }
             }
 
             return Promise.resolve(null);
@@ -239,11 +267,14 @@ suite('LSP Custom Requests Test Suite', () => {
         if (sendCustomRequestOriginal) {
             sinon.stub(clientModule as any, 'sendCustomRequest').callsFake(sendCustomRequestStub);
         }
+
+        resetCompletionTimelineSupportCacheForTests();
     });
 
     teardown(() => {
         // Восстановить все stubs
         sinon.restore();
+        resetCompletionTimelineSupportCacheForTests();
     });
 
     /**
@@ -295,6 +326,41 @@ suite('LSP Custom Requests Test Suite', () => {
         assert.strictEqual(result.operation_id, null, 'operation_id should be nullable');
         assert.strictEqual(result.message, null, 'message should be nullable');
         assert.strictEqual(typeof result.updated_at_ms, 'number', 'updated_at_ms should be number');
+    });
+
+    test('getCompletionTimeline should work via executeCommand', async function() {
+        this.timeout(5000);
+
+        const result = await getCompletionTimeline({ limit: 10 });
+        assert.strictEqual(result.kind, 'ok');
+        if (result.kind !== 'ok') {
+            return;
+        }
+
+        assert.strictEqual(result.response.version, 1);
+        assert.strictEqual(result.response.traces.length, 1);
+        assert.strictEqual(result.response.traces[0].trace_id, 'trace-1');
+    });
+
+    test('getCompletionTimeline should fail-closed on Method not found', async function() {
+        this.timeout(5000);
+
+        sendRequestStub.resetBehavior();
+        sendRequestStub.callsFake((method: string, params: any) => {
+            if (method === 'workspace/executeCommand' && params?.command === 'bsl.getCompletionTimeline') {
+                return Promise.reject({ code: -32601, message: 'Method not found' });
+            }
+            return Promise.resolve(null);
+        });
+
+        const first = await getCompletionTimeline({ limit: 1 });
+        assert.strictEqual(first.kind, 'unsupported');
+
+        // Второй вызов не должен ходить в LSP повторно, потому что capability закэширована как unsupported.
+        const callCountBefore = sendRequestStub.callCount;
+        const second = await getCompletionTimeline({ limit: 1 });
+        assert.strictEqual(second.kind, 'unsupported');
+        assert.strictEqual(sendRequestStub.callCount, callCountBefore);
     });
 
     /**

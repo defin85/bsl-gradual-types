@@ -167,6 +167,7 @@ impl BslLanguageServer {
                         "bsl.getTypeRepositoryStats".to_string(),
                         "bsl.getWorkspaceStats".to_string(),
                         "bsl.getObservabilityMetrics".to_string(),
+                        "bsl.getCompletionTimeline".to_string(),
                         "bsl.getRuntimeConfig".to_string(),
                         "bsl.parseConfiguration".to_string(),
                         "bsl.cache.getStats".to_string(),

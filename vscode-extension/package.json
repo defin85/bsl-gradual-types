@@ -520,6 +520,11 @@
                 "category": "BSL Analyzer"
             },
             {
+                "command": "bslAnalyzer.refreshCompletionTimeline",
+                "title": "Refresh Completion Timeline",
+                "category": "BSL Analyzer"
+            },
+            {
                 "command": "bslAnalyzer.toggleObservabilityAutoRefresh",
                 "title": "Toggle Observability Auto Refresh",
                 "category": "BSL Analyzer"
@@ -696,6 +701,11 @@
                     "id": "bslAnalyzer.observability",
                     "name": "Observability",
                     "type": "tree"
+                },
+                {
+                    "id": "bslAnalyzer.completionTimeline",
+                    "name": "Completion Timeline",
+                    "type": "webview"
                 }
             ]
         },
@@ -761,6 +771,9 @@
                 },
                 {
                     "command": "bslAnalyzer.refreshObservability"
+                },
+                {
+                    "command": "bslAnalyzer.refreshCompletionTimeline"
                 },
                 {
                     "command": "bslAnalyzer.toggleObservabilityAutoRefresh"
@@ -849,6 +862,11 @@
                     "command": "bslAnalyzer.toggleObservabilityCompactMode",
                     "when": "view == bslAnalyzer.observability",
                     "group": "navigation@2"
+                },
+                {
+                    "command": "bslAnalyzer.refreshCompletionTimeline",
+                    "when": "view == bslAnalyzer.completionTimeline",
+                    "group": "navigation"
                 },
                 {
                     "command": "bslAnalyzer.refreshTypeRepository",

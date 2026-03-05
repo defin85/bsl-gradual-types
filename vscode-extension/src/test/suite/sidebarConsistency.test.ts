@@ -45,6 +45,7 @@ suite('Sidebar Consistency Test Suite', () => {
             'bslAnalyzer.actions',
             'bslAnalyzer.cacheDashboard',
             'bslAnalyzer.observability',
+            'bslAnalyzer.completionTimeline',
         ];
 
         for (const id of required) {

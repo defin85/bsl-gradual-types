@@ -40,6 +40,7 @@ import {
     BslDiagnosticsProvider,
     CacheDashboardProvider,
     ObservabilityProvider,
+    CompletionTimelineWebviewProvider,
     HierarchicalTypeIndexProvider,
     BslActionsWebviewProvider,
     TypeDetailsWebviewProvider,
@@ -324,6 +325,17 @@ function registerSidebarProviders(context: vscode.ExtensionContext) {
         context.subscriptions.push(observabilityProvider);
         outputChannel.appendLine('✅ Observability provider registered');
 
+        // Completion Timeline webview provider
+        outputChannel.appendLine('📋 Creating Completion Timeline webview provider...');
+        const completionTimelineProvider = new CompletionTimelineWebviewProvider(outputChannel);
+        const completionTimelineWebview = vscode.window.registerWebviewViewProvider(
+            'bslAnalyzer.completionTimeline',
+            completionTimelineProvider
+        );
+        context.subscriptions.push(completionTimelineWebview);
+        context.subscriptions.push(completionTimelineProvider);
+        outputChannel.appendLine('✅ Completion Timeline webview provider registered');
+
         // Diagnostics provider  
         outputChannel.appendLine('📋 Creating Diagnostics provider...');
         const diagnosticsProvider = new BslDiagnosticsProvider();
@@ -398,6 +410,13 @@ function registerSidebarProviders(context: vscode.ExtensionContext) {
             vscode.commands.registerCommand('bslAnalyzer.refreshObservability', () => {
                 outputChannel.appendLine('🔄 Refreshing Observability panel');
                 observabilityProvider.refresh();
+            })
+        );
+
+        context.subscriptions.push(
+            vscode.commands.registerCommand('bslAnalyzer.refreshCompletionTimeline', () => {
+                outputChannel.appendLine('🔄 Refreshing Completion Timeline panel');
+                completionTimelineProvider.refresh();
             })
         );
 

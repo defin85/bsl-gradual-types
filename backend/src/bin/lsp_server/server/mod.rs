@@ -15,7 +15,7 @@ mod core;
 mod language_server;
 pub(crate) mod request_context;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
@@ -101,6 +101,9 @@ pub(crate) struct CompletionParityStateV2 {
 pub(crate) type CompletionParityKeyV2 = (V2FileId, i32, u32, u32);
 pub(crate) type CompletionParityStoreV2 =
     Arc<RwLock<HashMap<CompletionParityKeyV2, CompletionParityStateV2>>>;
+
+pub(crate) const COMPLETION_TIMELINE_VERSION: u32 = 1;
+pub(crate) const COMPLETION_TIMELINE_MAX_ENTRIES: usize = 200;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FullIndexStateKind {
@@ -221,6 +224,8 @@ pub struct BslLanguageServer {
     pub(crate) full_index_state: Arc<Mutex<FullIndexRuntimeState>>,
     pub(crate) next_full_index_operation_id: Arc<AtomicU64>,
     pub(crate) full_index_watchdog_timeout: Duration,
+    pub(crate) completion_timeline_traces: Arc<Mutex<VecDeque<crate::types::CompletionTimelineTrace>>>,
+    pub(crate) next_completion_timeline_trace_id: Arc<AtomicU64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

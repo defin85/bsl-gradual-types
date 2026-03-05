@@ -89,6 +89,19 @@ When all tasks are complete, execute the agent commands:
 
 ---
 
+## OpenSpec Delivery Contract (Mandatory)
+
+- Before coding for an OpenSpec change, build an execution matrix from `spec.md` requirements/scenarios to target files and tests.
+- Every MUST/Requirement/Scenario must have automated evidence (`test`) or an explicitly approved exception from the user.
+- Statuses `partially implemented` or `not implemented` for mandatory requirements block task completion and hand-off.
+- For API surface changes, update all relevant layers together: backend view/urls, `contracts/orchestrator/src/**`, aggregated `contracts/orchestrator/openapi.yaml`, and frontend generated client/types when applicable.
+- Async requirements must include a real async boundary (queue/worker/workflow). Synchronous execution in request path does not satisfy async requirements.
+- Integration/source requirements must use real runtime integration paths. Metadata/mock paths are allowed only for tests or explicitly approved temporary modes.
+- If any mandatory requirement cannot be delivered now, stop and escalate with concrete blockers and options; do not silently ship a partial implementation.
+- Final delivery report must include `Requirement -> Code -> Test` evidence with concrete file paths.
+
+---
+
 ## Landing the Plane (Session Completion)
 
 **When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.

@@ -40,6 +40,7 @@ suite('Completion Timeline Model Test Suite', () => {
         assert.strictEqual(state.traces[0].stages.length, 3);
         assert.ok(state.traces[0].stages.every((stage) => stage.width_percent >= 0));
         assert.ok(state.traces[0].stages.every((stage) => stage.duration_percent >= 0));
+        assert.ok(state.average_trace, 'average trace should be available for non-empty payload');
     });
 
     test('Dominant stage highlight should fallback to max duration stage', () => {
@@ -110,6 +111,60 @@ suite('Completion Timeline Model Test Suite', () => {
         const queryBundle = trace.stages.find((stage) => stage.name === 'query_bundle');
         assert.ok(queryBundle, 'query_bundle stage should exist');
         assert.ok(queryBundle!.duration_percent > 59.9 && queryBundle!.duration_percent < 60.1);
+    });
+
+    test('Average trace should aggregate durations and expose sample count', () => {
+        const payload: CompletionTimelineResponse = {
+            version: 1,
+            traces: [
+                {
+                    trace_id: 'trace-1',
+                    request_id: 'req-1',
+                    uri: 'file:///tmp/test1.bsl',
+                    trigger_mode: 'invoked',
+                    outcome: 'ok_non_empty',
+                    started_at_ms: 1_700_000_000_001,
+                    total_duration_ms: 30,
+                    dominant_stage: 'query_bundle',
+                    stages: [
+                        { name: 'prepare_stateful', status: 'completed', started_offset_ms: 0, duration_ms: 10 },
+                        { name: 'query_bundle', status: 'completed', started_offset_ms: 10, duration_ms: 20 },
+                    ],
+                },
+                {
+                    trace_id: 'trace-2',
+                    request_id: 'req-2',
+                    uri: 'file:///tmp/test2.bsl',
+                    trigger_mode: 'trigger_character',
+                    outcome: 'ok_non_empty',
+                    started_at_ms: 1_700_000_000_002,
+                    total_duration_ms: 50,
+                    dominant_stage: 'query_bundle',
+                    stages: [
+                        { name: 'prepare_stateful', status: 'completed', started_offset_ms: 0, duration_ms: 20 },
+                        { name: 'query_bundle', status: 'completed', started_offset_ms: 20, duration_ms: 30 },
+                    ],
+                },
+            ],
+        };
+
+        const state = mapCompletionTimelineResponseToPanelState(payload);
+        assert.strictEqual(state.kind, 'ready');
+        if (state.kind !== 'ready') {
+            return;
+        }
+
+        assert.ok(state.average_trace, 'average trace should exist');
+        const average = state.average_trace!;
+        assert.strictEqual(average.sample_count, 2);
+        assert.strictEqual(average.trace_id, 'average(2)');
+
+        const prepare = average.stages.find((stage) => stage.name === 'prepare_stateful');
+        const query = average.stages.find((stage) => stage.name === 'query_bundle');
+        assert.ok(prepare);
+        assert.ok(query);
+        assert.strictEqual(prepare!.duration_ms, 15);
+        assert.strictEqual(query!.duration_ms, 25);
     });
 
     test('Legacy unsupported path should map to explicit unsupported state', () => {

@@ -162,6 +162,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             align-items: center;
             gap: 8px;
             margin-bottom: 10px;
+            flex-wrap: wrap;
         }
         .refresh {
             border: 1px solid var(--vscode-button-border, transparent);
@@ -173,6 +174,23 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
         }
         .refresh:hover {
             background: var(--vscode-button-hoverBackground);
+        }
+        .mode-toggle {
+            display: inline-flex;
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        .mode-button {
+            border: 0;
+            background: transparent;
+            color: var(--vscode-editor-foreground);
+            padding: 4px 8px;
+            cursor: pointer;
+        }
+        .mode-button.active {
+            background: color-mix(in srgb, var(--vscode-button-background) 45%, transparent);
+            color: var(--vscode-button-foreground);
         }
         .meta {
             color: var(--vscode-descriptionForeground);
@@ -286,6 +304,10 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
 <body>
     <div class="toolbar">
         <button class="refresh" id="refresh">Refresh</button>
+        <div class="mode-toggle" role="tablist" aria-label="Timeline mode">
+            <button class="mode-button active" id="modeAll" role="tab" aria-selected="true">All traces</button>
+            <button class="mode-button" id="modeAverage" role="tab" aria-selected="false">Averaged</button>
+        </div>
         <span class="meta" id="updatedAt">Waiting for data...</span>
     </div>
     <div id="root" class="placeholder">Loading completion timeline...</div>
@@ -294,9 +316,19 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
         const root = document.getElementById('root');
         const updatedAtNode = document.getElementById('updatedAt');
         const refreshButton = document.getElementById('refresh');
+        const modeAllButton = document.getElementById('modeAll');
+        const modeAverageButton = document.getElementById('modeAverage');
+        let currentMode = 'all';
+        let latestReadyState = null;
 
         refreshButton.addEventListener('click', () => {
             vscode.postMessage({ type: 'refresh' });
+        });
+        modeAllButton.addEventListener('click', () => {
+            setMode('all');
+        });
+        modeAverageButton.addEventListener('click', () => {
+            setMode('average');
         });
 
         function escapeHtml(value) {
@@ -386,6 +418,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                     '<div>' +
                         '<strong>' + escapeHtml(trace.trace_id) + '</strong>' +
                         ' <span class="meta">(' + escapeHtml(trace.trigger_mode) + ')</span>' +
+                        (trace.sample_count ? ' <span class="meta">| sample=' + escapeHtml(trace.sample_count) + '</span>' : '') +
                     '</div>' +
                     '<div>' +
                         '<span class="badge ' + outcomeClass + '">' + escapeHtml(trace.outcome) + '</span>' +
@@ -397,6 +430,40 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 overhead +
                 '<table class="stage-table"><tbody>' + stageRows + '</tbody></table>' +
             '</section>';
+        }
+
+        function applyModeUi() {
+            const allActive = currentMode === 'all';
+            modeAllButton.classList.toggle('active', allActive);
+            modeAverageButton.classList.toggle('active', !allActive);
+            modeAllButton.setAttribute('aria-selected', allActive ? 'true' : 'false');
+            modeAverageButton.setAttribute('aria-selected', allActive ? 'false' : 'true');
+        }
+
+        function setMode(nextMode) {
+            currentMode = nextMode;
+            applyModeUi();
+            if (latestReadyState) {
+                renderReadyState(latestReadyState);
+            }
+        }
+
+        function renderReadyState(state) {
+            const traces = state.traces || [];
+            if (currentMode === 'average') {
+                if (!state.average_trace) {
+                    root.innerHTML = '<div class="placeholder">No completion traces to average yet.</div>';
+                } else {
+                    root.innerHTML = renderTrace(state.average_trace);
+                }
+                return;
+            }
+
+            if (traces.length === 0) {
+                root.innerHTML = '<div class="placeholder">No completion traces yet. Trigger completion to populate timeline.</div>';
+            } else {
+                root.innerHTML = traces.map(renderTrace).join('');
+            }
         }
 
         function renderState(state) {
@@ -417,12 +484,8 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             }
 
             if (state.kind === 'ready') {
-                const traces = state.traces || [];
-                if (traces.length === 0) {
-                    root.innerHTML = '<div class="placeholder">No completion traces yet. Trigger completion to populate timeline.</div>';
-                } else {
-                    root.innerHTML = traces.map(renderTrace).join('');
-                }
+                latestReadyState = state;
+                renderReadyState(state);
                 updatedAtNode.textContent = 'Updated ' + new Date(state.updated_at_ms).toLocaleTimeString() +
                     ' | contract v' + state.version;
             }
@@ -435,6 +498,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             }
         });
 
+        applyModeUi();
         vscode.postMessage({ type: 'ready' });
     <\/script>
 </body>

@@ -115,6 +115,10 @@ async fn main() -> Result<()> {
     // Legacy custom requests used by VSCode extension
     .custom_method("bsl/buildIndex", BslLanguageServer::handle_build_index)
     .custom_method(
+        "bsl/getIndexState",
+        BslLanguageServer::handle_get_index_state,
+    )
+    .custom_method(
         "bsl/incrementalUpdate",
         BslLanguageServer::handle_incremental_update,
     )

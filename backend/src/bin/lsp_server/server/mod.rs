@@ -17,9 +17,9 @@ pub(crate) mod request_context;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tower_lsp::lsp_types::CompletionItem;
@@ -29,6 +29,7 @@ use bsl_analysis_v2::{DepsSnapshotId, FileId as V2FileId, SettingsId};
 use bsl_backend::system::SystemCoordinator;
 
 use crate::config::{BslSettings, LspConfig};
+use crate::types::GetIndexStateResponse;
 
 // Re-export Url for use in submodules
 pub use tower_lsp::lsp_types::Url;
@@ -101,6 +102,83 @@ pub(crate) type CompletionParityKeyV2 = (V2FileId, i32, u32, u32);
 pub(crate) type CompletionParityStoreV2 =
     Arc<RwLock<HashMap<CompletionParityKeyV2, CompletionParityStateV2>>>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FullIndexStateKind {
+    Idle,
+    Running,
+    Ready,
+    Failed,
+}
+
+impl FullIndexStateKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Running => "running",
+            Self::Ready => "ready",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FullIndexOperationKind {
+    Startup,
+    BuildIndex,
+}
+
+impl FullIndexOperationKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Startup => "startup",
+            Self::BuildIndex => "buildIndex",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct FullIndexRuntimeState {
+    pub state: FullIndexStateKind,
+    pub active_operation: Option<FullIndexOperationKind>,
+    pub operation_id: Option<String>,
+    pub message: Option<String>,
+    pub updated_at_ms: u64,
+}
+
+impl Default for FullIndexRuntimeState {
+    fn default() -> Self {
+        Self {
+            state: FullIndexStateKind::Idle,
+            active_operation: None,
+            operation_id: None,
+            message: None,
+            updated_at_ms: unix_timestamp_ms(),
+        }
+    }
+}
+
+impl FullIndexRuntimeState {
+    pub(crate) fn to_response(&self) -> GetIndexStateResponse {
+        GetIndexStateResponse {
+            version: 1,
+            state: self.state.as_str().to_string(),
+            ready: self.state == FullIndexStateKind::Ready,
+            active_operation: self.active_operation.map(|op| op.as_str().to_string()),
+            operation_id: self.operation_id.clone(),
+            message: self.message.clone(),
+            updated_at_ms: self.updated_at_ms,
+        }
+    }
+}
+
+pub(crate) fn unix_timestamp_ms() -> u64 {
+    let now = SystemTime::now();
+    let duration = now
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_else(|_| Duration::from_millis(0));
+    duration.as_millis().min(u64::MAX as u128) as u64
+}
+
 /// BSL Language Server backend - CLEAN ARCHITECTURE
 #[derive(Clone)]
 pub struct BslLanguageServer {
@@ -140,6 +218,9 @@ pub struct BslLanguageServer {
         Arc<completion_cancellation::CompletionCancellationRegistry>,
     pub(crate) last_deps_id_v2: Arc<RwLock<Option<DepsSnapshotId>>>,
     pub(crate) last_settings_id_v2: Arc<RwLock<Option<SettingsId>>>,
+    pub(crate) full_index_state: Arc<Mutex<FullIndexRuntimeState>>,
+    pub(crate) next_full_index_operation_id: Arc<AtomicU64>,
+    pub(crate) full_index_watchdog_timeout: Duration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

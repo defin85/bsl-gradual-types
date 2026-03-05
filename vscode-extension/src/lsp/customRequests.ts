@@ -74,6 +74,20 @@ export interface BuildIndexResponse {
     message: string;
 }
 
+export interface GetIndexStateParams {}
+
+export type IndexStateKind = 'idle' | 'running' | 'ready' | 'failed';
+
+export interface GetIndexStateResponse {
+    version: number;
+    state: IndexStateKind;
+    ready: boolean;
+    active_operation?: 'startup' | 'buildIndex';
+    operation_id?: string;
+    message?: string;
+    updated_at_ms: number;
+}
+
 export interface ValidateMethodParams {
     object_type: string;
     method_name: string;
@@ -235,6 +249,51 @@ export async function queryType(typeName: string): Promise<QueryTypeResponse> {
 export async function buildIndex(params: BuildIndexParams): Promise<BuildIndexResponse> {
     const { sendCustomRequest } = await import('./client');
     return await sendCustomRequest<BuildIndexResponse>('bsl/buildIndex', params);
+}
+
+/**
+ * Текущее состояние full-index на стороне LSP (server-driven source of truth)
+ */
+export async function getIndexState(
+    params: GetIndexStateParams = {}
+): Promise<GetIndexStateResponse> {
+    const { sendCustomRequest } = await import('./client');
+    return await sendCustomRequest<GetIndexStateResponse>('bsl/getIndexState', params);
+}
+
+/**
+ * Совместимость с legacy LSP, где `bsl/getIndexState` может отсутствовать.
+ */
+export function isMethodNotFoundError(error: unknown): boolean {
+    const asRecord = (value: unknown): Record<string, unknown> | null => {
+        if (typeof value !== 'object' || value === null) {
+            return null;
+        }
+        return value as Record<string, unknown>;
+    };
+
+    const readCode = (value: unknown): number | undefined => {
+        const record = asRecord(value);
+        if (!record) {
+            return undefined;
+        }
+        const code = record.code;
+        return typeof code === 'number' ? code : undefined;
+    };
+
+    const directCode = readCode(error);
+    if (directCode === -32601) {
+        return true;
+    }
+
+    const errorRecord = asRecord(error);
+    const nestedErrorCode = readCode(errorRecord?.error);
+    if (nestedErrorCode === -32601) {
+        return true;
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    return /method not found/i.test(message);
 }
 
 /**

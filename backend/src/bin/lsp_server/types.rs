@@ -60,6 +60,26 @@ pub struct BuildIndexResponse {
     pub message: String,
 }
 
+/// Custom request: bsl/getIndexState - machine-readable full-index state
+#[derive(Debug, Deserialize, Default)]
+#[allow(dead_code)]
+pub struct GetIndexStateParams {}
+
+#[derive(Debug, Serialize)]
+#[allow(dead_code)]
+pub struct GetIndexStateResponse {
+    pub version: u32,
+    pub state: String,
+    pub ready: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_operation: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    pub updated_at_ms: u64,
+}
+
 /// Custom request: bsl/getWorkspaceStats - workspace stats for Overview panel
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -3,6 +3,7 @@ import { CommandHandler } from '../types';
 import { setAutoReindexPaused, updateStatusBar } from '../lsp/progress';
 import { getAutoReindexEnabled, getConfigurationPath, getPlatformVersion, getPlatformDocsArchive } from '../utils';
 import { queryType, buildIndex, incrementalUpdate, pauseAutoReindex, resumeAutoReindex } from '../lsp/customRequests';
+import { isAttachedBuildIndexResponse } from '../indexStartupOrchestration';
 import { showIndexStatsWebview } from '../webviews';
 
 /**
@@ -107,6 +108,22 @@ export function registerIndexCommands(
             outputChannel.appendLine(`BuildIndex (LSP): ${args.join(' ')}`);
 
             const result = await buildIndex({ workspace_path: workspacePath });
+
+            if (isAttachedBuildIndexResponse(result)) {
+                updateStatusBar('$(sync~spin) BSL: Index already running');
+                outputChannel.appendLine(`BuildIndex (attached): ${result.message}`);
+                vscode.window.showInformationMessage(
+                    'BSL Index уже строится на сервере. Подключено к текущей операции.'
+                );
+                return;
+            }
+
+            if (!result.success) {
+                updateStatusBar(`$(error) BSL: Index build failed: ${result.message}`);
+                vscode.window.showErrorMessage(`Index build failed: ${result.message}`);
+                outputChannel.appendLine(`Index build failed: ${result.message}`);
+                return;
+            }
 
             updateStatusBar('$(check) BSL: Ready');
             const typesCount = result.types_count || 'unknown';

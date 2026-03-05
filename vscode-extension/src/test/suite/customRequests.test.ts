@@ -4,6 +4,7 @@ import * as sinon from 'sinon';
 import {
     queryType,
     buildIndex,
+    getIndexState,
     validateMethod,
     checkTypeCompatibility,
     incrementalUpdate,
@@ -186,6 +187,13 @@ suite('LSP Custom Requests Test Suite', () => {
                     types_count: 100,
                     message: 'Mock: Index built successfully'
                 });
+            } else if (method === 'bsl/getIndexState') {
+                return Promise.resolve({
+                    version: 1,
+                    state: 'ready',
+                    ready: true,
+                    updated_at_ms: Date.now()
+                });
             } else if (method === 'bsl/validateMethod') {
                 return Promise.resolve({
                     valid: true,
@@ -270,6 +278,17 @@ suite('LSP Custom Requests Test Suite', () => {
 
         // types_count может быть 0 для stub реализации
         assert.ok(result.types_count >= 0, 'Types count should be non-negative');
+    });
+
+    test('getIndexState should work via LSP', async function() {
+        this.timeout(5000);
+
+        const result = await getIndexState({});
+        assert.ok(result, 'Get index state result should not be null');
+        assert.strictEqual(result.version, 1, 'Version should be v1');
+        assert.strictEqual(typeof result.state, 'string', 'State should be string');
+        assert.strictEqual(typeof result.ready, 'boolean', 'Ready should be boolean');
+        assert.strictEqual(typeof result.updated_at_ms, 'number', 'updated_at_ms should be number');
     });
 
     /**

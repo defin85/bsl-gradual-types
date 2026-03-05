@@ -230,6 +230,29 @@ impl BslLanguageServer {
                     platform_docs
                 );
 
+                let startup_operation_id = match self
+                    .begin_full_index_operation(
+                        super::super::FullIndexOperationKind::Startup,
+                        "Loading platform and configuration types",
+                    )
+                    .await
+                {
+                    super::super::command_handlers::BeginFullIndexOutcome::Started {
+                        operation_id,
+                    } => operation_id,
+                    super::super::command_handlers::BeginFullIndexOutcome::AlreadyRunning {
+                        active_operation,
+                        operation_id,
+                    } => {
+                        warn!(
+                            active_operation = ?active_operation.map(|op| op.as_str()),
+                            operation_id = ?operation_id,
+                            "startup full-index already running; attaching without duplicate launch"
+                        );
+                        return;
+                    }
+                };
+
                 // Create channels for progress and result
                 let (progress_tx, mut progress_rx) = mpsc::unbounded_channel::<ProgressUpdate>();
                 let (result_tx, result_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
@@ -424,6 +447,11 @@ impl BslLanguageServer {
                         self.apply_deps_bundle_v2("start_with_paths", startup.deps_bundle_v2)
                             .await;
                         self.sync_v2_globals().await;
+                        self.finish_full_index_operation_success(
+                            &startup_operation_id,
+                            "Startup index ready",
+                        )
+                        .await;
                         let _ = result_tx.send(Ok(()));
                         self.client
                             .log_message(
@@ -434,6 +462,11 @@ impl BslLanguageServer {
                     }
                     Err(e) => {
                         error!("Failed to load platform types: {}", e);
+                        self.finish_full_index_operation_failed(
+                            &startup_operation_id,
+                            format!("Startup index failed: {e}"),
+                        )
+                        .await;
                         let _ = result_tx.send(Err(e.to_string()));
                         self.client
                             .log_message(

@@ -15,6 +15,23 @@
 - Зафиксировать startup-орchestration в extension: решение о запуске full build принимается по серверному состоянию, а не по локальному файловому sentinel.
 - Зафиксировать, что auto-reindex контур остаётся incremental-only и не подменяется full build на старте без необходимости.
 
+## Resolved Decisions (2026-03-05)
+- Контракт `bsl/getIndexState` фиксируется в версии `v1` с machine-readable полями:
+  - `version`, `state`, `ready`, `active_operation`, `operation_id`, `message`, `updated_at_ms`.
+- Политика гонки `startup` vs `bsl/buildIndex` фиксируется как strict single-flight:
+  - один leader;
+  - повторные запросы `bsl/buildIndex` во время `running` attach к текущей операции и не запускают новый full-index.
+- Политика совместимости с legacy LSP (без `bsl/getIndexState`) фиксируется как fail-closed для startup auto-index:
+  - extension не запускает silent full build на старте;
+  - extension показывает явное предупреждение;
+  - ручной `Build Index` остаётся доступен.
+- Fail-safe антизалипание `running` фиксируется через watchdog timeout:
+  - default: `hard_timeout_ms = 1200000` (20 минут);
+  - по timeout состояние переводится в `failed`.
+- UX для ручного `Build Index` во время `running`:
+  - показывается информационный статус "already running (attached)";
+  - второй progress и второй full-index не создаются.
+
 ## Impact
 - Affected specs: `bsl-intellisense`
 - Affected code (implementation follow-up):

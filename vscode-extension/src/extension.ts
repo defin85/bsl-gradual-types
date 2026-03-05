@@ -27,7 +27,15 @@ import {
     initializeUtils,
     autoDetectConfiguration
 } from './utils';
-import { buildIndex } from './lsp/customRequests';
+import {
+    buildIndex,
+    getIndexState,
+    isMethodNotFoundError,
+} from './lsp/customRequests';
+import {
+    decideStartupIndexAction,
+    isAttachedBuildIndexResponse,
+} from './indexStartupOrchestration';
 import {
     BslOverviewProvider,
     BslDiagnosticsProvider,
@@ -214,6 +222,7 @@ async function autoDetectConfigurationIfNeeded() {
 async function initializeIndexIfNeeded() {
     const autoIndexBuild = BslAnalyzerConfig.autoIndexBuild;
     const configPath = BslAnalyzerConfig.configurationPath;
+    const platformVersion = BslAnalyzerConfig.platformVersion;
 
     if (!autoIndexBuild) {
         outputChannel.appendLine('ℹ️ Auto-index build is disabled');
@@ -226,27 +235,38 @@ async function initializeIndexIfNeeded() {
         return;
     }
 
-    // Check if we have valid UUID for this configuration
-    const projectId = extractUuidProjectId(configPath);
-    if (!projectId) {
-        outputChannel.appendLine('❌ Cannot find UUID in Configuration.xml - no fallback, index cannot be built');
-        updateStatusBar('BSL Analyzer: Invalid Config');
+    let indexState;
+    try {
+        indexState = await getIndexState({});
+    } catch (error) {
+        if (isMethodNotFoundError(error)) {
+            outputChannel.appendLine(
+                '⚠️ Legacy LSP: bsl/getIndexState is not supported; startup auto-index is fail-closed'
+            );
+            updateStatusBar('$(warning) BSL: Legacy LSP (manual Build Index)');
+            void vscode.window.showWarningMessage(
+                'BSL Analyzer: LSP server не поддерживает bsl/getIndexState. Авто-индексация на старте отключена (fail-closed), используйте Build Index вручную.'
+            );
+            return;
+        }
+
+        outputChannel.appendLine(`❌ Failed to query bsl/getIndexState: ${error}`);
+        updateStatusBar('$(warning) BSL: Index state unavailable');
         return;
     }
 
-    // Check if index already exists in cache
-    const platformVersion = BslAnalyzerConfig.platformVersion;
-    const indexCachePath = path.join(
-        require('os').homedir(),
-        '.bsl_analyzer',
-        'project_indices',
-        projectId,
-        platformVersion
-    );
+    const decision = decideStartupIndexAction(indexState);
+    if (decision.action === 'skip') {
+        outputChannel.appendLine('✅ LSP reports ready index state, startup build skipped');
+        updateStatusBar('$(check) BSL: Index Ready');
+        return;
+    }
 
-    if (fs.existsSync(path.join(indexCachePath, 'unified_index.json'))) {
-        outputChannel.appendLine(`✅ Index found in cache: ${projectId}/${platformVersion}`);
-        updateStatusBar('BSL Analyzer: Index Ready');
+    if (decision.action === 'attach') {
+        outputChannel.appendLine(
+            `ℹ️ LSP reports running full-index (${indexState.active_operation || 'unknown'}${indexState.operation_id ? `, operation_id=${indexState.operation_id}` : ''}), startup build attached`
+        );
+        updateStatusBar('$(sync~spin) BSL: Index already running');
         return;
     }
 
@@ -260,7 +280,7 @@ async function initializeIndexIfNeeded() {
         return;
     }
 
-    outputChannel.appendLine('🚀 Building BSL index with user-configured settings...');
+    outputChannel.appendLine(`🚀 Building BSL index (reason=${decision.reason})...`);
 
     // Build index with user-provided configuration
     try {
@@ -273,10 +293,22 @@ async function initializeIndexIfNeeded() {
 
         // ✅ ЗАМЕНА CLI → LSP: build_unified_index #2
         const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-        await buildIndex({ workspace_path: workspacePath });
+        const response = await buildIndex({ workspace_path: workspacePath });
+
+        if (isAttachedBuildIndexResponse(response)) {
+            outputChannel.appendLine(`ℹ️ ${response.message}`);
+            updateStatusBar('$(sync~spin) BSL: Index already running');
+            return;
+        }
+
+        if (!response.success) {
+            updateStatusBar(`$(error) BSL: Index build failed: ${response.message}`);
+            outputChannel.appendLine(`❌ Index build failed: ${response.message}`);
+            return;
+        }
 
         updateStatusBar('$(check) BSL: Index Ready');
-        outputChannel.appendLine('✅ Index build completed successfully');
+        outputChannel.appendLine(`✅ Index build completed successfully: ${response.message}`);
     } catch (error) {
         updateStatusBar(`$(error) BSL: Index build failed: ${error}`);
         outputChannel.appendLine(`❌ Index build failed: ${error}`);
@@ -315,39 +347,10 @@ function showWelcomeMessage() {
             }
         });
     } else {
-        // Everything is configured
-        const homedir = require('os').homedir();
-        const platformVersion = BslAnalyzerConfig.platformVersion;
-        const projectId = extractUuidProjectId(configPath);
-        
-        if (projectId) {
-            const indexPath = path.join(homedir, '.bsl_analyzer', 'project_indices', projectId, platformVersion, 'unified_index.json');
-            if (fs.existsSync(indexPath)) {
-                vscode.window.showInformationMessage('BSL Analyzer: Index loaded from cache. Ready to use!');
-            } else {
-                vscode.window.showInformationMessage('BSL Analyzer: Configuration detected. Building index...');
-            }
-        } else {
-            vscode.window.showWarningMessage('BSL Analyzer: Invalid configuration (no UUID). Please check your Configuration.xml');
-        }
+        vscode.window.showInformationMessage(
+            'BSL Analyzer: Configuration detected. Index orchestration is managed by LSP server.'
+        );
     }
-}
-
-// UUID-based project identifier (must match Rust naming scheme; no fallback)
-function extractUuidProjectId(configPath: string): string | null {
-    try {
-        const cfgXml = path.join(configPath, 'Configuration.xml');
-        if (!fs.existsSync(cfgXml)) return null;
-        const content = fs.readFileSync(cfgXml, 'utf-8');
-        const m = content.match(/<Configuration[^>]*uuid="([^"]+)"/i);
-        if (m && m[1]) {
-            const uuid = m[1].replace(/-/g, '');
-            return `${path.basename(configPath)}_${uuid}`;
-        }
-    } catch (e) {
-        outputChannel.appendLine(`Failed to extract UUID: ${e}`);
-    }
-    return null;
 }
 
 // Все функции организованы в модули:

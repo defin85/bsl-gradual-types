@@ -191,6 +191,9 @@ impl BslLanguageServer {
             completion_cancellation_registry_v2,
             last_deps_id_v2: Arc::new(RwLock::new(Some(initial_deps_id))),
             last_settings_id_v2: Arc::new(RwLock::new(Some(initial_settings_id))),
+            full_index_state: Arc::new(Mutex::new(super::FullIndexRuntimeState::default())),
+            next_full_index_operation_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            full_index_watchdog_timeout: Duration::from_millis(1_200_000),
         }
     }
 }

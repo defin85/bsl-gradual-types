@@ -7,6 +7,7 @@ use tower_lsp::lsp_types::{MessageType, Url};
 use tracing::{info, warn};
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::commands::{
     handle_incremental_update, handle_parse_configuration, ParseConfigurationParams,
@@ -14,13 +15,146 @@ use crate::commands::{
 use crate::handlers::{find_containing_function_in_dto, CurrentContextResponse};
 use crate::types::{
     AutoReindexCommandParams, AutoReindexStateResponse, BuildIndexParams, BuildIndexResponse,
-    GetCurrentContextParams, IncrementalUpdateParams, IncrementalUpdateResponse,
-    ObservabilityMetricsResponse, WorkspaceStatsResponse,
+    GetCurrentContextParams, GetIndexStateParams, GetIndexStateResponse, IncrementalUpdateParams,
+    IncrementalUpdateResponse, ObservabilityMetricsResponse, WorkspaceStatsResponse,
 };
 
-use super::BslLanguageServer;
+use super::{BslLanguageServer, FullIndexOperationKind, FullIndexStateKind};
+
+const ATTACHED_MESSAGE: &str = "already running (attached)";
+
+#[derive(Debug, Clone)]
+pub(crate) enum BeginFullIndexOutcome {
+    Started { operation_id: String },
+    AlreadyRunning {
+        active_operation: Option<FullIndexOperationKind>,
+        operation_id: Option<String>,
+    },
+}
 
 impl BslLanguageServer {
+    pub(crate) async fn handle_get_index_state(
+        &self,
+        _params: GetIndexStateParams,
+    ) -> JsonRpcResult<GetIndexStateResponse> {
+        Ok(self.current_index_state().await)
+    }
+
+    pub(crate) async fn current_index_state(&self) -> GetIndexStateResponse {
+        let state = self.full_index_state.lock().await;
+        state.to_response()
+    }
+
+    pub(crate) async fn begin_full_index_operation(
+        &self,
+        kind: FullIndexOperationKind,
+        message: impl Into<String>,
+    ) -> BeginFullIndexOutcome {
+        let message = message.into();
+        let operation_id = format!(
+            "{}-{}",
+            kind.as_str(),
+            self.next_full_index_operation_id
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
+
+        {
+            let mut state = self.full_index_state.lock().await;
+            if state.state == FullIndexStateKind::Running {
+                return BeginFullIndexOutcome::AlreadyRunning {
+                    active_operation: state.active_operation,
+                    operation_id: state.operation_id.clone(),
+                };
+            }
+
+            state.state = FullIndexStateKind::Running;
+            state.active_operation = Some(kind);
+            state.operation_id = Some(operation_id.clone());
+            state.message = Some(message);
+            state.updated_at_ms = crate::server::unix_timestamp_ms();
+        }
+
+        self.spawn_full_index_watchdog(operation_id.clone(), self.full_index_watchdog_timeout);
+
+        BeginFullIndexOutcome::Started { operation_id }
+    }
+
+    pub(crate) fn spawn_full_index_watchdog(&self, operation_id: String, timeout: Duration) {
+        let state_holder = self.full_index_state.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(timeout).await;
+
+            let mut state = state_holder.lock().await;
+            if state.state != FullIndexStateKind::Running {
+                return;
+            }
+            if state.operation_id.as_deref() != Some(operation_id.as_str()) {
+                return;
+            }
+
+            state.state = FullIndexStateKind::Failed;
+            state.active_operation = None;
+            state.operation_id = None;
+            state.message = Some(format!(
+                "full-index timeout after {}ms",
+                timeout.as_millis()
+            ));
+            state.updated_at_ms = crate::server::unix_timestamp_ms();
+        });
+    }
+
+    pub(crate) async fn finish_full_index_operation_success(
+        &self,
+        operation_id: &str,
+        message: impl Into<String>,
+    ) {
+        self.finish_full_index_operation(operation_id, FullIndexStateKind::Ready, message)
+            .await;
+    }
+
+    pub(crate) async fn finish_full_index_operation_failed(
+        &self,
+        operation_id: &str,
+        message: impl Into<String>,
+    ) {
+        self.finish_full_index_operation(operation_id, FullIndexStateKind::Failed, message)
+            .await;
+    }
+
+    async fn finish_full_index_operation(
+        &self,
+        operation_id: &str,
+        final_state: FullIndexStateKind,
+        message: impl Into<String>,
+    ) {
+        let mut state = self.full_index_state.lock().await;
+        if state.operation_id.as_deref() != Some(operation_id) {
+            return;
+        }
+
+        state.state = final_state;
+        state.active_operation = None;
+        state.operation_id = None;
+        state.message = Some(message.into());
+        state.updated_at_ms = crate::server::unix_timestamp_ms();
+    }
+
+    fn attached_build_index_response(
+        active_operation: Option<FullIndexOperationKind>,
+        operation_id: Option<String>,
+    ) -> BuildIndexResponse {
+        let active = active_operation.map(|op| op.as_str()).unwrap_or("unknown");
+        let suffix = operation_id
+            .as_ref()
+            .map(|id| format!(" (operation_id={id})"))
+            .unwrap_or_default();
+        BuildIndexResponse {
+            success: true,
+            types_count: 0,
+            message: format!("{ATTACHED_MESSAGE}: active_operation={active}{suffix}"),
+        }
+    }
+
     /// Handle bsl.getCurrentContext command
     pub(crate) async fn handle_get_current_context(
         &self,
@@ -111,23 +245,47 @@ impl BslLanguageServer {
         &self,
         _params: BuildIndexParams,
     ) -> JsonRpcResult<BuildIndexResponse> {
+        let operation_id = match self
+            .begin_full_index_operation(
+                FullIndexOperationKind::BuildIndex,
+                "Building BSL index",
+            )
+            .await
+        {
+            BeginFullIndexOutcome::Started { operation_id } => operation_id,
+            BeginFullIndexOutcome::AlreadyRunning {
+                active_operation,
+                operation_id,
+            } => {
+                return Ok(Self::attached_build_index_response(
+                    active_operation,
+                    operation_id,
+                ));
+            }
+        };
+
         let cfg = self.config.read().await.clone();
         let Some(cfg) = cfg else {
+            let message = "LSP config not available (initializationOptions not received)".to_string();
+            self.finish_full_index_operation_failed(&operation_id, message.clone())
+                .await;
             return Ok(BuildIndexResponse {
                 success: false,
                 types_count: 0,
-                message: "LSP config not available (initializationOptions not received)"
-                    .to_string(),
+                message,
             });
         };
 
         let platform_docs_root = cfg.platform_docs_archive.as_deref().map(PathBuf::from);
 
         let Some(config_path) = cfg.configuration_path else {
+            let message = "configurationPath is not configured".to_string();
+            self.finish_full_index_operation_failed(&operation_id, message.clone())
+                .await;
             return Ok(BuildIndexResponse {
                 success: false,
                 types_count: 0,
-                message: "configurationPath is not configured".to_string(),
+                message,
             });
         };
 
@@ -147,6 +305,16 @@ impl BslLanguageServer {
             self.deps_update_v2("bsl/buildIndex", platform_docs_root, Some(config_root))
                 .await;
             self.sync_v2_globals().await;
+            self.finish_full_index_operation_success(&operation_id, "Index build completed")
+                .await;
+        } else {
+            self.finish_full_index_operation_failed(
+                &operation_id,
+                resp.message
+                    .clone()
+                    .unwrap_or_else(|| "Index build failed".to_string()),
+            )
+            .await;
         }
 
         Ok(BuildIndexResponse {
@@ -325,4 +493,136 @@ fn count_bsl_files(root: &Path) -> usize {
     }
 
     count
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bsl_backend::system::SystemCoordinator;
+    use std::sync::{Arc, Mutex as StdMutex};
+    use tower_lsp::LspService;
+
+    fn create_test_server() -> BslLanguageServer {
+        let coordinator = Arc::new(SystemCoordinator::new());
+        let holder: Arc<StdMutex<Option<BslLanguageServer>>> = Arc::new(StdMutex::new(None));
+
+        let (_service, _socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            let holder = holder.clone();
+            move |client| {
+                let server = BslLanguageServer::new(client, coordinator.clone());
+                *holder.lock().expect("test server holder lock") = Some(server.clone());
+                server
+            }
+        })
+        .finish();
+
+        let server = holder
+            .lock()
+            .expect("test server holder lock")
+            .clone()
+            .expect("test server must be captured");
+        server
+    }
+
+    #[tokio::test]
+    async fn build_index_attaches_when_startup_operation_is_running() {
+        let server = create_test_server();
+        let startup_operation_id = match server
+            .begin_full_index_operation(FullIndexOperationKind::Startup, "startup")
+            .await
+        {
+            BeginFullIndexOutcome::Started { operation_id } => operation_id,
+            BeginFullIndexOutcome::AlreadyRunning { .. } => {
+                panic!("startup operation unexpectedly already running")
+            }
+        };
+
+        let response = server
+            .handle_build_index(BuildIndexParams {
+                workspace_path: String::new(),
+            })
+            .await
+            .expect("build index response");
+
+        assert!(response.success, "attached response must be successful");
+        assert_eq!(response.types_count, 0);
+        assert!(
+            response.message.contains("already running (attached)"),
+            "unexpected message: {}",
+            response.message
+        );
+
+        let state = server.current_index_state().await;
+        assert_eq!(state.state, "running");
+        assert_eq!(state.active_operation.as_deref(), Some("startup"));
+        assert_eq!(
+            state.operation_id.as_deref(),
+            Some(startup_operation_id.as_str())
+        );
+
+        server
+            .finish_full_index_operation_failed(&startup_operation_id, "cleanup")
+            .await;
+    }
+
+    #[tokio::test]
+    async fn get_index_state_reports_ready_after_successful_finish() {
+        let server = create_test_server();
+        let operation_id = match server
+            .begin_full_index_operation(FullIndexOperationKind::BuildIndex, "build")
+            .await
+        {
+            BeginFullIndexOutcome::Started { operation_id } => operation_id,
+            BeginFullIndexOutcome::AlreadyRunning { .. } => {
+                panic!("operation unexpectedly already running")
+            }
+        };
+
+        server
+            .finish_full_index_operation_success(&operation_id, "done")
+            .await;
+
+        let state = server
+            .handle_get_index_state(GetIndexStateParams::default())
+            .await
+            .expect("index state response");
+
+        assert_eq!(state.version, 1);
+        assert_eq!(state.state, "ready");
+        assert!(state.ready);
+        assert!(state.active_operation.is_none());
+        assert!(state.operation_id.is_none());
+        assert!(state.updated_at_ms > 0);
+    }
+
+    #[tokio::test]
+    async fn watchdog_timeout_transitions_running_operation_to_failed() {
+        let server = create_test_server();
+        let operation_id = match server
+            .begin_full_index_operation(FullIndexOperationKind::BuildIndex, "build")
+            .await
+        {
+            BeginFullIndexOutcome::Started { operation_id } => operation_id,
+            BeginFullIndexOutcome::AlreadyRunning { .. } => {
+                panic!("operation unexpectedly already running")
+            }
+        };
+
+        server.spawn_full_index_watchdog(operation_id, Duration::from_millis(10));
+        tokio::time::sleep(Duration::from_millis(30)).await;
+
+        let state = server.current_index_state().await;
+        assert_eq!(state.state, "failed");
+        assert!(!state.ready);
+        assert!(state.active_operation.is_none());
+        assert!(state.operation_id.is_none());
+        assert!(
+            state
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("timeout")),
+            "timeout message must be present"
+        );
+    }
 }

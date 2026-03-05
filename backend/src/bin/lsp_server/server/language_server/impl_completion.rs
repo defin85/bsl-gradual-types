@@ -29,6 +29,14 @@ struct CompletionTimelineCapture {
     stages: Vec<crate::types::CompletionTimelineStageTrace>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct CompletionResponseBuildBreakdown {
+    snapshot_read: std::time::Duration,
+    collect: std::time::Duration,
+    rank: std::time::Duration,
+    format: std::time::Duration,
+}
+
 impl CompletionTimelineCapture {
     fn new(
         request_id: Option<String>,
@@ -46,13 +54,16 @@ impl CompletionTimelineCapture {
         }
     }
 
-    fn push_stage(
+    fn duration_to_ms(duration: std::time::Duration) -> u64 {
+        duration.as_millis().min(u64::MAX as u128) as u64
+    }
+
+    fn push_stage_ms(
         &mut self,
         name: &str,
         status: CompletionTimelineStageStatus,
-        duration: std::time::Duration,
+        duration_ms: u64,
     ) {
-        let duration_ms = duration.as_millis().min(u64::MAX as u128) as u64;
         let stage = crate::types::CompletionTimelineStageTrace {
             name: name.to_string(),
             status: status.as_str().to_string(),
@@ -63,8 +74,61 @@ impl CompletionTimelineCapture {
         self.stages.push(stage);
     }
 
+    fn push_stage(
+        &mut self,
+        name: &str,
+        status: CompletionTimelineStageStatus,
+        duration: std::time::Duration,
+    ) {
+        self.push_stage_ms(name, status, Self::duration_to_ms(duration));
+    }
+
+    fn push_completed_stage_ms(&mut self, name: &str, duration_ms: u64) {
+        self.push_stage_ms(name, CompletionTimelineStageStatus::Completed, duration_ms);
+    }
+
     fn push_completed_stage(&mut self, name: &str, duration: std::time::Duration) {
         self.push_stage(name, CompletionTimelineStageStatus::Completed, duration);
+    }
+
+    fn push_response_build_stage(
+        &mut self,
+        response_build_duration: std::time::Duration,
+        breakdown: Option<CompletionResponseBuildBreakdown>,
+    ) {
+        let response_build_ms = Self::duration_to_ms(response_build_duration);
+        let Some(breakdown) = breakdown else {
+            self.push_completed_stage_ms("response_build", response_build_ms);
+            return;
+        };
+
+        let stage_durations_ms = [
+            ("snapshot_read", Self::duration_to_ms(breakdown.snapshot_read)),
+            ("collect", Self::duration_to_ms(breakdown.collect)),
+            ("rank", Self::duration_to_ms(breakdown.rank)),
+            ("format", Self::duration_to_ms(breakdown.format)),
+        ];
+        let breakdown_total_ms = stage_durations_ms
+            .iter()
+            .fold(0_u64, |acc, (_, duration_ms)| {
+                acc.saturating_add(*duration_ms)
+            });
+
+        // Fail-closed: avoid duplicating aggregate + nested stages when breakdown is inconsistent.
+        if breakdown_total_ms == 0 || breakdown_total_ms > response_build_ms {
+            self.push_completed_stage_ms("response_build", response_build_ms);
+            return;
+        }
+
+        for (name, duration_ms) in stage_durations_ms {
+            if duration_ms > 0 {
+                self.push_completed_stage_ms(name, duration_ms);
+            }
+        }
+        let response_build_other_ms = response_build_ms.saturating_sub(breakdown_total_ms);
+        if response_build_other_ms > 0 {
+            self.push_completed_stage_ms("response_build_other", response_build_other_ms);
+        }
     }
 
     fn push_terminal_stage(&mut self, outcome: &str) {
@@ -84,7 +148,14 @@ impl CompletionTimelineCapture {
         total_duration: std::time::Duration,
         outcome: &str,
     ) -> crate::types::CompletionTimelineTrace {
-        let total_duration_ms = total_duration.as_millis().min(u64::MAX as u128) as u64;
+        let total_duration_ms = Self::duration_to_ms(total_duration);
+        let max_stage_end_ms = self
+            .stages
+            .iter()
+            .map(|stage| stage.started_offset_ms.saturating_add(stage.duration_ms))
+            .max()
+            .unwrap_or(0);
+        let total_duration_ms = total_duration_ms.max(max_stage_end_ms);
         let dominant_stage = self
             .stages
             .iter()
@@ -951,7 +1022,17 @@ impl BslLanguageServer {
                     let response_build_elapsed = response_build_started.elapsed();
                     self.coordinator
                         .record_completion_stage_latency("response_build", response_build_elapsed);
-                    timeline_capture.push_completed_stage("response_build", response_build_elapsed);
+                    let response_build_breakdown = completion_response
+                        .as_ref()
+                        .and_then(|response| response.stats.as_ref())
+                        .map(|stats| CompletionResponseBuildBreakdown {
+                            snapshot_read: stats.stage_snapshot_read,
+                            collect: stats.stage_collect,
+                            rank: stats.stage_rank,
+                            format: stats.stage_format,
+                        });
+                    timeline_capture
+                        .push_response_build_stage(response_build_elapsed, response_build_breakdown);
                     if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
                         event_driven_guards_enabled,
                         self,
@@ -1062,15 +1143,6 @@ impl BslLanguageServer {
         )
         .await;
 
-        if let Some(result) = completion.as_ref() {
-            if let Some(stats) = &result.stats {
-                timeline_capture.push_completed_stage("snapshot_read", stats.stage_snapshot_read);
-                timeline_capture.push_completed_stage("collect", stats.stage_collect);
-                timeline_capture.push_completed_stage("rank", stats.stage_rank);
-                timeline_capture.push_completed_stage("format", stats.stage_format);
-            }
-        }
-
         let timeline_outcome = completion_outcome.unwrap_or("ok_empty");
         timeline_capture.push_terminal_stage(timeline_outcome);
         if !shadow_internal_request {
@@ -1091,5 +1163,87 @@ impl BslLanguageServer {
             drop_guard.disarm();
         }
         Ok(completion.map(|result| result.response))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tower_lsp::lsp_types::Url;
+
+    fn sample_capture() -> CompletionTimelineCapture {
+        let uri = Url::parse("file:///completion_timeline_capture_test.bsl").expect("test uri");
+        CompletionTimelineCapture::new(Some("req-1".to_string()), &uri, "invoked", 1_700_000_000)
+    }
+
+    #[test]
+    fn completion_timeline_total_duration_is_never_less_than_stage_end() {
+        let mut capture = sample_capture();
+        capture.push_completed_stage("sync_globals", std::time::Duration::from_millis(7));
+        capture.push_completed_stage("query_bundle", std::time::Duration::from_millis(11));
+
+        let trace = capture.into_trace(
+            "trace-1".to_string(),
+            std::time::Duration::from_millis(5),
+            "ok_empty",
+        );
+        assert_eq!(trace.total_duration_ms, 18);
+    }
+
+    #[test]
+    fn response_build_breakdown_replaces_aggregate_without_double_counting() {
+        let mut capture = sample_capture();
+        capture.push_completed_stage("prepare_stateful", std::time::Duration::from_millis(5));
+        capture.push_response_build_stage(
+            std::time::Duration::from_millis(10),
+            Some(CompletionResponseBuildBreakdown {
+                snapshot_read: std::time::Duration::from_millis(2),
+                collect: std::time::Duration::from_millis(3),
+                rank: std::time::Duration::from_millis(1),
+                format: std::time::Duration::from_millis(1),
+            }),
+        );
+
+        let stage_names: Vec<&str> = capture.stages.iter().map(|stage| stage.name.as_str()).collect();
+        assert!(!stage_names.contains(&"response_build"));
+        assert!(stage_names.contains(&"snapshot_read"));
+        assert!(stage_names.contains(&"collect"));
+        assert!(stage_names.contains(&"rank"));
+        assert!(stage_names.contains(&"format"));
+        assert!(stage_names.contains(&"response_build_other"));
+
+        let max_stage_end = capture
+            .stages
+            .iter()
+            .map(|stage| stage.started_offset_ms.saturating_add(stage.duration_ms))
+            .max()
+            .unwrap_or(0);
+        assert_eq!(max_stage_end, 15);
+    }
+
+    #[test]
+    fn response_build_breakdown_falls_back_to_aggregate_when_inconsistent() {
+        let mut capture = sample_capture();
+        capture.push_response_build_stage(
+            std::time::Duration::from_millis(3),
+            Some(CompletionResponseBuildBreakdown {
+                snapshot_read: std::time::Duration::from_millis(2),
+                collect: std::time::Duration::from_millis(2),
+                rank: std::time::Duration::from_millis(1),
+                format: std::time::Duration::from_millis(1),
+            }),
+        );
+        assert_eq!(capture.stages.len(), 1);
+        assert_eq!(capture.stages[0].name, "response_build");
+        assert_eq!(capture.stages[0].duration_ms, 3);
+    }
+
+    #[test]
+    fn terminal_stage_marks_superseded_as_cancelled() {
+        let mut capture = sample_capture();
+        capture.push_terminal_stage("superseded");
+        assert_eq!(capture.stages.len(), 1);
+        assert_eq!(capture.stages[0].name, "terminal");
+        assert_eq!(capture.stages[0].status, "cancelled");
     }
 }

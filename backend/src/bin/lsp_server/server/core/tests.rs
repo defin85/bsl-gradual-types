@@ -262,6 +262,48 @@ async fn initialize_lsp_service(service: &mut LspService<BslLanguageServer>) {
     );
 }
 
+async fn shutdown_lsp_service(
+    service: &mut LspService<BslLanguageServer>,
+    close_uri: Option<&Url>,
+) {
+    if let Some(uri) = close_uri {
+        let did_close = DidCloseTextDocumentParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+        };
+        let did_close_req = Request::build("textDocument/didClose")
+            .params(serde_json::to_value(did_close).expect("DidCloseTextDocumentParams"))
+            .finish();
+        let did_close_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_close_req)
+            .await
+            .expect("didClose notification");
+        assert!(did_close_response.is_none(), "didClose is a notification");
+    }
+
+    let shutdown_req = Request::build("shutdown").id(2).finish();
+    let shutdown_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(shutdown_req)
+        .await
+        .expect("shutdown request");
+    assert!(shutdown_response.is_some(), "shutdown should return a response");
+
+    let exit_req = Request::build("exit").finish();
+    let exit_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(exit_req)
+        .await
+        .expect("exit notification");
+    assert!(exit_response.is_none(), "exit is a notification");
+}
+
 async fn wait_lsp_publish_diagnostics(
     receiver: &mut UnboundedReceiver<PublishDiagnosticsParams>,
     uri: &Url,
@@ -8655,7 +8697,8 @@ async fn run_scale_aware_profile(
             }
         })
         .finish();
-        let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+        let mut drain_task =
+            tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
 
         initialize_lsp_service(&mut service).await;
 
@@ -9453,7 +9496,16 @@ async fn run_scale_aware_profile(
         }
         profile_report.insert(phase.name.to_string(), phase_report);
 
-        drain_task.abort();
+        shutdown_lsp_service(&mut service, Some(&uri)).await;
+        drop(server);
+        drop(service);
+
+        if tokio::time::timeout(Duration::from_millis(500), &mut drain_task)
+            .await
+            .is_err()
+        {
+            drain_task.abort();
+        }
     }
 
     serde_json::Value::Object(profile_report)

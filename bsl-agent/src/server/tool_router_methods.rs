@@ -394,19 +394,14 @@ impl BslAgentHandler {
         let job_id = self
             .job_manager
             .spawn_with_class("bsl_diagnostics", job_class, move |ctx| async move {
+                let progress = SemanticJobProgress::new(ctx.clone(), "bsl_diagnostics");
                 tracing::debug!(
                     job_id = %ctx.job_id(),
                     session_id = %params.session_id,
                     "diagnostics job entered async closure"
                 );
-                ctx.set_progress("bsl_diagnostics/running", 0).await;
-                tracing::debug!(
-                    job_id = %ctx.job_id(),
-                    session_id = %params.session_id,
-                    "diagnostics job progress set"
-                );
                 let response = session_manager
-                    .bsl_diagnostics(params)
+                    .bsl_diagnostics_with_progress(params, Some(progress))
                     .await
                     .map_err(|err| anyhow::anyhow!(err.to_string()))?;
                 tracing::info!(
@@ -455,9 +450,9 @@ impl BslAgentHandler {
         let job_id = self
             .job_manager
             .spawn_with_class("bsl_symbol_search", job_class, move |ctx| async move {
-                ctx.set_progress("bsl_symbol_search/running", 0).await;
+                let progress = SemanticJobProgress::new(ctx, "bsl_symbol_search");
                 let response = session_manager
-                    .bsl_symbol_search(params)
+                    .bsl_symbol_search_with_progress(params, Some(progress))
                     .await
                     .map_err(|err| anyhow::anyhow!(err.to_string()))?;
                 serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
@@ -630,9 +625,9 @@ impl BslAgentHandler {
         let job_id = self
             .job_manager
             .spawn_with_class("bsl_type_at_position", job_class, move |ctx| async move {
-                ctx.set_progress("bsl_type_at_position/running", 0).await;
+                let progress = SemanticJobProgress::new(ctx, "bsl_type_at_position");
                 let response = session_manager
-                    .bsl_type_at_position(params)
+                    .bsl_type_at_position_with_progress(params, Some(progress))
                     .await
                     .map_err(|err| anyhow::anyhow!(err.to_string()))?;
                 serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
@@ -666,9 +661,9 @@ impl BslAgentHandler {
         let job_id = self
             .job_manager
             .spawn_with_class("bsl_members", job_class, move |ctx| async move {
-                ctx.set_progress("bsl_members/running", 0).await;
+                let progress = SemanticJobProgress::new(ctx, "bsl_members");
                 let response = session_manager
-                    .bsl_members(params)
+                    .bsl_members_with_progress(params, Some(progress))
                     .await
                     .map_err(|err| anyhow::anyhow!(err.to_string()))?;
                 serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
@@ -702,9 +697,9 @@ impl BslAgentHandler {
         let job_id = self
             .job_manager
             .spawn_with_class("bsl_definition", job_class, move |ctx| async move {
-                ctx.set_progress("bsl_definition/running", 0).await;
+                let progress = SemanticJobProgress::new(ctx, "bsl_definition");
                 let response = session_manager
-                    .bsl_definition(params)
+                    .bsl_definition_with_progress(params, Some(progress))
                     .await
                     .map_err(|err| anyhow::anyhow!(err.to_string()))?;
                 serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
@@ -742,9 +737,9 @@ impl BslAgentHandler {
         let job_id = self
             .job_manager
             .spawn_with_class("bsl_references", job_class, move |ctx| async move {
-                ctx.set_progress("bsl_references/running", 0).await;
+                let progress = SemanticJobProgress::new(ctx, "bsl_references");
                 let response = session_manager
-                    .bsl_references(params)
+                    .bsl_references_with_progress(params, Some(progress))
                     .await
                     .map_err(|err| anyhow::anyhow!(err.to_string()))?;
                 serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
@@ -776,9 +771,9 @@ impl BslAgentHandler {
         let job_id = self
             .job_manager
             .spawn("context_pack", move |ctx| async move {
-                ctx.set_progress("context_pack/running", 0).await;
+                let progress = SemanticJobProgress::new(ctx, "context_pack");
                 let response = session_manager
-                    .context_pack(params)
+                    .context_pack_with_progress(params, Some(progress))
                     .await
                     .map_err(|err| anyhow::anyhow!(err.to_string()))?;
                 serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
@@ -801,9 +796,9 @@ impl BslAgentHandler {
         let job_id = self
             .job_manager
             .spawn("context_expand", move |ctx| async move {
-                ctx.set_progress("context_expand/running", 0).await;
+                let progress = SemanticJobProgress::new(ctx, "context_expand");
                 let response = session_manager
-                    .context_expand(params)
+                    .context_expand_with_progress(params, Some(progress))
                     .await
                     .map_err(|err| anyhow::anyhow!(err.to_string()))?;
                 serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))

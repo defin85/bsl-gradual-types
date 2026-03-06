@@ -3,7 +3,16 @@ impl SessionManager {
         &self,
         params: ContextPackParams,
     ) -> Result<ContextPackResponse, rmcp::ErrorData> {
+        self.context_pack_with_progress(params, None).await
+    }
+
+    pub(crate) async fn context_pack_with_progress(
+        &self,
+        params: ContextPackParams,
+        progress: Option<SemanticJobProgress>,
+    ) -> Result<ContextPackResponse, rmcp::ErrorData> {
         let uuid = parse_session_id(&params.session_id)?;
+        report_job_stage(progress.as_ref(), "collecting_context", 5).await;
         let (
             analysis_revision,
             roots,
@@ -95,6 +104,7 @@ impl SessionManager {
 
         match params.focus {
             Some(ContextFocus::Position { file, position }) => {
+                report_job_stage(progress.as_ref(), "focus_position", 25).await;
                 let file_key = document_key_from_ref(&roots, &file.doc)?;
                 let (root_path, abs_path, file_ref) = resolve_doc_path(&roots, &file_key)?;
                 let source_text =
@@ -109,6 +119,7 @@ impl SessionManager {
                 text.push_line("");
 
                 if params.include.snippets {
+                    report_job_stage(progress.as_ref(), "rendering_snippet", 45).await;
                     let center_line = position.line;
                     let snippet =
                         render_snippet(&source_text, center_line, PACK_SNIPPET_CONTEXT_LINES);
@@ -141,6 +152,7 @@ impl SessionManager {
                 }
 
                 if params.include.types {
+                    report_job_stage(progress.as_ref(), "resolving_type", 70).await;
                     let version = select_effective_version(&file, &file_key, &overlays);
                     if let Ok((context, prepared)) = prepare_ephemeral_mcp_operation(
                         SemanticOperation::TypeAtPosition,
@@ -186,6 +198,7 @@ impl SessionManager {
                 let _ = index_snapshot.id.as_str();
             }
             Some(ContextFocus::Diagnostic { diagnostic_id }) => {
+                report_job_stage(progress.as_ref(), "loading_diagnostics", 35).await;
                 text.push_line(&format!("focus: diagnostic {diagnostic_id}"));
                 text.push_line("");
 
@@ -208,6 +221,7 @@ impl SessionManager {
                     })?;
 
                 if params.include.snippets {
+                    report_job_stage(progress.as_ref(), "rendering_snippet", 70).await;
                     let doc = DocumentRef::Canonical(CanonicalDocumentRef {
                         root_id: diagnostic.file.root_id.clone(),
                         path: diagnostic.file.path.clone(),
@@ -260,6 +274,7 @@ impl SessionManager {
                 truncated |= diagnostics.truncated;
             }
             Some(ContextFocus::Symbol { symbol_id }) => {
+                report_job_stage(progress.as_ref(), "resolving_symbol", 35).await;
                 let symbol = {
                     let sessions = self.sessions.read().await;
                     let session = sessions.get(&uuid).ok_or_else(|| {
@@ -286,6 +301,7 @@ impl SessionManager {
                 text.push_line("");
 
                 if params.include.snippets {
+                    report_job_stage(progress.as_ref(), "rendering_snippet", 55).await;
                     let doc = DocumentRef::Canonical(CanonicalDocumentRef {
                         root_id: symbol.file.root_id.clone(),
                         path: symbol.file.path.clone(),
@@ -331,6 +347,7 @@ impl SessionManager {
                 }
 
                 if params.include.references {
+                    report_job_stage(progress.as_ref(), "loading_references", 75).await;
                     let refs = self
                         .bsl_references(BslReferencesParams {
                             session_id: params.session_id.clone(),
@@ -345,6 +362,7 @@ impl SessionManager {
                 }
             }
             Some(ContextFocus::Query { query }) => {
+                report_job_stage(progress.as_ref(), "searching_symbols", 60).await;
                 text.push_line(&format!("focus: query {query:?}"));
                 text.push_line("");
 
@@ -373,11 +391,13 @@ impl SessionManager {
                 }
             }
             None => {
+                report_job_stage(progress.as_ref(), "assembling_pack", 60).await;
                 text.push_line("focus: none");
                 text.push_line("");
             }
         }
 
+        report_job_stage(progress.as_ref(), "finalizing", 95).await;
         sort_pack_items(&mut items);
 
         let text_truncated = text.truncated;
@@ -417,7 +437,16 @@ impl SessionManager {
         &self,
         params: ContextExpandParams,
     ) -> Result<ContextExpandResponse, rmcp::ErrorData> {
+        self.context_expand_with_progress(params, None).await
+    }
+
+    pub(crate) async fn context_expand_with_progress(
+        &self,
+        params: ContextExpandParams,
+        progress: Option<SemanticJobProgress>,
+    ) -> Result<ContextExpandResponse, rmcp::ErrorData> {
         let uuid = parse_session_id(&params.session_id)?;
+        report_job_stage(progress.as_ref(), "resolving_item", 15).await;
         let (analysis_revision, roots, overlays, item) = {
             let sessions = self.sessions.read().await;
             let session = sessions
@@ -443,6 +472,7 @@ impl SessionManager {
 
         match item {
             StoredPackItem::Snippet { file, center_line } => {
+                report_job_stage(progress.as_ref(), "rendering_snippet", 80).await;
                 let doc = DocumentRef::Canonical(CanonicalDocumentRef {
                     root_id: file.root_id.clone(),
                     path: file.path.clone(),
@@ -472,6 +502,7 @@ impl SessionManager {
         }
 
         let truncated = text.truncated;
+        report_job_stage(progress.as_ref(), "finalizing", 95).await;
         Ok(ContextExpandResponse {
             analysis_revision,
             text: text.finish(),

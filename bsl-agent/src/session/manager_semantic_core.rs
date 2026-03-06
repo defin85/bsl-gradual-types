@@ -3,6 +3,14 @@ impl SessionManager {
         &self,
         params: BslDiagnosticsParams,
     ) -> Result<BslDiagnosticsResponse, rmcp::ErrorData> {
+        self.bsl_diagnostics_with_progress(params, None).await
+    }
+
+    pub(crate) async fn bsl_diagnostics_with_progress(
+        &self,
+        params: BslDiagnosticsParams,
+        progress: Option<SemanticJobProgress>,
+    ) -> Result<BslDiagnosticsResponse, rmcp::ErrorData> {
         let uuid = parse_session_id(&params.session_id)?;
         let flow_sensitive_enabled = params.include_flow_sensitive;
         tracing::debug!(
@@ -12,6 +20,7 @@ impl SessionManager {
             scope = ?params.scope,
             "bsl_diagnostics entered"
         );
+        report_job_stage(progress.as_ref(), "resolving_scope", 5).await;
         let (
             roots,
             hot_set,
@@ -50,19 +59,21 @@ impl SessionManager {
             bsl_runtime::application::diagnostics_execution_plan(profile, flow_sensitive_enabled)
                 .cpu_class;
         let files = collect_scope_files(&roots, &hot_set, scope)?;
+        let total_files = files.len();
         tracing::debug!(
             session_id = %params.session_id,
-            files = files.len(),
+            files = total_files,
             profile = profile.as_str(),
             worker_class = ?worker_class,
             "bsl_diagnostics resolved scope files"
         );
+        report_batch_progress(progress.as_ref(), "analyzing_files", 0, total_files, 15, 85).await;
         let facade = SemanticFacade;
         let mut diagnostics = Vec::new();
         let mut truncated = false;
         let mut total_read_bytes = 0u64;
 
-        for file in files {
+        for (index, file) in files.into_iter().enumerate() {
             let doc_snapshot = match load_document_snapshot(&file, &overlays)? {
                 Some(snapshot) => snapshot,
                 None => continue,
@@ -134,12 +145,22 @@ impl SessionManager {
                 "bsl_diagnostics file worker completed"
             );
             diagnostics.extend(file_result.diagnostics);
+            report_batch_progress(
+                progress.as_ref(),
+                "analyzing_files",
+                index + 1,
+                total_files,
+                15,
+                85,
+            )
+            .await;
             if file_result.hit_limit {
                 truncated = true;
                 break;
             }
         }
 
+        report_job_stage(progress.as_ref(), "finalizing", 95).await;
         facade.sort_diagnostics(&mut diagnostics);
         if diagnostics.len() > params.limit as usize {
             diagnostics.truncate(params.limit as usize);
@@ -158,6 +179,14 @@ impl SessionManager {
         &self,
         params: BslSymbolSearchParams,
     ) -> Result<BslSymbolSearchResponse, rmcp::ErrorData> {
+        self.bsl_symbol_search_with_progress(params, None).await
+    }
+
+    pub(crate) async fn bsl_symbol_search_with_progress(
+        &self,
+        params: BslSymbolSearchParams,
+        progress: Option<SemanticJobProgress>,
+    ) -> Result<BslSymbolSearchResponse, rmcp::ErrorData> {
         let uuid = parse_session_id(&params.session_id)?;
         let query = params.query.trim();
         if query.is_empty() {
@@ -172,6 +201,7 @@ impl SessionManager {
             });
         }
 
+        report_job_stage(progress.as_ref(), "collecting_files", 5).await;
         let (roots, analysis_revision, deps_id, deps, index_snapshot, coordinator) = {
             let sessions = self.sessions.read().await;
             let session = sessions
@@ -191,12 +221,14 @@ impl SessionManager {
         };
 
         let files = collect_project_files(&roots)?;
+        let total_files = files.len();
         let query_lower = query.to_lowercase();
         let mut symbols = Vec::new();
         let mut truncated = false;
         let mut total_read_bytes = 0u64;
+        report_batch_progress(progress.as_ref(), "scanning_files", 0, total_files, 15, 85).await;
 
-        for file in files {
+        for (index, file) in files.into_iter().enumerate() {
             let text = match load_disk_text_with_limits(&file.root_path, &file.abs_path)? {
                 Some(text) => text,
                 None => continue,
@@ -326,12 +358,22 @@ impl SessionManager {
                 })??;
 
             symbols.extend(file_symbols);
+            report_batch_progress(
+                progress.as_ref(),
+                "scanning_files",
+                index + 1,
+                total_files,
+                15,
+                85,
+            )
+            .await;
             if symbols.len() >= params.limit as usize {
                 truncated = true;
                 break;
             }
         }
 
+        report_job_stage(progress.as_ref(), "finalizing", 95).await;
         sort_symbols(&mut symbols);
         if symbols.len() > params.limit as usize {
             symbols.truncate(params.limit as usize);
@@ -370,8 +412,17 @@ impl SessionManager {
         &self,
         params: BslTypeAtPositionParams,
     ) -> Result<BslTypeAtPositionResponse, rmcp::ErrorData> {
+        self.bsl_type_at_position_with_progress(params, None).await
+    }
+
+    pub(crate) async fn bsl_type_at_position_with_progress(
+        &self,
+        params: BslTypeAtPositionParams,
+        progress: Option<SemanticJobProgress>,
+    ) -> Result<BslTypeAtPositionResponse, rmcp::ErrorData> {
         let uuid = parse_session_id(&params.session_id)?;
         let flow_sensitive_enabled = params.include_flow_sensitive;
+        report_job_stage(progress.as_ref(), "resolving_document", 10).await;
         let (analysis_revision, roots, overlays, deps_id, deps, index_snapshot, coordinator) = {
             let sessions = self.sessions.read().await;
             let session = sessions
@@ -397,6 +448,7 @@ impl SessionManager {
             select_effective_text(&params.file, &file_key, &overlays, &root_path, &abs_path)?;
         let version = select_effective_version(&params.file, &file_key, &overlays);
 
+        report_job_stage(progress.as_ref(), "preparing_snapshot", 35).await;
         let (context, prepared) = match prepare_ephemeral_mcp_operation(
             SemanticOperation::TypeAtPosition,
             flow_sensitive_enabled,
@@ -422,6 +474,7 @@ impl SessionManager {
         };
 
         let analysis = prepared.snapshot.analysis;
+        report_job_stage(progress.as_ref(), "querying_ir", 60).await;
         let program_query = IntellisenseV2Facade::run_optional_query(
             &context,
             ObservabilityStage::IrQuery,
@@ -440,6 +493,7 @@ impl SessionManager {
         };
 
         let pos = params.position;
+        report_job_stage(progress.as_ref(), "resolving_type", 85).await;
         let type_info = type_at_utf16_position(
             &analysis,
             FileId(1),
@@ -468,6 +522,7 @@ impl SessionManager {
             range: span_to_range_with_analysis(&analysis, FileId(1), node.span),
         });
 
+        report_job_stage(progress.as_ref(), "finalizing", 95).await;
         Ok(BslTypeAtPositionResponse {
             analysis_revision,
             flow_sensitive_enabled,
@@ -481,8 +536,17 @@ impl SessionManager {
         &self,
         params: BslMembersParams,
     ) -> Result<BslMembersResponse, rmcp::ErrorData> {
+        self.bsl_members_with_progress(params, None).await
+    }
+
+    pub(crate) async fn bsl_members_with_progress(
+        &self,
+        params: BslMembersParams,
+        progress: Option<SemanticJobProgress>,
+    ) -> Result<BslMembersResponse, rmcp::ErrorData> {
         let uuid = parse_session_id(&params.session_id)?;
         let flow_sensitive_enabled = params.include_flow_sensitive;
+        report_job_stage(progress.as_ref(), "resolving_document", 10).await;
         let (analysis_revision, roots, overlays, deps_id, deps, index_snapshot, coordinator) = {
             let sessions = self.sessions.read().await;
             let session = sessions
@@ -508,6 +572,7 @@ impl SessionManager {
             select_effective_text(&params.file, &file_key, &overlays, &root_path, &abs_path)?;
         let version = select_effective_version(&params.file, &file_key, &overlays);
 
+        report_job_stage(progress.as_ref(), "preparing_snapshot", 30).await;
         let (context, prepared) = match prepare_ephemeral_mcp_operation(
             SemanticOperation::Members,
             flow_sensitive_enabled,
@@ -536,6 +601,7 @@ impl SessionManager {
             index_snapshot,
             ..
         } = prepared.snapshot;
+        report_job_stage(progress.as_ref(), "querying_ir", 50).await;
         let program = IntellisenseV2Facade::run_optional_query(
             &context,
             ObservabilityStage::IrQuery,
@@ -545,6 +611,7 @@ impl SessionManager {
         )
         .ok()
         .flatten();
+        report_job_stage(progress.as_ref(), "querying_parse_result", 65).await;
         let parse_result = IntellisenseV2Facade::run_parse_result_query(
             &context,
             &analysis,
@@ -586,6 +653,7 @@ impl SessionManager {
             flow_sensitive_enabled,
         );
 
+        report_job_stage(progress.as_ref(), "resolving_members", 85).await;
         let result = bsl_runtime::application::type_system::get_completion_with_semantic_program_snapshot_v2(
             text.as_str(),
             params.position.line,
@@ -632,6 +700,7 @@ impl SessionManager {
             members.truncate(params.limit as usize);
         }
 
+        report_job_stage(progress.as_ref(), "finalizing", 95).await;
         Ok(BslMembersResponse {
             analysis_revision,
             flow_sensitive_enabled,

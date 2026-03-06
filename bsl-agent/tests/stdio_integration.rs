@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use bsl_agent::types::{
@@ -179,6 +180,38 @@ async fn wait_job_terminal(
     }
 }
 
+async fn collect_job_updates(
+    service: &RunningService<RoleClient, ()>,
+    job_id: &str,
+    timeout_ms: u64,
+) -> Vec<JobStatusResponse> {
+    let mut updates = Vec::new();
+
+    loop {
+        let status: JobStatusResponse = call_tool(
+            service,
+            "job_wait",
+            json!({ "job_id": job_id, "timeout_ms": timeout_ms }),
+        )
+        .await;
+
+        let is_new = updates.last().is_none_or(|prev: &JobStatusResponse| {
+            prev.state != status.state
+                || prev.phase != status.phase
+                || prev.progress.percent != status.progress.percent
+        });
+        if is_new {
+            updates.push(status.clone());
+        }
+
+        if !matches!(status.state, JobStateDto::Queued | JobStateDto::Running) {
+            break;
+        }
+    }
+
+    updates
+}
+
 async fn wait_job_succeeded(service: &RunningService<RoleClient, ()>, job_id: &str) {
     let status = wait_job_terminal(service, job_id).await;
     assert_eq!(
@@ -213,6 +246,73 @@ async fn wait_workspace_ready(
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
+}
+
+fn write_semantic_progress_fixture(root: &Path, file_count: usize) {
+    for idx in 0..file_count {
+        let module_path = root.join(format!("src/CommonModules/Progress{idx:03}/Module.bsl"));
+        std::fs::create_dir_all(module_path.parent().expect("module parent"))
+            .expect("create module dir");
+
+        let mut source = format!("Процедура TestProgressProc{idx}()\n");
+        for _ in 0..24 {
+            source.push_str("    Лок = Неопределено;\n");
+            source.push_str("    Лок.Метод();\n");
+            source.push_str("    Если Лок <> Неопределено Тогда\n");
+            source.push_str("        Лок.Метод();\n");
+            source.push_str("    КонецЕсли;\n");
+        }
+        source.push_str("КонецПроцедуры\n");
+
+        std::fs::write(&module_path, source).expect("write semantic fixture");
+    }
+}
+
+fn assert_running_progress_is_non_decorative(
+    updates: &[JobStatusResponse],
+    expected_phase_prefix: &str,
+) {
+    let running_updates: Vec<&JobStatusResponse> = updates
+        .iter()
+        .filter(|status| matches!(status.state, JobStateDto::Queued | JobStateDto::Running))
+        .collect();
+    assert!(
+        !running_updates.is_empty(),
+        "expected at least one running update, got {updates:?}"
+    );
+
+    let running_percents: BTreeSet<u8> = running_updates
+        .iter()
+        .map(|status| status.progress.percent)
+        .filter(|percent| *percent > 0 && *percent < 100)
+        .collect();
+    assert!(
+        running_percents.len() >= 2,
+        "expected multiple intermediate running percents, got updates={updates:?}"
+    );
+
+    assert!(
+        running_updates
+            .iter()
+            .any(|status| status.phase.starts_with(expected_phase_prefix)),
+        "expected running phase with prefix {expected_phase_prefix:?}, got updates={updates:?}"
+    );
+
+    let mut last_percent = 0;
+    for status in updates {
+        assert!(
+            status.progress.percent >= last_percent,
+            "progress must be monotonic: last={last_percent} current={} updates={updates:?}",
+            status.progress.percent
+        );
+        last_percent = status.progress.percent;
+    }
+
+    let terminal = updates.last().expect("terminal update");
+    assert_eq!(
+        terminal.progress.percent, 100,
+        "terminal update must reach 100: {terminal:?}"
+    );
 }
 
 #[tokio::test]
@@ -1019,6 +1119,103 @@ async fn stdio_file_diagnostics_job_wait_survives_loop_backedge() {
     );
 
     let _build_info: BuildInfoResponse = call_tool(&service, "build_info", json!({})).await;
+
+    let _close: serde_json::Value = call_tool(
+        &service,
+        "workspace_close",
+        json!({ "session_id": &session_id }),
+    )
+    .await;
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_project_diagnostics_job_reports_intermediate_progress() {
+    let service = spawn_agent(&[]).await;
+
+    let temp_root = tempfile::TempDir::new().expect("tempdir");
+    write_semantic_progress_fixture(temp_root.path(), 48);
+
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [temp_root.path().to_string_lossy()],
+        }),
+    )
+    .await;
+    let session_id = open.session_id.clone();
+    let _status = wait_workspace_ready(&service, &open).await;
+
+    let start: JobStartResponse = call_tool(
+        &service,
+        "bsl_diagnostics_start",
+        json!({
+            "session_id": &session_id,
+            "scope": "project",
+            "limit": 2000,
+            "include_flow_sensitive": true
+        }),
+    )
+    .await;
+
+    let updates = collect_job_updates(&service, &start.job_id, 50).await;
+    assert_running_progress_is_non_decorative(&updates, "bsl_diagnostics/");
+
+    let result: BslDiagnosticsResponse =
+        call_tool(&service, "job_result", json!({ "job_id": &start.job_id })).await;
+    assert!(
+        !result.diagnostics.is_empty(),
+        "expected semantic diagnostics for progress fixture"
+    );
+
+    let _close: serde_json::Value = call_tool(
+        &service,
+        "workspace_close",
+        json!({ "session_id": &session_id }),
+    )
+    .await;
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_symbol_search_job_reports_intermediate_progress() {
+    let service = spawn_agent(&[]).await;
+
+    let temp_root = tempfile::TempDir::new().expect("tempdir");
+    write_semantic_progress_fixture(temp_root.path(), 48);
+
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [temp_root.path().to_string_lossy()],
+        }),
+    )
+    .await;
+    let session_id = open.session_id.clone();
+    let _status = wait_workspace_ready(&service, &open).await;
+
+    let start: JobStartResponse = call_tool(
+        &service,
+        "bsl_symbol_search_start",
+        json!({
+            "session_id": &session_id,
+            "query": "TestProgressProc",
+            "limit": 500
+        }),
+    )
+    .await;
+
+    let updates = collect_job_updates(&service, &start.job_id, 50).await;
+    assert_running_progress_is_non_decorative(&updates, "bsl_symbol_search/");
+
+    let result: BslSymbolSearchResponse =
+        call_tool(&service, "job_result", json!({ "job_id": &start.job_id })).await;
+    assert!(
+        !result.symbols.is_empty(),
+        "expected symbol search results for progress fixture"
+    );
 
     let _close: serde_json::Value = call_tool(
         &service,

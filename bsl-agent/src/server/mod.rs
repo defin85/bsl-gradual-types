@@ -13,7 +13,7 @@ use bsl_runtime::application::{
 };
 
 use crate::jobs::JobManager;
-use crate::session::SessionManager;
+use crate::session::{SemanticJobProgress, SessionManager};
 use crate::types::{
     BslAgentError, BuildInfoResponse, JobStartResponse, JobStateDto, UiUrlResponse,
 };

@@ -3,8 +3,17 @@ impl SessionManager {
         &self,
         params: BslDefinitionParams,
     ) -> Result<BslDefinitionResponse, rmcp::ErrorData> {
+        self.bsl_definition_with_progress(params, None).await
+    }
+
+    pub(crate) async fn bsl_definition_with_progress(
+        &self,
+        params: BslDefinitionParams,
+        progress: Option<SemanticJobProgress>,
+    ) -> Result<BslDefinitionResponse, rmcp::ErrorData> {
         let uuid = parse_session_id(&params.session_id)?;
         if let Some(symbol_id) = params.symbol_id.as_deref() {
+            report_job_stage(progress.as_ref(), "resolving_symbol_id", 60).await;
             let sessions = self.sessions.read().await;
             let session = sessions
                 .get(&uuid)
@@ -42,6 +51,7 @@ impl SessionManager {
             ));
         };
 
+        report_job_stage(progress.as_ref(), "resolving_document", 10).await;
         let (analysis_revision, roots, overlays, deps_id, deps, index_snapshot, coordinator) = {
             let sessions = self.sessions.read().await;
             let session = sessions
@@ -66,6 +76,7 @@ impl SessionManager {
         let text = select_effective_text(&file, &file_key, &overlays, &root_path, &abs_path)?;
         let version = select_effective_version(&file, &file_key, &overlays);
 
+        report_job_stage(progress.as_ref(), "preparing_snapshot", 35).await;
         let (context, prepared) = match prepare_ephemeral_mcp_operation(
             SemanticOperation::Definition,
             false,
@@ -89,6 +100,7 @@ impl SessionManager {
         };
 
         let analysis = prepared.snapshot.analysis;
+        report_job_stage(progress.as_ref(), "querying_ir", 60).await;
         let program_query = IntellisenseV2Facade::run_optional_query(
             &context,
             ObservabilityStage::IrQuery,
@@ -111,6 +123,7 @@ impl SessionManager {
                 snippet: None,
             });
         };
+        report_job_stage(progress.as_ref(), "resolving_definition", 85).await;
         let type_at_position_hint = type_at_utf16_position(
             &analysis,
             FileId(1),
@@ -159,6 +172,7 @@ impl SessionManager {
             None => None,
         };
 
+        report_job_stage(progress.as_ref(), "finalizing", 95).await;
         Ok(BslDefinitionResponse {
             analysis_revision,
             location,
@@ -170,7 +184,16 @@ impl SessionManager {
         &self,
         params: BslReferencesParams,
     ) -> Result<BslReferencesResponse, rmcp::ErrorData> {
+        self.bsl_references_with_progress(params, None).await
+    }
+
+    pub(crate) async fn bsl_references_with_progress(
+        &self,
+        params: BslReferencesParams,
+        progress: Option<SemanticJobProgress>,
+    ) -> Result<BslReferencesResponse, rmcp::ErrorData> {
         let uuid = parse_session_id(&params.session_id)?;
+        report_job_stage(progress.as_ref(), "resolving_symbol", 10).await;
         let (roots, analysis_revision, deps_id, deps, index_snapshot, symbol, coordinator) = {
             let sessions = self.sessions.read().await;
             let session = sessions
@@ -196,6 +219,7 @@ impl SessionManager {
         };
 
         if symbol.kind != "function" && symbol.kind != "procedure" {
+            report_job_stage(progress.as_ref(), "finalizing", 95).await;
             return Ok(BslReferencesResponse {
                 analysis_revision,
                 count: 0,
@@ -205,11 +229,13 @@ impl SessionManager {
         }
 
         let files = collect_project_files(&roots)?;
+        let total_files = files.len();
         let mut references = Vec::new();
         let mut truncated = false;
         let mut total_read_bytes = 0u64;
+        report_batch_progress(progress.as_ref(), "scanning_files", 0, total_files, 20, 85).await;
 
-        for file in files {
+        for (index, file) in files.into_iter().enumerate() {
             let text = match load_disk_text_with_limits(&file.root_path, &file.abs_path)? {
                 Some(text) => text,
                 None => continue,
@@ -320,12 +346,22 @@ impl SessionManager {
                 })??;
 
             references.extend(file_references);
+            report_batch_progress(
+                progress.as_ref(),
+                "scanning_files",
+                index + 1,
+                total_files,
+                20,
+                85,
+            )
+            .await;
             if references.len() >= params.limit as usize {
                 truncated = true;
                 break;
             }
         }
 
+        report_job_stage(progress.as_ref(), "finalizing", 95).await;
         sort_references(&mut references);
         if references.len() > params.limit as usize {
             references.truncate(params.limit as usize);

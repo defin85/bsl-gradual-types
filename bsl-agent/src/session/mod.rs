@@ -155,6 +155,7 @@ include!("manager_context.rs");
 
 include!("helpers_core.rs");
 include!("helpers_fs.rs");
+include!("helpers_progress.rs");
 include!("helpers_semantic.rs");
 
 #[cfg(test)]

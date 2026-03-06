@@ -291,7 +291,10 @@ async fn shutdown_lsp_service(
         .call(shutdown_req)
         .await
         .expect("shutdown request");
-    assert!(shutdown_response.is_some(), "shutdown should return a response");
+    assert!(
+        shutdown_response.is_some(),
+        "shutdown should return a response"
+    );
 
     let exit_req = Request::build("exit").finish();
     let exit_response = service
@@ -6767,7 +6770,8 @@ async fn p22_get_completion_timeline_exposes_versioned_contract() {
 
 #[tokio::test]
 async fn p22_get_completion_timeline_contains_completion_trace() {
-    const FIXTURE: &str = "Процедура Тест()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.\nКонецПроцедуры\n";
+    const FIXTURE: &str =
+        "Процедура Тест()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.\nКонецПроцедуры\n";
 
     let coordinator = Arc::new(SystemCoordinator::new());
 
@@ -6855,7 +6859,10 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
         !traces.is_empty(),
         "expected non-empty completion timeline traces after completion request"
     );
-    let trace = traces.last().and_then(|value| value.as_object()).expect("trace");
+    let trace = traces
+        .last()
+        .and_then(|value| value.as_object())
+        .expect("trace");
     for field in [
         "trace_id",
         "request_id",
@@ -6867,7 +6874,10 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
         "dominant_stage",
         "stages",
     ] {
-        assert!(trace.contains_key(field), "missing field `{field}` in trace");
+        assert!(
+            trace.contains_key(field),
+            "missing field `{field}` in trace"
+        );
     }
     let stages = trace
         .get("stages")

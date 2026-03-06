@@ -300,5 +300,7 @@ fn test_load_types_allows_form_synthetic_type_names() {
     .expect("form synthetic types must remain allowed in global repository");
 
     assert!(repo.find_type("Формы.Документы.Док1.Форма1").is_some());
-    assert!(repo.find_type("ЭлементыФормы.Документы.Док1.Форма1").is_some());
+    assert!(repo
+        .find_type("ЭлементыФормы.Документы.Док1.Форма1")
+        .is_some());
 }

@@ -269,45 +269,53 @@ impl NullSafetyAnalyzer {
             .iter()
             .find(|e| e.from == node_id && e.kind == EdgeKind::ConditionalTrue)
         {
+            let tracked = TypeId::new(variable);
             self.non_null_vars
                 .entry(edge.to)
                 .or_default()
-                .insert(TypeId::new(variable));
+                .insert(tracked.clone());
 
-            // Рекурсивно для всех последующих узлов в then-ветке
-            self.propagate_non_null(edge.to, variable);
+            // CFG может содержать backedge-циклы (`while`, `for`, `foreach`), поэтому
+            // используем явный worklist вместо рекурсии по successors.
+            self.propagate_non_null(edge.to, tracked, variable);
         }
     }
 
     /// Распространить информацию о non-null дальше по графу
-    fn propagate_non_null(&mut self, node_id: usize, variable: &str) {
-        let successors: Vec<_> = self
-            .cfg
-            .edges()
-            .iter()
-            .filter(|e| e.from == node_id && e.kind != EdgeKind::ConditionalFalse)
-            .map(|e| e.to)
-            .collect();
+    fn propagate_non_null(&mut self, start_node_id: usize, tracked: TypeId, variable: &str) {
+        let mut worklist = vec![start_node_id];
+        let mut visited = HashSet::from([start_node_id]);
 
-        for successor in successors {
-            // Не распространяем, если переменная переприсваивается
-            let node = &self.cfg.nodes()[successor];
-            if let CfgNodeKind::Assignment {
-                variable: assigned, ..
-            } = &node.kind
-            {
-                if assigned == variable {
-                    continue;
+        while let Some(node_id) = worklist.pop() {
+            let successors: Vec<_> = self
+                .cfg
+                .edges()
+                .iter()
+                .filter(|e| e.from == node_id && e.kind != EdgeKind::ConditionalFalse)
+                .map(|e| e.to)
+                .collect();
+
+            for successor in successors {
+                // Не распространяем, если переменная переприсваивается.
+                let node = &self.cfg.nodes()[successor];
+                if let CfgNodeKind::Assignment {
+                    variable: assigned, ..
+                } = &node.kind
+                {
+                    if assigned == variable {
+                        continue;
+                    }
+                }
+
+                self.non_null_vars
+                    .entry(successor)
+                    .or_default()
+                    .insert(tracked.clone());
+
+                if visited.insert(successor) {
+                    worklist.push(successor);
                 }
             }
-
-            self.non_null_vars
-                .entry(successor)
-                .or_default()
-                .insert(TypeId::new(variable));
-
-            // Рекурсивно
-            self.propagate_non_null(successor, variable);
         }
     }
 

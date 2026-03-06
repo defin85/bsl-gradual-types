@@ -89,10 +89,7 @@ fn has_unknown_member_diagnostic(message: &str, member_name: &str) -> bool {
 }
 
 fn is_simple_member_identifier(label: &str) -> bool {
-    !label.is_empty()
-        && label
-            .chars()
-            .all(|ch| ch == '_' || ch.is_alphanumeric())
+    !label.is_empty() && label.chars().all(|ch| ch == '_' || ch.is_alphanumeric())
 }
 
 fn pick_member_for_diagnostics_probe(items: &[CompletionItem]) -> Option<(String, bool)> {
@@ -118,10 +115,7 @@ fn pick_member_for_diagnostics_probe(items: &[CompletionItem]) -> Option<(String
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn assert_cross_consumer_consistency(
-    code_template: &str,
-    completion_prefix: &str,
-) {
+async fn assert_cross_consumer_consistency(code_template: &str, completion_prefix: &str) {
     let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
     let index_snapshot = deps_bundle.index_snapshot.clone();
     let uri = Url::parse("file:///universal_collection_cross_consumer_consistency.bsl")
@@ -129,8 +123,16 @@ async fn assert_cross_consumer_consistency(
 
     let host = setup_host(deps_bundle.as_ref(), code_template);
     let analysis = host.analysis();
-    let file_content = analysis.file_text(FILE_ID).ok().flatten().expect("file_text");
-    let resolved_file_path = analysis.file_path(FILE_ID).ok().flatten().expect("file_path");
+    let file_content = analysis
+        .file_text(FILE_ID)
+        .ok()
+        .flatten()
+        .expect("file_text");
+    let resolved_file_path = analysis
+        .file_path(FILE_ID)
+        .ok()
+        .flatten()
+        .expect("file_path");
     let ir_program = analysis.ir(FILE_ID).ok().flatten().expect("ir");
     let parse_result = analysis
         .parse_result(FILE_ID)
@@ -171,9 +173,14 @@ async fn assert_cross_consumer_consistency(
         "completion must return at least one candidate at {:?}",
         completion_position
     );
-    let labels = items.iter().map(|item| item.label.clone()).collect::<Vec<_>>();
+    let labels = items
+        .iter()
+        .map(|item| item.label.clone())
+        .collect::<Vec<_>>();
     let (selected_member, is_method_call) = pick_member_for_diagnostics_probe(&items)
-        .unwrap_or_else(|| panic!("no completion member suitable for diagnostics probe: {labels:?}"));
+        .unwrap_or_else(|| {
+            panic!("no completion member suitable for diagnostics probe: {labels:?}")
+        });
     let selected_access = if is_method_call {
         format!("{}()", selected_member)
     } else {
@@ -239,11 +246,7 @@ async fn map_index_access_cross_consumer_consistency() {
         "КонецПроцедуры\n",
     );
 
-    assert_cross_consumer_consistency(
-        code,
-        "    probe = map[\"k\"].",
-    )
-    .await;
+    assert_cross_consumer_consistency(code, "    probe = map[\"k\"].").await;
 }
 
 #[tokio::test]
@@ -256,11 +259,7 @@ async fn structure_field_cross_consumer_consistency() {
         "КонецПроцедуры\n",
     );
 
-    assert_cross_consumer_consistency(
-        code,
-        "    probe = S.",
-    )
-    .await;
+    assert_cross_consumer_consistency(code, "    probe = S.").await;
 }
 
 #[tokio::test]
@@ -274,9 +273,5 @@ async fn value_table_row_column_cross_consumer_consistency() {
         "КонецПроцедуры\n",
     );
 
-    assert_cross_consumer_consistency(
-        code,
-        "    probe = Стр.",
-    )
-    .await;
+    assert_cross_consumer_consistency(code, "    probe = Стр.").await;
 }

@@ -224,7 +224,8 @@ pub struct BslLanguageServer {
     pub(crate) full_index_state: Arc<Mutex<FullIndexRuntimeState>>,
     pub(crate) next_full_index_operation_id: Arc<AtomicU64>,
     pub(crate) full_index_watchdog_timeout: Duration,
-    pub(crate) completion_timeline_traces: Arc<Mutex<VecDeque<crate::types::CompletionTimelineTrace>>>,
+    pub(crate) completion_timeline_traces:
+        Arc<Mutex<VecDeque<crate::types::CompletionTimelineTrace>>>,
     pub(crate) next_completion_timeline_trace_id: Arc<AtomicU64>,
 }
 

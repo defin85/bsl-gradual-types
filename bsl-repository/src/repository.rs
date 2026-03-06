@@ -106,12 +106,8 @@ const FORBIDDEN_INSTANCE_LOCAL_TYPE_PREFIXES: [&str; 4] = [
     "__bsl_v2_typed_row__",
 ];
 
-const INSTANCE_LOCAL_MARKERS: [&str; 4] = [
-    "snapshot_id=",
-    "scope_id=",
-    "instance_id=",
-    "creation_span",
-];
+const INSTANCE_LOCAL_MARKERS: [&str; 4] =
+    ["snapshot_id=", "scope_id=", "instance_id=", "creation_span"];
 
 const UNIVERSAL_COLLECTION_MARKERS: [&str; 6] = [
     "соответствие",
@@ -154,7 +150,8 @@ fn ensure_no_forbidden_instance_local_types(
     let forbidden: Vec<&str> = candidate_types
         .iter()
         .filter_map(|type_data| {
-            is_forbidden_instance_local_type_name(&type_data.name).then_some(type_data.name.as_str())
+            is_forbidden_instance_local_type_name(&type_data.name)
+                .then_some(type_data.name.as_str())
         })
         .collect();
 

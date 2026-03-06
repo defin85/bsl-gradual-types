@@ -547,7 +547,12 @@ pub(crate) async fn get_completion_with_analysis(
                 .await
                 {
                     add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
-                    add_properties_from_resolution(metadata_lookup, &resolution, &mut candidates, 1);
+                    add_properties_from_resolution(
+                        metadata_lookup,
+                        &resolution,
+                        &mut candidates,
+                        1,
+                    );
                 }
             } else if let Some(base_name) = context.member_base.as_deref() {
                 if let Some(kind) = get_collection_kind(base_name) {
@@ -557,12 +562,22 @@ pub(crate) async fn get_completion_with_analysis(
                 {
                     let resolution = TypeResolution::explicit(&type_name);
                     add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
-                    add_properties_from_resolution(metadata_lookup, &resolution, &mut candidates, 1);
+                    add_properties_from_resolution(
+                        metadata_lookup,
+                        &resolution,
+                        &mut candidates,
+                        1,
+                    );
                 } else if let Some(resolution) =
                     resolve_member_owner_type(analysis, file_content, line, column, base_name).await
                 {
                     add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
-                    add_properties_from_resolution(metadata_lookup, &resolution, &mut candidates, 1);
+                    add_properties_from_resolution(
+                        metadata_lookup,
+                        &resolution,
+                        &mut candidates,
+                        1,
+                    );
                 }
             }
         }

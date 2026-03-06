@@ -38,12 +38,7 @@ struct CompletionResponseBuildBreakdown {
 }
 
 impl CompletionTimelineCapture {
-    fn new(
-        request_id: Option<String>,
-        uri: &Url,
-        trigger_mode: &str,
-        started_at_ms: u64,
-    ) -> Self {
+    fn new(request_id: Option<String>, uri: &Url, trigger_mode: &str, started_at_ms: u64) -> Self {
         Self {
             request_id,
             uri: uri.to_string(),
@@ -103,7 +98,10 @@ impl CompletionTimelineCapture {
         };
 
         let stage_durations_ms = [
-            ("snapshot_read", Self::duration_to_ms(breakdown.snapshot_read)),
+            (
+                "snapshot_read",
+                Self::duration_to_ms(breakdown.snapshot_read),
+            ),
             ("collect", Self::duration_to_ms(breakdown.collect)),
             ("rank", Self::duration_to_ms(breakdown.rank)),
             ("format", Self::duration_to_ms(breakdown.format)),
@@ -134,8 +132,12 @@ impl CompletionTimelineCapture {
     fn push_terminal_stage(&mut self, outcome: &str) {
         let status = match outcome {
             "cancelled" | "superseded" => CompletionTimelineStageStatus::Cancelled,
-            "handler_error" | "queue_rejected" | "wait_not_ready" | "missing_deps"
-            | "missing_file_content" | "missing_file_path" => CompletionTimelineStageStatus::Failed,
+            "handler_error"
+            | "queue_rejected"
+            | "wait_not_ready"
+            | "missing_deps"
+            | "missing_file_content"
+            | "missing_file_path" => CompletionTimelineStageStatus::Failed,
             "skipped" => CompletionTimelineStageStatus::Skipped,
             _ => CompletionTimelineStageStatus::Completed,
         };
@@ -1031,8 +1033,10 @@ impl BslLanguageServer {
                             rank: stats.stage_rank,
                             format: stats.stage_format,
                         });
-                    timeline_capture
-                        .push_response_build_stage(response_build_elapsed, response_build_breakdown);
+                    timeline_capture.push_response_build_stage(
+                        response_build_elapsed,
+                        response_build_breakdown,
+                    );
                     if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
                         event_driven_guards_enabled,
                         self,
@@ -1204,7 +1208,11 @@ mod tests {
             }),
         );
 
-        let stage_names: Vec<&str> = capture.stages.iter().map(|stage| stage.name.as_str()).collect();
+        let stage_names: Vec<&str> = capture
+            .stages
+            .iter()
+            .map(|stage| stage.name.as_str())
+            .collect();
         assert!(!stage_names.contains(&"response_build"));
         assert!(stage_names.contains(&"snapshot_read"));
         assert!(stage_names.contains(&"collect"));

@@ -121,6 +121,56 @@ fn test_loop_header_null_check_suppresses_warning_in_body() {
 }
 
 #[test]
+fn test_loop_backedge_null_check_does_not_recurse_forever() {
+    let mut cfg = ControlFlowGraph::new();
+
+    cfg.add_node(CfgNode {
+        id: 0,
+        kind: CfgNodeKind::LoopHeader {
+            condition: "x <> Null".to_string(),
+        },
+    });
+
+    cfg.add_node(CfgNode {
+        id: 1,
+        kind: CfgNodeKind::MethodCall {
+            object: "x".to_string(),
+            method: "Метод".to_string(),
+            arguments: vec![],
+        },
+    });
+
+    cfg.add_edge(0, 1, EdgeKind::ConditionalTrue);
+    cfg.add_edge(1, 0, EdgeKind::Unconditional);
+
+    let mut analyzer = NullSafetyAnalyzer::new(cfg);
+    let mut context = FlowAnalysisContext::new();
+
+    context.set_variable(
+        "x",
+        TypeResolution {
+            result: ResolutionResult::nullable(ConcreteType::string()),
+            certainty: Certainty::Known,
+            source: ResolutionSource::Static,
+            metadata: ResolutionMetadata::default(),
+            active_facet: None,
+            available_facets: vec![],
+        },
+    );
+
+    let result = analyzer.analyze(&context);
+    assert!(
+        result.warnings.is_empty(),
+        "expected no warnings inside loop body after null check, warnings={:?}",
+        result.warnings
+    );
+    assert!(
+        !result.safe_operations.is_empty(),
+        "expected safe operation to be recorded for loop backedge"
+    );
+}
+
+#[test]
 fn test_unchecked_null_warning() {
     let mut cfg = ControlFlowGraph::new();
 

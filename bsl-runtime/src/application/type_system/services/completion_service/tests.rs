@@ -1257,7 +1257,10 @@ async fn completion_does_not_infer_member_owner_without_owner_hint() {
     };
 
     let resolved = resolve_member_owner_type(Some(&ctx), content, line, column, "ТаблЗнач").await;
-    assert!(resolved.is_none(), "owner type must come only from shared resolved hint path");
+    assert!(
+        resolved.is_none(),
+        "owner type must come only from shared resolved hint path"
+    );
 
     let result = get_completion_with_analysis(
         content,

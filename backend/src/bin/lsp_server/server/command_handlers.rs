@@ -16,8 +16,8 @@ use crate::handlers::{find_containing_function_in_dto, CurrentContextResponse};
 use crate::types::{
     AutoReindexCommandParams, AutoReindexStateResponse, BuildIndexParams, BuildIndexResponse,
     CompletionTimelineRequest, CompletionTimelineResponse, GetCurrentContextParams,
-    GetIndexStateParams, GetIndexStateResponse, IncrementalUpdateParams,
-    IncrementalUpdateResponse, ObservabilityMetricsResponse, WorkspaceStatsResponse,
+    GetIndexStateParams, GetIndexStateResponse, IncrementalUpdateParams, IncrementalUpdateResponse,
+    ObservabilityMetricsResponse, WorkspaceStatsResponse,
 };
 
 use super::{BslLanguageServer, FullIndexOperationKind, FullIndexStateKind};
@@ -26,7 +26,9 @@ const ATTACHED_MESSAGE: &str = "already running (attached)";
 
 #[derive(Debug, Clone)]
 pub(crate) enum BeginFullIndexOutcome {
-    Started { operation_id: String },
+    Started {
+        operation_id: String,
+    },
     AlreadyRunning {
         active_operation: Option<FullIndexOperationKind>,
         operation_id: Option<String>,
@@ -247,10 +249,7 @@ impl BslLanguageServer {
         _params: BuildIndexParams,
     ) -> JsonRpcResult<BuildIndexResponse> {
         let operation_id = match self
-            .begin_full_index_operation(
-                FullIndexOperationKind::BuildIndex,
-                "Building BSL index",
-            )
+            .begin_full_index_operation(FullIndexOperationKind::BuildIndex, "Building BSL index")
             .await
         {
             BeginFullIndexOutcome::Started { operation_id } => operation_id,
@@ -267,7 +266,8 @@ impl BslLanguageServer {
 
         let cfg = self.config.read().await.clone();
         let Some(cfg) = cfg else {
-            let message = "LSP config not available (initializationOptions not received)".to_string();
+            let message =
+                "LSP config not available (initializationOptions not received)".to_string();
             self.finish_full_index_operation_failed(&operation_id, message.clone())
                 .await;
             return Ok(BuildIndexResponse {
@@ -533,8 +533,8 @@ mod tests {
     use std::sync::{Arc, Mutex as StdMutex};
     use tower::Service;
     use tower::ServiceExt;
-    use tower_lsp::lsp_types::{ClientCapabilities, InitializeParams, InitializedParams};
     use tower_lsp::jsonrpc::Request;
+    use tower_lsp::lsp_types::{ClientCapabilities, InitializeParams, InitializedParams};
     use tower_lsp::LspService;
 
     fn create_test_server() -> BslLanguageServer {
@@ -560,8 +560,7 @@ mod tests {
         server
     }
 
-    fn create_custom_service(
-    ) -> (
+    fn create_custom_service() -> (
         LspService<BslLanguageServer>,
         tokio::task::JoinHandle<()>,
         BslLanguageServer,
@@ -781,12 +780,10 @@ mod tests {
                 .expect("state"),
             "idle"
         );
-        assert!(
-            !object
-                .get("ready")
-                .and_then(|value| value.as_bool())
-                .expect("ready")
-        );
+        assert!(!object
+            .get("ready")
+            .and_then(|value| value.as_bool())
+            .expect("ready"));
 
         drain_task.abort();
     }
@@ -820,12 +817,10 @@ mod tests {
         let value = serde_json::to_value(response).expect("serialize response");
         let result = value.get("result").expect("result field");
         let object = result.as_object().expect("result object");
-        assert!(
-            object
-                .get("success")
-                .and_then(|value| value.as_bool())
-                .expect("success")
-        );
+        assert!(object
+            .get("success")
+            .and_then(|value| value.as_bool())
+            .expect("success"));
         let message = object
             .get("message")
             .and_then(|value| value.as_str())
@@ -907,7 +902,10 @@ mod tests {
             .expect("timeline response");
         assert_eq!(response.version, 1);
         assert_eq!(response.traces.len(), 200);
-        assert_eq!(response.traces.first().map(|trace| trace.trace_id.as_str()), Some("trace-5"));
+        assert_eq!(
+            response.traces.first().map(|trace| trace.trace_id.as_str()),
+            Some("trace-5")
+        );
         assert_eq!(
             response.traces.last().map(|trace| trace.trace_id.as_str()),
             Some("trace-204")

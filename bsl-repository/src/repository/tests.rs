@@ -224,3 +224,81 @@ fn test_remove_signatures_by_name() {
     repo.remove_global_function_signatures(&["Глобальная".to_string()]);
     assert!(repo.find_method_signature(None, "Глобальная").is_none());
 }
+
+#[test]
+fn test_load_types_rejects_per_instance_collection_synthetic_types() {
+    let repo = InMemoryTypeRepository::new();
+
+    let forbidden = RawTypeData {
+        name: "__bsl_v2_instance_effect__Соответствие#snapshot_id=s1#scope_id=0#creation_span=12"
+            .to_string(),
+        source: RawDataSource::UserDefined,
+        ..Default::default()
+    };
+
+    let err = repo
+        .load_types(vec![forbidden])
+        .expect_err("load_types must reject per-instance synthetic collection types");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("forbidden per-instance synthetic type names"),
+        "unexpected error message: {msg}"
+    );
+    assert_eq!(
+        repo.get_all_types().len(),
+        0,
+        "rejected load_types must not mutate repository"
+    );
+}
+
+#[test]
+fn test_upsert_types_rejects_per_instance_collection_synthetic_types() {
+    let repo = InMemoryTypeRepository::new();
+    repo.load_types(vec![RawTypeData {
+        name: "Документы.Док1".to_string(),
+        source: RawDataSource::Configuration,
+        ..Default::default()
+    }])
+    .unwrap();
+
+    let forbidden = RawTypeData {
+        name: "Структура#instance_id=abc#snapshot_id=s2".to_string(),
+        source: RawDataSource::UserDefined,
+        ..Default::default()
+    };
+
+    let err = repo
+        .upsert_types(vec![forbidden])
+        .expect_err("upsert_types must reject per-instance synthetic collection types");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("forbidden per-instance synthetic type names"),
+        "unexpected error message: {msg}"
+    );
+    assert!(
+        repo.find_type("Документы.Док1").is_some(),
+        "failed upsert must keep already loaded types intact"
+    );
+}
+
+#[test]
+fn test_load_types_allows_form_synthetic_type_names() {
+    let repo = InMemoryTypeRepository::new();
+
+    repo.load_types(vec![
+        RawTypeData {
+            name: "Формы.Документы.Док1.Форма1".to_string(),
+            source: RawDataSource::Configuration,
+            ..Default::default()
+        },
+        RawTypeData {
+            name: "ЭлементыФормы.Документы.Док1.Форма1".to_string(),
+            source: RawDataSource::Configuration,
+            ..Default::default()
+        },
+    ])
+    .expect("form synthetic types must remain allowed in global repository");
+
+    assert!(repo.find_type("Формы.Документы.Док1.Форма1").is_some());
+    assert!(repo.find_type("ЭлементыФормы.Документы.Док1.Форма1").is_some());
+}

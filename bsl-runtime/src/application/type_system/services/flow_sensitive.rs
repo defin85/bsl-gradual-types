@@ -5,6 +5,7 @@ use bsl_shared::ir::{
     ControlFlowGraph, EdgeKind, NodeAtByteOffsetBias, SemanticNodeKind, SemanticProgram,
 };
 
+#[allow(dead_code)]
 fn conditional_branch_node_at_byte_offset(
     program: &SemanticProgram,
     cfg: &ControlFlowGraph,
@@ -37,6 +38,7 @@ fn conditional_branch_node_at_byte_offset(
         .unwrap_or(conditional_node_id)
 }
 
+#[allow(dead_code)]
 fn build_initial_flow_context_for_narrowing(
     cfg: &ControlFlowGraph,
     variable_name: &str,
@@ -63,6 +65,7 @@ fn build_initial_flow_context_for_narrowing(
     ctx
 }
 
+#[allow(dead_code)]
 pub(crate) fn narrow_type_for_variable_at(
     program: &SemanticProgram,
     byte_offset: u32,

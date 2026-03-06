@@ -107,7 +107,7 @@ fn compute_hover_info_from_ir(
                 let owner_span = object_node
                     .and_then(|idx| ir_program.nodes.get(idx).map(|n| n.span))
                     .unwrap_or(node.span);
-                let owner_resolution = type_at_span_start(analysis, file_id, owner_span)
+                let owner_resolution = type_at_owner_span(analysis, file_id, owner_span)
                     .unwrap_or_else(TypeResolution::unknown);
 
                 let (prop_type, is_readonly) = metadata_lookup
@@ -199,15 +199,37 @@ fn compute_hover_info_from_ir(
     Some(format!("BSL symbol at position {}:{}", line, column))
 }
 
-fn type_at_span_start(
+fn type_at_owner_span(
     analysis: &bsl_analysis_v2::AnalysisV2,
     file_id: bsl_analysis_v2::FileId,
     span: Span,
 ) -> Option<TypeResolution> {
-    analysis
-        .type_at_byte_offset_serve_only(file_id, span.start)
-        .ok()
-        .flatten()
+    let mut fallback: Option<TypeResolution> = None;
+    let mut probes = Vec::with_capacity(2);
+
+    if span.end > span.start {
+        probes.push(span.end.saturating_sub(1));
+    }
+    probes.push(span.start);
+
+    for probe in probes {
+        let resolution = analysis
+            .type_at_byte_offset_serve_only(file_id, probe)
+            .ok()
+            .flatten();
+        let Some(resolution) = resolution else {
+            continue;
+        };
+
+        if !resolution.is_unknown() && !resolution.is_dynamic() {
+            return Some(resolution);
+        }
+        if fallback.is_none() {
+            fallback = Some(resolution);
+        }
+    }
+
+    fallback
 }
 
 fn control_node_at_position(

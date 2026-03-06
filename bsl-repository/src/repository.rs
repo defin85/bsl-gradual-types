@@ -3,7 +3,7 @@
 use crate::signature_index::SignatureValidationResult;
 use crate::signature_index::{ConstructorSignature, MethodSignature, SignatureIndex};
 pub use crate::RepositoryStats;
-use anyhow::Result;
+use anyhow::{bail, Result};
 use bsl_types::types::{GenericInfo, MetadataKind, ParameterInfo, RawDataSource, RawTypeData};
 use bsl_types::{TypeDefinitionLocation, TypeId};
 use chrono::{DateTime, Utc};
@@ -99,6 +99,75 @@ impl Default for InMemoryTypeRepository {
     }
 }
 
+const FORBIDDEN_INSTANCE_LOCAL_TYPE_PREFIXES: [&str; 4] = [
+    "__bsl_v2_instance_effect__",
+    "__bsl_v2_collection_schema__",
+    "__bsl_v2_typed_structure__",
+    "__bsl_v2_typed_row__",
+];
+
+const INSTANCE_LOCAL_MARKERS: [&str; 4] = [
+    "snapshot_id=",
+    "scope_id=",
+    "instance_id=",
+    "creation_span",
+];
+
+const UNIVERSAL_COLLECTION_MARKERS: [&str; 6] = [
+    "соответствие",
+    "map",
+    "структура",
+    "structure",
+    "таблицазначений",
+    "valuetable",
+];
+
+fn is_forbidden_instance_local_type_name(type_name: &str) -> bool {
+    let lowered = type_name.trim().to_lowercase();
+    if lowered.is_empty() {
+        return false;
+    }
+
+    if FORBIDDEN_INSTANCE_LOCAL_TYPE_PREFIXES
+        .iter()
+        .any(|prefix| lowered.starts_with(prefix))
+    {
+        return true;
+    }
+
+    let has_instance_local_marker = INSTANCE_LOCAL_MARKERS
+        .iter()
+        .any(|marker| lowered.contains(marker));
+    if !has_instance_local_marker {
+        return false;
+    }
+
+    UNIVERSAL_COLLECTION_MARKERS
+        .iter()
+        .any(|marker| lowered.contains(marker))
+}
+
+fn ensure_no_forbidden_instance_local_types(
+    operation: &str,
+    candidate_types: &[RawTypeData],
+) -> Result<()> {
+    let forbidden: Vec<&str> = candidate_types
+        .iter()
+        .filter_map(|type_data| {
+            is_forbidden_instance_local_type_name(&type_data.name).then_some(type_data.name.as_str())
+        })
+        .collect();
+
+    if forbidden.is_empty() {
+        return Ok(());
+    }
+
+    bail!(
+        "TypeRepository.{operation}: forbidden per-instance synthetic type names for universal collections: {}. Use snapshot-local InstanceEffectStore instead.",
+        forbidden.join(", ")
+    );
+}
+
 impl TypeRepository for InMemoryTypeRepository {
     fn set_platform_docs_loaded(&self, loaded: bool) {
         let mut flag = self
@@ -119,6 +188,8 @@ impl TypeRepository for InMemoryTypeRepository {
     }
 
     fn load_types(&self, new_types: Vec<RawTypeData>) -> Result<()> {
+        ensure_no_forbidden_instance_local_types("load_types", &new_types)?;
+
         let mut types = self.types.write().unwrap_or_else(|poisoned| {
             tracing::warn!("types RwLock poisoned in load_types, recovering");
             poisoned.into_inner()
@@ -177,6 +248,8 @@ impl TypeRepository for InMemoryTypeRepository {
         if new_types.is_empty() {
             return Ok(());
         }
+
+        ensure_no_forbidden_instance_local_types("upsert_types", &new_types)?;
 
         let mut types = self.types.write().unwrap_or_else(|poisoned| {
             tracing::warn!("types RwLock poisoned in upsert_types, recovering");

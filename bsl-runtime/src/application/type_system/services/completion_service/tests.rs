@@ -559,6 +559,10 @@ async fn completion_labels_non_member(
         .collect()
 }
 
+fn owner_hint(type_name: &str) -> Option<TypeResolution> {
+    Some(TypeResolution::explicit(type_name))
+}
+
 #[tokio::test]
 async fn completion_non_member_hides_block_locals_outside_if() {
     let content = concat!(
@@ -1148,7 +1152,7 @@ async fn completion_resolves_variable_type_for_member_access() {
         resolver: resolver.as_ref(),
         file_path: "completion_test.bsl",
         parse_result: None,
-        member_access_owner_type_hint: None,
+        member_access_owner_type_hint: owner_hint("ТаблицаЗначений"),
         include_flow_sensitive: false,
     };
 
@@ -1178,6 +1182,104 @@ async fn completion_resolves_variable_type_for_member_access() {
     );
     assert!(
         labels.contains(&"Количество".to_string()),
+        "labels: {:?}",
+        labels
+    );
+}
+
+#[tokio::test]
+async fn completion_does_not_infer_member_owner_without_owner_hint() {
+    let repository = Arc::new(InMemoryTypeRepository::new());
+    repository
+        .load_types(vec![RawTypeData {
+            name: "ТаблицаЗначений".to_string(),
+            source: RawDataSource::Platform,
+            methods: vec![RawMethodData {
+                name: "Добавить".to_string(),
+                return_type: "Булево".to_string(),
+                ..Default::default()
+            }],
+            properties: vec![RawPropertyData {
+                name: "Количество".to_string(),
+                prop_type: "Число".to_string(),
+                is_readonly: true,
+            }],
+            ..Default::default()
+        }])
+        .expect("load types");
+
+    let repo: Arc<dyn bsl_shared::domain::repository::TypeRepository> = repository.clone();
+    let resolver = Arc::new(TypeResolver::new(repo.clone()));
+    let metadata_lookup = TypeMetadataLookup::new(repo.clone());
+
+    let index = IntellisenseIndexStore::new("cfg", "platform");
+    let content = concat!(
+        "Процедура Тест()\n",
+        "    ТаблЗнач = Новый ТаблицаЗначений;\n",
+        "    ТаблЗнач.\n",
+        "КонецПроцедуры\n"
+    );
+    let line = 2;
+    let line_text = "    ТаблЗнач.";
+    let column = line_text.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+
+    let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+        signature_index: repo.get_signature_index_clone(),
+        resolver: Some(resolver.clone()),
+        repository: repo.clone(),
+        platform_signatures_loaded: false,
+    });
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(ChangeV2::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("test"),
+        deps,
+    });
+    host.apply_change(ChangeV2::SetSettingsSnapshot {
+        settings_id: SettingsId::from_hash("test"),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+    host.apply_change(ChangeV2::SetFile {
+        file_id: V2FileId(1),
+        text: Arc::from(content.to_string()),
+        version: 0,
+        path: Arc::from("completion_no_owner_hint_test.bsl"),
+    });
+    let analysis = host.analysis();
+    let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
+
+    let ctx = CompletionAnalysisContext {
+        ir_program: Some(ir_program),
+        resolver: resolver.as_ref(),
+        file_path: "completion_no_owner_hint_test.bsl",
+        parse_result: None,
+        member_access_owner_type_hint: None,
+        include_flow_sensitive: false,
+    };
+
+    let resolved = resolve_member_owner_type(Some(&ctx), content, line, column, "ТаблЗнач").await;
+    assert!(resolved.is_none(), "owner type must come only from shared resolved hint path");
+
+    let result = get_completion_with_analysis(
+        content,
+        line,
+        column,
+        Some("completion_no_owner_hint_test.bsl"),
+        &index,
+        &metadata_lookup,
+        Some(&ctx),
+        None,
+    )
+    .await
+    .expect("completion ok");
+
+    let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
+    assert!(
+        !labels.contains(&"Добавить".to_string()),
+        "labels: {:?}",
+        labels
+    );
+    assert!(
+        !labels.contains(&"Количество".to_string()),
         "labels: {:?}",
         labels
     );
@@ -1300,7 +1402,7 @@ async fn completion_resolves_implicit_form_object_member_access_without_hint() {
 }
 
 #[tokio::test]
-async fn completion_uses_flow_sensitive_narrowing_for_member_access() {
+async fn completion_uses_owner_hint_for_member_access_when_flow_sensitive_is_enabled() {
     let repository = Arc::new(InMemoryTypeRepository::new());
     repository
         .load_types(vec![RawTypeData {
@@ -1362,7 +1464,7 @@ async fn completion_uses_flow_sensitive_narrowing_for_member_access() {
         resolver: resolver.as_ref(),
         file_path: "completion_narrowing_test.bsl",
         parse_result: None,
-        member_access_owner_type_hint: None,
+        member_access_owner_type_hint: owner_hint("Строка"),
         include_flow_sensitive: true,
     };
 
@@ -1459,7 +1561,7 @@ async fn completion_resolves_nested_member_access_chain() {
         resolver: resolver.as_ref(),
         file_path: "completion_nested_chain_test.bsl",
         parse_result: None,
-        member_access_owner_type_hint: None,
+        member_access_owner_type_hint: owner_hint("КоллекцияКолонокТаблицыЗначений"),
         include_flow_sensitive: false,
     };
 
@@ -1571,7 +1673,7 @@ async fn completion_supports_member_access_after_method_call() {
         resolver: resolver.as_ref(),
         file_path: "completion_call_chain_test.bsl",
         parse_result: Some(parse_result),
-        member_access_owner_type_hint: None,
+        member_access_owner_type_hint: owner_hint("КолонкаТаблицыЗначений"),
         include_flow_sensitive: false,
     };
 
@@ -1666,7 +1768,7 @@ async fn completion_supports_member_access_after_index_access() {
         resolver: resolver.as_ref(),
         file_path: "completion_index_access_test.bsl",
         parse_result: Some(parse_result),
-        member_access_owner_type_hint: None,
+        member_access_owner_type_hint: owner_hint("КолонкаТаблицыЗначений"),
         include_flow_sensitive: false,
     };
 
@@ -1761,7 +1863,7 @@ async fn completion_supports_member_access_after_map_index_access() {
         resolver: resolver.as_ref(),
         file_path: "completion_map_index_access_test.bsl",
         parse_result: Some(parse_result),
-        member_access_owner_type_hint: None,
+        member_access_owner_type_hint: owner_hint("КолонкаТаблицыЗначений"),
         include_flow_sensitive: false,
     };
 
@@ -2079,7 +2181,7 @@ async fn completion_substitutes_faceted_metadata_name_in_return_type() {
         resolver: resolver.as_ref(),
         file_path: "completion_facet_substitution_test.bsl",
         parse_result: Some(parse_result),
-        member_access_owner_type_hint: None,
+        member_access_owner_type_hint: owner_hint("Справочники.Контрагенты"),
         include_flow_sensitive: false,
     };
 

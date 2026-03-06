@@ -112,9 +112,10 @@ fn type_at_utf16_position(
             })
     } else {
         analysis
-            .type_at_byte_offset(file_id, byte_offset)
+            .type_at_byte_offset_serve_only(file_id, byte_offset)
             .ok()
             .flatten()
+            .or_else(|| analysis.type_at_byte_offset(file_id, byte_offset).ok().flatten())
     }
 }
 
@@ -148,7 +149,11 @@ fn member_access_owner_type_hint_at_position(
             .flatten()
             .or_else(|| analysis.type_at_byte_offset(file_id, offset).ok().flatten())
     } else {
-        analysis.type_at_byte_offset(file_id, offset).ok().flatten()
+        analysis
+            .type_at_byte_offset_serve_only(file_id, offset)
+            .ok()
+            .flatten()
+            .or_else(|| analysis.type_at_byte_offset(file_id, offset).ok().flatten())
     }
 }
 

@@ -781,12 +781,11 @@ mod tests {
                 .expect("state"),
             "idle"
         );
-        assert_eq!(
-            object
+        assert!(
+            !object
                 .get("ready")
                 .and_then(|value| value.as_bool())
-                .expect("ready"),
-            false
+                .expect("ready")
         );
 
         drain_task.abort();

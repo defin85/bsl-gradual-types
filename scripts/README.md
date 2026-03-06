@@ -382,6 +382,8 @@ cargo install cargo-nextest --locked
   - `quick` (по умолчанию): debug + subset lib-тестов
   - `smoke`: `./scripts/run-intellisense-tests.sh smoke`
   - `full`: `cargo nextest run --release --workspace` (или `cargo test --release --workspace` если nextest выключен)
+- после успешной полной сборки скрипт удаляет старые `vscode-extension/*.vsix` и создаёт новый пакет `vscode-extension/<name>-<version>.vsix`
+- в режиме `--fast` упаковка `.vsix` пропускается: fast-профиль не пересобирает WASM-артефакты
 - принудительно включить nextest: `./scripts/build-all.sh --nextest`
 - выключить nextest: `./scripts/build-all.sh --no-nextest`
 

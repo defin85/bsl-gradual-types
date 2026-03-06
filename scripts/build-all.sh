@@ -16,6 +16,7 @@
 #     --nextest                    использовать cargo-nextest (если установлен)
 #     --no-nextest                 не использовать cargo-nextest (всегда cargo test)
 #     --fast                       быстрый локальный цикл: debug LSP + extension без WASM/тестов
+#                                  (упаковка .vsix пропускается, т.к. fast не обновляет WASM)
 #     (по умолчанию выполняется cargo clean раз в 2 дня)
 # ============================================================================
 
@@ -89,6 +90,7 @@ CLEAN_TARGET_REASON="manual"
 USE_NEXTEST="auto" # auto|true|false
 TEST_SUITE="quick" # quick|smoke|full
 FAST_MODE=false
+VSIX_PATH=""
 
 # Если скрипт запущен без аргументов в WSL — включаем мягкую уборку по умолчанию,
 # чтобы target/ не раздувался бесконтрольно.
@@ -164,6 +166,33 @@ fi
 # Получить текущую версию из package.json
 get_current_version() {
     grep '"version"' vscode-extension/package.json | head -1 | sed 's/.*"version": *"\([^"]*\)".*/\1/'
+}
+
+# Получить имя extension из package.json
+get_extension_name() {
+    grep '"name"' vscode-extension/package.json | head -1 | sed 's/.*"name": *"\([^"]*\)".*/\1/'
+}
+
+get_vsce_package_module() {
+    local vsce_bin
+    vsce_bin=$(command -v vsce 2>/dev/null) || return 1
+
+    local vsce_bin_dir
+    vsce_bin_dir=$(dirname "$vsce_bin")
+
+    local candidate="$vsce_bin_dir/node_modules/@vscode/vsce/out/package.js"
+    if [ -f "$candidate" ]; then
+        echo "$candidate"
+        return 0
+    fi
+
+    candidate="$vsce_bin_dir/node_modules/vsce/out/package.js"
+    if [ -f "$candidate" ]; then
+        echo "$candidate"
+        return 0
+    fi
+
+    return 1
 }
 
 # Инкрементировать patch версию (0.4.2 -> 0.4.3)
@@ -556,6 +585,62 @@ build_vscode_extension() {
 }
 
 # ============================================================================
+# ЭТАП 3.5: Упаковка VSCode Extension (.vsix)
+# ============================================================================
+
+package_vscode_extension() {
+    log_section "ЭТАП 3.5: Упаковка VSCode Extension (.vsix)"
+
+    if [ "$FAST_MODE" = true ]; then
+        log_warning "⏭️  Упаковка .vsix пропущена (--fast): fast-профиль не обновляет WASM артефакты"
+        VSIX_PATH=""
+        return 0
+    fi
+
+    local extension_name
+    extension_name=$(get_extension_name)
+
+    local vsce_package_module
+    if ! vsce_package_module=$(get_vsce_package_module); then
+        log_error "❌ Не найден JS-модуль vsce. Установите: npm install -g @vscode/vsce"
+        return 1
+    fi
+
+    local vsix_dir="vscode-extension"
+    local vsix_name="${extension_name}-${BUILD_VERSION}.vsix"
+    VSIX_PATH="$vsix_dir/$vsix_name"
+
+    shopt -s nullglob
+    local existing_vsix=("$vsix_dir"/*.vsix)
+    shopt -u nullglob
+
+    if [ "${#existing_vsix[@]}" -gt 0 ]; then
+        log_info "\n🧹 Удаление старых VSIX пакетов:"
+        local package_path
+        for package_path in "${existing_vsix[@]}"; do
+            log_info "  - $(basename "$package_path")"
+            rm -f "$package_path"
+        done
+    else
+        log_info "\n🧹 Старые VSIX пакеты не найдены"
+    fi
+
+    (
+        cd vscode-extension || exit 1
+        measure_time env \
+            VSCE_PACKAGE_MODULE="$vsce_package_module" \
+            VSIX_PACKAGE_PATH="$vsix_name" \
+            node -e 'const { pack } = require(process.env.VSCE_PACKAGE_MODULE); (async () => { const result = await pack({ cwd: process.cwd(), packagePath: process.env.VSIX_PACKAGE_PATH, useYarn: false }); console.log(`Packaged: ${result.packagePath}`); })().catch((error) => { console.error(error); process.exit(1); });'
+    ) || return 1
+
+    log_info "\n📦 Проверка VSIX пакета:"
+    check_file "$VSIX_PATH" "VSIX package ($vsix_name)" || return 1
+
+    log_success "\n✅ VSIX пакет создан успешно"
+    return 0
+}
+
+# ============================================================================
 # ЭТАП 4: Тесты (опционально)
 # ============================================================================
 
@@ -665,6 +750,7 @@ print_summary() {
     echo -e "${CYAN}📦 VSCode Extension:${NC}"
     [ -f "vscode-extension/out/extension.js" ] && echo "  ✅ TypeScript ($(du -h vscode-extension/out/extension.js | cut -f1))"
     [ -f "vscode-extension/bin/lsp-server${BINARY_EXT}" ] && echo "  ✅ LSP Server binary ($(du -h "vscode-extension/bin/lsp-server${BINARY_EXT}" | cut -f1))"
+    [ -n "$VSIX_PATH" ] && [ -f "$VSIX_PATH" ] && echo "  ✅ VSIX package ($(du -h "$VSIX_PATH" | cut -f1)): $(basename "$VSIX_PATH")"
 
     local wasm_count=$(find vscode-extension/media/webview -name "*.wasm" 2>/dev/null | wc -l)
     if [ "$wasm_count" -gt 0 ]; then
@@ -678,8 +764,14 @@ print_summary() {
     # Следующие шаги
     echo -e "${CYAN}🚀 Следующие шаги:${NC}"
     echo "  1. Запустить тесты: ./test-runner.sh или /test-runner"
-    echo "  2. Запустить VSCode: code vscode-extension/"
-    echo "  3. Проверить расширение: F5 в VSCode"
+    if [ -n "$VSIX_PATH" ] && [ -f "$VSIX_PATH" ]; then
+        echo "  2. Установить пакет: code --install-extension $VSIX_PATH --force"
+        echo "  3. Или открыть extension для отладки: code vscode-extension/"
+        echo "  4. Проверить расширение: F5 в VSCode"
+    else
+        echo "  2. Запустить VSCode: code vscode-extension/"
+        echo "  3. Проверить расширение: F5 в VSCode"
+    fi
     echo ""
 }
 
@@ -739,6 +831,12 @@ main() {
     # Этап 3: VSCode Extension
     if ! build_vscode_extension; then
         log_error "\n❌ Сборка VSCode Extension провалилась!"
+        exit 1
+    fi
+
+    # Этап 3.5: Упаковка .vsix
+    if ! package_vscode_extension; then
+        log_error "\n❌ Упаковка VSCode Extension (.vsix) провалилась!"
         exit 1
     fi
 

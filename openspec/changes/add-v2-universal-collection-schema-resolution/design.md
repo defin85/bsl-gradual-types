@@ -98,6 +98,66 @@
   - Для конфликтов типов допускается `union` или certainty downgrade.
   - Для ветвлений и alias поддерживаются только простые snapshot-local сценарии.
 
+## InstanceEffectStore Contract
+`InstanceEffectStore` хранится только в границах одного v2 snapshot и не сериализуется в глобальные shared-кэши.
+
+Identity и ключи:
+- `InstanceId` MUST включать стабильную привязку к snapshot и локальному происхождению значения.
+- Минимальный состав `InstanceId` первой версии:
+  - `snapshot_id`,
+  - `symbol_key` (normal form имени переменной),
+  - `scope_id`,
+  - `creation_span_start`.
+
+Store shape (v1):
+- `MapEffects`:
+  - `generic_key_type: Option<TypeResolution>`,
+  - `generic_value_type: Option<TypeResolution>`,
+  - `literal_keys: Map<NormalizedLiteralKey, ValueEffectEntry>`.
+- `StructureEffects`:
+  - `fields: Map<NormalizedMemberName, MemberEffectEntry>`.
+- `ValueTableEffects`:
+  - `columns: Map<NormalizedMemberName, MemberEffectEntry>`.
+
+Entry shape:
+- `canonical_name: String`,
+- `value_type: TypeResolution`,
+- `source_span: Span`,
+- `certainty: Certainty`.
+
+Normalization rules:
+- ключи/имена MUST сравниваться регистронезависимо;
+- для отображения MUST сохраняться `canonical_name` из первого валидного source.
+
+## Merge And Alias Policy (v1)
+Общая цель v1: детерминированный merge без path-explosion.
+
+Alias (поддерживаемый минимум):
+- Простое присваивание `B = A` MUST переносить ссылку на тот же `InstanceId` внутри текущего snapshot.
+- Переопределение `A = <new expr>` MUST создавать новый `InstanceId` для `A`.
+
+Branch merge (`Если`, `Попытка/Исключение`):
+- Для одинаковых members/keys в обеих ветках:
+  - тип MUST объединяться (`union`) с downgrade certainty при конфликте.
+- Для members/keys, существующих только в одной ветке:
+  - запись MAY сохраняться как доступная в merged snapshot с downgraded certainty.
+- Merge MUST быть детерминированным и не зависеть от порядка обхода AST.
+
+Unknown member policy после merge:
+- `Соответствие` dynamic key: без hard-fail (safe degrade).
+- typed `Структура` unknown field: hard-fail.
+- typed-row unknown column: hard-fail.
+
+## Consumer Contract Enforcement
+`completion`, `hover`, `type-at-position`, `semantic diagnostics` MUST читать owner/type из одного resolved path.
+
+Запрещено:
+- consumer-local schema inference на AST/text chain как источник истины;
+- отдельные overlay/state для отдельных consumers.
+
+Допустимо:
+- thin-adapter преобразование формата ответа (LSP/UI), если оно не меняет owner/type resolution.
+
 ## Rejected Approaches
 - Rejected: реализовывать `Соответствие`, `Структура` и `ТаблицаЗначений` отдельными архитектурными ветками.
   - Reason: это ломает единый contract и увеличивает риск расхождения consumers.
@@ -142,6 +202,32 @@
 - Regression:
   - существующие generic index-access tests остаются зелёными;
   - новый unified change не ломает snapshot consistency, требуемую `add-lsp-functional-ga-readiness`.
+
+## Rollout And Rollback
+Rollout MUST идти через feature-flag и наблюдаемость.
+
+Rollout steps:
+1. Включить новый путь за флагом для internal/canary профилей.
+2. Собирать consistency и latency метрики по completion/hover/type-at-position/diagnostics.
+3. Перевести default на новый путь после прохождения quality gate.
+4. Удалить legacy обходные ветки после стабилизации.
+
+Rollback triggers:
+- рост расхождений cross-consumer consistency;
+- выход p95 latency за agreed budget;
+- рост unknown-member false positive/false negative выше порога.
+
+Rollback action:
+- атомарное отключение feature-flag с возвратом на стабильный путь.
+
+## Observability Contract
+Минимальные метрики:
+- `universal_effect_store_entries_total`,
+- `universal_effect_store_merge_conflicts_total`,
+- `universal_effect_store_branch_merge_total`,
+- `universal_effect_store_alias_bind_total`,
+- `universal_schema_consistency_mismatch_total`,
+- `universal_schema_runtime_fallback_total`.
 
 ## Risks / Trade-offs
 - Риск: перетащить слишком много state в каждый `TypeResolution`.

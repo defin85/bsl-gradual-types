@@ -14,6 +14,18 @@
 - **WHEN** IDE выполняет completion, hover и diagnostics в одной ревизии документа
 - **THEN** все операции используют один и тот же resolved type contract без расхождений между consumer-слоями
 
+### Requirement: Consumer channels используют только единый resolved path (MUST)
+Система MUST использовать один и тот же resolved owner/type contract для `completion`, `hover`, `type-at-position` и `semantic diagnostics`.
+
+Consumer-local schema/effect inference MUST NOT использоваться как источник истины.
+Допустим только thin-adapter, который читает уже резолвленный тип из общего v2 snapshot contract.
+
+#### Scenario: Один и тот же owner-type для member access во всех consumer каналах
+- **GIVEN** документ содержит member/index access, зависящий от schema-effects universal value collections
+- **WHEN** IDE последовательно запрашивает completion, hover, type-at-position и semantic diagnostics в одной ревизии документа
+- **THEN** все каналы используют один и тот же resolved owner/type contract
+- **AND** результаты не расходятся из-за consumer-local inference
+
 ### Requirement: v2 резолвит значение `Соответствие` при index access (MUST)
 Система MUST резолвить тип выражения `map[key]` для `Соответствие` в рамках одного v2 snapshot, используя map-effects из кода.
 
@@ -60,6 +72,17 @@
 - **WHEN** анализируется `Map[Ключ]`
 - **THEN** система не создаёт hard-fail диагностику о неизвестном ключе
 - **AND** тип выражения определяется по policy приоритетов
+
+### Requirement: Per-instance schema не мутирует глобальный TypeRepository (MUST)
+Per-instance schema/effects MUST оставаться snapshot-local.
+Система MUST NOT регистрировать synthetic per-instance типы или иные mutable записи в глобальном `TypeRepository` ради `Соответствие` / `Структура` / `ТаблицаЗначений`.
+
+#### Scenario: Переключение snapshot не протекает per-instance state в global repository
+- **GIVEN** один snapshot содержит локально выведенную schema для экземпляров universal value collections
+- **AND** другой snapshot не содержит эту schema
+- **WHEN** выполняется анализ во втором snapshot
+- **THEN** во втором snapshot не появляются synthetic members из первого snapshot
+- **AND** global `TypeRepository` не содержит новых per-instance synthetic типов
 
 ### Requirement: v2 отслеживает flow-sensitive schema полей `Структура` (MUST)
 Система MUST отслеживать schema-effect полей конкретного экземпляра `Структура` в рамках одного v2 snapshot.
@@ -156,3 +179,11 @@
 - **WHEN** система не может извлечь тип колонки статически
 - **THEN** колонка `СложнаяКолонка` остается доступной для member access/completion
 - **AND** её тип определяется как `Произвольный`
+
+### Requirement: Acceptance фиксирует cross-consumer consistency для одной позиции (MUST)
+Система MUST иметь интеграционные acceptance tests, которые сравнивают результат для одной и той же позиции между `completion`, `hover`, `type-at-position` и `semantic diagnostics`.
+
+#### Scenario: `map["k"].` консистентен между completion/hover/type-at-position/diagnostics
+- **GIVEN** код выводит тип `map["k"]` из schema-effects
+- **WHEN** запускаются acceptance tests по одной позиции в документе
+- **THEN** completion candidates, hover/type-at-position type и semantic diagnostics соответствуют одному resolved owner/type contract

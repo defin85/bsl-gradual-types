@@ -5,6 +5,13 @@ impl SessionManager {
     ) -> Result<BslDiagnosticsResponse, rmcp::ErrorData> {
         let uuid = parse_session_id(&params.session_id)?;
         let flow_sensitive_enabled = params.include_flow_sensitive;
+        tracing::debug!(
+            session_id = %params.session_id,
+            include_flow_sensitive = flow_sensitive_enabled,
+            limit = params.limit,
+            scope = ?params.scope,
+            "bsl_diagnostics entered"
+        );
         let (
             roots,
             hot_set,
@@ -35,7 +42,21 @@ impl SessionManager {
         };
 
         let scope = normalize_workspace_scope(params.scope)?;
+        let profile = match &scope {
+            WorkspaceScopeTagged::File { .. } => DiagnosticsProfile::Fast,
+            _ => DiagnosticsProfile::DebouncedFull,
+        };
+        let worker_class =
+            bsl_runtime::application::diagnostics_execution_plan(profile, flow_sensitive_enabled)
+                .cpu_class;
         let files = collect_scope_files(&roots, &hot_set, scope)?;
+        tracing::debug!(
+            session_id = %params.session_id,
+            files = files.len(),
+            profile = profile.as_str(),
+            worker_class = ?worker_class,
+            "bsl_diagnostics resolved scope files"
+        );
         let facade = SemanticFacade;
         let mut diagnostics = Vec::new();
         let mut truncated = false;
@@ -53,108 +74,68 @@ impl SessionManager {
                 break;
             }
 
-            let (context, prepared) = match prepare_ephemeral_mcp_operation(
-                SemanticOperation::Diagnostics,
-                flow_sensitive_enabled,
-                deps_id.clone(),
-                deps.clone(),
-                index_snapshot.clone(),
-                Arc::from(doc_snapshot.text),
-                doc_snapshot.version,
-                Arc::from(doc_snapshot.abs_path.to_string_lossy().to_string()),
-                DetailLevel::Full,
-                coordinator.as_ref(),
-            ) {
-                Ok(values) => values,
-                Err(_) => continue,
-            };
-
-            let analysis = prepared.snapshot.analysis;
-            let Some(code) = analysis
-                .file_text(bsl_analysis_v2::FileId(1))
-                .ok()
-                .flatten()
-            else {
-                continue;
-            };
-            let Some(line_index) = analysis
-                .line_index(bsl_analysis_v2::FileId(1))
-                .ok()
-                .flatten()
-            else {
-                continue;
-            };
-            let file_diags_query = if flow_sensitive_enabled {
-                IntellisenseV2Facade::run_optional_query(
-                    &context,
-                    ObservabilityStage::SemanticDiagnosticsQuery,
-                    &analysis,
-                    Some(coordinator.as_ref()),
-                    |analysis| {
-                        analysis.semantic_diagnostics_flow_sensitive(bsl_analysis_v2::FileId(1))
-                    },
-                )
-            } else {
-                IntellisenseV2Facade::run_optional_query(
-                    &context,
-                    ObservabilityStage::SemanticDiagnosticsQuery,
-                    &analysis,
-                    Some(coordinator.as_ref()),
-                    |analysis| analysis.semantic_diagnostics(bsl_analysis_v2::FileId(1)),
-                )
-            };
-            let Some(file_diags) = file_diags_query.ok().flatten() else {
-                continue;
-            };
-
-            for diag in file_diags.iter() {
-                if diagnostics.len() >= params.limit as usize {
-                    truncated = true;
-                    break;
-                }
-
-                let (start_line, start_character) = line_index
-                    .byte_offset_to_utf16_position(code.as_ref(), diag.span.start as usize);
-                let (end_line, end_character) =
-                    line_index.byte_offset_to_utf16_position(code.as_ref(), diag.span.end as usize);
-                let range = RangeDto {
-                    start: PositionDto {
-                        line: start_line,
-                        character: start_character,
-                    },
-                    end: PositionDto {
-                        line: end_line,
-                        character: end_character,
-                    },
-                };
-
-                let severity = match diag.severity {
-                    bsl_shared::domain::types::DiagnosticSeverity::Error => {
-                        crate::semantic::dto::DiagnosticSeverityDto::Error
-                    }
-                    bsl_shared::domain::types::DiagnosticSeverity::Warning => {
-                        crate::semantic::dto::DiagnosticSeverityDto::Warning
-                    }
-                    bsl_shared::domain::types::DiagnosticSeverity::Info
-                    | bsl_shared::domain::types::DiagnosticSeverity::Hint => {
-                        crate::semantic::dto::DiagnosticSeverityDto::Info
-                    }
-                };
-
-                diagnostics.push(facade.diagnostic(
-                    analysis_revision,
-                    DocumentRefDto {
-                        root_id: doc_snapshot.file.root_id.clone(),
-                        path: doc_snapshot.file.path.clone(),
-                    },
-                    range,
-                    severity,
-                    None,
-                    diag.message.clone(),
-                ));
+            let remaining_limit = params.limit as usize - diagnostics.len();
+            if remaining_limit == 0 {
+                truncated = true;
+                break;
             }
 
-            if truncated {
+            let deps_local = deps.clone();
+            let index_snapshot_local = index_snapshot.clone();
+            let coordinator_local = coordinator.clone();
+            let deps_id_local = deps_id.clone();
+            let doc_path_for_error = doc_snapshot.abs_path.display().to_string();
+            tracing::debug!(
+                session_id = %params.session_id,
+                file = %doc_path_for_error,
+                bytes = total_read_bytes,
+                remaining_limit,
+                "bsl_diagnostics dispatching file worker"
+            );
+
+            let file_result =
+                bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
+                    worker_class,
+                    ObservabilityOrigin::Agent.as_str(),
+                    Some(coordinator.as_ref()),
+                    move || {
+                        collect_file_diagnostics(
+                            flow_sensitive_enabled,
+                            analysis_revision,
+                            deps_id_local,
+                            deps_local,
+                            index_snapshot_local,
+                            coordinator_local,
+                            doc_snapshot,
+                            remaining_limit,
+                        )
+                    },
+                )
+                .await
+                .map_err(|err| {
+                    rmcp::ErrorData::internal_error(
+                        format!(
+                            "diagnostics worker task join failed for {}: {err}",
+                            doc_path_for_error
+                        ),
+                        None,
+                    )
+                })??;
+
+            let Some(file_result) = file_result else {
+                continue;
+            };
+
+            tracing::debug!(
+                session_id = %params.session_id,
+                file = %file.abs_path.display(),
+                diagnostics = file_result.diagnostics.len(),
+                hit_limit = file_result.hit_limit,
+                "bsl_diagnostics file worker completed"
+            );
+            diagnostics.extend(file_result.diagnostics);
+            if file_result.hit_limit {
+                truncated = true;
                 break;
             }
         }
@@ -658,4 +639,143 @@ impl SessionManager {
             truncated,
         })
     }
+}
+
+struct FileDiagnosticsBatch {
+    diagnostics: Vec<crate::semantic::dto::DiagnosticDto>,
+    hit_limit: bool,
+}
+
+fn collect_file_diagnostics(
+    flow_sensitive_enabled: bool,
+    analysis_revision: u64,
+    deps_id: bsl_analysis_v2::DepsSnapshotId,
+    deps: Arc<bsl_analysis_v2::SemanticDeps>,
+    index_snapshot: Arc<bsl_runtime::system::IndexSnapshot>,
+    coordinator: Arc<bsl_runtime::system::SystemCoordinator>,
+    doc_snapshot: DocumentSnapshot,
+    remaining_limit: usize,
+) -> Result<Option<FileDiagnosticsBatch>, rmcp::ErrorData> {
+    let DocumentSnapshot {
+        file,
+        abs_path,
+        text,
+        version,
+    } = doc_snapshot;
+    let abs_path_display = abs_path.display().to_string();
+    tracing::debug!(
+        file = %abs_path_display,
+        bytes = text.len(),
+        remaining_limit,
+        "diagnostics file worker entered"
+    );
+
+    let (context, prepared) = match prepare_ephemeral_mcp_operation(
+        SemanticOperation::Diagnostics,
+        flow_sensitive_enabled,
+        deps_id,
+        deps,
+        index_snapshot,
+        Arc::from(text),
+        version,
+        Arc::from(abs_path.to_string_lossy().to_string()),
+        DetailLevel::Full,
+        coordinator.as_ref(),
+    ) {
+        Ok(values) => values,
+        Err(_) => return Ok(None),
+    };
+    tracing::debug!(
+        file = %abs_path_display,
+        "diagnostics file worker prepared semantic snapshot"
+    );
+
+    let analysis = prepared.snapshot.analysis;
+    let Some(code) = analysis.file_text(FileId(1)).ok().flatten() else {
+        return Ok(None);
+    };
+    let Some(line_index) = analysis.line_index(FileId(1)).ok().flatten() else {
+        return Ok(None);
+    };
+    let file_diags_query = if flow_sensitive_enabled {
+        IntellisenseV2Facade::run_optional_query(
+            &context,
+            ObservabilityStage::SemanticDiagnosticsQuery,
+            &analysis,
+            Some(coordinator.as_ref()),
+            |analysis| analysis.semantic_diagnostics_flow_sensitive(FileId(1)),
+        )
+    } else {
+        IntellisenseV2Facade::run_optional_query(
+            &context,
+            ObservabilityStage::SemanticDiagnosticsQuery,
+            &analysis,
+            Some(coordinator.as_ref()),
+            |analysis| analysis.semantic_diagnostics(FileId(1)),
+        )
+    };
+    let Some(file_diags) = file_diags_query.ok().flatten() else {
+        return Ok(None);
+    };
+    tracing::debug!(
+        file = %abs_path_display,
+        diagnostics = file_diags.len(),
+        "diagnostics file worker collected semantic diagnostics"
+    );
+
+    let facade = SemanticFacade;
+    let mut diagnostics = Vec::new();
+    let mut hit_limit = false;
+
+    for diag in file_diags.iter() {
+        if diagnostics.len() >= remaining_limit {
+            hit_limit = true;
+            break;
+        }
+
+        let (start_line, start_character) =
+            line_index.byte_offset_to_utf16_position(code.as_ref(), diag.span.start as usize);
+        let (end_line, end_character) =
+            line_index.byte_offset_to_utf16_position(code.as_ref(), diag.span.end as usize);
+        let range = RangeDto {
+            start: PositionDto {
+                line: start_line,
+                character: start_character,
+            },
+            end: PositionDto {
+                line: end_line,
+                character: end_character,
+            },
+        };
+
+        let severity = match diag.severity {
+            bsl_shared::domain::types::DiagnosticSeverity::Error => {
+                crate::semantic::dto::DiagnosticSeverityDto::Error
+            }
+            bsl_shared::domain::types::DiagnosticSeverity::Warning => {
+                crate::semantic::dto::DiagnosticSeverityDto::Warning
+            }
+            bsl_shared::domain::types::DiagnosticSeverity::Info
+            | bsl_shared::domain::types::DiagnosticSeverity::Hint => {
+                crate::semantic::dto::DiagnosticSeverityDto::Info
+            }
+        };
+
+        diagnostics.push(facade.diagnostic(
+            analysis_revision,
+            DocumentRefDto {
+                root_id: file.root_id.clone(),
+                path: file.path.clone(),
+            },
+            range,
+            severity,
+            None,
+            diag.message.clone(),
+        ));
+    }
+
+    Ok(Some(FileDiagnosticsBatch {
+        diagnostics,
+        hit_limit,
+    }))
 }

@@ -307,12 +307,13 @@ impl JobManager {
         Fut:
             std::future::Future<Output = Result<serde_json::Value, anyhow::Error>> + Send + 'static,
     {
+        let phase = phase.into();
         let job_id = Uuid::new_v4();
         let now = now_unix_secs();
         let job = PersistedJob {
             job_id: job_id.to_string(),
             state: JobStateDto::Queued,
-            phase: phase.into(),
+            phase: phase.clone(),
             progress: ProgressDto { percent: 0 },
             error: None,
             created_at: now,
@@ -337,7 +338,16 @@ impl JobManager {
             CpuWorkClass::Background => Arc::clone(&self.background_limiter),
         };
         let job_id_str = job_id.to_string();
+        tracing::info!(
+            job_id = %job_id_str,
+            phase = %phase,
+            cpu_class = ?class,
+            "job queued"
+        );
+        let job_id_for_task = job_id_str.clone();
         let job_id_str_for_cleanup = job_id_str.clone();
+        let phase_for_task = phase.clone();
+        let class_for_task = class;
         let ctx = JobContext {
             job_id: job_id_str.clone(),
             entry: Arc::clone(&entry),
@@ -351,6 +361,12 @@ impl JobManager {
                 .expect("job class concurrency limiter closed");
 
             if entry.canceled.load(Ordering::Relaxed) {
+                tracing::info!(
+                    job_id = %job_id_for_task,
+                    phase = %phase_for_task,
+                    cpu_class = ?class_for_task,
+                    "job canceled before start"
+                );
                 {
                     let mut job = entry.job.write().await;
                     job.state = JobStateDto::Canceled;
@@ -378,9 +394,21 @@ impl JobManager {
                 store.write_job(&job);
             }
             entry.notify.notify_waiters();
+            tracing::info!(
+                job_id = %job_id_for_task,
+                phase = %phase_for_task,
+                cpu_class = ?class_for_task,
+                "job started"
+            );
 
             let result = job_fn(ctx.clone()).await;
             if entry.canceled.load(Ordering::Relaxed) {
+                tracing::info!(
+                    job_id = %job_id_for_task,
+                    phase = %phase_for_task,
+                    cpu_class = ?class_for_task,
+                    "job canceled while running"
+                );
                 entry.notify.notify_waiters();
                 return;
             }
@@ -403,6 +431,12 @@ impl JobManager {
                         store.write_job(&job);
                         store.write_result(&job.job_id, &value);
                     }
+                    tracing::info!(
+                        job_id = %job_id_for_task,
+                        phase = %phase_for_task,
+                        cpu_class = ?class_for_task,
+                        "job succeeded"
+                    );
                 }
                 Err(err) => {
                     {
@@ -417,6 +451,13 @@ impl JobManager {
                         let job = entry.job.read().await.clone();
                         store.write_job(&job);
                     }
+                    tracing::warn!(
+                        job_id = %job_id_for_task,
+                        phase = %phase_for_task,
+                        cpu_class = ?class_for_task,
+                        error = %err,
+                        "job failed"
+                    );
                 }
             }
 
@@ -477,18 +518,34 @@ impl JobManager {
         {
             let job = entry.job.read().await;
             if job.is_terminal() {
+                tracing::info!(
+                    job_id = job_id,
+                    timeout_ms,
+                    state = job.state.as_str(),
+                    phase = %job.phase,
+                    "job_wait returning terminal status immediately"
+                );
                 return Ok(job.as_status());
             }
         }
 
+        tracing::info!(job_id = job_id, timeout_ms, "job_wait begin");
         let timeout = Duration::from_millis(timeout_ms);
         let notified = entry.notify.notified();
-        tokio::select! {
-            _ = notified => {}
-            _ = tokio::time::sleep(timeout) => {}
-        }
+        let wake_reason = tokio::select! {
+            _ = notified => "notify",
+            _ = tokio::time::sleep(timeout) => "timeout",
+        };
 
         let job = entry.job.read().await;
+        tracing::info!(
+            job_id = job_id,
+            timeout_ms,
+            wake_reason,
+            state = job.state.as_str(),
+            phase = %job.phase,
+            "job_wait returning status"
+        );
         Ok(job.as_status())
     }
 

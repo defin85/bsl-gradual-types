@@ -378,17 +378,44 @@ impl BslAgentHandler {
             _ => DiagnosticsProfile::DebouncedFull,
         };
         let job_class = diagnostics_execution_plan(profile, false).cpu_class;
+        tracing::info!(
+            session_id = %params.session_id,
+            scope = ?params.scope,
+            limit = params.limit,
+            include_flow_sensitive = params.include_flow_sensitive,
+            profile = profile.as_str(),
+            cpu_class = ?job_class,
+            "starting diagnostics job"
+        );
 
         let session_manager = Arc::clone(&self.session_manager);
         let session_id = params.session_id.clone();
+        let session_id_for_job = session_id.clone();
         let job_id = self
             .job_manager
             .spawn_with_class("bsl_diagnostics", job_class, move |ctx| async move {
+                tracing::debug!(
+                    job_id = %ctx.job_id(),
+                    session_id = %params.session_id,
+                    "diagnostics job entered async closure"
+                );
                 ctx.set_progress("bsl_diagnostics/running", 0).await;
+                tracing::debug!(
+                    job_id = %ctx.job_id(),
+                    session_id = %params.session_id,
+                    "diagnostics job progress set"
+                );
                 let response = session_manager
                     .bsl_diagnostics(params)
                     .await
                     .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+                tracing::info!(
+                    job_id = %ctx.job_id(),
+                    session_id = %session_id_for_job,
+                    diagnostics = response.diagnostics.len(),
+                    truncated = response.truncated,
+                    "diagnostics job produced response"
+                );
                 serde_json::to_value(response).map_err(|err| anyhow::anyhow!(err.to_string()))
             })
             .await;

@@ -154,6 +154,12 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
+fn local_real_project_root() -> PathBuf {
+    std::env::var_os("BSL_AGENT_REAL_PROJECT_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/home/egor/code/DO_Rolf_PT"))
+}
+
 async fn wait_job_terminal(
     service: &RunningService<RoleClient, ()>,
     job_id: &str,
@@ -947,6 +953,154 @@ async fn stdio_build_info_returns_version() {
     assert!(!resp.target.is_empty());
     assert!(resp.pid > 0);
 
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_file_diagnostics_job_wait_survives_loop_backedge() {
+    let service = spawn_agent(&[]).await;
+
+    let temp_root = tempfile::TempDir::new().expect("tempdir");
+    let module_path = temp_root
+        .path()
+        .join("src/CommonModules/LoopBackedge/Module.bsl");
+    std::fs::create_dir_all(module_path.parent().expect("module parent"))
+        .expect("create module dir");
+    std::fs::write(
+        &module_path,
+        "Процедура Тест()\n\
+         \tx = Null;\n\
+         \tПока x <> Null Цикл\n\
+         \t\tx.Метод();\n\
+         \tКонецЦикла;\n\
+         КонецПроцедуры\n",
+    )
+    .expect("write module");
+
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [temp_root.path().to_string_lossy()],
+        }),
+    )
+    .await;
+    let session_id = open.session_id.clone();
+    let _status = wait_workspace_ready(&service, &open).await;
+
+    let start: JobStartResponse = call_tool(
+        &service,
+        "bsl_diagnostics_start",
+        json!({
+            "session_id": &session_id,
+            "scope": {
+                "kind": "file",
+                "document": { "path": module_path.to_string_lossy() }
+            },
+            "limit": 200,
+            "include_flow_sensitive": true
+        }),
+    )
+    .await;
+
+    let waited = wait_job_terminal(&service, &start.job_id).await;
+    assert_eq!(
+        waited.state,
+        JobStateDto::Succeeded,
+        "diagnostics job must finish without killing stdio transport: {:?}",
+        waited
+    );
+
+    let result: BslDiagnosticsResponse =
+        call_tool(&service, "job_result", json!({ "job_id": &start.job_id })).await;
+    assert!(
+        result.flow_sensitive_enabled,
+        "expected flow-sensitive diagnostics response"
+    );
+
+    let _build_info: BuildInfoResponse = call_tool(&service, "build_info", json!({})).await;
+
+    let _close: serde_json::Value = call_tool(
+        &service,
+        "workspace_close",
+        json!({ "session_id": &session_id }),
+    )
+    .await;
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+#[ignore = "manual local smoke against DO_Rolf_PT"]
+async fn stdio_real_project_file_diagnostics_job_wait_smoke() {
+    let project_root = local_real_project_root();
+    assert!(
+        project_root.is_dir(),
+        "project root does not exist: {}",
+        project_root.display()
+    );
+    let target_file =
+        project_root.join("src/cf/InformationRegisters/АбонентыЭДО/Ext/ManagerModule.bsl");
+    assert!(
+        target_file.is_file(),
+        "target file does not exist: {}",
+        target_file.display()
+    );
+
+    let service = spawn_agent_in_dir(
+        &project_root,
+        &[
+            ("RUST_LOG", "bsl_agent=info"),
+            ("BSL_CACHE_DIR", "/home/egor/.cache/bsl-gradual-types"),
+            ("BSL_AGENT_HTTP_ADDR", "127.0.0.1:0"),
+        ],
+    )
+    .await;
+
+    let _build_info: BuildInfoResponse = call_tool(&service, "build_info", json!({})).await;
+
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [project_root.to_string_lossy()],
+        }),
+    )
+    .await;
+    let session_id = open.session_id.clone();
+    let _status = wait_workspace_ready(&service, &open).await;
+
+    let start: JobStartResponse = call_tool(
+        &service,
+        "bsl_diagnostics_start",
+        json!({
+            "session_id": &session_id,
+            "scope": {
+                "kind": "file",
+                "document": { "path": target_file.to_string_lossy() }
+            },
+            "limit": 200,
+            "include_flow_sensitive": true
+        }),
+    )
+    .await;
+
+    let waited = wait_job_terminal(&service, &start.job_id).await;
+    assert!(
+        !matches!(waited.state, JobStateDto::Queued | JobStateDto::Running),
+        "real project diagnostics job must reach terminal state: {:?}",
+        waited
+    );
+
+    let _result: BslDiagnosticsResponse =
+        call_tool(&service, "job_result", json!({ "job_id": &start.job_id })).await;
+    let _build_info_after: BuildInfoResponse = call_tool(&service, "build_info", json!({})).await;
+
+    let _close: serde_json::Value = call_tool(
+        &service,
+        "workspace_close",
+        json!({ "session_id": &session_id }),
+    )
+    .await;
     let _ = service.cancel().await;
 }
 

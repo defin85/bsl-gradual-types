@@ -11,6 +11,10 @@
 Нужен один change с единым архитектурным контрактом.
 
 ## What Changes
+- Зафиксировать implementation approach этого change как единственно допустимый `Option B`: unified snapshot-local `InstanceEffectStore`.
+- Явно запретить для этого change любые альтернативные implementation path:
+  - `Option A`: отдельные overlay-модели по одной на `Соответствие` / `Структура` / `ТаблицаЗначений`;
+  - `Option C`: synthetic types или иная per-instance schema мутация глобального `TypeRepository`.
 - Добавить единый контракт snapshot-local schema/effect resolution для universal value collections в `bsl-intellisense-v2`.
 - Зафиксировать flow-sensitive index value resolution для `Соответствие`:
   - источники effect: `Новый Соответствие`, `Вставить`, `Установить`;
@@ -28,6 +32,9 @@
 - Зафиксировать архитектурный запрет на synthetic global repository types для этой задачи:
   - state MUST оставаться snapshot-local;
   - глобальный `TypeRepository` MUST NOT мутироваться ради per-instance schema.
+- Зафиксировать delivery rule:
+  - частичная реализация через consumer-local inference/overlay в `completion`, `hover` или `diagnostics` не засчитывается как выполнение change;
+  - реализация MUST сначала появиться в едином v2 resolved-type path, а затем использоваться consumers.
 
 ## Impact
 - Affected specs:

@@ -33,7 +33,7 @@
 - Плюсы: можно двигать каждую тему локально.
 - Минусы: дублирование merge/alias/invalidation logic, высокий риск расхождения consumers.
 
-### Option B (Recommended): Unified snapshot-local effect store
+### Option B: Unified snapshot-local effect store
 - Идея:
   - хранить instance-local effects в одном состоянии snapshot;
   - materialize разные выходы:
@@ -47,21 +47,39 @@
 - Плюсы: reuse существующего lookup API.
 - Минусы: сложный lifecycle, риск утечки состояния между snapshot, плохой fit для incremental invalidation.
 
+## Architecture Lock
+Этот change нормирует реализацию однозначно:
+- реализация MUST использовать только `Option B`;
+- `Option A` и `Option C` MUST NOT использоваться ни как финальная архитектура, ни как временный compatibility path;
+- реализация MUST сначала строить единый v2 resolved-type path в `analysis-v2`, и только затем подключать consumers;
+- реализация MUST NOT добавлять consumer-local schema inference, который обходит общий snapshot contract.
+
+Под `Option A` в рамках этого change понимаются:
+- отдельные overlay/state-модели для `Соответствие`, `Структура`, `ТаблицаЗначений`;
+- независимые merge/alias/invalidation policy по коллекциям;
+- локальная реализация schema resolution только в `completion`, только в `hover` или только в `diagnostics`.
+
+Под `Option C` в рамках этого change понимаются:
+- synthetic `RawTypeData` или synthetic concrete types, зарегистрированные в глобальном `TypeRepository` ради per-instance schema;
+- любой shared mutable cache, который переживает границы одного v2 snapshot и хранит instance-local collection schema.
+
 ## Decisions
-- Decision: принять Option B.
-  - Why: это единственный вариант, который одновременно согласуется с текущим v2 pipeline и не создаёт глобального mutable state.
+- Decision: принять и зафиксировать только `Option B`.
+  - Why: это единственный вариант, который одновременно согласуется с текущим v2 pipeline, сохраняет один source of truth и не создаёт глобального mutable state.
 
 - Decision: использовать unified snapshot-local `InstanceEffectStore`.
   - Store MUST поддерживать:
     - map effects (`generic V` + literal-key specializations),
     - structure field schema,
     - value-table column schema.
+  - Store MUST быть единственной точкой хранения per-instance collection schema внутри snapshot.
 
 - Decision: `TypeRepository` MUST NOT мутироваться для per-instance schema.
   - Why: snapshot-local semantics не должны жить в глобальном shared cache.
 
 - Decision: consumer contract MUST идти через один resolved type path.
   - `completion`, `hover`, `type-at-position`, `semantic diagnostics` используют один и тот же `TypeResolution` / type hints contract.
+  - Любой consumer-local fallback MAY существовать только как thin adapter над этим resolved type path и MUST NOT иметь отдельную schema/effect логику.
 
 - Decision: strict/safe-degrade policy различается по доменам:
   - `Соответствие`:
@@ -79,6 +97,14 @@
 - Decision: merge policy первой версии должна быть deterministic и ограниченной.
   - Для конфликтов типов допускается `union` или certainty downgrade.
   - Для ветвлений и alias поддерживаются только простые snapshot-local сценарии.
+
+## Rejected Approaches
+- Rejected: реализовывать `Соответствие`, `Структура` и `ТаблицаЗначений` отдельными архитектурными ветками.
+  - Reason: это ломает единый contract и увеличивает риск расхождения consumers.
+- Rejected: закрывать change через расширение глобального `TypeRepository` synthetic instance-local типами.
+  - Reason: это несовместимо со snapshot-local semantics и incremental invalidation.
+- Rejected: сначала доставить локальную поддержку только в `completion`, а затем “дотянуть” `hover` и `diagnostics`.
+  - Reason: capability spec требует единый v2 pipeline, а не поэтапные divergent paths.
 
 ## Unified Model
 1. `analysis-v2` строит `InstanceEffectStore` внутри snapshot.

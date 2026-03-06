@@ -17,11 +17,14 @@
 
 Для `bsl_references_start` система MUST поддерживать ограниченную семантическую верификацию только по кандидатам, а не полный workspace scan на каждый запрос.
 
+Primary search path MUST оставаться discovery-oriented: сервер MUST возвращать compact candidate payload и MUST NOT требовать snippet materialization или unconditional full semantic execution для каждого candidate как обязательную часть symbol search path.
+
 #### Scenario: Symbol search не требует полного workspace scan на каждый запрос
 - **GIVEN** workspace-сессия `ready=true` и индекс symbols актуален
 - **WHEN** клиент вызывает `bsl_symbol_search_start`
 - **THEN** сервер отбирает результаты из индексных candidates
 - **AND** не запускает per-request полный обход всех BSL-файлов как основной путь
+- **AND** не требует snippet materialization или полного semantic pass по каждому candidate как обязательный primary path
 
 #### Scenario: References выполняется как candidate-first с ограниченной верификацией
 - **GIVEN** клиент передал валидный `symbol_id` для `bsl_references_start`

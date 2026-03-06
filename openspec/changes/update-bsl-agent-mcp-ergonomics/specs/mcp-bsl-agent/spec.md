@@ -66,13 +66,20 @@ Tool SHALL:
 - принимать `session_id` и путь к одному документу внутри `roots`;
 - использовать тот же underlying diagnostics execution path, что и `bsl_diagnostics_start` с `scope={kind:file,...}`;
 - возвращать `job_id` и следовать той же async job model;
-- использовать тот же diagnostics result contract, что и file-scope `bsl_diagnostics_start`.
+- использовать тот же diagnostics result contract, что и file-scope `bsl_diagnostics_start`;
+- если базовый file-scope diagnostics поддерживает optional shaping параметры, принимать и передавать тот же single-file-compatible набор параметров без wrapper-specific aliases и без отдельного payload contract.
 
 #### Scenario: Convenience tool эквивалентен tagged file scope
 - **GIVEN** ready workspace-сессия и путь к документу внутри `roots`
 - **WHEN** клиент вызывает `bsl_diagnostics_file_start(...)`
 - **THEN** сервер возвращает `job_id`
 - **AND** итоговый `job_result` эквивалентен вызову `bsl_diagnostics_start(scope={kind:file, document:{path:...}})`
+
+#### Scenario: Convenience tool не форкает compact shaping path
+- **GIVEN** ready workspace-сессия и базовый file-scope diagnostics поддерживает opt-in shaping параметры
+- **WHEN** клиент вызывает `bsl_diagnostics_file_start(...)` с single-file-compatible shaping параметрами
+- **THEN** итоговый `job_result` совпадает по shape с `bsl_diagnostics_start(scope={kind:file, document:{path:...}})` при тех же параметрах
+- **AND** convenience tool не вводит wrapper-specific compact payload
 
 ### Requirement: Common operator-facing lifecycle errors имеют canonical wording
 Система SHALL возвращать предсказуемые operator-facing сообщения как минимум для следующих частых случаев:

@@ -36,11 +36,22 @@
 - Decision: fallback допускается только как явный, наблюдаемый режим.
   - Rationale: без silent fallback проще triage и rollback; соответствует fail-closed практике для correctness-path.
 
+- Decision: `search_path` и `fallback_reason` в рамках этого change живут в observability, а не в публичном `job_result`.
+  - Rationale: search result contract должен оставаться compact candidate payload без operator/debug полей; triage и rollout state должны читаться из канонического observability path.
+
 - Decision: shared search contract остаётся discovery-first, а не semantic-summary engine.
   - Rationale: это удерживает scope change управляемым и не смешивает candidate retrieval с тяжёлой semantic интерпретацией.
 
 - Decision: shared runtime search contract должен возвращать semantic-friendly candidate metadata.
   - Rationale: потребители уровня adapters/LLM tooling должны уметь ранжировать и выбирать follow-up reads по компактному candidate set без обязательного full semantic execution на primary path.
+
+- Decision: rollout выполняется с временным operator-only kill-switch через existing runtime env overrides.
+  - Contract: `BSL_AGENT_INDEX_SEARCH=0` принудительно переводит MCP search tools на legacy path; отсутствие переменной или значение `1` оставляет index-backed path primary по умолчанию.
+  - Observability: при принудительном legacy режиме `search_path=legacy_forced`, а причина фиксируется как `fallback_reason=rollout_override`.
+  - Rationale: change заметно меняет latency/correctness envelope на больших workspace, поэтому нужен быстрый rollback без нового API surface.
+
+- Decision: отдельный shared planner facade для `context_pack` в этот change не входит.
+  - Rationale: новый search contract должен быть достаточным discovery substrate; orchestration/planner остаётся adapter-level concern до отдельного follow-on change.
 
 ## Alternatives Considered
 - Оставить текущий file-scan path и только повысить лимиты.
@@ -69,14 +80,9 @@
   - Mitigation: фиксированный сортировочный контракт и интеграционные parity тесты.
 
 ## Migration Plan
-1. Добавить shared runtime search contract, semantic-friendly candidate metadata и observability keys.
+1. Добавить shared runtime search contract, semantic-friendly candidate metadata, observability keys и temporary rollback switch semantics.
 2. Перевести `bsl_types_search_start` и parity `/api/mcp/search`.
 3. Перевести `bsl_symbol_search_start`.
 4. Перевести `bsl_references_start` на candidate-first path.
-5. Добавить regression тесты (overlay consistency, parity, mixed-load).
-6. `context_pack` оставить на текущем contract в рамках этого change; follow-on change сможет переиспользовать новый discovery-first search layer для planner/enrichment.
-
-## Open Questions
-- Нужен ли отдельный feature-flag rollout для index-backed search path в MCP (по умолчанию on/off)?
-- Нужна ли явная выдача `search_path` в payload `job_result`, или достаточно observability snapshot?
-- Нужен ли отдельный shared planner facade для будущего `context_pack`, или adapter-level orchestration поверх search contract окажется достаточной?
+5. Добавить regression тесты (overlay consistency, parity, mixed-load, forced-legacy rollback visibility).
+6. `context_pack` оставить на текущем contract в рамках этого change; follow-on change сможет переиспользовать новый discovery-first search layer для planner/enrichment без отдельного planner facade в рамках текущего change.

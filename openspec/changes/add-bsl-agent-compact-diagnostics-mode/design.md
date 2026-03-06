@@ -109,6 +109,23 @@
 
 Это must-have для LLM/операторского сценария, где часто нужно быстро получить только `error` или только `warning`, не вытаскивая полный список.
 
+### 8. Ownership boundary для docs/examples
+Этот change владеет diagnostics-specific user-facing material:
+- описание shaping параметров;
+- compact payload examples;
+- `mcp_help/README` examples для `compact`, `group_by`, `omit_null_fields`, `omit_repeated_file`, `severity_filter`.
+
+Change `update-bsl-agent-mcp-ergonomics` владеет workflow recipes и общими operator-facing примерами.
+
+Это разграничение нужно, чтобы `mcp_help` и README не дублировали одну и ту же diagnostics матрицу в двух местах.
+
+### 9. Convenience wrappers reuse the same compact shaping path
+Любой convenience entry point для single-file diagnostics, включая `bsl_diagnostics_file_start`, обязан:
+- принимать тот же single-file-compatible набор shaping параметров;
+- использовать тот же diagnostics result serializer/shaper;
+- не вводить отдельный compact-only payload contract;
+- оставлять `diagnostic_id` стабильным drilldown identifier в flat и grouped режимах.
+
 ## Risks / Trade-offs
 - Появляется альтернативная shape ответа для `compact=true`; это допустимо, потому что режим opt-in.
 - `group_by=message` не должен ломать downstream сценарии с `diagnostic_id`, поэтому `occurrences[]` обязаны сохранять stable ids.
@@ -118,7 +135,7 @@
 1. Сначала расширить spec и DTO request/response.
 2. Затем реализовать compact serialization без изменения default path.
 3. После этого добавить grouped path и summary regressions.
-4. Обновить `mcp_help` и README примерами compact режима.
+4. Обновить `mcp_help` и README diagnostics-specific примерами compact режима и не дублировать workflow recipes, принадлежащие ergonomics change.
 
 ## Open Questions
 - Нет блокирующих. Если позже понадобится более агрессивное сворачивание, можно отдельно обсудить диапазонный `severity_filter` (`>=warning`) и человеко-читаемый short id, но это не входит в данный change.

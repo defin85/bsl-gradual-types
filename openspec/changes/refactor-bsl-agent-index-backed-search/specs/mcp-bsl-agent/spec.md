@@ -46,14 +46,23 @@ Search-инструменты `bsl_types_search_start`, `bsl_symbol_search_start
 
 ### Requirement: MCP search path и fallback причины наблюдаемы и явны (MUST)
 Observability для MCP search MUST фиксировать:
-- путь выполнения (`index` или `fallback`);
-- low-cardinality причину fallback;
+- путь выполнения (`index`, `fallback` или `legacy_forced`);
+- low-cardinality причину fallback / forced rollback;
 - агрегаты candidates/results для triage.
 
 Fallback MUST NOT быть silent: при fallback система MUST давать явный сигнал через observability контракт.
+
+Принудительный rollback на legacy path через operator override MUST также быть явным только в observability и MUST NOT менять публичный `job_result` contract search tools в рамках этого change.
 
 #### Scenario: Fallback path отражается в observability
 - **GIVEN** index-backed path недоступен для конкретного search запроса
 - **WHEN** сервер завершает запрос через fallback path
 - **THEN** observability snapshot содержит `search_path=fallback`
 - **AND** содержит low-cardinality fallback reason, достаточную для triage
+
+#### Scenario: Принудительный legacy rollback виден в observability, но не меняет `job_result`
+- **GIVEN** оператор включил temporary rollback override для MCP search
+- **WHEN** клиент вызывает `bsl_types_search_start`, `bsl_symbol_search_start` или `bsl_references_start`
+- **THEN** observability snapshot содержит `search_path=legacy_forced`
+- **AND** содержит `fallback_reason=rollout_override`
+- **AND** публичный `job_result` не получает дополнительных debug/operator полей только из-за rollout override

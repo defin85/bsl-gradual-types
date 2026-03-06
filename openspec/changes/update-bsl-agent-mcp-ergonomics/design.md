@@ -84,18 +84,43 @@
 
 Требование не в полном переводе всех ошибок на новый taxonomy, а в том, чтобы эти частые случаи возвращали predictable фразы, на которые можно опираться и человеку, и LLM.
 
+### 6. Ownership boundary для help/README между ergonomics и compact diagnostics
+Этот change владеет:
+- `workspace_open` wording;
+- workflow recipes;
+- `build_info` operator context;
+- canonical lifecycle errors;
+- help/README для convenience entry point.
+
+Change `add-bsl-agent-compact-diagnostics-mode` владеет:
+- diagnostics shaping parameter docs;
+- compact payload examples;
+- diagnostics-specific `mcp_help/README` examples про `compact/group_by/omit_*`.
+
+Ergonomics recipes MAY ссылаться на compact mode как на opt-in capability, но SHALL NOT дублировать полный parameter matrix или compact payload contract.
+
+### 7. Convenience tool разделяет тот же single-file diagnostics request surface
+`bsl_diagnostics_file_start` должен принимать тот же набор single-file-compatible diagnostics параметров, что и базовый file-scope path.
+
+Это включает:
+- `limit`;
+- `include_flow_sensitive`;
+- и, после реализации `add-bsl-agent-compact-diagnostics-mode`, те же shaping параметры (`compact`, `group_by`, `omit_null_fields`, `omit_repeated_file`, `severity_filter`) без wrapper-specific aliases.
+
+Результат convenience tool обязан проходить через тот же serializer/shaper, что и `bsl_diagnostics_start(scope={kind:file,...})`.
+
 ## Risks / Trade-offs
 - Добавление convenience tool слегка расширяет surface area, но это оправдано, потому что он thin wrapper и не вводит новый execution path.
 - Дублирование `ui_url` в `build_info` создаёт частичное пересечение с отдельным tool, но выигрывает в operator ergonomics.
 - Recipe-heavy `mcp_help` нельзя превращать в длинный reference manual; recipes должны оставаться компактными.
 
 ## Migration Plan
-1. Сначала зафиксировать contract и docs/help wording.
+1. Сначала зафиксировать contract, docs/help wording и ownership boundary с `add-bsl-agent-compact-diagnostics-mode`.
 2. Затем расширить `build_info`.
-3. Потом добавить `bsl_diagnostics_file_start`.
+3. Потом добавить `bsl_diagnostics_file_start` поверх уже общего diagnostics request/result path.
 4. После этого стабилизировать canonical error wording и закрыть regressions.
 
 ## Alignment With `add-bsl-agent-compact-diagnostics-mode`
 - Compact diagnostics payload остаётся responsibility change `add-bsl-agent-compact-diagnostics-mode`.
 - Recipes и convenience tool, которые касаются diagnostics, должны быть совместимы с compact mode, но не переопределять его.
-- Если оба change реализуются параллельно, diagnostics request/response code path должен быть общим.
+- Если оба change реализуются параллельно, diagnostics request builder и result serializer/shaper должны быть общими.

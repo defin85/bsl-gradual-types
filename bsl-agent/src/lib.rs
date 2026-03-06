@@ -1,5 +1,6 @@
 pub mod http_ui;
 pub mod jobs;
+pub mod logging;
 pub mod semantic;
 pub mod server;
 pub mod session;

@@ -1,5 +1,6 @@
 use bsl_agent::http_ui::start_http_ui;
 use bsl_agent::jobs::JobManager;
+use bsl_agent::logging::{init_stdio_logging, resolve_log_path_from_process, ResolvedLogPath};
 use bsl_agent::server::BslAgentHandler;
 use bsl_agent::session::SessionManager;
 use bsl_agent::ui_discovery::HttpUiDiscoveryRecord;
@@ -9,7 +10,6 @@ use std::io::Write;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use uuid::Uuid;
 
 use clap::{Parser, Subcommand};
@@ -153,40 +153,30 @@ async fn ui_url(instance_id: Option<String>, pid: Option<u32>, roots: Option<Str
     }
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+fn log_startup_record(resolved_log: &ResolvedLogPath) {
+    let cache_dir = global_runtime_config()
+        .get_pathbuf(RuntimeKey::CacheDir)
+        .map(|path| path.display().to_string());
+    let http_addr = global_runtime_config().get_string(RuntimeKey::AgentHttpAddr);
 
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "bsl_agent=debug,info".into()),
-        )
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_writer(std::io::stderr)
-                .with_ansi(false),
-        )
-        .init();
+    tracing::info!(
+        package = env!("CARGO_PKG_NAME"),
+        version = env!("CARGO_PKG_VERSION"),
+        profile = option_env!("BSL_AGENT_PROFILE").unwrap_or("unknown"),
+        target = option_env!("BSL_AGENT_TARGET").unwrap_or("unknown"),
+        git_sha = option_env!("BSL_AGENT_GIT_SHA").unwrap_or("unknown"),
+        git_describe = option_env!("BSL_AGENT_GIT_DESCRIBE").unwrap_or("unknown"),
+        build_unix_secs = option_env!("BSL_AGENT_BUILD_UNIX_SECS").unwrap_or("unknown"),
+        pid = std::process::id(),
+        cwd = %resolved_log.cwd.display(),
+        log_path = %resolved_log.log_path.display(),
+        bsl_cache_dir = ?cache_dir,
+        bsl_agent_http_addr = ?http_addr,
+        "bsl-agent starting"
+    );
+}
 
-    if let Some(command) = cli.command {
-        match command {
-            Command::Ui {
-                command: UiCommand::List { all },
-            } => return ui_list(all).await,
-            Command::Ui {
-                command:
-                    UiCommand::Url {
-                        instance_id,
-                        pid,
-                        roots,
-                    },
-            } => ui_url(instance_id, pid, roots).await,
-        }
-    }
-
-    tracing::info!("bsl-agent starting...");
-
+async fn run_stdio_agent() -> anyhow::Result<()> {
     let session_manager = Arc::new(SessionManager::new());
     let job_manager = Arc::new(JobManager::new());
     let mut handler =
@@ -243,8 +233,56 @@ async fn main() -> anyhow::Result<()> {
     let service = handler
         .serve(stdio())
         .await
-        .inspect_err(|e| tracing::error!("server error: {:?}", e))?;
-    service.waiting().await?;
+        .inspect_err(|err| tracing::error!(error = ?err, "failed to start stdio MCP service"))?;
+    service.waiting().await.inspect_err(
+        |err| tracing::error!(error = ?err, "stdio MCP service terminated with error"),
+    )?;
+    tracing::info!("stdio transport closed");
+
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    if let Some(command) = cli.command {
+        match command {
+            Command::Ui {
+                command: UiCommand::List { all },
+            } => return ui_list(all).await,
+            Command::Ui {
+                command:
+                    UiCommand::Url {
+                        instance_id,
+                        pid,
+                        roots,
+                    },
+            } => ui_url(instance_id, pid, roots).await,
+        }
+    }
+
+    let resolved_log = match resolve_log_path_from_process() {
+        Ok(resolved) => resolved,
+        Err(err) => {
+            eprintln!("bsl-agent file logging bootstrap failed: {err}");
+            return Err(err);
+        }
+    };
+
+    if let Err(err) = init_stdio_logging(&resolved_log) {
+        eprintln!(
+            "bsl-agent file logging bootstrap failed for {}: {err}",
+            resolved_log.log_path.display()
+        );
+        return Err(err);
+    }
+
+    log_startup_record(&resolved_log);
+
+    if let Err(err) = run_stdio_agent().await {
+        tracing::error!(error = ?err, "bsl-agent stdio server failed");
+        return Err(err);
+    }
 
     Ok(())
 }

@@ -15,14 +15,23 @@ use rmcp::{RoleClient, ServiceError, ServiceExt};
 use serde::de::DeserializeOwned;
 use serde_json::json;
 use tokio::process::Command;
+use tokio::time::{timeout, Duration};
 
 fn bsl_agent_bin() -> &'static str {
     env!("CARGO_BIN_EXE_bsl-agent")
 }
 
 async fn spawn_agent(extra_env: &[(&str, &str)]) -> RunningService<RoleClient, ()> {
+    spawn_agent_in_dir(&repo_root(), extra_env).await
+}
+
+async fn spawn_agent_in_dir(
+    cwd: &Path,
+    extra_env: &[(&str, &str)],
+) -> RunningService<RoleClient, ()> {
     let mut cmd = Command::new(bsl_agent_bin()).configure(|cmd| {
         cmd.env("RUST_LOG", "error");
+        cmd.current_dir(cwd);
     });
     for (key, value) in extra_env {
         cmd.env(key, value);
@@ -30,6 +39,20 @@ async fn spawn_agent(extra_env: &[(&str, &str)]) -> RunningService<RoleClient, (
 
     let transport = TokioChildProcess::new(cmd).expect("spawn bsl-agent");
     ().serve(transport).await.expect("connect client")
+}
+
+async fn run_agent_output_in_dir(cwd: &Path, extra_env: &[(&str, &str)]) -> std::process::Output {
+    let mut cmd = Command::new(bsl_agent_bin());
+    cmd.current_dir(cwd);
+    cmd.env("RUST_LOG", "error");
+    for (key, value) in extra_env {
+        cmd.env(key, value);
+    }
+
+    timeout(Duration::from_secs(5), cmd.output())
+        .await
+        .expect("bsl-agent output timeout")
+        .expect("bsl-agent output")
 }
 
 fn json_object(value: serde_json::Value) -> rmcp::model::JsonObject {
@@ -925,6 +948,160 @@ async fn stdio_build_info_returns_version() {
     assert!(resp.pid > 0);
 
     let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_creates_persistent_log_file_in_process_cwd() {
+    let cwd = tempfile::TempDir::new().expect("tempdir");
+    let log_path = cwd.path().join(".bsl-agent").join("mcp.log");
+
+    let service = spawn_agent_in_dir(cwd.path(), &[("RUST_LOG", "bsl_agent=info")]).await;
+
+    for _ in 0..20 {
+        if log_path.is_file() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
+    assert!(
+        log_path.is_file(),
+        "missing log file: {}",
+        log_path.display()
+    );
+
+    let log = std::fs::read_to_string(&log_path).expect("read mcp.log");
+    assert!(
+        log.contains("bsl-agent starting"),
+        "log does not contain startup record: {log}"
+    );
+    assert!(
+        log.contains(&cwd.path().display().to_string()),
+        "log does not contain cwd: {log}"
+    );
+
+    let _ = service.cancel().await;
+
+    assert!(log_path.is_file(), "log file disappeared after cancel");
+}
+
+#[tokio::test]
+async fn stdio_logging_keeps_stdout_clean() {
+    let cwd = tempfile::TempDir::new().expect("tempdir");
+    let log_path = cwd.path().join(".bsl-agent").join("mcp.log");
+
+    let output = run_agent_output_in_dir(cwd.path(), &[("RUST_LOG", "bsl_agent=info")]).await;
+
+    assert!(
+        !output.status.success(),
+        "expected startup to stop on closed stdin, stdout={:?} stderr={:?}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "stdout must stay reserved for MCP transport, got: {:?}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        log_path.is_file(),
+        "missing log file: {}",
+        log_path.display()
+    );
+
+    let log = std::fs::read_to_string(&log_path).expect("read mcp.log");
+    assert!(
+        log.contains("failed to start stdio MCP service"),
+        "log does not contain early startup failure record: {log}"
+    );
+}
+
+#[tokio::test]
+async fn stdio_prefers_explicit_log_file_override() {
+    let cwd = tempfile::TempDir::new().expect("tempdir");
+    let overridden_dir = tempfile::TempDir::new().expect("tempdir");
+    let explicit_log_path = overridden_dir.path().join("custom-mcp.log");
+    let directory_override_path = overridden_dir.path().join("directory-override");
+    let default_log_path = cwd.path().join(".bsl-agent").join("mcp.log");
+
+    let service = spawn_agent_in_dir(
+        cwd.path(),
+        &[
+            ("RUST_LOG", "bsl_agent=info"),
+            (
+                "BSL_AGENT_LOG_FILE",
+                explicit_log_path.to_string_lossy().as_ref(),
+            ),
+            (
+                "BSL_AGENT_LOG_DIR",
+                directory_override_path.to_string_lossy().as_ref(),
+            ),
+        ],
+    )
+    .await;
+
+    for _ in 0..20 {
+        if explicit_log_path.is_file() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
+    assert!(
+        explicit_log_path.is_file(),
+        "missing overridden log file: {}",
+        explicit_log_path.display()
+    );
+    assert!(
+        !default_log_path.exists(),
+        "default log path should stay unused: {}",
+        default_log_path.display()
+    );
+    assert!(
+        !directory_override_path.join("mcp.log").exists(),
+        "directory override should stay unused when BSL_AGENT_LOG_FILE is set"
+    );
+
+    let log = std::fs::read_to_string(&explicit_log_path).expect("read custom log");
+    assert!(
+        log.contains(&explicit_log_path.display().to_string()),
+        "log does not contain effective overridden path: {log}"
+    );
+
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_fails_fast_when_log_path_cannot_be_initialized() {
+    let cwd = tempfile::TempDir::new().expect("tempdir");
+    let blocking_path = cwd.path().join("not-a-dir");
+    std::fs::write(&blocking_path, "blocker").expect("write blocker file");
+
+    let output = run_agent_output_in_dir(
+        cwd.path(),
+        &[(
+            "BSL_AGENT_LOG_DIR",
+            blocking_path.to_string_lossy().as_ref(),
+        )],
+    )
+    .await;
+
+    assert!(
+        !output.status.success(),
+        "expected startup failure, stdout={:?} stderr={:?}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("file logging bootstrap failed"),
+        "stderr={stderr:?}"
+    );
+    assert!(
+        stderr.contains(&blocking_path.display().to_string()),
+        "stderr={stderr:?}"
+    );
 }
 
 #[tokio::test]

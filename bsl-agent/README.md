@@ -26,6 +26,8 @@ Notes:
 
 Logging:
 - `RUST_LOG` - e.g. `bsl_agent=info` or `bsl_agent=debug,info`
+- `BSL_AGENT_LOG_FILE` - explicit file path for the MCP stdio log (highest priority)
+- `BSL_AGENT_LOG_DIR` - directory override; `bsl-agent` writes `<dir>/mcp.log` when `BSL_AGENT_LOG_FILE` is not set
 
 Disk cache (shared with backend startup):
 - `BSL_CACHE_DIR` - cache root directory (overrides XDG/HOME defaults)
@@ -55,6 +57,27 @@ Notes:
 - By default, `bsl-agent` serves an embedded SPA baked into the binary at build time.
 - UI parity endpoints for types:
   - `GET /api/mcp/types`, `GET /api/mcp/search`, `GET /api/mcp/metrics` (read-only).
+
+## MCP stdio file log
+
+For MCP stdio mode, `bsl-agent` always creates a persistent operator-visible log file before the normal MCP lifecycle starts. This log is independent from `workspace_open`, so it is available even if transport or process startup fails first.
+
+Path precedence:
+- `BSL_AGENT_LOG_FILE`
+- `BSL_AGENT_LOG_DIR` + `/mcp.log`
+- `<cwd>/.bsl-agent/mcp.log`
+
+Default example:
+
+```text
+/home/egor/code/DO_Rolf_PT/.bsl-agent/mcp.log
+```
+
+Notes:
+- `stdout` stays reserved for MCP transport frames.
+- `stderr` may still contain the same diagnostics, but the file log is the primary path to inspect after a crash or `Transport closed`.
+- If file log bootstrap fails, `bsl-agent` prints the attempted path and the OS error to `stderr` and exits without starting the stdio MCP server.
+- Startup records include build/version info, `pid`, `cwd`, effective log path, `BSL_CACHE_DIR`, and `BSL_AGENT_HTTP_ADDR`.
 
 ## Building embedded UI assets
 
@@ -116,12 +139,38 @@ If your MCP client can call tools but cannot run shell commands, use the MCP too
 ```toml
 [mcp_servers.bsl_agent]
 command = "/home/egor/code/bsl-gradual-types/target/release/bsl-agent"
-cwd = "/home/egor/code/bsl-gradual-types"
+cwd = "/home/egor/code/DO_Rolf_PT"
 env = {
   RUST_LOG = "bsl_agent=info",
-  BSL_CACHE_DIR = "/tmp/bsl-cache",
+  BSL_CACHE_DIR = "/home/egor/.cache/bsl-gradual-types",
   BSL_AGENT_HTTP_ADDR = "127.0.0.1:0",
 }
+```
+
+With this config the stable default log path is:
+
+```text
+/home/egor/code/DO_Rolf_PT/.bsl-agent/mcp.log
+```
+
+## Smoke-check for stdio logging
+
+Create the log file without `workspace_open`:
+
+```bash
+tmpdir="$(mktemp -d)" && cd "$tmpdir" && RUST_LOG=bsl_agent=info /home/egor/code/bsl-gradual-types/target/debug/bsl-agent </dev/null >/tmp/bsl-agent-stdout.txt 2>/tmp/bsl-agent-stderr.txt; test -f "$tmpdir/.bsl-agent/mcp.log" && tail -n 20 "$tmpdir/.bsl-agent/mcp.log"
+```
+
+Check the explicit file override:
+
+```bash
+tmpdir="$(mktemp -d)" && logfile="$tmpdir/custom-mcp.log" && cd "$tmpdir" && RUST_LOG=bsl_agent=info BSL_AGENT_LOG_FILE="$logfile" /home/egor/code/bsl-gradual-types/target/debug/bsl-agent </dev/null >/tmp/bsl-agent-stdout.txt 2>/tmp/bsl-agent-stderr.txt; test -f "$logfile" && tail -n 20 "$logfile"
+```
+
+Reproduce the fail-fast path:
+
+```bash
+tmpdir="$(mktemp -d)" && blocker="$tmpdir/not-a-dir" && printf blocker >"$blocker" && cd "$tmpdir" && BSL_AGENT_LOG_DIR="$blocker" /home/egor/code/bsl-gradual-types/target/debug/bsl-agent </dev/null >/tmp/bsl-agent-stdout.txt 2>/tmp/bsl-agent-stderr.txt; cat /tmp/bsl-agent-stderr.txt
 ```
 
 ## LLM usage notes

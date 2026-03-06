@@ -1,50 +1,49 @@
 ## Context
-Стадия syntax diagnostics в текущем v2 пути зависит от полного parse на новую ревизию текста. На больших модулях это становится доминирующим алгоритмическим фактором latency.
+Инкрементальный `ParseSnapshot` уже существует как version-bound parse contract для completion/diagnostics. `didChange` path уже использует incremental parse с fail-safe full fallback, а syntax diagnostics уже читаются из общего parse state.
 
-Цель изменения: уменьшить вычислительную стоимость syntax diagnostics на последовательных ревизиях одного файла без потери корректности и детерминированности.
+Оставшийся пробел не алгоритмический, а наблюдательный: сейчас можно увидеть mode parse snapshot и можно увидеть aggregate latency `syntax_diagnostics_query_ms`, но нельзя формально сравнить syntax-stage latency по parse mode в одном observability contract.
 
 ## Goals / Non-Goals
 - Goals:
-  - Перейти на incremental parse для последовательных `didChange` ревизий.
-  - Сохранить эквивалентность user-facing diagnostics относительно full parse.
-  - Сделать root-cause наблюдаемым через hit/miss/fallback метрики.
+  - Добавить mode-aware observability для syntax diagnostics stage.
+  - Сохранить low-cardinality taxonomy и deterministic dual-write semantics.
+  - Сделать root-cause сравнение `incremental/reused/full/other` vs syntax latency доступным без новых high-cardinality меток.
 - Non-Goals:
-  - Изменять grammar языка BSL.
-  - Изменять существующую message policy синтаксических diagnostics.
+  - Менять incremental parse implementation.
+  - Менять lifecycle `ParseSnapshot`.
+  - Менять user-facing semantics diagnostics.
 
 ## Decisions
-- Decision 1: Использовать incremental tree reuse как primary path
-  - Для последовательных ревизий одного файла система хранит предыдущее parse tree.
-  - На `didChange` применяется edit mapping и запускается incremental parse от предыдущего дерева.
-  - Результат становится новым canonical tree текущей ревизии.
+- Decision 1: Сузить change только до residual observability scope
+  - Этот change MUST NOT повторно специфицировать incremental parse, fallback или parse snapshot lifecycle.
+  - Единственный scope change: mode-aware измерение latency syntax diagnostics.
 
   Alternatives considered:
-  - Только увеличить debounce heavy diagnostics.
-    - Отклонено: уменьшает частоту запусков, но не снижает алгоритмическую стоимость одного запуска.
-  - Полная замена parser стеком другого типа.
-    - Отклонено: высокий migration risk и большой объем несвязанных изменений.
+  - Архивировать change без остатка.
+    - Отклонено: остаётся практический observability gap для root-cause анализа.
+  - Оставить change в исходном виде.
+    - Отклонено: это дублирует уже доставленный `ParseSnapshot` contract.
 
-- Decision 2: Fallback-first correctness policy
-  - Если edit mapping некорректен или incremental parse невалиден, система MUST выполнять full parse текущей ревизии.
-  - Fallback MUST быть детерминирован и прозрачно наблюдаем через метрики причин.
+- Decision 2: Использовать ту же mode taxonomy, что и у parse snapshot observability
+  - `syntax_diagnostics` MUST публиковать mode-aware latency с теми же значениями: `incremental`, `reused`, `full`, `other`.
+  - Источник mode MUST быть тем же parse snapshot / parse-report контуром, который уже используется для diagnostics текущей ревизии.
 
-- Decision 3: Каноническая эквивалентность diagnostics
-  - User-facing diagnostics после пост-обработки MUST оставаться эквивалентными full parse контракту для той же ревизии текста.
-  - Любые различия допустимы только как внутренние performance детали, но не как изменение semantic/diagnostic контракта.
+- Decision 3: Legacy fixed key остаётся aggregate projection
+  - `intellisense_v2_syntax_diagnostics_query_ms` MUST сохраниться для backward compatibility.
+  - Mode-aware разрез MUST публиковаться через канонический event model и соответствующую deterministic projection, а не через отдельную ad-hoc метрику без taxonomy mapping.
 
 ## Risks / Trade-offs
-- Риск: ошибки в edit mapping могут давать непредсказуемое дерево.
-  - Mitigation: строгая валидация mapping + немедленный fallback на full parse.
-- Риск: хранение деревьев увеличит память.
-  - Mitigation: ограничение кэша на открытые документы и очистка при close/removal.
-- Риск: смешанный путь (incremental/full) усложнит отладку.
-  - Mitigation: observability hit/miss/fallback причины и тесты эквивалентности.
+- Риск: mode у syntax-stage будет вычисляться не из того же источника, что и parse snapshot mode.
+  - Mitigation: derive mode только из уже выбранного parse snapshot/report для данной ревизии.
+- Риск: появится второй observability contract рядом с каноническим event model.
+  - Mitigation: расширять только существующий canonical/drilldown contract и legacy projection.
+- Риск: рост cardinality.
+  - Mitigation: использовать только фиксированный enum `incremental|reused|full|other`.
 
 ## Migration / Rollout
-1. Включить incremental path под feature/runtime flag в report-only режиме.
-2. Снять метрики hit/miss/fallback и сравнить с full parse baseline.
-3. Перевести incremental path в default после подтвержденной эквивалентности diagnostics.
+1. Добавить mode-aware emission для syntax diagnostics stage в канонический observability pipeline.
+2. Сохранить compatibility projection для aggregate fixed-key метрики.
+3. Добавить contract/regression tests на mode-aware drilldown и legacy aggregate parity.
 
 ## Open Questions
-- Нужен ли отдельный лимит на максимальный диапазон edit для incremental path перед принудительным full parse.
-- Нужно ли хранить промежуточные trees для rollback между несколькими конкурентными версиями документа.
+- Нужен ли отдельный fixed-key projection по mode, или для residual scope достаточно canonical/drilldown mode-aware разреза при сохранении aggregate legacy key.

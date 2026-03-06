@@ -1,16 +1,16 @@
-## 1. Incremental Parsing Contract
-- [ ] 1.1 Специфицировать API и lifecycle incremental parse (предыдущее дерево, применение edit, parse новой ревизии).
-- [ ] 1.2 Зафиксировать критерии валидности edit-преобразования и условия fallback на full parse.
+## 1. Scope Narrowing
+- [ ] 1.1 Сузить change только до residual observability scope для `syntax_diagnostics`.
+- [ ] 1.2 Удалить из change повторное описание incremental parse, fallback и lifecycle `ParseSnapshot`.
 
-## 2. Integration in v2 Pipeline
-- [ ] 2.1 Внедрить incremental parse путь в syntax diagnostics контур для последовательных ревизий одного файла.
-- [ ] 2.2 Обеспечить детерминированный fallback на full parse при невозможности incremental обновления.
+## 2. Observability Contract
+- [ ] 2.1 Добавить mode-aware измерение latency `syntax_diagnostics` stage в канонический observability contract.
+- [ ] 2.2 Использовать существующую low-cardinality taxonomy parse mode: `incremental`, `reused`, `full`, `other`.
+- [ ] 2.3 Сохранить `intellisense_v2_syntax_diagnostics_query_ms` как aggregate compatibility projection.
 
-## 3. Observability
-- [ ] 3.1 Добавить метрики incremental hit/miss/fallback и причины fallback.
-- [ ] 3.2 Добавить stage-level сравнение latency incremental vs full parse для large профиля.
+## 3. Validation
+- [ ] 3.1 Добавить contract/regression tests, которые доказывают наличие mode-aware разреза для syntax diagnostics latency.
+- [ ] 3.2 Добавить проверку, что legacy aggregate projection остаётся детерминированной и backward-compatible.
+- [ ] 3.3 Выполнить `openspec validate add-incremental-syntax-diagnostics-for-large-modules --strict --no-interactive`.
 
-## 4. Validation
-- [ ] 4.1 Добавить regression tests на эквивалентность diagnostics (incremental vs full parse).
-- [ ] 4.2 Добавить perf regression тесты/сценарии для large/small профилей.
-- [ ] 4.3 Выполнить `openspec validate add-incremental-syntax-diagnostics-for-large-modules --strict --no-interactive`.
+## 4. Follow-up Boundary
+- [ ] 4.1 Не расширять этот change назад в parse/runtime algorithm work; отдельный scope требует нового change.

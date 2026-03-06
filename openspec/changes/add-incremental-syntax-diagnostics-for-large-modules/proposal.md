@@ -1,27 +1,36 @@
-# Change: Инкрементальный syntax diagnostics pipeline для больших модулей
+# Change: Mode-aware observability для syntax diagnostics на больших модулях
 
 ## Why
-`syntax_diagnostics` на больших модулях остается тяжелой стадией, потому что текущий путь опирается на полный parse для каждой новой ревизии текста.
+Инкрементальный `ParseSnapshot` и fail-safe full fallback уже доставлены как общий parse contract для completion/diagnostics.
 
-Это создает алгоритмический bottleneck и ограничивает верхнюю границу ускорения completion/diagnostics при активном редактировании больших файлов.
+Остаточный пробел только один: текущая observability позволяет видеть `parse_snapshot` mode и общий `syntax_diagnostics_query_ms`, но не позволяет формально сравнить latency syntax-stage по parse mode (`incremental`, `reused`, `full`, `other`) в одном и том же diagnostics контуре.
+
+Из-за этого root-cause анализ на больших модулях остается неполным: видно, каким был parse path, и видно общую latency syntax-stage, но не видно их связку на одном low-cardinality observability contract.
 
 ## What Changes
-- **ADDED**: инкрементальный синтаксический путь для последовательных ревизий одного файла с reuse предыдущего parse tree.
-  - Используются edit-aware обновления дерева и incremental parse вместо полного parse на каждое `didChange`.
-- **ADDED**: fail-safe policy для некорректных/неприменимых edits.
-  - При невозможности корректного incremental update система MUST fallback на полный parse текущей ревизии без нарушения корректности diagnostics.
-- **ADDED**: observability для incremental hit/miss/fallback причин и latency эффекта.
+- **ADDED**: residual observability delta для `syntax_diagnostics`.
+  - Канонический observability contract MUST различать latency syntax-stage по parse mode.
+  - Используется low-cardinality mode taxonomy, согласованная с уже существующим `ParseSnapshot` observability: `incremental`, `reused`, `full`, `other`.
+- **ADDED**: deterministic projection rule.
+  - Legacy fixed-key метрика `intellisense_v2_syntax_diagnostics_query_ms` сохраняется как aggregate compatibility projection.
+  - Mode-aware разрез публикуется через канонический/drilldown contract и тестируется отдельно.
+
+## Explicitly Out of Scope
+- Любые изменения incremental parse path, edit mapping, fallback logic или lifecycle `ParseSnapshot`.
+- Любые изменения parse/diagnostics semantics.
+- Любые новые parser/runtime algorithms.
 
 ## Impact
 - Affected specs:
   - `bsl-intellisense-v2`
 - Affected code (planned):
-  - `syntax/src/lib.rs`
-  - `analysis-v2/src/lib.rs`
-  - `backend/src/bin/lsp_server/server/language_server.rs`
-  - `backend/src/bin/lsp_server/server/core.rs`
+  - `bsl-runtime/src/system/basic_observability/query_metrics.rs`
   - `bsl-runtime/src/system/basic_observability.rs`
+  - `bsl-runtime/src/system/system_coordinator/coordinator/observability.rs`
+  - `bsl-runtime/src/application/intellisense_v2/facade/operations.rs`
+  - `backend/src/bin/lsp_server/server/core.rs`
+  - `backend/src/bin/lsp_server/server/core/tests.rs`
 
 ## Out of Scope
-- Изменение семантики синтаксических сообщений (rewrite rules и текст diagnostics).
 - Изменение LSP wire-контракта для diagnostics/completion.
+- Замена или повторная реализация `add-incremental-parse-snapshot-for-analysis-v2`.

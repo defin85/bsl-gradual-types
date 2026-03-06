@@ -510,9 +510,9 @@ impl BslAgentHandler {
         let job_id = self
             .job_manager
             .spawn("bsl_types_list", move |ctx| async move {
-                ctx.set_progress("bsl_types_list/running", 0).await;
+                let progress = SemanticJobProgress::new(ctx, "bsl_types_list");
                 let response = session_manager
-                    .bsl_types_list(params)
+                    .bsl_types_list_with_progress(params, Some(progress))
                     .await
                     .map_err(|err| anyhow::anyhow!(err.to_string()))?;
                 Ok(response)
@@ -556,9 +556,9 @@ impl BslAgentHandler {
         let job_id = self
             .job_manager
             .spawn("bsl_types_search", move |ctx| async move {
-                ctx.set_progress("bsl_types_search/running", 0).await;
+                let progress = SemanticJobProgress::new(ctx, "bsl_types_search");
                 let response = session_manager
-                    .bsl_types_search(params)
+                    .bsl_types_search_with_progress(params, Some(progress))
                     .await
                     .map_err(|err| anyhow::anyhow!(err.to_string()))?;
                 Ok(response)
@@ -596,9 +596,9 @@ impl BslAgentHandler {
         let job_id = self
             .job_manager
             .spawn("bsl_type_get", move |ctx| async move {
-                ctx.set_progress("bsl_type_get/running", 0).await;
+                let progress = SemanticJobProgress::new(ctx, "bsl_type_get");
                 let response = session_manager
-                    .bsl_type_get(params)
+                    .bsl_type_get_with_progress(params, Some(progress))
                     .await
                     .map_err(|err| anyhow::anyhow!(err.to_string()))?;
                 Ok(response)

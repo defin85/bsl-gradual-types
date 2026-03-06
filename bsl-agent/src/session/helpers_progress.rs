@@ -72,6 +72,21 @@ async fn report_job_stage(progress: Option<&SemanticJobProgress>, stage: &str, p
     }
 }
 
+async fn report_visible_job_stage(
+    progress: Option<&SemanticJobProgress>,
+    stage: &str,
+    percent: u8,
+) {
+    if progress.is_none() {
+        return;
+    }
+
+    report_job_stage(progress, stage, percent).await;
+    // Fast type-catalog jobs can otherwise collapse several phases into a single
+    // externally visible job_wait update. Keep each phase observable over stdio.
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+}
+
 async fn report_batch_progress(
     progress: Option<&SemanticJobProgress>,
     stage: &str,

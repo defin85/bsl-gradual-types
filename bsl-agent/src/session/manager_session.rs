@@ -406,6 +406,15 @@ impl SessionManager {
         &self,
         params: BslTypesListParams,
     ) -> Result<serde_json::Value, rmcp::ErrorData> {
+        self.bsl_types_list_with_progress(params, None).await
+    }
+
+    pub(crate) async fn bsl_types_list_with_progress(
+        &self,
+        params: BslTypesListParams,
+        progress: Option<SemanticJobProgress>,
+    ) -> Result<serde_json::Value, rmcp::ErrorData> {
+        report_visible_job_stage(progress.as_ref(), "validating_request", 5).await;
         if params.page < 1 {
             return Err(rmcp::ErrorData::invalid_params("page must be >= 1", None));
         }
@@ -430,10 +439,13 @@ impl SessionManager {
             .and_then(|page| page.checked_mul(params.limit as usize))
             .ok_or_else(|| rmcp::ErrorData::invalid_params("page/limit overflow", None))?;
 
+        report_visible_job_stage(progress.as_ref(), "loading_snapshot", 20).await;
         let startup = self
             .ready_startup_for_http(Some(&params.session_id))
             .await?;
         let deps = startup.deps_bundle_v2.semantic_deps.clone();
+
+        report_visible_job_stage(progress.as_ref(), "building_metadata", 40).await;
         let metadata_lookup = Self::build_metadata_lookup_v2(&deps);
 
         let category_filter = params
@@ -454,6 +466,7 @@ impl SessionManager {
             _ => Vec::new(),
         };
 
+        report_visible_job_stage(progress.as_ref(), "collecting_types", 65).await;
         let mut dto = web_api_service::get_all_types_as_dto(
             deps.as_ref(),
             &metadata_lookup,
@@ -464,6 +477,7 @@ impl SessionManager {
             params.flow_sensitive_only,
         );
 
+        report_visible_job_stage(progress.as_ref(), "serializing_result", 90).await;
         match params.view {
             BslTypesView::NamesOnly => {
                 let names: Vec<String> = dto.types.into_iter().map(|t| t.name).collect();
@@ -487,6 +501,15 @@ impl SessionManager {
         &self,
         params: BslTypesSearchParams,
     ) -> Result<serde_json::Value, rmcp::ErrorData> {
+        self.bsl_types_search_with_progress(params, None).await
+    }
+
+    pub(crate) async fn bsl_types_search_with_progress(
+        &self,
+        params: BslTypesSearchParams,
+        progress: Option<SemanticJobProgress>,
+    ) -> Result<serde_json::Value, rmcp::ErrorData> {
+        report_visible_job_stage(progress.as_ref(), "validating_request", 5).await;
         let query = params.query.trim();
         if query.is_empty() {
             return Err(rmcp::ErrorData::invalid_params(
@@ -501,16 +524,21 @@ impl SessionManager {
             ));
         }
 
+        report_visible_job_stage(progress.as_ref(), "loading_snapshot", 20).await;
         let startup = self
             .ready_startup_for_http(Some(&params.session_id))
             .await?;
         let deps = startup.deps_bundle_v2.semantic_deps.clone();
+
+        report_visible_job_stage(progress.as_ref(), "building_metadata", 40).await;
         let metadata_lookup = Self::build_metadata_lookup_v2(&deps);
 
+        report_visible_job_stage(progress.as_ref(), "searching_types", 65).await;
         let mut dto = web_api_service::search_types_as_dto(deps.as_ref(), &metadata_lookup, query)
             .await
             .map_err(|err| rmcp::ErrorData::internal_error(err.to_string(), None))?;
 
+        report_visible_job_stage(progress.as_ref(), "filtering_results", 80).await;
         if let Some(source) = params.source {
             let expected_category = match source {
                 BslTypeSource::Platform => "Platform",
@@ -524,6 +552,7 @@ impl SessionManager {
             dto.types.truncate(params.limit as usize);
         }
 
+        report_visible_job_stage(progress.as_ref(), "serializing_result", 92).await;
         match params.view {
             BslTypesView::NamesOnly => {
                 let names: Vec<String> = dto.types.into_iter().map(|t| t.name).collect();
@@ -547,6 +576,15 @@ impl SessionManager {
         &self,
         params: BslTypeGetParams,
     ) -> Result<serde_json::Value, rmcp::ErrorData> {
+        self.bsl_type_get_with_progress(params, None).await
+    }
+
+    pub(crate) async fn bsl_type_get_with_progress(
+        &self,
+        params: BslTypeGetParams,
+        progress: Option<SemanticJobProgress>,
+    ) -> Result<serde_json::Value, rmcp::ErrorData> {
+        report_visible_job_stage(progress.as_ref(), "validating_request", 5).await;
         let type_name = params.type_name.trim();
         if type_name.is_empty() {
             return Err(rmcp::ErrorData::invalid_params(
@@ -555,12 +593,16 @@ impl SessionManager {
             ));
         }
 
+        report_visible_job_stage(progress.as_ref(), "loading_snapshot", 20).await;
         let startup = self
             .ready_startup_for_http(Some(&params.session_id))
             .await?;
         let deps = startup.deps_bundle_v2.semantic_deps.clone();
+
+        report_visible_job_stage(progress.as_ref(), "building_metadata", 40).await;
         let metadata_lookup = Self::build_metadata_lookup_v2(&deps);
 
+        report_visible_job_stage(progress.as_ref(), "resolving_type", 70).await;
         let mut dto = web_api_service::get_type_details_as_dto(
             deps.as_ref(),
             &metadata_lookup,
@@ -583,6 +625,7 @@ impl SessionManager {
             dto.methods.clear();
         }
 
+        report_visible_job_stage(progress.as_ref(), "serializing_result", 92).await;
         serde_json::to_value(dto).map_err(|err| {
             rmcp::ErrorData::internal_error(format!("serialize type dto: {err}"), None)
         })

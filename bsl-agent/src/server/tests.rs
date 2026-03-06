@@ -75,7 +75,17 @@ async fn cancel_stale_batch_jobs_cancels_running_jobs() {
         .await;
     handler.cancel_stale_batch_jobs("session-1", 2).await;
 
-    let status = job_manager.status(&job_id).await.expect("status");
+    let status = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let status = job_manager.status(&job_id).await.expect("status");
+            if matches!(status.state, JobStateDto::Canceled) {
+                break status;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("stale batch job must transition to canceled");
     assert_eq!(
         status.state,
         JobStateDto::Canceled,

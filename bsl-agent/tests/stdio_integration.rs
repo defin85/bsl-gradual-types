@@ -858,6 +858,166 @@ async fn stdio_types_list_is_deterministic_on_basic_workspace() {
 }
 
 #[tokio::test]
+async fn stdio_types_list_job_reports_intermediate_progress() {
+    let service = spawn_agent(&[]).await;
+
+    let temp_root = tempfile::TempDir::new().expect("tempdir");
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [temp_root.path().to_string_lossy()],
+        }),
+    )
+    .await;
+    let session_id = open.session_id.clone();
+    let _status = wait_workspace_ready(&service, &open).await;
+
+    let start: JobStartResponse = call_tool(
+        &service,
+        "bsl_types_list_start",
+        json!({ "session_id": &session_id, "page": 1, "limit": 50, "view": "names_only" }),
+    )
+    .await;
+    let updates = collect_job_updates(&service, &start.job_id, 50).await;
+    assert_running_progress_is_non_decorative(&updates, "bsl_types_list/");
+
+    let names: Vec<String> =
+        call_tool(&service, "job_result", json!({ "job_id": &start.job_id })).await;
+    assert!(!names.is_empty(), "expected platform types in list result");
+
+    let _close: serde_json::Value = call_tool(
+        &service,
+        "workspace_close",
+        json!({ "session_id": &session_id }),
+    )
+    .await;
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_types_search_job_reports_intermediate_progress() {
+    let service = spawn_agent(&[]).await;
+
+    let repo = repo_root();
+    let config_root = repo.join("examples/conf/conf_test");
+
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [config_root.to_string_lossy()],
+            "configuration_path": config_root.to_string_lossy(),
+        }),
+    )
+    .await;
+    let session_id = open.session_id.clone();
+    let _status = wait_workspace_ready(&service, &open).await;
+
+    let start: JobStartResponse = call_tool(
+        &service,
+        "bsl_types_search_start",
+        json!({
+            "session_id": &session_id,
+            "query": "ЗаказНаряды",
+            "limit": 1000,
+            "source": "configuration",
+            "view": "names_only"
+        }),
+    )
+    .await;
+    let updates = collect_job_updates(&service, &start.job_id, 50).await;
+    assert_running_progress_is_non_decorative(&updates, "bsl_types_search/");
+
+    let names: Vec<String> =
+        call_tool(&service, "job_result", json!({ "job_id": &start.job_id })).await;
+    assert!(!names.is_empty(), "expected non-empty type search result");
+
+    let _close: serde_json::Value = call_tool(
+        &service,
+        "workspace_close",
+        json!({ "session_id": &session_id }),
+    )
+    .await;
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_type_get_job_reports_intermediate_progress() {
+    let service = spawn_agent(&[]).await;
+
+    let repo = repo_root();
+    let config_root = repo.join("examples/conf/conf_test");
+
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [config_root.to_string_lossy()],
+            "configuration_path": config_root.to_string_lossy(),
+        }),
+    )
+    .await;
+    let session_id = open.session_id.clone();
+    let _status = wait_workspace_ready(&service, &open).await;
+
+    let search_start: JobStartResponse = call_tool(
+        &service,
+        "bsl_types_search_start",
+        json!({
+            "session_id": &session_id,
+            "query": "ЗаказНаряды",
+            "limit": 1000,
+            "source": "configuration",
+            "view": "names_only"
+        }),
+    )
+    .await;
+    wait_job_succeeded(&service, &search_start.job_id).await;
+    let names: Vec<String> = call_tool(
+        &service,
+        "job_result",
+        json!({ "job_id": &search_start.job_id }),
+    )
+    .await;
+    let type_name = names
+        .iter()
+        .find(|name| name.contains("DocumentObject") && name.contains("ЗаказНаряды"))
+        .or_else(|| {
+            names
+                .iter()
+                .find(|name| name.contains("ДокументОбъект") && name.contains("ЗаказНаряды"))
+        })
+        .or_else(|| names.iter().find(|name| name.contains("ЗаказНаряды")))
+        .expect("type name from search");
+
+    let start: JobStartResponse = call_tool(
+        &service,
+        "bsl_type_get_start",
+        json!({
+            "session_id": &session_id,
+            "type_name": type_name,
+            "source": "configuration",
+            "include_methods": false
+        }),
+    )
+    .await;
+    let updates = collect_job_updates(&service, &start.job_id, 50).await;
+    assert_running_progress_is_non_decorative(&updates, "bsl_type_get/");
+
+    let dto: TypeDto = call_tool(&service, "job_result", json!({ "job_id": &start.job_id })).await;
+    assert!(!dto.properties.is_empty(), "expected type properties");
+
+    let _close: serde_json::Value = call_tool(
+        &service,
+        "workspace_close",
+        json!({ "session_id": &session_id }),
+    )
+    .await;
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
 async fn stdio_type_get_returns_properties_and_tabular_sections_for_conf_type() {
     let service = spawn_agent(&[]).await;
 

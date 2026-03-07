@@ -301,9 +301,15 @@ impl IntellisenseV2Facade {
                     }
                 }
                 ObservabilityStage::SyntaxDiagnosticsQuery => {
+                    let syntax_mode = analysis
+                        .syntax_diagnostics_observability_mode(context.file_id)
+                        .ok()
+                        .flatten()
+                        .unwrap_or("other");
                     coordinator
-                        .record_intellisense_v2_syntax_diagnostics_query_latency_with_origin(
+                        .record_intellisense_v2_syntax_diagnostics_query_latency_with_origin_and_mode(
                             context.origin.as_str(),
+                            syntax_mode,
                             elapsed,
                         );
                     if report_cancelled {

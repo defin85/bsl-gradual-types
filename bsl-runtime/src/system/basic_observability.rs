@@ -216,6 +216,7 @@ const ALLOWED_STAGES: &[&str] = &[
     "semantic_diagnostics_query",
     "parse_result_query",
 ];
+const ALLOWED_PARSE_MODES: &[&str] = &["incremental", "reused", "full", "other"];
 const ALLOWED_OUTCOMES: &[&str] = &[
     "success",
     "empty",

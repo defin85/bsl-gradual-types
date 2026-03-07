@@ -296,8 +296,8 @@ impl BasicObservability {
     }
 
     pub fn record_intellisense_v2_syntax_diagnostics_query_latency(&self, duration: Duration) {
-        self.record_intellisense_v2_syntax_diagnostics_query_latency_with_origin(
-            "runtime", duration,
+        self.record_intellisense_v2_syntax_diagnostics_query_latency_with_origin_and_mode(
+            "runtime", "other", duration,
         );
     }
 
@@ -306,12 +306,24 @@ impl BasicObservability {
         origin: &str,
         duration: Duration,
     ) {
+        self.record_intellisense_v2_syntax_diagnostics_query_latency_with_origin_and_mode(
+            origin, "other", duration,
+        );
+    }
+
+    pub fn record_intellisense_v2_syntax_diagnostics_query_latency_with_origin_and_mode(
+        &self,
+        origin: &str,
+        parse_mode: &str,
+        duration: Duration,
+    ) {
+        let parse_mode = normalize_parse_snapshot_mode_label(parse_mode);
         let elapsed_ms = duration.as_millis() as f64;
         self.emit_canonical_event(
             CanonicalEvent {
                 family: CanonicalFamily::StageTotal,
                 origin,
-                mode: None,
+                mode: Some(parse_mode),
                 operation: Some("diagnostics"),
                 stage: Some("syntax_diagnostics_query"),
                 outcome: None,
@@ -332,7 +344,7 @@ impl BasicObservability {
             CanonicalEvent {
                 family: CanonicalFamily::StageLatencyMs,
                 origin,
-                mode: None,
+                mode: Some(parse_mode),
                 operation: Some("diagnostics"),
                 stage: Some("syntax_diagnostics_query"),
                 outcome: None,

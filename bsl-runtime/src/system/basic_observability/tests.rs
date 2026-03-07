@@ -170,6 +170,131 @@ fn completion_mode_dimension_normalizes_unknown_values() {
 }
 
 #[test]
+fn syntax_diagnostics_stage_metrics_include_parse_mode_dimension_and_keep_projection_parity() {
+    let observability = BasicObservability::default();
+    observability.record_intellisense_v2_syntax_diagnostics_query_latency_with_origin_and_mode(
+        "lsp",
+        "incremental",
+        Duration::from_millis(14),
+    );
+
+    let exported = observability.get_metrics().export_metrics();
+    let counters = counters(&exported);
+    let histograms = histograms(&exported);
+
+    let drilldown_counter = "intellisense_v2_drilldown_stage_total_origin_lsp_mode_incremental_operation_diagnostics_stage_syntax_diagnostics_query";
+    let drilldown_histogram = "intellisense_v2_drilldown_stage_latency_ms_origin_lsp_mode_incremental_operation_diagnostics_stage_syntax_diagnostics_query";
+    assert_eq!(counter_value(counters, drilldown_counter), 1);
+    assert_eq!(histogram_count(histograms, drilldown_histogram), 1);
+    assert_eq!(
+        counter_value(counters, "intellisense_v2_syntax_diagnostics_query_total"),
+        counter_value(counters, drilldown_counter),
+        "syntax_diagnostics legacy total must stay in deterministic projection parity",
+    );
+    assert_eq!(
+        histogram_count(histograms, "intellisense_v2_syntax_diagnostics_query_ms"),
+        histogram_count(histograms, drilldown_histogram),
+        "syntax_diagnostics legacy latency must stay in deterministic projection parity",
+    );
+}
+
+#[test]
+fn syntax_diagnostics_parse_mode_dimension_normalizes_unknown_values_to_other() {
+    let observability = BasicObservability::default();
+    observability.record_intellisense_v2_syntax_diagnostics_query_latency_with_origin_and_mode(
+        "web",
+        "unknown-mode",
+        Duration::from_millis(9),
+    );
+
+    let exported = observability.get_metrics().export_metrics();
+    let counters = counters(&exported);
+
+    let normalized_key = "intellisense_v2_drilldown_stage_total_origin_web_mode_other_operation_diagnostics_stage_syntax_diagnostics_query";
+    assert_eq!(
+        counter_value(counters, normalized_key),
+        1,
+        "unknown parse mode must collapse into bounded syntax mode label set",
+    );
+    assert!(
+        !counters
+            .keys()
+            .any(|key| key.contains("_mode_unknown-mode")),
+        "unexpected syntax mode labels must not leak into drilldown metrics",
+    );
+}
+
+#[test]
+fn stage_aware_mode_schema_rejects_mixed_parse_and_completion_modes() {
+    let observability = BasicObservability::default();
+
+    observability.emit_canonical_event(
+        CanonicalEvent {
+            family: CanonicalFamily::StageTotal,
+            origin: "lsp",
+            mode: Some("legacy"),
+            operation: Some("diagnostics"),
+            stage: Some("syntax_diagnostics_query"),
+            outcome: None,
+            reason: None,
+            query_kind: None,
+            work_class: None,
+            saturation_metric: None,
+            value_kind: CanonicalValueKind::Counter,
+            value: 1.0,
+            requires_legacy_projection: true,
+        },
+        None,
+    );
+    observability.emit_canonical_event(
+        CanonicalEvent {
+            family: CanonicalFamily::StageTotal,
+            origin: "lsp",
+            mode: Some("incremental"),
+            operation: Some("completion"),
+            stage: Some("ir_query"),
+            outcome: None,
+            reason: None,
+            query_kind: None,
+            work_class: None,
+            saturation_metric: None,
+            value_kind: CanonicalValueKind::Counter,
+            value: 1.0,
+            requires_legacy_projection: true,
+        },
+        None,
+    );
+
+    let exported = observability.get_metrics().export_metrics();
+    let counters = counters(&exported);
+
+    assert_eq!(
+        counter_value(
+            counters,
+            "intellisense_v2_observability_contract_violation_total"
+        ),
+        2,
+        "invalid stage/mode combinations must be rejected by schema validation",
+    );
+    assert_eq!(
+        counter_value(
+            counters,
+            "intellisense_v2_drilldown_stage_total_origin_lsp_mode_legacy_operation_diagnostics_stage_syntax_diagnostics_query"
+        ),
+        0,
+        "completion mode labels must not leak into syntax diagnostics stage",
+    );
+    assert_eq!(
+        counter_value(
+            counters,
+            "intellisense_v2_drilldown_stage_total_origin_lsp_mode_incremental_operation_completion_stage_ir_query"
+        ),
+        0,
+        "parse mode labels must not leak into completion stage metrics",
+    );
+}
+
+#[test]
 fn invalid_origin_event_is_dropped_with_contract_violation_signal() {
     let observability = BasicObservability::default();
     observability.record_intellisense_v2_wait_for_file_version_with_origin(

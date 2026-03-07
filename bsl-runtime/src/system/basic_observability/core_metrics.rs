@@ -1,6 +1,17 @@
 use super::*;
 
 impl BasicObservability {
+    fn allowed_modes_for_stage(operation: &str, stage: &str) -> Option<&'static [&'static str]> {
+        match (operation, stage) {
+            ("diagnostics", "syntax_diagnostics_query") => Some(ALLOWED_PARSE_MODES),
+            ("completion", "runtime_wait_for_file_version")
+            | ("completion", "runtime_snapshot_with_deps")
+            | ("completion", "ir_query")
+            | ("completion", "parse_result_query") => Some(ALLOWED_COMPLETION_MODES),
+            _ => None,
+        }
+    }
+
     /// Логирование запуска системы
     pub fn log_startup(&self) {
         self.logger.info(
@@ -129,7 +140,16 @@ impl BasicObservability {
             return Err("invalid_value");
         }
         if let Some(mode) = event.mode {
-            if !contains_allowed(ALLOWED_COMPLETION_MODES, mode) {
+            let Some(operation) = event.operation else {
+                return Err("mode_requires_operation_and_stage");
+            };
+            let Some(stage) = event.stage else {
+                return Err("mode_requires_operation_and_stage");
+            };
+            let Some(allowed_modes) = Self::allowed_modes_for_stage(operation, stage) else {
+                return Err("mode_not_allowed_for_stage");
+            };
+            if !contains_allowed(allowed_modes, mode) {
                 return Err("invalid_mode");
             }
         }

@@ -3,8 +3,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::time::{timeout, Duration};
 
+use bsl_analysis_v2::{LineIndex, ParseChangedRange, ParseSnapshot};
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::resolver::TypeResolver;
+use bsl_syntax::ParseOptions;
+use tree_sitter::{Parser as TreeSitterParser, Tree};
 
 #[tokio::test]
 async fn p7_apply_changes_and_wait_for_version_works() {
@@ -139,6 +142,71 @@ fn make_deps() -> Arc<SemanticDeps> {
 
 fn make_index_snapshot(raw_id: &str) -> Arc<IndexSnapshot> {
     Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash(raw_id)))
+}
+
+fn parse_backend_tree_for_test(text: &str) -> Arc<Tree> {
+    let mut parser = TreeSitterParser::new();
+    parser
+        .set_language(&tree_sitter_bsl::LANGUAGE.into())
+        .expect("tree-sitter-bsl language");
+    Arc::new(
+        parser
+            .parse(text, None)
+            .expect("tree-sitter parse for snapshot"),
+    )
+}
+
+fn parse_snapshot_for_test(
+    file_id: FileId,
+    file_version: i32,
+    text: &str,
+    changed_ranges: Vec<ParseChangedRange>,
+    incremental: bool,
+    fallback_reason: Option<&str>,
+) -> ParseSnapshot {
+    ParseSnapshot {
+        file_id,
+        file_version,
+        parse_result: Arc::new(
+            bsl_syntax::parse(text, &ParseOptions::default()).expect("snapshot parse"),
+        ),
+        line_index: Arc::new(LineIndex::new(text)),
+        backend_tree: parse_backend_tree_for_test(text),
+        changed_ranges: Arc::new(changed_ranges),
+        produced_at_millis: 0,
+        backend_tree_hash: 0,
+        incremental,
+        fallback_reason: fallback_reason.map(Arc::from),
+    }
+}
+
+fn counters(metrics: &serde_json::Value) -> &serde_json::Map<String, serde_json::Value> {
+    metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object")
+}
+
+fn histograms(metrics: &serde_json::Value) -> &serde_json::Map<String, serde_json::Value> {
+    metrics
+        .get("histograms")
+        .and_then(|value| value.as_object())
+        .expect("metrics.histograms object")
+}
+
+fn counter_value(counters: &serde_json::Map<String, serde_json::Value>, key: &str) -> u64 {
+    counters
+        .get(key)
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0)
+}
+
+fn histogram_count(histograms: &serde_json::Map<String, serde_json::Value>, key: &str) -> u64 {
+    histograms
+        .get(key)
+        .and_then(|value| value.get("count"))
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0)
 }
 
 #[tokio::test]
@@ -675,6 +743,213 @@ async fn completion_mode_propagates_into_stage_drilldown_metrics() {
     assert!(
         counters.contains_key("intellisense_v2_parse_result_query_total"),
         "legacy parse_result counter must still be projected"
+    );
+
+    runtime.shutdown_for_test().await;
+}
+
+#[tokio::test]
+async fn syntax_diagnostics_metrics_follow_shared_parse_snapshot_mode_and_keep_aggregate_projection(
+) {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let file_id = FileId(22);
+    let deps_id = DepsSnapshotId::from_hash("deps_syntax_incremental");
+    let settings_id = SettingsId::from_hash("settings_syntax_incremental");
+    let text: Arc<str> = Arc::from("Процедура Тест()\n\tЕсли Истина Тогда\nКонецПроцедуры\n");
+    let path: Arc<str> = Arc::from("syntax_incremental.bsl");
+
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: deps_id.clone(),
+        deps: make_deps(),
+    });
+    host.apply_change(Change::SetSettingsSnapshot {
+        settings_id: settings_id.clone(),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+    let runtime = IntellisenseV2Facade::new(
+        host,
+        make_index_snapshot("syntax_incremental"),
+        Some(coordinator.clone()),
+    );
+
+    runtime.apply_changes(vec![Change::SetFileWithSnapshot {
+        file_id,
+        text: text.clone(),
+        version: 1,
+        path: path.clone(),
+        parse_snapshot: parse_snapshot_for_test(
+            file_id,
+            1,
+            text.as_ref(),
+            vec![ParseChangedRange {
+                start_byte: 18,
+                old_end_byte: 18,
+                new_end_byte: 30,
+            }],
+            true,
+            None,
+        ),
+    }]);
+
+    let ready = timeout(
+        Duration::from_secs(1),
+        runtime.wait_for_file_version(file_id, 1),
+    )
+    .await
+    .expect("wait_for_file_version timeout");
+    assert!(ready, "expected incremental snapshot revision to be ready");
+
+    let context = ExecutionContext {
+        origin: ObservabilityOrigin::Lsp,
+        operation: SemanticOperation::Diagnostics,
+        completion_mode: None,
+        completion_large_churn_active: false,
+        file_id,
+        min_file_version: Some(1),
+        expected_deps_id: Some(deps_id),
+        flow_sensitive: false,
+        settings: ExecutionSettings {
+            settings_id,
+            diagnostics_detail_level: DetailLevel::Full,
+        },
+        cancellation: CancellationPolicy::BestEffort,
+    };
+
+    let prepared = runtime
+        .prepare_stateful_operation(&context, Some(&coordinator))
+        .await
+        .expect("prepare_stateful_operation");
+    let diagnostics = IntellisenseV2Facade::run_syntax_diagnostics_query_singleflight(
+        &context,
+        &prepared.snapshot.analysis,
+        Some(&coordinator),
+        file_id,
+    )
+    .expect("syntax diagnostics query");
+    assert!(
+        diagnostics.is_some(),
+        "syntax diagnostics query should execute against snapshot-backed analysis"
+    );
+
+    let metrics = coordinator.observability_metrics();
+    let counters = counters(&metrics);
+    let histograms = histograms(&metrics);
+    let drilldown_counter =
+        "intellisense_v2_drilldown_stage_total_origin_lsp_mode_incremental_operation_diagnostics_stage_syntax_diagnostics_query";
+    let drilldown_histogram =
+        "intellisense_v2_drilldown_stage_latency_ms_origin_lsp_mode_incremental_operation_diagnostics_stage_syntax_diagnostics_query";
+
+    assert_eq!(
+        counter_value(counters, drilldown_counter),
+        1,
+        "syntax diagnostics stage must publish parse-mode drilldown for incremental snapshots"
+    );
+    assert_eq!(
+        histogram_count(histograms, drilldown_histogram),
+        1,
+        "syntax diagnostics stage latency histogram must publish parse-mode drilldown"
+    );
+    assert_eq!(
+        counter_value(counters, "intellisense_v2_syntax_diagnostics_query_total"),
+        counter_value(counters, drilldown_counter),
+        "legacy syntax_diagnostics total must remain deterministic aggregate projection"
+    );
+    assert_eq!(
+        histogram_count(histograms, "intellisense_v2_syntax_diagnostics_query_ms"),
+        histogram_count(histograms, drilldown_histogram),
+        "legacy syntax_diagnostics latency histogram must remain deterministic aggregate projection"
+    );
+
+    runtime.shutdown_for_test().await;
+}
+
+#[tokio::test]
+async fn syntax_diagnostics_metrics_use_mode_other_for_non_lsp_without_parse_snapshot() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let file_id = FileId(23);
+    let deps_id = DepsSnapshotId::from_hash("deps_syntax_other");
+    let settings_id = SettingsId::from_hash("settings_syntax_other");
+
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: deps_id.clone(),
+        deps: make_deps(),
+    });
+    host.apply_change(Change::SetSettingsSnapshot {
+        settings_id: settings_id.clone(),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+    let runtime = IntellisenseV2Facade::new(
+        host,
+        make_index_snapshot("syntax_other"),
+        Some(coordinator.clone()),
+    );
+
+    runtime.apply_changes(vec![Change::SetFile {
+        file_id,
+        text: Arc::from("Процедура Тест()\n\tЕсли Истина Тогда\nКонецПроцедуры\n"),
+        version: 1,
+        path: Arc::from("syntax_other.bsl"),
+    }]);
+
+    let ready = timeout(
+        Duration::from_secs(1),
+        runtime.wait_for_file_version(file_id, 1),
+    )
+    .await
+    .expect("wait_for_file_version timeout");
+    assert!(ready, "expected non-LSP diagnostics revision to be ready");
+
+    let context = ExecutionContext {
+        origin: ObservabilityOrigin::Web,
+        operation: SemanticOperation::Diagnostics,
+        completion_mode: None,
+        completion_large_churn_active: false,
+        file_id,
+        min_file_version: Some(1),
+        expected_deps_id: Some(deps_id),
+        flow_sensitive: false,
+        settings: ExecutionSettings {
+            settings_id,
+            diagnostics_detail_level: DetailLevel::Full,
+        },
+        cancellation: CancellationPolicy::BestEffort,
+    };
+
+    let prepared = runtime
+        .prepare_stateful_operation(&context, Some(&coordinator))
+        .await
+        .expect("prepare_stateful_operation");
+    let diagnostics = IntellisenseV2Facade::run_syntax_diagnostics_query_singleflight(
+        &context,
+        &prepared.snapshot.analysis,
+        Some(&coordinator),
+        file_id,
+    )
+    .expect("syntax diagnostics query");
+    assert!(
+        diagnostics.is_some(),
+        "syntax diagnostics query should execute without snapshot-bound parse mode"
+    );
+
+    let metrics = coordinator.observability_metrics();
+    let counters = counters(&metrics);
+    let histograms = histograms(&metrics);
+    let drilldown_counter =
+        "intellisense_v2_drilldown_stage_total_origin_web_mode_other_operation_diagnostics_stage_syntax_diagnostics_query";
+    let drilldown_histogram =
+        "intellisense_v2_drilldown_stage_latency_ms_origin_web_mode_other_operation_diagnostics_stage_syntax_diagnostics_query";
+
+    assert_eq!(
+        counter_value(counters, drilldown_counter),
+        1,
+        "non-LSP syntax diagnostics without version-bound ParseSnapshot must publish mode_other"
+    );
+    assert_eq!(
+        histogram_count(histograms, drilldown_histogram),
+        1,
+        "non-LSP syntax diagnostics latency must publish mode_other"
     );
 
     runtime.shutdown_for_test().await;

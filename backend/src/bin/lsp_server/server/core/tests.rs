@@ -7171,6 +7171,132 @@ async fn p22_get_observability_metrics_exposes_unified_stage_contract() {
 }
 
 #[tokio::test]
+async fn p22_get_observability_metrics_exposes_syntax_diagnostics_mode_drilldown() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        move |client| BslLanguageServer::new(client, coordinator.clone())
+    })
+    .finish();
+    let (published_tx, mut published_rx) =
+        tokio::sync::mpsc::unbounded_channel::<PublishDiagnosticsParams>();
+    let drain_task = tokio::spawn(async move {
+        while let Some(req) = socket.next().await {
+            if req.method() != "textDocument/publishDiagnostics" {
+                continue;
+            }
+            let Some(params) = req.params().cloned() else {
+                continue;
+            };
+            let Ok(parsed) =
+                serde_json::from_value::<tower_lsp::lsp_types::PublishDiagnosticsParams>(params)
+            else {
+                continue;
+            };
+            let _ = published_tx.send(parsed);
+        }
+    });
+
+    initialize_lsp_service(&mut service).await;
+
+    let uri = Url::parse("file:///syntax_mode_metrics_fixture.bsl").expect("fixture uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: "Процедура Тест(\nКонецПроцедуры\n".to_string(),
+        },
+    };
+    let did_open_req = Request::build("textDocument/didOpen")
+        .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+        .finish();
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(did_open_req)
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+    let diagnostics = wait_lsp_publish_diagnostics(&mut published_rx, &uri).await;
+    assert!(
+        !diagnostics.is_empty(),
+        "syntax fixture must publish diagnostics before metrics snapshot"
+    );
+
+    let execute = Request::build("workspace/executeCommand")
+        .id(2)
+        .params(serde_json::json!({
+            "command": "bsl.getObservabilityMetrics",
+            "arguments": [],
+        }))
+        .finish();
+    let execute_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(execute)
+        .await
+        .expect("workspace/executeCommand request")
+        .expect("workspace/executeCommand response");
+    let value = serde_json::to_value(&execute_response).expect("serialize response");
+    let result = value.get("result").cloned().expect("result field");
+    let metrics = result.get("metrics").expect("metrics field");
+    let counters = metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    let histograms = metrics
+        .get("histograms")
+        .and_then(|value| value.as_object())
+        .expect("metrics.histograms object");
+
+    let drilldown_counter = counters
+        .get(
+            "intellisense_v2_drilldown_stage_total_origin_lsp_mode_full_operation_diagnostics_stage_syntax_diagnostics_query",
+        )
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let aggregate_counter = counters
+        .get("intellisense_v2_syntax_diagnostics_query_total")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let drilldown_hist_count = histograms
+        .get(
+            "intellisense_v2_drilldown_stage_latency_ms_origin_lsp_mode_full_operation_diagnostics_stage_syntax_diagnostics_query",
+        )
+        .and_then(|value| value.get("count"))
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let aggregate_hist_count = histograms
+        .get("intellisense_v2_syntax_diagnostics_query_ms")
+        .and_then(|value| value.get("count"))
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+
+    assert!(
+        drilldown_counter > 0,
+        "metrics endpoint must expose syntax_diagnostics stage drilldown by parse mode"
+    );
+    assert_eq!(
+        aggregate_counter, drilldown_counter,
+        "legacy aggregate total must remain in parity with syntax_diagnostics mode drilldown"
+    );
+    assert!(
+        drilldown_hist_count > 0,
+        "metrics endpoint must expose syntax_diagnostics latency histogram by parse mode"
+    );
+    assert_eq!(
+        aggregate_hist_count, drilldown_hist_count,
+        "legacy aggregate latency must remain in parity with syntax_diagnostics mode drilldown"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
 async fn p22_get_completion_timeline_exposes_versioned_contract() {
     let coordinator = Arc::new(SystemCoordinator::new());
 

@@ -414,6 +414,18 @@ impl SystemCoordinator {
             .record_intellisense_v2_syntax_diagnostics_query_latency_with_origin(origin, duration);
     }
 
+    pub fn record_intellisense_v2_syntax_diagnostics_query_latency_with_origin_and_mode(
+        &self,
+        origin: &str,
+        parse_mode: &str,
+        duration: std::time::Duration,
+    ) {
+        self.observability
+            .record_intellisense_v2_syntax_diagnostics_query_latency_with_origin_and_mode(
+                origin, parse_mode, duration,
+            );
+    }
+
     pub fn record_intellisense_v2_semantic_diagnostics_query_latency(
         &self,
         duration: std::time::Duration,

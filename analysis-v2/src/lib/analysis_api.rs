@@ -14,6 +14,18 @@ impl AnalysisV2 {
         (snapshot.file_version == file_version).then_some(snapshot)
     }
 
+    fn parse_snapshot_observability_mode(snapshot: &ParseSnapshot) -> &'static str {
+        if snapshot.incremental {
+            if snapshot.changed_ranges.is_empty() {
+                "reused"
+            } else {
+                "incremental"
+            }
+        } else {
+            "full"
+        }
+    }
+
     fn parse_snapshot_can_reuse_previous_ir(snapshot: &ParseSnapshot, current_text: &str) -> bool {
         if !snapshot.incremental || snapshot.fallback_reason.is_some() {
             return false;
@@ -326,6 +338,19 @@ impl AnalysisV2 {
             return Ok(Some(Arc::new(snapshot.parse_result.syntax_errors.clone())));
         }
         cancellable(|| syntax_diagnostics(&self.db, file, self.settings).0).map(Some)
+    }
+
+    pub fn syntax_diagnostics_observability_mode(
+        &self,
+        file_id: FileId,
+    ) -> Cancellable<Option<&'static str>> {
+        let Some(&file) = self.files.get(&file_id) else {
+            return Ok(None);
+        };
+        if let Some(snapshot) = self.parse_snapshot_for_file(file_id, file) {
+            return Ok(Some(Self::parse_snapshot_observability_mode(snapshot)));
+        }
+        Ok(Some("other"))
     }
 
     pub fn semantic_diagnostics(
@@ -847,4 +872,3 @@ impl AnalysisV2 {
         })
     }
 }
-

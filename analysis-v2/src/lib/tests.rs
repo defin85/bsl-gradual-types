@@ -927,6 +927,105 @@ fn syntax_diagnostics_are_read_from_parse_result() {
 }
 
 #[test]
+fn syntax_diagnostics_observability_mode_uses_version_bound_parse_snapshot() {
+    let file_id = FileId(1);
+    let path: Arc<str> = Arc::from("test.bsl");
+    let text: Arc<str> = Arc::from("Procedure Test()\nEndProcedure");
+
+    let reused_mode = {
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(Change::SetFileWithSnapshot {
+            file_id,
+            text: text.clone(),
+            version: 1,
+            path: path.clone(),
+            parse_snapshot: parse_snapshot_for_test(
+                file_id,
+                1,
+                text.as_ref(),
+                Vec::new(),
+                true,
+                None,
+            ),
+        });
+        let analysis = host.snapshot();
+        analysis
+            .syntax_diagnostics_observability_mode(file_id)
+            .unwrap()
+            .expect("mode for snapshot-backed file")
+    };
+    assert_eq!(reused_mode, "reused");
+
+    let incremental_mode = {
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(Change::SetFileWithSnapshot {
+            file_id,
+            text: text.clone(),
+            version: 1,
+            path: path.clone(),
+            parse_snapshot: parse_snapshot_for_test(
+                file_id,
+                1,
+                text.as_ref(),
+                vec![ParseChangedRange {
+                    start_byte: 0,
+                    old_end_byte: 0,
+                    new_end_byte: 1,
+                }],
+                true,
+                None,
+            ),
+        });
+        let analysis = host.snapshot();
+        analysis
+            .syntax_diagnostics_observability_mode(file_id)
+            .unwrap()
+            .expect("mode for incremental snapshot")
+    };
+    assert_eq!(incremental_mode, "incremental");
+
+    let full_mode = {
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(Change::SetFileWithSnapshot {
+            file_id,
+            text: text.clone(),
+            version: 1,
+            path: path.clone(),
+            parse_snapshot: parse_snapshot_for_test(
+                file_id,
+                1,
+                text.as_ref(),
+                Vec::new(),
+                false,
+                None,
+            ),
+        });
+        let analysis = host.snapshot();
+        analysis
+            .syntax_diagnostics_observability_mode(file_id)
+            .unwrap()
+            .expect("mode for full snapshot")
+    };
+    assert_eq!(full_mode, "full");
+
+    let other_mode = {
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(Change::SetFile {
+            file_id,
+            text,
+            version: 2,
+            path,
+        });
+        let analysis = host.snapshot();
+        analysis
+            .syntax_diagnostics_observability_mode(file_id)
+            .unwrap()
+            .expect("mode for file without snapshot")
+    };
+    assert_eq!(other_mode, "other");
+}
+
+#[test]
 fn semantic_diagnostics_skip_when_syntax_errors_present() {
     let mut host = AnalysisHostV2::default();
     let file_id = FileId(1);

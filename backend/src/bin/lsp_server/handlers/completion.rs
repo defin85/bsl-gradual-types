@@ -220,7 +220,7 @@ pub async fn handle_completion_v2_with_trigger_hint(
                 compute_member_access_owner_hint_from_parse_result(
                     file_content.as_ref(),
                     file_path.as_ref(),
-                    position.clone(),
+                    position,
                     parse_result.as_ref(),
                     deps.clone(),
                 )

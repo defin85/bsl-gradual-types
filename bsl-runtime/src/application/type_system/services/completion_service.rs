@@ -96,6 +96,7 @@ pub(crate) struct CompletionAnalysisContext<'a> {
     pub ir_program: Option<Arc<SemanticProgram>>,
     pub resolver: &'a TypeResolver,
     pub file_path: &'a str,
+    #[allow(dead_code)]
     pub parse_result: Option<Arc<bsl_syntax::ast::ParseResult>>,
     pub member_access_owner_type_hint: Option<TypeResolution>,
     #[allow(dead_code)]

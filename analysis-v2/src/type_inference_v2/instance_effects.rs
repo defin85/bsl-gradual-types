@@ -24,9 +24,9 @@ struct InstanceState {
 
 #[derive(Debug, Clone)]
 enum InstanceKind {
-    Map(MapEffects),
-    Structure(StructureEffects),
-    ValueTable(ValueTableEffects),
+    Map(Box<MapEffects>),
+    Structure(Box<StructureEffects>),
+    ValueTable(Box<ValueTableEffects>),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -99,19 +99,15 @@ impl InstanceEffectStore {
                 effects.generic_value_type = type_params.get(1).and_then(concrete_param_resolution);
             }
         }
-        InstanceBinding::Direct(self.insert_state(InstanceKind::Map(effects)))
+        InstanceBinding::Direct(self.insert_state(InstanceKind::Map(Box::new(effects))))
     }
 
     pub(super) fn new_structure_instance(&mut self) -> InstanceBinding {
-        InstanceBinding::Direct(
-            self.insert_state(InstanceKind::Structure(StructureEffects::default())),
-        )
+        InstanceBinding::Direct(self.insert_state(InstanceKind::Structure(Box::default())))
     }
 
     pub(super) fn new_value_table_instance(&mut self) -> InstanceBinding {
-        InstanceBinding::Direct(
-            self.insert_state(InstanceKind::ValueTable(ValueTableEffects::default())),
-        )
+        InstanceBinding::Direct(self.insert_state(InstanceKind::ValueTable(Box::default())))
     }
 
     pub(super) fn value_table_row_binding(&self, table_instance: InstanceId) -> InstanceBinding {
@@ -487,13 +483,13 @@ fn downgrade_certainty(certainty: Certainty) -> Certainty {
 fn merge_instance_state(left: &InstanceState, right: &InstanceState) -> InstanceState {
     let kind = match (&left.kind, &right.kind) {
         (InstanceKind::Map(left), InstanceKind::Map(right)) => {
-            InstanceKind::Map(merge_map_effects(left, right))
+            InstanceKind::Map(Box::new(merge_map_effects(left, right)))
         }
         (InstanceKind::Structure(left), InstanceKind::Structure(right)) => {
-            InstanceKind::Structure(merge_structure_effects(left, right))
+            InstanceKind::Structure(Box::new(merge_structure_effects(left, right)))
         }
         (InstanceKind::ValueTable(left), InstanceKind::ValueTable(right)) => {
-            InstanceKind::ValueTable(merge_value_table_effects(left, right))
+            InstanceKind::ValueTable(Box::new(merge_value_table_effects(left, right)))
         }
         _ => left.kind.clone(),
     };
@@ -536,17 +532,19 @@ fn merge_value_table_effects(
 
 fn downgrade_instance_state(state: &InstanceState) -> InstanceState {
     let kind = match &state.kind {
-        InstanceKind::Map(effects) => InstanceKind::Map(MapEffects {
+        InstanceKind::Map(effects) => InstanceKind::Map(Box::new(MapEffects {
             generic_key_type: effects.generic_key_type.clone().map(downgrade_resolution),
             generic_value_type: effects.generic_value_type.clone().map(downgrade_resolution),
             literal_keys: downgrade_structural_map(&effects.literal_keys),
-        }),
-        InstanceKind::Structure(effects) => InstanceKind::Structure(StructureEffects {
+        })),
+        InstanceKind::Structure(effects) => InstanceKind::Structure(Box::new(StructureEffects {
             fields: downgrade_structural_map(&effects.fields),
-        }),
-        InstanceKind::ValueTable(effects) => InstanceKind::ValueTable(ValueTableEffects {
-            columns: downgrade_structural_map(&effects.columns),
-        }),
+        })),
+        InstanceKind::ValueTable(effects) => {
+            InstanceKind::ValueTable(Box::new(ValueTableEffects {
+                columns: downgrade_structural_map(&effects.columns),
+            }))
+        }
     };
 
     InstanceState { kind }

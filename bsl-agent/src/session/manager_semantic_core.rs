@@ -110,16 +110,16 @@ impl SessionManager {
                     ObservabilityOrigin::Agent.as_str(),
                     Some(coordinator.as_ref()),
                     move || {
-                        collect_file_diagnostics(
+                        collect_file_diagnostics(FileDiagnosticsRequest {
                             flow_sensitive_enabled,
                             analysis_revision,
-                            deps_id_local,
-                            deps_local,
-                            index_snapshot_local,
-                            coordinator_local,
+                            deps_id: deps_id_local,
+                            deps: deps_local,
+                            index_snapshot: index_snapshot_local,
+                            coordinator: coordinator_local,
                             doc_snapshot,
                             remaining_limit,
-                        )
+                        })
                     },
                 )
                 .await
@@ -715,7 +715,7 @@ struct FileDiagnosticsBatch {
     hit_limit: bool,
 }
 
-fn collect_file_diagnostics(
+struct FileDiagnosticsRequest {
     flow_sensitive_enabled: bool,
     analysis_revision: u64,
     deps_id: bsl_analysis_v2::DepsSnapshotId,
@@ -724,7 +724,21 @@ fn collect_file_diagnostics(
     coordinator: Arc<bsl_runtime::system::SystemCoordinator>,
     doc_snapshot: DocumentSnapshot,
     remaining_limit: usize,
+}
+
+fn collect_file_diagnostics(
+    request: FileDiagnosticsRequest,
 ) -> Result<Option<FileDiagnosticsBatch>, rmcp::ErrorData> {
+    let FileDiagnosticsRequest {
+        flow_sensitive_enabled,
+        analysis_revision,
+        deps_id,
+        deps,
+        index_snapshot,
+        coordinator,
+        doc_snapshot,
+        remaining_limit,
+    } = request;
     let DocumentSnapshot {
         file,
         abs_path,

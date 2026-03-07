@@ -115,7 +115,10 @@ fn pick_member_for_diagnostics_probe(items: &[CompletionItem]) -> Option<(String
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn assert_cross_consumer_consistency(code_template: &str, completion_prefix: &str) {
+async fn assert_cross_consumer_consistency_without_manual_owner_hint(
+    code_template: &str,
+    completion_prefix: &str,
+) {
     let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
     let index_snapshot = deps_bundle.index_snapshot.clone();
     let uri = Url::parse("file:///universal_collection_cross_consumer_consistency.bsl")
@@ -143,10 +146,10 @@ async fn assert_cross_consumer_consistency(code_template: &str, completion_prefi
     let completion_offset =
         byte_offset_of(code_template, completion_prefix) + completion_prefix.len();
     let completion_position = byte_offset_to_utf16_position(code_template, completion_offset);
-    let owner_hint =
+    let shared_owner_hint =
         member_access_owner_hint_at_position(&analysis, file_content.as_ref(), completion_position);
     assert!(
-        owner_hint.is_some(),
+        shared_owner_hint.is_some(),
         "expected non-empty owner hint for completion at {:?}",
         completion_position
     );
@@ -155,7 +158,7 @@ async fn assert_cross_consumer_consistency(code_template: &str, completion_prefi
         resolved_file_path.clone(),
         ir_program,
         Some(parse_result),
-        owner_hint,
+        None,
         deps_bundle.semantic_deps.clone(),
         completion_position,
         &uri,
@@ -236,8 +239,78 @@ async fn assert_cross_consumer_consistency(code_template: &str, completion_prefi
     );
 }
 
+async fn assert_completion_without_manual_owner_hint(
+    code_template: &str,
+    completion_prefix: &str,
+    expected_label: &str,
+) {
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
+    let index_snapshot = deps_bundle.index_snapshot.clone();
+    let uri =
+        Url::parse("file:///universal_collection_no_manual_hint_completion.bsl").expect("test uri");
+
+    let host = setup_host(deps_bundle.as_ref(), code_template);
+    let analysis = host.analysis();
+    let file_content = analysis
+        .file_text(FILE_ID)
+        .ok()
+        .flatten()
+        .expect("file_text");
+    let resolved_file_path = analysis
+        .file_path(FILE_ID)
+        .ok()
+        .flatten()
+        .expect("file_path");
+    let ir_program = analysis.ir(FILE_ID).ok().flatten().expect("ir");
+    let parse_result = analysis
+        .parse_result(FILE_ID)
+        .ok()
+        .flatten()
+        .expect("parse_result");
+
+    let completion_offset =
+        byte_offset_of(code_template, completion_prefix) + completion_prefix.len();
+    let completion_position = byte_offset_to_utf16_position(code_template, completion_offset);
+    let shared_owner_hint =
+        member_access_owner_hint_at_position(&analysis, file_content.as_ref(), completion_position);
+    assert!(
+        shared_owner_hint.is_some(),
+        "shared type-at-position contract must know receiver type at {:?}",
+        completion_position
+    );
+
+    let completion = completion_handler::handle_completion_v2(
+        file_content,
+        resolved_file_path,
+        ir_program,
+        Some(parse_result),
+        None,
+        deps_bundle.semantic_deps.clone(),
+        completion_position,
+        &uri,
+        index_snapshot.as_ref(),
+        false,
+        false,
+    )
+    .await
+    .expect("completion response");
+    assert!(
+        !completion.had_error,
+        "completion without manual owner hint must not fail"
+    );
+
+    let labels = completion_items(completion.response)
+        .into_iter()
+        .map(|item| item.label)
+        .collect::<Vec<_>>();
+    assert!(
+        labels.iter().any(|label| label == expected_label),
+        "completion without manual owner hint must include '{expected_label}', labels={labels:?}"
+    );
+}
+
 #[tokio::test]
-async fn map_index_access_cross_consumer_consistency() {
+async fn map_index_access_cross_consumer_consistency_without_manual_owner_hint() {
     let code = concat!(
         "Процедура Тест()\n",
         "    map = Новый Соответствие;\n",
@@ -246,11 +319,12 @@ async fn map_index_access_cross_consumer_consistency() {
         "КонецПроцедуры\n",
     );
 
-    assert_cross_consumer_consistency(code, "    probe = map[\"k\"].").await;
+    assert_cross_consumer_consistency_without_manual_owner_hint(code, "    probe = map[\"k\"].")
+        .await;
 }
 
 #[tokio::test]
-async fn structure_field_cross_consumer_consistency() {
+async fn structure_field_cross_consumer_consistency_without_manual_owner_hint() {
     let code = concat!(
         "Процедура Тест()\n",
         "    S = Новый Структура;\n",
@@ -259,11 +333,11 @@ async fn structure_field_cross_consumer_consistency() {
         "КонецПроцедуры\n",
     );
 
-    assert_cross_consumer_consistency(code, "    probe = S.").await;
+    assert_cross_consumer_consistency_without_manual_owner_hint(code, "    probe = S.").await;
 }
 
 #[tokio::test]
-async fn value_table_row_column_cross_consumer_consistency() {
+async fn value_table_row_column_cross_consumer_consistency_without_manual_owner_hint() {
     let code = concat!(
         "Процедура Тест()\n",
         "    ТЗ = Новый ТаблицаЗначений;\n",
@@ -273,5 +347,45 @@ async fn value_table_row_column_cross_consumer_consistency() {
         "КонецПроцедуры\n",
     );
 
-    assert_cross_consumer_consistency(code, "    probe = Стр.").await;
+    assert_cross_consumer_consistency_without_manual_owner_hint(code, "    probe = Стр.").await;
+}
+
+#[tokio::test]
+async fn map_index_access_completion_without_manual_owner_hint_uses_shared_contract() {
+    let code = concat!(
+        "Процедура Тест()\n",
+        "    map = Новый Соответствие;\n",
+        "    map.Вставить(\"k\", Новый ТаблицаЗначений);\n",
+        "    probe = map[\"k\"].\n",
+        "КонецПроцедуры\n",
+    );
+
+    assert_completion_without_manual_owner_hint(code, "    probe = map[\"k\"].", "Колонки").await;
+}
+
+#[tokio::test]
+async fn typed_structure_completion_without_manual_owner_hint_uses_shared_contract() {
+    let code = concat!(
+        "Процедура Тест()\n",
+        "    S = Новый Структура;\n",
+        "    S.Вставить(\"Идентификатор\", \"A-01\");\n",
+        "    probe = S.\n",
+        "КонецПроцедуры\n",
+    );
+
+    assert_completion_without_manual_owner_hint(code, "    probe = S.", "Идентификатор").await;
+}
+
+#[tokio::test]
+async fn value_table_row_completion_without_manual_owner_hint_uses_shared_contract() {
+    let code = concat!(
+        "Процедура Тест()\n",
+        "    ТЗ = Новый ТаблицаЗначений;\n",
+        "    ТЗ.Колонки.Добавить(\"Идентификатор\", Новый ОписаниеТипов(\"Строка\"));\n",
+        "    Стр = ТЗ.Добавить();\n",
+        "    probe = Стр.\n",
+        "КонецПроцедуры\n",
+    );
+
+    assert_completion_without_manual_owner_hint(code, "    probe = Стр.", "Идентификатор").await;
 }

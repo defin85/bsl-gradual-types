@@ -1060,12 +1060,12 @@ impl TypeInferencer {
                 (None, None) => continue,
             };
 
-            let merged_binding = match (left.variable_binding(&key), right.variable_binding(&key)) {
-                (Some(left_binding), Some(right_binding)) if left_binding == right_binding => {
-                    Some(left_binding.clone())
-                }
-                _ => None,
-            };
+            let merged_binding = merged.instance_effects.merge_variable_binding(
+                &left.instance_effects,
+                left.variable_binding(&key),
+                &right.instance_effects,
+                right.variable_binding(&key),
+            );
             let merged_description = match (
                 left.description_type_resolution(&key),
                 right.description_type_resolution(&key),

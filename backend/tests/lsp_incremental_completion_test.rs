@@ -81,15 +81,11 @@ fn completion_labels(response: CompletionResponse) -> Vec<String> {
 }
 
 fn format_expr_with_cursor_guard(typed: &str) -> String {
-    if typed.ends_with('.') {
-        format!("{typed} X")
-    } else {
-        format!("{typed}X")
-    }
+    typed.to_string()
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn apply_and_complete_at_member_dot(
+async fn apply_and_complete_at_member_dot_in_fixture(
     host: &mut AnalysisHostV2,
     deps_bundle: &Arc<DepsBundleV2>,
     index_snapshot: &Arc<bsl_backend::system::IndexSnapshot>,
@@ -97,19 +93,21 @@ async fn apply_and_complete_at_member_dot(
     file_path: &str,
     file_id: V2FileId,
     version: i32,
+    setup: &str,
     typed: &str,
 ) -> completion_handler::CompletionResponseWithStats {
     let expr = format_expr_with_cursor_guard(typed);
-    let content = format!(
-        "Процедура M8()\n    ТаблЗнач = Новый ТаблицаЗначений;\n    __tmp = {expr};\nКонецПроцедуры\n"
-    );
+    let statement_suffix = if typed.ends_with('.') { "" } else { ";" };
+    let content =
+        format!("Процедура M8()\n{setup}    __tmp = {expr}{statement_suffix}\nКонецПроцедуры\n");
 
     let (file_content, file_path, ir_program, parse_result) =
         apply_file(host, file_id, version, file_path, &content);
 
+    let tmp_line = 1 + setup.bytes().filter(|byte| *byte == b'\n').count() as u32;
     let prefix_len = utf16_len("    __tmp = ");
     let position = Position {
-        line: 2,
+        line: tmp_line,
         character: prefix_len + utf16_len(typed),
     };
 
@@ -128,6 +126,31 @@ async fn apply_and_complete_at_member_dot(
     )
     .await
     .expect("completion response")
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn apply_and_complete_at_member_dot(
+    host: &mut AnalysisHostV2,
+    deps_bundle: &Arc<DepsBundleV2>,
+    index_snapshot: &Arc<bsl_backend::system::IndexSnapshot>,
+    uri: &Url,
+    file_path: &str,
+    file_id: V2FileId,
+    version: i32,
+    typed: &str,
+) -> completion_handler::CompletionResponseWithStats {
+    apply_and_complete_at_member_dot_in_fixture(
+        host,
+        deps_bundle,
+        index_snapshot,
+        uri,
+        file_path,
+        file_id,
+        version,
+        "    ТаблЗнач = Новый ТаблицаЗначений;\n",
+        typed,
+    )
+    .await
 }
 
 #[tokio::test]
@@ -266,6 +289,75 @@ async fn m8_lsp_edits_around_dot_do_not_break_completion() {
     .await;
     let labels = completion_labels(response.response);
     assert!(labels.iter().any(|label| label == "Добавить"));
+}
+
+#[tokio::test]
+async fn m8_lsp_incremental_universal_collection_receivers_use_shared_owner_hint_without_manual_hint(
+) {
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
+    let index_snapshot = deps_bundle.index_snapshot.clone();
+
+    for (label, file_id, setup, target, expected) in [
+        (
+            "map",
+            V2FileId(11),
+            "    Map = Новый Соответствие;\n    Map.Вставить(\"k\", Новый ТаблицаЗначений);\n",
+            "Map[\"k\"].",
+            "Колонки",
+        ),
+        (
+            "structure",
+            V2FileId(12),
+            "    S = Новый Структура;\n    S.Вставить(\"Идентификатор\", \"A-01\");\n",
+            "S.",
+            "Идентификатор",
+        ),
+        (
+            "row",
+            V2FileId(13),
+            "    ТЗ = Новый ТаблицаЗначений;\n    ТЗ.Колонки.Добавить(\"Идентификатор\", Новый ОписаниеТипов(\"Строка\"));\n    Стр = ТЗ.Добавить();\n",
+            "Стр.",
+            "Идентификатор",
+        ),
+    ] {
+        let uri = Url::parse(&format!("file:///m8_universal_incremental_{label}.bsl"))
+            .expect("test uri");
+        let file_path = &format!("m8_universal_incremental_{label}.bsl");
+        let mut host = setup_host(deps_bundle.as_ref());
+        let mut typed = String::new();
+        let mut version: i32 = 0;
+
+        for ch in target.chars() {
+            typed.push(ch);
+            version = version.saturating_add(1);
+            let response = apply_and_complete_at_member_dot_in_fixture(
+                &mut host,
+                &deps_bundle,
+                &index_snapshot,
+                &uri,
+                file_path,
+                file_id,
+                version,
+                setup,
+                &typed,
+            )
+            .await;
+
+            if !typed.ends_with('.') {
+                continue;
+            }
+
+            assert!(
+                !response.had_error,
+                "incremental completion must not fail for {label} receiver '{typed}'"
+            );
+            let labels = completion_labels(response.response);
+            assert!(
+                labels.iter().any(|candidate| candidate == expected),
+                "incremental no-hint completion must include '{expected}' for {label}, typed='{typed}', labels={labels:?}"
+            );
+        }
+    }
 }
 
 #[tokio::test]

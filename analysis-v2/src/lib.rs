@@ -90,6 +90,16 @@ pub struct SemanticDeps {
     pub platform_signatures_loaded: bool,
 }
 
+pub fn type_at_byte_offset_for_parse_result(
+    parse_result: &bsl_syntax::ast::ParseResult,
+    file_path: &str,
+    deps: Arc<SemanticDeps>,
+    byte_offset: u32,
+) -> Option<TypeResolution> {
+    type_inference_v2::build_type_index_with_path(&parse_result.program, file_path, deps)
+        .type_at_byte_offset(byte_offset)
+}
+
 impl std::fmt::Debug for SemanticDeps {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SemanticDeps")

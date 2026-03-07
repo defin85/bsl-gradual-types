@@ -1,4 +1,5 @@
 use super::*;
+use bsl_syntax::ast::Expression;
 
 pub(super) fn add_methods_from_resolution(
     metadata_lookup: &TypeMetadataLookup,

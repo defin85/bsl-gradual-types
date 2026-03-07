@@ -4,7 +4,8 @@ use bsl_shared::domain::signature_index::{MethodSignature, SignatureSource};
 use bsl_shared::domain::type_id::TypeId;
 use bsl_shared::domain::types::{
     FacetKind, MetadataKind, ParameterInfo, PrimitiveType, RawAttributeData, RawDataSource,
-    RawPropertyData, RawTabularSectionData, RawTypeData, FORM_DATA_SEMANTICS_NOTE,
+    RawPropertyData, RawTabularSectionData, RawTypeData, StructuralMemberSpan,
+    FORM_DATA_SEMANTICS_NOTE,
 };
 use bsl_shared::TypeRepository;
 use bsl_syntax::ParseOptions;
@@ -12,6 +13,13 @@ use bsl_syntax::ParseOptions;
 fn parse(code: &str) -> Program {
     let parsed = bsl_syntax::parse(code, &ParseOptions::default()).expect("parse ok");
     parsed.program
+}
+
+fn structural_member_span_for_literal(source: &str, literal: &str) -> StructuralMemberSpan {
+    let start = source
+        .find(literal)
+        .unwrap_or_else(|| panic!("missing literal {literal}")) as u32;
+    StructuralMemberSpan::new(start, start + literal.len() as u32)
 }
 
 fn deps_with_array_method() -> Arc<SemanticDeps> {
@@ -1533,6 +1541,35 @@ fn typed_structure_alias_keeps_structural_members() {
 }
 
 #[test]
+fn typed_structure_insert_preserves_field_source_span() {
+    let deps = deps_with_universal_collection_types();
+    let source = r#"Процедура Тест()
+    S = Новый Структура;
+    S.Вставить("Идентификатор", "A-01");
+    probe = S.Идентификатор;
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "Documents/Док1/Ext/ObjectModule.bsl", deps);
+
+    let owner_offset = source.rfind("S.Идентификатор").expect("owner") as u32;
+    let owner = index
+        .type_at_byte_offset(owner_offset)
+        .expect("type at structure owner");
+    let member = owner
+        .find_structural_member("идентификатор")
+        .expect("typed structure field");
+
+    assert_eq!(
+        member.source_span,
+        Some(structural_member_span_for_literal(
+            source,
+            "\"Идентификатор\""
+        ))
+    );
+}
+
+#[test]
 fn value_table_add_row_materializes_typed_row_members() {
     let deps = deps_with_universal_collection_types();
     let source = r#"Процедура Тест()
@@ -1550,6 +1587,36 @@ fn value_table_add_row_materializes_typed_row_members() {
         .type_at_byte_offset(property_offset)
         .expect("type at row property");
     assert_eq!(property.type_name(), "Строка");
+}
+
+#[test]
+fn typed_value_table_row_preserves_column_source_span() {
+    let deps = deps_with_universal_collection_types();
+    let source = r#"Процедура Тест()
+    ТЗ = Новый ТаблицаЗначений;
+    ТЗ.Колонки.Добавить("Идентификатор", Новый ОписаниеТипов("Строка"));
+    Стр = ТЗ.Добавить();
+    probe = Стр.Идентификатор;
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "Documents/Док1/Ext/ObjectModule.bsl", deps);
+
+    let owner_offset = source.rfind("Стр.Идентификатор").expect("row owner") as u32;
+    let owner = index
+        .type_at_byte_offset(owner_offset)
+        .expect("type at row owner");
+    let member = owner
+        .find_structural_member("идентификатор")
+        .expect("typed row column");
+
+    assert_eq!(
+        member.source_span,
+        Some(structural_member_span_for_literal(
+            source,
+            "\"Идентификатор\""
+        ))
+    );
 }
 
 #[test]
@@ -1591,6 +1658,222 @@ fn structure_fields_survive_if_branch_merge() {
     let property = index
         .type_at_byte_offset(property_offset)
         .expect("type at merged property");
+    assert_eq!(property.type_name(), "Строка");
+}
+
+#[test]
+fn structure_fields_survive_else_branch_merge() {
+    let deps = deps_with_universal_collection_types();
+    let source = r#"Процедура Тест()
+    S = Новый Структура;
+    Если Ложь Тогда
+    Иначе
+        S.Вставить("Идентификатор", "A-01");
+    КонецЕсли;
+    probe = S.Идентификатор;
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "Documents/Док1/Ext/ObjectModule.bsl", deps);
+
+    let property_offset = source.rfind("Идентификатор").expect("merged property") as u32;
+    let property = index
+        .type_at_byte_offset(property_offset)
+        .expect("type at merged property");
+    assert_eq!(property.type_name(), "Строка");
+}
+
+#[test]
+fn map_literal_value_survives_else_branch_merge() {
+    let deps = deps_with_universal_collection_types();
+    let source = r#"Процедура Тест()
+    Map = Новый Соответствие;
+    Если Ложь Тогда
+    Иначе
+        Map.Вставить("k", 10);
+    КонецЕсли;
+    probe = Map["k"];
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "Documents/Док1/Ext/ObjectModule.bsl", deps);
+
+    let offset = source
+        .find("Map[\"k\"]")
+        .map(|idx| idx + "Map[\"k\"]".len() - 1)
+        .expect("map access") as u32;
+    let resolved = index
+        .type_at_byte_offset(offset)
+        .expect("type at map access");
+    assert_eq!(resolved.type_name(), "Число");
+}
+
+#[test]
+fn value_table_columns_survive_else_branch_merge() {
+    let deps = deps_with_universal_collection_types();
+    let source = r#"Процедура Тест()
+    ТЗ = Новый ТаблицаЗначений;
+    Если Ложь Тогда
+    Иначе
+        ТЗ.Колонки.Добавить("Идентификатор", Новый ОписаниеТипов("Строка"));
+    КонецЕсли;
+    Стр = ТЗ.Добавить();
+    probe = Стр.Идентификатор;
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "Documents/Док1/Ext/ObjectModule.bsl", deps);
+
+    let property_offset = source.rfind("Идентификатор").expect("row property") as u32;
+    let property = index
+        .type_at_byte_offset(property_offset)
+        .expect("type at row property");
+    assert_eq!(property.type_name(), "Строка");
+}
+
+#[test]
+fn fresh_structure_instances_in_branches_merge_members_for_same_variable() {
+    let deps = deps_with_universal_collection_types();
+    let source = r#"Процедура Тест(Флаг)
+    Если Флаг Тогда
+        S = Новый Структура;
+        S.Вставить("Идентификатор", "A-01");
+    Иначе
+        S = Новый Структура;
+        S.Вставить("Количество", 10);
+    КонецЕсли;
+    probe1 = S.Идентификатор;
+    probe2 = S.Количество;
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "Documents/Док1/Ext/ObjectModule.bsl", deps);
+
+    let string_offset = source.find("S.Идентификатор").expect("string property") as u32;
+    let string_type = index
+        .type_at_byte_offset(string_offset + "S.Идентификатор".len() as u32 - 1)
+        .expect("type at string property");
+    assert_eq!(string_type.type_name(), "Строка");
+
+    let number_offset = source.rfind("S.Количество").expect("number property") as u32;
+    let number_type = index
+        .type_at_byte_offset(number_offset + "S.Количество".len() as u32 - 1)
+        .expect("type at number property");
+    assert_eq!(number_type.type_name(), "Число");
+}
+
+#[test]
+fn map_alias_keeps_literal_specialization() {
+    let deps = deps_with_universal_collection_types();
+    let source = r#"Процедура Тест()
+    Map = Новый Соответствие;
+    Map.Вставить("k", 10);
+    Map2 = Map;
+    probe = Map2["k"];
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "Documents/Док1/Ext/ObjectModule.bsl", deps);
+
+    let offset = source
+        .find("Map2[\"k\"]")
+        .map(|idx| idx + "Map2[\"k\"]".len() - 1)
+        .expect("aliased map access") as u32;
+    let resolved = index
+        .type_at_byte_offset(offset)
+        .expect("type at aliased map access");
+    assert_eq!(resolved.type_name(), "Число");
+}
+
+#[test]
+fn value_table_row_alias_keeps_typed_columns() {
+    let deps = deps_with_universal_collection_types();
+    let source = r#"Процедура Тест()
+    ТЗ = Новый ТаблицаЗначений;
+    ТЗ.Колонки.Добавить("Идентификатор", Новый ОписаниеТипов("Строка"));
+    Стр = ТЗ.Добавить();
+    Стр2 = Стр;
+    probe = Стр2.Идентификатор;
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "Documents/Док1/Ext/ObjectModule.bsl", deps);
+
+    let property_offset = source.rfind("Идентификатор").expect("row alias property") as u32;
+    let property = index
+        .type_at_byte_offset(property_offset)
+        .expect("type at row alias property");
+    assert_eq!(property.type_name(), "Строка");
+}
+
+#[test]
+fn branch_assigned_structure_binding_survives_then_only_merge() {
+    let deps = deps_with_universal_collection_types();
+    let source = r#"Процедура Тест(Флаг)
+    S = Неопределено;
+    Если Флаг Тогда
+        S = Новый Структура;
+        S.Вставить("Идентификатор", "A-01");
+    КонецЕсли;
+    probe = S.Идентификатор;
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "Documents/Док1/Ext/ObjectModule.bsl", deps);
+
+    let property_offset = source.rfind("Идентификатор").expect("branch property") as u32;
+    let property = index
+        .type_at_byte_offset(property_offset)
+        .expect("type at branch property");
+    assert_eq!(property.type_name(), "Строка");
+}
+
+#[test]
+fn branch_assigned_map_binding_survives_else_only_merge() {
+    let deps = deps_with_universal_collection_types();
+    let source = r#"Процедура Тест(Флаг)
+    Map = Неопределено;
+    Если Флаг Тогда
+    Иначе
+        Map = Новый Соответствие;
+        Map.Вставить("k", 10);
+    КонецЕсли;
+    probe = Map["k"];
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "Documents/Док1/Ext/ObjectModule.bsl", deps);
+
+    let offset = source
+        .find("Map[\"k\"]")
+        .map(|idx| idx + "Map[\"k\"]".len() - 1)
+        .expect("branch map access") as u32;
+    let resolved = index
+        .type_at_byte_offset(offset)
+        .expect("type at branch map access");
+    assert_eq!(resolved.type_name(), "Число");
+}
+
+#[test]
+fn branch_assigned_value_table_binding_survives_then_only_merge() {
+    let deps = deps_with_universal_collection_types();
+    let source = r#"Процедура Тест(Флаг)
+    ТЗ = Неопределено;
+    Если Флаг Тогда
+        ТЗ = Новый ТаблицаЗначений;
+        ТЗ.Колонки.Добавить("Идентификатор", Новый ОписаниеТипов("Строка"));
+    КонецЕсли;
+    Стр = ТЗ.Добавить();
+    probe = Стр.Идентификатор;
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "Documents/Док1/Ext/ObjectModule.bsl", deps);
+
+    let property_offset = source.rfind("Идентификатор").expect("branch row property") as u32;
+    let property = index
+        .type_at_byte_offset(property_offset)
+        .expect("type at branch row property");
     assert_eq!(property.type_name(), "Строка");
 }
 

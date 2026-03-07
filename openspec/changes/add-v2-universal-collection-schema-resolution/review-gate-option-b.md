@@ -26,6 +26,8 @@ Change: `add-v2-universal-collection-schema-resolution`
     - `test_load_types_allows_form_synthetic_type_names`
   - `analysis-v2/src/type_inference_v2/tests.rs`
     - `universal_collection_effects_do_not_mutate_type_repository`
+  - `analysis-v2/src/lib/tests.rs`
+    - `universal_collection_snapshot_switch_does_not_leak_schema_effects`
 
 ### 2) Unified resolved path (против Option A)
 
@@ -36,15 +38,22 @@ Change: `add-v2-universal-collection-schema-resolution`
   - `semantic-diagnostics/src/visitor.rs`
   - `syntax/src/tree_sitter_adapter/expression_converter.rs`
 - Direct acceptance / regression evidence:
+  - `backend/tests/universal_collection_cross_consumer_consistency_test.rs`
+    - `map_index_access_cross_consumer_consistency_without_manual_owner_hint`
+    - `structure_field_cross_consumer_consistency_without_manual_owner_hint`
+    - `value_table_row_column_cross_consumer_consistency_without_manual_owner_hint`
   - `backend/src/bin/lsp_server/server/core/tests.rs`
     - `p7_map_index_access_exact_cross_consumer_acceptance_uses_snapshot_owner_without_manual_hint`
     - `p7_dynamic_map_key_exact_cross_consumer_acceptance_uses_safe_policy_without_unknown_key`
     - `p7_typed_structure_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics`
     - `p7_typed_value_table_row_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics`
     - `p7_hover_cache_miss_on_map_index_access_does_not_use_legacy_word_fallback`
+  - `backend/tests/lsp_incremental_completion_test.rs`
+    - `m8_lsp_incremental_universal_collection_receivers_use_shared_owner_hint_without_manual_hint`
   - `analysis-v2/src/lib/tests.rs`
     - `serve_only_matches_legacy_for_universal_collections_in_complete_snapshot`
     - `serve_only_matches_legacy_for_universal_collections_with_incomplete_member_access`
+    - `universal_collection_snapshot_switch_does_not_leak_schema_effects`
   - `syntax/src/lib/tests.rs`
     - `parse_incomplete_member_access_preserves_receiver_expression`
 
@@ -78,3 +87,4 @@ Change: `add-v2-universal-collection-schema-resolution`
 
 - **PASS (для 4.2)**: текущий change остаётся внутри Option B и не вводит Option A / Option C runtime paths.
 - **PASS (для rollout/rollback guardrails)**: contract перепривязан к реально существующему `intellisense_v2_*` telemetry + perf gate surface; устаревших feature-flag claims не осталось.
+- **Residual risk status**: snapshot switch leakage, branch-only instance merges и incremental no-hint completion теперь закрыты прямыми regression-tests; fail-open compatibility path для universal collections не допускается.

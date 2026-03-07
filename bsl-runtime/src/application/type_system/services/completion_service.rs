@@ -19,13 +19,11 @@ use bsl_shared::domain::types::{
 };
 use bsl_shared::domain::{CompletionItem, CompletionKind, TypeMetadataLookup, TypeResolution};
 use bsl_shared::ir::{ScopeId, ScopeKind, SemanticNodeKind, SemanticProgram};
-use bsl_syntax::ast::Expression;
 
 use super::super::extractors::symbol_extractor::{
     extract_word_at_position, is_identifier_char, utf16_to_byte_offset,
 };
 use super::completion_ranking::{rank_candidates_with_trace, RankingCandidate};
-use super::completion_target::extract_completion_target_for_member_access;
 use crate::system::keyword_index::DEFAULT_KEYWORDS;
 use crate::system::{
     IndexItemKind, IndexSnapshot, IntellisenseIndexStore, LineIndex, SymbolKind, SymbolScope,
@@ -440,127 +438,21 @@ pub(crate) async fn get_completion_with_analysis(
         {
             add_methods_from_resolution(metadata_lookup, &owner_hint, &mut candidates, 0);
             add_properties_from_resolution(metadata_lookup, &owner_hint, &mut candidates, 1);
-        } else {
-            let receiver_types_from_ast = analysis
-                .and_then(|analysis| {
-                    analysis
-                        .parse_result
-                        .as_ref()
-                        .map(|parse_result| (analysis, parse_result))
-                })
-                .and_then(|(analysis, parse_result)| {
-                    extract_completion_target_for_member_access(
-                        file_content,
-                        line,
-                        column,
-                        parse_result,
-                    )
-                    .and_then(|target| {
-                        if let Some(expr) = target.receiver_expression.as_ref() {
-                            return Some(resolve_receiver_types_from_expression(
-                                Some(analysis),
-                                file_content,
-                                line,
-                                column,
-                                expr,
-                                &snapshot,
-                                metadata_lookup,
-                            ));
-                        }
-
-                        let mut out = Vec::new();
-                        if let Some(exprs) = target.receiver_union_expressions.as_ref() {
-                            for expr in exprs {
-                                out.extend(resolve_receiver_types_from_expression(
-                                    Some(analysis),
-                                    file_content,
-                                    line,
-                                    column,
-                                    expr,
-                                    &snapshot,
-                                    metadata_lookup,
-                                ));
-                            }
-                        }
-
-                        (!out.is_empty()).then(|| dedup_resolutions(out))
-                    })
-                })
-                .filter(|types| !types.is_empty());
-
-            if let Some(receiver_types) = receiver_types_from_ast {
-                for owner in receiver_types {
-                    add_methods_from_resolution(metadata_lookup, &owner, &mut candidates, 0);
-                    add_properties_from_resolution(metadata_lookup, &owner, &mut candidates, 1);
-                }
-            } else if let Some(receiver_chain) =
-                extract_member_receiver_chain(file_content, line, column)
-            {
-                if receiver_chain.len() == 1 {
-                    let base_name = receiver_chain[0].as_str();
-                    if let Some(kind) = get_collection_kind(base_name) {
-                        add_metadata_items(&snapshot, Some(kind), &mut candidates, 1);
-                    } else if let Some(type_name) =
-                        resolve_type_name(&snapshot, base_name, metadata_lookup)
-                    {
-                        let resolution = analysis
-                            .map(|ctx| ctx.resolver.resolve_expression_sync(&type_name))
-                            .unwrap_or_else(|| TypeResolution::explicit(&type_name));
-                        add_methods_from_resolution(
-                            metadata_lookup,
-                            &resolution,
-                            &mut candidates,
-                            0,
-                        );
-                        add_properties_from_resolution(
-                            metadata_lookup,
-                            &resolution,
-                            &mut candidates,
-                            1,
-                        );
-                    } else if let Some(resolution) =
-                        resolve_member_owner_type(analysis, file_content, line, column, base_name)
-                            .await
-                    {
-                        add_methods_from_resolution(
-                            metadata_lookup,
-                            &resolution,
-                            &mut candidates,
-                            0,
-                        );
-                        add_properties_from_resolution(
-                            metadata_lookup,
-                            &resolution,
-                            &mut candidates,
-                            1,
-                        );
-                    }
-                } else if let Some(resolution) = resolve_member_chain_owner_type(
-                    analysis,
-                    file_content,
-                    line,
-                    column,
-                    &receiver_chain,
-                    &snapshot,
-                    metadata_lookup,
-                )
-                .await
-                {
-                    add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
-                    add_properties_from_resolution(
-                        metadata_lookup,
-                        &resolution,
-                        &mut candidates,
-                        1,
-                    );
-                }
-            } else if let Some(base_name) = context.member_base.as_deref() {
+        } else if let Some(receiver_chain) =
+            extract_member_receiver_chain(file_content, line, column)
+        {
+            // Shared owner hints are now the only source of truth for per-instance
+            // schema/effects. Local fallback below is limited to metadata/context chains.
+            if receiver_chain.len() == 1 {
+                let base_name = receiver_chain[0].as_str();
                 if let Some(kind) = get_collection_kind(base_name) {
                     add_metadata_items(&snapshot, Some(kind), &mut candidates, 1);
                 } else if let Some(type_name) =
                     resolve_type_name(&snapshot, base_name, metadata_lookup)
                 {
-                    let resolution = TypeResolution::explicit(&type_name);
+                    let resolution = analysis
+                        .map(|ctx| ctx.resolver.resolve_expression_sync(&type_name))
+                        .unwrap_or_else(|| TypeResolution::explicit(&type_name));
                     add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
                     add_properties_from_resolution(
                         metadata_lookup,
@@ -579,6 +471,33 @@ pub(crate) async fn get_completion_with_analysis(
                         1,
                     );
                 }
+            } else if let Some(resolution) = resolve_member_chain_owner_type(
+                analysis,
+                file_content,
+                line,
+                column,
+                &receiver_chain,
+                &snapshot,
+                metadata_lookup,
+            )
+            .await
+            {
+                add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
+                add_properties_from_resolution(metadata_lookup, &resolution, &mut candidates, 1);
+            }
+        } else if let Some(base_name) = context.member_base.as_deref() {
+            if let Some(kind) = get_collection_kind(base_name) {
+                add_metadata_items(&snapshot, Some(kind), &mut candidates, 1);
+            } else if let Some(type_name) = resolve_type_name(&snapshot, base_name, metadata_lookup)
+            {
+                let resolution = TypeResolution::explicit(&type_name);
+                add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
+                add_properties_from_resolution(metadata_lookup, &resolution, &mut candidates, 1);
+            } else if let Some(resolution) =
+                resolve_member_owner_type(analysis, file_content, line, column, base_name).await
+            {
+                add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
+                add_properties_from_resolution(metadata_lookup, &resolution, &mut candidates, 1);
             }
         }
 

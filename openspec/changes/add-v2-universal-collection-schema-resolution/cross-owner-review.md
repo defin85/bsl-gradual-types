@@ -22,10 +22,13 @@ Change: `add-v2-universal-collection-schema-resolution`
   - `analysis-v2/src/type_inference_v2/tests.rs`
     - `universal_collection_effects_do_not_mutate_type_repository`
     - `typed_structure_alias_keeps_structural_members`
+    - `typed_structure_insert_preserves_field_source_span`
     - `value_table_add_row_materializes_typed_row_members`
+    - `typed_value_table_row_preserves_column_source_span`
   - `analysis-v2/src/lib/tests.rs`
     - `serve_only_matches_legacy_for_universal_collections_in_complete_snapshot`
     - `serve_only_matches_legacy_for_universal_collections_with_incomplete_member_access`
+    - `universal_collection_snapshot_switch_does_not_leak_schema_effects`
 - Вердикт: **accepted**.
 
 ### completion
@@ -34,6 +37,12 @@ Change: `add-v2-universal-collection-schema-resolution`
   - `bsl-runtime/src/application/type_system/services/completion_service/member_resolution.rs`
   - `syntax/src/tree_sitter_adapter/expression_converter.rs`
 - Exact evidence:
+  - `backend/tests/universal_collection_cross_consumer_consistency_test.rs`
+    - `map_index_access_cross_consumer_consistency_without_manual_owner_hint`
+    - `structure_field_cross_consumer_consistency_without_manual_owner_hint`
+    - `value_table_row_column_cross_consumer_consistency_without_manual_owner_hint`
+  - `backend/tests/lsp_incremental_completion_test.rs`
+    - `m8_lsp_incremental_universal_collection_receivers_use_shared_owner_hint_without_manual_hint`
   - `backend/src/bin/lsp_server/server/core/tests.rs`
     - `p7_map_index_access_exact_cross_consumer_acceptance_uses_snapshot_owner_without_manual_hint`
     - `p7_dynamic_map_key_exact_cross_consumer_acceptance_uses_safe_policy_without_unknown_key`
@@ -84,4 +93,4 @@ Change: `add-v2-universal-collection-schema-resolution`
 
 - Архитектурный review по владельческим зонам завершён.
 - Change совместим с зафиксированным Option B contract и его always-on observability/perf-gate rollout model.
-- На дату review незакрытых MUST evidence gaps для change не осталось.
+- На дату review незакрытых MUST evidence gaps для change не осталось; snapshot-switch leakage и incremental no-hint regressions закреплены отдельными regression-tests.

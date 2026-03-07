@@ -1407,6 +1407,155 @@ fn serve_only_matches_legacy_for_short_map_index_incomplete_member_access() {
 }
 
 #[test]
+fn universal_collection_snapshot_switch_does_not_leak_schema_effects() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(211);
+    let text_v1: Arc<str> = Arc::from(
+        "Процедура Тест()\n\
+             Map = Новый Соответствие;\n\
+             Map.Вставить(\"k\", Новый ТаблицаЗначений);\n\
+             S = Новый Структура;\n\
+             S.Вставить(\"Идентификатор\", \"A-01\");\n\
+             ТЗ = Новый ТаблицаЗначений;\n\
+             ТЗ.Колонки.Добавить(\"Идентификатор\", Новый ОписаниеТипов(\"Строка\"));\n\
+             Стр = ТЗ.Добавить();\n\
+             ЗначДляMap = Map[\"k\"];\n\
+             ЗначДляСтруктуры = S;\n\
+             ЗначДляСтроки = Стр;\n\
+             КонецПроцедуры",
+    );
+    let text_v2: Arc<str> = Arc::from(
+        "Процедура Тест()\n\
+             Map = Новый Соответствие;\n\
+             S = Новый Структура;\n\
+             ТЗ = Новый ТаблицаЗначений;\n\
+             Стр = ТЗ.Добавить();\n\
+             ЗначДляMap = Map[\"k\"];\n\
+             ЗначДляСтруктуры = S;\n\
+             ЗначДляСтроки = Стр;\n\
+             КонецПроцедуры",
+    );
+
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("deps-universal-switch"),
+        deps: universal_collection_semantic_deps(),
+    });
+    host.apply_change(Change::SetFileWithSnapshot {
+        file_id,
+        text: text_v1.clone(),
+        version: 1,
+        path: Arc::from("serve-only-universal-switch-v1.bsl"),
+        parse_snapshot: parse_snapshot_for_test(
+            file_id,
+            1,
+            text_v1.as_ref(),
+            Vec::new(),
+            true,
+            None,
+        ),
+    });
+    {
+        let analysis_v1 = host.snapshot();
+        let precompute = analysis_v1
+            .precompute_type_index_for_file(file_id, Some(1), 0)
+            .expect("precompute universal switch v1");
+        assert_eq!(
+            precompute.reason_code,
+            TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeExactStored
+        );
+    }
+
+    host.apply_change(Change::SetFileWithSnapshot {
+        file_id,
+        text: text_v2.clone(),
+        version: 2,
+        path: Arc::from("serve-only-universal-switch-v2.bsl"),
+        parse_snapshot: parse_snapshot_for_test(
+            file_id,
+            2,
+            text_v2.as_ref(),
+            Vec::new(),
+            true,
+            None,
+        ),
+    });
+
+    let analysis_v2 = host.snapshot();
+    let precompute = analysis_v2
+        .precompute_type_index_for_file(file_id, Some(2), 0)
+        .expect("precompute universal switch v2");
+    assert_eq!(
+        precompute.reason_code,
+        TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeExactStored
+    );
+
+    let map_probe = marker_tail_offset(text_v2.as_ref(), "Map[\"k\"]");
+    let map_legacy = analysis_v2
+        .type_at_byte_offset(file_id, map_probe)
+        .expect("legacy map lookup")
+        .expect("legacy map result");
+    let map_serve_only = analysis_v2
+        .type_at_byte_offset_serve_only_profiled(file_id, map_probe)
+        .expect("serve-only map lookup");
+    assert_eq!(
+        map_serve_only.serve_reason_code,
+        TypeIndexServeReasonCode::TypeIndexExactHit
+    );
+    assert_eq!(map_serve_only.resolution, Some(map_legacy.clone()));
+    assert_eq!(
+        map_legacy.type_name(),
+        "Произвольный",
+        "new snapshot without map effects must not leak previous value specialization"
+    );
+
+    let structure_probe = marker_tail_offset(text_v2.as_ref(), "ЗначДляСтруктуры = S");
+    let structure_legacy = analysis_v2
+        .type_at_byte_offset(file_id, structure_probe)
+        .expect("legacy structure lookup")
+        .expect("legacy structure result");
+    let structure_serve_only = analysis_v2
+        .type_at_byte_offset_serve_only_profiled(file_id, structure_probe)
+        .expect("serve-only structure lookup");
+    assert_eq!(
+        structure_serve_only.serve_reason_code,
+        TypeIndexServeReasonCode::TypeIndexExactHit
+    );
+    let structure_resolution = structure_serve_only
+        .resolution
+        .expect("serve-only structure resolution");
+    assert_eq!(structure_resolution, structure_legacy);
+    assert!(
+        structure_resolution
+            .find_structural_member("идентификатор")
+            .is_none(),
+        "new snapshot without inserts must not leak previous structure field"
+    );
+
+    let row_probe = marker_tail_offset(text_v2.as_ref(), "ЗначДляСтроки = Стр");
+    let row_legacy = analysis_v2
+        .type_at_byte_offset(file_id, row_probe)
+        .expect("legacy row lookup")
+        .expect("legacy row result");
+    let row_serve_only = analysis_v2
+        .type_at_byte_offset_serve_only_profiled(file_id, row_probe)
+        .expect("serve-only row lookup");
+    assert_eq!(
+        row_serve_only.serve_reason_code,
+        TypeIndexServeReasonCode::TypeIndexExactHit
+    );
+    let row_resolution = row_serve_only
+        .resolution
+        .expect("serve-only row resolution");
+    assert_eq!(row_resolution, row_legacy);
+    assert!(
+        row_resolution
+            .find_structural_member("идентификатор")
+            .is_none(),
+        "new snapshot without column effects must not leak previous typed-row column"
+    );
+}
+
+#[test]
 fn serve_only_stale_served_for_new_version_without_exact_artifact() {
     let mut host = AnalysisHostV2::default();
     let file_id = FileId(202);

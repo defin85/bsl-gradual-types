@@ -300,20 +300,60 @@ impl InstanceEffectStore {
             .collect();
 
         for instance_id in instance_ids {
-            let Some(left_state) = left.states.get(&instance_id) else {
-                continue;
-            };
-            let Some(right_state) = right.states.get(&instance_id) else {
-                merged.states.insert(instance_id, left_state.clone());
-                continue;
+            let entry = match (
+                left.states.get(&instance_id),
+                right.states.get(&instance_id),
+            ) {
+                (Some(left_state), Some(right_state)) => {
+                    merge_instance_state(left_state, right_state)
+                }
+                (Some(left_state), None) => downgrade_instance_state(left_state),
+                (None, Some(right_state)) => downgrade_instance_state(right_state),
+                (None, None) => continue,
             };
 
-            merged
-                .states
-                .insert(instance_id, merge_instance_state(left_state, right_state));
+            merged.states.insert(instance_id, entry);
         }
 
         merged
+    }
+
+    pub(super) fn merge_variable_binding(
+        &mut self,
+        left_store: &Self,
+        left_binding: Option<&InstanceBinding>,
+        right_store: &Self,
+        right_binding: Option<&InstanceBinding>,
+    ) -> Option<InstanceBinding> {
+        match (left_binding, right_binding) {
+            (Some(left_binding), Some(right_binding)) if left_binding == right_binding => {
+                Some(left_binding.clone())
+            }
+            (Some(InstanceBinding::Direct(left_id)), Some(InstanceBinding::Direct(right_id))) => {
+                let left_state = left_store.states.get(left_id)?;
+                let right_state = right_store.states.get(right_id)?;
+                let merged = merge_instance_state(left_state, right_state);
+                Some(InstanceBinding::Direct(self.insert_state(merged.kind)))
+            }
+            (
+                Some(InstanceBinding::ValueTableRow {
+                    table_instance: left_id,
+                }),
+                Some(InstanceBinding::ValueTableRow {
+                    table_instance: right_id,
+                }),
+            ) => {
+                let left_state = left_store.states.get(left_id)?;
+                let right_state = right_store.states.get(right_id)?;
+                let merged = merge_instance_state(left_state, right_state);
+                Some(InstanceBinding::ValueTableRow {
+                    table_instance: self.insert_state(merged.kind),
+                })
+            }
+            (Some(binding), None) => self.clone_binding_from_store(left_store, binding, true),
+            (None, Some(binding)) => self.clone_binding_from_store(right_store, binding, true),
+            _ => None,
+        }
     }
 
     fn insert_state(&mut self, kind: InstanceKind) -> InstanceId {
@@ -321,6 +361,36 @@ impl InstanceEffectStore {
         self.next_id += 1;
         self.states.insert(id, InstanceState { kind });
         id
+    }
+
+    fn clone_binding_from_store(
+        &mut self,
+        store: &Self,
+        binding: &InstanceBinding,
+        downgrade: bool,
+    ) -> Option<InstanceBinding> {
+        match binding {
+            InstanceBinding::Direct(instance_id) => {
+                let state = store.states.get(instance_id)?;
+                let state = if downgrade {
+                    downgrade_instance_state(state)
+                } else {
+                    state.clone()
+                };
+                Some(InstanceBinding::Direct(self.insert_state(state.kind)))
+            }
+            InstanceBinding::ValueTableRow { table_instance } => {
+                let state = store.states.get(table_instance)?;
+                let state = if downgrade {
+                    downgrade_instance_state(state)
+                } else {
+                    state.clone()
+                };
+                Some(InstanceBinding::ValueTableRow {
+                    table_instance: self.insert_state(state.kind),
+                })
+            }
+        }
     }
 }
 
@@ -464,6 +534,33 @@ fn merge_value_table_effects(
     }
 }
 
+fn downgrade_instance_state(state: &InstanceState) -> InstanceState {
+    let kind = match &state.kind {
+        InstanceKind::Map(effects) => InstanceKind::Map(MapEffects {
+            generic_key_type: effects.generic_key_type.clone().map(downgrade_resolution),
+            generic_value_type: effects.generic_value_type.clone().map(downgrade_resolution),
+            literal_keys: downgrade_structural_map(&effects.literal_keys),
+        }),
+        InstanceKind::Structure(effects) => InstanceKind::Structure(StructureEffects {
+            fields: downgrade_structural_map(&effects.fields),
+        }),
+        InstanceKind::ValueTable(effects) => InstanceKind::ValueTable(ValueTableEffects {
+            columns: downgrade_structural_map(&effects.columns),
+        }),
+    };
+
+    InstanceState { kind }
+}
+
+fn downgrade_structural_map(
+    entries: &BTreeMap<String, StructuralEffectEntry>,
+) -> BTreeMap<String, StructuralEffectEntry> {
+    entries
+        .iter()
+        .map(|(key, entry)| (key.clone(), entry.downgrade_for_branch()))
+        .collect()
+}
+
 fn merge_structural_map(
     left: &BTreeMap<String, StructuralEffectEntry>,
     right: &BTreeMap<String, StructuralEffectEntry>,
@@ -501,6 +598,15 @@ fn merge_optional_resolution(slot: &mut Option<TypeResolution>, incoming: TypeRe
         Some(existing) => *slot = Some(merge_resolutions(&existing, &incoming)),
         None => *slot = Some(incoming),
     }
+}
+
+fn downgrade_resolution(mut resolution: TypeResolution) -> TypeResolution {
+    resolution.certainty = downgrade_certainty(resolution.certainty);
+    for member in &mut resolution.metadata.structural_members {
+        member.certainty = downgrade_certainty(member.certainty);
+        member.member_type.certainty = downgrade_certainty(member.member_type.certainty);
+    }
+    resolution
 }
 
 pub(super) fn merge_resolutions(left: &TypeResolution, right: &TypeResolution) -> TypeResolution {

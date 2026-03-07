@@ -577,7 +577,12 @@ fn convert_property_access(node: &Node, source: &str) -> Result<Option<Expressio
             property,
             span,
         })),
-        _ => {
+        Some(obj) => {
+            // Preserve the stable receiver for incomplete member access like `obj.`
+            // or `obj[index].` instead of degrading to an undeclared identifier.
+            Ok(Some(obj))
+        }
+        None => {
             // Fallback: возвращаем как Identifier
             Ok(Some(Expression::Identifier {
                 name: node_text(node, source),

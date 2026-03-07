@@ -1093,6 +1093,13 @@ fn marker_offset(text: &str, marker: &str) -> u32 {
         .min(u32::MAX as usize) as u32
 }
 
+fn marker_tail_offset(text: &str, marker: &str) -> u32 {
+    text.find(marker)
+        .map(|idx| idx + marker.len() - 1)
+        .unwrap_or_else(|| panic!("marker `{marker}` not found"))
+        .min(u32::MAX as usize) as u32
+}
+
 fn default_semantic_deps() -> Arc<SemanticDeps> {
     let repository = Arc::new(InMemoryTypeRepository::new()) as Arc<dyn TypeRepository>;
     let platform_signatures_loaded = repository.platform_docs_loaded();
@@ -1101,6 +1108,58 @@ fn default_semantic_deps() -> Arc<SemanticDeps> {
         resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
         repository,
         platform_signatures_loaded,
+    })
+}
+
+fn universal_collection_semantic_deps() -> Arc<SemanticDeps> {
+    let repository_impl = Arc::new(InMemoryTypeRepository::new());
+    repository_impl
+        .load_types(vec![
+            bsl_shared::domain::types::RawTypeData {
+                name: "Соответствие".to_string(),
+                source: bsl_shared::domain::types::RawDataSource::Platform,
+                ..Default::default()
+            },
+            bsl_shared::domain::types::RawTypeData {
+                name: "Структура".to_string(),
+                source: bsl_shared::domain::types::RawDataSource::Platform,
+                ..Default::default()
+            },
+            bsl_shared::domain::types::RawTypeData {
+                name: "ТаблицаЗначений".to_string(),
+                source: bsl_shared::domain::types::RawDataSource::Platform,
+                properties: vec![bsl_shared::domain::types::RawPropertyData {
+                    name: "Колонки".to_string(),
+                    prop_type: "КоллекцияКолонокТаблицыЗначений".to_string(),
+                    is_readonly: false,
+                }],
+                ..Default::default()
+            },
+            bsl_shared::domain::types::RawTypeData {
+                name: "КоллекцияКолонокТаблицыЗначений".to_string(),
+                source: bsl_shared::domain::types::RawDataSource::Platform,
+                ..Default::default()
+            },
+            bsl_shared::domain::types::RawTypeData {
+                name: "СтрокаТаблицыЗначений".to_string(),
+                source: bsl_shared::domain::types::RawDataSource::Platform,
+                ..Default::default()
+            },
+            bsl_shared::domain::types::RawTypeData {
+                name: "ОписаниеТипов".to_string(),
+                source: bsl_shared::domain::types::RawDataSource::Platform,
+                ..Default::default()
+            },
+        ])
+        .expect("load universal collection types");
+
+    let repository =
+        repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+    Arc::new(SemanticDeps {
+        signature_index: SignatureIndex::new(),
+        resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
+        repository,
+        platform_signatures_loaded: true,
     })
 }
 
@@ -1145,6 +1204,206 @@ fn serve_only_exact_hit_matches_legacy_for_same_snapshot() {
         TypeIndexServeReasonCode::TypeIndexExactHit
     );
     assert_eq!(serve_only.resolution, legacy);
+}
+
+#[test]
+fn serve_only_matches_legacy_for_universal_collections_in_complete_snapshot() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(208);
+    let text: Arc<str> = Arc::from(
+        "Процедура Тест()\n\
+             Map = Новый Соответствие;\n\
+             Map.Вставить(\"k\", Новый ТаблицаЗначений);\n\
+             S = Новый Структура;\n\
+             S.Вставить(\"Идентификатор\", \"A-01\");\n\
+             ТЗ = Новый ТаблицаЗначений;\n\
+             ТЗ.Колонки.Добавить(\"Идентификатор\", Новый ОписаниеТипов(\"Строка\"));\n\
+             Стр = ТЗ.Добавить();\n\
+             ЗначДляMap = Map[\"k\"];\n\
+             ЗначДляСтруктуры = S;\n\
+             ЗначДляСтроки = Стр;\n\
+             КонецПроцедуры",
+    );
+
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("deps-universal-complete"),
+        deps: universal_collection_semantic_deps(),
+    });
+    host.apply_change(Change::SetFileWithSnapshot {
+        file_id,
+        text: text.clone(),
+        version: 1,
+        path: Arc::from("serve-only-universal-complete.bsl"),
+        parse_snapshot: parse_snapshot_for_test(file_id, 1, text.as_ref(), Vec::new(), true, None),
+    });
+
+    let analysis = host.snapshot();
+    let precompute = analysis
+        .precompute_type_index_for_file(file_id, Some(1), 0)
+        .expect("precompute universal complete");
+    assert_eq!(
+        precompute.reason_code,
+        TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeExactStored
+    );
+
+    for (label, probe) in [
+        ("map", marker_tail_offset(text.as_ref(), "Map[\"k\"]")),
+        (
+            "structure",
+            marker_tail_offset(text.as_ref(), "ЗначДляСтруктуры = S"),
+        ),
+        (
+            "row",
+            marker_tail_offset(text.as_ref(), "ЗначДляСтроки = Стр"),
+        ),
+    ] {
+        let legacy = analysis
+            .type_at_byte_offset(file_id, probe)
+            .unwrap_or_else(|_| panic!("legacy type lookup for {label}"))
+            .unwrap_or_else(|| panic!("legacy type result for {label}"));
+        let serve_only = analysis
+            .type_at_byte_offset_serve_only_profiled(file_id, probe)
+            .unwrap_or_else(|_| panic!("serve-only lookup for {label}"));
+        assert_eq!(
+            serve_only.serve_reason_code,
+            TypeIndexServeReasonCode::TypeIndexExactHit,
+            "serve-only must hit exact artifact for {label}"
+        );
+        assert_eq!(
+            serve_only.resolution,
+            Some(legacy),
+            "serve-only must match legacy resolution for {label}"
+        );
+    }
+}
+
+#[test]
+fn serve_only_matches_legacy_for_universal_collections_with_incomplete_member_access() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(209);
+    let text: Arc<str> = Arc::from(
+        "Процедура Тест()\n\
+             Map = Новый Соответствие;\n\
+             Map.Вставить(\"k\", Новый ТаблицаЗначений);\n\
+             S = Новый Структура;\n\
+             S.Вставить(\"Идентификатор\", \"A-01\");\n\
+             ТЗ = Новый ТаблицаЗначений;\n\
+             ТЗ.Колонки.Добавить(\"Идентификатор\", Новый ОписаниеТипов(\"Строка\"));\n\
+             Стр = ТЗ.Добавить();\n\
+             ДляCompletionMap = Map[\"k\"].\n\
+             ДляCompletionСтруктуры = S.\n\
+             ДляCompletionСтроки = Стр.\n\
+             КонецПроцедуры",
+    );
+
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("deps-universal-incomplete"),
+        deps: universal_collection_semantic_deps(),
+    });
+    host.apply_change(Change::SetFileWithSnapshot {
+        file_id,
+        text: text.clone(),
+        version: 1,
+        path: Arc::from("serve-only-universal-incomplete.bsl"),
+        parse_snapshot: parse_snapshot_for_test(file_id, 1, text.as_ref(), Vec::new(), true, None),
+    });
+
+    let analysis = host.snapshot();
+    let precompute = analysis
+        .precompute_type_index_for_file(file_id, Some(1), 0)
+        .expect("precompute universal incomplete");
+    assert_eq!(
+        precompute.reason_code,
+        TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeExactStored
+    );
+
+    for (label, probe) in [
+        ("map", marker_tail_offset(text.as_ref(), "Map[\"k\"]")),
+        (
+            "structure",
+            marker_tail_offset(text.as_ref(), "ДляCompletionСтруктуры = S"),
+        ),
+        (
+            "row",
+            marker_tail_offset(text.as_ref(), "ДляCompletionСтроки = Стр"),
+        ),
+    ] {
+        let legacy = analysis
+            .type_at_byte_offset(file_id, probe)
+            .unwrap_or_else(|_| panic!("legacy type lookup for {label}"))
+            .unwrap_or_else(|| panic!("legacy type result for {label}"));
+        let serve_only = analysis
+            .type_at_byte_offset_serve_only_profiled(file_id, probe)
+            .unwrap_or_else(|_| panic!("serve-only lookup for {label}"));
+        assert_eq!(
+            serve_only.serve_reason_code,
+            TypeIndexServeReasonCode::TypeIndexExactHit,
+            "serve-only must stay exact for incomplete member access on {label}"
+        );
+        assert_eq!(
+            serve_only.resolution,
+            Some(legacy),
+            "serve-only must match legacy resolution for incomplete member access on {label}"
+        );
+    }
+}
+
+#[test]
+fn serve_only_matches_legacy_for_short_map_index_incomplete_member_access() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(210);
+    let text: Arc<str> = Arc::from(
+        "Процедура Тест()\n\
+             Map = Новый Соответствие;\n\
+             Map.Вставить(\"k\", Новый ТаблицаЗначений);\n\
+             ДляCompletion = Map[\"k\"].\n\
+             КонецПроцедуры",
+    );
+
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("deps-universal-short-map-incomplete"),
+        deps: universal_collection_semantic_deps(),
+    });
+    host.apply_change(Change::SetFileWithSnapshot {
+        file_id,
+        text: text.clone(),
+        version: 1,
+        path: Arc::from("serve-only-universal-short-map-incomplete.bsl"),
+        parse_snapshot: parse_snapshot_for_test(file_id, 1, text.as_ref(), Vec::new(), true, None),
+    });
+
+    let analysis = host.snapshot();
+    let probe = marker_tail_offset(text.as_ref(), "Map[\"k\"]");
+    let legacy = analysis
+        .type_at_byte_offset(file_id, probe)
+        .expect("legacy type lookup")
+        .expect("legacy type result");
+    let precompute = analysis
+        .precompute_type_index_for_file(file_id, Some(1), 0)
+        .expect("precompute short map incomplete");
+    assert_eq!(
+        precompute.reason_code,
+        TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeExactStored
+    );
+
+    let serve_only = analysis
+        .type_at_byte_offset_serve_only_profiled(file_id, probe)
+        .expect("serve-only lookup");
+    assert_eq!(
+        serve_only.serve_reason_code,
+        TypeIndexServeReasonCode::TypeIndexExactHit,
+        "serve-only must stay exact for short map incomplete member access"
+    );
+    assert_eq!(
+        legacy.type_name(),
+        "ТаблицаЗначений",
+        "legacy type lookup must keep exact map value type on short incomplete fixture"
+    );
+    assert_eq!(
+        serve_only.resolution,
+        Some(legacy),
+        "serve-only must match legacy resolution on short map incomplete fixture"
+    );
 }
 
 #[test]

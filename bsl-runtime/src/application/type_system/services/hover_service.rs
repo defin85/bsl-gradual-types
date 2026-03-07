@@ -95,6 +95,21 @@ fn compute_hover_info_from_ir(
             type_at_cursor = type_at_owner_span(analysis, file_id, node.span);
         }
     }
+    let indexed_expression_hover = byte_offset.and_then(|offset| {
+        let span = indexed_expression_span_at_byte_offset(file_content, offset as usize)?;
+        let resolution = type_at_owner_span(analysis, file_id, span)?;
+        if resolution.is_unknown() || resolution.is_dynamic() {
+            return None;
+        }
+        let label = span_text(file_content, span)?.trim();
+        if label.is_empty() {
+            return None;
+        }
+        Some((label.to_string(), resolution))
+    });
+    if let Some((_, resolution)) = &indexed_expression_hover {
+        type_at_cursor = Some(resolution.clone());
+    }
 
     let formatter = if let Some(config) = hover_config.clone() {
         HoverFormatter::new(config, metadata_lookup.clone())
@@ -189,6 +204,15 @@ fn compute_hover_info_from_ir(
         }
     }
 
+    if let Some((label, resolution)) = indexed_expression_hover {
+        info!(
+            "Hover v2 type_at_byte_offset({}): {}",
+            byte_offset.unwrap_or_default(),
+            resolution.type_name()
+        );
+        return Some(formatter.format_variable(&label, &resolution));
+    }
+
     if let (Some(word), Some(resolution)) = (&word_under_cursor, &type_at_cursor) {
         info!(
             "Hover v2 type_at_byte_offset({}): {}",
@@ -196,6 +220,21 @@ fn compute_hover_info_from_ir(
             resolution.type_name()
         );
         return Some(formatter.format_variable(word, resolution));
+    }
+
+    if let Some(resolution) = &type_at_cursor {
+        if let Some(label) = node_at_position
+            .and_then(|node| span_text(file_content, node.span))
+            .map(str::trim)
+            .filter(|label| !label.is_empty())
+        {
+            info!(
+                "Hover v2 type_at_byte_offset({}): {}",
+                byte_offset.unwrap_or_default(),
+                resolution.type_name()
+            );
+            return Some(formatter.format_variable(label, resolution));
+        }
     }
 
     // Milestone 2.11 Task B1: Logs when symbol not found
@@ -276,6 +315,60 @@ fn identifier_span_at_byte_offset(file_content: &str, byte_offset: usize) -> Opt
     };
 
     Some(Span::new(start as u32, end as u32))
+}
+
+fn indexed_expression_span_at_byte_offset(file_content: &str, byte_offset: usize) -> Option<Span> {
+    let identifier_span = identifier_span_at_byte_offset(file_content, byte_offset)?;
+    let mut cursor = identifier_span.end as usize;
+    while let Some(ch) = file_content.get(cursor..)?.chars().next() {
+        if !ch.is_whitespace() {
+            break;
+        }
+        cursor += ch.len_utf8();
+    }
+    if file_content.get(cursor..)?.chars().next()? != '[' {
+        return None;
+    }
+
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut chars = file_content.get(cursor..)?.char_indices().peekable();
+    while let Some((relative_idx, ch)) = chars.next() {
+        let absolute_idx = cursor + relative_idx;
+        if in_string {
+            if ch == '"' {
+                if chars.peek().is_some_and(|(_, next)| *next == '"') {
+                    let _ = chars.next();
+                    continue;
+                }
+                in_string = false;
+            }
+            continue;
+        }
+
+        match ch {
+            '"' => in_string = true,
+            '[' => depth += 1,
+            ']' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(Span::new(
+                        identifier_span.start,
+                        (absolute_idx + ch.len_utf8()) as u32,
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
+fn span_text(file_content: &str, span: Span) -> Option<&str> {
+    let start = span.start as usize;
+    let end = span.end as usize;
+    file_content.get(start..end)
 }
 
 fn control_node_at_position(

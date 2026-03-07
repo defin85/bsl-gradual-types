@@ -1,4 +1,5 @@
 use super::*;
+use crate::ast::{Expression, Statement};
 use crate::tree_sitter_adapter::span::LineIndex;
 use bsl_shared::domain::types::ErrorType;
 
@@ -34,6 +35,38 @@ fn parse_reports_byte_spans_for_incomplete_new_with_emoji_prefix() {
 
     assert_eq!(err.span.start, expected_offset);
     assert_eq!(err.span.end, expected_offset);
+}
+
+#[test]
+fn parse_incomplete_member_access_preserves_receiver_expression() {
+    let source = "Процедура Тест()\n    ДляCompletion = Map[\"k\"].\nКонецПроцедуры";
+    let result = parse(source, &ParseOptions::default()).unwrap();
+
+    let Statement::ProcedureDecl { body, .. } = &result.program.statements[0] else {
+        panic!(
+            "expected procedure declaration, got: {:?}",
+            result.program.statements
+        );
+    };
+    let Statement::Assignment { value, .. } = &body[0] else {
+        panic!("expected assignment, got: {:?}", body);
+    };
+
+    match value {
+        Expression::IndexAccess { object, index, .. } => {
+            assert!(
+                matches!(object.as_ref(), Expression::Identifier { name, .. } if name == "Map")
+            );
+            assert!(matches!(
+                index.as_ref(),
+                Expression::String { value, .. } if value == "k"
+            ));
+        }
+        other => panic!(
+            "incomplete member access must preserve receiver expression, got: {:?}",
+            other
+        ),
+    }
 }
 
 #[test]

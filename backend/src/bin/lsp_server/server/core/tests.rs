@@ -4036,6 +4036,370 @@ Map.Вставить(\"k\", Новый ТаблицаЗначений);\n\
 }
 
 #[tokio::test]
+async fn p7_map_index_access_exact_cross_consumer_acceptance_uses_snapshot_owner_without_manual_hint(
+) {
+    let completion_fixture = "Процедура Тест()\n\
+    Map = Новый Соответствие;\n\
+    Map.Вставить(\"k\", Новый ТаблицаЗначений);\n\
+    ДляCompletion = Map[\"k\"].\n\
+КонецПроцедуры\n";
+    let resolved_fixture = "Процедура Тест()\n\
+    Map = Новый Соответствие;\n\
+    Map.Вставить(\"k\", Новый ТаблицаЗначений);\n\
+    ДляHover = Map[\"k\"];\n\
+    Проверка = Map[\"k\"].Колонки;\n\
+КонецПроцедуры\n";
+
+    let (mut service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        completion_fixture,
+        "file:///test_p7_universal_map_exact_acceptance.bsl",
+    )
+    .await;
+
+    let legacy_type_name = snapshot_type_name_at_marker(
+        &server,
+        file_id,
+        completion_fixture,
+        "ДляCompletion = Map[\"k\"]",
+    )
+    .await;
+    assert_eq!(
+        legacy_type_name, "ТаблицаЗначений",
+        "legacy type-at-position must already know map value type before completion"
+    );
+
+    let serve_only_type_name = snapshot_serve_only_type_name_at_marker(
+        &server,
+        file_id,
+        completion_fixture,
+        "ДляCompletion = Map[\"k\"]",
+    )
+    .await;
+    assert_eq!(
+        serve_only_type_name.as_deref(),
+        Some("ТаблицаЗначений"),
+        "serve-only snapshot contract must already know map value type before completion"
+    );
+
+    let completion_labels = lsp_completion_labels_at(
+        &mut service,
+        &uri,
+        find_utf16_position_after_marker(completion_fixture, "ДляCompletion = Map[\"k\"]."),
+    )
+    .await;
+    assert!(
+        completion_labels.iter().any(|label| label == "Колонки"),
+        "completion must expose map value members, labels={completion_labels:?}"
+    );
+    assert!(
+        !completion_labels
+            .iter()
+            .any(|label| label == "Ключ" || label == "Значение"),
+        "completion must not fall back to key/value pair members, labels={completion_labels:?}"
+    );
+
+    replace_lsp_fixture_and_wait(&mut service, &server, &uri, file_id, 2, resolved_fixture).await;
+
+    let serve_only_hover_type_name = snapshot_serve_only_type_name_at_marker(
+        &server,
+        file_id,
+        resolved_fixture,
+        "ДляHover = Map[\"k\"]",
+    )
+    .await;
+    assert_eq!(
+        serve_only_hover_type_name.as_deref(),
+        Some("ТаблицаЗначений"),
+        "resolved map index must already have exact serve-only type before hover"
+    );
+
+    let hover_text = lsp_hover_text_at(
+        &mut service,
+        &uri,
+        find_utf16_position_at_marker_tail(resolved_fixture, "ДляHover = Map[\"k\"]"),
+    )
+    .await;
+    assert!(
+        hover_text.contains("ТаблицаЗначений"),
+        "hover must expose resolved map value type, hover={hover_text}"
+    );
+
+    let type_name =
+        snapshot_type_name_at_marker(&server, file_id, resolved_fixture, "ДляHover = Map[\"k\"]")
+            .await;
+    assert_eq!(
+        type_name, "ТаблицаЗначений",
+        "type-at-position must match the resolved map value type"
+    );
+
+    let diagnostics = snapshot_semantic_diagnostic_messages(&server, file_id).await;
+    assert!(
+        diagnostics
+            .iter()
+            .all(|message| !message_has_unknown_member(message, "Колонки")),
+        "diagnostics must not drift for known map value member, diagnostics={diagnostics:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p7_dynamic_map_key_exact_cross_consumer_acceptance_uses_safe_policy_without_unknown_key() {
+    let completion_fixture = "Процедура Тест()\n\
+    Map = Новый Соответствие;\n\
+    Map.Вставить(\"k\", Новый ТаблицаЗначений);\n\
+    Ключ = \"k\";\n\
+    ДляCompletion = Map[Ключ].\n\
+КонецПроцедуры\n";
+    let resolved_fixture = "Процедура Тест()\n\
+    Map = Новый Соответствие;\n\
+    Map.Вставить(\"k\", Новый ТаблицаЗначений);\n\
+    Ключ = \"k\";\n\
+    ДляHover = Map[Ключ];\n\
+    Проверка = Map[Ключ].Колонки;\n\
+КонецПроцедуры\n";
+
+    let (mut service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        completion_fixture,
+        "file:///test_p7_universal_map_dynamic_exact_acceptance.bsl",
+    )
+    .await;
+
+    let completion_labels = lsp_completion_labels_at(
+        &mut service,
+        &uri,
+        find_utf16_position_after_marker(completion_fixture, "ДляCompletion = Map[Ключ]."),
+    )
+    .await;
+    assert!(
+        completion_labels.iter().any(|label| label == "Колонки"),
+        "completion must expose generic map value members for dynamic key, labels={completion_labels:?}"
+    );
+    assert!(
+        !completion_labels
+            .iter()
+            .any(|label| label == "Ключ" || label == "Значение"),
+        "dynamic map key must not complete as key/value pair, labels={completion_labels:?}"
+    );
+
+    replace_lsp_fixture_and_wait(&mut service, &server, &uri, file_id, 2, resolved_fixture).await;
+
+    let serve_only_hover_type_name = snapshot_serve_only_type_name_at_marker(
+        &server,
+        file_id,
+        resolved_fixture,
+        "ДляHover = Map[Ключ]",
+    )
+    .await;
+    assert_eq!(
+        serve_only_hover_type_name.as_deref(),
+        Some("ТаблицаЗначений"),
+        "resolved dynamic map index must already have generic serve-only value type before hover"
+    );
+
+    let hover_text = lsp_hover_text_at(
+        &mut service,
+        &uri,
+        find_utf16_position_at_marker_tail(resolved_fixture, "ДляHover = Map[Ключ]"),
+    )
+    .await;
+    assert!(
+        hover_text.contains("ТаблицаЗначений"),
+        "hover must expose generic map value type for dynamic key, hover={hover_text}"
+    );
+
+    let type_name =
+        snapshot_type_name_at_marker(&server, file_id, resolved_fixture, "ДляHover = Map[Ключ]")
+            .await;
+    assert_eq!(
+        type_name, "ТаблицаЗначений",
+        "dynamic key type-at-position must follow generic value contract"
+    );
+
+    let diagnostics = snapshot_semantic_diagnostic_messages(&server, file_id).await;
+    assert!(
+        diagnostics
+            .iter()
+            .all(|message| !message_has_unknown_member(message, "Колонки")),
+        "diagnostics must not drift for known dynamic map value member, diagnostics={diagnostics:?}"
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .all(|message| !message_has_unknown_key(message)),
+        "dynamic map key must not emit unknown-key diagnostics, diagnostics={diagnostics:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p7_typed_structure_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics(
+) {
+    let completion_fixture = "Процедура Тест()\n\
+    S = Новый Структура;\n\
+    S.Вставить(\"Идентификатор\", \"A-01\");\n\
+    S.Вставить(\"Количество\", 10);\n\
+    ДляCompletion = S.\n\
+КонецПроцедуры\n";
+    let resolved_fixture = "Процедура Тест()\n\
+    S = Новый Структура;\n\
+    S.Вставить(\"Идентификатор\", \"A-01\");\n\
+    S.Вставить(\"Количество\", 10);\n\
+    ДляHover = S.Идентификатор;\n\
+    Ошибка = S.Идентифкатор;\n\
+КонецПроцедуры\n";
+
+    let (mut service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        completion_fixture,
+        "file:///test_p7_typed_structure_exact_acceptance.bsl",
+    )
+    .await;
+
+    let completion_labels = lsp_completion_labels_at(
+        &mut service,
+        &uri,
+        find_utf16_position_after_marker(completion_fixture, "ДляCompletion = S."),
+    )
+    .await;
+    assert!(
+        completion_labels
+            .iter()
+            .any(|label| label == "Идентификатор"),
+        "completion must include typed structure field Идентификатор, labels={completion_labels:?}"
+    );
+    assert!(
+        completion_labels.iter().any(|label| label == "Количество"),
+        "completion must include typed structure field Количество, labels={completion_labels:?}"
+    );
+
+    replace_lsp_fixture_and_wait(&mut service, &server, &uri, file_id, 2, resolved_fixture).await;
+
+    let hover_text = lsp_hover_text_at(
+        &mut service,
+        &uri,
+        find_utf16_position_at_marker_tail(resolved_fixture, "ДляHover = S.Идентификатор"),
+    )
+    .await;
+    assert!(
+        hover_text.contains("Идентификатор") && hover_text.contains("Строка"),
+        "hover must expose structure field name and type, hover={hover_text}"
+    );
+
+    let type_name = snapshot_type_name_at_marker(
+        &server,
+        file_id,
+        resolved_fixture,
+        "ДляHover = S.Идентификатор",
+    )
+    .await;
+    assert_eq!(
+        type_name, "Строка",
+        "typed structure type-at-position must expose field type"
+    );
+
+    let diagnostics = snapshot_semantic_diagnostic_messages(&server, file_id).await;
+    assert!(
+        diagnostics
+            .iter()
+            .any(|message| message_has_unknown_member(message, "Идентифкатор")),
+        "typed structure typo must produce unknown-member diagnostic, diagnostics={diagnostics:?}"
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .all(|message| !message_has_unknown_member(message, "Идентификатор")),
+        "typed structure exact field must not regress to unknown-member diagnostic, diagnostics={diagnostics:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p7_typed_value_table_row_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics(
+) {
+    let completion_fixture = "Процедура Тест()\n\
+    ТЗ = Новый ТаблицаЗначений;\n\
+    ТЗ.Колонки.Добавить(\"Идентификатор\", Новый ОписаниеТипов(\"Строка\"));\n\
+    ТЗ.Колонки.Добавить(\"Количество\", Новый ОписаниеТипов(\"Число\"));\n\
+    Стр = ТЗ.Добавить();\n\
+    ДляCompletion = Стр.\n\
+КонецПроцедуры\n";
+    let resolved_fixture = "Процедура Тест()\n\
+    ТЗ = Новый ТаблицаЗначений;\n\
+    ТЗ.Колонки.Добавить(\"Идентификатор\", Новый ОписаниеТипов(\"Строка\"));\n\
+    ТЗ.Колонки.Добавить(\"Количество\", Новый ОписаниеТипов(\"Число\"));\n\
+    Стр = ТЗ.Добавить();\n\
+    ДляHover = Стр.Идентификатор;\n\
+    Ошибка = Стр.Идентифкатор;\n\
+КонецПроцедуры\n";
+
+    let (mut service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        completion_fixture,
+        "file:///test_p7_typed_value_table_row_exact_acceptance.bsl",
+    )
+    .await;
+
+    let completion_labels = lsp_completion_labels_at(
+        &mut service,
+        &uri,
+        find_utf16_position_after_marker(completion_fixture, "ДляCompletion = Стр."),
+    )
+    .await;
+    assert!(
+        completion_labels
+            .iter()
+            .any(|label| label == "Идентификатор"),
+        "completion must include typed-row column Идентификатор, labels={completion_labels:?}"
+    );
+    assert!(
+        completion_labels.iter().any(|label| label == "Количество"),
+        "completion must include typed-row column Количество, labels={completion_labels:?}"
+    );
+
+    replace_lsp_fixture_and_wait(&mut service, &server, &uri, file_id, 2, resolved_fixture).await;
+
+    let hover_text = lsp_hover_text_at(
+        &mut service,
+        &uri,
+        find_utf16_position_at_marker_tail(resolved_fixture, "ДляHover = Стр.Идентификатор"),
+    )
+    .await;
+    assert!(
+        hover_text.contains("Идентификатор") && hover_text.contains("Строка"),
+        "hover must expose typed-row column name and type, hover={hover_text}"
+    );
+
+    let type_name = snapshot_type_name_at_marker(
+        &server,
+        file_id,
+        resolved_fixture,
+        "ДляHover = Стр.Идентификатор",
+    )
+    .await;
+    assert_eq!(
+        type_name, "Строка",
+        "typed-row type-at-position must expose column type"
+    );
+
+    let diagnostics = snapshot_semantic_diagnostic_messages(&server, file_id).await;
+    assert!(
+        diagnostics
+            .iter()
+            .any(|message| message_has_unknown_member(message, "Идентифкатор")),
+        "typed-row typo must produce unknown-member diagnostic, diagnostics={diagnostics:?}"
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .all(|message| !message_has_unknown_member(message, "Идентификатор")),
+        "typed-row exact column must not regress to unknown-member diagnostic, diagnostics={diagnostics:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
 async fn p7_completion_owner_hint_type_lookup_is_serve_only_even_when_flow_sensitive_enabled() {
     let coordinator = Arc::new(SystemCoordinator::new());
 
@@ -8644,6 +9008,370 @@ fn find_utf16_position_after_marker(source: &str, marker: &str) -> Position {
     let last_line = prefix.lines().last().unwrap_or("");
     let character = last_line.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
     Position::new(line, character)
+}
+
+fn find_utf16_position_at_marker_tail(source: &str, marker: &str) -> Position {
+    let start_byte = source
+        .find(marker)
+        .unwrap_or_else(|| panic!("marker not found: {marker}"));
+    let (tail_start_in_marker, tail_utf16) = marker
+        .char_indices()
+        .last()
+        .map(|(idx, ch)| (idx, ch.len_utf16()))
+        .unwrap_or_else(|| panic!("marker must not be empty"));
+    let tail_start = start_byte + tail_start_in_marker;
+    let prefix = &source[..tail_start];
+    let line = prefix.lines().count().saturating_sub(1) as u32;
+    let last_line = prefix.lines().last().unwrap_or("");
+    let character = last_line
+        .chars()
+        .map(|ch| ch.len_utf16())
+        .sum::<usize>()
+        .saturating_add(tail_utf16) as u32;
+    Position::new(line, character)
+}
+
+fn syntax_helper_path_for_tests() -> std::path::PathBuf {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let syntax_helper_path = manifest_dir
+        .join("..")
+        .join("examples")
+        .join("syntax_helper");
+    assert!(
+        syntax_helper_path.exists(),
+        "syntax helper path does not exist: {}",
+        syntax_helper_path.display()
+    );
+    syntax_helper_path
+}
+
+async fn prime_server_with_syntax_helper_deps(server: &BslLanguageServer) {
+    let syntax_helper_path = syntax_helper_path_for_tests();
+    let coordinator = server.coordinator.clone();
+    let startup_path = syntax_helper_path.clone();
+    tokio::task::spawn_blocking(move || {
+        coordinator.start_with_paths_blocking(Some(startup_path.as_path()), None, None, None)
+    })
+    .await
+    .expect("syntax helper startup join")
+    .expect("syntax helper startup");
+    server
+        .deps_update_v2(
+            "p7_universal_collection_exact_acceptance_setup",
+            Some(syntax_helper_path),
+            None,
+        )
+        .await;
+    server.sync_v2_globals().await;
+}
+
+async fn open_lsp_fixture_with_snapshot(
+    fixture: &str,
+    uri_str: &str,
+) -> (
+    LspService<BslLanguageServer>,
+    tokio::task::JoinHandle<()>,
+    BslLanguageServer,
+    Url,
+    bsl_analysis_v2::FileId,
+) {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be created");
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let uri = Url::parse(uri_str).expect("test uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: fixture.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    server.sync_v2_globals().await;
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    let expected_version = server
+        .latest_received_file_versions_v2
+        .read()
+        .await
+        .get(&file_id)
+        .copied()
+        .expect("latest received version for opened file");
+    assert_eq!(
+        expected_version, 1,
+        "opened fixture must start at version 1"
+    );
+    assert!(
+        server
+            .analysis_v2
+            .wait_for_file_version(file_id, expected_version)
+            .await,
+        "analysis runtime must catch up to opened file version"
+    );
+    wait_for_type_index_precompute_completion(&server, file_id).await;
+
+    (service, drain_task, server, uri, file_id)
+}
+
+async fn replace_lsp_fixture_and_wait(
+    service: &mut LspService<BslLanguageServer>,
+    server: &BslLanguageServer,
+    uri: &Url,
+    file_id: bsl_analysis_v2::FileId,
+    version: i32,
+    fixture: &str,
+) {
+    let did_change = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: None,
+            range_length: None,
+            text: fixture.to_string(),
+        }],
+    };
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+
+    server.sync_v2_globals().await;
+    let expected_version = server
+        .latest_received_file_versions_v2
+        .read()
+        .await
+        .get(&file_id)
+        .copied()
+        .expect("latest received version for changed file");
+    assert_eq!(
+        expected_version, version,
+        "latest received version must track didChange"
+    );
+    assert!(
+        server
+            .analysis_v2
+            .wait_for_file_version(file_id, expected_version)
+            .await,
+        "analysis runtime must catch up after didChange"
+    );
+    wait_for_type_index_precompute_completion(server, file_id).await;
+}
+
+async fn lsp_completion_labels_at(
+    service: &mut LspService<BslLanguageServer>,
+    uri: &Url,
+    position: Position,
+) -> Vec<String> {
+    let completion_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/completion")
+                .id(12001)
+                .params(
+                    serde_json::to_value(CompletionParams {
+                        text_document_position: TextDocumentPositionParams {
+                            text_document: TextDocumentIdentifier { uri: uri.clone() },
+                            position,
+                        },
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                        partial_result_params: PartialResultParams::default(),
+                        context: Some(CompletionContext {
+                            trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+                            trigger_character: Some(".".to_string()),
+                        }),
+                    })
+                    .expect("CompletionParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("completion request")
+        .expect("completion response");
+    let completion_value =
+        serde_json::to_value(&completion_response).expect("serialize completion response");
+    let completion_result = completion_value
+        .get("result")
+        .cloned()
+        .expect("completion result field");
+    let completion: Option<CompletionResponse> =
+        serde_json::from_value(completion_result).expect("parse completion result");
+
+    normalize_lsp_member_labels(&completion.expect("completion result present"))
+}
+
+async fn lsp_hover_text_at(
+    service: &mut LspService<BslLanguageServer>,
+    uri: &Url,
+    position: Position,
+) -> String {
+    let hover_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/hover")
+                .id(12002)
+                .params(
+                    serde_json::to_value(HoverParams {
+                        text_document_position_params: TextDocumentPositionParams {
+                            text_document: TextDocumentIdentifier { uri: uri.clone() },
+                            position,
+                        },
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                    })
+                    .expect("HoverParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("hover request")
+        .expect("hover response");
+    let hover_value = serde_json::to_value(&hover_response).expect("serialize hover response");
+    let hover_result = hover_value
+        .get("result")
+        .cloned()
+        .expect("hover result field");
+    let hover: Option<Hover> = serde_json::from_value(hover_result).expect("parse hover result");
+
+    extract_hover_text(hover.expect("hover result present")).expect("hover text")
+}
+
+async fn snapshot_type_name_at_marker(
+    server: &BslLanguageServer,
+    file_id: bsl_analysis_v2::FileId,
+    fixture: &str,
+    marker: &str,
+) -> String {
+    let position = find_utf16_position_at_marker_tail(fixture, marker);
+    let analysis = server.analysis_v2.snapshot().await;
+    let byte_offset = analysis
+        .utf16_position_to_byte_offset(file_id, position.line, position.character)
+        .ok()
+        .flatten()
+        .expect("utf16_position_to_byte_offset");
+    let resolution = analysis
+        .type_at_byte_offset(file_id, byte_offset.min(u32::MAX as usize) as u32)
+        .expect("type_at_byte_offset query")
+        .expect("type_at_byte_offset result");
+
+    bsl_shared::formatting::user_facing_resolution_type_name(&resolution)
+}
+
+async fn snapshot_serve_only_type_name_at_marker(
+    server: &BslLanguageServer,
+    file_id: bsl_analysis_v2::FileId,
+    fixture: &str,
+    marker: &str,
+) -> Option<String> {
+    let position = find_utf16_position_at_marker_tail(fixture, marker);
+    let analysis = server.analysis_v2.snapshot().await;
+    let byte_offset = analysis
+        .utf16_position_to_byte_offset(file_id, position.line, position.character)
+        .ok()
+        .flatten()
+        .expect("utf16_position_to_byte_offset");
+    let profiled = analysis
+        .type_at_byte_offset_serve_only_profiled(file_id, byte_offset.min(u32::MAX as usize) as u32)
+        .expect("type_at_byte_offset_serve_only_profiled");
+
+    profiled
+        .resolution
+        .map(|resolution| bsl_shared::formatting::user_facing_resolution_type_name(&resolution))
+}
+
+async fn snapshot_semantic_diagnostic_messages(
+    server: &BslLanguageServer,
+    file_id: bsl_analysis_v2::FileId,
+) -> Vec<String> {
+    let analysis = server.analysis_v2.snapshot().await;
+    analysis
+        .semantic_diagnostics(file_id)
+        .ok()
+        .flatten()
+        .as_deref()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|diagnostic| diagnostic.message)
+        .collect()
+}
+
+async fn wait_for_type_index_precompute_completion(
+    server: &BslLanguageServer,
+    file_id: bsl_analysis_v2::FileId,
+) {
+    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(5);
+    loop {
+        let has_task = {
+            let tasks = server.type_index_precompute_tasks_v2.lock().await;
+            tasks.contains_key(&file_id)
+        };
+        if !has_task {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "type-index precompute did not finish for file_id={}",
+            file_id.0
+        );
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
+}
+
+fn message_has_unknown_member(message: &str, member_name: &str) -> bool {
+    let lower_message = message.to_lowercase();
+    lower_message.contains(&member_name.to_lowercase())
+        && (lower_message.contains("не существует") || lower_message.contains("не найден"))
+}
+
+fn message_has_unknown_key(message: &str) -> bool {
+    let lower_message = message.to_lowercase();
+    lower_message.contains("ключ") && lower_message.contains("не найден")
 }
 
 fn utf16_end_position(source: &str) -> Position {

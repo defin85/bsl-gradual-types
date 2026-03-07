@@ -1390,6 +1390,47 @@ fn map_index_access_materializes_inserted_value_type() {
 }
 
 #[test]
+fn map_effect_store_uses_generic_value_when_literal_specialization_is_missing() {
+    let mut effects = InstanceEffectStore::default();
+    let base_resolution = TypeResolution::generic(
+        "Соответствие",
+        &["Строка", "ДокументСсылка.Док1"],
+        Certainty::Known,
+    );
+    let binding = effects.new_map_instance(&base_resolution);
+    let instance_id = InstanceEffectStore::direct_instance(&binding).expect("instance id");
+
+    let resolved = effects
+        .resolve_map_value(instance_id, Some("ЛюбойКлюч"))
+        .expect("generic value resolution");
+
+    assert_eq!(resolved.type_name(), "ДокументСсылка.Док1");
+}
+
+#[test]
+fn map_index_access_without_effects_falls_back_to_proizvolny() {
+    let deps = deps_with_universal_collection_types();
+    let source = r#"Процедура Тест()
+    map = Новый Соответствие;
+    Ключ = "k";
+    probe = map[Ключ];
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "Documents/Док1/Ext/ObjectModule.bsl", deps);
+
+    let offset = source
+        .find("map[Ключ]")
+        .map(|idx| idx + "map[Ключ]".len() - 1)
+        .expect("map index") as u32;
+    let resolved = index
+        .type_at_byte_offset(offset)
+        .expect("type at map index");
+
+    assert_eq!(resolved.type_name(), "Произвольный");
+}
+
+#[test]
 fn universal_collection_effects_do_not_mutate_type_repository() {
     let repository_impl = Arc::new(InMemoryTypeRepository::new());
     repository_impl
@@ -1551,4 +1592,67 @@ fn structure_fields_survive_if_branch_merge() {
         .type_at_byte_offset(property_offset)
         .expect("type at merged property");
     assert_eq!(property.type_name(), "Строка");
+}
+
+#[test]
+fn structure_field_with_unknown_value_type_falls_back_to_proizvolny() {
+    let deps = deps_with_universal_collection_types();
+    let source = r#"Процедура Тест()
+    S = Новый Структура;
+    S.Вставить("СложноеПоле", ПолучитьНечёткийТип());
+    probe = S.СложноеПоле;
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "Documents/Док1/Ext/ObjectModule.bsl", deps);
+
+    let property_offset = source.rfind("СложноеПоле").expect("field property") as u32;
+    let property = index
+        .type_at_byte_offset(property_offset)
+        .expect("type at structure property");
+
+    assert_eq!(property.type_name(), "Произвольный");
+}
+
+#[test]
+fn value_table_column_description_variable_string_type_materializes_string() {
+    let deps = deps_with_universal_collection_types();
+    let source = r#"Процедура Тест()
+    ОписаниеТиповСтрока150 = Новый ОписаниеТипов(КвалификаторыСтрок.StringType);
+    ТЗ = Новый ТаблицаЗначений;
+    ТЗ.Колонки.Добавить("Идентификатор", ОписаниеТиповСтрока150);
+    Стр = ТЗ.Добавить();
+    probe = Стр.Идентификатор;
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "Documents/Док1/Ext/ObjectModule.bsl", deps);
+
+    let property_offset = source.rfind("Идентификатор").expect("row property") as u32;
+    let property = index
+        .type_at_byte_offset(property_offset)
+        .expect("type at row property");
+
+    assert_eq!(property.type_name(), "Строка");
+}
+
+#[test]
+fn value_table_column_with_unsupported_description_falls_back_to_proizvolny() {
+    let deps = deps_with_universal_collection_types();
+    let source = r#"Процедура Тест()
+    ТЗ = Новый ТаблицаЗначений;
+    ТЗ.Колонки.Добавить("СложнаяКолонка", ВычислитьОписаниеТипов());
+    Стр = ТЗ.Добавить();
+    probe = Стр.СложнаяКолонка;
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "Documents/Док1/Ext/ObjectModule.bsl", deps);
+
+    let property_offset = source.rfind("СложнаяКолонка").expect("row property") as u32;
+    let property = index
+        .type_at_byte_offset(property_offset)
+        .expect("type at row property");
+
+    assert_eq!(property.type_name(), "Произвольный");
 }

@@ -341,6 +341,10 @@ impl TypeEnv {
         self.instance_bindings.get(key)
     }
 
+    pub(super) fn description_type_resolution(&self, key: &str) -> Option<TypeResolution> {
+        self.description_type_bindings.get(key).cloned()
+    }
+
     pub(super) fn set_variable_value(
         &mut self,
         key: String,
@@ -350,9 +354,22 @@ impl TypeEnv {
         self.variables
             .insert(key.clone(), strip_structural_members(base_resolution));
         if let Some(binding) = binding {
-            self.instance_bindings.insert(key, binding);
+            self.instance_bindings.insert(key.clone(), binding);
         } else {
             self.instance_bindings.remove(&key);
+        }
+        self.description_type_bindings.remove(&key);
+    }
+
+    pub(super) fn set_description_type_resolution(
+        &mut self,
+        key: String,
+        resolution: Option<TypeResolution>,
+    ) {
+        if let Some(resolution) = resolution {
+            self.description_type_bindings.insert(key, resolution);
+        } else {
+            self.description_type_bindings.remove(&key);
         }
     }
 }
@@ -368,6 +385,21 @@ fn concrete_param_resolution(concrete: &ConcreteType) -> Option<TypeResolution> 
     } else {
         Some(TypeResolution::known(concrete.clone()))
     }
+}
+
+pub(super) fn arbitrary_resolution() -> TypeResolution {
+    let mut resolution = TypeResolution::explicit("Произвольный");
+    resolution.certainty = Certainty::InferredWeak;
+    resolution.source = ResolutionSource::Inferred;
+    resolution
+}
+
+pub(super) fn normalize_schema_value_type(resolution: TypeResolution) -> TypeResolution {
+    if resolution.is_unknown() || resolution.is_dynamic() {
+        return arbitrary_resolution();
+    }
+
+    resolution
 }
 
 fn span_to_structural(span: bsl_shared::ir::Span) -> StructuralMemberSpan {

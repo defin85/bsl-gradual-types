@@ -79,6 +79,7 @@ impl TypeIndex {
 struct TypeEnv {
     variables: HashMap<String, TypeResolution>,
     instance_bindings: HashMap<String, InstanceBinding>,
+    description_type_bindings: HashMap<String, TypeResolution>,
     instance_effects: InstanceEffectStore,
     local_function_summaries: Arc<HashMap<String, LocalFunctionSummary>>,
     module_type: Option<ModuleType>,
@@ -89,6 +90,7 @@ impl Default for TypeEnv {
         Self {
             variables: HashMap::new(),
             instance_bindings: HashMap::new(),
+            description_type_bindings: HashMap::new(),
             instance_effects: InstanceEffectStore::default(),
             local_function_summaries: Arc::new(HashMap::new()),
             module_type: None,
@@ -118,7 +120,8 @@ mod local_function_summaries;
 
 use self::expression_helpers::{expr_span, signature_lookup_type_name};
 use self::instance_effects::{
-    merge_resolutions, strip_structural_members, InstanceBinding, InstanceEffectStore, InstanceId,
+    arbitrary_resolution, merge_resolutions, normalize_schema_value_type, strip_structural_members,
+    InstanceBinding, InstanceEffectStore, InstanceId,
 };
 
 impl TypeInferencer {
@@ -341,6 +344,7 @@ impl TypeInferencer {
                 let value_type = self.infer_expr(value, env, index);
                 if let Expression::Identifier { name, .. } = target {
                     let key = name.to_lowercase();
+                    let description_type = self.extract_type_from_description_expr(value, env);
                     let binding = self.binding_for_assignment_value(value, &value_type, env);
                     let base_resolution = binding
                         .as_ref()
@@ -351,6 +355,7 @@ impl TypeInferencer {
                         base_resolution,
                         binding.map(|(_base_resolution, binding)| binding),
                     );
+                    env.set_description_type_resolution(key.clone(), description_type);
                     // Hover/type-at-position на имени переменной после присваивания
                     // должен видеть новый тип.
                     if let Some(updated) = env.variable_resolution(&key) {
@@ -843,11 +848,12 @@ impl TypeInferencer {
         {
             if let Some(instance_id) = self.direct_instance_for_expr(object, env) {
                 if env.instance_effects.is_map_instance(instance_id) && args.len() >= 2 {
+                    let value_type = normalize_schema_value_type(arg_types[1].clone());
                     env.instance_effects.insert_map_value(
                         instance_id,
                         self.extract_literal_key_with_normalized(&args[0]),
                         arg_types.first().cloned(),
-                        arg_types[1].clone(),
+                        value_type,
                         expr_span(&args[0]),
                     );
                     let receiver = self.infer_expr(object, env, _index);
@@ -859,7 +865,7 @@ impl TypeInferencer {
                         env.instance_effects.insert_structure_field(
                             instance_id,
                             &field_name,
-                            arg_types[1].clone(),
+                            normalize_schema_value_type(arg_types[1].clone()),
                             expr_span(&args[0]),
                         );
                     }
@@ -874,12 +880,13 @@ impl TypeInferencer {
                 let column_name = args.first().and_then(|expr| self.extract_literal_key(expr));
                 let column_type = args
                     .get(1)
-                    .and_then(|expr| self.extract_type_from_description_expr(expr, env));
+                    .and_then(|expr| self.extract_type_from_description_expr(expr, env))
+                    .map(normalize_schema_value_type);
                 if let Some(column_name) = column_name {
                     env.instance_effects.insert_value_table_column(
                         table_instance,
                         &column_name,
-                        column_type.unwrap_or_else(TypeResolution::unknown),
+                        column_type.unwrap_or_else(arbitrary_resolution),
                         expr_span(args.first().unwrap_or(object)),
                     );
                 }
@@ -953,9 +960,32 @@ impl TypeInferencer {
             } if type_name.trim().eq_ignore_ascii_case("ОписаниеТипов") => args
                 .first()
                 .and_then(|arg| self.extract_type_from_description_expr(arg, env)),
-            Expression::Identifier { name, .. } => env.variable_resolution(&name.to_lowercase()),
+            Expression::Identifier { name, .. } => {
+                env.description_type_resolution(&name.to_lowercase())
+            }
+            Expression::PropertyAccess {
+                object, property, ..
+            } => self.extract_type_from_description_qualifier(object, property),
             _ => None,
         }
+    }
+
+    fn extract_type_from_description_qualifier(
+        &self,
+        object: &Expression,
+        property: &str,
+    ) -> Option<TypeResolution> {
+        let Expression::Identifier { name, .. } = object else {
+            return None;
+        };
+
+        if name.eq_ignore_ascii_case("КвалификаторыСтрок")
+            && property.eq_ignore_ascii_case("StringType")
+        {
+            return Some(TypeResolution::primitive("Строка"));
+        }
+
+        None
     }
 
     fn resolve_declared_type_name(&self, type_name: &str) -> TypeResolution {
@@ -990,7 +1020,8 @@ impl TypeInferencer {
             let value_type = arg_types
                 .get(position + 1)
                 .cloned()
-                .unwrap_or_else(TypeResolution::unknown);
+                .map(normalize_schema_value_type)
+                .unwrap_or_else(arbitrary_resolution);
             resolution.add_structural_member(bsl_shared::domain::types::StructuralMember::new(
                 field_name.to_string(),
                 value_type,
@@ -1035,8 +1066,22 @@ impl TypeInferencer {
                 }
                 _ => None,
             };
+            let merged_description = match (
+                left.description_type_resolution(&key),
+                right.description_type_resolution(&key),
+            ) {
+                (Some(left_desc), Some(right_desc))
+                    if left_desc
+                        .type_name()
+                        .eq_ignore_ascii_case(&right_desc.type_name()) =>
+                {
+                    Some(left_desc)
+                }
+                _ => None,
+            };
 
-            merged.set_variable_value(key, merged_base, merged_binding);
+            merged.set_variable_value(key.clone(), merged_base, merged_binding);
+            merged.set_description_type_resolution(key, merged_description);
         }
 
         merged
@@ -1081,7 +1126,7 @@ impl TypeInferencer {
         }
 
         let _ = expr;
-        TypeResolution::unknown()
+        arbitrary_resolution()
     }
 
     fn infer_global_function_call(&self, name: &str, env: &TypeEnv) -> TypeResolution {

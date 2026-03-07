@@ -10,8 +10,8 @@ use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::SignatureIndex;
 use bsl_shared::domain::types::MetadataKind;
 use bsl_shared::domain::types::{
-    Certainty, ContextualTypeDescriptor, FacetKind, ResolutionMetadata, ResolutionResult,
-    ResolutionSource,
+    Certainty, ContextualTypeDescriptor, FacetKind, GenericType, ResolutionMetadata,
+    ResolutionResult, ResolutionSource,
 };
 use bsl_shared::domain::types::{ConcreteType, TypeResolution, UncertaintyReason, WeightedType};
 use bsl_shared::domain::TypeMetadataLookup;
@@ -78,6 +78,8 @@ impl TypeIndex {
 #[derive(Clone)]
 struct TypeEnv {
     variables: HashMap<String, TypeResolution>,
+    instance_bindings: HashMap<String, InstanceBinding>,
+    instance_effects: InstanceEffectStore,
     local_function_summaries: Arc<HashMap<String, LocalFunctionSummary>>,
     module_type: Option<ModuleType>,
 }
@@ -86,6 +88,8 @@ impl Default for TypeEnv {
     fn default() -> Self {
         Self {
             variables: HashMap::new(),
+            instance_bindings: HashMap::new(),
+            instance_effects: InstanceEffectStore::default(),
             local_function_summaries: Arc::new(HashMap::new()),
             module_type: None,
         }
@@ -107,10 +111,15 @@ struct TypeInferencer {
 
 #[path = "type_inference_v2/expression_helpers.rs"]
 mod expression_helpers;
+#[path = "type_inference_v2/instance_effects.rs"]
+mod instance_effects;
 #[path = "type_inference_v2/local_function_summaries.rs"]
 mod local_function_summaries;
 
 use self::expression_helpers::{expr_span, signature_lookup_type_name};
+use self::instance_effects::{
+    merge_resolutions, strip_structural_members, InstanceBinding, InstanceEffectStore, InstanceId,
+};
 
 impl TypeInferencer {
     fn new(deps: Arc<SemanticDeps>) -> Self {
@@ -326,16 +335,27 @@ impl TypeInferencer {
                     .as_deref()
                     .map(TypeResolution::explicit)
                     .unwrap_or_else(TypeResolution::unknown);
-                env.variables.insert(name.to_lowercase(), resolution);
+                env.set_variable_value(name.to_lowercase(), resolution, None);
             }
             Statement::Assignment { target, value, .. } => {
                 let value_type = self.infer_expr(value, env, index);
                 if let Expression::Identifier { name, .. } = target {
                     let key = name.to_lowercase();
-                    env.variables.insert(key.clone(), value_type);
+                    let binding = self.binding_for_assignment_value(value, &value_type, env);
+                    let base_resolution = binding
+                        .as_ref()
+                        .map(|(base_resolution, _binding)| base_resolution.clone())
+                        .unwrap_or_else(|| value_type.clone());
+                    env.set_variable_value(
+                        key.clone(),
+                        base_resolution,
+                        binding.map(|(_base_resolution, binding)| binding),
+                    );
                     // Hover/type-at-position на имени переменной после присваивания
                     // должен видеть новый тип.
-                    self.record(expr_span(target), env.variables[&key].clone(), index);
+                    if let Some(updated) = env.variable_resolution(&key) {
+                        self.record(expr_span(target), updated, index);
+                    }
                 }
             }
             Statement::If {
@@ -345,25 +365,29 @@ impl TypeInferencer {
                 ..
             } => {
                 let _ = self.infer_expr(condition, env, index);
-                let mut then_env = env.clone();
+                let base_env = env.clone();
+                let mut then_env = base_env.clone();
                 for stmt in then_body {
                     self.visit_statement(stmt, &mut then_env, index);
                 }
+                let mut else_env = base_env.clone();
                 if let Some(else_body) = else_body {
-                    let mut else_env = env.clone();
                     for stmt in else_body {
                         self.visit_statement(stmt, &mut else_env, index);
                     }
                 }
+                *env = self.merge_control_flow_env(&base_env, &then_env, &else_env);
             }
             Statement::While {
                 condition, body, ..
             } => {
                 let _ = self.infer_expr(condition, env, index);
-                let mut body_env = env.clone();
+                let base_env = env.clone();
+                let mut body_env = base_env.clone();
                 for stmt in body {
                     self.visit_statement(stmt, &mut body_env, index);
                 }
+                *env = self.merge_control_flow_env(&base_env, &body_env, &base_env);
             }
             Statement::For {
                 variable,
@@ -374,13 +398,17 @@ impl TypeInferencer {
             } => {
                 let _ = self.infer_expr(start, env, index);
                 let _ = self.infer_expr(end, env, index);
-                let mut body_env = env.clone();
-                body_env
-                    .variables
-                    .insert(variable.to_lowercase(), TypeResolution::primitive("Число"));
+                let base_env = env.clone();
+                let mut body_env = base_env.clone();
+                body_env.set_variable_value(
+                    variable.to_lowercase(),
+                    TypeResolution::primitive("Число"),
+                    None,
+                );
                 for stmt in body {
                     self.visit_statement(stmt, &mut body_env, index);
                 }
+                *env = self.merge_control_flow_env(&base_env, &body_env, &base_env);
             }
             Statement::ForEach {
                 variable,
@@ -388,14 +416,22 @@ impl TypeInferencer {
                 body,
                 ..
             } => {
-                let _ = self.infer_expr(collection, env, index);
-                let mut body_env = env.clone();
-                body_env
-                    .variables
-                    .insert(variable.to_lowercase(), TypeResolution::unknown());
+                let collection_type = self.infer_expr(collection, env, index);
+                let base_env = env.clone();
+                let mut body_env = base_env.clone();
+                let foreach_binding = self.binding_for_foreach_collection(collection, env);
+                body_env.set_variable_value(
+                    variable.to_lowercase(),
+                    foreach_binding
+                        .as_ref()
+                        .map(|(resolution, _binding)| resolution.clone())
+                        .unwrap_or(collection_type),
+                    foreach_binding.map(|(_resolution, binding)| binding),
+                );
                 for stmt in body {
                     self.visit_statement(stmt, &mut body_env, index);
                 }
+                *env = self.merge_control_flow_env(&base_env, &body_env, &base_env);
             }
             Statement::Return {
                 value: Some(value), ..
@@ -408,14 +444,16 @@ impl TypeInferencer {
                 except_body,
                 ..
             } => {
-                let mut try_env = env.clone();
+                let base_env = env.clone();
+                let mut try_env = base_env.clone();
                 for stmt in try_body {
                     self.visit_statement(stmt, &mut try_env, index);
                 }
-                let mut except_env = env.clone();
+                let mut except_env = base_env.clone();
                 for stmt in except_body {
                     self.visit_statement(stmt, &mut except_env, index);
                 }
+                *env = self.merge_control_flow_env(&base_env, &try_env, &except_env);
             }
             Statement::Call { expression, .. } => {
                 let _ = self.infer_expr(expression, env, index);
@@ -457,12 +495,15 @@ impl TypeInferencer {
                 if directive_disables_form_context(*compiler_directive) {
                     for key in FORM_CONTEXT_BOUND_SYMBOL_KEYS {
                         fn_env.variables.remove(key);
+                        fn_env.instance_bindings.remove(key);
                     }
                 }
                 for param in params {
-                    fn_env
-                        .variables
-                        .insert(param.to_lowercase(), TypeResolution::unknown());
+                    fn_env.set_variable_value(
+                        param.to_lowercase(),
+                        TypeResolution::unknown(),
+                        None,
+                    );
                 }
                 for stmt in body {
                     self.visit_statement(stmt, &mut fn_env, index);
@@ -495,24 +536,14 @@ impl TypeInferencer {
             Expression::Identifier { name, .. } => self.infer_identifier(name, env),
             Expression::New {
                 type_name, args, ..
-            } => {
-                for arg in args {
-                    let _ = self.infer_expr(arg, env, index);
-                }
-                self.infer_new_expression(type_name)
-            }
+            } => self.infer_new_expression(type_name, args, env, index),
             Expression::PropertyAccess {
                 object, property, ..
             } => {
                 let object_resolution = self.infer_expr(object, env, index);
                 self.infer_property_access(&object_resolution, property)
             }
-            Expression::Call { function, args, .. } => {
-                for arg in args {
-                    let _ = self.infer_expr(arg, env, index);
-                }
-                self.infer_call(function, env, index)
-            }
+            Expression::Call { function, args, .. } => self.infer_call(function, args, env, index),
             Expression::Binary {
                 left,
                 operator,
@@ -548,9 +579,9 @@ impl TypeInferencer {
                 index: index_expr,
                 ..
             } => {
-                let _ = self.infer_expr(object, env, index);
+                let object_resolution = self.infer_expr(object, env, index);
                 let _ = self.infer_expr(index_expr, env, index);
-                TypeResolution::unknown()
+                self.resolve_index_access(expr, object, index_expr, &object_resolution, env)
             }
             Expression::Await { expression, .. } => self.infer_expr(expression, env, index),
         };
@@ -571,7 +602,7 @@ impl TypeInferencer {
             return TypeResolution::primitive("Булево");
         }
 
-        if let Some(value) = env.variables.get(&name_lower) {
+        if let Some(value) = env.variable_resolution(&name_lower) {
             return value.clone();
         }
 
@@ -600,13 +631,21 @@ impl TypeInferencer {
         TypeResolution::undeclared_variable(name)
     }
 
-    fn infer_new_expression(&self, type_name: &str) -> TypeResolution {
+    fn infer_new_expression(
+        &self,
+        type_name: &str,
+        args: &[Expression],
+        env: &mut TypeEnv,
+        index: &mut TypeIndex,
+    ) -> TypeResolution {
         let clean = type_name.trim().trim_end_matches("()").trim();
-        match clean {
+        let mut resolution = match clean {
             "Массив" => TypeResolution::generic("Массив", &["?"], Certainty::InferredWeak),
             "Соответствие" => {
                 TypeResolution::generic("Соответствие", &["?", "?"], Certainty::InferredWeak)
             }
+            "Структура" => TypeResolution::explicit("Структура"),
+            "ТаблицаЗначений" => TypeResolution::explicit("ТаблицаЗначений"),
             "Список" => TypeResolution::generic("Список", &["?"], Certainty::InferredWeak),
             _ => {
                 if self.deps.repository.find_type(clean).is_some() {
@@ -620,7 +659,18 @@ impl TypeInferencer {
                     res
                 }
             }
+        };
+
+        let arg_types: Vec<TypeResolution> = args
+            .iter()
+            .map(|arg| self.infer_expr(arg, env, index))
+            .collect();
+
+        if clean == "Структура" {
+            self.apply_structure_constructor_members(&mut resolution, args, &arg_types);
         }
+
+        resolution
     }
 
     fn infer_property_access(
@@ -648,19 +698,390 @@ impl TypeInferencer {
     fn infer_call(
         &self,
         function: &Expression,
+        args: &[Expression],
         env: &mut TypeEnv,
         index: &mut TypeIndex,
     ) -> TypeResolution {
+        let arg_types: Vec<TypeResolution> = args
+            .iter()
+            .map(|arg| self.infer_expr(arg, env, index))
+            .collect();
+
         match function {
             Expression::Identifier { name, .. } => self.infer_global_function_call(name, env),
             Expression::PropertyAccess {
                 object, property, ..
             } => {
                 let receiver = self.infer_expr(object, env, index);
+                if let Some(resolved) = self.try_apply_universal_collection_method(
+                    object, property, args, &arg_types, env, index,
+                ) {
+                    return resolved;
+                }
+
                 self.infer_method_call(&receiver, property)
             }
             _ => TypeResolution::unknown(),
         }
+    }
+
+    fn binding_for_assignment_value(
+        &self,
+        expr: &Expression,
+        value_type: &TypeResolution,
+        env: &mut TypeEnv,
+    ) -> Option<(TypeResolution, InstanceBinding)> {
+        match expr {
+            Expression::Identifier { name, .. } => {
+                let key = name.to_lowercase();
+                let base_resolution = env.variable_base_resolution(&key)?.clone();
+                let binding = env.variable_binding(&key)?.clone();
+                Some((base_resolution, binding))
+            }
+            Expression::New {
+                type_name, args, ..
+            } => {
+                let clean = type_name.trim().trim_end_matches("()").trim();
+                let base_resolution = strip_structural_members(value_type.clone());
+                let binding = match clean {
+                    "Соответствие" => {
+                        env.instance_effects.new_map_instance(&base_resolution)
+                    }
+                    "Структура" => {
+                        let binding = env.instance_effects.new_structure_instance();
+                        if let Some(instance_id) = InstanceEffectStore::direct_instance(&binding) {
+                            for member in value_type.structural_members() {
+                                env.instance_effects.insert_structure_field(
+                                    instance_id,
+                                    &member.canonical_name,
+                                    (*member.member_type).clone(),
+                                    bsl_shared::ir::Span::new(
+                                        member
+                                            .source_span
+                                            .map(|span| span.start)
+                                            .unwrap_or_else(|| expr_span(expr).start),
+                                        member
+                                            .source_span
+                                            .map(|span| span.end)
+                                            .unwrap_or_else(|| expr_span(expr).end),
+                                    ),
+                                );
+                            }
+                        }
+                        binding
+                    }
+                    "ТаблицаЗначений" => {
+                        env.instance_effects.new_value_table_instance()
+                    }
+                    _ => return None,
+                };
+
+                let _ = args;
+                Some((base_resolution, binding))
+            }
+            Expression::Call { function, .. } => {
+                let Expression::PropertyAccess {
+                    object, property, ..
+                } = function.as_ref()
+                else {
+                    return None;
+                };
+
+                if !property.eq_ignore_ascii_case("Добавить") {
+                    return None;
+                }
+
+                let table_instance = self.direct_instance_for_expr(object, env)?;
+                if !env.instance_effects.is_value_table_instance(table_instance) {
+                    return None;
+                }
+
+                let base_resolution = TypeResolution::explicit("СтрокаТаблицыЗначений");
+                let binding = env.instance_effects.value_table_row_binding(table_instance);
+                Some((base_resolution, binding))
+            }
+            _ => None,
+        }
+    }
+
+    fn binding_for_foreach_collection(
+        &self,
+        collection: &Expression,
+        env: &TypeEnv,
+    ) -> Option<(TypeResolution, InstanceBinding)> {
+        let table_instance = self.direct_instance_for_expr(collection, env)?;
+        if !env.instance_effects.is_value_table_instance(table_instance) {
+            return None;
+        }
+
+        let base_resolution = TypeResolution::explicit("СтрокаТаблицыЗначений");
+        let binding = env.instance_effects.value_table_row_binding(table_instance);
+        Some((base_resolution, binding))
+    }
+
+    fn direct_instance_for_expr(&self, expr: &Expression, env: &TypeEnv) -> Option<InstanceId> {
+        match expr {
+            Expression::Identifier { name, .. } => {
+                let key = name.to_lowercase();
+                env.variable_binding(&key)
+                    .and_then(InstanceEffectStore::direct_instance)
+            }
+            _ => None,
+        }
+    }
+
+    fn try_apply_universal_collection_method(
+        &self,
+        object: &Expression,
+        property: &str,
+        args: &[Expression],
+        arg_types: &[TypeResolution],
+        env: &mut TypeEnv,
+        _index: &mut TypeIndex,
+    ) -> Option<TypeResolution> {
+        if property.eq_ignore_ascii_case("Вставить") || property.eq_ignore_ascii_case("Установить")
+        {
+            if let Some(instance_id) = self.direct_instance_for_expr(object, env) {
+                if env.instance_effects.is_map_instance(instance_id) && args.len() >= 2 {
+                    env.instance_effects.insert_map_value(
+                        instance_id,
+                        self.extract_literal_key_with_normalized(&args[0]),
+                        arg_types.first().cloned(),
+                        arg_types[1].clone(),
+                        expr_span(&args[0]),
+                    );
+                    let receiver = self.infer_expr(object, env, _index);
+                    return Some(self.infer_method_call(&receiver, property));
+                }
+
+                if env.instance_effects.is_structure_instance(instance_id) && args.len() >= 2 {
+                    if let Some(field_name) = self.extract_literal_key(&args[0]) {
+                        env.instance_effects.insert_structure_field(
+                            instance_id,
+                            &field_name,
+                            arg_types[1].clone(),
+                            expr_span(&args[0]),
+                        );
+                    }
+                    let receiver = self.infer_expr(object, env, _index);
+                    return Some(self.infer_method_call(&receiver, property));
+                }
+            }
+        }
+
+        if property.eq_ignore_ascii_case("Добавить") {
+            if let Some(table_instance) = self.value_table_columns_owner_instance(object, env) {
+                let column_name = args.first().and_then(|expr| self.extract_literal_key(expr));
+                let column_type = args
+                    .get(1)
+                    .and_then(|expr| self.extract_type_from_description_expr(expr, env));
+                if let Some(column_name) = column_name {
+                    env.instance_effects.insert_value_table_column(
+                        table_instance,
+                        &column_name,
+                        column_type.unwrap_or_else(TypeResolution::unknown),
+                        expr_span(args.first().unwrap_or(object)),
+                    );
+                }
+                let receiver = self.infer_expr(object, env, _index);
+                return Some(self.infer_method_call(&receiver, property));
+            }
+
+            if let Some(table_instance) = self.direct_instance_for_expr(object, env) {
+                if env.instance_effects.is_value_table_instance(table_instance) {
+                    let binding = env.instance_effects.value_table_row_binding(table_instance);
+                    let base_resolution = TypeResolution::explicit("СтрокаТаблицыЗначений");
+                    return Some(
+                        env.instance_effects
+                            .materialize(&base_resolution, Some(&binding)),
+                    );
+                }
+            }
+        }
+
+        None
+    }
+
+    fn value_table_columns_owner_instance(
+        &self,
+        expr: &Expression,
+        env: &TypeEnv,
+    ) -> Option<InstanceId> {
+        let Expression::PropertyAccess {
+            object, property, ..
+        } = expr
+        else {
+            return None;
+        };
+
+        if !property.eq_ignore_ascii_case("Колонки") {
+            return None;
+        }
+
+        let instance_id = self.direct_instance_for_expr(object, env)?;
+        env.instance_effects
+            .is_value_table_instance(instance_id)
+            .then_some(instance_id)
+    }
+
+    fn extract_literal_key_with_normalized(&self, expr: &Expression) -> Option<(String, String)> {
+        let canonical = self.extract_literal_key(expr)?;
+        Some((
+            bsl_shared::domain::type_id::normalize(&canonical),
+            canonical,
+        ))
+    }
+
+    fn extract_literal_key(&self, expr: &Expression) -> Option<String> {
+        match expr {
+            Expression::String { value, .. } => Some(value.clone()),
+            Expression::Number { value, .. } => Some(value.to_string()),
+            Expression::Boolean { value, .. } => Some(value.to_string()),
+            _ => None,
+        }
+    }
+
+    fn extract_type_from_description_expr(
+        &self,
+        expr: &Expression,
+        env: &TypeEnv,
+    ) -> Option<TypeResolution> {
+        match expr {
+            Expression::String { value, .. } => Some(self.resolve_declared_type_name(value)),
+            Expression::New {
+                type_name, args, ..
+            } if type_name.trim().eq_ignore_ascii_case("ОписаниеТипов") => args
+                .first()
+                .and_then(|arg| self.extract_type_from_description_expr(arg, env)),
+            Expression::Identifier { name, .. } => env.variable_resolution(&name.to_lowercase()),
+            _ => None,
+        }
+    }
+
+    fn resolve_declared_type_name(&self, type_name: &str) -> TypeResolution {
+        if let Some(resolved) = self.try_resolve_configuration_type(type_name) {
+            return resolved;
+        }
+
+        let resolved = self.resolver.resolve_expression_sync(type_name);
+        if resolved.is_unknown() && self.deps.repository.find_type(type_name).is_some() {
+            return TypeResolution::explicit(type_name);
+        }
+
+        resolved
+    }
+
+    fn apply_structure_constructor_members(
+        &self,
+        resolution: &mut TypeResolution,
+        args: &[Expression],
+        arg_types: &[TypeResolution],
+    ) {
+        let Some(Expression::String { value: names, .. }) = args.first() else {
+            return;
+        };
+
+        for (position, field_name) in names
+            .split(',')
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .enumerate()
+        {
+            let value_type = arg_types
+                .get(position + 1)
+                .cloned()
+                .unwrap_or_else(TypeResolution::unknown);
+            resolution.add_structural_member(bsl_shared::domain::types::StructuralMember::new(
+                field_name.to_string(),
+                value_type,
+                args.get(position + 1).map(|expr| {
+                    let span = expr_span(expr);
+                    bsl_shared::domain::types::StructuralMemberSpan::new(span.start, span.end)
+                }),
+                Certainty::Inferred,
+            ));
+        }
+    }
+
+    fn merge_control_flow_env(&self, base: &TypeEnv, left: &TypeEnv, right: &TypeEnv) -> TypeEnv {
+        let mut merged = base.clone();
+        merged.instance_effects = InstanceEffectStore::merge_branch(
+            &base.instance_effects,
+            &left.instance_effects,
+            &right.instance_effects,
+        );
+
+        let variable_keys: BTreeSet<String> = base
+            .variables
+            .keys()
+            .chain(left.variables.keys())
+            .chain(right.variables.keys())
+            .cloned()
+            .collect();
+
+        for key in variable_keys {
+            let left_base = left.variable_base_resolution(&key);
+            let right_base = right.variable_base_resolution(&key);
+            let merged_base = match (left_base, right_base) {
+                (Some(left_base), Some(right_base)) => merge_resolutions(left_base, right_base),
+                (Some(left_base), None) => left_base.clone(),
+                (None, Some(right_base)) => right_base.clone(),
+                (None, None) => continue,
+            };
+
+            let merged_binding = match (left.variable_binding(&key), right.variable_binding(&key)) {
+                (Some(left_binding), Some(right_binding)) if left_binding == right_binding => {
+                    Some(left_binding.clone())
+                }
+                _ => None,
+            };
+
+            merged.set_variable_value(key, merged_base, merged_binding);
+        }
+
+        merged
+    }
+
+    fn resolve_index_access(
+        &self,
+        expr: &Expression,
+        object: &Expression,
+        index_expr: &Expression,
+        object_resolution: &TypeResolution,
+        env: &TypeEnv,
+    ) -> TypeResolution {
+        if let Some(instance_id) = self.direct_instance_for_expr(object, env) {
+            if env.instance_effects.is_map_instance(instance_id) {
+                let literal_key = self.extract_literal_key(index_expr);
+                if let Some(resolved) = env
+                    .instance_effects
+                    .resolve_map_value(instance_id, literal_key.as_deref())
+                {
+                    return resolved;
+                }
+            }
+        }
+
+        if let ResolutionResult::Generic(GenericType {
+            base_type,
+            type_params,
+        }) = &object_resolution.result
+        {
+            if base_type.eq_ignore_ascii_case("Соответствие") {
+                if let Some(value_type) = type_params.get(1).and_then(|param| {
+                    (!matches!(
+                        param,
+                        ConcreteType::Special(bsl_shared::domain::types::SpecialType::Undefined)
+                    ))
+                    .then(|| TypeResolution::known(param.clone()))
+                }) {
+                    return value_type;
+                }
+            }
+        }
+
+        let _ = expr;
+        TypeResolution::unknown()
     }
 
     fn infer_global_function_call(&self, name: &str, env: &TypeEnv) -> TypeResolution {

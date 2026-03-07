@@ -58,10 +58,9 @@ impl TypeInferencer {
         }
 
         let owner_resolution = env
-            .variables
-            .get("этотобъект")
-            .or_else(|| env.variables.get("объект"))?;
-        let resolved = self.resolve_property_type_by_name(owner_resolution, name_lower)?;
+            .variable_resolution("этотобъект")
+            .or_else(|| env.variable_resolution("объект"))?;
+        let resolved = self.resolve_property_type_by_name(&owner_resolution, name_lower)?;
         tracing::debug!(
             metric = "applied_owner_member_identifier_fallback_hit_total",
             identifier = name,

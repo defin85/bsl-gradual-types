@@ -84,6 +84,64 @@ fn deps_with_common_module_method() -> Arc<SemanticDeps> {
     })
 }
 
+fn deps_with_universal_collection_types() -> Arc<SemanticDeps> {
+    let repository_impl = Arc::new(InMemoryTypeRepository::new());
+    repository_impl
+        .load_types(vec![
+            RawTypeData {
+                name: "Соответствие".to_string(),
+                source: RawDataSource::Platform,
+                methods: vec![],
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "Структура".to_string(),
+                source: RawDataSource::Platform,
+                methods: vec![],
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "ТаблицаЗначений".to_string(),
+                source: RawDataSource::Platform,
+                properties: vec![RawPropertyData {
+                    name: "Колонки".to_string(),
+                    prop_type: "КоллекцияКолонокТаблицыЗначений".to_string(),
+                    is_readonly: false,
+                }],
+                methods: vec![],
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "КоллекцияКолонокТаблицыЗначений".to_string(),
+                source: RawDataSource::Platform,
+                methods: vec![],
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "СтрокаТаблицыЗначений".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "ОписаниеТипов".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+        ])
+        .expect("load universal collection types");
+
+    let repository =
+        repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+    let resolver = Arc::new(TypeResolver::new(repository.clone()));
+
+    Arc::new(SemanticDeps {
+        repository,
+        signature_index: SignatureIndex::new(),
+        resolver: Some(resolver),
+        platform_signatures_loaded: true,
+    })
+}
+
 fn deps_with_document_create_document_method() -> Arc<SemanticDeps> {
     let repository_impl = Arc::new(InMemoryTypeRepository::new());
     repository_impl
@@ -1306,4 +1364,191 @@ fn local_parameter_shadows_global_collection_in_identifier_resolution() {
         "procedure parameter must shadow global collection and stay unknown, got: {:?}",
         resolved
     );
+}
+
+#[test]
+fn map_index_access_materializes_inserted_value_type() {
+    let deps = deps_with_universal_collection_types();
+    let source = r#"Процедура Тест()
+    map = Новый Соответствие;
+    map.Вставить("k", Новый ТаблицаЗначений);
+    probe = map["k"];
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "Documents/Док1/Ext/ObjectModule.bsl", deps);
+
+    let offset = source
+        .find("map[\"k\"]")
+        .map(|idx| idx + "map[\"k\"]".len() - 1)
+        .expect("map index") as u32;
+    let resolved = index
+        .type_at_byte_offset(offset)
+        .expect("type at map index");
+
+    assert_eq!(resolved.type_name(), "ТаблицаЗначений");
+}
+
+#[test]
+fn universal_collection_effects_do_not_mutate_type_repository() {
+    let repository_impl = Arc::new(InMemoryTypeRepository::new());
+    repository_impl
+        .load_types(vec![
+            RawTypeData {
+                name: "Соответствие".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "Структура".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "ТаблицаЗначений".to_string(),
+                source: RawDataSource::Platform,
+                properties: vec![RawPropertyData {
+                    name: "Колонки".to_string(),
+                    prop_type: "КоллекцияКолонокТаблицыЗначений".to_string(),
+                    is_readonly: false,
+                }],
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "КоллекцияКолонокТаблицыЗначений".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "СтрокаТаблицыЗначений".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "ОписаниеТипов".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+        ])
+        .expect("load universal collection types");
+
+    let repository =
+        repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+    let deps = Arc::new(SemanticDeps {
+        repository,
+        signature_index: SignatureIndex::new(),
+        resolver: Some(Arc::new(TypeResolver::new(
+            repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>
+        ))),
+        platform_signatures_loaded: true,
+    });
+    let before = repository_impl.get_all_types();
+
+    let source = r#"Процедура Тест()
+    map = Новый Соответствие;
+    map.Вставить("k", Новый ТаблицаЗначений);
+    S = Новый Структура;
+    S.Вставить("Идентификатор", "A-01");
+    ТЗ = Новый ТаблицаЗначений;
+    ТЗ.Колонки.Добавить("Идентификатор", Новый ОписаниеТипов("Строка"));
+    Стр = ТЗ.Добавить();
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let _index = build_type_index_with_path(&program, "Documents/Док1/Ext/ObjectModule.bsl", deps);
+
+    let after = repository_impl.get_all_types();
+    assert_eq!(after.len(), before.len());
+    assert_eq!(
+        after.iter().map(|ty| ty.name.as_str()).collect::<Vec<_>>(),
+        before.iter().map(|ty| ty.name.as_str()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn typed_structure_alias_keeps_structural_members() {
+    let deps = deps_with_universal_collection_types();
+    let source = r#"Процедура Тест()
+    S = Новый Структура;
+    S.Вставить("Идентификатор", "A-01");
+    S2 = S;
+    probe = S2.Идентификатор;
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "Documents/Док1/Ext/ObjectModule.bsl", deps);
+
+    let owner_offset = source.rfind("S2.Идентификатор").expect("owner") as u32;
+    let owner = index
+        .type_at_byte_offset(owner_offset)
+        .expect("type at structure owner");
+    assert!(owner.find_structural_member("идентификатор").is_some());
+
+    let property_offset = source.rfind("Идентификатор").expect("property") as u32;
+    let property = index
+        .type_at_byte_offset(property_offset)
+        .expect("type at structure property");
+    assert_eq!(property.type_name(), "Строка");
+}
+
+#[test]
+fn value_table_add_row_materializes_typed_row_members() {
+    let deps = deps_with_universal_collection_types();
+    let source = r#"Процедура Тест()
+    ТЗ = Новый ТаблицаЗначений;
+    ТЗ.Колонки.Добавить("Идентификатор", Новый ОписаниеТипов("Строка"));
+    Стр = ТЗ.Добавить();
+    probe = Стр.Идентификатор;
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "Documents/Док1/Ext/ObjectModule.bsl", deps);
+
+    let property_offset = source.rfind("Идентификатор").expect("row property") as u32;
+    let property = index
+        .type_at_byte_offset(property_offset)
+        .expect("type at row property");
+    assert_eq!(property.type_name(), "Строка");
+}
+
+#[test]
+fn foreach_over_value_table_materializes_typed_row_members() {
+    let deps = deps_with_universal_collection_types();
+    let source = r#"Процедура Тест()
+    ТЗ = Новый ТаблицаЗначений;
+    ТЗ.Колонки.Добавить("Идентификатор", Новый ОписаниеТипов("Строка"));
+    Для каждого Стр Из ТЗ Цикл
+        probe = Стр.Идентификатор;
+    КонецЦикла;
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "Documents/Док1/Ext/ObjectModule.bsl", deps);
+
+    let property_offset = source.rfind("Идентификатор").expect("foreach row property") as u32;
+    let property = index
+        .type_at_byte_offset(property_offset)
+        .expect("type at foreach row property");
+    assert_eq!(property.type_name(), "Строка");
+}
+
+#[test]
+fn structure_fields_survive_if_branch_merge() {
+    let deps = deps_with_universal_collection_types();
+    let source = r#"Процедура Тест()
+    S = Новый Структура;
+    Если Истина Тогда
+        S.Вставить("Идентификатор", "A-01");
+    КонецЕсли;
+    probe = S.Идентификатор;
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "Documents/Док1/Ext/ObjectModule.bsl", deps);
+
+    let property_offset = source.rfind("Идентификатор").expect("merged property") as u32;
+    let property = index
+        .type_at_byte_offset(property_offset)
+        .expect("type at merged property");
+    assert_eq!(property.type_name(), "Строка");
 }

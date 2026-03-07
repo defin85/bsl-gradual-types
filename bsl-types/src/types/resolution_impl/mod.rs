@@ -7,3 +7,4 @@ mod compatibility;
 mod constructors;
 mod definition_location;
 mod queries;
+mod structural_members;

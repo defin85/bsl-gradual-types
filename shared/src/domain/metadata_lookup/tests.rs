@@ -7,7 +7,8 @@ use crate::domain::types::{
     Certainty, ConcreteType, ConfigurationType, FacetKind, GenericType, MetadataKind, PlatformType,
     RawAttributeData, RawDataSource, RawMethodData, RawParamData, RawPropertyData,
     RawTabularSectionData, RawTypeData, ResolutionMetadata, ResolutionResult, ResolutionSource,
-    TabularRowType, TypeResolution, FORM_DATA_FORM_TYPE_NOTE_PREFIX, FORM_DATA_SEMANTICS_NOTE,
+    StructuralMember, TabularRowType, TypeResolution, FORM_DATA_FORM_TYPE_NOTE_PREFIX,
+    FORM_DATA_SEMANTICS_NOTE,
 };
 use std::sync::Arc;
 
@@ -191,6 +192,49 @@ fn test_unknown_type_returns_empty() {
     assert!(lookup.get_methods(&resolution).is_empty());
     assert!(!lookup.has_member(&resolution, "Метод"));
     assert_eq!(lookup.get_description(&resolution), "");
+}
+
+#[test]
+fn test_get_properties_includes_structural_members_before_repository_fallback() {
+    let repo = create_test_repository();
+    let lookup = TypeMetadataLookup::new(repo);
+    let resolution = TypeResolution::explicit("Структура").with_structural_member(
+        StructuralMember::known("Идентификатор", TypeResolution::primitive("Строка")),
+    );
+
+    let properties = lookup.get_properties(&resolution);
+
+    assert_eq!(properties.len(), 1);
+    assert_eq!(properties[0].name, "Идентификатор");
+    assert_eq!(properties[0].prop_type, "Строка");
+}
+
+#[test]
+fn test_has_member_finds_structural_property_case_insensitively() {
+    let repo = create_test_repository();
+    let lookup = TypeMetadataLookup::new(repo);
+    let resolution = TypeResolution::explicit("СтрокаТаблицыЗначений").with_structural_member(
+        StructuralMember::known("Количество", TypeResolution::primitive("Число")),
+    );
+
+    assert!(lookup.has_member(&resolution, "количество"));
+    assert!(lookup.has_member(&resolution, "КОЛИЧЕСТВО"));
+}
+
+#[test]
+fn test_get_property_origin_tag_marks_structural_members() {
+    let repo = create_test_repository();
+    let lookup = TypeMetadataLookup::new(repo);
+    let resolution = TypeResolution::explicit("Структура").with_structural_member(
+        StructuralMember::known("Идентификатор", TypeResolution::primitive("Строка")),
+    );
+
+    let origin = lookup.get_property_origin_tag(&resolution, "идентификатор");
+
+    assert_eq!(
+        origin,
+        Some(TypeMetadataLookup::structural_property_origin_tag())
+    );
 }
 
 // === Тесты для Generic типов ===

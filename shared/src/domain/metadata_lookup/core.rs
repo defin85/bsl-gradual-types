@@ -1,6 +1,7 @@
 //! Основные методы TypeMetadataLookup для получения данных типов.
 
 use super::TypeMetadataLookup;
+use crate::domain::resolver::names_equal_ignore_case;
 use crate::domain::resolver::GenericStrategy;
 use crate::domain::signature_index::MethodSignature;
 use crate::domain::types::{
@@ -11,6 +12,7 @@ use crate::domain::types::{
 
 const PROPERTY_ORIGIN_REPOSITORY: &str = "repository";
 const PROPERTY_ORIGIN_INTRINSIC: &str = "intrinsic";
+const PROPERTY_ORIGIN_STRUCTURAL: &str = "structural";
 const PREDEFINED_MANAGER_PROP_TYPE_PREFIX: &str = "__predefined_manager__:";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -351,15 +353,20 @@ impl TypeMetadataLookup {
         &self,
         resolution: &TypeResolution,
     ) -> Vec<(RawPropertyData, &'static str)> {
+        let structural_props = self.get_structural_properties_with_origin(resolution);
+
         if let Some(enum_props) = self.get_enum_manager_properties(resolution) {
-            return enum_props
-                .into_iter()
-                .map(|property| (property, PROPERTY_ORIGIN_REPOSITORY))
-                .collect();
+            return Self::merge_property_layers(vec![
+                structural_props,
+                enum_props
+                    .into_iter()
+                    .map(|property| (property, PROPERTY_ORIGIN_REPOSITORY))
+                    .collect(),
+            ]);
         }
 
         if let Some(form_data_props) = self.get_form_data_properties_with_origin(resolution) {
-            return form_data_props;
+            return Self::merge_property_layers(vec![structural_props, form_data_props]);
         }
 
         // Базовый слой: lazy lookup через active_facet (для конфигурационных типов),
@@ -379,11 +386,52 @@ impl TypeMetadataLookup {
                 .collect()
         };
 
-        if let Some(predefined_props) = self.get_predefined_manager_properties(resolution) {
-            return Self::merge_predefined_manager_properties(base_props, predefined_props);
+        let base_props =
+            if let Some(predefined_props) = self.get_predefined_manager_properties(resolution) {
+                Self::merge_predefined_manager_properties(base_props, predefined_props)
+            } else {
+                base_props
+            };
+
+        Self::merge_property_layers(vec![structural_props, base_props])
+    }
+
+    fn get_structural_properties_with_origin(
+        &self,
+        resolution: &TypeResolution,
+    ) -> Vec<(RawPropertyData, &'static str)> {
+        resolution
+            .structural_members()
+            .iter()
+            .map(|member| {
+                (
+                    RawPropertyData {
+                        name: member.canonical_name.clone(),
+                        prop_type: member.member_type.type_name(),
+                        is_readonly: false,
+                    },
+                    PROPERTY_ORIGIN_STRUCTURAL,
+                )
+            })
+            .collect()
+    }
+
+    fn merge_property_layers(
+        layers: Vec<Vec<(RawPropertyData, &'static str)>>,
+    ) -> Vec<(RawPropertyData, &'static str)> {
+        let mut merged: Vec<(RawPropertyData, &'static str)> = Vec::new();
+        let mut seen = std::collections::HashSet::<String>::new();
+
+        for layer in layers {
+            for (property, origin) in layer {
+                let key = crate::domain::type_id::normalize(&property.name);
+                if seen.insert(key) {
+                    merged.push((property, origin));
+                }
+            }
         }
 
-        base_props
+        merged
     }
 
     fn merge_predefined_manager_properties(
@@ -422,7 +470,7 @@ impl TypeMetadataLookup {
     ) -> Option<&'static str> {
         self.get_properties_with_origin(resolution)
             .into_iter()
-            .find(|(property, _origin)| property.name == property_name)
+            .find(|(property, _origin)| names_equal_ignore_case(&property.name, property_name))
             .map(|(_property, origin)| origin)
     }
 
@@ -432,6 +480,10 @@ impl TypeMetadataLookup {
 
     pub fn intrinsic_property_origin_tag() -> &'static str {
         PROPERTY_ORIGIN_INTRINSIC
+    }
+
+    pub fn structural_property_origin_tag() -> &'static str {
+        PROPERTY_ORIGIN_STRUCTURAL
     }
 
     pub fn repository_property_origin_tag() -> &'static str {
@@ -760,16 +812,15 @@ impl TypeMetadataLookup {
             Self::has_contextual_note(resolution, FORM_DATA_SEMANTICS_NOTE)
                 && Self::is_intrinsic_form_data_member_name(member_name);
 
-        if self
-            .get_methods(resolution)
-            .iter()
-            .any(|m| m.name == member_name || m.english_name == member_name)
-        {
+        if self.get_methods(resolution).iter().any(|m| {
+            names_equal_ignore_case(&m.name, member_name)
+                || names_equal_ignore_case(&m.english_name, member_name)
+        }) {
             return true;
         }
 
         for (property, origin) in self.get_properties_with_origin(resolution) {
-            if property.name == member_name {
+            if names_equal_ignore_case(&property.name, member_name) {
                 if Self::is_intrinsic_property_origin(origin) {
                     tracing::debug!(
                         metric = "form_data_intrinsic_member_hit_total",
@@ -795,7 +846,11 @@ impl TypeMetadataLookup {
         };
 
         // Проверяем значения перечисления
-        if raw.enum_values.iter().any(|v| v == member_name) {
+        if raw
+            .enum_values
+            .iter()
+            .any(|value| names_equal_ignore_case(value, member_name))
+        {
             return true;
         }
 
@@ -805,7 +860,11 @@ impl TypeMetadataLookup {
                 .repository
                 .find_type(&format!("Перечисления.{}", enum_name))
             {
-                if raw_enum.enum_values.iter().any(|v| v == member_name) {
+                if raw_enum
+                    .enum_values
+                    .iter()
+                    .any(|value| names_equal_ignore_case(value, member_name))
+                {
                     return true;
                 }
             }

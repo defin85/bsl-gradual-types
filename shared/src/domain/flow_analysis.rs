@@ -176,6 +176,7 @@ impl FlowAnalysisContext {
                                     var_id.display()
                                 )],
                                 uncertainty_reason: None,
+                                structural_members: vec![],
                             },
                             active_facet: None,
                             available_facets: vec![],

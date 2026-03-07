@@ -9,6 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::metadata::MetadataKind;
+use super::structural_members::StructuralMember;
 
 /// Certainty level of type resolution
 ///
@@ -115,4 +116,7 @@ pub struct ResolutionMetadata {
     /// Used for precise error messages and validation decisions
     #[serde(skip_serializing_if = "Option::is_none")]
     pub uncertainty_reason: Option<UncertaintyReason>,
+    /// Snapshot-local structural members attached to this resolution.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub structural_members: Vec<StructuralMember>,
 }

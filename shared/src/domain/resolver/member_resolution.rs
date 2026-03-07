@@ -168,6 +168,7 @@ impl<'a> MemberResolver<'a> {
                 column: None,
                 notes: vec![note],
                 uncertainty_reason,
+                structural_members: vec![],
             },
             active_facet: Some(facet),
             available_facets,
@@ -279,6 +280,7 @@ impl<'a> MemberResolver<'a> {
                     tabular_section.attributes.len()
                 )],
                 uncertainty_reason: None,
+                structural_members: vec![],
             },
             active_facet: Some(FacetKind::Collection), // Табличная часть - это коллекция
             available_facets: vec![FacetKind::Collection],

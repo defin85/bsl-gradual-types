@@ -28,6 +28,7 @@ mod primitives;
 mod raw_data;
 mod resolution;
 mod resolution_impl;
+mod structural_members;
 
 #[cfg(test)]
 mod tests;
@@ -44,3 +45,4 @@ pub use metadata::*;
 pub use primitives::*;
 pub use raw_data::*;
 pub use resolution::*;
+pub use structural_members::*;

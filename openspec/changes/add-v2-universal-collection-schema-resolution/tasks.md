@@ -23,7 +23,7 @@
 - [x] 2.5 Описать merge/alias policy для простых присваиваний и ветвлений.
 - [x] 2.6 Описать интеграцию с `TypeMetadataLookup` и `TypeResolution` без мутации глобального `TypeRepository`.
 - [x] 2.7 Зафиксировать структуру `InstanceEffectStore` (identity, map/structure/value-table entries, normalization rules).
-- [x] 2.8 Зафиксировать rollout/rollback и observability contract (feature-flag, метрики, пороги rollback).
+- [x] 2.8 Зафиксировать rollout/rollback и observability contract (existing `intellisense_v2_*` telemetry, perf-gate thresholds, rollback signals).
 
 ## 3. Implementation Guardrails
 - [x] 3.1 Убрать/запретить consumer-local schema/effect inference в `completion_service` и связанных runtime-resolver путях.

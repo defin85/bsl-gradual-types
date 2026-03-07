@@ -204,30 +204,52 @@ Unknown member policy после merge:
   - новый unified change не ломает snapshot consistency, требуемую `add-lsp-functional-ga-readiness`.
 
 ## Rollout And Rollback
-Rollout MUST идти через feature-flag и наблюдаемость.
+Rollout MUST идти через единственный production path Option B и наблюдаемость. Для этого change проект больше не использует отдельный runtime feature-flag: новый universal-collection contract всегда живёт на общем `intellisense-v2` пути и защищается acceptance/perf gates, а не параллельным переключателем поведения.
 
 Rollout steps:
-1. Включить новый путь за флагом для internal/canary профилей.
-2. Собирать consistency и latency метрики по completion/hover/type-at-position/diagnostics.
-3. Перевести default на новый путь после прохождения quality gate.
-4. Удалить legacy обходные ветки после стабилизации.
+1. Держать один production path для `completion` / `hover` / `type-at-position` / `semantic diagnostics`; не добавлять consumer-local fallback path специально для `Соответствие` / `Структура` / `ТаблицаЗначений`.
+2. Перед merge прогонять exact cross-consumer acceptance и strict-policy suite для `map["k"]`, `S.<Поле>`, `Стр.<Колонка>`.
+3. Подтверждать стабильность по существующему scale-aware gate, который потребляет экспортируемые `intellisense_v2_*` latency/counter metrics.
+4. После merge наблюдать тот же always-on path через telemetry и baseline reports; если gate начинает падать, откатывать commit, а не вводить временный feature flag.
 
 Rollback triggers:
-- рост расхождений cross-consumer consistency;
-- выход p95 latency за agreed budget;
-- рост unknown-member false positive/false negative выше порога.
+- любой провал exact acceptance/regression tests для `map["k"]`, `S.<Поле>` или `Стр.<Колонка>`;
+- провал `backend/src/perf_gate_evaluator.rs` по large/small completion ratios, cancelled rate или ratio `completion_fallback_unavailable / interactive_wait_budget_exhausted`;
+- воспроизводимый drift в stage latency / stale-fallback counters на том же fixture set и baseline report.
 
 Rollback action:
-- атомарное отключение feature-flag с возвратом на стабильный путь.
+- revert offending commit(s), восстановление последнего passing baseline report и повторный прогон acceptance/perf gate suite;
+- не добавлять отдельный feature-flagged path или consumer-local workaround ради rollback.
 
 ## Observability Contract
-Минимальные метрики:
-- `universal_effect_store_entries_total`,
-- `universal_effect_store_merge_conflicts_total`,
-- `universal_effect_store_branch_merge_total`,
-- `universal_effect_store_alias_bind_total`,
-- `universal_schema_consistency_mismatch_total`,
-- `universal_schema_runtime_fallback_total`.
+Минимальный observability contract для этого change совпадает с существующим `intellisense-v2` telemetry surface и его perf-gate projections.
+
+Обязательные histograms:
+- `intellisense_v2_wait_for_file_version_completion_ms`,
+- `intellisense_v2_snapshot_completion_ms`,
+- `intellisense_v2_ir_query_completion_ms`,
+- `intellisense_v2_syntax_diagnostics_query_ms`,
+- `intellisense_v2_semantic_diagnostics_query_ms`,
+- `intellisense_v2_singleflight_wait_ms`.
+
+Обязательные counters:
+- `intellisense_v2_interactive_wait_budget_exhausted_total`,
+- `intellisense_v2_interactive_stale_served_total`,
+- `intellisense_v2_completion_stale_fallback_total`,
+- `intellisense_v2_completion_fallback_unavailable_total`,
+- `intellisense_v2_singleflight_leader_total`,
+- `intellisense_v2_singleflight_shared_total`,
+- `intellisense_v2_singleflight_key_unavailable_total`,
+- `intellisense_v2_revision_lag_sample_total`.
+
+Drilldown contract MUST сохранять dimensions `origin`, `operation`, `completion_mode`, `stage` через `intellisense_v2_drilldown_stage_total_*` и `intellisense_v2_drilldown_stage_latency_ms_*`.
+
+Rollback thresholds закреплены в существующем gate:
+- `large wait ratio <= 0.60`;
+- `large completion ratio <= 0.75`;
+- `small completion ratio <= 1.25`;
+- `cancelled rate <= 0.10`;
+- если stale fastpath был задействован, то `completion_fallback_unavailable / interactive_wait_budget_exhausted <= 0.20`.
 
 ## Risks / Trade-offs
 - Риск: перетащить слишком много state в каждый `TypeResolution`.

@@ -142,6 +142,9 @@ fn build_v2_ir(
         .flatten()
         .expect("file_path");
     let ir_program = analysis.ir(file_id).ok().flatten().expect("ir");
+    analysis
+        .precompute_type_index_for_file(file_id, None, 0)
+        .expect("type index precompute");
 
     (analysis, file_id, file_content, file_path, ir_program)
 }

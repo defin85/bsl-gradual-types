@@ -184,6 +184,9 @@ pub fn hover_for_code_with_config(
         .map_err(|_| anyhow::anyhow!("ir query cancelled"))
         .and_then(|value| value.ok_or_else(|| anyhow::anyhow!("ir unavailable")))
         .expect("ir");
+    analysis
+        .precompute_type_index_for_file(file_id, None, 0)
+        .expect("type index precompute");
 
     let deps = deps_bundle.semantic_deps.clone();
     let resolver = deps

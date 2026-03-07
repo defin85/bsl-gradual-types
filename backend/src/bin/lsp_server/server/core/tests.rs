@@ -3948,6 +3948,94 @@ async fn p7_hover_cache_miss_emits_type_index_fallback_unavailable_reason() {
 }
 
 #[tokio::test]
+async fn p7_hover_cache_miss_on_map_index_access_does_not_use_legacy_word_fallback() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().unwrap() = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let fixture = "Процедура Тест()\n\
+Map = Новый Соответствие;\n\
+Map.Вставить(\"k\", Новый ТаблицаЗначений);\n\
+ЗначДляHover = Map[\"k\"];\n\
+КонецПроцедуры\n";
+    let uri = Url::parse("file:///test_p7_hover_map_index_no_legacy_fallback.bsl").expect("uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: fixture.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let server = server_holder
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("server must be captured");
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    server.cancel_type_index_precompute_v2(file_id).await;
+
+    let hover_position = find_utf16_position_after_marker(fixture, "ЗначДляHover = ");
+    let hover_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/hover")
+                .id(9108)
+                .params(
+                    serde_json::to_value(HoverParams {
+                        text_document_position_params: TextDocumentPositionParams {
+                            text_document: TextDocumentIdentifier { uri: uri.clone() },
+                            position: hover_position,
+                        },
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                    })
+                    .expect("HoverParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("hover request")
+        .expect("hover response");
+    let hover_value = serde_json::to_value(&hover_response).expect("serialize response");
+    let hover_result = hover_value.get("result").cloned().expect("result field");
+    let hover: Option<Hover> = serde_json::from_value(hover_result).expect("parse hover");
+    assert!(
+        hover.is_none(),
+        "hover cache miss on map index access must not synthesize legacy fallback payload: {hover_value:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
 async fn p7_completion_owner_hint_type_lookup_is_serve_only_even_when_flow_sensitive_enabled() {
     let coordinator = Arc::new(SystemCoordinator::new());
 

@@ -1888,6 +1888,105 @@ async fn completion_supports_member_access_after_map_index_access() {
 }
 
 #[tokio::test]
+async fn completion_does_not_infer_map_index_owner_without_shared_hint_even_with_parse_result() {
+    let repository = Arc::new(InMemoryTypeRepository::new());
+    repository
+        .load_types(vec![
+            RawTypeData {
+                name: "Соответствие".to_string(),
+                source: RawDataSource::Platform,
+                collection_item_type: Some("КолонкаТаблицыЗначений".to_string()),
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "КолонкаТаблицыЗначений".to_string(),
+                source: RawDataSource::Platform,
+                properties: vec![RawPropertyData {
+                    name: "Имя".to_string(),
+                    prop_type: "Строка".to_string(),
+                    is_readonly: true,
+                }],
+                ..Default::default()
+            },
+        ])
+        .expect("load types");
+
+    let repo: Arc<dyn bsl_shared::domain::repository::TypeRepository> = repository.clone();
+    let resolver = Arc::new(TypeResolver::new(repo.clone()));
+    let metadata_lookup = TypeMetadataLookup::new(repo.clone());
+
+    let index = IntellisenseIndexStore::new("cfg", "platform");
+    let content = concat!(
+        "Процедура Тест()\n",
+        "    Перем map;\n",
+        "    map = Новый Соответствие;\n",
+        "    map[\"k\"].\n",
+        "КонецПроцедуры\n"
+    );
+    let line = 3;
+    let line_text = "    map[\"k\"].";
+    let column = line_text.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+
+    let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+        signature_index: repo.get_signature_index_clone(),
+        resolver: Some(resolver.clone()),
+        repository: repo.clone(),
+        platform_signatures_loaded: false,
+    });
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(ChangeV2::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("test"),
+        deps,
+    });
+    host.apply_change(ChangeV2::SetSettingsSnapshot {
+        settings_id: SettingsId::from_hash("test"),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+    host.apply_change(ChangeV2::SetFile {
+        file_id: V2FileId(1),
+        text: Arc::from(content.to_string()),
+        version: 0,
+        path: Arc::from("completion_map_index_access_no_hint_test.bsl"),
+    });
+    let analysis = host.analysis();
+    let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
+    let parse_result = analysis
+        .parse_result(V2FileId(1))
+        .ok()
+        .flatten()
+        .expect("parse_result");
+
+    let ctx = CompletionAnalysisContext {
+        ir_program: Some(ir_program),
+        resolver: resolver.as_ref(),
+        file_path: "completion_map_index_access_no_hint_test.bsl",
+        parse_result: Some(parse_result),
+        member_access_owner_type_hint: None,
+        include_flow_sensitive: false,
+    };
+
+    let result = get_completion_with_analysis(
+        content,
+        line,
+        column,
+        Some("completion_map_index_access_no_hint_test.bsl"),
+        &index,
+        &metadata_lookup,
+        Some(&ctx),
+        None,
+    )
+    .await
+    .expect("completion ok");
+
+    let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
+    assert!(
+        !labels.contains(&"Имя".to_string()),
+        "map index owner must come from shared owner hint, labels: {:?}",
+        labels
+    );
+}
+
+#[tokio::test]
 async fn completion_supports_member_access_after_ternary_expression() {
     let repository = Arc::new(InMemoryTypeRepository::new());
     repository

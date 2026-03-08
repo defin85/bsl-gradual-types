@@ -1296,7 +1296,7 @@ async fn completion_does_not_infer_member_owner_without_owner_hint() {
 }
 
 #[tokio::test]
-async fn completion_resolves_implicit_form_object_member_access_without_hint() {
+async fn completion_implicit_form_object_member_access_fails_closed_without_shared_hint() {
     let repository = Arc::new(InMemoryTypeRepository::new());
     repository
         .load_types(vec![
@@ -1377,6 +1377,133 @@ async fn completion_resolves_implicit_form_object_member_access_without_hint() {
         file_path,
         parse_result: None,
         member_access_owner_type_hint: None,
+        include_flow_sensitive: false,
+    };
+
+    let result = get_completion_with_analysis(
+        content,
+        line,
+        column,
+        Some("file:///completion_form_module_implicit_owner_test.bsl"),
+        &index,
+        &metadata_lookup,
+        Some(&ctx),
+        None,
+    )
+    .await
+    .expect("completion ok");
+
+    let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
+    assert!(
+        !labels.contains(&"Записать".to_string()),
+        "labels: {:?}",
+        labels
+    );
+    assert!(
+        !labels.contains(&"Ссылка".to_string()),
+        "labels: {:?}",
+        labels
+    );
+    assert!(
+        !labels.contains(&"ПометкаУдаления".to_string()),
+        "labels: {:?}",
+        labels
+    );
+}
+
+#[tokio::test]
+async fn completion_resolves_implicit_form_object_member_access_with_shared_hint() {
+    let repository = Arc::new(InMemoryTypeRepository::new());
+    repository
+        .load_types(vec![
+            RawTypeData {
+                name: "Документы.Док1".to_string(),
+                source: RawDataSource::Configuration,
+                facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+                kind: Some(MetadataKind::Document),
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "Формы.Документы.Док1.Форма1".to_string(),
+                source: RawDataSource::Configuration,
+                properties: vec![RawPropertyData {
+                    name: "РеквизитФормы".to_string(),
+                    prop_type: "Строка".to_string(),
+                    is_readonly: false,
+                }],
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "ДокументОбъект".to_string(),
+                source: RawDataSource::Platform,
+                facets: vec![FacetKind::Object],
+                methods: vec![RawMethodData {
+                    name: "Записать".to_string(),
+                    return_type: "Булево".to_string(),
+                    ..Default::default()
+                }],
+                properties: vec![RawPropertyData {
+                    name: "ФацетСвойство".to_string(),
+                    prop_type: "Число".to_string(),
+                    is_readonly: false,
+                }],
+                ..Default::default()
+            },
+        ])
+        .expect("load types");
+
+    let repo: Arc<dyn bsl_shared::domain::repository::TypeRepository> = repository.clone();
+    let resolver = Arc::new(TypeResolver::new(repo.clone()));
+    let metadata_lookup = TypeMetadataLookup::new(repo.clone());
+    let index = IntellisenseIndexStore::new("cfg", "platform");
+
+    let content = concat!(
+        "Процедура Тест()\n",
+        "    x = Объект;\n",
+        "    Объект.\n",
+        "КонецПроцедуры\n"
+    );
+    let file_path = "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl";
+    let line = 2;
+    let column = "    Объект".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+
+    let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+        signature_index: repo.get_signature_index_clone(),
+        resolver: Some(resolver.clone()),
+        repository: repo.clone(),
+        platform_signatures_loaded: false,
+    });
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(ChangeV2::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("test"),
+        deps,
+    });
+    host.apply_change(ChangeV2::SetSettingsSnapshot {
+        settings_id: SettingsId::from_hash("test"),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+    host.apply_change(ChangeV2::SetFile {
+        file_id: V2FileId(1),
+        text: Arc::from(content.to_string()),
+        version: 0,
+        path: Arc::from(file_path),
+    });
+    let analysis = host.analysis();
+    let member_access_owner_type_hint = analysis
+        .type_at_byte_offset(V2FileId(1), byte_offset_of(content, "x = Объект") + "x = ".len() as u32)
+        .expect("type_at_byte_offset query");
+    assert!(
+        member_access_owner_type_hint.is_some(),
+        "expected shared owner hint for FormModule.Объект"
+    );
+    let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
+
+    let ctx = CompletionAnalysisContext {
+        ir_program: Some(ir_program),
+        resolver: resolver.as_ref(),
+        file_path,
+        parse_result: None,
+        member_access_owner_type_hint,
         include_flow_sensitive: false,
     };
 
@@ -1500,7 +1627,7 @@ async fn completion_uses_owner_hint_for_member_access_when_flow_sensitive_is_ena
 }
 
 #[test]
-fn implicit_module_context_owner_fallback_matches_shared_resolution_for_supported_modules() {
+fn implicit_module_context_owner_resolution_requires_shared_hint_for_supported_modules() {
     let repository = Arc::new(InMemoryTypeRepository::new());
     repository
         .load_types(vec![RawTypeData {
@@ -1570,7 +1697,7 @@ fn implicit_module_context_owner_fallback_matches_shared_resolution_for_supporte
             .expect("shared resolution for implicit context symbol");
         let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
 
-        let ctx = CompletionAnalysisContext {
+        let ctx_without_hint = CompletionAnalysisContext {
             ir_program: Some(ir_program),
             resolver: resolver.as_ref(),
             file_path,
@@ -1579,18 +1706,39 @@ fn implicit_module_context_owner_fallback_matches_shared_resolution_for_supporte
             include_flow_sensitive: false,
         };
 
-        let fallback = resolve_member_owner_type_sync(Some(&ctx), &content, 2, access_column, base_name)
-            .expect("bootstrap-only fallback must resolve supported implicit module symbol");
+        let without_hint =
+            resolve_member_owner_type_sync(Some(&ctx_without_hint), &content, 2, access_column, base_name);
+        assert!(
+            without_hint.is_none(),
+            "implicit module-context owner must fail closed without shared hint for {file_path}:{base_name}"
+        );
+
+        let ctx_with_hint = CompletionAnalysisContext {
+            ir_program: Some(ctx_without_hint.ir_program.expect("ir program available")),
+            resolver: resolver.as_ref(),
+            file_path,
+            parse_result: None,
+            member_access_owner_type_hint: Some(expected.clone()),
+            include_flow_sensitive: false,
+        };
+        let resolved = resolve_member_owner_type_sync(
+            Some(&ctx_with_hint),
+            &content,
+            2,
+            access_column,
+            base_name,
+        )
+        .expect("shared owner hint must resolve supported implicit module symbol");
 
         assert_eq!(
-            fallback, expected,
-            "bootstrap-only fallback must match shared analysis resolution for {file_path}:{base_name}"
+            resolved, expected,
+            "shared owner hint must match analysis resolution for {file_path}:{base_name}"
         );
     }
 }
 
 #[test]
-fn implicit_module_context_owner_fallback_fails_closed_outside_supported_modules() {
+fn implicit_module_context_owner_resolution_fails_closed_outside_supported_modules() {
     let repository = Arc::new(InMemoryTypeRepository::new());
     let repo: Arc<dyn TypeRepository> = repository.clone();
     let resolver = Arc::new(TypeResolver::new(repo.clone()));
@@ -1641,7 +1789,7 @@ fn implicit_module_context_owner_fallback_fails_closed_outside_supported_modules
     let fallback = resolve_member_owner_type_sync(Some(&ctx), content, 1, access_column, "Объект");
     assert!(
         fallback.is_none(),
-        "bootstrap-only fallback must fail closed outside supported module-context paths"
+        "implicit module-context owner resolution must fail closed outside supported module-context paths"
     );
 }
 

@@ -4619,6 +4619,48 @@ async fn p7_typed_value_table_row_exact_cross_consumer_acceptance_keeps_same_con
 }
 
 #[tokio::test]
+async fn p7_form_module_object_completion_uses_default_lsp_owner_hint_path() {
+    let fixture = "Процедура Тест()\n\
+    ДляCompletion = Объект.\n\
+КонецПроцедуры\n";
+
+    let (mut service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        fixture,
+        "file:///Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl",
+    )
+    .await;
+
+    let completion_position =
+        find_utf16_position_after_marker(fixture, "ДляCompletion = Объект.");
+    let completion_labels = lsp_completion_labels_at(&mut service, &uri, completion_position).await;
+    assert!(
+        completion_labels.iter().any(|label| label == "Ссылка"),
+        "default LSP completion for FormModule.Объект must include form-data property Ссылка, labels={completion_labels:?}"
+    );
+    assert!(
+        completion_labels
+            .iter()
+            .any(|label| label == "ПометкаУдаления"),
+        "default LSP completion for FormModule.Объект must include form-data property ПометкаУдаления, labels={completion_labels:?}"
+    );
+    assert!(
+        !completion_labels
+            .iter()
+            .any(|label| label == "ПолучитьСсылкуНового"),
+        "default LSP completion for FormModule.Объект must not expose applied object-facet method ПолучитьСсылкуНового, labels={completion_labels:?}"
+    );
+
+    let type_name =
+        snapshot_type_name_at_marker(&server, file_id, fixture, "ДляCompletion = Объект").await;
+    assert_eq!(
+        type_name, "ДанныеФормыСтруктура",
+        "default LSP path must keep shared form-data type at implicit Объект"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
 async fn p7_typed_structure_revision_switch_does_not_leak_stale_structural_members_across_interfaces(
 ) {
     let fixture_v1 = "Процедура Тест()\n\

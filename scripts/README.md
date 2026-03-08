@@ -230,6 +230,8 @@ python3 scripts/check-openspec-change-governance.py \
   --change-id add-performance-first-ai-engineering-guardrails
 ```
 
+**Default automation path:** workflow `../.github/workflows/ci.yml` определяет затронутые `openspec/changes/<id>` и запускает этот governance gate fail-closed на `pull_request`, `push` в `master` и `workflow_dispatch`.
+
 ---
 
 ### `check-protected-assets-gate.py` - Fail-closed protected assets gate

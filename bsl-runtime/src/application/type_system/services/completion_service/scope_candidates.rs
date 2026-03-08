@@ -245,7 +245,6 @@ pub(super) fn resolve_completion_scope_position(
 
     Some(CompletionScopePosition {
         byte_offset,
-        scope_id,
         scope_rank,
     })
 }

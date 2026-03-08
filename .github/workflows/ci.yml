@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/ci.yml"
+      - "openspec/changes/**"
+      - "README.md"
+      - "CONTRIBUTING.md"
+      - "scripts/README.md"
+      - "scripts/check-openspec-change-governance.py"
+      - "scripts/check-protected-assets-gate.py"
+  push:
+    branches:
+      - master
+    paths:
+      - ".github/workflows/ci.yml"
+      - "openspec/changes/**"
+      - "README.md"
+      - "CONTRIBUTING.md"
+      - "scripts/README.md"
+      - "scripts/check-openspec-change-governance.py"
+      - "scripts/check-protected-assets-gate.py"
+
+permissions: read-all
+
+jobs:
+  openspec_governance_gate:
+    name: OpenSpec governance gate (default readiness path)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Resolve protected-assets base ref
+        id: protected_base_ref
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base_ref="${{ github.event.pull_request.base.sha }}"
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
+            base_ref="${{ github.event.before }}"
+          else
+            base_ref=""
+          fi
+          if [[ -z "${base_ref}" || "${base_ref}" == "0000000000000000000000000000000000000000" ]]; then
+            base_ref="HEAD~1"
+          fi
+          echo "value=${base_ref}" >> "${GITHUB_OUTPUT}"
+      - name: Resolve touched OpenSpec change IDs
+        id: openspec_changes
+        shell: bash
+        run: |
+          mapfile -t change_ids < <(
+            git diff --name-only "${{ steps.protected_base_ref.outputs.value }}...HEAD" \
+              | sed -n 's#^openspec/changes/\([^/]*\)/.*#\1#p' \
+              | sort -u
+          )
+          if [[ ${#change_ids[@]} -eq 0 ]]; then
+            echo "ids=" >> "${GITHUB_OUTPUT}"
+            echo "No OpenSpec changes touched in this revision."
+            exit 0
+          fi
+          echo "ids=${change_ids[*]}" >> "${GITHUB_OUTPUT}"
+          echo "Resolved OpenSpec change IDs: ${change_ids[*]}"
+      - name: Run governance gates for touched OpenSpec changes
+        if: ${{ steps.openspec_changes.outputs.ids != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for change_id in ${{ steps.openspec_changes.outputs.ids }}; do
+            change_root="openspec/changes/${change_id}"
+            governance_root="${change_root}/governance"
+            if [[ ! -f "${governance_root}/change_criticality.json" ]]; then
+              echo "Skipping ${change_id}: governance artifacts are missing."
+              continue
+            fi
+            python3 scripts/check-openspec-change-governance.py \
+              --change-id "${change_id}"
+            manifest="${governance_root}/protected_assets_manifest.txt"
+            override="${governance_root}/protected_assets_override.json"
+            if [[ -f "${manifest}" ]]; then
+              python3 scripts/check-protected-assets-gate.py \
+                --change-id "${change_id}" \
+                --manifest "${manifest}" \
+                --override "${override}" \
+                --base-ref "${{ steps.protected_base_ref.outputs.value }}"
+            else
+              echo "Skipping protected-assets gate for ${change_id}: manifest missing."
+            fi
+          done

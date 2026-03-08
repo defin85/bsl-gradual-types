@@ -143,6 +143,18 @@ fn apply_file(
     (file_content, file_path, ir_program, parse_result)
 }
 
+fn shared_owner_hint_at_marker(
+    host: &AnalysisHostV2,
+    file_id: V2FileId,
+    content: &str,
+    marker: &str,
+) -> Option<bsl_shared::domain::types::TypeResolution> {
+    let object_offset = content.find(marker).expect("marker offset") + "x = ".len();
+    host.analysis()
+        .type_at_byte_offset(file_id, object_offset as u32)
+        .expect("type_at_byte_offset query")
+}
+
 fn completion_items(response: CompletionResponse) -> Vec<CompletionItem> {
     match response {
         CompletionResponse::List(list) => list.items,
@@ -313,21 +325,32 @@ async fn completion_and_resolve_follow_unified_form_contract() {
     let index_snapshot = deps_bundle.index_snapshot.clone();
     let uri =
         Url::parse("file:///form_module_object_unified_contract_completion.bsl").expect("uri");
-    let content = concat!("Процедура Тест()\n", "    Объект.\n", "КонецПроцедуры\n",);
+    let content = concat!(
+        "Процедура Тест()\n",
+        "    x = Объект;\n",
+        "    Объект.\n",
+        "КонецПроцедуры\n",
+    );
 
     let mut host = setup_host(deps_bundle.as_ref());
     let (file_content, resolved_file_path, ir_program, parse_result) =
         apply_file(&mut host, V2FileId(1), FILE_PATH, content);
+    let member_access_owner_type_hint =
+        shared_owner_hint_at_marker(&host, V2FileId(1), content, "x = Объект");
+    assert!(
+        member_access_owner_type_hint.is_some(),
+        "expected shared owner hint for FormModule.Объект completion"
+    );
 
     let response = completion_handler::handle_completion_v2(
         file_content,
         resolved_file_path,
         ir_program,
         Some(parse_result),
-        None,
+        member_access_owner_type_hint,
         deps_bundle.semantic_deps.clone(),
         Position {
-            line: 1,
+            line: 2,
             character: utf16_len("    Объект."),
         },
         &uri,
@@ -372,6 +395,58 @@ async fn completion_and_resolve_follow_unified_form_contract() {
             assert_no_internal_or_legacy_names(&doc, "completion docs");
         }
     }
+}
+
+#[tokio::test]
+async fn completion_form_module_object_fails_closed_without_shared_owner_hint() {
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
+    let index_snapshot = deps_bundle.index_snapshot.clone();
+    let uri = Url::parse("file:///form_module_object_completion_no_hint.bsl").expect("uri");
+    let content = concat!("Процедура Тест()\n", "    Объект.\n", "КонецПроцедуры\n",);
+
+    let mut host = setup_host(deps_bundle.as_ref());
+    let (file_content, resolved_file_path, ir_program, parse_result) =
+        apply_file(&mut host, V2FileId(1), FILE_PATH, content);
+
+    let response = completion_handler::handle_completion_v2(
+        file_content,
+        resolved_file_path,
+        ir_program,
+        Some(parse_result),
+        None,
+        deps_bundle.semantic_deps.clone(),
+        Position {
+            line: 1,
+            character: utf16_len("    Объект."),
+        },
+        &uri,
+        index_snapshot.as_ref(),
+        false,
+        false,
+    )
+    .await
+    .expect("completion response");
+
+    assert!(!response.had_error, "completion returned error");
+    let labels = completion_items(response.response)
+        .into_iter()
+        .map(|item| item.label)
+        .collect::<Vec<_>>();
+    assert!(
+        !labels.iter().any(|label| label == "Ссылка"),
+        "completion without shared hint must not expose form-data members, labels={:?}",
+        labels
+    );
+    assert!(
+        !labels.iter().any(|label| label == "ПометкаУдаления"),
+        "completion without shared hint must not expose form-data members, labels={:?}",
+        labels
+    );
+    assert!(
+        !labels.iter().any(|label| label == "ПолучитьСсылкуНового"),
+        "completion without shared hint must not leak applied object-facet members, labels={:?}",
+        labels
+    );
 }
 
 #[test]

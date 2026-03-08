@@ -1,5 +1,4 @@
 use super::*;
-use bsl_shared::domain::types::{Certainty, ResolutionSource};
 
 pub(super) fn add_methods_from_resolution(
     metadata_lookup: &TypeMetadataLookup,
@@ -67,229 +66,26 @@ pub(super) fn add_properties_from_resolution(
 
 pub(super) async fn resolve_member_owner_type(
     analysis: Option<&CompletionAnalysisContext<'_>>,
-    file_content: &str,
-    line: u32,
-    column: u32,
-    base_name: &str,
+    _file_content: &str,
+    _line: u32,
+    _column: u32,
+    _base_name: &str,
 ) -> Option<TypeResolution> {
-    resolve_member_owner_type_sync(analysis, file_content, line, column, base_name)
+    resolve_member_owner_type_sync(analysis, _file_content, _line, _column, _base_name)
 }
 
 pub(super) fn resolve_member_owner_type_sync(
     analysis: Option<&CompletionAnalysisContext<'_>>,
-    file_content: &str,
-    line: u32,
-    column: u32,
-    base_name: &str,
+    _file_content: &str,
+    _line: u32,
+    _column: u32,
+    _base_name: &str,
 ) -> Option<TypeResolution> {
     let ctx = analysis?;
-    if let Some(hint) = ctx.member_access_owner_type_hint.as_ref() {
-        if !hint.is_unknown() && !hint.is_dynamic() {
-            return Some(hint.clone());
-        }
-    }
-
-    let ir_program = ctx.ir_program.as_deref()?;
-    let scope_position = resolve_completion_scope_position(ir_program, file_content, line, column)?;
-    // TODO(bsl-gradual-types-6mx.2): remove this bootstrap-only fallback once
-    // the shared owner-hint path covers implicit module-context symbols end-to-end.
-    resolve_implicit_member_owner_type_from_module_context(
-        ctx,
-        ir_program,
-        &scope_position,
-        base_name,
-    )
-    .filter(|resolution| !resolution.is_unknown() && !resolution.is_dynamic())
-}
-
-pub(super) fn parse_owner_kind(owner_type: &str) -> Option<(MetadataKind, &str)> {
-    let (xml_kind, object_name) = owner_type.split_once('.')?;
-    let kind = MetadataKind::from_xml_tag(xml_kind)?;
-    Some((kind, object_name))
-}
-
-fn resolve_platform_descriptor_type(
-    resolver: Option<&TypeResolver>,
-    type_name: &str,
-) -> TypeResolution {
-    let resolved = resolver
-        .map(|current| current.resolve_expression_sync(type_name))
-        .unwrap_or_else(|| TypeResolution::unknown());
-    if !resolved.is_unknown() {
-        return resolved;
-    }
-    TypeResolution::inferred_weak(type_name)
-}
-
-fn resolve_configuration_descriptor(
-    resolver: Option<&TypeResolver>,
-    kind: MetadataKind,
-    name: &str,
-) -> TypeResolution {
-    let mut resolution = TypeResolution::metadata_type(kind, name, None);
-    let metadata_type_name = format!("{}.{}", kind.to_prefix(), name);
-    let resolved = resolver
-        .map(|current| current.resolve_expression_sync(&metadata_type_name))
-        .unwrap_or_else(|| TypeResolution::unknown());
-
-    if !resolved.is_unknown() {
-        resolution.available_facets = resolved.available_facets.clone();
-        return resolution;
-    }
-
-    resolution.certainty = Certainty::InferredWeak;
-    resolution.source = ResolutionSource::Inferred;
-    resolution
-}
-
-fn resolve_configuration_facet_descriptor(
-    resolver: Option<&TypeResolver>,
-    kind: MetadataKind,
-    name: &str,
-    facet: FacetKind,
-) -> TypeResolution {
-    let mut resolution = TypeResolution::metadata_type(kind, name, Some(facet));
-    let metadata_type_name = format!("{}.{}", kind.to_prefix(), name);
-    let resolved = resolver
-        .map(|current| current.resolve_expression_sync(&metadata_type_name))
-        .unwrap_or_else(|| TypeResolution::unknown());
-
-    if !resolved.is_unknown() {
-        resolution.available_facets = resolved.available_facets.clone();
-        return resolution;
-    }
-
-    resolution.certainty = Certainty::InferredWeak;
-    resolution.source = ResolutionSource::Inferred;
-    resolution
-}
-
-pub(super) fn resolve_type_from_contextual_descriptor(
-    resolver: Option<&TypeResolver>,
-    descriptor: &ContextualTypeDescriptor,
-) -> TypeResolution {
-    match descriptor {
-        ContextualTypeDescriptor::PlatformType { type_name } => {
-            resolve_platform_descriptor_type(resolver, type_name)
-        }
-        ContextualTypeDescriptor::ConfigurationFacet { kind, name, facet } => {
-            resolve_configuration_facet_descriptor(resolver, *kind, name, *facet)
-        }
-        ContextualTypeDescriptor::FormType { .. }
-        | ContextualTypeDescriptor::FormElementsType { .. } => {
-            resolve_platform_descriptor_type(resolver, &descriptor.canonical_type_name())
-        }
-        ContextualTypeDescriptor::FormDataObject {
-            kind, owner_name, ..
-        } => {
-            let mut resolution = resolve_configuration_descriptor(resolver, *kind, owner_name);
-            for note in descriptor.resolution_metadata_notes() {
-                if !resolution.metadata.notes.contains(&note) {
-                    resolution.metadata.notes.push(note);
-                }
-            }
-            resolution
-        }
-    }
-}
-
-pub(super) fn resolve_implicit_member_owner_type_from_module_context(
-    ctx: &CompletionAnalysisContext<'_>,
-    ir_program: &SemanticProgram,
-    scope_position: &CompletionScopePosition,
-    base_name: &str,
-) -> Option<TypeResolution> {
-    if !is_implicit_context_symbol(base_name) {
-        return None;
-    }
-
-    let base_lower = base_name.to_lowercase();
-    let mut current_scope = Some(scope_position.scope_id);
-    let mut visible = false;
-    while let Some(scope_id) = current_scope {
-        let Some(scope) = ir_program.get_scope(scope_id) else {
-            break;
-        };
-        if scope
-            .variables
-            .keys()
-            .any(|name| name.to_lowercase() == base_lower)
-        {
-            visible = true;
-            break;
-        }
-        current_scope = scope.parent;
-    }
-
-    if !visible {
-        return None;
-    }
-
-    let location = CodeLocation::determine_from_path(Path::new(ctx.file_path)).ok()?;
-
-    let descriptor = match location.module_type {
-        ModuleType::FormModule {
-            form_name,
-            owner_type,
-        } => {
-            let (kind, owner_name) = parse_owner_kind(&owner_type)?;
-            let owner_name = owner_name.to_string();
-
-            match base_lower.as_str() {
-                "этотобъект" | "этаформа" | "форма" => {
-                    ContextualTypeDescriptor::FormType {
-                        kind,
-                        owner_name,
-                        form_name,
-                    }
-                }
-                "объект" => ContextualTypeDescriptor::FormDataObject {
-                    kind,
-                    owner_name,
-                    form_name,
-                },
-                "элементы" => ContextualTypeDescriptor::FormElementsType {
-                    kind,
-                    owner_name,
-                    form_name,
-                },
-                "параметры" => ContextualTypeDescriptor::PlatformType {
-                    type_name: "Структура".to_string(),
-                },
-                _ => return None,
-            }
-        }
-        ModuleType::ManagerModule { owner_type } => {
-            if !matches!(base_lower.as_str(), "этотобъект" | "объект") {
-                return None;
-            }
-            let (kind, owner_name) = parse_owner_kind(&owner_type)?;
-            ContextualTypeDescriptor::ConfigurationFacet {
-                kind,
-                name: owner_name.to_string(),
-                facet: FacetKind::Manager,
-            }
-        }
-        ModuleType::ObjectModule { owner_type } | ModuleType::RecordSetModule { owner_type } => {
-            if !matches!(base_lower.as_str(), "этотобъект" | "объект") {
-                return None;
-            }
-            let (kind, owner_name) = parse_owner_kind(&owner_type)?;
-            ContextualTypeDescriptor::ConfigurationFacet {
-                kind,
-                name: owner_name.to_string(),
-                facet: FacetKind::Object,
-            }
-        }
-        _ => return None,
-    };
-
-    let resolution = resolve_type_from_contextual_descriptor(Some(ctx.resolver), &descriptor);
-    if resolution.is_unknown() || resolution.is_dynamic() {
-        None
-    } else {
-        Some(resolution)
-    }
+    ctx.member_access_owner_type_hint
+        .as_ref()
+        .filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
+        .cloned()
 }
 
 pub(super) fn resolve_property_access_type(
@@ -457,7 +253,6 @@ pub(super) fn resolve_type_from_string(
 #[derive(Debug, Clone)]
 pub(super) struct CompletionScopePosition {
     pub(super) byte_offset: u32,
-    pub(super) scope_id: ScopeId,
     pub(super) scope_rank: HashMap<ScopeId, usize>,
 }
 

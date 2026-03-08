@@ -4,18 +4,16 @@
 
 use anyhow::Result;
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, Span};
 
-use bsl_shared::domain::code_location::{CodeLocation, ModuleType};
 use bsl_shared::domain::metadata_constants::get_collection_kind;
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::SignatureIndex;
 use bsl_shared::domain::types::{
-    ConcreteType, ContextualTypeDescriptor, FacetKind, MetadataKind, ResolutionResult, SpecialType,
+    ConcreteType, FacetKind, MetadataKind, ResolutionResult, SpecialType,
 };
 use bsl_shared::domain::{CompletionItem, CompletionKind, TypeMetadataLookup, TypeResolution};
 use bsl_shared::ir::{ScopeId, ScopeKind, SemanticNodeKind, SemanticProgram};

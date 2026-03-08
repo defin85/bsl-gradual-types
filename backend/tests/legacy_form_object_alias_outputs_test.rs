@@ -74,6 +74,18 @@ fn apply_file(
     (file_content, file_path, ir_program, parse_result)
 }
 
+fn shared_owner_hint_at_marker(
+    host: &AnalysisHostV2,
+    file_id: V2FileId,
+    content: &str,
+    marker: &str,
+) -> Option<bsl_shared::domain::types::TypeResolution> {
+    let object_offset = content.find(marker).expect("marker offset") + "x = ".len();
+    host.analysis()
+        .type_at_byte_offset(file_id, object_offset as u32)
+        .expect("type_at_byte_offset query")
+}
+
 fn completion_items(response: CompletionResponse) -> Vec<CompletionItem> {
     match response {
         CompletionResponse::List(list) => list.items,
@@ -144,21 +156,32 @@ async fn completion_and_resolve_do_not_expose_legacy_form_alias() {
     let index_snapshot = deps_bundle.index_snapshot.clone();
     let uri = Url::parse("file:///legacy_form_alias_completion.bsl").expect("uri");
     let file_path = "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl";
-    let content = concat!("Процедура Тест()\n", "    Объект.\n", "КонецПроцедуры\n",);
+    let content = concat!(
+        "Процедура Тест()\n",
+        "    x = Объект;\n",
+        "    Объект.\n",
+        "КонецПроцедуры\n",
+    );
 
     let mut host = setup_host(deps_bundle.as_ref());
     let (file_content, resolved_file_path, ir_program, parse_result) =
         apply_file(&mut host, V2FileId(1), file_path, content);
+    let member_access_owner_type_hint =
+        shared_owner_hint_at_marker(&host, V2FileId(1), content, "x = Объект");
+    assert!(
+        member_access_owner_type_hint.is_some(),
+        "expected shared owner hint for FormModule.Объект completion"
+    );
 
     let response = completion_handler::handle_completion_v2(
         file_content,
         resolved_file_path,
         ir_program,
         Some(parse_result),
-        None,
+        member_access_owner_type_hint,
         deps_bundle.semantic_deps.clone(),
         Position {
-            line: 1,
+            line: 2,
             character: utf16_len("    Объект."),
         },
         &uri,

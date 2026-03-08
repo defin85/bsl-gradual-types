@@ -1,7 +1,8 @@
 # Traceability: update-gradual-core-production-readiness
 
 Этот артефакт фиксирует прямую трассировку `Requirement -> Code -> Test`
-для delivered production-readiness contract.
+для финального production-readiness состояния после закрытия epic
+`bsl-gradual-types-b6q`.
 
 ## Requirement: Shared resolved contract first-class выражает snapshot-local structural members
 
@@ -38,10 +39,12 @@ Code:
 - `bsl-runtime/src/application/type_system/services/completion_service.rs`
 - `bsl-runtime/src/application/type_system/services/completion_service/member_resolution.rs`
 - `bsl-runtime/src/application/type_system/services/hover_service.rs`
+- `backend/src/bin/lsp_server/server/language_server/impl_completion_helpers.rs`
 - `backend/src/bin/lsp_server/handlers/completion.rs`
 - `backend/src/bin/lsp_server/handlers/hover.rs`
 - `backend/src/presentation/web/handlers.rs`
 - `backend/src/presentation/web/handlers/semantic.rs`
+- `bsl-agent/src/session/helpers_semantic.rs`
 - `bsl-agent/src/session/manager_semantic_core.rs`
 
 Tests:
@@ -49,16 +52,25 @@ Tests:
   - `typed_structure_completion_without_shared_owner_hint_fails_closed_in_direct_handler_path`
   - `typed_value_table_row_completion_without_shared_owner_hint_fails_closed_in_direct_handler_path`
 - `bsl-runtime/src/application/type_system/services/completion_service/tests.rs`
-  - `implicit_module_context_owner_fallback_matches_shared_resolution_for_supported_modules`
-  - `implicit_module_context_owner_fallback_fails_closed_outside_supported_modules`
+  - `completion_implicit_form_object_member_access_fails_closed_without_shared_hint`
+  - `completion_resolves_implicit_form_object_member_access_with_shared_hint`
+  - `implicit_module_context_owner_resolution_requires_shared_hint_for_supported_modules`
+  - `implicit_module_context_owner_resolution_fails_closed_outside_supported_modules`
+- `backend/tests/form_module_object_unified_contract_test.rs`
+  - `completion_and_resolve_follow_unified_form_contract`
+  - `completion_form_module_object_fails_closed_without_shared_owner_hint`
+- `backend/tests/legacy_form_object_alias_outputs_test.rs`
+  - `completion_and_resolve_do_not_expose_legacy_form_alias`
 - `backend/src/bin/lsp_server/server/core/tests.rs`
+  - `p7_form_module_object_completion_uses_default_lsp_owner_hint_path`
   - `p7_typed_structure_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics`
   - `p7_typed_value_table_row_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics`
   - `p7_typed_structure_revision_switch_does_not_leak_stale_structural_members_across_interfaces`
   - `p7_typed_value_table_row_revision_switch_does_not_leak_stale_structural_members_across_interfaces`
 
 Notes:
-- bounded bootstrap-only module-context path remains explicitly catalogued in `design.md`, now matches shared analysis `TypeResolution` for supported implicit symbols, and fails closed outside supported module-context paths.
+- completion owner resolution больше не содержит bootstrap-only implicit module-context fallback;
+- supported implicit module-context completion работает только через shared owner hint, а no-hint path fail-closed.
 
 ## Requirement: Cross-consumer acceptance доказывает semantic equivalence, а не только smoke consistency
 
@@ -68,6 +80,8 @@ Code:
 - `backend/src/bin/lsp_server/server/core/tests.rs`
 - `backend/tests/universal_collection_cross_consumer_consistency_test.rs`
 - `backend/tests/universal_collection_strict_policy_test.rs`
+- `backend/tests/form_module_object_unified_contract_test.rs`
+- `backend/tests/legacy_form_object_alias_outputs_test.rs`
 - `backend/src/bin/lsp_server/handlers/completion.rs`
 - `backend/src/bin/lsp_server/handlers/completion/tests.rs`
 - `bsl-agent/src/types/mod.rs`
@@ -75,6 +89,7 @@ Code:
 
 Tests:
 - `backend/src/bin/lsp_server/server/core/tests.rs`
+  - `p7_form_module_object_completion_uses_default_lsp_owner_hint_path`
   - `p7_typed_structure_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics`
   - `p7_typed_value_table_row_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics`
   - `p7_typed_structure_revision_switch_does_not_leak_stale_structural_members_across_interfaces`
@@ -82,6 +97,11 @@ Tests:
 - `backend/tests/universal_collection_cross_consumer_consistency_test.rs`
   - `typed_structure_completion_without_shared_owner_hint_fails_closed_in_direct_handler_path`
   - `typed_value_table_row_completion_without_shared_owner_hint_fails_closed_in_direct_handler_path`
+- `backend/tests/form_module_object_unified_contract_test.rs`
+  - `completion_and_resolve_follow_unified_form_contract`
+  - `completion_form_module_object_fails_closed_without_shared_owner_hint`
+- `backend/tests/legacy_form_object_alias_outputs_test.rs`
+  - `completion_and_resolve_do_not_expose_legacy_form_alias`
 - `backend/src/bin/lsp_server/handlers/completion/tests.rs`
   - `structural_property_completion_items_include_member_identity_in_data`
 
@@ -90,16 +110,20 @@ Tests:
 Status: `covered`
 
 Code / artefacts:
-- `openspec/changes/update-gradual-core-production-readiness/tasks.md`
+- `.github/workflows/ci.yml`
+- `README.md`
+- `CONTRIBUTING.md`
+- `scripts/README.md`
+- `scripts/check-openspec-change-governance.py`
+- `scripts/check-protected-assets-gate.py`
+- `scripts/test-ci-openspec-governance-workflow.py`
+- `scripts/test-openspec-change-governance.py`
 - `openspec/changes/update-gradual-core-production-readiness/validation/acceptance_matrix.md`
 - `openspec/changes/update-gradual-core-production-readiness/validation/final-closure-checklist.md`
-- `openspec/changes/update-gradual-core-production-readiness/governance/change_criticality.json`
-- `openspec/changes/update-gradual-core-production-readiness/governance/dependency_checks.json`
 - `openspec/changes/update-gradual-core-production-readiness/governance/readiness_status.json`
-- `scripts/check-openspec-change-governance.py`
 
 Evidence:
-- `openspec validate update-gradual-core-production-readiness --strict --no-interactive`
+- `python3 scripts/test-ci-openspec-governance-workflow.py`
 - `python3 scripts/check-openspec-change-governance.py --change-id update-gradual-core-production-readiness`
 - `python3 -m unittest scripts.test-openspec-change-governance -v`
 
@@ -108,16 +132,16 @@ Evidence:
 Status: `covered`
 
 Code / artefacts:
-- `openspec/changes/update-gradual-core-production-readiness/proposal.md`
 - `openspec/changes/update-gradual-core-production-readiness/design.md`
 - `openspec/changes/update-gradual-core-production-readiness/traceability.md`
 - `openspec/changes/update-gradual-core-production-readiness/residual-risk-review.md`
+- `openspec/changes/update-gradual-core-production-readiness/validation/acceptance_matrix.md`
 - `openspec/changes/update-gradual-core-production-readiness/validation/readiness-review-status.md`
 - `openspec/changes/update-gradual-core-production-readiness/validation/final-closure-checklist.md`
 - `openspec/changes/update-gradual-core-production-readiness/governance/readiness_status.json`
 
 Evidence:
-- `residual-risk-review.md` отделяет semantic risk closure от final closure status;
-- `readiness_status.json` теперь ссылается на canonical `readiness-review-status.md` и `traceability.md`, а не на stale manual verdict fields;
-- `scripts/test-openspec-change-governance.py` фиксирует conflicting evidence, approved superseding handoff и optimistic-overclaim regressions;
-- `final-closure-checklist.md` фиксирует final validation/gate evidence без optimistic wording.
+- `readiness-review-status.md` и `readiness_status.json` ссылаются на final reviewed evidence, а не на stale self-reported tokens;
+- `traceability.md` больше не каталогизирует удалённый bootstrap fallback как допустимый end-state;
+- `final-closure-checklist.md` фиксирует active workflow wiring, runtime convergence и full acceptance evidence;
+- `residual-risk-review.md` сохраняет semantic-risk reasoning как вход в финальный verdict, без stale references на старый follow-up backlog.

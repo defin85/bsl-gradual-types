@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-1.70+-brightgreen.svg)](https://www.rust-lang.org/)
 
-GitHub Actions выполняет Rust quality gates и проверки политики репозитория (workflow `CI`). Перед PR всё равно рекомендуется прогонять эти команды локально (см. `CONTRIBUTING.md`).
+GitHub Actions сейчас использует workflow `CI` как default fail-closed path для OpenSpec governance gate по затронутым `openspec/changes/<id>`. Локальные `cargo fmt`, `cargo clippy` и `cargo test` перед PR по-прежнему обязательны (см. `CONTRIBUTING.md`).
 
 ## 📋 Обзор
 

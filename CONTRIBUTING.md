@@ -236,7 +236,7 @@ pub fn my_function(param1: Type1, param2: Type2) -> Result<ReturnType> {
 5. ✅ Обновите CHANGELOG.md
 
 ### PR Review Process
-1. **GitHub Actions** - должен пройти workflow `CI` (см. `.github/workflows/ci.yml`).
+1. **GitHub Actions** - workflow `CI` является default entrypoint для OpenSpec governance gate по затронутым `openspec/changes/<id>` (см. `.github/workflows/ci.yml`).
 2. **Code Review** - Минимум 1 approve от maintainer
 3. **Testing** - Comprehensive testing в разных окружениях
 4. **Documentation** - Проверка актуальности документации

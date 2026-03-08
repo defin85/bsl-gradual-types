@@ -1,21 +1,20 @@
 # Change: update-gradual-core-production-readiness
 
 ## Why
-Change был создан после production-readiness review, который показал разрыв между сильной архитектурной идеей и фактическим delivery evidence.
+Change появился после production-readiness review, который выявил четыре класса gap:
+- snapshot-local structural knowledge для typed `Структура` и typed-row ещё не было first-class shared truth со stable identity;
+- completion сохранял риск consumer-local reconstruction;
+- exact acceptance и traceability ещё не доказывали same member identity и hidden-hint fail-closed behaviour;
+- OpenSpec change можно было optimistic трактовать как `complete` без machine-readable readiness gate и без active default workflow.
 
-Ключевые gaps были такими:
-- snapshot-local structural knowledge для typed `Структура` и typed-row ещё не было first-class shared truth с stable identity;
-- completion допускал risk consumer-local reconstruction;
-- exact acceptance и traceability ещё не доказывали same member identity и fail-closed hidden-hint behaviour;
-- OpenSpec change можно было optimistic трактовать как complete без machine-readable readiness gate.
-
-Нужен был отдельный change, который сначала зафиксирует этот contract, а затем будет доведён до прямого `Requirement -> Code -> Test` evidence.
+Нужен был change, который сначала формализует этот contract, а затем доведёт его до прямого `Requirement -> Code -> Test` evidence.
 
 ## What Changes
-- Зафиксирован и доставлен first-class shared structural contract для typed `Структура` и typed-row, включая stable member identity.
-- Completion / hover / type-at-position / diagnostics / `LSP` / `MCP` / Web adapters привязаны к одному resolved truth для reviewed structural scenarios; остающиеся bootstrap-only exceptions явно ограничены design-артефактом.
-- Exact acceptance теперь доказывает same member identity, same known/unknown policy, hidden-hint fail-closed behaviour и snapshot revision isolation across interfaces.
-- Для `dev-workflow` введён change-specific readiness gate с machine-readable governance artefacts, который блокирует optimistic `complete` при конфликте backlog/evidence.
+- Доставлен first-class shared structural contract для typed `Структура` и typed-row, включая stable member identity.
+- Completion / hover / type-at-position / diagnostics / `LSP` / `MCP` / Web adapters сведены к одному resolved truth.
+- Bootstrap-only implicit module-context fallback в completion owner resolution удалён; этот scope теперь strict shared-hint-driven.
+- Exact acceptance доказывает same member identity, same known/unknown policy, hidden-hint fail-closed behaviour и snapshot revision isolation across interfaces.
+- Для `dev-workflow` введён change-specific readiness gate с machine-readable governance artefacts и active default workflow `.github/workflows/ci.yml`, который блокирует optimistic `complete` при конфликте backlog/evidence.
 
 ## Impact
 - Affected specs:
@@ -27,15 +26,17 @@ Change был создан после production-readiness review, которы�
   - `bsl-runtime/src/application/type_system/services/*`
   - `backend/src/bin/lsp_server/**`
   - `bsl-agent/src/session/**`
+  - `.github/workflows/ci.yml`
   - change-local governance / validation artefacts under `openspec/changes/update-gradual-core-production-readiness/`
 
 ## Delivery Status
 
 Delivered:
 - shared structural member identity and lifecycle semantics;
-- exact cross-consumer acceptance for typed `Структура` and typed-row;
-- fail-closed hidden-hint regressions;
-- change-specific readiness governance and honest closure evidence.
+- exact cross-consumer acceptance for typed `Структура`, typed-row and implicit module-context owner resolution;
+- fail-closed hidden-hint regressions in direct handler paths;
+- default LSP-path evidence for `FormModule.Объект.`;
+- active default governance workflow and refreshed closure evidence.
 
 Current verdict:
 - `complete` for this change;

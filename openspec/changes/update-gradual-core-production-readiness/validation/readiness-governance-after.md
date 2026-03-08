@@ -9,8 +9,9 @@ pass
 
 - Architectural governance artefacts now exist under `governance/`.
 - Acceptance matrix, dependency checks, test-first refs, ADR and ownership sign-off are recorded.
+- `.github/workflows/ci.yml` provides the active default fail-closed path for touched OpenSpec changes.
 - `readiness_status.json` declares the change as `complete`.
-- Critical backlog referenced by the change is closed, so the gate allows final closure without overclaim.
+- Critical backlog referenced by the change (`bsl-gradual-types-b6q`) is closed, so the gate allows final closure without overclaim.
 
 ## Passing evidence
 
@@ -23,5 +24,5 @@ python3 scripts/check-openspec-change-governance.py --change-id update-gradual-c
 Resolved result:
 - `pass`
 - `after`
-- readiness/backlog alignment stays fail-closed
+- readiness/backlog alignment stays fail-closed, including the default workflow path
 - final verdict is `complete`

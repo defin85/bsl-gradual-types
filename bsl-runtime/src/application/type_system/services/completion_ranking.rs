@@ -29,6 +29,7 @@ pub struct RankingSignals {
 pub struct RankedCandidate {
     pub item: CompletionItem,
     pub owner_type: Option<String>,
+    pub member_identity: Option<String>,
     pub label_lower: String,
     pub source_priority: u8,
     pub scope: Option<SymbolScope>,
@@ -60,6 +61,7 @@ pub struct RankingSummary {
 pub struct RankingCandidate {
     pub item: CompletionItem,
     pub owner_type: Option<String>,
+    pub member_identity: Option<String>,
     pub label_lower: String,
     pub source_priority: u8,
     pub scope: Option<SymbolScope>,
@@ -161,6 +163,7 @@ pub fn rank_candidates_with_trace(
         ranked.push(RankedCandidate {
             item: candidate.item,
             owner_type: candidate.owner_type,
+            member_identity: candidate.member_identity,
             label_lower: candidate.label_lower,
             source_priority: candidate.source_priority,
             scope: candidate.scope,
@@ -176,6 +179,7 @@ pub fn rank_candidates_with_trace(
             .then_with(|| kind_rank(a.item.kind).cmp(&kind_rank(b.item.kind)))
             .then_with(|| scope_rank(a.scope).cmp(&scope_rank(b.scope)))
             .then_with(|| a.owner_type.cmp(&b.owner_type))
+            .then_with(|| a.member_identity.cmp(&b.member_identity))
             .then_with(|| a.source_priority.cmp(&b.source_priority))
     });
 
@@ -323,9 +327,13 @@ fn dedup_key(candidate: &RankedCandidate) -> String {
         .as_deref()
         .map(|owner| owner.to_lowercase())
         .unwrap_or_else(|| "none".to_string());
+    let member_identity = candidate
+        .member_identity
+        .clone()
+        .unwrap_or_else(|| "none".to_string());
     format!(
-        "{}|{:?}|{}|{}",
-        candidate.label_lower, candidate.item.kind, scope, owner
+        "{}|{:?}|{}|{}|{}",
+        candidate.label_lower, candidate.item.kind, scope, owner, member_identity
     )
 }
 
@@ -347,6 +355,9 @@ fn merge_candidates(mut best: RankedCandidate, other: RankedCandidate) -> Ranked
     }
     if best.owner_type.is_none() {
         best.owner_type = other.owner_type;
+    }
+    if best.member_identity.is_none() {
+        best.member_identity = other.member_identity;
     }
 
     best.origin_sources = merge_sources(&best.origin_sources, &other.origin_sources);
@@ -372,6 +383,7 @@ fn stable_order(a: &RankedCandidate, b: &RankedCandidate) -> std::cmp::Ordering 
             .then_with(|| kind_rank(a.item.kind).cmp(&kind_rank(b.item.kind)))
             .then_with(|| scope_rank(a.scope).cmp(&scope_rank(b.scope)))
             .then_with(|| a.owner_type.cmp(&b.owner_type))
+            .then_with(|| a.member_identity.cmp(&b.member_identity))
             .then_with(|| a.source_priority.cmp(&b.source_priority))
             .then_with(|| {
                 b.score
@@ -388,6 +400,7 @@ fn stable_order(a: &RankedCandidate, b: &RankedCandidate) -> std::cmp::Ordering 
         .then_with(|| kind_rank(a.item.kind).cmp(&kind_rank(b.item.kind)))
         .then_with(|| scope_rank(a.scope).cmp(&scope_rank(b.scope)))
         .then_with(|| a.owner_type.cmp(&b.owner_type))
+        .then_with(|| a.member_identity.cmp(&b.member_identity))
 }
 
 fn kind_rank(kind: CompletionKind) -> u8 {

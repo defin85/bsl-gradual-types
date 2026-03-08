@@ -395,6 +395,90 @@ async fn typed_structure_completion_without_shared_owner_hint_fails_closed_in_di
 }
 
 #[tokio::test]
+async fn typed_value_table_row_completion_without_shared_owner_hint_fails_closed_in_direct_handler_path(
+) {
+    let code = concat!(
+        "Процедура Тест()\n",
+        "    ТЗ = Новый ТаблицаЗначений;\n",
+        "    ТЗ.Колонки.Добавить(\"Идентификатор\", Новый ОписаниеТипов(\"Строка\"));\n",
+        "    Стр = ТЗ.Добавить();\n",
+        "    probe = Стр.\n",
+        "КонецПроцедуры\n",
+    );
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
+    let index_snapshot = deps_bundle.index_snapshot.clone();
+    let uri = Url::parse("file:///typed_value_table_row_no_shared_hint_completion.bsl")
+        .expect("test uri");
+
+    let host = setup_host(deps_bundle.as_ref(), code);
+    let analysis = host.analysis();
+    let file_content = analysis
+        .file_text(FILE_ID)
+        .ok()
+        .flatten()
+        .expect("file_text");
+    let resolved_file_path = analysis
+        .file_path(FILE_ID)
+        .ok()
+        .flatten()
+        .expect("file_path");
+    let ir_program = analysis.ir(FILE_ID).ok().flatten().expect("ir");
+    let parse_result = analysis
+        .parse_result(FILE_ID)
+        .ok()
+        .flatten()
+        .expect("parse_result");
+    let completion_offset = byte_offset_of(code, "    probe = Стр.") + "    probe = Стр.".len();
+    let completion_position = byte_offset_to_utf16_position(code, completion_offset);
+
+    let shared_owner_hint =
+        member_access_owner_hint_at_position(&analysis, file_content.as_ref(), completion_position);
+    assert!(
+        shared_owner_hint.is_some(),
+        "shared contract must still know the typed-row receiver type at {:?}",
+        completion_position
+    );
+
+    let completion = completion_handler::handle_completion_v2(
+        file_content,
+        resolved_file_path,
+        ir_program,
+        Some(parse_result),
+        None,
+        deps_bundle.semantic_deps.clone(),
+        completion_position,
+        &uri,
+        index_snapshot.as_ref(),
+        false,
+        false,
+    )
+    .await
+    .expect("completion response");
+    assert!(
+        !completion.had_error,
+        "direct handler path without shared owner hint must fail closed for typed-row, not crash"
+    );
+
+    let items = completion_items(completion.response);
+    let labels = items
+        .iter()
+        .map(|item| item.label.clone())
+        .collect::<Vec<_>>();
+    assert!(
+        !items.iter().any(|item| {
+            item.label == "Идентификатор"
+                && matches!(
+                    item.kind,
+                    Some(CompletionItemKind::PROPERTY)
+                        | Some(CompletionItemKind::FIELD)
+                        | Some(CompletionItemKind::METHOD)
+                )
+        }),
+        "direct handler path must not reconstruct typed-row structural column from consumer-local fallback, labels={labels:?}"
+    );
+}
+
+#[tokio::test]
 async fn map_index_access_cross_consumer_consistency_with_shared_owner_hint() {
     let code = concat!(
         "Процедура Тест()\n",

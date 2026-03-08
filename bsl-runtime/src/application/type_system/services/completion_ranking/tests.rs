@@ -63,6 +63,25 @@ fn candidate(
     RankingCandidate {
         item: CompletionItem::new(label.to_string(), kind),
         owner_type: owner_type.map(|value| value.to_string()),
+        member_identity: None,
+        label_lower: label.to_lowercase(),
+        source_priority,
+        scope,
+    }
+}
+
+fn candidate_with_member_identity(
+    label: &str,
+    kind: CompletionKind,
+    source_priority: u8,
+    scope: Option<SymbolScope>,
+    owner_type: Option<&str>,
+    member_identity: Option<&str>,
+) -> RankingCandidate {
+    RankingCandidate {
+        item: CompletionItem::new(label.to_string(), kind),
+        owner_type: owner_type.map(|value| value.to_string()),
+        member_identity: member_identity.map(|value| value.to_string()),
         label_lower: label.to_lowercase(),
         source_priority,
         scope,
@@ -81,6 +100,7 @@ fn ranked(
     RankedCandidate {
         item: CompletionItem::new(label.to_string(), kind),
         owner_type: owner_type.clone(),
+        member_identity: None,
         label_lower: label.to_lowercase(),
         source_priority,
         scope,
@@ -113,6 +133,7 @@ fn rank_prefers_exact_prefix() {
         RankingCandidate {
             item: CompletionItem::new("тест".to_string(), CompletionKind::Function),
             owner_type: None,
+            member_identity: None,
             label_lower: "тест".to_string(),
             source_priority: 2,
             scope: None,
@@ -120,6 +141,7 @@ fn rank_prefers_exact_prefix() {
         RankingCandidate {
             item: CompletionItem::new("тестирование".to_string(), CompletionKind::Function),
             owner_type: None,
+            member_identity: None,
             label_lower: "тестирование".to_string(),
             source_priority: 2,
             scope: None,
@@ -146,6 +168,7 @@ fn rank_prefers_local_scope() {
         RankingCandidate {
             item: CompletionItem::new("abc".to_string(), CompletionKind::Variable),
             owner_type: None,
+            member_identity: None,
             label_lower: "abc".to_string(),
             source_priority: 2,
             scope: Some(SymbolScope::Global),
@@ -153,6 +176,7 @@ fn rank_prefers_local_scope() {
         RankingCandidate {
             item: CompletionItem::new("abc".to_string(), CompletionKind::Variable),
             owner_type: None,
+            member_identity: None,
             label_lower: "abc".to_string(),
             source_priority: 2,
             scope: Some(SymbolScope::Local),
@@ -182,6 +206,7 @@ fn dedup_keeps_best_score() {
         RankingCandidate {
             item: CompletionItem::new("abc".to_string(), CompletionKind::Function),
             owner_type: None,
+            member_identity: None,
             label_lower: "abc".to_string(),
             source_priority: 3,
             scope: Some(SymbolScope::Global),
@@ -189,6 +214,7 @@ fn dedup_keeps_best_score() {
         RankingCandidate {
             item: CompletionItem::new("abc".to_string(), CompletionKind::Function),
             owner_type: None,
+            member_identity: None,
             label_lower: "abc".to_string(),
             source_priority: 1,
             scope: Some(SymbolScope::Global),
@@ -216,6 +242,7 @@ fn ordering_is_deterministic_for_equal_scores() {
         RankingCandidate {
             item: CompletionItem::new("abc".to_string(), CompletionKind::Function),
             owner_type: None,
+            member_identity: None,
             label_lower: "abc".to_string(),
             source_priority: 2,
             scope: Some(SymbolScope::Global),
@@ -223,6 +250,7 @@ fn ordering_is_deterministic_for_equal_scores() {
         RankingCandidate {
             item: CompletionItem::new("abc".to_string(), CompletionKind::Function),
             owner_type: Some("Owner".to_string()),
+            member_identity: None,
             label_lower: "abc".to_string(),
             source_priority: 2,
             scope: Some(SymbolScope::Global),
@@ -254,6 +282,7 @@ fn dedup_merges_details_from_weaker_candidate() {
         RankingCandidate {
             item: CompletionItem::new("abc".to_string(), CompletionKind::Function),
             owner_type: None,
+            member_identity: None,
             label_lower: "abc".to_string(),
             source_priority: 0,
             scope: Some(SymbolScope::Global),
@@ -266,6 +295,7 @@ fn dedup_merges_details_from_weaker_candidate() {
                 Some("doc".to_string()),
             ),
             owner_type: None,
+            member_identity: None,
             label_lower: "abc".to_string(),
             source_priority: 3,
             scope: Some(SymbolScope::Global),
@@ -414,6 +444,24 @@ fn dedup_key_differs_by_scope_kind_and_owner() {
 }
 
 #[test]
+fn dedup_key_differs_by_member_identity() {
+    let mut base = ranked(
+        "abc",
+        CompletionKind::Property,
+        1,
+        Some(SymbolScope::Local),
+        Some("Owner"),
+        0.5,
+    );
+    base.member_identity = Some("member:one".to_string());
+
+    let mut diff_identity = base.clone();
+    diff_identity.member_identity = Some("member:two".to_string());
+
+    assert_ne!(dedup_key(&base), dedup_key(&diff_identity));
+}
+
+#[test]
 fn rank_keeps_candidates_with_different_owner_types() {
     let ctx = CompletionContext {
         current_word: "a".to_string(),
@@ -439,6 +487,32 @@ fn rank_keeps_candidates_with_different_owner_types() {
             1,
             Some(SymbolScope::Global),
             Some("TypeB"),
+        ),
+    ];
+
+    let ranked = rank_candidates(candidates, &ctx);
+    assert_eq!(ranked.candidates.len(), 2);
+}
+
+#[test]
+fn rank_keeps_candidates_with_different_member_identity() {
+    let ctx = ctx("", true);
+    let candidates = vec![
+        candidate_with_member_identity(
+            "Идентификатор",
+            CompletionKind::Property,
+            1,
+            Some(SymbolScope::Global),
+            Some("Структура"),
+            Some("struct:one"),
+        ),
+        candidate_with_member_identity(
+            "Идентификатор",
+            CompletionKind::Property,
+            1,
+            Some(SymbolScope::Global),
+            Some("Структура"),
+            Some("struct:two"),
         ),
     ];
 
@@ -683,6 +757,7 @@ fn rank_candidates_emits_trace_logs_with_request_id() {
     let candidates = vec![RankingCandidate {
         item: CompletionItem::new("abc".to_string(), CompletionKind::Function),
         owner_type: None,
+        member_identity: None,
         label_lower: "abc".to_string(),
         source_priority: 2,
         scope: Some(SymbolScope::Global),

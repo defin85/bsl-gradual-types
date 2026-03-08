@@ -474,6 +474,32 @@ struct NormalizedPoint {
     start_character: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct NormalizedMemberEntry {
+    name: String,
+    kind: String,
+    member_identity: Option<String>,
+}
+
+fn member_kind_name(kind: CompletionItemKind) -> Option<&'static str> {
+    match kind {
+        CompletionItemKind::METHOD => Some("method"),
+        CompletionItemKind::PROPERTY => Some("property"),
+        CompletionItemKind::FIELD => Some("field"),
+        CompletionItemKind::FUNCTION => Some("function"),
+        CompletionItemKind::CONSTRUCTOR => Some("constructor"),
+        _ => None,
+    }
+}
+
+fn completion_item_member_identity(item: &tower_lsp::lsp_types::CompletionItem) -> Option<String> {
+    item.data
+        .as_ref()
+        .and_then(|value| value.get("member_identity"))
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+}
+
 fn normalize_lsp_member_labels(response: &CompletionResponse) -> Vec<String> {
     let items = match response {
         CompletionResponse::Array(items) => items.as_slice(),
@@ -498,8 +524,45 @@ fn normalize_lsp_member_labels(response: &CompletionResponse) -> Vec<String> {
     out
 }
 
+fn normalize_lsp_member_entries(response: &CompletionResponse) -> Vec<NormalizedMemberEntry> {
+    let items = match response {
+        CompletionResponse::Array(items) => items.as_slice(),
+        CompletionResponse::List(list) => list.items.as_slice(),
+    };
+    let mut out: Vec<NormalizedMemberEntry> = items
+        .iter()
+        .filter_map(|item| {
+            let kind = item.kind.and_then(member_kind_name)?;
+            Some(NormalizedMemberEntry {
+                name: item.label.clone(),
+                kind: kind.to_string(),
+                member_identity: completion_item_member_identity(item),
+            })
+        })
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
 fn normalize_mcp_member_labels(members: &[bsl_agent::types::MemberDto]) -> Vec<String> {
     let mut out: Vec<String> = members.iter().map(|member| member.name.clone()).collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn normalize_mcp_member_entries(
+    members: &[bsl_agent::types::MemberDto],
+) -> Vec<NormalizedMemberEntry> {
+    let mut out: Vec<NormalizedMemberEntry> = members
+        .iter()
+        .map(|member| NormalizedMemberEntry {
+            name: member.name.clone(),
+            kind: member.kind.clone(),
+            member_identity: member.member_identity.clone(),
+        })
+        .collect();
     out.sort();
     out.dedup();
     out
@@ -4256,12 +4319,14 @@ async fn p7_typed_structure_exact_cross_consumer_acceptance_keeps_same_contract_
     )
     .await;
 
-    let completion_labels = lsp_completion_labels_at(
-        &mut service,
-        &uri,
-        find_utf16_position_after_marker(completion_fixture, "ДляCompletion = S."),
-    )
-    .await;
+    let completion_position =
+        find_utf16_position_after_marker(completion_fixture, "ДляCompletion = S.");
+    let completion_members =
+        lsp_completion_members_at(&mut service, &uri, completion_position).await;
+    let completion_labels = completion_members
+        .iter()
+        .map(|entry| entry.name.clone())
+        .collect::<Vec<_>>();
     assert!(
         completion_labels
             .iter()
@@ -4273,14 +4338,78 @@ async fn p7_typed_structure_exact_cross_consumer_acceptance_keeps_same_contract_
         "completion must include typed structure field Количество, labels={completion_labels:?}"
     );
 
-    replace_lsp_fixture_and_wait(&mut service, &server, &uri, file_id, 2, resolved_fixture).await;
-
-    let hover_text = lsp_hover_text_at(
-        &mut service,
-        &uri,
-        find_utf16_position_at_marker_tail(resolved_fixture, "ДляHover = S.Идентификатор"),
+    let runtime_resolution = snapshot_type_resolution_at_marker(
+        &server,
+        file_id,
+        completion_fixture,
+        "ДляCompletion = S",
     )
     .await;
+    let runtime_identifier_identity = runtime_resolution
+        .find_structural_member("Идентификатор")
+        .map(|member| member.member_id.key.clone())
+        .expect("runtime structural identity for Идентификатор");
+    let runtime_quantity_identity = runtime_resolution
+        .find_structural_member("Количество")
+        .map(|member| member.member_id.key.clone())
+        .expect("runtime structural identity for Количество");
+
+    let lsp_identifier = completion_members
+        .iter()
+        .find(|entry| {
+            entry.name == "Идентификатор"
+                && entry.member_identity.as_deref() == Some(runtime_identifier_identity.as_str())
+        })
+        .expect("lsp completion entry Идентификатор");
+    let lsp_quantity = completion_members
+        .iter()
+        .find(|entry| {
+            entry.name == "Количество"
+                && entry.member_identity.as_deref() == Some(runtime_quantity_identity.as_str())
+        })
+        .expect("lsp completion entry Количество");
+    assert_eq!(
+        lsp_identifier.member_identity.as_deref(),
+        Some(runtime_identifier_identity.as_str()),
+        "LSP completion must expose the same structural member identity as runtime"
+    );
+    assert_eq!(
+        lsp_quantity.member_identity.as_deref(),
+        Some(runtime_quantity_identity.as_str()),
+        "LSP completion must expose the same quantity member identity as runtime"
+    );
+
+    let mcp_members = mcp_member_entries_at_code(completion_fixture, completion_position).await;
+    let mcp_identifier = mcp_members
+        .iter()
+        .find(|entry| {
+            entry.name == "Идентификатор"
+                && entry.member_identity.as_deref() == Some(runtime_identifier_identity.as_str())
+        })
+        .expect("mcp members entry Идентификатор");
+    let mcp_quantity = mcp_members
+        .iter()
+        .find(|entry| {
+            entry.name == "Количество"
+                && entry.member_identity.as_deref() == Some(runtime_quantity_identity.as_str())
+        })
+        .expect("mcp members entry Количество");
+    assert_eq!(
+        mcp_identifier.member_identity.as_deref(),
+        Some(runtime_identifier_identity.as_str()),
+        "MCP members must expose the same structural member identity as runtime"
+    );
+    assert_eq!(
+        mcp_quantity.member_identity.as_deref(),
+        Some(runtime_quantity_identity.as_str()),
+        "MCP members must expose the same quantity member identity as runtime"
+    );
+
+    replace_lsp_fixture_and_wait(&mut service, &server, &uri, file_id, 2, resolved_fixture).await;
+
+    let resolved_position =
+        find_utf16_position_at_marker_tail(resolved_fixture, "ДляHover = S.Идентификатор");
+    let hover_text = lsp_hover_text_at(&mut service, &uri, resolved_position).await;
     assert!(
         hover_text.contains("Идентификатор") && hover_text.contains("Строка"),
         "hover must expose structure field name and type, hover={hover_text}"
@@ -4296,6 +4425,18 @@ async fn p7_typed_structure_exact_cross_consumer_acceptance_keeps_same_contract_
     assert_eq!(
         type_name, "Строка",
         "typed structure type-at-position must expose field type"
+    );
+
+    let mcp_type_name = mcp_type_name_at_code(resolved_fixture, resolved_position).await;
+    assert_eq!(
+        mcp_type_name, type_name,
+        "MCP type_at_position must agree with shared runtime type for typed structure field"
+    );
+
+    let web_hover_text = web_hover_text_for_code(resolved_fixture, resolved_position).await;
+    assert!(
+        web_hover_text.contains(&type_name),
+        "Web hover must agree with shared runtime type for typed structure field, hover={web_hover_text}"
     );
 
     let diagnostics = snapshot_semantic_diagnostic_messages(&server, file_id).await;
@@ -4340,12 +4481,14 @@ async fn p7_typed_value_table_row_exact_cross_consumer_acceptance_keeps_same_con
     )
     .await;
 
-    let completion_labels = lsp_completion_labels_at(
-        &mut service,
-        &uri,
-        find_utf16_position_after_marker(completion_fixture, "ДляCompletion = Стр."),
-    )
-    .await;
+    let completion_position =
+        find_utf16_position_after_marker(completion_fixture, "ДляCompletion = Стр.");
+    let completion_members =
+        lsp_completion_members_at(&mut service, &uri, completion_position).await;
+    let completion_labels = completion_members
+        .iter()
+        .map(|entry| entry.name.clone())
+        .collect::<Vec<_>>();
     assert!(
         completion_labels
             .iter()
@@ -4357,14 +4500,78 @@ async fn p7_typed_value_table_row_exact_cross_consumer_acceptance_keeps_same_con
         "completion must include typed-row column Количество, labels={completion_labels:?}"
     );
 
-    replace_lsp_fixture_and_wait(&mut service, &server, &uri, file_id, 2, resolved_fixture).await;
-
-    let hover_text = lsp_hover_text_at(
-        &mut service,
-        &uri,
-        find_utf16_position_at_marker_tail(resolved_fixture, "ДляHover = Стр.Идентификатор"),
+    let runtime_resolution = snapshot_type_resolution_at_marker(
+        &server,
+        file_id,
+        completion_fixture,
+        "ДляCompletion = Стр",
     )
     .await;
+    let runtime_identifier_identity = runtime_resolution
+        .find_structural_member("Идентификатор")
+        .map(|member| member.member_id.key.clone())
+        .expect("runtime typed-row identity for Идентификатор");
+    let runtime_quantity_identity = runtime_resolution
+        .find_structural_member("Количество")
+        .map(|member| member.member_id.key.clone())
+        .expect("runtime typed-row identity for Количество");
+
+    let lsp_identifier = completion_members
+        .iter()
+        .find(|entry| {
+            entry.name == "Идентификатор"
+                && entry.member_identity.as_deref() == Some(runtime_identifier_identity.as_str())
+        })
+        .expect("lsp completion entry Идентификатор");
+    let lsp_quantity = completion_members
+        .iter()
+        .find(|entry| {
+            entry.name == "Количество"
+                && entry.member_identity.as_deref() == Some(runtime_quantity_identity.as_str())
+        })
+        .expect("lsp completion entry Количество");
+    assert_eq!(
+        lsp_identifier.member_identity.as_deref(),
+        Some(runtime_identifier_identity.as_str()),
+        "LSP completion must expose the same typed-row member identity as runtime"
+    );
+    assert_eq!(
+        lsp_quantity.member_identity.as_deref(),
+        Some(runtime_quantity_identity.as_str()),
+        "LSP completion must expose the same typed-row quantity identity as runtime"
+    );
+
+    let mcp_members = mcp_member_entries_at_code(completion_fixture, completion_position).await;
+    let mcp_identifier = mcp_members
+        .iter()
+        .find(|entry| {
+            entry.name == "Идентификатор"
+                && entry.member_identity.as_deref() == Some(runtime_identifier_identity.as_str())
+        })
+        .expect("mcp members entry Идентификатор");
+    let mcp_quantity = mcp_members
+        .iter()
+        .find(|entry| {
+            entry.name == "Количество"
+                && entry.member_identity.as_deref() == Some(runtime_quantity_identity.as_str())
+        })
+        .expect("mcp members entry Количество");
+    assert_eq!(
+        mcp_identifier.member_identity.as_deref(),
+        Some(runtime_identifier_identity.as_str()),
+        "MCP members must expose the same typed-row member identity as runtime"
+    );
+    assert_eq!(
+        mcp_quantity.member_identity.as_deref(),
+        Some(runtime_quantity_identity.as_str()),
+        "MCP members must expose the same typed-row quantity identity as runtime"
+    );
+
+    replace_lsp_fixture_and_wait(&mut service, &server, &uri, file_id, 2, resolved_fixture).await;
+
+    let resolved_position =
+        find_utf16_position_at_marker_tail(resolved_fixture, "ДляHover = Стр.Идентификатор");
+    let hover_text = lsp_hover_text_at(&mut service, &uri, resolved_position).await;
     assert!(
         hover_text.contains("Идентификатор") && hover_text.contains("Строка"),
         "hover must expose typed-row column name and type, hover={hover_text}"
@@ -4380,6 +4587,18 @@ async fn p7_typed_value_table_row_exact_cross_consumer_acceptance_keeps_same_con
     assert_eq!(
         type_name, "Строка",
         "typed-row type-at-position must expose column type"
+    );
+
+    let mcp_type_name = mcp_type_name_at_code(resolved_fixture, resolved_position).await;
+    assert_eq!(
+        mcp_type_name, type_name,
+        "MCP type_at_position must agree with shared runtime type for typed-row field"
+    );
+
+    let web_hover_text = web_hover_text_for_code(resolved_fixture, resolved_position).await;
+    assert!(
+        web_hover_text.contains(&type_name),
+        "Web hover must agree with shared runtime type for typed-row field, hover={web_hover_text}"
     );
 
     let diagnostics = snapshot_semantic_diagnostic_messages(&server, file_id).await;
@@ -9415,6 +9634,50 @@ async fn lsp_completion_labels_at(
     normalize_lsp_member_labels(&completion.expect("completion result present"))
 }
 
+async fn lsp_completion_members_at(
+    service: &mut LspService<BslLanguageServer>,
+    uri: &Url,
+    position: Position,
+) -> Vec<NormalizedMemberEntry> {
+    let completion_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/completion")
+                .id(12011)
+                .params(
+                    serde_json::to_value(CompletionParams {
+                        text_document_position: TextDocumentPositionParams {
+                            text_document: TextDocumentIdentifier { uri: uri.clone() },
+                            position,
+                        },
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                        partial_result_params: PartialResultParams::default(),
+                        context: Some(CompletionContext {
+                            trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+                            trigger_character: Some(".".to_string()),
+                        }),
+                    })
+                    .expect("CompletionParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("completion request")
+        .expect("completion response");
+    let completion_value =
+        serde_json::to_value(&completion_response).expect("serialize completion response");
+    let completion_result = completion_value
+        .get("result")
+        .cloned()
+        .expect("completion result field");
+    let completion: Option<CompletionResponse> =
+        serde_json::from_value(completion_result).expect("parse completion result");
+
+    normalize_lsp_member_entries(&completion.expect("completion result present"))
+}
+
 async fn lsp_hover_text_at(
     service: &mut LspService<BslLanguageServer>,
     uri: &Url,
@@ -9471,6 +9734,146 @@ async fn snapshot_type_name_at_marker(
         .expect("type_at_byte_offset result");
 
     bsl_shared::formatting::user_facing_resolution_type_name(&resolution)
+}
+
+async fn snapshot_type_resolution_at_marker(
+    server: &BslLanguageServer,
+    file_id: bsl_analysis_v2::FileId,
+    fixture: &str,
+    marker: &str,
+) -> bsl_shared::domain::types::TypeResolution {
+    let position = find_utf16_position_at_marker_tail(fixture, marker);
+    let analysis = server.analysis_v2.snapshot().await;
+    let byte_offset = analysis
+        .utf16_position_to_byte_offset(file_id, position.line, position.character)
+        .ok()
+        .flatten()
+        .expect("utf16_position_to_byte_offset");
+
+    analysis
+        .type_at_byte_offset(file_id, byte_offset.min(u32::MAX as usize) as u32)
+        .expect("type_at_byte_offset query")
+        .expect("type_at_byte_offset result")
+}
+
+async fn mcp_member_entries_at_code(code: &str, position: Position) -> Vec<NormalizedMemberEntry> {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let module_path = temp.path().join("Module.bsl");
+    std::fs::write(&module_path, code).expect("write module");
+    let manager = Arc::new(SessionManager::new());
+    let job_manager = Arc::new(JobManager::new());
+    let open = manager
+        .open(
+            WorkspaceOpenParams {
+                roots: vec![temp.path().to_string_lossy().to_string()],
+                platform_docs_archive: None,
+                platform_version: None,
+                configuration_path: None,
+                mode: None,
+            },
+            job_manager.clone(),
+        )
+        .await
+        .expect("mcp workspace open");
+    wait_mcp_startup(job_manager.as_ref(), open.startup_job_id.as_deref()).await;
+
+    let members = manager
+        .bsl_members(BslMembersParams {
+            session_id: open.session_id,
+            file: McpFileRef {
+                doc: McpDocumentRef::Path(module_path.to_string_lossy().to_string()),
+                text: None,
+                version: None,
+            },
+            position: McpPosition {
+                line: position.line,
+                character: position.character,
+            },
+            limit: 100,
+            include_flow_sensitive: false,
+        })
+        .await
+        .expect("mcp members");
+
+    normalize_mcp_member_entries(&members.members)
+}
+
+async fn mcp_type_name_at_code(code: &str, position: Position) -> String {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let module_path = temp.path().join("Module.bsl");
+    std::fs::write(&module_path, code).expect("write module");
+    let manager = Arc::new(SessionManager::new());
+    let job_manager = Arc::new(JobManager::new());
+    let open = manager
+        .open(
+            WorkspaceOpenParams {
+                roots: vec![temp.path().to_string_lossy().to_string()],
+                platform_docs_archive: None,
+                platform_version: None,
+                configuration_path: None,
+                mode: None,
+            },
+            job_manager.clone(),
+        )
+        .await
+        .expect("mcp workspace open");
+    wait_mcp_startup(job_manager.as_ref(), open.startup_job_id.as_deref()).await;
+
+    let response = manager
+        .bsl_type_at_position(BslTypeAtPositionParams {
+            session_id: open.session_id,
+            file: McpFileRef {
+                doc: McpDocumentRef::Path(module_path.to_string_lossy().to_string()),
+                text: None,
+                version: None,
+            },
+            position: McpPosition {
+                line: position.line,
+                character: position.character,
+            },
+            include_flow_sensitive: false,
+        })
+        .await
+        .expect("mcp type_at_position");
+
+    response
+        .type_info
+        .map(|info| info.name)
+        .expect("mcp type_at_position type_info")
+}
+
+async fn web_hover_text_for_code(code: &str, position: Position) -> String {
+    let app = create_router(build_web_test_state(), "backend/static", true);
+    let response = app
+        .oneshot(
+            AxumRequest::post("/api/hover")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(axum::body::Body::from(
+                    serde_json::json!({
+                        "code": code,
+                        "line": position.line,
+                        "column": position.character
+                    })
+                    .to_string(),
+                ))
+                .expect("web hover request"),
+        )
+        .await
+        .expect("web hover response");
+    assert!(
+        response.status().is_success(),
+        "unexpected web hover status: {}",
+        response.status()
+    );
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("web hover body");
+    let payload: serde_json::Value = serde_json::from_slice(&body).expect("web hover payload");
+    payload
+        .get("hover")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string()
 }
 
 async fn snapshot_serve_only_type_name_at_marker(

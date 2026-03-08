@@ -557,6 +557,7 @@ pub(super) fn add_local_symbols_from_ir(
             CompletionItem::new(local.name, CompletionKind::Variable),
             priority,
             None,
+            None,
             Some(SymbolScope::Local),
         ));
     }
@@ -594,6 +595,7 @@ pub(super) fn add_symbols(
             CompletionItem::new(item.name.clone(), kind),
             priority,
             None,
+            None,
             item.scope,
         ));
     }
@@ -610,6 +612,7 @@ pub(super) fn add_module_symbols(
             target.push(Candidate::new(
                 CompletionItem::new(item.name.clone(), kind),
                 priority,
+                None,
                 None,
                 item.scope,
             ));
@@ -651,6 +654,7 @@ pub(super) fn add_metadata_items(
                         priority,
                         None,
                         None,
+                        None,
                     ));
                 }
             }
@@ -668,6 +672,7 @@ pub(super) fn add_metadata_items(
                     target.push(Candidate::new(
                         CompletionItem::with_details(item.name.clone(), item_kind, detail, None),
                         priority,
+                        None,
                         None,
                         None,
                     ));

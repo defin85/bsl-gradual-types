@@ -264,7 +264,7 @@ fn metadata_completion_items_have_granular_kind_in_data() {
         Some("Регистр сведений".to_string()),
         None,
     );
-    let lsp_item = to_lsp_completion(item, None, vec![], false, None);
+    let lsp_item = to_lsp_completion(item, None, None, vec![], false, None);
     let kind = lsp_item
         .data
         .as_ref()
@@ -280,7 +280,7 @@ fn method_completion_items_keep_method_kind_in_data() {
         "Добавить".to_string(),
         bsl_shared::domain::CompletionKind::Method,
     );
-    let lsp_item = to_lsp_completion(item, None, vec![], false, None);
+    let lsp_item = to_lsp_completion(item, None, None, vec![], false, None);
     let kind = lsp_item
         .data
         .as_ref()
@@ -296,7 +296,7 @@ fn property_completion_items_keep_property_kind_in_data() {
         "Длина".to_string(),
         bsl_shared::domain::CompletionKind::Property,
     );
-    let lsp_item = to_lsp_completion(item, Some("Массив".to_string()), vec![0], false, None);
+    let lsp_item = to_lsp_completion(item, Some("Массив".to_string()), None, vec![0], false, None);
     let kind = lsp_item
         .data
         .as_ref()
@@ -307,9 +307,51 @@ fn property_completion_items_keep_property_kind_in_data() {
 
     let candidate_id = parse_candidate_id(&lsp_item).expect("candidate_id");
     match candidate_id.payload {
-        CompletionCandidateIdPayload::Property { owner_type, name } => {
+        CompletionCandidateIdPayload::Property {
+            owner_type,
+            name,
+            member_identity,
+        } => {
             assert_eq!(owner_type, "Массив");
             assert_eq!(name, "Длина");
+            assert_eq!(member_identity, None);
+        }
+        other => panic!("expected property candidate_id, got {:?}", other),
+    }
+}
+
+#[test]
+fn structural_property_completion_items_include_member_identity_in_data() {
+    let item = bsl_shared::domain::CompletionItem::new(
+        "Идентификатор".to_string(),
+        bsl_shared::domain::CompletionKind::Property,
+    );
+    let lsp_item = to_lsp_completion(
+        item,
+        Some("Структура".to_string()),
+        Some("struct:field:1".to_string()),
+        vec![0],
+        false,
+        None,
+    );
+
+    let member_identity = lsp_item
+        .data
+        .as_ref()
+        .and_then(|value| value.get("member_identity"))
+        .and_then(|value| value.as_str());
+    assert_eq!(member_identity, Some("struct:field:1"));
+
+    let candidate_id = parse_candidate_id(&lsp_item).expect("candidate_id");
+    match candidate_id.payload {
+        CompletionCandidateIdPayload::Property {
+            owner_type,
+            name,
+            member_identity,
+        } => {
+            assert_eq!(owner_type, "Структура");
+            assert_eq!(name, "Идентификатор");
+            assert_eq!(member_identity.as_deref(), Some("struct:field:1"));
         }
         other => panic!("expected property candidate_id, got {:?}", other),
     }
@@ -486,6 +528,7 @@ async fn m6_completion_resolve_uses_candidate_id_for_function_origin() {
             bsl_shared::domain::CompletionKind::Function,
         ),
         None,
+        None,
         vec![0],
         false,
         Some(deps.as_ref()),
@@ -495,6 +538,7 @@ async fn m6_completion_resolve_uses_candidate_id_for_function_origin() {
             "Дубль".to_string(),
             bsl_shared::domain::CompletionKind::Function,
         ),
+        None,
         None,
         vec![1],
         false,
@@ -526,6 +570,7 @@ async fn m6_completion_resolve_uses_candidate_id_for_property() {
             bsl_shared::domain::CompletionKind::Property,
         ),
         Some("Массив".to_string()),
+        None,
         vec![0],
         false,
         Some(deps.as_ref()),
@@ -545,6 +590,7 @@ async fn m6_completion_resolve_uses_candidate_id_for_metadata() {
             "ТестДок".to_string(),
             bsl_shared::domain::CompletionKind::Document,
         ),
+        None,
         None,
         vec![2],
         false,
@@ -566,6 +612,7 @@ async fn m6_completion_resolve_dedup_sources_prefers_local_function() {
             "Дубль".to_string(),
             bsl_shared::domain::CompletionKind::Function,
         ),
+        None,
         None,
         vec![0, 1],
         false,
@@ -590,6 +637,7 @@ async fn m6_completion_resolve_legacy_fallback_works_without_candidate_id() {
             bsl_shared::domain::CompletionKind::Method,
         ),
         Some("Массив".to_string()),
+        None,
         vec![0],
         false,
         Some(deps.as_ref()),

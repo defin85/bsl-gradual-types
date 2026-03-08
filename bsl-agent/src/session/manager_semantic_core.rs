@@ -812,6 +812,7 @@ fn collect_members(request: MembersRequest) -> Result<BslMembersResponse, rmcp::
                 name: candidate.item.label,
                 kind: kind.to_string(),
                 detail: candidate.item.detail,
+                member_identity: candidate.member_identity,
             })
         })
         .collect::<Vec<_>>();

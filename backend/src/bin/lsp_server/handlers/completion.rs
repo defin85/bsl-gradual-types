@@ -51,6 +51,8 @@ enum CompletionCandidateIdPayload {
     Property {
         owner_type: String,
         name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        member_identity: Option<String>,
     },
     Function {
         name: String,
@@ -92,6 +94,7 @@ pub fn build_keyword_degraded_completion(snippet_support: bool) -> CompletionRes
                     (*keyword).to_string(),
                     CompletionKind::Keyword,
                 ),
+                None,
                 None,
                 vec![],
                 snippet_support,
@@ -210,6 +213,7 @@ pub async fn handle_completion_v2_with_trigger_hint(
                     to_lsp_completion(
                         candidate.item,
                         candidate.owner_type,
+                        candidate.member_identity,
                         candidate.origin_sources,
                         snippet_support,
                         Some(deps.as_ref()),
@@ -288,6 +292,7 @@ pub async fn handle_completion_v2_degraded(
                     to_lsp_completion(
                         candidate.item,
                         candidate.owner_type,
+                        candidate.member_identity,
                         candidate.origin_sources,
                         snippet_support,
                         Some(deps.as_ref()),
@@ -355,6 +360,7 @@ pub async fn handle_completion_resolve(
 fn to_lsp_completion(
     item: bsl_shared::domain::CompletionItem,
     owner_type: Option<String>,
+    member_identity: Option<String>,
     origin_sources: Vec<u8>,
     snippet_support: bool,
     deps: Option<&bsl_analysis_v2::SemanticDeps>,
@@ -364,6 +370,7 @@ fn to_lsp_completion(
         kind_tag,
         &item,
         owner_type.as_deref(),
+        member_identity.as_deref(),
         &origin_sources,
         deps,
     );
@@ -382,12 +389,14 @@ fn to_lsp_completion(
         None
     };
 
-    let data = Some(json!({
-        "kind": kind_tag,
-        "owner_type": owner_type,
-        "origin_sources": origin_sources,
-        "candidate_id": candidate_id,
-    }));
+    let mut data = serde_json::Map::new();
+    data.insert("kind".to_string(), json!(kind_tag));
+    data.insert("owner_type".to_string(), json!(owner_type));
+    data.insert("origin_sources".to_string(), json!(origin_sources));
+    data.insert("candidate_id".to_string(), json!(candidate_id));
+    if let Some(member_identity) = member_identity {
+        data.insert("member_identity".to_string(), json!(member_identity));
+    }
 
     CompletionItem {
         label: item.label,
@@ -398,7 +407,7 @@ fn to_lsp_completion(
         insert_text_format,
         filter_text: item.filter_text,
         sort_text: item.sort_text,
-        data,
+        data: Some(serde_json::Value::Object(data)),
         ..Default::default()
     }
 }
@@ -407,6 +416,7 @@ fn build_candidate_id(
     kind_tag: &str,
     item: &bsl_shared::domain::CompletionItem,
     owner_type: Option<&str>,
+    member_identity: Option<&str>,
     origin_sources: &[u8],
     deps: Option<&bsl_analysis_v2::SemanticDeps>,
 ) -> CompletionCandidateId {
@@ -446,6 +456,7 @@ fn build_candidate_id(
                 Some(owner) => CompletionCandidateIdPayload::Property {
                     owner_type: normalize_owner_type(owner),
                     name: item.label.clone(),
+                    member_identity: member_identity.map(str::to_string),
                 },
                 None => CompletionCandidateIdPayload::Other {
                     kind: kind_tag.to_string(),
@@ -559,9 +570,9 @@ fn resolve_by_candidate_id(
             metadata_lookup,
             snippet_support,
         ),
-        CompletionCandidateIdPayload::Property { owner_type, name } => {
-            resolve_property_by_candidate_id(owner_type, name, metadata_lookup)
-        }
+        CompletionCandidateIdPayload::Property {
+            owner_type, name, ..
+        } => resolve_property_by_candidate_id(owner_type, name, metadata_lookup),
         CompletionCandidateIdPayload::Function {
             name,
             sig_hash,

@@ -162,6 +162,7 @@ pub(super) fn add_keywords(snapshot: &IndexSnapshot, target: &mut Vec<Candidate>
                 priority,
                 None,
                 None,
+                None,
             ));
         }
         return;
@@ -171,6 +172,7 @@ pub(super) fn add_keywords(snapshot: &IndexSnapshot, target: &mut Vec<Candidate>
         target.push(Candidate::new(
             CompletionItem::new(item.name.clone(), CompletionKind::Keyword),
             priority,
+            None,
             None,
             None,
         ));
@@ -192,6 +194,7 @@ pub(super) fn add_types(snapshot: &IndexSnapshot, target: &mut Vec<Candidate>, p
             target.push(Candidate::new(
                 CompletionItem::new(item.name.clone(), CompletionKind::Type),
                 priority,
+                None,
                 None,
                 None,
             ));

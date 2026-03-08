@@ -4619,6 +4619,161 @@ async fn p7_typed_value_table_row_exact_cross_consumer_acceptance_keeps_same_con
 }
 
 #[tokio::test]
+async fn p7_typed_structure_revision_switch_does_not_leak_stale_structural_members_across_interfaces(
+) {
+    let fixture_v1 = "Процедура Тест()\n\
+    S = Новый Структура;\n\
+    S.Вставить(\"Идентификатор\", \"A-01\");\n\
+    ДляCompletion = S.\n\
+КонецПроцедуры\n";
+    let fixture_v2 = "Процедура Тест()\n\
+    S = Новый Структура;\n\
+    ДляCompletion = S.\n\
+    Ошибка = S.Идентификатор;\n\
+КонецПроцедуры\n";
+
+    let (mut service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        fixture_v1,
+        "file:///test_p7_typed_structure_revision_switch.bsl",
+    )
+    .await;
+
+    let v1_completion_position = find_utf16_position_after_marker(fixture_v1, "ДляCompletion = S.");
+    let v1_completion_members =
+        lsp_completion_members_at(&mut service, &uri, v1_completion_position).await;
+    assert!(
+        v1_completion_members.iter().any(|entry| {
+            entry.name == "Идентификатор" && entry.member_identity.is_some()
+        }),
+        "v1 completion must expose structural member identity before revision switch"
+    );
+
+    replace_lsp_fixture_and_wait(&mut service, &server, &uri, file_id, 2, fixture_v2).await;
+
+    let runtime_resolution =
+        snapshot_type_resolution_at_marker(&server, file_id, fixture_v2, "ДляCompletion = S").await;
+    assert!(
+        runtime_resolution
+            .find_structural_member("идентификатор")
+            .is_none(),
+        "runtime snapshot after revision switch must not leak stale structure field"
+    );
+
+    let v2_completion_position = find_utf16_position_after_marker(fixture_v2, "ДляCompletion = S.");
+    let v2_completion_labels =
+        lsp_completion_labels_at(&mut service, &uri, v2_completion_position).await;
+    assert!(
+        !v2_completion_labels
+            .iter()
+            .any(|label| label == "Идентификатор"),
+        "LSP completion must fail closed after revision switch, labels={v2_completion_labels:?}"
+    );
+
+    let mcp_members = mcp_member_entries_at_code(fixture_v2, v2_completion_position).await;
+    assert!(
+        !mcp_members.iter().any(|entry| entry.name == "Идентификатор"),
+        "MCP members must not leak stale structure field after revision switch, members={mcp_members:?}"
+    );
+
+    let diagnostics = snapshot_semantic_diagnostic_messages(&server, file_id).await;
+    assert!(
+        diagnostics
+            .iter()
+            .any(|message| message_has_unknown_member(message, "Идентификатор")),
+        "runtime/LSP diagnostics must surface stale structure field as unknown-member, diagnostics={diagnostics:?}"
+    );
+
+    let web_diagnostics = web_semantic_diagnostic_messages_for_code(fixture_v2).await;
+    assert!(
+        web_diagnostics
+            .iter()
+            .any(|message| message_has_unknown_member(message, "Идентификатор")),
+        "Web diagnostics must surface stale structure field as unknown-member, diagnostics={web_diagnostics:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p7_typed_value_table_row_revision_switch_does_not_leak_stale_structural_members_across_interfaces(
+) {
+    let fixture_v1 = "Процедура Тест()\n\
+    ТЗ = Новый ТаблицаЗначений;\n\
+    ТЗ.Колонки.Добавить(\"Идентификатор\", Новый ОписаниеТипов(\"Строка\"));\n\
+    Стр = ТЗ.Добавить();\n\
+    ДляCompletion = Стр.\n\
+КонецПроцедуры\n";
+    let fixture_v2 = "Процедура Тест()\n\
+    ТЗ = Новый ТаблицаЗначений;\n\
+    Стр = ТЗ.Добавить();\n\
+    ДляCompletion = Стр.\n\
+    Ошибка = Стр.Идентификатор;\n\
+КонецПроцедуры\n";
+
+    let (mut service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        fixture_v1,
+        "file:///test_p7_typed_value_table_row_revision_switch.bsl",
+    )
+    .await;
+
+    let v1_completion_position =
+        find_utf16_position_after_marker(fixture_v1, "ДляCompletion = Стр.");
+    let v1_completion_members =
+        lsp_completion_members_at(&mut service, &uri, v1_completion_position).await;
+    assert!(
+        v1_completion_members.iter().any(|entry| {
+            entry.name == "Идентификатор" && entry.member_identity.is_some()
+        }),
+        "v1 typed-row completion must expose structural member identity before revision switch"
+    );
+
+    replace_lsp_fixture_and_wait(&mut service, &server, &uri, file_id, 2, fixture_v2).await;
+
+    let runtime_resolution =
+        snapshot_type_resolution_at_marker(&server, file_id, fixture_v2, "ДляCompletion = Стр")
+            .await;
+    assert!(
+        runtime_resolution
+            .find_structural_member("идентификатор")
+            .is_none(),
+        "runtime snapshot after revision switch must not leak stale typed-row column"
+    );
+
+    let v2_completion_position =
+        find_utf16_position_after_marker(fixture_v2, "ДляCompletion = Стр.");
+    let v2_completion_labels =
+        lsp_completion_labels_at(&mut service, &uri, v2_completion_position).await;
+    assert!(
+        !v2_completion_labels.iter().any(|label| label == "Идентификатор"),
+        "LSP completion must fail closed after typed-row revision switch, labels={v2_completion_labels:?}"
+    );
+
+    let mcp_members = mcp_member_entries_at_code(fixture_v2, v2_completion_position).await;
+    assert!(
+        !mcp_members.iter().any(|entry| entry.name == "Идентификатор"),
+        "MCP members must not leak stale typed-row column after revision switch, members={mcp_members:?}"
+    );
+
+    let diagnostics = snapshot_semantic_diagnostic_messages(&server, file_id).await;
+    assert!(
+        diagnostics
+            .iter()
+            .any(|message| message_has_unknown_member(message, "Идентификатор")),
+        "runtime/LSP diagnostics must surface stale typed-row column as unknown-member, diagnostics={diagnostics:?}"
+    );
+
+    let web_diagnostics = web_semantic_diagnostic_messages_for_code(fixture_v2).await;
+    assert!(
+        web_diagnostics
+            .iter()
+            .any(|message| message_has_unknown_member(message, "Идентификатор")),
+        "Web diagnostics must surface stale typed-row column as unknown-member, diagnostics={web_diagnostics:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
 async fn p7_completion_owner_hint_type_lookup_is_serve_only_even_when_flow_sensitive_enabled() {
     let coordinator = Arc::new(SystemCoordinator::new());
 
@@ -9874,6 +10029,35 @@ async fn web_hover_text_for_code(code: &str, position: Position) -> String {
         .and_then(|value| value.as_str())
         .unwrap_or_default()
         .to_string()
+}
+
+async fn web_semantic_diagnostic_messages_for_code(code: &str) -> Vec<String> {
+    let app = create_router(build_web_test_state(), "backend/static", true);
+    let response = app
+        .oneshot(
+            AxumRequest::post("/api/diagnostics")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(axum::body::Body::from(
+                    serde_json::json!({ "code": code }).to_string(),
+                ))
+                .expect("web diagnostics request"),
+        )
+        .await
+        .expect("web diagnostics response");
+    assert!(
+        response.status().is_success(),
+        "unexpected web diagnostics status: {}",
+        response.status()
+    );
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("web diagnostics body");
+    let payload: serde_json::Value =
+        serde_json::from_slice(&body).expect("web diagnostics payload");
+    normalize_web_semantic_diagnostics(&payload)
+        .into_iter()
+        .map(|diagnostic| diagnostic.message)
+        .collect()
 }
 
 async fn snapshot_serve_only_type_name_at_marker(

@@ -1,30 +1,39 @@
 # Traceability: update-gradual-core-production-readiness
 
-Этот артефакт фиксирует обязательную трассировку `Requirement -> Future Code Area -> Required Test Class`
-для future-facing production-readiness contract.
+Этот артефакт фиксирует прямую трассировку `Requirement -> Code -> Test`
+для delivered production-readiness contract.
 
 ## Requirement: Shared resolved contract first-class выражает snapshot-local structural members
 
-Future code areas:
+Status: `covered`
+
+Code:
 - `bsl-types/src/types/certainty.rs`
-- `bsl-types/src/types/resolution.rs`
 - `bsl-types/src/types/structural_members.rs`
 - `bsl-types/src/types/resolution_impl/structural_members.rs`
 - `analysis-v2/src/type_inference_v2/instance_effects.rs`
 - `analysis-v2/src/type_inference_v2.rs`
 
-Required test class:
-- `analysis-v2` unit tests for typed `Структура` member materialization
-- `analysis-v2` unit tests for typed-row column materialization
-- `analysis-v2` snapshot-isolation tests proving structural members do not leak across revisions
-
-Current signal:
-- existing `analysis-v2/src/type_inference_v2/tests.rs` already covers typed `Структура`, typed-row and `source_span`;
-- future remediation still needs delivery evidence for stable member identity as explicit shared contract data.
+Tests:
+- `bsl-types/src/types/tests/structural_members_tests.rs`
+  - `test_resolution_preserves_structural_member_contract`
+  - `test_replacing_same_structural_member_preserves_member_id`
+  - `test_structural_member_contract_roundtrips_member_id_through_serde`
+  - `test_structural_member_contract_rehydrates_member_id_from_legacy_payload`
+- `analysis-v2/src/type_inference_v2/tests.rs`
+  - `typed_structure_alias_preserves_member_identity`
+  - `typed_structure_case_insensitive_update_preserves_identity_and_canonical_name`
+  - `typed_value_table_row_alias_preserves_column_identity`
+  - `typed_value_table_column_case_insensitive_update_preserves_identity_and_canonical_name`
+  - `structure_field_identity_survives_branch_merge`
+  - `structure_member_identity_survives_else_branch_merge`
+  - `value_table_column_identity_survives_else_branch_merge`
 
 ## Requirement: Semantic consumers используют один resolved path или thin adapters
 
-Future code areas:
+Status: `covered`
+
+Code:
 - `bsl-runtime/src/application/intellisense_v2/facade.rs`
 - `bsl-runtime/src/application/type_system/services/completion_service.rs`
 - `bsl-runtime/src/application/type_system/services/completion_service/member_resolution.rs`
@@ -35,47 +44,75 @@ Future code areas:
 - `backend/src/presentation/web/handlers/semantic.rs`
 - `bsl-agent/src/session/manager_semantic_core.rs`
 
-Required test class:
-- backend exact acceptance tests for completion + hover + type-at-position + diagnostics
-- cross-interface parity tests for `LSP` / `MCP` / `Web`
-- regression tests proving semantic correctness does not require consumer-only owner/member hints
+Tests:
+- `backend/tests/universal_collection_cross_consumer_consistency_test.rs`
+  - `typed_structure_completion_without_shared_owner_hint_fails_closed_in_direct_handler_path`
+  - `typed_value_table_row_completion_without_shared_owner_hint_fails_closed_in_direct_handler_path`
+- `backend/src/bin/lsp_server/server/core/tests.rs`
+  - `p7_typed_structure_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics`
+  - `p7_typed_value_table_row_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics`
+  - `p7_typed_structure_revision_switch_does_not_leak_stale_structural_members_across_interfaces`
+  - `p7_typed_value_table_row_revision_switch_does_not_leak_stale_structural_members_across_interfaces`
 
-Current signal:
-- existing backend exact-acceptance tests already compare completion/hover/type-at-position/diagnostics on typed `Структура` and typed-row;
-- completion still contains bootstrap/local owner-resolution branches that must shrink to thin-adapter or bootstrap-only status.
+Notes:
+- bounded bootstrap-only module-context path remains explicitly catalogued in `design.md` and does not act as second structural truth for reviewed scenarios.
 
 ## Requirement: Cross-consumer acceptance доказывает semantic equivalence, а не только smoke consistency
 
-Future code areas:
+Status: `covered`
+
+Code:
 - `backend/src/bin/lsp_server/server/core/tests.rs`
 - `backend/tests/universal_collection_cross_consumer_consistency_test.rs`
 - `backend/tests/universal_collection_strict_policy_test.rs`
-- acceptance/reporting artifacts under `openspec/changes/update-gradual-core-production-readiness/`
+- `backend/src/bin/lsp_server/handlers/completion.rs`
+- `backend/src/bin/lsp_server/handlers/completion/tests.rs`
+- `bsl-agent/src/types/mod.rs`
+- `bsl-agent/src/session/manager_semantic_core.rs`
 
-Required test class:
-- exact acceptance tests with same owner resolution result
-- exact acceptance tests with same member identity
-- policy tests for known/unknown member parity
-- negative tests that intentionally remove hidden consumer-only hints and expect drift detection
-
-Current signal:
-- smoke/parity coverage already exists;
-- exact matrix must remain explicit and must not be replaced by smoke-only pass criteria.
+Tests:
+- `backend/src/bin/lsp_server/server/core/tests.rs`
+  - `p7_typed_structure_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics`
+  - `p7_typed_value_table_row_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics`
+  - `p7_typed_structure_revision_switch_does_not_leak_stale_structural_members_across_interfaces`
+  - `p7_typed_value_table_row_revision_switch_does_not_leak_stale_structural_members_across_interfaces`
+- `backend/tests/universal_collection_cross_consumer_consistency_test.rs`
+  - `typed_structure_completion_without_shared_owner_hint_fails_closed_in_direct_handler_path`
+  - `typed_value_table_row_completion_without_shared_owner_hint_fails_closed_in_direct_handler_path`
+- `backend/src/bin/lsp_server/handlers/completion/tests.rs`
+  - `structural_property_completion_items_include_member_identity_in_data`
 
 ## Requirement: Change completion MUST NOT завышать readiness относительно MUST backlog
 
-Future code areas:
+Status: `covered`
+
+Code / artefacts:
 - `openspec/changes/update-gradual-core-production-readiness/tasks.md`
+- `openspec/changes/update-gradual-core-production-readiness/validation/acceptance_matrix.md`
+- `openspec/changes/update-gradual-core-production-readiness/validation/final-closure-checklist.md`
+- `openspec/changes/update-gradual-core-production-readiness/governance/change_criticality.json`
+- `openspec/changes/update-gradual-core-production-readiness/governance/dependency_checks.json`
+- `openspec/changes/update-gradual-core-production-readiness/governance/readiness_status.json`
+- `scripts/check-openspec-change-governance.py`
+
+Evidence:
+- `openspec validate update-gradual-core-production-readiness --strict --no-interactive`
+- `python3 scripts/check-openspec-change-governance.py --change-id update-gradual-core-production-readiness`
+
+## Requirement: Traceability и review artifacts MUST отражать реальные gaps без optimistic overclaim
+
+Status: `covered`
+
+Code / artefacts:
+- `openspec/changes/update-gradual-core-production-readiness/proposal.md`
+- `openspec/changes/update-gradual-core-production-readiness/design.md`
 - `openspec/changes/update-gradual-core-production-readiness/traceability.md`
-- `openspec/changes/update-gradual-core-production-readiness/specs/dev-workflow/spec.md`
-- Beads task graph in `.beads/`
-- future workflow automation hook or CI job that compares OpenSpec evidence against critical backlog
+- `openspec/changes/update-gradual-core-production-readiness/residual-risk-review.md`
+- `openspec/changes/update-gradual-core-production-readiness/validation/readiness-review-status.md`
+- `openspec/changes/update-gradual-core-production-readiness/validation/final-closure-checklist.md`
+- `openspec/changes/update-gradual-core-production-readiness/governance/readiness_status.json`
 
-Required test class:
-- strict OpenSpec validation
-- workflow audit/review artifact that checks checklist vs traceability vs critical backlog
-- CI or scripted readiness-gate smoke check once automation is introduced
-
-Current signal:
-- current change now has explicit contract text plus traceability artifact;
-- automated readiness gate is still a future delivery item and therefore cannot yet be overclaimed as shipped workflow enforcement.
+Evidence:
+- `residual-risk-review.md` отделяет semantic risk closure от final closure status;
+- `readiness_status.json` объявляет `complete` только после закрытия critical backlog;
+- `final-closure-checklist.md` фиксирует final validation/gate evidence без optimistic wording.

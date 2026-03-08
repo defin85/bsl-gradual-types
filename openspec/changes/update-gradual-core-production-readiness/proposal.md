@@ -1,33 +1,42 @@
 # Change: update-gradual-core-production-readiness
 
 ## Why
-Проект уже имеет сильную базу gradual typing: явные уровни certainty, controlled degradation, drift-prevention тесты и правильно сформулированную целевую архитектуру shared resolved path.
+Change был создан после production-readiness review, который показал разрыв между сильной архитектурной идеей и фактическим delivery evidence.
 
-Но текущее состояние ядра ещё не дотягивает до production-grade shared truth:
-- snapshot-local structural knowledge для typed `Структура` и typed-row ещё не выражено first-class в общем resolved contract;
-- часть consumer-путей всё ещё содержит локальные смысловые ветки, особенно в completion;
-- acceptance и traceability артефакты могут завышать фактическую готовность change по отношению к MUST-требованиям;
-- процесс допускает расхождение между состоянием OpenSpec change и реальным P1 backlog в Beads.
+Ключевые gaps были такими:
+- snapshot-local structural knowledge для typed `Структура` и typed-row ещё не было first-class shared truth с stable identity;
+- completion допускал risk consumer-local reconstruction;
+- exact acceptance и traceability ещё не доказывали same member identity и fail-closed hidden-hint behaviour;
+- OpenSpec change можно было optimistic трактовать как complete без machine-readable readiness gate.
 
-Нужно отдельно зафиксировать future-facing contract, который превратит сильную платформу gradual typing в действительно общую и операционно честную систему.
+Нужен был отдельный change, который сначала зафиксирует этот contract, а затем будет доведён до прямого `Requirement -> Code -> Test` evidence.
 
 ## What Changes
-- Зафиксировать для `bsl-intellisense-v2`, что shared resolved contract MUST first-class нести snapshot-local structural member knowledge.
-- Зафиксировать, что semantic consumers и adapter surfaces MUST читать один и тот же resolved path, а локальные ветки допускаются только как thin adapters без собственной semantic truth.
-- Зафиксировать более жёсткий acceptance contract: cross-consumer consistency должна доказывать shared semantics, а не только smoke-level отсутствие явного drift.
-- Зафиксировать для `dev-workflow` readiness gate против “отчётного самообмана”: change нельзя считать complete, если по его MUST-требованиям ещё открыт критический follow-up backlog.
+- Зафиксирован и доставлен first-class shared structural contract для typed `Структура` и typed-row, включая stable member identity.
+- Completion / hover / type-at-position / diagnostics / `LSP` / `MCP` / Web adapters привязаны к одному resolved truth для reviewed structural scenarios; остающиеся bootstrap-only exceptions явно ограничены design-артефактом.
+- Exact acceptance теперь доказывает same member identity, same known/unknown policy, hidden-hint fail-closed behaviour и snapshot revision isolation across interfaces.
+- Для `dev-workflow` введён change-specific readiness gate с machine-readable governance artefacts, который блокирует optimistic `complete` при конфликте backlog/evidence.
 
 ## Impact
 - Affected specs:
   - `bsl-intellisense-v2`
   - `dev-workflow`
-- Affected code (future expected):
+- Affected code:
   - `bsl-types/src/types/*`
-  - `shared/src/domain/metadata_lookup/*`
   - `analysis-v2/src/type_inference_v2.rs`
   - `bsl-runtime/src/application/type_system/services/*`
-  - acceptance / parity / traceability tooling
+  - `backend/src/bin/lsp_server/**`
+  - `bsl-agent/src/session/**`
+  - change-local governance / validation artefacts under `openspec/changes/update-gradual-core-production-readiness/`
 
-## Notes
-- Этот change intentionally future-facing и фиксирует архитектурную цель, а не немедленную реализацию.
-- Он не заменяет текущий epic `bsl-gradual-types-cb6`, а сохраняет более широкий вывод “что ещё отделяет сильную платформу от production-grade ядра”.
+## Delivery Status
+
+Delivered:
+- shared structural member identity and lifecycle semantics;
+- exact cross-consumer acceptance for typed `Структура` and typed-row;
+- fail-closed hidden-hint regressions;
+- change-specific readiness governance and honest closure evidence.
+
+Current verdict:
+- `complete` for this change;
+- direct evidence is recorded in `traceability.md`, `residual-risk-review.md`, `validation/final-closure-checklist.md`, and `governance/readiness_status.json`.

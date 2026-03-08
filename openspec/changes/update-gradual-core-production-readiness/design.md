@@ -1,32 +1,32 @@
 # Design: update-gradual-core-production-readiness
 
 ## Context
-Сейчас проект сильнее в архитектурном понимании правильной gradual-системы, чем в полной доставке этого понимания в shared runtime contract.
+Change больше не является purely future-facing.
 
-Подтверждённые симптомы:
-- `Certainty` / `UncertaintyReason` и graceful degradation уже формализованы;
-- часть acceptance/parity тестов реально ловит drift;
-- в design/spec уже закреплена цель единого resolved path;
-- при этом snapshot-local structural knowledge ещё не стало first-class shared truth;
-- completion сохраняет локальные semantic branches;
-- отчётность change может расходиться с фактическим критическим backlog.
+После remediation work shared structural contract, exact acceptance и readiness governance доставлены в код и change-local artefacts:
+- `ResolutionMetadata.structural_members` остаётся canonical carrier для snapshot-local member knowledge;
+- structural member entry теперь несёт explicit `member_id`;
+- completion ranking и adapter payloads больше не теряют structural identity;
+- exact acceptance закрывает same-identity, hidden-hint fail-closed и revision-switch leakage;
+- governance gate фиксирует honest `declared_status` относительно Beads backlog.
 
 ## Goals
-- Сохранить архитектурный вывод как формальный future contract, а не только как текст ревью.
-- Зафиксировать критерии, при которых ядро gradual typing можно будет честно считать production-grade.
-- Связать архитектурную готовность и delivery honesty одним change.
+- Сохранить архитектурный вывод как delivered contract, а не как устаревший review note.
+- Зафиксировать прямую связь `Requirement -> Code -> Test` для shared structural semantics и delivery honesty.
+- Убрать future-facing wording там, где change уже backed by code/tests/governance evidence.
 
 ## Non-Goals
-- Не реализовывать этот контракт в рамках данного change.
-- Не дублировать текущий `add-v2-universal-collection-schema-resolution` и его follow-up epic task-by-task.
-- Не предписывать немедленный выбор конкретной структуры данных, если соблюдён shared-contract result.
+- Не переписывать runtime на новый carrier поверх уже доставленного `TypeResolution`-centric contract.
+- Не устранять bootstrap-only implicit module-context path, пока он остаётся bounded exception и не вводит отдельную structural truth.
+- Не дублировать remediation epic task-by-task; delivered evidence уже отражено в change-local artefacts.
 
 ## Current Code Signals
 - `bsl-types/src/types/certainty.rs` уже хранит snapshot-local structural members внутри `ResolutionMetadata.structural_members`.
-- `bsl-types/src/types/structural_members.rs` уже задаёт shared carrier для `canonical_name`, `member_type`, `source_span`, `certainty`.
-- `analysis-v2/src/type_inference_v2/tests.rs` уже проверяет materialization typed `Структура` и typed-row, а также сохранение `source_span`.
-- `backend/src/bin/lsp_server/server/core/tests.rs` уже содержит exact cross-consumer acceptance для typed `Структура` и typed-row.
-- `backend/src/bin/lsp_server/handlers/completion.rs` и `bsl-runtime/src/application/type_system/services/completion_service/member_resolution.rs` всё ещё содержат bootstrap/local owner-resolution logic, которую future remediation должна либо удалить, либо свести к thin adapter.
+- `bsl-types/src/types/structural_members.rs` задаёт shared carrier для `member_id`, `canonical_name`, `member_type`, `source_span`, `certainty`.
+- `analysis-v2/src/type_inference_v2/tests.rs` покрывает alias/update/merge lifecycle для typed `Структура` и typed-row.
+- `backend/src/bin/lsp_server/server/core/tests.rs` содержит exact cross-consumer acceptance и revision-switch regressions.
+- `backend/tests/universal_collection_cross_consumer_consistency_test.rs` фиксирует fail-closed behaviour без shared owner hint.
+- `backend/src/bin/lsp_server/handlers/completion.rs` и `bsl-runtime/src/application/type_system/services/completion_service/member_resolution.rs` всё ещё содержат bootstrap-only owner path для implicit module-context symbols; он остаётся явным bounded exception, а не second semantic truth.
 
 ## Decisions
 
@@ -58,13 +58,11 @@ Representation вида `Структура<vec<ConcreteType>>` или generic l
 - sidecar не создаёт второй semantic source of truth относительно owner resolution.
 
 #### Stable identity interpretation
-`stable identity` в рамках этого future contract означает consumer-independent member key внутри одного snapshot/revision.
+`stable identity` в рамках этого delivered contract означает consumer-independent member key внутри одного snapshot/revision.
 
-Предпочтительный end-state:
-- явный `member_id` или эквивалентный stable token в shared contract.
-
-Допустимый transitional equivalent:
-- нормализованное canonical member name вместе с owner identity и source location, если эта композиция выдаётся всем consumers как один и тот же stable contract key.
+Delivered state:
+- явный `member_id` в shared contract;
+- identity сохраняется через materialization, replace/update, serialization, ranking/dedup и adapter payloads.
 
 ### 2. Semantic consumers MUST использовать один resolved path
 `completion`, `hover`, `type-at-position`, `semantic diagnostics`, а также adapter surfaces (`LSP`, `MCP`, Web helpers) должны читать owner/type из одного semantic contract.
@@ -100,8 +98,8 @@ Migration strategy делится на четыре шага:
 
 #### Temporary exceptions catalog
 Для текущей кодовой базы временно допустимы только такие completion-specific исключения:
-- parse-result owner hint как bootstrap input в `backend/src/bin/lsp_server/handlers/completion.rs`, если он лишь помогает прийти к тому же owner resolution, который позже станет доступен через shared path;
-- implicit module-context descriptor resolution в `completion_service/member_resolution.rs`, если итогом остаётся обычный `TypeResolution`, читаемый теми же downstream consumers;
+- parse-result owner hint как bootstrap input в `backend/src/bin/lsp_server/handlers/completion.rs`, если он лишь помогает прийти к тому же owner resolution, который уже доступен через shared path для reviewed structural scenarios;
+- implicit module-context descriptor resolution в `completion_service/member_resolution.rs`, если итогом остаётся обычный `TypeResolution`, читаемый теми же downstream consumers и не создающий structural truth;
 - LSP/Web/MCP response shaping, snippet support и candidate ranking как adapter-only поведение.
 
 Недопустимый end-state:
@@ -135,6 +133,12 @@ Required evidence classes:
 - cross-interface parity tests for LSP / MCP / Web;
 - negative tests that intentionally remove hidden hint paths and expect acceptance failure when semantic truth is not shared.
 
+Delivered evidence:
+- lifecycle / identity coverage in `analysis-v2/src/type_inference_v2/tests.rs`;
+- contract / serde / replace coverage in `bsl-types/src/types/tests/structural_members_tests.rs`;
+- exact `LSP` / `MCP` / runtime / Web assertions in `backend/src/bin/lsp_server/server/core/tests.rs`;
+- direct-handler fail-closed checks in `backend/tests/universal_collection_cross_consumer_consistency_test.rs`.
+
 ### 4. Delivery readiness MUST быть честной относительно MUST backlog
 Если review выявил, что MUST-требования change фактически не доставлены, и для этого создан критический follow-up backlog, исходный change не должен продолжать жить в статусе “complete” только на основании закрытых checklist items.
 
@@ -145,7 +149,7 @@ Required evidence classes:
 - критический Beads backlog, созданный для закрытия тех же MUST-требований.
 
 #### Governance path
-OpenSpec -> Beads governance для этого future contract должен работать так:
+OpenSpec -> Beads governance для этого delivered contract работает так:
 
 1. Contract truth
 - OpenSpec requirement и design задают MUST truth и acceptance expectations.
@@ -160,14 +164,19 @@ OpenSpec -> Beads governance для этого future contract должен ра
 
 4. Execution truth
 - каждый critical MUST gap получает связанный Beads epic/task graph;
-- пока этот backlog открыт, change остаётся `partial`, `not ready` или эквивалентно незавершённым.
+- пока этот backlog открыт, `readiness_status.json` не позволяет честно объявить change `complete`.
 
 5. Archive truth
 - archive допустим только после согласования checklist, strict validation, traceability, review verdict и состояния critical Beads backlog;
 - approved superseding delivery path должен явно ссылаться на заменяющий epic/change, иначе он не снимает блокировку `complete`.
 
-### 5. Этот change future-facing и зависит от более узких remediation changes
-Текущий change не заменяет remediation-level change/epic. Он фиксирует более широкий стандарт готовности, к которому должны прийти follow-up работы.
+### 5. Этот change больше не future-facing
+Follow-up remediation epic использовался как delivery path и теперь исчерпан.
+
+Change считается delivered только потому, что:
+- code-path gaps закрыты задачами `6mx.1`, `6mx.2`, `6mx.3`, `6mx.7`, `6mx.8`;
+- residual risk matrix закрыта задачей `6mx.5`;
+- readiness gate и closure evidence закрыты задачами `6mx.4` и `6mx.6`.
 
 ## Alternatives Considered
 
@@ -186,15 +195,13 @@ Rejected.
 ## Risks / Trade-offs
 - Change объединяет архитектурную и процессную тему.
   - Mitigation: scope ограничен readiness contract и не уходит в implementation details.
-- Возможен overlap с текущими active changes.
-  - Mitigation: этот change явно future-facing и не заменяет remediation work, а задаёт следующий критерий зрелости.
+- В кодовой базе остаётся bootstrap-only implicit module-context path.
+  - Mitigation: он явно перечислен как bounded exception, не несёт second structural truth и покрыт honest delivery wording.
 
 ## Migration Plan
-1. Утвердить future readiness contract.
-2. Использовать preferred `TypeResolution`-centric structural contract как default target для follow-up changes в `bsl-intellisense-v2`.
-3. Свести completion-specific semantic branches к bootstrap-only исключениям с явным removal plan.
-4. Доставить acceptance matrix и cross-interface exact assertions как обязательный evidence layer.
-5. После реализации remediation work добавить governance gate, который связывает OpenSpec completion с реальным MUST backlog.
+1. Применить change и архивировать его только после закрытия OpenSpec workflow.
+2. Сохранять `TypeResolution`-centric structural contract как canonical path для следующих gradual-typing changes.
+3. Удалять bounded bootstrap exceptions отдельными follow-up changes только при наличии replacement path и automated evidence.
 
 ## Open Questions
-- Должен ли readiness gate быть автоматизирован через tooling, или на первом этапе достаточно обязательного review artifact?
+- Нет. Для этого change readiness gate уже автоматизирован tooling-скриптом.

@@ -3,20 +3,21 @@
 Date: March 8, 2026
 
 ## Verdict
-partial
+complete
 
 ## Covered now
 
 - Residual semantic / edge-case risk matrix is closed by direct evidence in `residual-risk-review.md`.
-- Governance artefacts exist and make the current non-final state machine-readable.
+- Traceability, proposal and design artefacts are refreshed to direct `Requirement -> Code -> Test` evidence.
+- Governance artefacts exist and the final status is machine-readable.
 
-## Still open
+## Closed backlog
 
-- `bsl-gradual-types-6mx.6` remains the final closure step for direct `Requirement -> Code -> Test` refresh.
-- Until that task is closed, this change must not claim `complete` or `ready`.
+- `bsl-gradual-types-6mx.4`
+- `bsl-gradual-types-6mx.6`
 
 ## Evidence
 
 - Review: `openspec/changes/update-gradual-core-production-readiness/residual-risk-review.md`
 - Traceability: `openspec/changes/update-gradual-core-production-readiness/traceability.md`
-- Backlog: `bsl-gradual-types-6mx.6`
+- Closure: `openspec/changes/update-gradual-core-production-readiness/validation/final-closure-checklist.md`

@@ -9,9 +9,8 @@ accepted
 
 ## Context
 Change начинался как future-facing contract, но после `6mx.1`, `6mx.2`, `6mx.3`, `6mx.5`, `6mx.7` и `6mx.8`
-стал частично delivered contract с прямым semantic evidence. Без machine-readable readiness gate этот
-change всё ещё можно было бы ошибочно трактовать как `complete` только по зелёному checklist и strict validation,
-хотя final traceability / closure scope ещё не закрыт.
+получил прямое semantic evidence. Финальный риск оставался процессным: без machine-readable readiness gate
+change можно было бы ошибочно трактовать как `complete` только по зелёному checklist и strict validation.
 
 ## Options Considered
 1. Оставить checklist + review notes без machine-readable readiness status.
@@ -25,7 +24,7 @@ change всё ещё можно было бы ошибочно трактова�
 - критический follow-up backlog закрыт или есть approved superseding delivery path;
 - governance artifacts проходят fail-closed validation.
 
-До этого change обязан оставаться `partial` или `not_ready`.
+До выполнения этих условий change обязан оставаться `partial` или `not_ready`.
 
 ## Budgets
 - Readiness budget: optimistic `complete` запрещён при открытом critical backlog.

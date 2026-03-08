@@ -38,6 +38,15 @@ const UNIFIED_STAGE_GAUGE_KEYS: &[&str] = &[
     "intellisense_v2_runtime_saturation_queue_depth_total",
 ];
 
+fn counter_value(metrics: &serde_json::Value, key: &str) -> u64 {
+    metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .and_then(|counters| counters.get(key))
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0)
+}
+
 fn assert_unified_intellisense_v2_stage_contract(metrics: &serde_json::Value) {
     let counters = metrics
         .get("counters")
@@ -653,6 +662,118 @@ async fn flow_sensitive_flags_are_explicit_in_mcp_responses() {
         .await
         .expect("members flow");
     assert!(members_flow.flow_sensitive_enabled);
+}
+
+#[tokio::test]
+async fn type_at_position_and_members_emit_interactive_runtime_exec_metrics() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+
+    let job_manager = Arc::new(JobManager::new());
+    let manager = Arc::new(SessionManager::new());
+    let open = manager
+        .open(
+            WorkspaceOpenParams {
+                roots: vec![temp.path().to_string_lossy().to_string()],
+                platform_docs_archive: None,
+                platform_version: None,
+                configuration_path: None,
+                mode: None,
+            },
+            Arc::clone(&job_manager),
+        )
+        .await
+        .expect("open");
+    wait_startup(job_manager.as_ref(), &open).await;
+
+    let session_id = open.session_id.clone();
+    let root_id = open.roots[0].root_id.clone();
+    let overlay_file = FileRef {
+        doc: DocumentRef::Canonical(CanonicalDocumentRef {
+            root_id,
+            path: "src/CommonModules/Foo/Module.bsl".to_string(),
+        }),
+        text: Some(
+            "Procedure Test()\n    arr = Новый Массив;\n    arr.Добавить(1);\n    arr.\nEndProcedure\n"
+                .to_string(),
+        ),
+        version: Some(1),
+    };
+    manager
+        .documents_set(
+            &session_id,
+            &[WorkspaceDocumentsSetFile::File(overlay_file.clone())],
+            true,
+        )
+        .await
+        .expect("documents_set");
+
+    let file = FileRef {
+        doc: overlay_file.doc.clone(),
+        text: None,
+        version: None,
+    };
+    let metric_key = "intellisense_v2_runtime_exec_interactive_total";
+
+    let baseline_metrics = manager
+        .observability_metrics_get(&session_id)
+        .await
+        .expect("observability baseline");
+    let baseline_exec_total = counter_value(&baseline_metrics.metrics, metric_key);
+
+    let type_response = manager
+        .bsl_type_at_position(BslTypeAtPositionParams {
+            session_id: session_id.clone(),
+            file: file.clone(),
+            position: Position {
+                line: 3,
+                character: 6,
+            },
+            include_flow_sensitive: false,
+        })
+        .await
+        .expect("type_at_position");
+    assert!(
+        type_response.warnings.is_empty(),
+        "type_at_position should not emit warnings: {:?}",
+        type_response.warnings
+    );
+
+    let after_type_metrics = manager
+        .observability_metrics_get(&session_id)
+        .await
+        .expect("observability after type_at_position");
+    let after_type_exec_total = counter_value(&after_type_metrics.metrics, metric_key);
+    assert!(
+        after_type_exec_total > baseline_exec_total,
+        "type_at_position should increment {metric_key}: before={baseline_exec_total}, after={after_type_exec_total}, metrics={}",
+        after_type_metrics.metrics
+    );
+
+    let members_response = manager
+        .bsl_members(BslMembersParams {
+            session_id,
+            file,
+            position: Position {
+                line: 3,
+                character: 6,
+            },
+            limit: 50,
+            include_flow_sensitive: false,
+        })
+        .await
+        .expect("members");
+    assert!(!members_response.truncated);
+
+    let after_members_metrics = manager
+        .observability_metrics_get(&open.session_id)
+        .await
+        .expect("observability after members");
+    let after_members_exec_total = counter_value(&after_members_metrics.metrics, metric_key);
+    assert!(
+        after_members_exec_total > after_type_exec_total,
+        "members should increment {metric_key}: before={after_type_exec_total}, after={after_members_exec_total}, metrics={}",
+        after_members_metrics.metrics
+    );
 }
 
 #[tokio::test]

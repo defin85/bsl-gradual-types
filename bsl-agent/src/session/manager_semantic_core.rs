@@ -447,89 +447,41 @@ impl SessionManager {
         let text =
             select_effective_text(&params.file, &file_key, &overlays, &root_path, &abs_path)?;
         let version = select_effective_version(&params.file, &file_key, &overlays);
+        let abs_path_display = abs_path.to_string_lossy().to_string();
 
         report_job_stage(progress.as_ref(), "preparing_snapshot", 35).await;
-        let (context, prepared) = match prepare_ephemeral_mcp_operation(
-            SemanticOperation::TypeAtPosition,
-            flow_sensitive_enabled,
-            deps_id.clone(),
-            deps.clone(),
-            index_snapshot.clone(),
-            Arc::from(text),
-            version,
-            Arc::from(abs_path.to_string_lossy().to_string()),
-            DetailLevel::Full,
-            coordinator.as_ref(),
-        ) {
-            Ok(values) => values,
-            Err(_) => {
-                return Ok(BslTypeAtPositionResponse {
+        let coordinator_for_worker = coordinator.clone();
+        let response = bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
+            bsl_runtime::application::cpu_work_class_for_operation(
+                SemanticOperation::TypeAtPosition,
+            ),
+            ObservabilityOrigin::Agent.as_str(),
+            Some(coordinator.as_ref()),
+            move || {
+                collect_type_at_position(TypeAtPositionRequest {
                     analysis_revision,
                     flow_sensitive_enabled,
-                    type_info: None,
-                    node: None,
-                    warnings: vec!["IR not available".to_string()],
-                });
-            }
-        };
-
-        let analysis = prepared.snapshot.analysis;
-        report_job_stage(progress.as_ref(), "querying_ir", 60).await;
-        let program_query = IntellisenseV2Facade::run_optional_query(
-            &context,
-            ObservabilityStage::IrQuery,
-            &analysis,
-            Some(coordinator.as_ref()),
-            |analysis| analysis.ir(FileId(1)),
-        );
-        let Some(program) = program_query.ok().flatten() else {
-            return Ok(BslTypeAtPositionResponse {
-                analysis_revision,
-                flow_sensitive_enabled,
-                type_info: None,
-                node: None,
-                warnings: vec!["IR not available".to_string()],
-            });
-        };
-
-        let pos = params.position;
-        report_job_stage(progress.as_ref(), "resolving_type", 85).await;
-        let type_info = type_at_utf16_position(
-            &analysis,
-            FileId(1),
-            pos.line,
-            pos.character,
-            flow_sensitive_enabled,
+                    deps_id,
+                    deps,
+                    index_snapshot,
+                    coordinator: coordinator_for_worker,
+                    text,
+                    version,
+                    abs_path: abs_path_display,
+                    position: params.position,
+                })
+            },
         )
-        .map(|resolution| TypeInfoDto {
-            name: user_facing_resolution_type_name(&resolution),
-            certainty: format!("{:?}", resolution.certainty).to_lowercase(),
-            active_facet: resolution
-                .active_facet
-                .as_ref()
-                .map(|facet| format!("{:?}", facet)),
-        });
-
-        let node = node_at_utf16_position(
-            &analysis,
-            program.as_ref(),
-            FileId(1),
-            pos.line,
-            pos.character,
-        )
-        .map(|node| NodeInfoDto {
-            kind: format!("{:?}", node.kind),
-            range: span_to_range_with_analysis(&analysis, FileId(1), node.span),
-        });
+        .await
+        .map_err(|err| {
+            rmcp::ErrorData::internal_error(
+                format!("type_at_position worker task join failed: {err}"),
+                None,
+            )
+        })??;
 
         report_job_stage(progress.as_ref(), "finalizing", 95).await;
-        Ok(BslTypeAtPositionResponse {
-            analysis_revision,
-            flow_sensitive_enabled,
-            type_info,
-            node,
-            warnings: Vec::new(),
-        })
+        Ok(response)
     }
 
     pub async fn bsl_members(
@@ -571,143 +523,311 @@ impl SessionManager {
         let text =
             select_effective_text(&params.file, &file_key, &overlays, &root_path, &abs_path)?;
         let version = select_effective_version(&params.file, &file_key, &overlays);
+        let abs_path_display = abs_path.to_string_lossy().to_string();
+        let completion_runtime = tokio::runtime::Handle::current();
 
         report_job_stage(progress.as_ref(), "preparing_snapshot", 30).await;
-        let (context, prepared) = match prepare_ephemeral_mcp_operation(
-            SemanticOperation::Members,
-            flow_sensitive_enabled,
-            deps_id.clone(),
-            deps.clone(),
-            index_snapshot.clone(),
-            Arc::from(text.clone()),
-            version,
-            Arc::from(abs_path.to_string_lossy().to_string()),
-            DetailLevel::Full,
-            coordinator.as_ref(),
-        ) {
-            Ok(values) => values,
-            Err(_) => {
-                return Ok(BslMembersResponse {
+        let coordinator_for_worker = coordinator.clone();
+        let response = bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
+            bsl_runtime::application::cpu_work_class_for_operation(SemanticOperation::Members),
+            ObservabilityOrigin::Agent.as_str(),
+            Some(coordinator.as_ref()),
+            move || {
+                collect_members(MembersRequest {
                     analysis_revision,
                     flow_sensitive_enabled,
-                    members: Vec::new(),
-                    truncated: false,
-                });
-            }
-        };
-
-        let bsl_runtime::application::SemanticSnapshot {
-            analysis,
-            index_snapshot,
-            ..
-        } = prepared.snapshot;
-        report_job_stage(progress.as_ref(), "querying_ir", 50).await;
-        let program = IntellisenseV2Facade::run_optional_query(
-            &context,
-            ObservabilityStage::IrQuery,
-            &analysis,
-            Some(coordinator.as_ref()),
-            |analysis| analysis.ir(FileId(1)),
-        )
-        .ok()
-        .flatten();
-        report_job_stage(progress.as_ref(), "querying_parse_result", 65).await;
-        let parse_result = IntellisenseV2Facade::run_parse_result_query(
-            &context,
-            &analysis,
-            program.is_some(),
-            Some(coordinator.as_ref()),
-            |analysis| analysis.parse_result(FileId(1)),
-        )
-        .ok()
-        .flatten();
-        let Some(program) = program else {
-            return Ok(BslMembersResponse {
-                analysis_revision,
-                flow_sensitive_enabled,
-                members: Vec::new(),
-                truncated: false,
-            });
-        };
-        let Some(parse_result) = parse_result else {
-            return Ok(BslMembersResponse {
-                analysis_revision,
-                flow_sensitive_enabled,
-                members: Vec::new(),
-                truncated: false,
-            });
-        };
-
-        let resolver = deps
-            .resolver
-            .clone()
-            .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())));
-        let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
-
-        let member_access_owner_type_hint = member_access_owner_type_hint_at_position(
-            &analysis,
-            FileId(1),
-            text.as_str(),
-            params.position.line,
-            params.position.character,
-            flow_sensitive_enabled,
-        );
-
-        report_job_stage(progress.as_ref(), "resolving_members", 85).await;
-        let result = bsl_runtime::application::type_system::get_completion_with_semantic_program_snapshot_v2(
-            text.as_str(),
-            params.position.line,
-            params.position.character,
-            None,
-            index_snapshot.as_ref(),
-            &metadata_lookup,
-            abs_path.to_string_lossy().as_ref(),
-            resolver.as_ref(),
-            program,
-            parse_result,
-            member_access_owner_type_hint,
-            flow_sensitive_enabled,
+                    deps_id,
+                    deps,
+                    index_snapshot,
+                    coordinator: coordinator_for_worker,
+                    text,
+                    version,
+                    abs_path: abs_path_display,
+                    position: params.position,
+                    limit: params.limit,
+                    completion_runtime,
+                })
+            },
         )
         .await
-        .map_err(|err| rmcp::ErrorData::internal_error(err.to_string(), None))?;
-
-        let mut members = result
-            .items
-            .into_iter()
-            .filter_map(|candidate| {
-                let kind = match candidate.item.kind {
-                    bsl_shared::domain::CompletionKind::Method => "method",
-                    bsl_shared::domain::CompletionKind::Property => "property",
-                    bsl_shared::domain::CompletionKind::Field => "field",
-                    bsl_shared::domain::CompletionKind::Function => "function",
-                    bsl_shared::domain::CompletionKind::Constructor => "constructor",
-                    _ => return None,
-                };
-
-                Some(MemberDto {
-                    name: candidate.item.label,
-                    kind: kind.to_string(),
-                    detail: candidate.item.detail,
-                })
-            })
-            .collect::<Vec<_>>();
-
-        members.sort_by(|a, b| {
-            (a.kind.as_str(), a.name.as_str()).cmp(&(b.kind.as_str(), b.name.as_str()))
-        });
-        let truncated = members.len() > params.limit as usize || result.is_incomplete;
-        if members.len() > params.limit as usize {
-            members.truncate(params.limit as usize);
-        }
+        .map_err(|err| {
+            rmcp::ErrorData::internal_error(format!("members worker task join failed: {err}"), None)
+        })??;
 
         report_job_stage(progress.as_ref(), "finalizing", 95).await;
-        Ok(BslMembersResponse {
+        Ok(response)
+    }
+}
+
+struct TypeAtPositionRequest {
+    analysis_revision: u64,
+    flow_sensitive_enabled: bool,
+    deps_id: bsl_analysis_v2::DepsSnapshotId,
+    deps: Arc<bsl_analysis_v2::SemanticDeps>,
+    index_snapshot: Arc<bsl_runtime::system::IndexSnapshot>,
+    coordinator: Arc<bsl_runtime::system::SystemCoordinator>,
+    text: String,
+    version: i32,
+    abs_path: String,
+    position: crate::server::types::Position,
+}
+
+fn collect_type_at_position(
+    request: TypeAtPositionRequest,
+) -> Result<BslTypeAtPositionResponse, rmcp::ErrorData> {
+    let TypeAtPositionRequest {
+        analysis_revision,
+        flow_sensitive_enabled,
+        deps_id,
+        deps,
+        index_snapshot,
+        coordinator,
+        text,
+        version,
+        abs_path,
+        position,
+    } = request;
+
+    let (context, prepared) = match prepare_ephemeral_mcp_operation(
+        SemanticOperation::TypeAtPosition,
+        flow_sensitive_enabled,
+        deps_id,
+        deps,
+        index_snapshot,
+        Arc::from(text),
+        version,
+        Arc::from(abs_path),
+        DetailLevel::Full,
+        coordinator.as_ref(),
+    ) {
+        Ok(values) => values,
+        Err(_) => {
+            return Ok(BslTypeAtPositionResponse {
+                analysis_revision,
+                flow_sensitive_enabled,
+                type_info: None,
+                node: None,
+                warnings: vec!["IR not available".to_string()],
+            });
+        }
+    };
+
+    let analysis = prepared.snapshot.analysis;
+    let program_query = IntellisenseV2Facade::run_optional_query(
+        &context,
+        ObservabilityStage::IrQuery,
+        &analysis,
+        Some(coordinator.as_ref()),
+        |analysis| analysis.ir(FileId(1)),
+    );
+    let Some(program) = program_query.ok().flatten() else {
+        return Ok(BslTypeAtPositionResponse {
             analysis_revision,
             flow_sensitive_enabled,
-            members,
-            truncated,
+            type_info: None,
+            node: None,
+            warnings: vec!["IR not available".to_string()],
+        });
+    };
+
+    let type_info = type_at_utf16_position(
+        &analysis,
+        FileId(1),
+        position.line,
+        position.character,
+        flow_sensitive_enabled,
+    )
+    .map(|resolution| TypeInfoDto {
+        name: user_facing_resolution_type_name(&resolution),
+        certainty: format!("{:?}", resolution.certainty).to_lowercase(),
+        active_facet: resolution
+            .active_facet
+            .as_ref()
+            .map(|facet| format!("{:?}", facet)),
+    });
+
+    let node = node_at_utf16_position(
+        &analysis,
+        program.as_ref(),
+        FileId(1),
+        position.line,
+        position.character,
+    )
+    .map(|node| NodeInfoDto {
+        kind: format!("{:?}", node.kind),
+        range: span_to_range_with_analysis(&analysis, FileId(1), node.span),
+    });
+
+    Ok(BslTypeAtPositionResponse {
+        analysis_revision,
+        flow_sensitive_enabled,
+        type_info,
+        node,
+        warnings: Vec::new(),
+    })
+}
+
+struct MembersRequest {
+    analysis_revision: u64,
+    flow_sensitive_enabled: bool,
+    deps_id: bsl_analysis_v2::DepsSnapshotId,
+    deps: Arc<bsl_analysis_v2::SemanticDeps>,
+    index_snapshot: Arc<bsl_runtime::system::IndexSnapshot>,
+    coordinator: Arc<bsl_runtime::system::SystemCoordinator>,
+    text: String,
+    version: i32,
+    abs_path: String,
+    position: crate::server::types::Position,
+    limit: u32,
+    completion_runtime: tokio::runtime::Handle,
+}
+
+fn collect_members(request: MembersRequest) -> Result<BslMembersResponse, rmcp::ErrorData> {
+    let MembersRequest {
+        analysis_revision,
+        flow_sensitive_enabled,
+        deps_id,
+        deps,
+        index_snapshot,
+        coordinator,
+        text,
+        version,
+        abs_path,
+        position,
+        limit,
+        completion_runtime,
+    } = request;
+
+    let (context, prepared) = match prepare_ephemeral_mcp_operation(
+        SemanticOperation::Members,
+        flow_sensitive_enabled,
+        deps_id,
+        deps.clone(),
+        index_snapshot,
+        Arc::from(text.clone()),
+        version,
+        Arc::from(abs_path.clone()),
+        DetailLevel::Full,
+        coordinator.as_ref(),
+    ) {
+        Ok(values) => values,
+        Err(_) => {
+            return Ok(BslMembersResponse {
+                analysis_revision,
+                flow_sensitive_enabled,
+                members: Vec::new(),
+                truncated: false,
+            });
+        }
+    };
+
+    let bsl_runtime::application::SemanticSnapshot {
+        analysis,
+        index_snapshot,
+        ..
+    } = prepared.snapshot;
+    let program = IntellisenseV2Facade::run_optional_query(
+        &context,
+        ObservabilityStage::IrQuery,
+        &analysis,
+        Some(coordinator.as_ref()),
+        |analysis| analysis.ir(FileId(1)),
+    )
+    .ok()
+    .flatten();
+    let parse_result = IntellisenseV2Facade::run_parse_result_query(
+        &context,
+        &analysis,
+        program.is_some(),
+        Some(coordinator.as_ref()),
+        |analysis| analysis.parse_result(FileId(1)),
+    )
+    .ok()
+    .flatten();
+    let Some(program) = program else {
+        return Ok(BslMembersResponse {
+            analysis_revision,
+            flow_sensitive_enabled,
+            members: Vec::new(),
+            truncated: false,
+        });
+    };
+    let Some(parse_result) = parse_result else {
+        return Ok(BslMembersResponse {
+            analysis_revision,
+            flow_sensitive_enabled,
+            members: Vec::new(),
+            truncated: false,
+        });
+    };
+
+    let resolver = deps
+        .resolver
+        .clone()
+        .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())));
+    let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
+
+    let member_access_owner_type_hint = member_access_owner_type_hint_at_position(
+        &analysis,
+        FileId(1),
+        text.as_str(),
+        position.line,
+        position.character,
+        flow_sensitive_enabled,
+    );
+
+    let result = completion_runtime
+        .block_on(
+            bsl_runtime::application::type_system::get_completion_with_semantic_program_snapshot_v2(
+                text.as_str(),
+                position.line,
+                position.character,
+                None,
+                index_snapshot.as_ref(),
+                &metadata_lookup,
+                abs_path.as_str(),
+                resolver.as_ref(),
+                program,
+                parse_result,
+                member_access_owner_type_hint,
+                flow_sensitive_enabled,
+            ),
+        )
+        .map_err(|err| rmcp::ErrorData::internal_error(err.to_string(), None))?;
+
+    let mut members = result
+        .items
+        .into_iter()
+        .filter_map(|candidate| {
+            let kind = match candidate.item.kind {
+                bsl_shared::domain::CompletionKind::Method => "method",
+                bsl_shared::domain::CompletionKind::Property => "property",
+                bsl_shared::domain::CompletionKind::Field => "field",
+                bsl_shared::domain::CompletionKind::Function => "function",
+                bsl_shared::domain::CompletionKind::Constructor => "constructor",
+                _ => return None,
+            };
+
+            Some(MemberDto {
+                name: candidate.item.label,
+                kind: kind.to_string(),
+                detail: candidate.item.detail,
+            })
         })
+        .collect::<Vec<_>>();
+
+    members.sort_by(|a, b| (a.kind.as_str(), a.name.as_str()).cmp(&(b.kind.as_str(), b.name.as_str())));
+    let truncated = members.len() > limit as usize || result.is_incomplete;
+    if members.len() > limit as usize {
+        members.truncate(limit as usize);
     }
+
+    Ok(BslMembersResponse {
+        analysis_revision,
+        flow_sensitive_enabled,
+        members,
+        truncated,
+    })
 }
 
 struct FileDiagnosticsBatch {

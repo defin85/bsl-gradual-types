@@ -56,6 +56,7 @@ pub async fn get_enhanced_hover(
             )
             .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
             .ok_or_else(|| anyhow::anyhow!("ir unavailable"))?;
+            precompute_hover_type_index(&analysis)?;
 
             let deps = deps_bundle.semantic_deps.clone();
             let resolver = deps_resolver(&deps);

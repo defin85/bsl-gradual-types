@@ -7765,14 +7765,13 @@ async fn p24_real_scenario_observability_stage_parity_lsp_vs_mcp() {
 
     let lsp_stages = collect_observed_stages(&lsp_metrics_payload);
     let mcp_stages = collect_observed_stages(&mcp_metrics_payload);
-    let required_stages = [
+    let required_shared_stages = [
         "runtime_snapshot_with_deps",
         "semantic_diagnostics_query",
         "ir_query",
-        "parse_result_query",
     ];
 
-    for stage in required_stages {
+    for stage in required_shared_stages {
         assert!(
             lsp_stages.contains(stage),
             "LSP metrics missing required stage {stage}, stages={lsp_stages:?}"
@@ -7790,6 +7789,14 @@ async fn p24_real_scenario_observability_stage_parity_lsp_vs_mcp() {
             "MCP stage {stage} has no positive counters"
         );
     }
+    assert!(
+        mcp_stages.contains("parse_result_query"),
+        "MCP metrics missing parse_result_query stage, stages={mcp_stages:?}"
+    );
+    assert!(
+        has_positive_counter_for_stage(&mcp_metrics_payload, "parse_result_query"),
+        "MCP stage parse_result_query has no positive counters"
+    );
 
     assert_drilldown_stage_metrics_for_origin(&lsp_metrics_payload, "lsp");
     assert_drilldown_stage_metrics_for_origin(&mcp_metrics_payload, "agent");
@@ -8028,6 +8035,7 @@ async fn p25_cross_interface_semantic_parity_lsp_web_mcp_core_tools() {
     // are validated via LSP/MCP pairs.
     let app = create_router(build_web_test_state(), "backend/static", true);
     let web_hover_response = app
+        .clone()
         .oneshot(
             AxumRequest::post("/api/hover")
                 .header(header::CONTENT_TYPE, "application/json")
@@ -8061,6 +8069,43 @@ async fn p25_cross_interface_semantic_parity_lsp_web_mcp_core_tools() {
     assert!(
         !web_hover_text.is_empty(),
         "expected non-empty Web hover text, payload={web_hover_payload}"
+    );
+    let web_enhanced_hover_response = app
+        .oneshot(
+            AxumRequest::post("/api/hover/enhanced")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(axum::body::Body::from(
+                    serde_json::json!({
+                        "code": TOOLS_FIXTURE,
+                        "line": TYPE_LINE,
+                        "column": TYPE_CHARACTER
+                    })
+                    .to_string(),
+                ))
+                .expect("web enhanced hover request"),
+        )
+        .await
+        .expect("web enhanced hover response");
+    assert!(
+        web_enhanced_hover_response.status().is_success(),
+        "unexpected web enhanced hover status: {}",
+        web_enhanced_hover_response.status()
+    );
+    let web_enhanced_hover_body =
+        axum::body::to_bytes(web_enhanced_hover_response.into_body(), usize::MAX)
+            .await
+            .expect("web enhanced hover body");
+    let web_enhanced_hover_payload: serde_json::Value =
+        serde_json::from_slice(&web_enhanced_hover_body).expect("web enhanced hover payload");
+    let web_enhanced_hover_text = web_enhanced_hover_payload
+        .get("hoverText")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        !web_enhanced_hover_text.is_empty()
+            && web_enhanced_hover_text != "No information available",
+        "expected non-empty Web enhanced hover text, payload={web_enhanced_hover_payload}"
     );
 
     let temp = tempfile::TempDir::new().expect("tempdir");

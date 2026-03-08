@@ -1,0 +1,10 @@
+# Protected acceptance assets (v1)
+openspec/changes/update-gradual-core-production-readiness/specs/bsl-intellisense-v2/spec.md
+openspec/changes/update-gradual-core-production-readiness/specs/dev-workflow/spec.md
+openspec/changes/update-gradual-core-production-readiness/traceability.md
+openspec/changes/update-gradual-core-production-readiness/residual-risk-review.md
+analysis-v2/src/type_inference_v2/tests.rs
+backend/src/bin/lsp_server/server/core/tests.rs
+backend/tests/universal_collection_cross_consumer_consistency_test.rs
+bsl-types/src/types/structural_members.rs
+scripts/check-openspec-change-governance.py

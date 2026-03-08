@@ -1,0 +1,13 @@
+{
+  "schema_version": "v1",
+  "change_id": "update-gradual-core-production-readiness",
+  "declared_status": "partial",
+  "review_verdict": "partial",
+  "traceability_status": "partial",
+  "review_ref": "openspec/changes/update-gradual-core-production-readiness/validation/readiness-review-status.md",
+  "traceability_ref": "openspec/changes/update-gradual-core-production-readiness/traceability.md",
+  "critical_backlog": [
+    "bsl-gradual-types-6mx.4",
+    "bsl-gradual-types-6mx.6"
+  ]
+}

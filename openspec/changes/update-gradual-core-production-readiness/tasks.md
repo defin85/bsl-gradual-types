@@ -21,3 +21,7 @@
 ## 3. Validation
 - [x] 3.1 Подготовить traceability `Requirement -> Future Code Area -> Required Test Class`.
 - [x] 3.2 Прогнать `openspec validate update-gradual-core-production-readiness --strict --no-interactive`.
+
+## Dependencies / Parallelism
+- [x] D1 Пункты 1.1, 1.2 и 1.4 блокируют 2.1, 2.2 и 2.3.
+- [x] D2 Пункты 1.5 и 2.4 блокируют 3.1 и 3.2.

@@ -285,6 +285,54 @@ class OpenSpecGovernanceScriptTest(unittest.TestCase):
         env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
         return env
 
+    def enable_readiness_gate(self, change_root: Path) -> None:
+        spec_path = change_root / "specs" / "dev-workflow" / "spec.md"
+        spec_path.write_text(
+            "\n".join(
+                [
+                    "## ADDED Requirements",
+                    "",
+                    "### Requirement: Change completion MUST NOT завышать readiness относительно MUST backlog",
+                    "Gate MUST сверять связанный критический Beads backlog.",
+                    "",
+                    "### Requirement: Traceability и review artifacts MUST отражать реальные gaps без optimistic overclaim",
+                    "Traceability и review artifacts MUST отражать реальные gaps без optimistic overclaim.",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+    def write_readiness_status(
+        self,
+        change_root: Path,
+        *,
+        declared_status: str = "complete",
+        review_verdict: str = "resolved",
+        review_ref: str | None = None,
+        traceability_status: str = "resolved",
+        traceability_ref: str | None = None,
+        critical_backlog: list[str] | None = None,
+        superseding_delivery_path: str | None = None,
+    ) -> None:
+        change_rel = f"openspec/changes/{self.CHANGE_ID}"
+        payload: dict[str, object] = {
+            "schema_version": "v1",
+            "change_id": self.CHANGE_ID,
+            "declared_status": declared_status,
+            "review_verdict": review_verdict,
+            "review_ref": review_ref or f"{change_rel}/validation/readiness-review.md",
+            "traceability_status": traceability_status,
+            "traceability_ref": traceability_ref or f"{change_rel}/validation/traceability.md",
+            "critical_backlog": critical_backlog or ["test-epic-1"],
+        }
+        if superseding_delivery_path is not None:
+            payload["superseding_delivery_path"] = superseding_delivery_path
+        (change_root / "governance" / "readiness_status.json").write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
     def test_passes_for_valid_change(self) -> None:
         with tempfile.TemporaryDirectory(prefix="governance-pass-") as tmp_dir:
             repo_root = Path(tmp_dir)
@@ -400,45 +448,143 @@ class OpenSpecGovernanceScriptTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="governance-open-backlog-") as tmp_dir:
             repo_root = Path(tmp_dir)
             change_root = self.seed_valid_change(repo_root)
-            spec_path = change_root / "specs" / "dev-workflow" / "spec.md"
-            spec_path.write_text(
-                "\n".join(
-                    [
-                        "## ADDED Requirements",
-                        "",
-                        "### Requirement: Change completion MUST NOT завышать readiness относительно MUST backlog",
-                        "Gate MUST сверять связанный критический Beads backlog.",
-                        "",
-                    ]
-                ),
-                encoding="utf-8",
-            )
+            self.enable_readiness_gate(change_root)
             (change_root / "validation" / "readiness-review.md").write_text(
                 "partial review verdict with open backlog\n",
                 encoding="utf-8",
             )
-            (change_root / "governance" / "readiness_status.json").write_text(
-                json.dumps(
-                    {
-                        "schema_version": "v1",
-                        "change_id": self.CHANGE_ID,
-                        "declared_status": "complete",
-                        "review_verdict": "partial",
-                        "review_ref": f"openspec/changes/{self.CHANGE_ID}/validation/readiness-review.md",
-                        "traceability_status": "partial",
-                        "traceability_ref": f"openspec/changes/{self.CHANGE_ID}/validation/readiness-review.md",
-                        "critical_backlog": ["test-epic-1"],
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                )
-                + "\n",
-                encoding="utf-8",
+            self.write_readiness_status(
+                change_root,
+                review_verdict="partial",
+                traceability_status="partial",
+                traceability_ref=f"openspec/changes/{self.CHANGE_ID}/validation/readiness-review.md",
             )
 
             env = self.make_fake_bd(repo_root, {"test-epic-1": "open"})
             completed = self.run_gate(repo_root, expected_exit=1, env=env)
             self.assertIn("readiness_gate_conflict", completed.stderr)
+
+    def test_passes_when_open_backlog_has_approved_superseding_delivery_path(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="governance-approved-superseding-") as tmp_dir:
+            repo_root = Path(tmp_dir)
+            change_root = self.seed_valid_change(repo_root)
+            self.enable_readiness_gate(change_root)
+            (change_root / "validation" / "readiness-review.md").write_text(
+                "# Readiness Review\n\n## Verdict\ncomplete\n",
+                encoding="utf-8",
+            )
+            (change_root / "validation" / "traceability.md").write_text(
+                "# Traceability\n\n## Requirement: Example\n\nStatus: `covered`\n",
+                encoding="utf-8",
+            )
+            superseding_rel = f"openspec/changes/{self.CHANGE_ID}/validation/superseding-delivery.md"
+            (change_root / "validation" / "superseding-delivery.md").write_text(
+                "# Superseding Delivery\n\nApproved handoff evidence.\n",
+                encoding="utf-8",
+            )
+            self.write_readiness_status(
+                change_root,
+                review_verdict="complete",
+                traceability_status="covered",
+                superseding_delivery_path=superseding_rel,
+            )
+
+            env = self.make_fake_bd(repo_root, {"test-epic-1": "open"})
+            completed = self.run_gate(repo_root, expected_exit=0, env=env)
+            self.assertIn("OpenSpec governance gate passed", completed.stdout)
+
+    def test_fails_when_open_backlog_has_unapproved_superseding_delivery_path(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="governance-unapproved-superseding-") as tmp_dir:
+            repo_root = Path(tmp_dir)
+            change_root = self.seed_valid_change(repo_root)
+            self.enable_readiness_gate(change_root)
+            (change_root / "validation" / "readiness-review.md").write_text(
+                "# Readiness Review\n\n## Verdict\ncomplete\n",
+                encoding="utf-8",
+            )
+            (change_root / "validation" / "traceability.md").write_text(
+                "# Traceability\n\n## Requirement: Example\n\nStatus: `covered`\n",
+                encoding="utf-8",
+            )
+            superseding_rel = f"openspec/changes/{self.CHANGE_ID}/validation/superseding-delivery.md"
+            (change_root / "validation" / "superseding-delivery.md").write_text(
+                "# Superseding Delivery\n\nPending handoff evidence.\n",
+                encoding="utf-8",
+            )
+            self.write_readiness_status(
+                change_root,
+                review_verdict="complete",
+                traceability_status="covered",
+                superseding_delivery_path=superseding_rel,
+            )
+
+            env = self.make_fake_bd(repo_root, {"test-epic-1": "open"})
+            completed = self.run_gate(repo_root, expected_exit=1, env=env)
+            self.assertIn("superseding_delivery_path", completed.stderr)
+            self.assertIn("readiness_gate_conflict", completed.stderr)
+
+    def test_fails_when_review_ref_evidence_is_weaker_than_declared_success(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="governance-review-mismatch-") as tmp_dir:
+            repo_root = Path(tmp_dir)
+            change_root = self.seed_valid_change(repo_root)
+            self.enable_readiness_gate(change_root)
+            (change_root / "validation" / "readiness-review.md").write_text(
+                "# Readiness Review\n\n## Verdict\npartial\n",
+                encoding="utf-8",
+            )
+            (change_root / "validation" / "traceability.md").write_text(
+                "# Traceability\n\n## Requirement: Example\n\nStatus: `covered`\n",
+                encoding="utf-8",
+            )
+            self.write_readiness_status(change_root)
+
+            env = self.make_fake_bd(repo_root, {"test-epic-1": "closed"})
+            completed = self.run_gate(repo_root, expected_exit=1, env=env)
+            self.assertIn("review_ref", completed.stderr)
+            self.assertIn("readiness_gate_conflict", completed.stderr)
+
+    def test_fails_when_traceability_ref_evidence_is_weaker_than_declared_success(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="governance-traceability-mismatch-") as tmp_dir:
+            repo_root = Path(tmp_dir)
+            change_root = self.seed_valid_change(repo_root)
+            self.enable_readiness_gate(change_root)
+            (change_root / "validation" / "readiness-review.md").write_text(
+                "# Readiness Review\n\n## Verdict\ncomplete\n",
+                encoding="utf-8",
+            )
+            (change_root / "validation" / "traceability.md").write_text(
+                "# Traceability\n\n## Requirement: Example\n\nStatus: `gap`\n",
+                encoding="utf-8",
+            )
+            self.write_readiness_status(change_root)
+
+            env = self.make_fake_bd(repo_root, {"test-epic-1": "closed"})
+            completed = self.run_gate(repo_root, expected_exit=1, env=env)
+            self.assertIn("readiness_gate_conflict", completed.stderr)
+            self.assertIn("traceability_ref", completed.stderr)
+
+    def test_fails_when_review_and_traceability_artifacts_disagree(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="governance-artifact-conflict-") as tmp_dir:
+            repo_root = Path(tmp_dir)
+            change_root = self.seed_valid_change(repo_root)
+            self.enable_readiness_gate(change_root)
+            (change_root / "validation" / "readiness-review.md").write_text(
+                "# Readiness Review\n\n## Verdict\nresolved\n",
+                encoding="utf-8",
+            )
+            (change_root / "validation" / "traceability.md").write_text(
+                "# Traceability\n\n## Requirement: Example\n\nStatus: `partial`\n",
+                encoding="utf-8",
+            )
+            self.write_readiness_status(
+                change_root,
+                declared_status="partial",
+                traceability_status="partial",
+            )
+
+            env = self.make_fake_bd(repo_root, {"test-epic-1": "closed"})
+            completed = self.run_gate(repo_root, expected_exit=1, env=env)
+            self.assertIn("review/traceability evidence disagree", completed.stderr)
 
 
 if __name__ == "__main__":

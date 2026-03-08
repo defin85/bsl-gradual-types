@@ -93,6 +93,18 @@ SUCCESS_READINESS_REVIEW = {
     "covered",
     "resolved",
     "ready",
+    "complete",
+    "closed",
+}
+
+FAILURE_READINESS_REVIEW = {
+    "partial",
+    "gap",
+    "not_ready",
+    "open",
+    "blocked",
+    "fail",
+    "unresolved",
 }
 
 ALLOWED_DECLARED_CHANGE_STATUS = {
@@ -100,6 +112,16 @@ ALLOWED_DECLARED_CHANGE_STATUS = {
     "not_ready",
     "complete",
 }
+
+READINESS_TOKEN_RE = re.compile(
+    r"\b(pass|covered|resolved|ready|complete|closed|partial|gap|not[_ -]?ready|open|blocked|fail(?:ing)?|unresolved)\b",
+    re.IGNORECASE,
+)
+TRACEABILITY_STATUS_RE = re.compile(r"(?im)^status:\s*`?([^`\n]+)`?\s*$")
+VERDICT_HEADING_RE = re.compile(r"(?ims)^##\s*verdict\s*$\s*([^\n]+)")
+FINAL_VERDICT_SECTION_RE = re.compile(r"(?ims)^##\s*final verdict\s*$([\s\S]+?)(?:^##\s|\Z)")
+ARROW_RESULT_RE = re.compile(r"(?im)->\s*`?([^`\n]+)`?")
+DECLARED_STATUS_RE = re.compile(r"(?im)declared status(?:\s+is)?\s*`?([^`\n]+)`?")
 
 
 class GateError(Exception):
@@ -214,6 +236,90 @@ def validate_evidence_ref(
         f"{reason_code}: {source_path} {field_name} must point to a file: {ref_value}",
     )
     return resolved
+
+
+def normalize_readiness_token(value: str) -> str:
+    normalized = value.strip().strip("`'\"").lower()
+    normalized = re.sub(r"[^a-z0-9]+", "_", normalized).strip("_")
+    if normalized == "failing":
+        return "fail"
+    return normalized
+
+
+def classify_readiness_token(token: str, *, source_path: Path, field_name: str) -> str:
+    if token in SUCCESS_READINESS_REVIEW:
+        return "success"
+    if token in FAILURE_READINESS_REVIEW:
+        return "failure"
+    raise GateError(
+        "readiness_gate_conflict: "
+        f"{source_path} {field_name} has unsupported readiness token {token!r}"
+    )
+
+
+def extract_readiness_token(text: str) -> str | None:
+    match = READINESS_TOKEN_RE.search(text)
+    if match is None:
+        return None
+    return normalize_readiness_token(match.group(1))
+
+
+def derive_review_evidence_state(path: Path) -> tuple[str, str]:
+    content = path.read_text(encoding="utf-8")
+
+    for regex in (
+        VERDICT_HEADING_RE,
+        FINAL_VERDICT_SECTION_RE,
+        DECLARED_STATUS_RE,
+        ARROW_RESULT_RE,
+    ):
+        for match in regex.finditer(content):
+            token = extract_readiness_token(match.group(1))
+            if token is not None:
+                return token, classify_readiness_token(
+                    token, source_path=path, field_name="review_ref"
+                )
+
+    for line in content.splitlines():
+        lowered = line.lower()
+        if "verdict" not in lowered and "status" not in lowered:
+            continue
+        token = extract_readiness_token(line)
+        if token is not None:
+            return token, classify_readiness_token(
+                token, source_path=path, field_name="review_ref"
+            )
+
+    raise GateError(
+        "readiness_gate_conflict: "
+        f"{path} review_ref does not expose a canonical readiness verdict"
+    )
+
+
+def derive_traceability_evidence_state(path: Path) -> tuple[str, str]:
+    content = path.read_text(encoding="utf-8")
+    status_tokens = [
+        normalize_readiness_token(match.group(1))
+        for match in TRACEABILITY_STATUS_RE.finditer(content)
+    ]
+    if status_tokens:
+        categories = [
+            classify_readiness_token(
+                token, source_path=path, field_name="traceability_ref"
+            )
+            for token in status_tokens
+        ]
+        if any(category == "failure" for category in categories):
+            failing_token = next(
+                token
+                for token, category in zip(status_tokens, categories, strict=True)
+                if category == "failure"
+            )
+            return failing_token, "failure"
+        return status_tokens[0], "success"
+
+    token, category = derive_review_evidence_state(path)
+    return token, category
 
 
 def ensure_path_within(
@@ -612,11 +718,11 @@ def change_requires_readiness_backlog_gate(change_root: Path) -> bool:
         return False
 
     content = spec_path.read_text(encoding="utf-8").lower()
-    return (
-        "change completion must not" in content
-        and "critical follow-up backlog" in content
-        and "beads backlog" in content
+    has_gate_requirement = "change completion must not" in content
+    mentions_backlog = "beads backlog" in content and (
+        "must backlog" in content or "follow-up backlog" in content
     )
+    return has_gate_requirement and mentions_backlog
 
 
 def fetch_beads_issue_statuses(repo_root: Path, issue_ids: list[str]) -> dict[str, str]:
@@ -693,13 +799,20 @@ def validate_readiness_status(
         ),
     )
 
+    declared_evidence_states: dict[str, tuple[str, str]] = {}
     for field_name in ("review_verdict", "traceability_status"):
         value = payload.get(field_name)
         ensure(
             isinstance(value, str) and value.strip(),
             f"readiness_gate_conflict: {path} {field_name} is required",
         )
+        token = normalize_readiness_token(value)
+        declared_evidence_states[field_name] = (
+            token,
+            classify_readiness_token(token, source_path=path, field_name=field_name),
+        )
 
+    evidence_refs: dict[str, Path] = {}
     for field_name in ("review_ref", "traceability_ref"):
         raw_ref = payload.get(field_name)
         ensure(
@@ -723,6 +836,7 @@ def validate_readiness_status(
             reason_code="readiness_gate_conflict",
             message=f"{path} {field_name} must point inside change root",
         )
+        evidence_refs[field_name] = evidence_path
 
     critical_backlog = payload.get("critical_backlog")
     ensure(
@@ -774,11 +888,42 @@ def validate_readiness_status(
         issue_id for issue_id, status in statuses.items() if status.strip().lower() != "closed"
     ]
 
-    review_verdict = str(payload["review_verdict"]).strip().lower()
-    traceability_status = str(payload["traceability_status"]).strip().lower()
+    review_token, review_category = derive_review_evidence_state(evidence_refs["review_ref"])
+    traceability_token, traceability_category = derive_traceability_evidence_state(
+        evidence_refs["traceability_ref"]
+    )
+    declared_review_token, declared_review_category = declared_evidence_states["review_verdict"]
+    declared_traceability_token, declared_traceability_category = declared_evidence_states[
+        "traceability_status"
+    ]
+
+    ensure(
+        declared_review_category == review_category,
+        (
+            "readiness_gate_conflict: "
+            f"{path} review_ref={evidence_refs['review_ref']} yields {review_token!r}, "
+            f"but review_verdict={declared_review_token!r}"
+        ),
+    )
+    ensure(
+        declared_traceability_category == traceability_category,
+        (
+            "readiness_gate_conflict: "
+            f"{path} traceability_ref={evidence_refs['traceability_ref']} yields {traceability_token!r}, "
+            f"but traceability_status={declared_traceability_token!r}"
+        ),
+    )
+    ensure(
+        review_category == traceability_category,
+        (
+            "readiness_gate_conflict: "
+            f"{path} review/traceability evidence disagree: "
+            f"review_ref={review_token!r}, traceability_ref={traceability_token!r}"
+        ),
+    )
+
     has_conflicting_evidence = (
-        review_verdict not in SUCCESS_READINESS_REVIEW
-        or traceability_status not in SUCCESS_READINESS_REVIEW
+        review_category != "success" or traceability_category != "success"
     )
 
     if declared_status == "complete":
@@ -787,7 +932,7 @@ def validate_readiness_status(
             (
                 "readiness_gate_conflict: "
                 f"{path} declared_status='complete' conflicts with "
-                f"review_verdict={review_verdict!r} traceability_status={traceability_status!r}"
+                f"review_verdict={review_token!r} traceability_status={traceability_token!r}"
             ),
         )
         ensure(

@@ -48,6 +48,9 @@ Tests:
 - `backend/tests/universal_collection_cross_consumer_consistency_test.rs`
   - `typed_structure_completion_without_shared_owner_hint_fails_closed_in_direct_handler_path`
   - `typed_value_table_row_completion_without_shared_owner_hint_fails_closed_in_direct_handler_path`
+- `bsl-runtime/src/application/type_system/services/completion_service/tests.rs`
+  - `implicit_module_context_owner_fallback_matches_shared_resolution_for_supported_modules`
+  - `implicit_module_context_owner_fallback_fails_closed_outside_supported_modules`
 - `backend/src/bin/lsp_server/server/core/tests.rs`
   - `p7_typed_structure_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics`
   - `p7_typed_value_table_row_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics`
@@ -55,7 +58,7 @@ Tests:
   - `p7_typed_value_table_row_revision_switch_does_not_leak_stale_structural_members_across_interfaces`
 
 Notes:
-- bounded bootstrap-only module-context path remains explicitly catalogued in `design.md` and does not act as second structural truth for reviewed scenarios.
+- bounded bootstrap-only module-context path remains explicitly catalogued in `design.md`, now matches shared analysis `TypeResolution` for supported implicit symbols, and fails closed outside supported module-context paths.
 
 ## Requirement: Cross-consumer acceptance доказывает semantic equivalence, а не только smoke consistency
 
@@ -98,6 +101,7 @@ Code / artefacts:
 Evidence:
 - `openspec validate update-gradual-core-production-readiness --strict --no-interactive`
 - `python3 scripts/check-openspec-change-governance.py --change-id update-gradual-core-production-readiness`
+- `python3 -m unittest scripts.test-openspec-change-governance -v`
 
 ## Requirement: Traceability и review artifacts MUST отражать реальные gaps без optimistic overclaim
 
@@ -114,5 +118,6 @@ Code / artefacts:
 
 Evidence:
 - `residual-risk-review.md` отделяет semantic risk closure от final closure status;
-- `readiness_status.json` объявляет `complete` только после закрытия critical backlog;
+- `readiness_status.json` теперь ссылается на canonical `readiness-review-status.md` и `traceability.md`, а не на stale manual verdict fields;
+- `scripts/test-openspec-change-governance.py` фиксирует conflicting evidence, approved superseding handoff и optimistic-overclaim regressions;
 - `final-closure-checklist.md` фиксирует final validation/gate evidence без optimistic wording.

@@ -9,6 +9,12 @@ Date: March 8, 2026
 ## Governance and readiness gate
 
 - `python3 scripts/check-openspec-change-governance.py --change-id update-gradual-core-production-readiness` -> pass
+- `python3 -m unittest scripts.test-openspec-change-governance -v` -> `OK`
+
+## Bootstrap-only fallback evidence
+
+- `cargo test -p bsl-runtime implicit_module_context_owner_fallback -- --nocapture` -> `2 passed`
+- `cargo test -p bsl-backend --test form_module_object_unified_contract_test completion_and_resolve_follow_unified_form_contract -- --nocapture` -> `1 passed`
 
 ## Delivered evidence
 
@@ -21,5 +27,6 @@ Date: March 8, 2026
 ## Final verdict
 
 - All MUST requirements for the change now have direct `Requirement -> Code -> Test` evidence.
-- No optimistic future-facing `complete/ready` wording remains in the change artifacts.
-- The change-specific critical backlog is closed; final declared status is `complete`.
+- No optimistic future-facing `complete/ready` wording remains in the change artifacts or in referenced readiness evidence.
+- The change-specific critical backlog `bsl-gradual-types-rri` is closed; final declared status is `complete`.
+- Machine-readable readiness status now points to the canonical review and traceability artefacts that the hardened gate actually re-reads.

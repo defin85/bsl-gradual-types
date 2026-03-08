@@ -50,6 +50,13 @@ fn utf16_column(content: &str, marker: &str) -> (u32, u32) {
     (line, column)
 }
 
+fn byte_offset_of(content: &str, marker: &str) -> u32 {
+    content
+        .find(marker)
+        .map(|index| index as u32)
+        .unwrap_or_else(|| panic!("Marker not found: {}", marker))
+}
+
 #[test]
 fn completion_context_detects_member_access_and_trigger_char() {
     let content = "Объект.";
@@ -1489,6 +1496,152 @@ async fn completion_uses_owner_hint_for_member_access_when_flow_sensitive_is_ena
         labels.contains(&"Длина".to_string()),
         "labels: {:?}",
         labels
+    );
+}
+
+#[test]
+fn implicit_module_context_owner_fallback_matches_shared_resolution_for_supported_modules() {
+    let repository = Arc::new(InMemoryTypeRepository::new());
+    repository
+        .load_types(vec![RawTypeData {
+            name: "Формы.Документы.Док1.Форма1".to_string(),
+            source: RawDataSource::Configuration,
+            ..Default::default()
+        }])
+        .expect("load types");
+
+    let repo: Arc<dyn TypeRepository> = repository.clone();
+    let resolver = Arc::new(TypeResolver::new(repo.clone()));
+    let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+        signature_index: repo.get_signature_index_clone(),
+        resolver: Some(resolver.clone()),
+        repository: repo.clone(),
+        platform_signatures_loaded: false,
+    });
+
+    let cases = [
+        (
+            "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl",
+            "Объект",
+        ),
+        (
+            "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl",
+            "ЭтотОбъект",
+        ),
+        ("Documents/Док1/Ext/ManagerModule.bsl", "Объект"),
+        ("Documents/Док1/Ext/ObjectModule.bsl", "ЭтотОбъект"),
+        (
+            "InformationRegisters/Регистр1/Ext/RecordSetModule.bsl",
+            "Объект",
+        ),
+    ];
+
+    for (file_path, base_name) in cases {
+        let content = format!(
+            "Процедура Тест()\n    expected = {base_name};\n    {base_name}.\nКонецПроцедуры\n"
+        );
+        let assignment_marker = format!("expected = {base_name}");
+        let assignment_offset = byte_offset_of(&content, &assignment_marker) + "expected = ".len() as u32;
+        let access_column = format!("    {base_name}")
+            .chars()
+            .map(|ch| ch.len_utf16())
+            .sum::<usize>() as u32;
+
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(ChangeV2::SetDepsSnapshot {
+            deps_id: DepsSnapshotId::from_hash(format!("implicit-module-context-{base_name}")),
+            deps: deps.clone(),
+        });
+        host.apply_change(ChangeV2::SetSettingsSnapshot {
+            settings_id: SettingsId::from_hash("implicit-module-context-fallback"),
+            diagnostics_detail_level: DetailLevel::Full,
+        });
+        host.apply_change(ChangeV2::SetFile {
+            file_id: V2FileId(1),
+            text: Arc::from(content.clone()),
+            version: 0,
+            path: Arc::from(file_path),
+        });
+
+        let analysis = host.analysis();
+        let expected = analysis
+            .type_at_byte_offset(V2FileId(1), assignment_offset)
+            .expect("type_at_byte_offset query")
+            .expect("shared resolution for implicit context symbol");
+        let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
+
+        let ctx = CompletionAnalysisContext {
+            ir_program: Some(ir_program),
+            resolver: resolver.as_ref(),
+            file_path,
+            parse_result: None,
+            member_access_owner_type_hint: None,
+            include_flow_sensitive: false,
+        };
+
+        let fallback = resolve_member_owner_type_sync(Some(&ctx), &content, 2, access_column, base_name)
+            .expect("bootstrap-only fallback must resolve supported implicit module symbol");
+
+        assert_eq!(
+            fallback, expected,
+            "bootstrap-only fallback must match shared analysis resolution for {file_path}:{base_name}"
+        );
+    }
+}
+
+#[test]
+fn implicit_module_context_owner_fallback_fails_closed_outside_supported_modules() {
+    let repository = Arc::new(InMemoryTypeRepository::new());
+    let repo: Arc<dyn TypeRepository> = repository.clone();
+    let resolver = Arc::new(TypeResolver::new(repo.clone()));
+    let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+        signature_index: repo.get_signature_index_clone(),
+        resolver: Some(resolver.clone()),
+        repository: repo,
+        platform_signatures_loaded: false,
+    });
+
+    let content = concat!(
+        "Процедура Тест()\n",
+        "    Объект.\n",
+        "КонецПроцедуры\n",
+    );
+    let access_column = "    Объект"
+        .chars()
+        .map(|ch| ch.len_utf16())
+        .sum::<usize>() as u32;
+
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(ChangeV2::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("implicit-module-context-unsupported"),
+        deps,
+    });
+    host.apply_change(ChangeV2::SetSettingsSnapshot {
+        settings_id: SettingsId::from_hash("implicit-module-context-fallback"),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+    host.apply_change(ChangeV2::SetFile {
+        file_id: V2FileId(1),
+        text: Arc::from(content),
+        version: 0,
+        path: Arc::from("CommonModules/ОбщегоНазначения/Ext/Module.bsl"),
+    });
+
+    let analysis = host.analysis();
+    let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
+    let ctx = CompletionAnalysisContext {
+        ir_program: Some(ir_program),
+        resolver: resolver.as_ref(),
+        file_path: "CommonModules/ОбщегоНазначения/Ext/Module.bsl",
+        parse_result: None,
+        member_access_owner_type_hint: None,
+        include_flow_sensitive: false,
+    };
+
+    let fallback = resolve_member_owner_type_sync(Some(&ctx), content, 1, access_column, "Объект");
+    assert!(
+        fallback.is_none(),
+        "bootstrap-only fallback must fail closed outside supported module-context paths"
     );
 }
 

@@ -1,4 +1,5 @@
 use super::*;
+use bsl_shared::domain::types::{Certainty, ResolutionSource};
 
 pub(super) fn add_methods_from_resolution(
     metadata_lookup: &TypeMetadataLookup,
@@ -107,25 +108,81 @@ pub(super) fn parse_owner_kind(owner_type: &str) -> Option<(MetadataKind, &str)>
     Some((kind, object_name))
 }
 
+fn resolve_platform_descriptor_type(
+    resolver: Option<&TypeResolver>,
+    type_name: &str,
+) -> TypeResolution {
+    let resolved = resolver
+        .map(|current| current.resolve_expression_sync(type_name))
+        .unwrap_or_else(|| TypeResolution::unknown());
+    if !resolved.is_unknown() {
+        return resolved;
+    }
+    TypeResolution::inferred_weak(type_name)
+}
+
+fn resolve_configuration_descriptor(
+    resolver: Option<&TypeResolver>,
+    kind: MetadataKind,
+    name: &str,
+) -> TypeResolution {
+    let mut resolution = TypeResolution::metadata_type(kind, name, None);
+    let metadata_type_name = format!("{}.{}", kind.to_prefix(), name);
+    let resolved = resolver
+        .map(|current| current.resolve_expression_sync(&metadata_type_name))
+        .unwrap_or_else(|| TypeResolution::unknown());
+
+    if !resolved.is_unknown() {
+        resolution.available_facets = resolved.available_facets.clone();
+        return resolution;
+    }
+
+    resolution.certainty = Certainty::InferredWeak;
+    resolution.source = ResolutionSource::Inferred;
+    resolution
+}
+
+fn resolve_configuration_facet_descriptor(
+    resolver: Option<&TypeResolver>,
+    kind: MetadataKind,
+    name: &str,
+    facet: FacetKind,
+) -> TypeResolution {
+    let mut resolution = TypeResolution::metadata_type(kind, name, Some(facet));
+    let metadata_type_name = format!("{}.{}", kind.to_prefix(), name);
+    let resolved = resolver
+        .map(|current| current.resolve_expression_sync(&metadata_type_name))
+        .unwrap_or_else(|| TypeResolution::unknown());
+
+    if !resolved.is_unknown() {
+        resolution.available_facets = resolved.available_facets.clone();
+        return resolution;
+    }
+
+    resolution.certainty = Certainty::InferredWeak;
+    resolution.source = ResolutionSource::Inferred;
+    resolution
+}
+
 pub(super) fn resolve_type_from_contextual_descriptor(
     resolver: Option<&TypeResolver>,
     descriptor: &ContextualTypeDescriptor,
 ) -> TypeResolution {
     match descriptor {
         ContextualTypeDescriptor::PlatformType { type_name } => {
-            resolve_type_from_string(resolver, type_name)
+            resolve_platform_descriptor_type(resolver, type_name)
         }
         ContextualTypeDescriptor::ConfigurationFacet { kind, name, facet } => {
-            TypeResolution::metadata_type(*kind, name, Some(*facet))
+            resolve_configuration_facet_descriptor(resolver, *kind, name, *facet)
         }
         ContextualTypeDescriptor::FormType { .. }
         | ContextualTypeDescriptor::FormElementsType { .. } => {
-            resolve_type_from_string(resolver, &descriptor.canonical_type_name())
+            resolve_platform_descriptor_type(resolver, &descriptor.canonical_type_name())
         }
         ContextualTypeDescriptor::FormDataObject {
             kind, owner_name, ..
         } => {
-            let mut resolution = TypeResolution::metadata_type(*kind, owner_name, None);
+            let mut resolution = resolve_configuration_descriptor(resolver, *kind, owner_name);
             for note in descriptor.resolution_metadata_notes() {
                 if !resolution.metadata.notes.contains(&note) {
                     resolution.metadata.notes.push(note);

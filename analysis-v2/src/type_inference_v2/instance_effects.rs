@@ -1,6 +1,8 @@
 use super::*;
 use bsl_shared::domain::type_id::normalize;
-use bsl_shared::domain::types::{GenericType, SpecialType, StructuralMember, StructuralMemberSpan};
+use bsl_shared::domain::types::{
+    GenericType, SpecialType, StructuralMember, StructuralMemberId, StructuralMemberSpan,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) struct InstanceId(u64);
@@ -48,6 +50,7 @@ struct ValueTableEffects {
 
 #[derive(Debug, Clone)]
 struct StructuralEffectEntry {
+    member_id: StructuralMemberId,
     canonical_name: String,
     value_type: TypeResolution,
     source_span: Option<StructuralMemberSpan>,
@@ -60,8 +63,20 @@ impl StructuralEffectEntry {
         value_type: TypeResolution,
         source_span: Option<StructuralMemberSpan>,
     ) -> Self {
+        let canonical_name = canonical_name.into();
+        let member_id = StructuralMemberId::new(&canonical_name, source_span);
+        Self::from_resolution_with_id(canonical_name, member_id, value_type, source_span)
+    }
+
+    fn from_resolution_with_id(
+        canonical_name: impl Into<String>,
+        member_id: StructuralMemberId,
+        value_type: TypeResolution,
+        source_span: Option<StructuralMemberSpan>,
+    ) -> Self {
         let certainty = value_type.certainty;
         Self {
+            member_id,
             canonical_name: canonical_name.into(),
             value_type,
             source_span,
@@ -76,6 +91,7 @@ impl StructuralEffectEntry {
             self.source_span,
             self.certainty,
         )
+        .with_member_id(self.member_id.clone())
     }
 
     fn downgrade_for_branch(&self) -> Self {
@@ -242,6 +258,7 @@ impl InstanceEffectStore {
         field_name: &str,
         value_type: TypeResolution,
         source_span: bsl_shared::ir::Span,
+        member_id: Option<StructuralMemberId>,
     ) {
         let Some(InstanceState {
             kind: InstanceKind::Structure(effects),
@@ -250,12 +267,24 @@ impl InstanceEffectStore {
             return;
         };
 
+        let key = normalize(field_name);
+        let source_span = Some(span_to_structural(source_span));
+        let existing_entry = effects.fields.get(&key);
+        let canonical_name = existing_entry
+            .map(|entry| entry.canonical_name.clone())
+            .unwrap_or_else(|| field_name.to_string());
+        let member_id = existing_entry
+            .map(|entry| entry.member_id.clone())
+            .or(member_id)
+            .unwrap_or_else(|| StructuralMemberId::new(field_name, source_span));
+
         effects.fields.insert(
-            normalize(field_name),
-            StructuralEffectEntry::from_resolution(
-                field_name.to_string(),
+            key,
+            StructuralEffectEntry::from_resolution_with_id(
+                canonical_name,
+                member_id,
                 value_type,
-                Some(span_to_structural(source_span)),
+                source_span,
             ),
         );
     }
@@ -274,12 +303,23 @@ impl InstanceEffectStore {
             return;
         };
 
+        let key = normalize(column_name);
+        let source_span = Some(span_to_structural(source_span));
+        let existing_entry = effects.columns.get(&key);
+        let canonical_name = existing_entry
+            .map(|entry| entry.canonical_name.clone())
+            .unwrap_or_else(|| column_name.to_string());
+        let member_id = existing_entry
+            .map(|entry| entry.member_id.clone())
+            .unwrap_or_else(|| StructuralMemberId::new(column_name, source_span));
+
         effects.columns.insert(
-            normalize(column_name),
-            StructuralEffectEntry::from_resolution(
-                column_name.to_string(),
+            key,
+            StructuralEffectEntry::from_resolution_with_id(
+                canonical_name,
+                member_id,
                 value_type,
-                Some(span_to_structural(source_span)),
+                source_span,
             ),
         );
     }
@@ -584,6 +624,7 @@ fn merge_effect_entry(
     right: &StructuralEffectEntry,
 ) -> StructuralEffectEntry {
     StructuralEffectEntry {
+        member_id: left.member_id.clone(),
         canonical_name: left.canonical_name.clone(),
         value_type: merge_resolutions(&left.value_type, &right.value_type),
         source_span: left.source_span.or(right.source_span),

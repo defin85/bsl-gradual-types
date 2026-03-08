@@ -27,8 +27,10 @@ impl TypeResolution {
             .find(|existing| existing.matches_name(&member.canonical_name))
         {
             let preserved_name = existing.canonical_name.clone();
+            let preserved_member_id = existing.member_id.clone();
             *existing = member;
             existing.canonical_name = preserved_name;
+            existing.member_id = preserved_member_id;
             return;
         }
 

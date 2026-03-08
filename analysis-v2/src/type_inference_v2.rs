@@ -770,6 +770,7 @@ impl TypeInferencer {
                                             .map(|span| span.end)
                                             .unwrap_or_else(|| expr_span(expr).end),
                                     ),
+                                    Some(member.member_id.clone()),
                                 );
                             }
                         }
@@ -867,6 +868,7 @@ impl TypeInferencer {
                             &field_name,
                             normalize_schema_value_type(arg_types[1].clone()),
                             expr_span(&args[0]),
+                            None,
                         );
                     }
                     let receiver = self.infer_expr(object, env, _index);

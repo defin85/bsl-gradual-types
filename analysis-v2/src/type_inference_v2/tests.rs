@@ -4,7 +4,7 @@ use bsl_shared::domain::signature_index::{MethodSignature, SignatureSource};
 use bsl_shared::domain::type_id::TypeId;
 use bsl_shared::domain::types::{
     FacetKind, MetadataKind, ParameterInfo, PrimitiveType, RawAttributeData, RawDataSource,
-    RawPropertyData, RawTabularSectionData, RawTypeData, StructuralMemberSpan,
+    RawPropertyData, RawTabularSectionData, RawTypeData, StructuralMemberId, StructuralMemberSpan,
     FORM_DATA_SEMANTICS_NOTE,
 };
 use bsl_shared::TypeRepository;
@@ -16,9 +16,20 @@ fn parse(code: &str) -> Program {
 }
 
 fn structural_member_span_for_literal(source: &str, literal: &str) -> StructuralMemberSpan {
+    structural_member_span_for_literal_occurrence(source, literal, 0)
+}
+
+fn structural_member_span_for_literal_occurrence(
+    source: &str,
+    literal: &str,
+    occurrence: usize,
+) -> StructuralMemberSpan {
     let start = source
-        .find(literal)
-        .unwrap_or_else(|| panic!("missing literal {literal}")) as u32;
+        .match_indices(literal)
+        .nth(occurrence)
+        .map(|(offset, _)| offset)
+        .unwrap_or_else(|| panic!("missing literal {literal} occurrence {occurrence}"))
+        as u32;
     StructuralMemberSpan::new(start, start + literal.len() as u32)
 }
 
@@ -1570,6 +1581,81 @@ fn typed_structure_insert_preserves_field_source_span() {
 }
 
 #[test]
+fn typed_structure_alias_preserves_member_identity() {
+    let deps = deps_with_universal_collection_types();
+    let source = r#"Процедура Тест()
+    S = Новый Структура;
+    S.Вставить("Идентификатор", "A-01");
+    S2 = S;
+    probe1 = S.Идентификатор;
+    probe2 = S2.Идентификатор;
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "Documents/Док1/Ext/ObjectModule.bsl", deps);
+
+    let owner1_offset = source.find("S.Идентификатор").expect("owner1") as u32;
+    let owner2_offset = source.rfind("S2.Идентификатор").expect("owner2") as u32;
+    let owner1 = index
+        .type_at_byte_offset(owner1_offset)
+        .expect("type at first structure owner");
+    let owner2 = index
+        .type_at_byte_offset(owner2_offset)
+        .expect("type at second structure owner");
+    let member1 = owner1
+        .find_structural_member("идентификатор")
+        .expect("first typed structure field");
+    let member2 = owner2
+        .find_structural_member("идентификатор")
+        .expect("second typed structure field");
+
+    assert_eq!(member1.member_id, member2.member_id);
+}
+
+#[test]
+fn typed_structure_case_insensitive_update_preserves_identity_and_canonical_name() {
+    let deps = deps_with_universal_collection_types();
+    let source = r#"Процедура Тест()
+    S = Новый Структура;
+    S.Вставить("Идентификатор", "A-01");
+    S.Вставить("идентификатор", 10);
+    probe = S.Идентификатор;
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "Documents/Док1/Ext/ObjectModule.bsl", deps);
+
+    let owner_offset = source.rfind("S.Идентификатор").expect("owner") as u32;
+    let owner = index
+        .type_at_byte_offset(owner_offset)
+        .expect("type at structure owner");
+    let member = owner
+        .find_structural_member("идентификатор")
+        .expect("typed structure field");
+
+    assert_eq!(owner.structural_members().len(), 1);
+    assert_eq!(member.canonical_name, "Идентификатор");
+    assert_eq!(
+        member.member_id,
+        StructuralMemberId::new(
+            "Идентификатор",
+            Some(structural_member_span_for_literal(
+                source,
+                "\"Идентификатор\""
+            )),
+        )
+    );
+    assert_eq!(
+        member.source_span,
+        Some(structural_member_span_for_literal(
+            source,
+            "\"идентификатор\""
+        ))
+    );
+    assert_eq!(member.member_type.type_name(), "Число");
+}
+
+#[test]
 fn value_table_add_row_materializes_typed_row_members() {
     let deps = deps_with_universal_collection_types();
     let source = r#"Процедура Тест()
@@ -1620,6 +1706,83 @@ fn typed_value_table_row_preserves_column_source_span() {
 }
 
 #[test]
+fn typed_value_table_row_alias_preserves_column_identity() {
+    let deps = deps_with_universal_collection_types();
+    let source = r#"Процедура Тест()
+    ТЗ = Новый ТаблицаЗначений;
+    ТЗ.Колонки.Добавить("Идентификатор", Новый ОписаниеТипов("Строка"));
+    Стр = ТЗ.Добавить();
+    Стр2 = Стр;
+    probe1 = Стр.Идентификатор;
+    probe2 = Стр2.Идентификатор;
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "Documents/Док1/Ext/ObjectModule.bsl", deps);
+
+    let owner1_offset = source.find("Стр.Идентификатор").expect("owner1") as u32;
+    let owner2_offset = source.rfind("Стр2.Идентификатор").expect("owner2") as u32;
+    let owner1 = index
+        .type_at_byte_offset(owner1_offset)
+        .expect("type at first row owner");
+    let owner2 = index
+        .type_at_byte_offset(owner2_offset)
+        .expect("type at second row owner");
+    let member1 = owner1
+        .find_structural_member("идентификатор")
+        .expect("first typed row column");
+    let member2 = owner2
+        .find_structural_member("идентификатор")
+        .expect("second typed row column");
+
+    assert_eq!(member1.member_id, member2.member_id);
+}
+
+#[test]
+fn typed_value_table_column_case_insensitive_update_preserves_identity_and_canonical_name() {
+    let deps = deps_with_universal_collection_types();
+    let source = r#"Процедура Тест()
+    ТЗ = Новый ТаблицаЗначений;
+    ТЗ.Колонки.Добавить("Идентификатор", Новый ОписаниеТипов("Строка"));
+    ТЗ.Колонки.Добавить("идентификатор", Новый ОписаниеТипов("Число"));
+    Стр = ТЗ.Добавить();
+    probe = Стр.Идентификатор;
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "Documents/Док1/Ext/ObjectModule.bsl", deps);
+
+    let owner_offset = source.rfind("Стр.Идентификатор").expect("owner") as u32;
+    let owner = index
+        .type_at_byte_offset(owner_offset)
+        .expect("type at row owner");
+    let member = owner
+        .find_structural_member("идентификатор")
+        .expect("typed row column");
+
+    assert_eq!(owner.structural_members().len(), 1);
+    assert_eq!(member.canonical_name, "Идентификатор");
+    assert_eq!(
+        member.member_id,
+        StructuralMemberId::new(
+            "Идентификатор",
+            Some(structural_member_span_for_literal(
+                source,
+                "\"Идентификатор\""
+            )),
+        )
+    );
+    assert_eq!(
+        member.source_span,
+        Some(structural_member_span_for_literal(
+            source,
+            "\"идентификатор\""
+        ))
+    );
+    assert_eq!(member.member_type.type_name(), "Число");
+}
+
+#[test]
 fn foreach_over_value_table_materializes_typed_row_members() {
     let deps = deps_with_universal_collection_types();
     let source = r#"Процедура Тест()
@@ -1662,6 +1825,42 @@ fn structure_fields_survive_if_branch_merge() {
 }
 
 #[test]
+fn structure_field_identity_survives_branch_merge() {
+    let deps = deps_with_universal_collection_types();
+    let source = r#"Процедура Тест()
+    S = Новый Структура;
+    S.Вставить("Идентификатор", "A-01");
+    probe_before = S.Идентификатор;
+    Если Истина Тогда
+        S.Вставить("Идентификатор", "B-02");
+    Иначе
+        S.Вставить("Идентификатор", "C-03");
+    КонецЕсли;
+    probe_after = S.Идентификатор;
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "Documents/Док1/Ext/ObjectModule.bsl", deps);
+
+    let before_owner_offset = source.find("S.Идентификатор").expect("before owner") as u32;
+    let after_owner_offset = source.rfind("S.Идентификатор").expect("after owner") as u32;
+    let before_owner = index
+        .type_at_byte_offset(before_owner_offset)
+        .expect("type before branch merge");
+    let after_owner = index
+        .type_at_byte_offset(after_owner_offset)
+        .expect("type after branch merge");
+    let before_member = before_owner
+        .find_structural_member("идентификатор")
+        .expect("structural member before merge");
+    let after_member = after_owner
+        .find_structural_member("идентификатор")
+        .expect("structural member after merge");
+
+    assert_eq!(before_member.member_id, after_member.member_id);
+}
+
+#[test]
 fn structure_fields_survive_else_branch_merge() {
     let deps = deps_with_universal_collection_types();
     let source = r#"Процедура Тест()
@@ -1681,6 +1880,40 @@ fn structure_fields_survive_else_branch_merge() {
         .type_at_byte_offset(property_offset)
         .expect("type at merged property");
     assert_eq!(property.type_name(), "Строка");
+}
+
+#[test]
+fn structure_member_identity_survives_else_branch_merge() {
+    let deps = deps_with_universal_collection_types();
+    let source = r#"Процедура Тест()
+    S = Новый Структура;
+    Если Ложь Тогда
+    Иначе
+        S.Вставить("Идентификатор", "A-01");
+        probe1 = S.Идентификатор;
+    КонецЕсли;
+    probe2 = S.Идентификатор;
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "Documents/Док1/Ext/ObjectModule.bsl", deps);
+
+    let owner1_offset = source.find("S.Идентификатор").expect("branch owner") as u32;
+    let owner2_offset = source.rfind("S.Идентификатор").expect("merged owner") as u32;
+    let owner1 = index
+        .type_at_byte_offset(owner1_offset)
+        .expect("type at branch structure owner");
+    let owner2 = index
+        .type_at_byte_offset(owner2_offset)
+        .expect("type at merged structure owner");
+    let member1 = owner1
+        .find_structural_member("идентификатор")
+        .expect("branch structural member");
+    let member2 = owner2
+        .find_structural_member("идентификатор")
+        .expect("merged structural member");
+
+    assert_eq!(member1.member_id, member2.member_id);
 }
 
 #[test]
@@ -1729,6 +1962,42 @@ fn value_table_columns_survive_else_branch_merge() {
         .type_at_byte_offset(property_offset)
         .expect("type at row property");
     assert_eq!(property.type_name(), "Строка");
+}
+
+#[test]
+fn value_table_column_identity_survives_else_branch_merge() {
+    let deps = deps_with_universal_collection_types();
+    let source = r#"Процедура Тест()
+    ТЗ = Новый ТаблицаЗначений;
+    Если Ложь Тогда
+    Иначе
+        ТЗ.Колонки.Добавить("Идентификатор", Новый ОписаниеТипов("Строка"));
+        Стр1 = ТЗ.Добавить();
+        probe1 = Стр1.Идентификатор;
+    КонецЕсли;
+    Стр2 = ТЗ.Добавить();
+    probe2 = Стр2.Идентификатор;
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "Documents/Док1/Ext/ObjectModule.bsl", deps);
+
+    let owner1_offset = source.find("Стр1.Идентификатор").expect("branch owner") as u32;
+    let owner2_offset = source.rfind("Стр2.Идентификатор").expect("merged owner") as u32;
+    let owner1 = index
+        .type_at_byte_offset(owner1_offset)
+        .expect("type at branch row owner");
+    let owner2 = index
+        .type_at_byte_offset(owner2_offset)
+        .expect("type at merged row owner");
+    let member1 = owner1
+        .find_structural_member("идентификатор")
+        .expect("branch row member");
+    let member2 = owner2
+        .find_structural_member("идентификатор")
+        .expect("merged row member");
+
+    assert_eq!(member1.member_id, member2.member_id);
 }
 
 #[test]

@@ -64,6 +64,7 @@ fn next_completion_request_id() -> u64 {
 pub struct CompletionCandidate {
     pub item: CompletionItem,
     pub owner_type: Option<String>,
+    pub member_identity: Option<String>,
     pub score: f32,
     pub origin_sources: Vec<u8>,
 }
@@ -545,6 +546,7 @@ pub(crate) async fn get_completion_with_analysis(
         .map(|candidate| RankingCandidate {
             item: candidate.item,
             owner_type: candidate.owner_type,
+            member_identity: candidate.member_identity,
             label_lower: candidate.label_lower,
             source_priority: candidate.source_priority,
             scope: candidate.scope,
@@ -578,6 +580,7 @@ pub(crate) async fn get_completion_with_analysis(
                 &candidate.label_lower,
             ),
             owner_type: candidate.owner_type,
+            member_identity: candidate.member_identity,
             score: candidate.score,
             origin_sources: candidate.origin_sources,
         })
@@ -648,6 +651,7 @@ struct Candidate {
     source_priority: u8,
     label_lower: String,
     owner_type: Option<String>,
+    member_identity: Option<String>,
     scope: Option<SymbolScope>,
 }
 
@@ -656,6 +660,7 @@ impl Candidate {
         item: CompletionItem,
         source_priority: u8,
         owner_type: Option<String>,
+        member_identity: Option<String>,
         scope: Option<SymbolScope>,
     ) -> Self {
         let label_lower = item.label.to_lowercase();
@@ -664,6 +669,7 @@ impl Candidate {
             source_priority,
             label_lower,
             owner_type,
+            member_identity,
             scope,
         }
     }

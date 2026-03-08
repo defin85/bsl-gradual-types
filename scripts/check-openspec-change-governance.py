@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from datetime import date
 from pathlib import Path
@@ -85,6 +86,19 @@ REQUIRED_OWNERSHIP_ROLES = {
     "runtime_owner",
     "lsp_owner",
     "process_owner",
+}
+
+SUCCESS_READINESS_REVIEW = {
+    "pass",
+    "covered",
+    "resolved",
+    "ready",
+}
+
+ALLOWED_DECLARED_CHANGE_STATUS = {
+    "partial",
+    "not_ready",
+    "complete",
 }
 
 
@@ -592,6 +606,206 @@ def validate_ownership_signoff(
     )
 
 
+def change_requires_readiness_backlog_gate(change_root: Path) -> bool:
+    spec_path = change_root / "specs" / "dev-workflow" / "spec.md"
+    if not spec_path.exists() or not spec_path.is_file():
+        return False
+
+    content = spec_path.read_text(encoding="utf-8").lower()
+    return (
+        "change completion must not" in content
+        and "critical follow-up backlog" in content
+        and "beads backlog" in content
+    )
+
+
+def fetch_beads_issue_statuses(repo_root: Path, issue_ids: list[str]) -> dict[str, str]:
+    completed = subprocess.run(
+        ["bd", "show", "--json", *issue_ids],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    ensure(
+        completed.returncode == 0,
+        (
+            "readiness_gate_conflict: unable to read Beads backlog status "
+            f"(exit={completed.returncode}): {completed.stderr.strip() or completed.stdout.strip()}"
+        ),
+    )
+    try:
+        payload = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise GateError(
+            "readiness_gate_conflict: invalid JSON from `bd show --json`"
+        ) from exc
+
+    ensure(
+        isinstance(payload, list),
+        "readiness_gate_conflict: `bd show --json` must return a JSON array",
+    )
+
+    statuses: dict[str, str] = {}
+    for item in payload:
+        ensure(
+            isinstance(item, dict),
+            "readiness_gate_conflict: each Beads item must be a JSON object",
+        )
+        issue_id = item.get("id")
+        status = item.get("status")
+        ensure(
+            isinstance(issue_id, str) and issue_id.strip(),
+            "readiness_gate_conflict: Beads item is missing id",
+        )
+        ensure(
+            isinstance(status, str) and status.strip(),
+            f"readiness_gate_conflict: Beads item {issue_id!r} is missing status",
+        )
+        statuses[issue_id] = status
+
+    missing_ids = [issue_id for issue_id in issue_ids if issue_id not in statuses]
+    ensure(
+        not missing_ids,
+        f"readiness_gate_conflict: Beads did not return statuses for {missing_ids}",
+    )
+    return statuses
+
+
+def validate_readiness_status(
+    path: Path, expected_change_id: str, repo_root: Path, change_root: Path
+) -> None:
+    payload = parse_json(path)
+    ensure(
+        payload.get("schema_version") == "v1",
+        f"readiness_gate_conflict: {path} schema_version must be 'v1'",
+    )
+    ensure(
+        payload.get("change_id") == expected_change_id,
+        f"readiness_gate_conflict: {path} change_id mismatch",
+    )
+    declared_status = payload.get("declared_status")
+    ensure(
+        declared_status in ALLOWED_DECLARED_CHANGE_STATUS,
+        (
+            "readiness_gate_conflict: "
+            f"{path} declared_status must be one of {sorted(ALLOWED_DECLARED_CHANGE_STATUS)}"
+        ),
+    )
+
+    for field_name in ("review_verdict", "traceability_status"):
+        value = payload.get(field_name)
+        ensure(
+            isinstance(value, str) and value.strip(),
+            f"readiness_gate_conflict: {path} {field_name} is required",
+        )
+
+    for field_name in ("review_ref", "traceability_ref"):
+        raw_ref = payload.get(field_name)
+        ensure(
+            isinstance(raw_ref, str) and raw_ref.strip(),
+            f"readiness_gate_conflict: {path} {field_name} is required",
+        )
+        evidence_path = validate_evidence_ref(
+            repo_root,
+            raw_ref,
+            field_name=field_name,
+            reason_code="readiness_gate_conflict",
+            source_path=path,
+        )
+        ensure(
+            evidence_path is not None,
+            f"readiness_gate_conflict: {path} {field_name} must point to a repository file",
+        )
+        ensure_path_within(
+            evidence_path,
+            change_root,
+            reason_code="readiness_gate_conflict",
+            message=f"{path} {field_name} must point inside change root",
+        )
+
+    critical_backlog = payload.get("critical_backlog")
+    ensure(
+        isinstance(critical_backlog, list)
+        and critical_backlog
+        and all(isinstance(item, str) and item.strip() for item in critical_backlog),
+        f"readiness_gate_conflict: {path} critical_backlog must be a non-empty string array",
+    )
+
+    superseding_delivery_path = payload.get("superseding_delivery_path")
+    superseding_approved = False
+    if superseding_delivery_path is not None:
+        ensure(
+            isinstance(superseding_delivery_path, str) and superseding_delivery_path.strip(),
+            f"readiness_gate_conflict: {path} superseding_delivery_path must be null or non-empty string",
+        )
+        superseding_path = validate_evidence_ref(
+            repo_root,
+            superseding_delivery_path,
+            field_name="superseding_delivery_path",
+            reason_code="readiness_gate_conflict",
+            source_path=path,
+        )
+        ensure(
+            superseding_path is not None,
+            (
+                "readiness_gate_conflict: "
+                f"{path} superseding_delivery_path must point to a repository file"
+            ),
+        )
+        ensure_path_within(
+            superseding_path,
+            change_root,
+            reason_code="readiness_gate_conflict",
+            message=f"{path} superseding_delivery_path must point inside change root",
+        )
+        superseding_text = superseding_path.read_text(encoding="utf-8").lower()
+        superseding_approved = "approved" in superseding_text
+        ensure(
+            superseding_approved,
+            (
+                "readiness_gate_conflict: "
+                f"{path} superseding_delivery_path must contain approved handoff evidence"
+            ),
+        )
+
+    statuses = fetch_beads_issue_statuses(repo_root, critical_backlog)
+    open_backlog = [
+        issue_id for issue_id, status in statuses.items() if status.strip().lower() != "closed"
+    ]
+
+    review_verdict = str(payload["review_verdict"]).strip().lower()
+    traceability_status = str(payload["traceability_status"]).strip().lower()
+    has_conflicting_evidence = (
+        review_verdict not in SUCCESS_READINESS_REVIEW
+        or traceability_status not in SUCCESS_READINESS_REVIEW
+    )
+
+    if declared_status == "complete":
+        ensure(
+            not has_conflicting_evidence,
+            (
+                "readiness_gate_conflict: "
+                f"{path} declared_status='complete' conflicts with "
+                f"review_verdict={review_verdict!r} traceability_status={traceability_status!r}"
+            ),
+        )
+        ensure(
+            not open_backlog or superseding_approved,
+            (
+                "readiness_gate_conflict: "
+                f"{path} declared_status='complete' is blocked by open critical backlog "
+                f"{open_backlog}"
+            ),
+        )
+        return
+
+    ensure(
+        declared_status in {"partial", "not_ready"},
+        f"readiness_gate_conflict: unexpected declared_status {declared_status!r}",
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Validate governance artifacts for OpenSpec change."
@@ -698,6 +912,18 @@ def main() -> int:
             )
             validate_ownership_signoff(
                 governance_root / "ownership_signoff.json",
+                args.change_id,
+                repo_root,
+                change_root,
+            )
+
+        if change_requires_readiness_backlog_gate(change_root):
+            check_required_file(
+                governance_root / "readiness_status.json",
+                "readiness_gate_conflict",
+            )
+            validate_readiness_status(
+                governance_root / "readiness_status.json",
                 args.change_id,
                 repo_root,
                 change_root,

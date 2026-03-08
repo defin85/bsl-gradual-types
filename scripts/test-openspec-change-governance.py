@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -223,7 +224,13 @@ class OpenSpecGovernanceScriptTest(unittest.TestCase):
         )
         return change_root
 
-    def run_gate(self, repo_root: Path, expected_exit: int) -> subprocess.CompletedProcess[str]:
+    def run_gate(
+        self,
+        repo_root: Path,
+        expected_exit: int,
+        *,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         completed = subprocess.run(
             [
                 sys.executable,
@@ -236,6 +243,7 @@ class OpenSpecGovernanceScriptTest(unittest.TestCase):
             check=False,
             capture_output=True,
             text=True,
+            env=env,
         )
         self.assertEqual(
             completed.returncode,
@@ -246,6 +254,36 @@ class OpenSpecGovernanceScriptTest(unittest.TestCase):
             ),
         )
         return completed
+
+    def make_fake_bd(self, repo_root: Path, statuses: dict[str, str]) -> dict[str, str]:
+        bin_dir = repo_root / "bin"
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        fake_bd = bin_dir / "bd"
+        fake_bd.write_text(
+            "\n".join(
+                [
+                    "#!/usr/bin/env python3",
+                    "import json",
+                    "import sys",
+                    "",
+                    f"STATUSES = {json.dumps(statuses, ensure_ascii=False)}",
+                    "",
+                    "if sys.argv[1:3] != ['show', '--json']:",
+                    "    sys.exit(2)",
+                    "",
+                    "issues = []",
+                    "for issue_id in sys.argv[3:]:",
+                    "    issues.append({'id': issue_id, 'status': STATUSES.get(issue_id, 'open')})",
+                    "print(json.dumps(issues))",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        fake_bd.chmod(0o755)
+        env = os.environ.copy()
+        env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+        return env
 
     def test_passes_for_valid_change(self) -> None:
         with tempfile.TemporaryDirectory(prefix="governance-pass-") as tmp_dir:
@@ -357,6 +395,50 @@ class OpenSpecGovernanceScriptTest(unittest.TestCase):
             )
             completed = self.run_gate(repo_root, expected_exit=1)
             self.assertIn("adr_missing_or_not_approved", completed.stderr)
+
+    def test_fails_when_complete_verdict_has_open_critical_backlog(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="governance-open-backlog-") as tmp_dir:
+            repo_root = Path(tmp_dir)
+            change_root = self.seed_valid_change(repo_root)
+            spec_path = change_root / "specs" / "dev-workflow" / "spec.md"
+            spec_path.write_text(
+                "\n".join(
+                    [
+                        "## ADDED Requirements",
+                        "",
+                        "### Requirement: Change completion MUST NOT завышать readiness относительно MUST backlog",
+                        "Gate MUST сверять связанный критический Beads backlog.",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (change_root / "validation" / "readiness-review.md").write_text(
+                "partial review verdict with open backlog\n",
+                encoding="utf-8",
+            )
+            (change_root / "governance" / "readiness_status.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "v1",
+                        "change_id": self.CHANGE_ID,
+                        "declared_status": "complete",
+                        "review_verdict": "partial",
+                        "review_ref": f"openspec/changes/{self.CHANGE_ID}/validation/readiness-review.md",
+                        "traceability_status": "partial",
+                        "traceability_ref": f"openspec/changes/{self.CHANGE_ID}/validation/readiness-review.md",
+                        "critical_backlog": ["test-epic-1"],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            env = self.make_fake_bd(repo_root, {"test-epic-1": "open"})
+            completed = self.run_gate(repo_root, expected_exit=1, env=env)
+            self.assertIn("readiness_gate_conflict", completed.stderr)
 
 
 if __name__ == "__main__":

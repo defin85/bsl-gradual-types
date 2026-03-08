@@ -14,6 +14,7 @@ pub(super) fn add_methods_from_resolution(
             priority,
             Some(owner_type.clone()),
             None,
+            None,
         ));
     }
 }
@@ -29,6 +30,9 @@ pub(super) fn add_properties_from_resolution(
     let mut intrinsic_count = 0usize;
     let mut saw_intrinsic = false;
     for (property, origin) in properties {
+        let member_identity = resolution
+            .find_structural_member(&property.name)
+            .map(|member| member.member_id.key.clone());
         let property_priority = if TypeMetadataLookup::is_intrinsic_property_origin(origin) {
             intrinsic_count += 1;
             saw_intrinsic = true;
@@ -45,6 +49,7 @@ pub(super) fn add_properties_from_resolution(
             CompletionItem::new(property.name, CompletionKind::Property),
             property_priority,
             Some(owner_type.clone()),
+            member_identity,
             None,
         ));
     }
@@ -85,6 +90,8 @@ pub(super) fn resolve_member_owner_type_sync(
 
     let ir_program = ctx.ir_program.as_deref()?;
     let scope_position = resolve_completion_scope_position(ir_program, file_content, line, column)?;
+    // TODO(bsl-gradual-types-6mx.2): remove this bootstrap-only fallback once
+    // the shared owner-hint path covers implicit module-context symbols end-to-end.
     resolve_implicit_member_owner_type_from_module_context(
         ctx,
         ir_program,

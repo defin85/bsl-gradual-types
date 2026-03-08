@@ -80,57 +80,6 @@ pub struct CompletionResponseWithStats {
     pub had_error: bool,
 }
 
-fn member_access_receiver_probe_offset(file_content: &str, position: Position) -> Option<u32> {
-    let line_text = file_content.lines().nth(position.line as usize)?;
-    let cursor_byte =
-        bsl_backend::system::positioning::utf16_to_byte_offset(line_text, position.character);
-    let line_prefix = match line_text
-        .get(cursor_byte..)
-        .and_then(|tail| tail.chars().next())
-    {
-        Some('.') => line_text.get(..cursor_byte.saturating_add(1))?,
-        _ => line_text.get(..cursor_byte)?,
-    };
-    let dot_in_line = line_prefix.rfind('.')?;
-    let receiver = line_prefix.get(..dot_in_line)?.trim_end();
-    let (probe_byte_in_line, _) = receiver
-        .char_indices()
-        .rev()
-        .find(|(_, ch)| !ch.is_whitespace())?;
-
-    let mut current_line: u32 = 0;
-    let mut file_offset: usize = 0;
-    for chunk in file_content.split_inclusive('\n') {
-        if current_line == position.line {
-            let mut line_chunk = chunk.strip_suffix('\n').unwrap_or(chunk);
-            line_chunk = line_chunk.strip_suffix('\r').unwrap_or(line_chunk);
-            let offset = file_offset.saturating_add(probe_byte_in_line.min(line_chunk.len()));
-            return Some(offset.min(u32::MAX as usize) as u32);
-        }
-        file_offset = file_offset.saturating_add(chunk.len());
-        current_line = current_line.saturating_add(1);
-    }
-
-    None
-}
-
-fn compute_member_access_owner_hint_from_parse_result(
-    file_content: &str,
-    file_path: &str,
-    position: Position,
-    parse_result: &bsl_syntax::ast::ParseResult,
-    deps: Arc<bsl_analysis_v2::SemanticDeps>,
-) -> Option<TypeResolution> {
-    let probe_offset = member_access_receiver_probe_offset(file_content, position)?;
-    bsl_analysis_v2::type_at_byte_offset_for_parse_result(
-        parse_result,
-        file_path,
-        deps,
-        probe_offset,
-    )
-    .filter(|resolution| !resolution.is_unknown() && !resolution.is_dynamic())
-}
-
 pub fn build_keyword_degraded_completion(snippet_support: bool) -> CompletionResponseWithStats {
     const KEYWORD_FALLBACK_LIMIT: usize = 64;
 
@@ -216,15 +165,6 @@ pub async fn handle_completion_v2_with_trigger_hint(
 
     let completion = match parse_result {
         Some(parse_result) => {
-            let owner_hint = member_access_owner_type_hint.or_else(|| {
-                compute_member_access_owner_hint_from_parse_result(
-                    file_content.as_ref(),
-                    file_path.as_ref(),
-                    position,
-                    parse_result.as_ref(),
-                    deps.clone(),
-                )
-            });
             get_completion_with_semantic_program_snapshot_v2_with_trigger_hint(
                 file_content.as_ref(),
                 position.line,
@@ -236,7 +176,7 @@ pub async fn handle_completion_v2_with_trigger_hint(
                 resolver.as_ref(),
                 ir_program,
                 parse_result,
-                owner_hint,
+                member_access_owner_type_hint,
                 include_flow_sensitive,
                 trigger_char_hint,
             )

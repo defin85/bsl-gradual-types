@@ -72,6 +72,33 @@ fn apply_file(
     (file_content, file_path, ir_program, parse_result)
 }
 
+fn member_access_owner_hint_at_position(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: V2FileId,
+    file_content: &str,
+    position: Position,
+) -> Option<bsl_shared::domain::types::TypeResolution> {
+    let line_text = file_content.lines().nth(position.line as usize)?;
+    let cursor_byte = bsl_analysis_v2::utf16_to_byte_offset(line_text, position.character);
+    let line_prefix = line_text.get(..cursor_byte)?;
+    let dot_idx = line_prefix.rfind('.')?;
+    let receiver = line_prefix.get(..dot_idx)?.trim_end();
+    let (probe_byte, _) = receiver
+        .char_indices()
+        .rev()
+        .find(|(_, ch)| !ch.is_whitespace())?;
+    let probe_utf16 = bsl_analysis_v2::byte_offset_to_utf16(line_text, probe_byte);
+    let probe_offset = analysis
+        .utf16_position_to_byte_offset(file_id, position.line, probe_utf16)
+        .ok()
+        .flatten()?;
+
+    analysis
+        .type_at_byte_offset(file_id, probe_offset.min(u32::MAX as usize) as u32)
+        .ok()
+        .flatten()
+}
+
 fn completion_labels(response: CompletionResponse) -> Vec<String> {
     let items = match response {
         CompletionResponse::List(list) => list.items,
@@ -110,13 +137,19 @@ async fn apply_and_complete_at_member_dot_in_fixture(
         line: tmp_line,
         character: prefix_len + utf16_len(typed),
     };
+    let owner_hint = member_access_owner_hint_at_position(
+        &host.analysis(),
+        file_id,
+        file_content.as_ref(),
+        position,
+    );
 
     completion_handler::handle_completion_v2(
         file_content,
         file_path,
         ir_program,
         Some(parse_result),
-        None,
+        owner_hint,
         deps_bundle.semantic_deps.clone(),
         position,
         uri,
@@ -197,13 +230,19 @@ async fn m8_lsp_incremental_typing_triggers_completion_on_dot() {
             line: 2,
             character: prefix_len + utf16_len(&typed),
         };
+        let owner_hint = member_access_owner_hint_at_position(
+            &host.analysis(),
+            file_id,
+            file_content.as_ref(),
+            position,
+        );
 
         let response = completion_handler::handle_completion_v2(
             file_content,
             file_path,
             ir_program,
             Some(parse_result),
-            None,
+            owner_hint,
             deps_bundle.semantic_deps.clone(),
             position,
             &uri,

@@ -1220,6 +1220,11 @@ async fn completion_does_not_infer_member_owner_without_owner_hint() {
     let metadata_lookup = TypeMetadataLookup::new(repo.clone());
 
     let index = IntellisenseIndexStore::new("cfg", "platform");
+    index.set_keywords(vec![IndexItem::new(
+        "Процедура",
+        IndexItemKind::Keyword,
+        crate::system::IndexKind::Keyword,
+    )]);
     let content = concat!(
         "Процедура Тест()\n",
         "    ТаблЗнач = Новый ТаблицаЗначений;\n",
@@ -1283,6 +1288,11 @@ async fn completion_does_not_infer_member_owner_without_owner_hint() {
     .expect("completion ok");
 
     let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
+    assert!(
+        labels.is_empty(),
+        "member access without shared owner hint must stay fail-closed, labels: {:?}",
+        labels
+    );
     assert!(
         !labels.contains(&"Добавить".to_string()),
         "labels: {:?}",
@@ -1490,7 +1500,10 @@ async fn completion_resolves_implicit_form_object_member_access_with_shared_hint
     });
     let analysis = host.analysis();
     let member_access_owner_type_hint = analysis
-        .type_at_byte_offset(V2FileId(1), byte_offset_of(content, "x = Объект") + "x = ".len() as u32)
+        .type_at_byte_offset(
+            V2FileId(1),
+            byte_offset_of(content, "x = Объект") + "x = ".len() as u32,
+        )
         .expect("type_at_byte_offset query");
     assert!(
         member_access_owner_type_hint.is_some(),
@@ -1647,10 +1660,7 @@ fn implicit_module_context_owner_resolution_requires_shared_hint_for_supported_m
     });
 
     let cases = [
-        (
-            "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl",
-            "Объект",
-        ),
+        ("Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl", "Объект"),
         (
             "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl",
             "ЭтотОбъект",
@@ -1668,7 +1678,8 @@ fn implicit_module_context_owner_resolution_requires_shared_hint_for_supported_m
             "Процедура Тест()\n    expected = {base_name};\n    {base_name}.\nКонецПроцедуры\n"
         );
         let assignment_marker = format!("expected = {base_name}");
-        let assignment_offset = byte_offset_of(&content, &assignment_marker) + "expected = ".len() as u32;
+        let assignment_offset =
+            byte_offset_of(&content, &assignment_marker) + "expected = ".len() as u32;
         let access_column = format!("    {base_name}")
             .chars()
             .map(|ch| ch.len_utf16())
@@ -1706,8 +1717,13 @@ fn implicit_module_context_owner_resolution_requires_shared_hint_for_supported_m
             include_flow_sensitive: false,
         };
 
-        let without_hint =
-            resolve_member_owner_type_sync(Some(&ctx_without_hint), &content, 2, access_column, base_name);
+        let without_hint = resolve_member_owner_type_sync(
+            Some(&ctx_without_hint),
+            &content,
+            2,
+            access_column,
+            base_name,
+        );
         assert!(
             without_hint.is_none(),
             "implicit module-context owner must fail closed without shared hint for {file_path}:{base_name}"
@@ -1749,15 +1765,8 @@ fn implicit_module_context_owner_resolution_fails_closed_outside_supported_modul
         platform_signatures_loaded: false,
     });
 
-    let content = concat!(
-        "Процедура Тест()\n",
-        "    Объект.\n",
-        "КонецПроцедуры\n",
-    );
-    let access_column = "    Объект"
-        .chars()
-        .map(|ch| ch.len_utf16())
-        .sum::<usize>() as u32;
+    let content = concat!("Процедура Тест()\n", "    Объект.\n", "КонецПроцедуры\n",);
+    let access_column = "    Объект".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
 
     let mut host = AnalysisHostV2::default();
     host.apply_change(ChangeV2::SetDepsSnapshot {

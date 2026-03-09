@@ -22,7 +22,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
-use tower_lsp::lsp_types::CompletionItem;
 use tower_lsp::Client;
 
 use bsl_analysis_v2::{DepsSnapshotId, FileId as V2FileId, SettingsId};
@@ -67,14 +66,6 @@ pub(crate) struct CodeActionsCapabilityState {
     pub registered: bool,
     pub in_flight: bool,
     pub desired_enabled: bool,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct CompletionStaleFallbackCacheEntryV2 {
-    pub deps_id: DepsSnapshotId,
-    pub settings_id: SettingsId,
-    pub file_version: i32,
-    pub items: Vec<CompletionItem>,
 }
 
 #[derive(Debug, Clone)]
@@ -213,8 +204,6 @@ pub struct BslLanguageServer {
     pub(crate) latest_apply_enqueued_at_v2: Arc<RwLock<HashMap<V2FileId, Instant>>>,
     pub(crate) scale_aware_churn_state_v2: Arc<RwLock<HashMap<V2FileId, ScaleAwareChurnStateV2>>>,
     pub(crate) completion_seen_files_v2: Arc<RwLock<HashSet<V2FileId>>>,
-    pub(crate) completion_stale_fallback_cache_v2:
-        Arc<RwLock<HashMap<V2FileId, CompletionStaleFallbackCacheEntryV2>>>,
     pub(crate) completion_parity_state_v2: CompletionParityStoreV2,
     pub(crate) completion_dispatcher_v2: Arc<completion_dispatcher::CompletionDispatcherRegistry>,
     pub(crate) completion_cancellation_registry_v2:

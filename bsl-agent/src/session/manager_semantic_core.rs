@@ -613,6 +613,7 @@ fn collect_type_at_position(
     };
 
     let analysis = prepared.snapshot.analysis;
+    precompute_exact_type_index(&analysis, FileId(1), version);
     let program_query = IntellisenseV2Facade::run_optional_query(
         &context,
         ObservabilityStage::IrQuery,
@@ -728,6 +729,7 @@ fn collect_members(request: MembersRequest) -> Result<BslMembersResponse, rmcp::
 
     let analysis = prepared.snapshot.analysis;
     let index_snapshot = prepared.index_snapshot;
+    precompute_exact_type_index(&analysis, FileId(1), version);
     let program = IntellisenseV2Facade::run_optional_query(
         &context,
         ObservabilityStage::IrQuery,

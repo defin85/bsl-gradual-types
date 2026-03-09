@@ -185,7 +185,6 @@ impl BslLanguageServer {
             latest_apply_enqueued_at_v2: Arc::new(RwLock::new(HashMap::new())),
             scale_aware_churn_state_v2: Arc::new(RwLock::new(HashMap::new())),
             completion_seen_files_v2: Arc::new(RwLock::new(std::collections::HashSet::new())),
-            completion_stale_fallback_cache_v2: Arc::new(RwLock::new(HashMap::new())),
             completion_parity_state_v2: Arc::new(RwLock::new(HashMap::new())),
             completion_dispatcher_v2,
             completion_cancellation_registry_v2,

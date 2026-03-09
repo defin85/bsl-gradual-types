@@ -621,23 +621,23 @@ fn scale_aware_document_classification_uses_bytes_or_lines_threshold() {
 fn completion_missing_ir_policy_decision_is_deterministic() {
     assert_eq!(
         completion_missing_ir_policy_decision(true, true, true, true),
-        CompletionMissingIrPolicyDecision::StrictCacheIncomplete
+        CompletionMissingIrPolicyDecision::FailClosedUnavailable
     );
     assert_eq!(
         completion_missing_ir_policy_decision(false, false, true, true),
-        CompletionMissingIrPolicyDecision::EmptyForNonMemberAccess
+        CompletionMissingIrPolicyDecision::FailClosedUnavailable
     );
     assert_eq!(
         completion_missing_ir_policy_decision(false, true, true, true),
-        CompletionMissingIrPolicyDecision::DegradedIncomplete
+        CompletionMissingIrPolicyDecision::FailClosedUnavailable
     );
     assert_eq!(
         completion_missing_ir_policy_decision(false, true, false, true),
-        CompletionMissingIrPolicyDecision::RelaxedCacheIncomplete
+        CompletionMissingIrPolicyDecision::FailClosedUnavailable
     );
     assert_eq!(
         completion_missing_ir_policy_decision(false, true, false, false),
-        CompletionMissingIrPolicyDecision::KeywordFallbackUnavailable
+        CompletionMissingIrPolicyDecision::FailClosedUnavailable
     );
 }
 
@@ -650,8 +650,8 @@ fn completion_fastpath_preconditions_require_completion_version_deps_and_knobs()
         true,
         true,
     );
-    assert!(ready.can_attempt_bounded_stale_fallback());
-    assert!(ready.churn_aware_fastpath_active());
+    assert!(!ready.can_attempt_bounded_stale_fallback());
+    assert!(!ready.churn_aware_fastpath_active());
 
     let missing_deps = completion_fastpath_preconditions(
         SemanticOperation::Completion,
@@ -679,11 +679,11 @@ fn completion_fastpath_preconditions_expose_large_churn_without_forcing_fallback
         true,
     );
     assert!(
-        stable_mode.can_attempt_bounded_stale_fallback(),
-        "stale fallback contract stays available outside churn when other preconditions pass"
+        !stable_mode.can_attempt_bounded_stale_fallback(),
+        "bounded stale fallback must stay disabled under fail-closed contract"
     );
     assert!(
         !stable_mode.churn_aware_fastpath_active(),
-        "churn-specific fastpath flag should only activate under large churn"
+        "large-churn mode must not silently reactivate stale fallback semantics"
     );
 }

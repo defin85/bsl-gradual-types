@@ -203,20 +203,9 @@ pub(super) fn add_types(snapshot: &IndexSnapshot, target: &mut Vec<Candidate>, p
 }
 
 pub(super) fn resolve_type_name(
-    snapshot: &IndexSnapshot,
     name: &str,
     metadata_lookup: &TypeMetadataLookup,
 ) -> Option<String> {
-    let lowered = name.to_lowercase();
-    let from_index = snapshot
-        .type_index
-        .values()
-        .find(|item| item.name.to_lowercase() == lowered)
-        .map(|item| item.name.clone());
-    if from_index.is_some() {
-        return from_index;
-    }
-
     let resolution = TypeResolution::explicit(name);
     metadata_lookup
         .get_raw_type(&resolution)
@@ -328,7 +317,7 @@ pub(super) async fn resolve_member_chain_owner_type(
     line: u32,
     column: u32,
     receiver_chain: &[String],
-    snapshot: &IndexSnapshot,
+    _snapshot: &IndexSnapshot,
     metadata_lookup: &TypeMetadataLookup,
 ) -> Option<TypeResolution> {
     resolve_member_chain_owner_type_sync(
@@ -337,7 +326,7 @@ pub(super) async fn resolve_member_chain_owner_type(
         line,
         column,
         receiver_chain,
-        snapshot,
+        _snapshot,
         metadata_lookup,
     )
 }
@@ -348,7 +337,7 @@ pub(super) fn resolve_member_chain_owner_type_sync(
     line: u32,
     column: u32,
     receiver_chain: &[String],
-    snapshot: &IndexSnapshot,
+    _snapshot: &IndexSnapshot,
     metadata_lookup: &TypeMetadataLookup,
 ) -> Option<TypeResolution> {
     if receiver_chain.is_empty() {
@@ -366,7 +355,7 @@ pub(super) fn resolve_member_chain_owner_type_sync(
             .unwrap_or_else(|| {
                 TypeResolution::metadata_type(kind, object_name, Some(FacetKind::Manager))
             })
-    } else if let Some(type_name) = resolve_type_name(snapshot, base_name, metadata_lookup) {
+    } else if let Some(type_name) = resolve_type_name(base_name, metadata_lookup) {
         analysis
             .map(|ctx| ctx.resolver.resolve_expression_sync(&type_name))
             .unwrap_or_else(|| TypeResolution::explicit(&type_name))

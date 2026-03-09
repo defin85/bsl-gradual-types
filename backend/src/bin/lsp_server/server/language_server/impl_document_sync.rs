@@ -560,10 +560,6 @@ impl BslLanguageServer {
                 .write()
                 .await
                 .remove(&file_id);
-            self.completion_stale_fallback_cache_v2
-                .write()
-                .await
-                .remove(&file_id);
             self.completion_parity_state_v2
                 .write()
                 .await

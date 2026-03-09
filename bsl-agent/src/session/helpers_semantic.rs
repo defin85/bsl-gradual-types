@@ -100,22 +100,12 @@ fn type_at_utf16_position(
         .flatten()? as u32;
 
     if include_flow_sensitive {
-        analysis
-            .flow_type_at_byte_offset(file_id, byte_offset)
-            .ok()
-            .flatten()
-            .or_else(|| {
-                analysis
-                    .type_at_byte_offset(file_id, byte_offset)
-                    .ok()
-                    .flatten()
-            })
+        analysis.flow_type_at_byte_offset(file_id, byte_offset).ok().flatten()
     } else {
         analysis
             .type_at_byte_offset_serve_only(file_id, byte_offset)
             .ok()
             .flatten()
-            .or_else(|| analysis.type_at_byte_offset(file_id, byte_offset).ok().flatten())
     }
 }
 
@@ -143,18 +133,21 @@ fn member_access_owner_type_hint_at_position(
         .flatten()?;
     let offset = offset.min(u32::MAX as usize) as u32;
     if include_flow_sensitive {
-        analysis
-            .flow_type_at_byte_offset(file_id, offset)
-            .ok()
-            .flatten()
-            .or_else(|| analysis.type_at_byte_offset(file_id, offset).ok().flatten())
+        analysis.flow_type_at_byte_offset(file_id, offset).ok().flatten()
     } else {
         analysis
             .type_at_byte_offset_serve_only(file_id, offset)
             .ok()
             .flatten()
-            .or_else(|| analysis.type_at_byte_offset(file_id, offset).ok().flatten())
     }
+}
+
+fn precompute_exact_type_index(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    file_version: i32,
+) {
+    let _ = analysis.precompute_type_index_for_file(file_id, Some(file_version), 0);
 }
 
 fn node_at_utf16_position<'a>(

@@ -447,9 +447,7 @@ pub(crate) async fn get_completion_with_analysis(
                 let base_name = receiver_chain[0].as_str();
                 if let Some(kind) = get_collection_kind(base_name) {
                     add_metadata_items(&snapshot, Some(kind), &mut candidates, 1);
-                } else if let Some(type_name) =
-                    resolve_type_name(&snapshot, base_name, metadata_lookup)
-                {
+                } else if let Some(type_name) = resolve_type_name(base_name, metadata_lookup) {
                     let resolution = analysis
                         .map(|ctx| ctx.resolver.resolve_expression_sync(&type_name))
                         .unwrap_or_else(|| TypeResolution::explicit(&type_name));
@@ -488,8 +486,7 @@ pub(crate) async fn get_completion_with_analysis(
         } else if let Some(base_name) = context.member_base.as_deref() {
             if let Some(kind) = get_collection_kind(base_name) {
                 add_metadata_items(&snapshot, Some(kind), &mut candidates, 1);
-            } else if let Some(type_name) = resolve_type_name(&snapshot, base_name, metadata_lookup)
-            {
+            } else if let Some(type_name) = resolve_type_name(base_name, metadata_lookup) {
                 let resolution = TypeResolution::explicit(&type_name);
                 add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
                 add_properties_from_resolution(metadata_lookup, &resolution, &mut candidates, 1);
@@ -499,10 +496,6 @@ pub(crate) async fn get_completion_with_analysis(
                 add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
                 add_properties_from_resolution(metadata_lookup, &resolution, &mut candidates, 1);
             }
-        }
-
-        if candidates.is_empty() {
-            add_keywords(&snapshot, &mut candidates, 4);
         }
     } else {
         let can_collect_locals_from_ir = analysis.and_then(|ctx| ctx.ir_program.as_ref()).is_some();

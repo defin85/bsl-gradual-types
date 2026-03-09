@@ -1745,7 +1745,7 @@ fn universal_collection_snapshot_switch_does_not_leak_schema_effects() {
 }
 
 #[test]
-fn serve_only_stale_served_for_new_version_without_exact_artifact() {
+fn serve_only_fails_closed_for_new_version_without_exact_artifact() {
     let mut host = AnalysisHostV2::default();
     let file_id = FileId(202);
     let text_v1: Arc<str> = Arc::from(
@@ -1800,12 +1800,16 @@ fn serve_only_stale_served_for_new_version_without_exact_artifact() {
         .expect("serve-only stale lookup");
     assert_eq!(
         serve_only.serve_reason_code,
-        TypeIndexServeReasonCode::TypeIndexStaleServed
+        TypeIndexServeReasonCode::TypeIndexFallbackUnavailable
+    );
+    assert!(
+        serve_only.resolution.is_none(),
+        "serve-only must fail closed instead of serving stale artifact"
     );
 }
 
 #[test]
-fn serve_only_returns_degraded_incomplete_for_snapshot_fallback_artifact() {
+fn serve_only_fails_closed_for_snapshot_fallback_artifact() {
     let mut host = AnalysisHostV2::default();
     let file_id = FileId(203);
     let text: Arc<str> = Arc::from(
@@ -1844,7 +1848,11 @@ fn serve_only_returns_degraded_incomplete_for_snapshot_fallback_artifact() {
         .expect("serve-only degraded lookup");
     assert_eq!(
         serve_only.serve_reason_code,
-        TypeIndexServeReasonCode::TypeIndexDegradedIncomplete
+        TypeIndexServeReasonCode::TypeIndexFallbackUnavailable
+    );
+    assert!(
+        serve_only.resolution.is_none(),
+        "serve-only must fail closed instead of serving degraded artifact"
     );
 }
 

@@ -381,14 +381,6 @@ impl BslLanguageServer {
             timeline_capture.push_completed_stage("sync_globals", sync_globals_elapsed);
 
             let empty = || Some(completion_empty_response(false));
-            let extract_non_empty_items =
-                |response: &crate::handlers::CompletionResponseWithStats| match &response.response {
-                    CompletionResponse::List(list) if !list.items.is_empty() => {
-                        Some(list.items.clone())
-                    }
-                    CompletionResponse::Array(items) if !items.is_empty() => Some(items.clone()),
-                    _ => None,
-                };
             let mut member_access_request = trigger_char_hint == Some('.');
             if !member_access_request {
                 let shadow_text = {
@@ -426,7 +418,6 @@ impl BslLanguageServer {
 
             match prepared {
                 Ok((context, prepared, expected_version)) => {
-                    let force_incomplete_due_stale = prepared.stale_served;
                     if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
                         event_driven_guards_enabled,
                         self,
@@ -504,76 +495,6 @@ impl BslLanguageServer {
                     {
                         completion_outcome = Some(outcome);
                         break 'completion_flow Some(completion_incomplete_empty_response());
-                    }
-
-                    if prepared.completion_churn_fastpath_active
-                        && prepared.wait_budget_exhausted
-                        && prepared.stale_served
-                    {
-                        let observed_deps_id = prepared.snapshot.deps_id.clone();
-                        let observed_settings_id = prepared.snapshot.analysis.settings_id().ok();
-                        let observed_file_version = prepared
-                            .snapshot
-                            .analysis
-                            .file_version(file_id)
-                            .ok()
-                            .flatten();
-                        observed_file_version_for_completion = observed_file_version;
-
-                        let (strict_stale_cached_items, relaxed_stale_cached_items) =
-                            completion_cached_stale_items(
-                                self,
-                                file_id,
-                                &observed_deps_id,
-                                observed_settings_id.as_ref(),
-                                observed_file_version,
-                            )
-                            .await;
-                        if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
-                            event_driven_guards_enabled,
-                            self,
-                            file_id,
-                            completion_request_id.as_deref(),
-                            completion_ticket.request_epoch,
-                            completion_cancellation_token.as_ref(),
-                            "collect",
-                            &mut cancel_event_emitted,
-                        )
-                        .await
-                        {
-                            completion_outcome = Some(outcome);
-                            break 'completion_flow Some(completion_incomplete_empty_response());
-                        }
-
-                        if let Some(items) =
-                            strict_stale_cached_items.or(relaxed_stale_cached_items)
-                        {
-                            completion_outcome.get_or_insert("degraded_incomplete");
-                            if !shadow_internal_request {
-                                spawn_completion_refresh_after_stale_fastpath(
-                                    self.clone(),
-                                    params.clone(),
-                                    trigger_char_hint,
-                                );
-                            }
-                            break 'completion_flow Some(completion_response_with_cached_items(
-                                items,
-                            ));
-                        }
-
-                        if !shadow_internal_request {
-                            spawn_completion_refresh_after_stale_fastpath(
-                                self.clone(),
-                                params.clone(),
-                                trigger_char_hint,
-                            );
-                        }
-                        self.coordinator
-                            .record_intellisense_v2_completion_fallback_unavailable();
-                        completion_outcome.get_or_insert("fallback_unavailable");
-                        break 'completion_flow Some(
-                            crate::handlers::build_keyword_degraded_completion(snippet_support),
-                        );
                     }
 
                     let query_bundle_started = Instant::now();
@@ -965,8 +886,7 @@ impl BslLanguageServer {
                     }
 
                     let response_build_started = Instant::now();
-                    let mut completion_response = match (file_content, file_path, deps, ir_program)
-                    {
+                    let completion_response = match (file_content, file_path, deps, ir_program) {
                         (Some(file_content), Some(file_path), Some(deps), Some(ir_program)) => {
                             crate::handlers::handle_completion_v2_with_trigger_hint(
                                 file_content,
@@ -1066,40 +986,6 @@ impl BslLanguageServer {
                     {
                         completion_outcome = Some(outcome);
                         break 'completion_flow Some(completion_incomplete_empty_response());
-                    }
-                    if force_incomplete_due_stale {
-                        if let Some(response) = completion_response.as_mut() {
-                            if let CompletionResponse::List(list) = &mut response.response {
-                                list.is_incomplete = true;
-                            }
-                        }
-                    }
-                    if !matches!(completion_outcome, Some("cancelled" | "superseded")) {
-                        let cache_store_started = Instant::now();
-                        if let (Some(settings_id), Some(file_version), Some(response_items)) = (
-                            observed_settings_id.clone(),
-                            observed_file_version,
-                            completion_response
-                                .as_ref()
-                                .and_then(extract_non_empty_items),
-                        ) {
-                            self.completion_stale_fallback_cache_v2
-                                .write()
-                                .await
-                                .insert(
-                                    file_id,
-                                    CompletionStaleFallbackCacheEntryV2 {
-                                        deps_id: observed_deps_id,
-                                        settings_id,
-                                        file_version,
-                                        items: response_items,
-                                    },
-                                );
-                        }
-                        let cache_store_elapsed = cache_store_started.elapsed();
-                        self.coordinator
-                            .record_completion_stage_latency("cache_store", cache_store_elapsed);
-                        timeline_capture.push_completed_stage("cache_store", cache_store_elapsed);
                     }
                     completion_response
                 }

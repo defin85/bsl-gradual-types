@@ -496,7 +496,7 @@ async fn stateful_prepare_operation_returns_missing_deps_on_mismatch() {
 }
 
 #[tokio::test]
-async fn interactive_prepare_timeout_serves_stale_when_gap_within_default() {
+async fn interactive_prepare_timeout_fails_closed_when_gap_within_default() {
     let coordinator = SystemCoordinator::new();
     let file_id = FileId(10);
     let deps_id = DepsSnapshotId::from_hash("deps_stale_ok");
@@ -542,26 +542,10 @@ async fn interactive_prepare_timeout_serves_stale_when_gap_within_default() {
 
     let prepared = runtime
         .prepare_stateful_operation(&context, Some(&coordinator))
-        .await
-        .expect("interactive fallback should serve stale snapshot");
+        .await;
     assert!(
-        prepared.wait_budget_exhausted,
-        "expected bounded wait timeout for interactive path"
-    );
-    assert!(
-        prepared.stale_served,
-        "expected stale fallback to be served"
-    );
-    assert!(
-        prepared.completion_churn_fastpath_active,
-        "completion stale fallback under large churn should set churn-aware fastpath flag"
-    );
-    assert_eq!(prepared.observed_file_version, Some(4));
-    assert!(
-        prepared
-            .wait_elapsed
-            .is_some_and(|elapsed| elapsed >= Duration::from_millis(90)),
-        "wait elapsed should reflect bounded wait timeout"
+        matches!(prepared, Err(SemanticOutcome::StaleVersion)),
+        "interactive completion must fail closed instead of serving stale snapshot"
     );
 
     let metrics = coordinator.observability_metrics();
@@ -578,8 +562,12 @@ async fn interactive_prepare_timeout_serves_stale_when_gap_within_default() {
         "wait budget exhausted metric should be recorded"
     );
     assert!(
-        counters.contains_key("intellisense_v2_interactive_stale_served_total"),
-        "stale served metric should be recorded"
+        counters
+            .get("intellisense_v2_interactive_stale_served_total")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0)
+            == 0,
+        "stale served metric must stay zero under fail-closed policy"
     );
     assert!(
         counters.contains_key("intellisense_v2_runtime_queue_wait_interactive_total"),
@@ -590,8 +578,16 @@ async fn interactive_prepare_timeout_serves_stale_when_gap_within_default() {
         "interactive exec-class counter should be recorded"
     );
     assert!(
-        counters.contains_key("intellisense_v2_completion_stale_fallback_total"),
-        "completion stale-fallback counter should be recorded"
+        counters
+            .get("intellisense_v2_completion_stale_fallback_total")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0)
+            == 0,
+        "completion stale-fallback counter must stay zero under fail-closed policy"
+    );
+    assert!(
+        counters.contains_key("intellisense_v2_completion_fallback_unavailable_total"),
+        "completion fallback-unavailable counter should be recorded"
     );
     assert!(
         counters.contains_key("intellisense_v2_revision_lag_sample_total"),

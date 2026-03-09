@@ -42,7 +42,7 @@ use crate::progress::log_progress_to_file;
 use crate::progress_bridge::{LspWorkDoneReporter, ProgressReporter};
 use crate::types::{GetCurrentContextParams, ServerStatus, ServerStatusParams};
 
-use super::{BslLanguageServer, CompletionStaleFallbackCacheEntryV2};
+use super::BslLanguageServer;
 
 #[path = "language_server/helpers.rs"]
 mod helpers;

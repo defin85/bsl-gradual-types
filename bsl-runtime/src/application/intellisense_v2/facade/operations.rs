@@ -26,7 +26,7 @@ impl IntellisenseV2Facade {
         );
         let queue_priority = RuntimeQueuePriority::for_operation(context.operation);
         let mut wait_budget_exhausted = false;
-        let mut stale_served = false;
+        let stale_served = false;
 
         let wait_elapsed = if let Some(min_file_version) = context.min_file_version {
             let started = Instant::now();
@@ -98,7 +98,6 @@ impl IntellisenseV2Facade {
         }
 
         let observed_file_version = analysis.file_version(context.file_id).ok().flatten();
-        let observed_settings_id = analysis.settings_id().ok();
         if let (Some(min_file_version), Some(knobs)) = (context.min_file_version, interactive_knobs)
         {
             if wait_budget_exhausted {
@@ -112,48 +111,15 @@ impl IntellisenseV2Facade {
                     }
                 };
 
-                if !fastpath_preconditions.can_attempt_bounded_stale_fallback() {
-                    record_completion_fallback_unavailable();
-                    return Err(SemanticOutcome::StaleVersion);
-                }
-                let Some(expected_deps_id) = context.expected_deps_id.as_ref() else {
-                    record_completion_fallback_unavailable();
-                    return Err(SemanticOutcome::StaleVersion);
-                };
-                if expected_deps_id != &deps_id {
-                    record_completion_fallback_unavailable();
-                    return Err(SemanticOutcome::StaleVersion);
-                }
-                if observed_settings_id.as_ref() != Some(&context.settings.settings_id) {
-                    record_completion_fallback_unavailable();
-                    return Err(SemanticOutcome::StaleVersion);
-                }
                 if let Some(observed_version) = observed_file_version {
                     if observed_version < min_file_version {
                         let lag_versions = min_file_version.saturating_sub(observed_version);
                         if let Some(coordinator) = observability {
                             coordinator.record_intellisense_v2_revision_lag(lag_versions);
                         }
-
-                        if let Err(outcome) = self
-                            .validate_stale_fallback(
-                                context.file_id,
-                                min_file_version,
-                                observed_version,
-                                knobs,
-                            )
-                            .await
-                        {
-                            record_completion_fallback_unavailable();
-                            return Err(outcome);
-                        }
-                        stale_served = true;
-                        if let Some(coordinator) = observability {
-                            coordinator.record_intellisense_v2_interactive_stale_served();
-                            if completion_fallback_metric_enabled {
-                                coordinator.record_intellisense_v2_completion_stale_fallback();
-                            }
-                        }
+                        let _ = knobs;
+                        record_completion_fallback_unavailable();
+                        return Err(SemanticOutcome::StaleVersion);
                     }
                 } else {
                     record_completion_fallback_unavailable();
@@ -174,31 +140,6 @@ impl IntellisenseV2Facade {
             completion_churn_fastpath_active: fastpath_preconditions.churn_aware_fastpath_active(),
             observed_file_version,
         })
-    }
-
-    async fn validate_stale_fallback(
-        &self,
-        file_id: FileId,
-        requested_version: i32,
-        observed_version: i32,
-        knobs: InteractiveFreshnessKnobs,
-    ) -> Result<(), SemanticOutcome> {
-        let version_gap = requested_version.saturating_sub(observed_version);
-        if version_gap > knobs.max_stale_version_gap {
-            return Err(SemanticOutcome::StaleVersion);
-        }
-
-        let Some(revision_state) = self.file_revision_state(file_id).await else {
-            return Err(SemanticOutcome::StaleVersion);
-        };
-        if revision_state.version != observed_version {
-            return Err(SemanticOutcome::StaleVersion);
-        }
-        if revision_state.updated_at.elapsed() > knobs.max_stale_age {
-            return Err(SemanticOutcome::StaleVersion);
-        }
-
-        Ok(())
     }
 
     /// Canonical ephemeral operation preparation for one-shot adapters:

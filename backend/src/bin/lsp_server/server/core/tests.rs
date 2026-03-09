@@ -3327,7 +3327,7 @@ async fn p7_completion_context_modes_are_supported() {
 }
 
 #[tokio::test]
-async fn p7_first_completion_after_received_advance_uses_stale_non_empty_result() {
+async fn p7_first_completion_after_received_advance_fails_closed_empty() {
     const STALE_FIXTURE: &str =
         "Процедура Тест()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.\nКонецПроцедуры\n";
 
@@ -3427,20 +3427,15 @@ async fn p7_first_completion_after_received_advance_uses_stale_non_empty_result(
     match completion {
         CompletionResponse::List(list) => {
             assert!(
-                list.is_incomplete,
-                "stale fallback completion must be marked isIncomplete=true"
-            );
-            assert!(
-                !list.items.is_empty(),
-                "first completion after received-version advance must not be empty"
+                list.items.is_empty(),
+                "first completion after received-version advance must fail closed with empty payload"
             );
         }
         CompletionResponse::Array(items) => {
             assert!(
-                !items.is_empty(),
-                "first completion after received-version advance must not be empty"
+                items.is_empty(),
+                "first completion after received-version advance must fail closed with empty payload"
             );
-            panic!("completion fallback must return CompletionList with isIncomplete=true");
         }
     }
 
@@ -3453,16 +3448,24 @@ async fn p7_first_completion_after_received_advance_uses_stale_non_empty_result(
         .get("intellisense_v2_completion_stale_fallback_total")
         .and_then(|value| value.as_u64())
         .unwrap_or(0);
+    let fallback_unavailable_total = counters
+        .get("intellisense_v2_completion_fallback_unavailable_total")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
     assert!(
-        stale_fallback_total > 0,
-        "expected stale fallback counter to be incremented"
+        stale_fallback_total == 0,
+        "stale fallback counter must stay zero under fail-closed contract"
+    );
+    assert!(
+        fallback_unavailable_total > 0,
+        "fail-closed completion miss must record fallback_unavailable"
     );
 
     drain_task.abort();
 }
 
 #[tokio::test]
-async fn p7_large_churn_budget_timeout_serves_cached_stale_fastpath() {
+async fn p7_large_churn_budget_timeout_returns_fail_closed_empty_response() {
     const FILLER_LINES: usize = 2200;
     let mut fixture = String::new();
     fixture.push_str("Процедура Тест()\n");
@@ -3478,11 +3481,6 @@ async fn p7_large_churn_budget_timeout_serves_cached_stale_fastpath() {
         .chars()
         .map(|ch| ch.len_utf16())
         .sum::<usize>() as u32;
-
-    let completion_items_count = |response: &CompletionResponse| match response {
-        CompletionResponse::Array(items) => items.len(),
-        CompletionResponse::List(list) => list.items.len(),
-    };
 
     let coordinator = Arc::new(SystemCoordinator::new());
     let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
@@ -3586,10 +3584,7 @@ async fn p7_large_churn_budget_timeout_serves_cached_stale_fastpath() {
         .await
         .expect("warm completion request")
         .expect("warm completion response");
-    assert!(
-        completion_items_count(&warm_completion) > 0,
-        "warm completion should prime stale fallback cache"
-    );
+    let _ = warm_completion;
 
     {
         let mut versions = server.latest_received_file_versions_v2.write().await;
@@ -3621,45 +3616,20 @@ async fn p7_large_churn_budget_timeout_serves_cached_stale_fastpath() {
     match stale_completion {
         CompletionResponse::List(list) => {
             assert!(
-                list.is_incomplete,
-                "stale fastpath response must be marked as incomplete"
-            );
-            assert!(
-                !list.items.is_empty(),
-                "stale fastpath should serve cached non-empty completion items"
+                list.items.is_empty(),
+                "large-churn timeout must fail closed with empty payload even when cache is warm"
             );
         }
         CompletionResponse::Array(items) => {
             assert!(
-                !items.is_empty(),
-                "stale fastpath should not degrade to empty completion array"
+                items.is_empty(),
+                "large-churn timeout must fail closed with empty payload even when cache is warm"
             );
-            panic!("stale fastpath response should use CompletionList");
         }
     }
     assert!(
         elapsed <= Duration::from_millis(wait_budget_ms.saturating_add(300)),
-        "stale fastpath should remain bounded near wait budget (elapsed={elapsed:?}, budget_ms={wait_budget_ms})"
-    );
-    let refresh_epoch = tokio::time::timeout(Duration::from_millis(700), async {
-        loop {
-            let epoch = server
-                .completion_dispatcher_v2
-                .latest_request_epoch(file_id)
-                .await
-                .unwrap_or(0);
-            if epoch >= 3 {
-                break epoch;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("background refresh should enqueue follow-up completion request");
-    assert!(
-        refresh_epoch >= 3,
-        "expected background refresh to advance completion request epoch, got {}",
-        refresh_epoch
+        "fail-closed completion should remain bounded near wait budget (elapsed={elapsed:?}, budget_ms={wait_budget_ms})"
     );
 
     let metrics = coordinator.observability_metrics();
@@ -3671,16 +3641,25 @@ async fn p7_large_churn_budget_timeout_serves_cached_stale_fastpath() {
         .get("intellisense_v2_completion_stale_fallback_total")
         .and_then(|value| value.as_u64())
         .unwrap_or(0);
+    let fallback_unavailable_total = counters
+        .get("intellisense_v2_completion_fallback_unavailable_total")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
     assert!(
-        stale_fallback_total > 0,
-        "expected stale fallback counter to increment under churn fastpath"
+        stale_fallback_total == 0,
+        "stale fallback counter must stay zero under fail-closed churn path"
+    );
+    assert!(
+        fallback_unavailable_total > 0,
+        "fail-closed churn path must record fallback_unavailable"
     );
 
     drain_task.abort();
 }
 
 #[tokio::test]
-async fn p7_large_churn_budget_timeout_without_cache_returns_keyword_fallback_incomplete() {
+async fn p7_large_churn_budget_timeout_without_prior_completion_returns_fail_closed_empty_response()
+{
     const FILLER_LINES: usize = 2200;
     let mut fixture = String::new();
     fixture.push_str("Процедура Тест()\n");
@@ -3783,35 +3762,6 @@ async fn p7_large_churn_budget_timeout_without_cache_returns_keyword_fallback_in
         "expected large+churn state to be active after burst didChange on large document"
     );
 
-    let warm_completion = server
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position::new(completion_line, completion_character),
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: Some(CompletionContext {
-                trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
-                trigger_character: Some(".".to_string()),
-            }),
-        })
-        .await
-        .expect("warm completion request")
-        .expect("warm completion response");
-    let warm_items_count = match &warm_completion {
-        CompletionResponse::Array(items) => items.len(),
-        CompletionResponse::List(list) => list.items.len(),
-    };
-    assert!(
-        warm_items_count > 0,
-        "warm completion should prime stale fallback cache before cache-miss simulation"
-    );
-
-    {
-        let mut cache = server.completion_stale_fallback_cache_v2.write().await;
-        cache.remove(&file_id);
-    }
     {
         let mut versions = server.latest_received_file_versions_v2.write().await;
         versions.insert(file_id, 8);
@@ -3842,46 +3792,20 @@ async fn p7_large_churn_budget_timeout_without_cache_returns_keyword_fallback_in
     match stale_completion {
         CompletionResponse::List(list) => {
             assert!(
-                list.is_incomplete,
-                "stale fastpath fallback-unavailable response must stay incomplete"
-            );
-            assert!(
-                !list.items.is_empty(),
-                "stale fastpath cache-miss must return keyword degraded items instead of empty result"
+                list.items.is_empty(),
+                "cache miss under large-churn timeout must fail closed with empty payload"
             );
         }
         CompletionResponse::Array(items) => {
             assert!(
-                !items.is_empty(),
-                "stale fastpath cache-miss must not degrade to empty completion array"
+                items.is_empty(),
+                "cache miss under large-churn timeout must fail closed with empty payload"
             );
-            panic!("stale fastpath fallback-unavailable response should use CompletionList");
         }
     }
     assert!(
         elapsed <= Duration::from_millis(wait_budget_ms.saturating_add(300)),
-        "stale fastpath cache-miss should remain bounded near wait budget (elapsed={elapsed:?}, budget_ms={wait_budget_ms})"
-    );
-
-    let refresh_epoch = tokio::time::timeout(Duration::from_millis(700), async {
-        loop {
-            let epoch = server
-                .completion_dispatcher_v2
-                .latest_request_epoch(file_id)
-                .await
-                .unwrap_or(0);
-            if epoch >= 3 {
-                break epoch;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("background refresh should enqueue follow-up completion request after cache miss");
-    assert!(
-        refresh_epoch >= 3,
-        "expected background refresh to advance completion request epoch after cache miss, got {}",
-        refresh_epoch
+        "fail-closed cache miss should remain bounded near wait budget (elapsed={elapsed:?}, budget_ms={wait_budget_ms})"
     );
 
     let metrics = coordinator.observability_metrics();
@@ -3894,8 +3818,8 @@ async fn p7_large_churn_budget_timeout_without_cache_returns_keyword_fallback_in
         .and_then(|value| value.as_u64())
         .unwrap_or(0);
     assert!(
-        stale_fallback_total > 0,
-        "expected stale fallback counter to increment under churn fastpath cache miss"
+        stale_fallback_total == 0,
+        "stale fallback counter must stay zero on fail-closed cache miss"
     );
     let fallback_unavailable_total = counters
         .get("intellisense_v2_completion_fallback_unavailable_total")

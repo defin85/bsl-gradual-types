@@ -65,14 +65,13 @@ pub struct CompletionFastpathPreconditions {
 
 impl CompletionFastpathPreconditions {
     pub fn can_attempt_bounded_stale_fallback(self) -> bool {
-        self.operation_is_completion
-            && self.has_min_file_version
-            && self.has_expected_deps
-            && self.has_interactive_knobs
+        let _ = self;
+        false
     }
 
     pub fn churn_aware_fastpath_active(self) -> bool {
-        self.can_attempt_bounded_stale_fallback() && self.large_churn_active
+        let _ = self;
+        false
     }
 }
 
@@ -182,30 +181,16 @@ impl DeferredHeavyDiagnosticsReason {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompletionMissingIrPolicyDecision {
-    StrictCacheIncomplete,
-    EmptyForNonMemberAccess,
-    DegradedIncomplete,
-    RelaxedCacheIncomplete,
-    KeywordFallbackUnavailable,
+    FailClosedUnavailable,
 }
 
 pub fn completion_missing_ir_policy_decision(
-    has_strict_cached_items: bool,
-    member_access_context: bool,
-    degraded_available: bool,
-    has_relaxed_cached_items: bool,
+    _has_strict_cached_items: bool,
+    _member_access_context: bool,
+    _degraded_available: bool,
+    _has_relaxed_cached_items: bool,
 ) -> CompletionMissingIrPolicyDecision {
-    if has_strict_cached_items {
-        CompletionMissingIrPolicyDecision::StrictCacheIncomplete
-    } else if !member_access_context {
-        CompletionMissingIrPolicyDecision::EmptyForNonMemberAccess
-    } else if degraded_available {
-        CompletionMissingIrPolicyDecision::DegradedIncomplete
-    } else if has_relaxed_cached_items {
-        CompletionMissingIrPolicyDecision::RelaxedCacheIncomplete
-    } else {
-        CompletionMissingIrPolicyDecision::KeywordFallbackUnavailable
-    }
+    CompletionMissingIrPolicyDecision::FailClosedUnavailable
 }
 
 impl CompletionPipelineKnobs {

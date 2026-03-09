@@ -277,38 +277,6 @@ pub(super) fn completion_incomplete_empty_response() -> crate::handlers::Complet
     completion_empty_response(true)
 }
 
-pub(super) fn completion_response_with_cached_items(
-    items: Vec<CompletionItem>,
-) -> crate::handlers::CompletionResponseWithStats {
-    crate::handlers::CompletionResponseWithStats {
-        response: CompletionResponse::List(CompletionList {
-            is_incomplete: true,
-            items,
-        }),
-        stats: None,
-        had_error: false,
-    }
-}
-
-pub(super) fn spawn_completion_refresh_after_stale_fastpath(
-    server: BslLanguageServer,
-    mut params: CompletionParams,
-    trigger_char_hint: Option<char>,
-) {
-    let shadow_trigger = completion_shadow_internal_trigger_value(trigger_char_hint);
-    if let Some(context) = params.context.as_mut() {
-        context.trigger_character = Some(shadow_trigger);
-    } else {
-        params.context = Some(CompletionContext {
-            trigger_kind: CompletionTriggerKind::INVOKED,
-            trigger_character: Some(shadow_trigger),
-        });
-    }
-    tokio::spawn(async move {
-        let _ = server.completion(params).await;
-    });
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum CompletionResponseRoute {
     Legacy,
@@ -521,147 +489,35 @@ pub(super) async fn completion_checkpoint_outcome_if_enabled(
     .await
 }
 
-pub(super) async fn completion_cached_stale_items(
-    server: &BslLanguageServer,
-    file_id: bsl_analysis_v2::FileId,
-    observed_deps_id: &bsl_analysis_v2::DepsSnapshotId,
-    observed_settings_id: Option<&bsl_analysis_v2::SettingsId>,
-    observed_file_version: Option<i32>,
-) -> (Option<Vec<CompletionItem>>, Option<Vec<CompletionItem>>) {
-    let cache = server.completion_stale_fallback_cache_v2.read().await;
-    let strict = match (observed_settings_id, observed_file_version) {
-        (Some(settings_id), Some(file_version)) => cache.get(&file_id).and_then(|entry| {
-            let compatible = entry.deps_id == *observed_deps_id
-                && entry.settings_id == *settings_id
-                && entry.file_version == file_version
-                && !entry.items.is_empty();
-            if compatible {
-                Some(entry.items.clone())
-            } else {
-                None
-            }
-        }),
-        _ => None,
-    };
-    let relaxed = cache.get(&file_id).and_then(|entry| {
-        if entry.items.is_empty() {
-            return None;
-        }
-        let deps_compatible = entry.deps_id == *observed_deps_id;
-        let settings_compatible = observed_settings_id
-            .map(|settings_id| entry.settings_id == *settings_id)
-            .unwrap_or(true);
-        let file_version_compatible = observed_file_version
-            .map(|file_version| entry.file_version == file_version)
-            .unwrap_or(true);
-        if deps_compatible && settings_compatible && file_version_compatible {
-            Some(entry.items.clone())
-        } else {
-            None
-        }
-    });
-    (strict, relaxed)
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn resolve_completion_without_ir(
-    server: &BslLanguageServer,
-    file_id: bsl_analysis_v2::FileId,
-    observed_deps_id: bsl_analysis_v2::DepsSnapshotId,
-    observed_settings_id: Option<bsl_analysis_v2::SettingsId>,
-    observed_file_version: Option<i32>,
-    member_access_context: bool,
-    file_content: Arc<str>,
-    file_path: Arc<str>,
-    parse_result: Option<Arc<bsl_syntax::ast::ParseResult>>,
-    member_access_owner_type_hint: Option<bsl_shared::domain::types::TypeResolution>,
-    deps: Arc<bsl_analysis_v2::SemanticDeps>,
-    position: Position,
-    uri: &Url,
-    index_snapshot: &bsl_backend::system::IndexSnapshot,
-    snippet_support: bool,
-    include_flow_sensitive: bool,
-    trigger_char_hint: Option<char>,
+    _server: &BslLanguageServer,
+    _file_id: bsl_analysis_v2::FileId,
+    _observed_deps_id: bsl_analysis_v2::DepsSnapshotId,
+    _observed_settings_id: Option<bsl_analysis_v2::SettingsId>,
+    _observed_file_version: Option<i32>,
+    _member_access_context: bool,
+    _file_content: Arc<str>,
+    _file_path: Arc<str>,
+    _parse_result: Option<Arc<bsl_syntax::ast::ParseResult>>,
+    _member_access_owner_type_hint: Option<bsl_shared::domain::types::TypeResolution>,
+    _deps: Arc<bsl_analysis_v2::SemanticDeps>,
+    _position: Position,
+    _uri: &Url,
+    _index_snapshot: &bsl_backend::system::IndexSnapshot,
+    _snippet_support: bool,
+    _include_flow_sensitive: bool,
+    _trigger_char_hint: Option<char>,
 ) -> (
     &'static str,
     Option<crate::handlers::CompletionResponseWithStats>,
 ) {
-    let (strict_stale_cached_items, relaxed_stale_cached_items) = completion_cached_stale_items(
-        server,
-        file_id,
-        &observed_deps_id,
-        observed_settings_id.as_ref(),
-        observed_file_version,
-    )
-    .await;
-
-    let mut degraded = if strict_stale_cached_items.is_none() && member_access_context {
-        crate::handlers::handle_completion_v2_degraded(
-            file_content,
-            file_path,
-            parse_result,
-            member_access_owner_type_hint,
-            deps,
-            position,
-            uri,
-            index_snapshot,
-            snippet_support,
-            include_flow_sensitive,
-            trigger_char_hint,
-        )
-        .await
-    } else {
-        None
-    };
-
-    if let Some(response) = degraded.as_mut() {
-        if let CompletionResponse::List(list) = &mut response.response {
-            list.is_incomplete = true;
-        }
-    }
-
-    let decision = bsl_runtime::application::completion_missing_ir_policy_decision(
-        strict_stale_cached_items.is_some(),
-        member_access_context,
-        degraded.is_some(),
-        relaxed_stale_cached_items.is_some(),
-    );
+    let decision =
+        bsl_runtime::application::completion_missing_ir_policy_decision(false, false, false, false);
 
     match decision {
-        bsl_runtime::application::CompletionMissingIrPolicyDecision::StrictCacheIncomplete => (
-            "degraded_incomplete",
-            Some(completion_response_with_cached_items(
-                strict_stale_cached_items.expect("strict cache decision requires strict items"),
-            )),
-        ),
-        bsl_runtime::application::CompletionMissingIrPolicyDecision::EmptyForNonMemberAccess => {
+        bsl_runtime::application::CompletionMissingIrPolicyDecision::FailClosedUnavailable => {
             ("missing_ir", Some(completion_empty_response(false)))
-        }
-        bsl_runtime::application::CompletionMissingIrPolicyDecision::DegradedIncomplete => {
-            ("degraded_incomplete", degraded)
-        }
-        bsl_runtime::application::CompletionMissingIrPolicyDecision::RelaxedCacheIncomplete => {
-            server
-                .coordinator
-                .record_intellisense_v2_completion_stale_fallback();
-            (
-                "degraded_incomplete",
-                Some(completion_response_with_cached_items(
-                    relaxed_stale_cached_items
-                        .expect("relaxed cache decision requires relaxed items"),
-                )),
-            )
-        }
-        bsl_runtime::application::CompletionMissingIrPolicyDecision::KeywordFallbackUnavailable => {
-            server
-                .coordinator
-                .record_intellisense_v2_completion_fallback_unavailable();
-            (
-                "fallback_unavailable",
-                Some(crate::handlers::build_keyword_degraded_completion(
-                    snippet_support,
-                )),
-            )
         }
     }
 }

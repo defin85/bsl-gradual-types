@@ -5,7 +5,6 @@ use std::time::{Duration, Instant};
 
 use super::policy::{
     completion_fastpath_preconditions, interactive_freshness_knobs, should_query_parse_result,
-    InteractiveFreshnessKnobs,
 };
 use tokio::sync::oneshot;
 use tracing::warn;

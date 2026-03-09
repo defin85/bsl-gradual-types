@@ -240,8 +240,16 @@ fn collect_type_at_position_preserves_available_facets_for_object_module_binding
     .expect("type_at_position");
 
     let type_info = response.type_info.expect("type info");
-    assert!(response.warnings.is_empty(), "warnings: {:?}", response.warnings);
-    assert!(type_info.name.contains("Док1"), "type name: {}", type_info.name);
+    assert!(
+        response.warnings.is_empty(),
+        "warnings: {:?}",
+        response.warnings
+    );
+    assert!(
+        type_info.name.contains("Док1"),
+        "type name: {}",
+        type_info.name
+    );
     assert_eq!(type_info.active_facet.as_deref(), Some("Object"));
     assert_eq!(
         type_info.available_facets,
@@ -250,6 +258,80 @@ fn collect_type_at_position_preserves_available_facets_for_object_module_binding
             "Object".to_string(),
             "Reference".to_string(),
         ]
+    );
+}
+
+#[test]
+fn semantic_helpers_fail_closed_without_precomputed_type_index() {
+    use bsl_analysis_v2::{DepsSnapshotId, SemanticDeps};
+    use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
+    use bsl_shared::domain::resolver::TypeResolver;
+    use bsl_shared::domain::signature_index::SignatureIndex;
+    use bsl_shared::domain::types::{FacetKind, MetadataKind, RawDataSource, RawTypeData};
+
+    let repository_impl = Arc::new(InMemoryTypeRepository::new());
+    repository_impl
+        .load_types(vec![RawTypeData {
+            name: "Документы.Док1".to_string(),
+            source: RawDataSource::Configuration,
+            facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+            kind: Some(MetadataKind::Document),
+            ..Default::default()
+        }])
+        .expect("load types");
+
+    let repository = repository_impl.clone() as Arc<dyn TypeRepository>;
+    let resolver = Arc::new(TypeResolver::new(repository.clone()));
+    let deps = Arc::new(SemanticDeps {
+        repository,
+        signature_index: SignatureIndex::new(),
+        resolver: Some(resolver),
+        platform_signatures_loaded: true,
+    });
+
+    let content = concat!(
+        "Процедура Тест()\n",
+        "    x = ЭтотОбъект;\n",
+        "    ЭтотОбъект.\n",
+        "КонецПроцедуры\n"
+    );
+    let mut host = bsl_analysis_v2::AnalysisHostV2::default();
+    host.apply_change(bsl_analysis_v2::Change::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("mcp-helper-fail-closed"),
+        deps,
+    });
+    host.apply_change(bsl_analysis_v2::Change::SetSettingsSnapshot {
+        settings_id: SettingsId::from_hash("mcp-helper-fail-closed"),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+    host.apply_change(bsl_analysis_v2::Change::SetFile {
+        file_id: bsl_analysis_v2::FileId(1),
+        text: Arc::from(content.to_string()),
+        version: 1,
+        path: Arc::from("Documents/Док1/Ext/ObjectModule.bsl"),
+    });
+
+    let analysis = host.analysis();
+    assert!(
+        type_at_utf16_position(&analysis, bsl_analysis_v2::FileId(1), 1, 10, false).is_none(),
+        "type-at-position helper must fail closed without exact type_index artifact"
+    );
+
+    let member_column = "    ЭтотОбъект"
+        .chars()
+        .map(|ch| ch.len_utf16())
+        .sum::<usize>() as u32;
+    assert!(
+        member_access_owner_type_hint_at_position(
+            &analysis,
+            bsl_analysis_v2::FileId(1),
+            content,
+            2,
+            member_column,
+            false,
+        )
+        .is_none(),
+        "member-access helper must fail closed without exact type_index artifact"
     );
 }
 

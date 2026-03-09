@@ -207,19 +207,16 @@ impl AnalysisV2 {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             if let Some(artifact) = cache.get_type_index_exact(&key) {
-                let reason = if artifact.parse_snapshot_meta.fallback_reason_present {
-                    TypeIndexServeReasonCode::TypeIndexDegradedIncomplete
+                if artifact.parse_snapshot_meta.fallback_reason_present {
+                    (
+                        None,
+                        TypeIndexServeReasonCode::TypeIndexFallbackUnavailable,
+                    )
                 } else {
-                    TypeIndexServeReasonCode::TypeIndexExactHit
-                };
-                (Some(artifact), reason)
-            } else if let Some((artifact, _stale_version)) = cache.get_type_index_stale(&key) {
-                let reason = if artifact.parse_snapshot_meta.fallback_reason_present {
-                    TypeIndexServeReasonCode::TypeIndexDegradedIncomplete
-                } else {
-                    TypeIndexServeReasonCode::TypeIndexStaleServed
-                };
-                (Some(artifact), reason)
+                    (Some(artifact), TypeIndexServeReasonCode::TypeIndexExactHit)
+                }
+            } else if cache.get_type_index_stale(&key).is_some() {
+                (None, TypeIndexServeReasonCode::TypeIndexFallbackUnavailable)
             } else {
                 (None, TypeIndexServeReasonCode::TypeIndexFallbackUnavailable)
             }

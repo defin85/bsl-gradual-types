@@ -644,6 +644,11 @@ fn collect_type_at_position(
             .active_facet
             .as_ref()
             .map(|facet| format!("{:?}", facet)),
+        available_facets: resolution
+            .available_facets
+            .iter()
+            .map(|facet| format!("{:?}", facet))
+            .collect(),
     });
 
     let node = node_at_utf16_position(

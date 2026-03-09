@@ -162,6 +162,10 @@ pub struct TypeResolutionDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_facet: Option<String>,
 
+    /// Доступные фасеты для configuration type
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub available_facets: Vec<String>,
+
     /// Доступные методы (если тип известен)
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub methods: Vec<String>,

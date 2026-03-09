@@ -62,3 +62,40 @@ fn test_serialization() {
     let deserialized: SemanticTreeDto = serde_json::from_str(&json).unwrap();
     assert_eq!(deserialized.file_path, "test.bsl");
 }
+
+#[test]
+fn test_type_resolution_dto_serialization_preserves_available_facets() {
+    let dto = TypeResolutionDto {
+        name: "Документы.Док1".to_string(),
+        category: "configuration".to_string(),
+        certainty: "known".to_string(),
+        certainty_percent: 100,
+        active_facet: Some("Object".to_string()),
+        available_facets: vec![
+            "Manager".to_string(),
+            "Object".to_string(),
+            "Reference".to_string(),
+        ],
+        methods: vec!["Записать".to_string()],
+        properties: vec!["Ссылка".to_string()],
+        is_union: Some(false),
+        union_components: vec!["Документы.Док1".to_string()],
+    };
+
+    let json = serde_json::to_value(&dto).unwrap();
+    let available_facets = json
+        .get("available_facets")
+        .and_then(|value| value.as_array())
+        .expect("available_facets array");
+    assert_eq!(available_facets.len(), 3);
+
+    let deserialized: TypeResolutionDto = serde_json::from_value(json).unwrap();
+    assert_eq!(
+        deserialized.available_facets,
+        vec![
+            "Manager".to_string(),
+            "Object".to_string(),
+            "Reference".to_string(),
+        ]
+    );
+}

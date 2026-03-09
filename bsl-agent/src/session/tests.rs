@@ -191,6 +191,68 @@ fn optional_query_outcome_classification_is_shared() {
     );
 }
 
+#[test]
+fn collect_type_at_position_preserves_available_facets_for_object_module_binding() {
+    use bsl_analysis_v2::{DepsSnapshotId, SemanticDeps};
+    use bsl_runtime::system::{IndexSnapshot, IndexSnapshotId, SystemCoordinator};
+    use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
+    use bsl_shared::domain::resolver::TypeResolver;
+    use bsl_shared::domain::signature_index::SignatureIndex;
+    use bsl_shared::domain::types::{FacetKind, MetadataKind, RawDataSource, RawTypeData};
+
+    let repository_impl = Arc::new(InMemoryTypeRepository::new());
+    repository_impl
+        .load_types(vec![RawTypeData {
+            name: "Документы.Док1".to_string(),
+            source: RawDataSource::Configuration,
+            facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+            kind: Some(MetadataKind::Document),
+            ..Default::default()
+        }])
+        .expect("load types");
+
+    let repository = repository_impl.clone() as Arc<dyn TypeRepository>;
+    let resolver = Arc::new(TypeResolver::new(repository.clone()));
+    let deps = Arc::new(SemanticDeps {
+        repository,
+        signature_index: SignatureIndex::new(),
+        resolver: Some(resolver),
+        platform_signatures_loaded: true,
+    });
+
+    let response = collect_type_at_position(TypeAtPositionRequest {
+        analysis_revision: 1,
+        flow_sensitive_enabled: false,
+        deps_id: DepsSnapshotId::from_hash("type-at-position-facet-preservation"),
+        deps,
+        index_snapshot: Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash(
+            "type-at-position-facet-preservation",
+        ))),
+        coordinator: Arc::new(SystemCoordinator::new()),
+        text: "Процедура Тест()\n    x = ЭтотОбъект;\nКонецПроцедуры\n".to_string(),
+        version: 0,
+        abs_path: "Documents/Док1/Ext/ObjectModule.bsl".to_string(),
+        position: Position {
+            line: 1,
+            character: 10,
+        },
+    })
+    .expect("type_at_position");
+
+    let type_info = response.type_info.expect("type info");
+    assert!(response.warnings.is_empty(), "warnings: {:?}", response.warnings);
+    assert!(type_info.name.contains("Док1"), "type name: {}", type_info.name);
+    assert_eq!(type_info.active_facet.as_deref(), Some("Object"));
+    assert_eq!(
+        type_info.available_facets,
+        vec![
+            "Manager".to_string(),
+            "Object".to_string(),
+            "Reference".to_string(),
+        ]
+    );
+}
+
 async fn wait_startup(job_manager: &JobManager, open: &WorkspaceOpenResponse) {
     let job_id = open
         .startup_job_id

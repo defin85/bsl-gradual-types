@@ -256,6 +256,8 @@ pub struct TypeInfoDto {
     pub certainty: String,
     #[serde(default)]
     pub active_facet: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub available_facets: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

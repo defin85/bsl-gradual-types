@@ -20,184 +20,183 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 
 <!-- OPENSPEC:END -->
 
+# Язык (важно)
+
+- Планы, спеки и описания change ведём на русском языке.
+- Общепринятые термины, названия сущностей, API/эндпоинты, ключи настроек и code identifiers можно оставлять на английском.
+
 # Unified Workflow
 
 We operate in a cycle: **OpenSpec (What) → Beads (How) → Code (Implementation)**.
 
 ## 1. Intent Formation
 
-The user initiates with:
-`/openspec-proposal "Add 2FA authentication"`
-
 OpenSpec creates a change folder (`openspec/changes/<change-id>/`) containing:
 
-- `proposal.md`: Business value and scope.
-- `tasks.md`: High-level task list.
-- `design.md`: Technical design (optional).
-- `specs/.../spec.md`: Requirements and acceptance criteria.
+- `proposal.md`: business value and scope
+- `tasks.md`: high-level task list
+- `design.md`: technical design (optional)
+- `specs/.../spec.md`: requirements and acceptance criteria
 
-**Agent Goal**: Edit these files until they represent a signable contract.
+**Agent Goal**: edit these files until they represent a signable contract.
 
-**DO NOT proceed to step 2 until you are explicitly told the keyword "Go!" in English.**
+**DO NOT proceed to step 2 until approval is explicit.**
+Explicit approval can be either:
+- the keyword `Go!` in English; or
+- a direct invocation of `/openspec-to-beads <change-id>`.
 
 ## 2. Task Transformation
 
-Once the change is approved, execute the agent command:
+Once the change is approved, execute:
 `/openspec-to-beads <change-id>`
 
 The agent must:
 
-1.  Read the change files.
-2.  Create a Beads Epic for the feature. Include a short description summarizing the intent and referencing the change folder (e.g., "See openspec/changes/<change-id>/").
-3.  Create Beads Tasks for each item in `tasks.md`. Include a brief description for each task to provide context (why this issue exists and what needs to be done).
-4.  Set dependencies (e.g., Infra blocks Backend blocks Frontend).
+1. Read the change files.
+2. Create a Beads Epic for the feature and reference `openspec/changes/<change-id>/`.
+3. Create Beads Tasks for each item in `tasks.md`.
+4. Set dependencies.
 
-Result: A **live task graph in `.beads/`**, not just text.
+Result: a **live task graph in `.beads/`**, not just text.
 
 ## 3. Execution
 
 Work loop:
 
-- `bd ready`: Check actionable tasks
-- `bd show <task-id>`: Get task context
-- Implement code
-- `bd close <task-id>`: Complete task
-- `bd vc status`: Check Beads VC state (Dolt)
-- `bd vc commit -m "..."`: Commit pending Beads changes when needed
+- `bd ready`
+- `bd show <task-id>`
+- implement code
+- `bd close <task-id>`
+- `bd vc status`
+- `bd vc commit -m "..."`
 
-**Rule**: Only work on tasks listed in `bd ready`.
+**Rules:**
+- For code changes, only work on tasks listed in `bd ready`.
+- For non-code requests (analysis, review, research without code edits), Beads tracking is recommended but not mandatory.
+- Newly discovered work must be tracked as a separate issue with dependency `discovered-from:<parent-id>`.
 
 ## 4. Fixation
 
-When all tasks are complete, execute the agent commands:
+When all tasks are complete, execute:
 
-- `/openspec-apply <change-id>`: Verify code meets specs.
-- Then, when ready,
-- `/openspec-archive <change-id>`: Archive the change.
-
----
+- `/openspec-apply <change-id>`
+- `/openspec-archive <change-id>`
 
 ## Agent Mental Checklist
 
-1.  **Start**: Is there an active OpenSpec change?
-    - No? → Create one (`/openspec-proposal`).
-    - Yes? → Read `proposal.md` and `tasks.md`.
-2.  **Plan**: Are tasks tracked in Beads?
-    - No? → Generate graph (`/openspec-to-beads`).
-    - Yes? → Work from `bd ready`.
-3.  **Align**: Keep OpenSpec (Intent) ↔ Beads (Plan) ↔ Code (Reality) in sync.
-
----
+1. Is there an active OpenSpec change?
+   - No → create one
+   - Yes → read `proposal.md` and `tasks.md`
+2. Are tasks tracked in Beads?
+   - No → generate graph
+   - Yes → work from `bd ready`
+3. Keep OpenSpec (Intent) ↔ Beads (Plan) ↔ Code (Reality) in sync.
 
 ## OpenSpec Delivery Contract (Mandatory)
 
 - Before coding for an OpenSpec change, build an execution matrix from `spec.md` requirements/scenarios to target files and tests.
 - Every MUST/Requirement/Scenario must have automated evidence (`test`) or an explicitly approved exception from the user.
 - Statuses `partially implemented` or `not implemented` for mandatory requirements block task completion and hand-off.
-- For API surface changes, update all relevant layers together: backend view/urls, `contracts/orchestrator/src/**`, aggregated `contracts/orchestrator/openapi.yaml`, and frontend generated client/types when applicable.
-- Async requirements must include a real async boundary (queue/worker/workflow). Synchronous execution in request path does not satisfy async requirements.
-- Integration/source requirements must use real runtime integration paths. Metadata/mock paths are allowed only for tests or explicitly approved temporary modes.
-- If any mandatory requirement cannot be delivered now, stop and escalate with concrete blockers and options; do not silently ship a partial implementation.
+- If any mandatory requirement cannot be delivered now, stop and escalate with concrete blockers and options.
 - Final delivery report must include `Requirement -> Code -> Test` evidence with concrete file paths.
-
----
-
-## Landing the Plane (Session Completion)
-
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
-
-**MANDATORY WORKFLOW:**
-
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
-   - `git pull --rebase`
-   - `bd vc status`
-   - if there are pending Beads changes: `bd vc commit -m "..."`
-   - `git push`
-   - `git status` - MUST show "up to date with origin"
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
-
-**CRITICAL RULES:**
-
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
 
 ## Issue Tracking
 
 This project uses **bd (beads)** for issue tracking.
 Run `bd prime` for workflow context.
 
-**Quick reference:**
+**Rules:**
+- Use `bd` as the source of truth for code-change tracking.
+- Do not use markdown TODO lists as a parallel tracker.
+- Prefer `--json` in programmatic/agent flows.
+- Use `bd vc status` / `bd vc commit` for Beads VC.
+- `bd sync` is deprecated/no-op and must not be used as a sync step.
+- In repositories with `dolt_mode: "server"`, do not use `bd dolt pull/push`.
+- Check `bd ready` before starting code work.
 
-- `bd ready` - Find unblocked work
-- `bd create "Title" --type task --priority 2 --description "..."` - Create ad-hoc issue
-- `bd close <task-id>` - Complete work
-- `bd vc status` - Check Dolt VC status
-- `bd vc commit -m "..."` - Commit pending Beads changes (if any)
+## Search Playbook
 
-For full workflow details: `bd prime`
+Search order:
 
-### Beads Dolt Server Mode (текущий репозиторий)
+1. `mcp__claude-context__search_code`
+2. `ast-index search "<query>"` if the repository uses `ast-index` or semantic search is noisy
+3. `rg`
+4. `rg --files`
 
-Актуальный режим в этом репозитории: `dolt_mode: "server"` (`.beads/metadata.json`) + shared `beads-dolt.service`.
+Checklist:
 
-Ключевые правила:
+1. Formulate the query as `component + action + context`.
+2. First pass: `limit: 6-10`.
+3. Set `extensionFilter` immediately.
+4. If results are noisy, rephrase using concrete entities.
+5. Confirm facts in at least 2 sources: code + test/spec/README.
+6. Do not treat TODO/checklists/status files as proof of implementation.
 
-- `bd sync` — deprecated/no-op, не использовать как шаг синхронизации.
-- Базовая проверка окружения: `./debug/start-dolt.sh` и `bd doctor --server`.
-- Проверка сервиса: `systemctl --user status beads-dolt.service --no-pager`.
-- Для фиксации изменений использовать `bd vc status` / `bd vc commit`.
-- В этом репозитории **не использовать Dolt remote/store** и не выполнять `bd dolt pull/push`.
+## Indexing
 
-## Semantic Search Playbook
+- For manual reindexing, use `force=true`.
+- Use one canonical absolute repo path with trailing `/`.
+- Use the same path for `index/status/clear/search`.
+- If mixed path keys were used before, clear old keys once and continue only with the canonical path.
 
-Use this checklist for semantic code search in this repository.
+## Landing the Plane (Session Completion)
 
-### Search Order
+**When ending a work session, work is NOT complete until `git push` succeeds.**
 
-1. Use `mcp__claude-context__search_code` first (semantic search).
-2. Use `grep` second (exact/pattern search in known areas).
-3. Use glob/filename pattern search last.
+Mandatory workflow:
 
-### Default Query Preset
+1. File issues for remaining work
+2. Run quality gates (if code changed)
+3. Update issue status
+4. `git pull --rebase`
+5. `bd vc status`
+6. if needed: `bd vc commit -m "..."`
+7. `git push`
+8. `git status` must show “up to date with origin”
+9. Clean up and hand off
 
-- Always set `extensionFilter: [".rs"]` for first-pass code discovery.
-- Start with `limit: 5-8`.
-- Use intent-focused queries (behavior + domain terms), not only symbol names.
-- If results are noisy, add concrete context keywords in the query:
-  `TypeResolver`, `SemanticValidationVisitor`, `AnalysisHostV2`, `lsp_server`.
+**Critical rules:**
+- Never stop before push succeeds
+- Never leave work stranded locally
+- If push fails, resolve and retry until it succeeds
+- If push is blocked by an external constraint or explicit user restriction, report the blocker explicitly and stop
 
-### Starter Query Templates
+## Project Overlay
 
-Use these as ready-to-run prompts for `search_code`:
+### Поиск
+- Основной путь:
+  1. `mcp__claude-context__search_code`
+  2. `rg`
+  3. `rg --files`
+- Для первого прохода всегда использовать `extensionFilter: [".rs"]`.
+- Начинать с `limit: 5-8`.
+- Формулировать intent-focused запросы, а не только по имени символа.
+- Если выдача шумная, добавлять конкретные сущности:
+  - `TypeResolver`
+  - `SemanticValidationVisitor`
+  - `AnalysisHostV2`
+  - `lsp_server`
 
-1. `где реализована проверка совместимости типов аргументов вызова`
-2. `построение diagnostics для неизвестного метода или свойства`
-3. `понижение severity unknown member access до warning`
-4. `сужение типа после проверки ТипЗнч в условии`
-5. `entry point LSP diagnostics analysis pipeline`
-6. `как формируется TypeResolution для member access`
-7. `парсинг bsl модулей и построение индекса модулей конфигурации`
-8. `где используется TypeMetadataLookup для проверки методов и свойств`
+### Стартовые query-template
+- `где реализована проверка совместимости типов аргументов вызова`
+- `построение diagnostics для неизвестного метода или свойства`
+- `понижение severity unknown member access до warning`
+- `сужение типа после проверки ТипЗнч в условии`
+- `entry point LSP diagnostics analysis pipeline`
+- `как формируется TypeResolution для member access`
+- `парсинг bsl модулей и построение индекса модулей конфигурации`
+- `где используется TypeMetadataLookup для проверки методов и свойств`
 
-### Noise Control / Reindexing
-
-If semantic search returns too many docs/test artifacts, reindex with `force=true`
-and ignore these paths:
-
-- `docs/**`
-- `openspec/**`
-- `vscode-extension/.vscode-test/**`
-- `**/target/**`
-- `**/node_modules/**`
-- `**/dist/**`
-- `**/build/**`
-- `**/coverage/**`
-- `**/tests/**`
-- `examples/**`
+### Уменьшение шума при индексации
+- При шумной выдаче переиндексировать с `force=true`.
+- Игнорировать:
+  - `docs/**`
+  - `openspec/**`
+  - `vscode-extension/.vscode-test/**`
+  - `**/target/**`
+  - `**/node_modules/**`
+  - `**/dist/**`
+  - `**/build/**`
+  - `**/coverage/**`
+  - `**/tests/**`
+  - `examples/**`

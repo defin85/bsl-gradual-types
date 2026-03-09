@@ -3,14 +3,10 @@ use super::*;
 impl IntellisenseV2Facade {
     pub async fn snapshot_for_operation(&self, operation: SemanticOperation) -> SemanticSnapshot {
         let queue_priority = RuntimeQueuePriority::for_operation(operation);
-        let (analysis, index_snapshot, deps_id) = self
+        let (analysis, _index_snapshot, deps_id) = self
             .snapshot_with_deps_with_priority(ObservabilityOrigin::Runtime, queue_priority)
             .await;
-        SemanticSnapshot {
-            analysis,
-            index_snapshot,
-            deps_id,
-        }
+        SemanticSnapshot { analysis, deps_id }
     }
 
     /// Canonical stateful operation preparation for adapters:
@@ -169,11 +165,8 @@ impl IntellisenseV2Facade {
         }
 
         Ok(PreparedOperationSnapshot {
-            snapshot: SemanticSnapshot {
-                analysis,
-                index_snapshot,
-                deps_id,
-            },
+            snapshot: SemanticSnapshot { analysis, deps_id },
+            index_snapshot,
             wait_elapsed,
             snapshot_elapsed,
             wait_budget_exhausted,
@@ -225,7 +218,7 @@ impl IntellisenseV2Facade {
         let snapshot = Self::ephemeral_snapshot(
             deps_id,
             deps,
-            index_snapshot,
+            index_snapshot.clone(),
             context.settings.clone(),
             context.file_id,
             file_text,
@@ -249,6 +242,7 @@ impl IntellisenseV2Facade {
 
         Ok(PreparedOperationSnapshot {
             snapshot,
+            index_snapshot,
             wait_elapsed: None,
             snapshot_elapsed,
             wait_budget_exhausted: false,
@@ -646,7 +640,7 @@ impl IntellisenseV2Facade {
     pub fn ephemeral_snapshot(
         deps_id: DepsSnapshotId,
         deps: Arc<SemanticDeps>,
-        index_snapshot: Arc<IndexSnapshot>,
+        _index_snapshot: Arc<IndexSnapshot>,
         settings: ExecutionSettings,
         file_id: FileId,
         file_text: Arc<str>,
@@ -671,7 +665,6 @@ impl IntellisenseV2Facade {
 
         SemanticSnapshot {
             analysis: host.snapshot(),
-            index_snapshot,
             deps_id,
         }
     }

@@ -721,11 +721,8 @@ fn collect_members(request: MembersRequest) -> Result<BslMembersResponse, rmcp::
         }
     };
 
-    let bsl_runtime::application::SemanticSnapshot {
-        analysis,
-        index_snapshot,
-        ..
-    } = prepared.snapshot;
+    let analysis = prepared.snapshot.analysis;
+    let index_snapshot = prepared.index_snapshot;
     let program = IntellisenseV2Facade::run_optional_query(
         &context,
         ObservabilityStage::IrQuery,

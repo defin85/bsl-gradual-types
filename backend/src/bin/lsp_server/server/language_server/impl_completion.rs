@@ -590,7 +590,7 @@ impl BslLanguageServer {
                         observed_file_version,
                     ) = {
                         let analysis = prepared.snapshot.analysis;
-                        let index_snapshot = prepared.snapshot.index_snapshot;
+                        let index_snapshot = prepared.index_snapshot;
                         let member_access_request_for_query = member_access_request;
                         let last_apply_enqueued_at = self
                             .latest_apply_enqueued_at_v2

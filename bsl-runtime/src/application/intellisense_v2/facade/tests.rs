@@ -333,7 +333,55 @@ fn ephemeral_snapshot_sets_contract_inputs() {
         settings.settings_id.as_str(),
         "ephemeral snapshot should carry settings id"
     );
-    assert_eq!(snapshot.index_snapshot.id.as_str(), "index_ephemeral");
+}
+
+#[test]
+fn prepare_ephemeral_operation_keeps_discovery_snapshot_outside_semantic_snapshot() {
+    let deps_id = DepsSnapshotId::from_hash("deps_prepared_ephemeral");
+    let settings = ExecutionSettings {
+        settings_id: SettingsId::from_hash("settings_prepared_ephemeral"),
+        diagnostics_detail_level: DetailLevel::Full,
+    };
+    let context = ExecutionContext {
+        origin: ObservabilityOrigin::Agent,
+        operation: SemanticOperation::Members,
+        completion_mode: None,
+        completion_large_churn_active: false,
+        file_id: FileId(7),
+        min_file_version: Some(42),
+        expected_deps_id: Some(deps_id.clone()),
+        flow_sensitive: false,
+        settings: settings.clone(),
+        cancellation: CancellationPolicy::BestEffort,
+    };
+
+    let prepared = IntellisenseV2Facade::prepare_ephemeral_operation(
+        &context,
+        deps_id.clone(),
+        make_deps(),
+        make_index_snapshot("index_prepared_ephemeral"),
+        Arc::from("Перем х;"),
+        42,
+        Arc::from("<prepared-ephemeral>"),
+        None,
+    )
+    .expect("prepare_ephemeral_operation");
+
+    assert_eq!(
+        prepared.snapshot.analysis.file_version(FileId(7)).unwrap(),
+        Some(42),
+        "prepared semantic snapshot should carry file version"
+    );
+    assert_eq!(
+        prepared.snapshot.deps_id.as_str(),
+        deps_id.as_str(),
+        "prepared semantic snapshot should carry deps id"
+    );
+    assert_eq!(
+        prepared.index_snapshot.id.as_str(),
+        "index_prepared_ephemeral",
+        "discovery snapshot must stay outside semantic snapshot payload"
+    );
 }
 
 #[test]

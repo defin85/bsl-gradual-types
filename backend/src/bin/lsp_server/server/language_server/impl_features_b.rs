@@ -80,7 +80,7 @@ impl BslLanguageServer {
 
             let (analysis, file_content, file_path, deps, ir_program) = {
                 let analysis = prepared.snapshot.analysis;
-                let index_snapshot = prepared.snapshot.index_snapshot;
+                let index_snapshot = prepared.index_snapshot;
                 let observed_deps_id = Some(prepared.snapshot.deps_id);
                 let observed_file_version = analysis.file_version(file_id).ok().flatten();
                 let observed_settings_id = analysis.settings_id().ok();
@@ -417,7 +417,7 @@ impl BslLanguageServer {
                 ir_program,
             ) = {
                 let analysis = prepared.snapshot.analysis;
-                let index_snapshot = prepared.snapshot.index_snapshot;
+                let index_snapshot = prepared.index_snapshot;
 
                 let observed_file_version = analysis.file_version(file_id).ok().flatten();
                 let observed_deps_id = Some(prepared.snapshot.deps_id);

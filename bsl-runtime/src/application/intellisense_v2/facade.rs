@@ -188,13 +188,13 @@ pub enum ObservabilityMetricKind {
 /// Shared snapshot payload consumed by semantic operations.
 pub struct SemanticSnapshot {
     pub analysis: AnalysisV2,
-    pub index_snapshot: Arc<IndexSnapshot>,
     pub deps_id: DepsSnapshotId,
 }
 
 /// Prepared operation state after canonical wait/snapshot sequencing.
 pub struct PreparedOperationSnapshot {
     pub snapshot: SemanticSnapshot,
+    pub index_snapshot: Arc<IndexSnapshot>,
     pub wait_elapsed: Option<Duration>,
     pub snapshot_elapsed: Duration,
     pub wait_budget_exhausted: bool,

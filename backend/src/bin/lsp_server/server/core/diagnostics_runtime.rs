@@ -443,7 +443,7 @@ impl BslLanguageServer {
         }
 
         let mut analysis = Some(prepared.snapshot.analysis);
-        let index_snapshot_id = prepared.snapshot.index_snapshot.id.as_str().to_string();
+        let index_snapshot_id = prepared.index_snapshot.id.as_str().to_string();
         let observed_deps_id = Some(prepared.snapshot.deps_id.as_str().to_string());
         let observed_settings_id = analysis
             .as_ref()

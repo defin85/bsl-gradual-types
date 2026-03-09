@@ -80,6 +80,46 @@ Canonical IR MUST содержать или однозначно порожда�
 - **THEN** индекс лишь денормализует lookup для fast queries
 - **AND** не вычисляет альтернативный semantic результат из parse tree или отдельной эвристики
 
+### Requirement: Semantic fast index отделён от discovery/search read-model (MUST)
+Система MUST различать:
+- semantic fast index для interactive semantic queries;
+- discovery/search read-model (`IndexSnapshot` и эквиваленты) для search/discovery сценариев.
+
+Discovery/search read-model MAY сосуществовать в том же runtime, но MUST NOT быть semantic source of truth для `completion`, `hover`, `signatureHelp`, `definition`, `type-at-position`, `diagnostics`.
+Недоступность semantic fast index MUST NOT приводить к backfill через discovery/search read-model.
+
+#### Scenario: Search index не подменяет semantic truth
+- **GIVEN** в runtime одновременно существуют canonical IR-derived semantic index и discovery/search index
+- **WHEN** IDE запрашивает `hover` или `completion`
+- **THEN** semantic ответ строится только из canonical IR и semantic fast index текущей revision
+- **AND** наличие search index не меняет semantic contract интерактивного ответа
+
+#### Scenario: Search index не становится rescue path при miss semantic fast index
+- **GIVEN** discovery/search index доступен, но semantic fast index текущей revision ещё недоступен
+- **WHEN** IDE запрашивает `completion`, `hover` или `definition`
+- **THEN** сервер отвечает fail-closed для текущей revision
+- **AND** не строит semantic payload из discovery/search read-model
+
+### Requirement: Adapter surfaces не реконструируют semantic truth локально (MUST)
+LSP/Web/MCP/CLI surfaces MUST использовать shared semantic runtime contract как единственный semantic read path.
+
+Adapters MAY:
+- выполнять syntax/position extraction;
+- конвертировать spans/offsets в surface-specific coordinates;
+- формировать transport payload.
+
+Adapters MUST NOT:
+- реконструировать owner/member/type truth локально из `parse_result`;
+- использовать текстовые эвристики как substitute для semantic truth;
+- использовать adapter-local caches или precomputed artifacts как stale substitute после смены revision;
+- materialize-ить alternate semantic answer при miss canonical artifacts.
+
+#### Scenario: Adapter miss остаётся fail-closed
+- **GIVEN** canonical IR или derived semantic index текущей revision недоступны
+- **WHEN** любой adapter surface запрашивает `completion`, `hover`, `definition` или `type-at-position`
+- **THEN** surface возвращает fail-closed результат согласно своему API contract
+- **AND** не строит локальный semantic substitute вне shared runtime path
+
 ### Requirement: Canonical semantic queries fail-closed при недоступности артефактов (MUST)
 Interactive semantic queries (`completion`, `hover`, `signatureHelp`, `definition`, `type-at-position`) MUST завершаться fail-closed, если canonical IR или derived semantic index текущей revision недоступны.
 
@@ -100,9 +140,32 @@ Observability MAY фиксировать bounded reason-code недоступн�
 
 #### Scenario: После didChange stale semantic payload не маскируется под current revision
 - **GIVEN** пользователь только что изменил документ и current revision ещё не имеет canonical IR или derived semantic index
-- **WHEN** IDE запрашивает `hover` или `type-at-position`
+- **WHEN** IDE запрашивает `hover`, `type-at-position` или `definition`
 - **THEN** сервер отвечает fail-closed для текущей revision
 - **AND** не возвращает semantic payload, вычисленный для предыдущей revision, как будто он относится к текущему коду
+
+### Requirement: Fail-closed observability использует bounded reason codes (MUST)
+Когда interactive semantic запрос завершается fail-closed, observability MUST фиксировать bounded low-cardinality reason code для текущей revision.
+
+Reason code MUST описывать причину недоступности canonical path и MUST NOT обозначать alternate semantic path как допустимый substitute.
+Reason taxonomy MUST оставаться low-cardinality и одинаково интерпретироваться во всех interactive surfaces.
+
+#### Scenario: Miss current revision отражается bounded reason code
+- **GIVEN** canonical IR или derived semantic index текущей revision недоступны
+- **WHEN** IDE запрашивает `hover` или `completion`
+- **THEN** observability фиксирует bounded reason code для fail-closed результата
+- **AND** причина не маскирует ответ как stale-but-acceptable semantic path
+
+### Requirement: Interactive latency budget защищается canonical fast path, а не fallback semantics (MUST)
+Система MUST удовлетворять согласованным representative latency budgets для interactive semantic queries (`completion`, `hover`, `definition`, `type-at-position`) с использованием canonical IR + derived semantic index.
+
+Если latency budget нарушен, система MUST оптимизировать canonical semantic path и MUST NOT возвращать stale, degraded или discovery-backed semantic substitute как механизм соблюдения latency.
+
+#### Scenario: Latency regression не возвращает legacy semantic rescue path
+- **GIVEN** representative interactive fixture показывает превышение согласованного latency budget
+- **WHEN** команда исправляет производительность v2 semantic pipeline
+- **THEN** исправление оптимизирует canonical IR/derived semantic index path
+- **AND** merge-state не вводит stale/degraded/search-backed semantic substitute как perf workaround
 
 ### Requirement: Applied-owner bare identifier fallback удалён из v2 semantics (MUST)
 Система MUST NOT резолвить bare identifiers в `ObjectModule` / `RecordSetModule` через special applied-owner fallback вне canonical IR semantic binding model.

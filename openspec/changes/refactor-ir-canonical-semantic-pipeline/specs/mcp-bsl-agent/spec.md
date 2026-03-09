@@ -30,6 +30,21 @@ Latency-critical MCP инструменты (`bsl_type_at_position`, `bsl_member
 - **THEN** owner/member resolution опирается на canonical IR и derived semantic index той же revision
 - **AND** результат не зависит от локального MCP-only semantic reconstruction
 
+### Requirement: MCP semantic adapters не реконструируют semantic truth локально (MUST)
+`bsl-agent` MUST использовать shared runtime contract как единственный semantic read path для MCP semantic tools и MAY выполнять только transport/syntax/position preparation вокруг него.
+
+`bsl-agent` MUST NOT:
+- резолвить owner/member/type truth локально из `parse_result`;
+- строить alternate semantic result из текста документа или adapter-local эвристик;
+- использовать adapter-local cache предыдущей revision как semantic substitute после смены snapshot;
+- использовать discovery/search index как semantic source для interactive semantic tools.
+
+#### Scenario: MCP adapter не делает local rescue при semantic miss
+- **GIVEN** canonical IR или derived semantic index текущей revision недоступны
+- **WHEN** клиент вызывает `bsl_members_start` или `bsl_type_at_position_start`
+- **THEN** `bsl-agent` возвращает fail-closed результат согласно MCP contract
+- **AND** не materialize-ит локальный semantic substitute вне shared runtime
+
 ### Requirement: MCP semantic tools fail-closed при miss canonical artifacts (MUST)
 Если canonical IR или derived semantic index текущей revision недоступны, semantic MCP tools MUST завершаться fail-closed.
 
@@ -40,6 +55,7 @@ Fail-closed для MCP означает:
 - отсутствие stale semantic payload, замаскированного под current-revision ответ.
 
 MCP MUST NOT использовать `serve_only -> full` semantic fallback как substitute для canonical IR-derived path.
+MCP MUST NOT использовать discovery/search index как latency/perf rescue path для interactive semantic tools.
 
 #### Scenario: MCP members не строит alternate semantic result при miss current revision
 - **GIVEN** active session revision ещё не имеет canonical IR или derived semantic index
@@ -52,3 +68,16 @@ MCP MUST NOT использовать `serve_only -> full` semantic fallback к�
 - **WHEN** клиент вызывает `bsl_type_at_position_start` или `bsl_definition_start`
 - **THEN** сервер отвечает fail-closed для текущей revision
 - **AND** не возвращает semantic payload от предыдущей revision как будто он относится к текущему snapshot
+
+### Requirement: MCP fail-closed observability использует shared bounded taxonomy (MUST)
+Когда semantic MCP tool завершает запрос fail-closed, `bsl-agent` MUST фиксировать bounded low-cardinality reason code из shared taxonomy semantic runtime.
+
+`bsl-agent` MUST NOT:
+- вводить MCP-only reason labels, которые размывают общую диагностику;
+- трактовать stale/degraded result как допустимый semantic substitute ради улучшения perceived availability.
+
+#### Scenario: MCP fail-closed reason code совпадает с shared semantic runtime taxonomy
+- **GIVEN** canonical IR или derived semantic index текущей revision недоступны
+- **WHEN** клиент вызывает `bsl_members_start` или `bsl_definition_start`
+- **THEN** observability использует shared bounded reason code для fail-closed результата
+- **AND** reason code не маскирует отсутствие canonical semantic path как acceptably stale response

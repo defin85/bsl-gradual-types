@@ -23,12 +23,16 @@
 - Переопределить архитектуру `bsl-intellisense-v2` как `IR -> derived semantic index -> interactive queries`.
 - Зафиксировать, что semantic truth может происходить только из canonical IR snapshot текущей revision.
 - Зафиксировать, что `derived semantic index` строится только из IR snapshot и не выполняет самостоятельный semantic inference.
+- Зафиксировать, что semantic `derived semantic index` остаётся отдельным revision-bound read-model и MUST NOT подменяться discovery/search read-model (`IndexSnapshot` и эквиваленты).
+- Зафиксировать, что discovery/search read-model может использоваться только для search/discovery и MUST NOT backfill-ить semantic surfaces даже при временной недоступности semantic fast index.
 - Удалить как целевой end-state:
   - stale/degraded/keyword semantic fallback paths;
   - non-IR semantic fast paths, которые материализуют truth вне canonical IR;
   - applied-owner bare identifier fallback для `ObjectModule` / `RecordSetModule`.
 - Зафиксировать fail-closed contract для `completion`, `hover`, `signatureHelp`, `definition`, `type-at-position`, `members`, `diagnostics` и MCP/Web adapter surfaces.
 - Зафиксировать, что система MUST NOT возвращать semantic truth от другой revision под видом exact/current-revision ответа; при недоступности current-revision canonical artifacts ответ остаётся fail-closed.
+- Зафиксировать, что adapters (`LSP`, `Web`, `MCP`, `CLI`) не materialize-ят semantic truth локально и используют shared runtime contract как единственный semantic read path.
+- Зафиксировать explicit quality gates для cutover: bounded low-cardinality fail-closed observability reason codes, representative latency acceptance budgets и запрет на perf-rescue через alternate semantic path.
 - Согласовать MCP semantic tools с тем же canonical IR + derived-index runtime contract.
 
 ## Impact
@@ -47,4 +51,5 @@
   - stale semantic ответы больше не маскируются под exact/current-revision semantics;
   - bare identifiers в `ObjectModule` / `RecordSetModule` больше не получают implicit applied-owner resolution вне canonical IR semantics.
 - Coordination:
-  - pending change `refactor-bsl-agent-index-backed-search` должен быть согласован с новым определением index path как IR-derived, а не как отдельного semantic source.
+  - pending change `refactor-bsl-agent-index-backed-search` должен быть согласован с новым определением index path как IR-derived, а не как отдельного semantic source;
+  - `IndexSnapshot` и эквиваленты остаются discovery/search-only и не могут выступать rollback-заменой semantic core для interactive queries.

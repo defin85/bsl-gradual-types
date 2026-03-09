@@ -6,6 +6,7 @@
 - exact completion path использует `SemanticProgram`/IR;
 - `type_at_byte_offset`, `serve_only` и ряд interactive owner-hint/type lookup paths используют отдельный `type_index`;
 - `type_index` строится напрямую из `parse_result.program`, а не как projection от canonical IR;
+- в runtime уже существует отдельный discovery/search read-model (`IndexSnapshot`), который не должен становиться второй semantic truth;
 - часть user-facing availability contract завязана на degraded semantics;
 - applied-owner bare identifier fallback остаётся отдельной semantic policy вне canonical IR.
 Дополнительно часть miss-path поведения допускает возврат semantic substitute, который для пользователя выглядит как ответ про текущую revision, хотя по сути является stale/degraded approximation.
@@ -86,6 +87,12 @@
 - индекс не читает `parse_result.program` как источник semantic truth;
 - индекс не реанимирует legacy fallback semantics.
 
+`derived semantic index` нормативно отделён от discovery/search индексов:
+- search/discovery read-model (`IndexSnapshot` и эквиваленты) может сосуществовать в runtime;
+- search/discovery read-model не является semantic source для `completion`, `hover`, `signatureHelp`, `definition`, `type-at-position`, `members`, `diagnostics`;
+- недоступность semantic fast index не даёт права backfill-ить semantic surfaces через discovery/search index;
+- координация с pending search changes должна сохранять это разделение явно.
+
 ### 3. Interactive queries используют только canonical IR или derived semantic index
 
 Целевой read path:
@@ -96,6 +103,12 @@
 - `type-at-position`: base type из derived semantic index, flow-sensitive overlay из canonical IR/CFG;
 - `semantic diagnostics`: canonical IR + derived semantic index;
 - `MCP` / `Web`: thin adapters над тем же shared runtime contract.
+
+Adapters (`LSP`, `Web`, `MCP`, `CLI`) не создают semantic truth локально:
+- допустимы syntax/position extraction и transport mapping;
+- недопустимы adapter-local owner/member/type reconstruction из `parse_result`, текста документа или локальных fallback-эвристик;
+- недопустимы adapter-local caches, которые переживают revision switch и затем маскируются под current-revision semantic truth;
+- при miss canonical artifacts adapter обязан оставаться fail-closed, а не materialize-ить substitute.
 
 ### 4. Flow-sensitive анализ остаётся IR-based overlay, но опирается на тот же base contract
 
@@ -123,6 +136,18 @@ Flow-sensitive logic добавляет narrowing/null-safety поверх то�
 - маскировать substitute-ответ как эквивалент canonical truth текущей revision.
 
 Observability обязана отражать bounded причину fail-closed, но не включать альтернативный semantic path.
+
+Для cutover acceptance reason taxonomy должна быть low-cardinality и различать как минимум:
+- `missing_canonical_ir`;
+- `missing_semantic_index`;
+- `superseded_revision`;
+- `cancelled`;
+- `unavailable_by_contract`.
+
+Observability контракт дополнительно требует:
+- фиксированный bounded набор reason codes без свободных/high-cardinality labels;
+- одинаковую интерпретацию reason codes во всех adapters;
+- отсутствие reason code, который подразумевает допустимость stale/substitute semantic payload.
 
 ### 6. Applied-owner bare identifier fallback удаляется
 
@@ -176,18 +201,29 @@ Rejected.
 - Big-bang cutover повышает интеграционный риск.
   - Mitigation: заранее зафиксировать execution matrix и cross-consumer acceptance до кодирования.
 
+## Quality Gates
+
+- Representative latency budgets фиксируются для интерактивных semantic queries (`completion`, `hover`, `definition`, `type-at-position`, `members`) на типовых fixtures:
+  - member access chain;
+  - immediately-after-`didChange` запрос;
+  - `ObjectModule` / `RecordSetModule`;
+  - неполный код с syntax extraction.
+- Cutover acceptance не допускает perf-rescue через alternate semantic path: любые latency проблемы устраняются оптимизацией canonical IR / derived semantic index, а не возвратом stale/degraded semantics.
+- Cross-consumer observability должна показывать одинаковый bounded reason code для одинаковой причины fail-closed в `LSP`, `Web`, `MCP`, `CLI`.
+
 ## Migration Plan
 
 1. Специфицировать canonical IR contract и derived semantic index contract.
-2. Расширить canonical IR так, чтобы он содержал все semantic facts, нужные interactive consumers.
-3. Построить derived semantic index как projection от canonical IR snapshot.
-4. Перевести `type-at-position`, owner hints, `hover`, `signatureHelp`, `definition`, `completion`, `members`, `diagnostics`, `MCP`/`Web` adapters на новый shared path.
-5. В той же merge-state удалить:
+2. Зафиксировать границу между semantic fast index и discovery/search read-model, чтобы pending search changes не ввели вторую semantic truth.
+3. Расширить canonical IR так, чтобы он содержал все semantic facts, нужные interactive consumers.
+4. Построить derived semantic index как projection от canonical IR snapshot.
+5. Перевести `type-at-position`, owner hints, `hover`, `signatureHelp`, `definition`, `completion`, `members`, `diagnostics`, `MCP`/`Web`/`CLI` adapters на новый shared path без local semantic reconstruction.
+6. В той же merge-state удалить:
    - parse-result-based semantic index truth,
    - degraded/stale/keyword semantic fallback paths,
    - stale-as-current substitute behavior,
    - applied-owner bare identifier fallback.
-6. Перебазировать contracts, acceptance и perf-gates на fail-closed canonical behavior.
+7. Перебазировать contracts, acceptance и perf-gates на fail-closed canonical behavior, включая bounded reason codes и representative latency budgets.
 
 ## Open Questions
 

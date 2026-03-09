@@ -1,7 +1,7 @@
 ## 1. Contract
 - [ ] 1.1 Зафиксировать, что canonical IR является единственным semantic source of truth для v2.
 - [ ] 1.2 Зафиксировать, что `derived semantic index` является единственным fast query артефактом и строится только из IR snapshot текущей revision.
-- [ ] 1.3 Зафиксировать fail-closed policy для недоступности canonical semantic артефактов вместо stale/degraded/keyword fallback.
+- [ ] 1.3 Зафиксировать fail-closed policy для недоступности canonical semantic артефактов вместо stale/degraded/keyword fallback и запрет на маскировку stale ответа под current-revision semantics.
 - [ ] 1.4 Зафиксировать удаление applied-owner bare identifier fallback как части semantic contract.
 - [ ] 1.5 Зафиксировать, что `parse_result` и другие syntax helpers могут использоваться только для syntax/position extraction, но не как самостоятельный semantic source.
 
@@ -9,7 +9,7 @@
 - [ ] 2.1 Описать минимальные расширения canonical IR, достаточные для owner/member/type/definition queries без parallel semantic inference path.
 - [ ] 2.2 Описать состав `derived semantic index` и contract его построения из одного IR snapshot/revision.
 - [ ] 2.3 Описать big-bang cutover для `LSP`, `Web`, `MCP`, `CLI` без long-lived dual runtime behavior в merge state.
-- [ ] 2.4 Описать contract/version impact для `contracts/**`, observability, acceptance и perf expectations после удаления degraded paths.
+- [ ] 2.4 Описать contract/version impact для `contracts/**`, observability, acceptance и perf expectations после удаления degraded paths и stale-as-current substitute behavior.
 - [ ] 2.5 Описать координацию или supersede-plan для связанных pending MCP/index changes.
 
 ## 3. Validation Plan
@@ -18,6 +18,7 @@
   - [ ] exact cross-consumer semantic equivalence
   - [ ] отсутствие adapter-local semantic truth
   - [ ] fail-closed behavior при miss canonical IR/index
+  - [ ] отсутствие stale semantic ответа, замаскированного под current revision
   - [ ] removal of bare-identifier fallback semantics
 - [ ] 3.3 Зафиксировать набор quality gates для cutover: tests, contracts, observability/perf checks.
 - [ ] 3.4 Прогнать `openspec validate refactor-ir-canonical-semantic-pipeline --strict --no-interactive`.

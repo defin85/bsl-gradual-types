@@ -8,6 +8,7 @@
 - `type_index` строится напрямую из `parse_result.program`, а не как projection от canonical IR;
 - часть user-facing availability contract завязана на degraded semantics;
 - applied-owner bare identifier fallback остаётся отдельной semantic policy вне canonical IR.
+Дополнительно часть miss-path поведения допускает возврат semantic substitute, который для пользователя выглядит как ответ про текущую revision, хотя по сути является stale/degraded approximation.
 
 Пользователь выбрал жёсткий end-state:
 - big-bang cutover;
@@ -21,6 +22,7 @@
 - Свести быстрые интерактивные запросы к чтению `derived semantic index`, построенного только из canonical IR snapshot.
 - Убрать parallel semantic inference paths и hidden adapter-local semantic truth.
 - Сделать fail-closed поведение явной частью публичного semantic contract.
+- Убрать возможность выдавать stale semantic result под видом exact/current-revision ответа.
 - Сохранить bounded interactive latency через derived index, а не через parallel semantic pipelines.
 
 ## Non-Goals
@@ -116,6 +118,10 @@ Flow-sensitive logic добавляет narrowing/null-safety поверх то�
 - `None`;
 - или иной bounded empty contract, совместимый с конкретным API surface.
 
+Система MUST NOT:
+- возвращать stale semantic payload под видом exact/current-revision ответа;
+- маскировать substitute-ответ как эквивалент canonical truth текущей revision.
+
 Observability обязана отражать bounded причину fail-closed, но не включать альтернативный semantic path.
 
 ### 6. Applied-owner bare identifier fallback удаляется
@@ -159,6 +165,8 @@ Rejected.
 
 - Поведение станет строже для пользователей при miss canonical artifacts.
   - Mitigation: explicit fail-closed contract, bounded observability reasons, acceptance updates.
+- Пользователи чаще увидят empty/unavailable вместо "хоть какого-то" результата.
+  - Mitigation: считать это осознанным контрактным изменением; stale/substitute ответ больше не считается допустимым, если он маскируется под current-revision semantics.
 - Рефактор затронет hot paths во многих модулях.
   - Mitigation: derived semantic index сохраняет fast query path и позволяет вынести expensive work в snapshot build.
 - Возможны perf regressions после удаления stale/degraded shortcuts.
@@ -177,6 +185,7 @@ Rejected.
 5. В той же merge-state удалить:
    - parse-result-based semantic index truth,
    - degraded/stale/keyword semantic fallback paths,
+   - stale-as-current substitute behavior,
    - applied-owner bare identifier fallback.
 6. Перебазировать contracts, acceptance и perf-gates на fail-closed canonical behavior.
 

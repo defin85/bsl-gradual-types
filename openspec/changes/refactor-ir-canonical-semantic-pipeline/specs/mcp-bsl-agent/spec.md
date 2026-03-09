@@ -37,6 +37,7 @@ Fail-closed для MCP означает:
 - пустой или `None` semantic payload там, где это допустимо публичным contract;
 - explicit warning/unavailable indication, если она уже предусмотрена surface;
 - отсутствие adapter-local semantic fallback, усиливающего truth.
+- отсутствие stale semantic payload, замаскированного под current-revision ответ.
 
 MCP MUST NOT использовать `serve_only -> full` semantic fallback как substitute для canonical IR-derived path.
 
@@ -45,3 +46,9 @@ MCP MUST NOT использовать `serve_only -> full` semantic fallback к�
 - **WHEN** клиент вызывает `bsl_members_start`
 - **THEN** сервер возвращает fail-closed empty/unavailable semantic result для этой revision
 - **AND** не materialize-ит members из alternate non-IR semantic path
+
+#### Scenario: MCP не возвращает stale semantic ответ как current revision result
+- **GIVEN** active session только что получила новую revision, а canonical IR или derived semantic index для неё ещё недоступны
+- **WHEN** клиент вызывает `bsl_type_at_position_start` или `bsl_definition_start`
+- **THEN** сервер отвечает fail-closed для текущей revision
+- **AND** не возвращает semantic payload от предыдущей revision как будто он относится к текущему snapshot

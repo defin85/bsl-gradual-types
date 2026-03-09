@@ -9,6 +9,7 @@
 - в `ObjectModule` / `RecordSetModule` остаётся applied-owner bare identifier semantics вне canonical IR path.
 
 Это усложняет доказательство того, что все semantic consumers читают одну и ту же truth, и оставляет архитектуру с несколькими конкурентными источниками semantic knowledge.
+Дополнительно это размывает пользовательский контракт: stale/degraded semantic ответ может выглядеть как ответ для текущей revision, хотя фактически относится к предыдущему snapshot.
 
 Пользователь подтвердил целевой end-state:
 - IR становится canonical semantic source of truth;
@@ -27,6 +28,7 @@
   - non-IR semantic fast paths, которые материализуют truth вне canonical IR;
   - applied-owner bare identifier fallback для `ObjectModule` / `RecordSetModule`.
 - Зафиксировать fail-closed contract для `completion`, `hover`, `signatureHelp`, `definition`, `type-at-position`, `members`, `diagnostics` и MCP/Web adapter surfaces.
+- Зафиксировать, что система MUST NOT возвращать semantic truth от другой revision под видом exact/current-revision ответа; при недоступности current-revision canonical artifacts ответ остаётся fail-closed.
 - Согласовать MCP semantic tools с тем же canonical IR + derived-index runtime contract.
 
 ## Impact
@@ -42,6 +44,7 @@
   - `contracts/**`
 - Breaking changes:
   - user-facing degraded completion/type fallback paths заменяются на explicit unavailable/empty fail-closed behavior;
+  - stale semantic ответы больше не маскируются под exact/current-revision semantics;
   - bare identifiers в `ObjectModule` / `RecordSetModule` больше не получают implicit applied-owner resolution вне canonical IR semantics.
 - Coordination:
   - pending change `refactor-bsl-agent-index-backed-search` должен быть согласован с новым определением index path как IR-derived, а не как отдельного semantic source.

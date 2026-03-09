@@ -11,6 +11,7 @@
 Syntax extraction для неполного кода MAY использовать parse/syntax helpers, но semantic candidates MUST происходить только из canonical IR snapshot текущей revision и его derived semantic index.
 
 Если canonical semantic artifacts для текущей revision недоступны, completion MUST работать fail-closed и MUST NOT синтезировать semantic candidates из stale cache, keyword fallback или альтернативного inference path.
+Система MUST NOT возвращать semantic candidates другой revision под видом exact/current-revision completion ответа.
 
 #### Scenario: Completion на неполном коде использует canonical semantic path
 - **GIVEN** пользователь набирает `expr.` и код может быть синтаксически неполным
@@ -84,6 +85,7 @@ Interactive semantic queries (`completion`, `hover`, `signatureHelp`, `definitio
 
 Fail-closed path MUST NOT:
 - использовать stale semantic artifacts как substitute;
+- возвращать semantic payload предыдущей revision под видом ответа для текущей revision;
 - возвращать keyword fallback как semantic answer;
 - запускать альтернативный parse-result-based semantic inference path;
 - усиливать semantic truth локальной adapter logic.
@@ -95,6 +97,12 @@ Observability MAY фиксировать bounded reason-code недоступн�
 - **WHEN** IDE запрашивает hover в позиции с member access
 - **THEN** сервер возвращает empty/unavailable hover response
 - **AND** не materialize-ит semantic ответ из альтернативного non-IR path
+
+#### Scenario: После didChange stale semantic payload не маскируется под current revision
+- **GIVEN** пользователь только что изменил документ и current revision ещё не имеет canonical IR или derived semantic index
+- **WHEN** IDE запрашивает `hover` или `type-at-position`
+- **THEN** сервер отвечает fail-closed для текущей revision
+- **AND** не возвращает semantic payload, вычисленный для предыдущей revision, как будто он относится к текущему коду
 
 ### Requirement: Applied-owner bare identifier fallback удалён из v2 semantics (MUST)
 Система MUST NOT резолвить bare identifiers в `ObjectModule` / `RecordSetModule` через special applied-owner fallback вне canonical IR semantic binding model.

@@ -14,7 +14,6 @@ use bsl_backend::application::type_system::{
 use bsl_backend::application::CompletionStats;
 use bsl_backend::application::{
     get_completion_with_semantic_hint_snapshot_with_trigger_hint,
-    get_completion_with_semantic_program_snapshot_v2_with_trigger_hint,
     get_completion_with_semantic_program_snapshot_with_trigger_hint,
 };
 use bsl_backend::system::IndexSnapshot;
@@ -150,7 +149,7 @@ pub async fn handle_completion_v2_with_trigger_hint(
     file_content: Arc<str>,
     file_path: Arc<str>,
     ir_program: Arc<SemanticProgram>,
-    parse_result: Option<Arc<bsl_syntax::ast::ParseResult>>,
+    _parse_result: Option<Arc<bsl_syntax::ast::ParseResult>>,
     member_access_owner_type_hint: Option<TypeResolution>,
     deps: Arc<bsl_analysis_v2::SemanticDeps>,
     position: Position,
@@ -166,43 +165,21 @@ pub async fn handle_completion_v2_with_trigger_hint(
         .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())));
     let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
 
-    let completion = match parse_result {
-        Some(parse_result) => {
-            get_completion_with_semantic_program_snapshot_v2_with_trigger_hint(
-                file_content.as_ref(),
-                position.line,
-                position.character,
-                Some(file_uri.as_str()),
-                index_snapshot,
-                &metadata_lookup,
-                file_path.as_ref(),
-                resolver.as_ref(),
-                ir_program,
-                parse_result,
-                member_access_owner_type_hint,
-                include_flow_sensitive,
-                trigger_char_hint,
-            )
-            .await
-        }
-        None => {
-            get_completion_with_semantic_program_snapshot_with_trigger_hint(
-                file_content.as_ref(),
-                position.line,
-                position.character,
-                Some(file_uri.as_str()),
-                index_snapshot,
-                &metadata_lookup,
-                file_path.as_ref(),
-                resolver.as_ref(),
-                ir_program,
-                member_access_owner_type_hint,
-                include_flow_sensitive,
-                trigger_char_hint,
-            )
-            .await
-        }
-    };
+    let completion = get_completion_with_semantic_program_snapshot_with_trigger_hint(
+        file_content.as_ref(),
+        position.line,
+        position.character,
+        Some(file_uri.as_str()),
+        index_snapshot,
+        &metadata_lookup,
+        file_path.as_ref(),
+        resolver.as_ref(),
+        ir_program,
+        member_access_owner_type_hint,
+        include_flow_sensitive,
+        trigger_char_hint,
+    )
+    .await;
 
     match completion {
         Ok(result) => {

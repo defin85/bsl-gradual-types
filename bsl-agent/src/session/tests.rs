@@ -334,6 +334,94 @@ async fn observability_metrics_exposes_unified_stage_contract_for_ready_session(
 }
 
 #[tokio::test]
+async fn bsl_members_does_not_execute_parse_result_query_on_semantic_path() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let job_manager = Arc::new(JobManager::new());
+    let manager = Arc::new(SessionManager::new());
+    let open = manager
+        .open(
+            WorkspaceOpenParams {
+                roots: vec![temp.path().to_string_lossy().to_string()],
+                platform_docs_archive: None,
+                platform_version: None,
+                configuration_path: None,
+                mode: None,
+            },
+            Arc::clone(&job_manager),
+        )
+        .await
+        .expect("open");
+    wait_startup(job_manager.as_ref(), &open).await;
+
+    let session_id = open.session_id.clone();
+    let root_id = open.roots[0].root_id.clone();
+    let overlay_file = FileRef {
+        doc: DocumentRef::Canonical(CanonicalDocumentRef {
+            root_id,
+            path: "src/CommonModules/Foo/Module.bsl".to_string(),
+        }),
+        text: Some(
+            "Procedure Test()\n    arr = Новый Массив;\n    arr.Добавить(1);\n    arr.\nEndProcedure\n"
+                .to_string(),
+        ),
+        version: Some(1),
+    };
+    manager
+        .documents_set(
+            &session_id,
+            &[WorkspaceDocumentsSetFile::File(overlay_file.clone())],
+            true,
+        )
+        .await
+        .expect("documents_set");
+
+    let baseline_metrics = manager
+        .observability_metrics_get(&session_id)
+        .await
+        .expect("observability before members");
+    let baseline_parse_result_queries = counter_value(
+        &baseline_metrics.metrics,
+        "intellisense_v2_parse_result_query_total",
+    );
+
+    let members = manager
+        .bsl_members(BslMembersParams {
+            session_id: session_id.clone(),
+            file: FileRef {
+                doc: overlay_file.doc.clone(),
+                text: None,
+                version: None,
+            },
+            position: Position {
+                line: 3,
+                character: 6,
+            },
+            limit: 50,
+            include_flow_sensitive: false,
+        })
+        .await
+        .expect("bsl_members");
+    assert!(
+        !members.truncated,
+        "members query must not truncate response"
+    );
+
+    let after_metrics = manager
+        .observability_metrics_get(&session_id)
+        .await
+        .expect("observability after members");
+    let after_parse_result_queries = counter_value(
+        &after_metrics.metrics,
+        "intellisense_v2_parse_result_query_total",
+    );
+    assert_eq!(
+        after_parse_result_queries, baseline_parse_result_queries,
+        "semantic MCP members path must not execute parse_result query; before={baseline_parse_result_queries}, after={after_parse_result_queries}, metrics={}",
+        after_metrics.metrics
+    );
+}
+
+#[tokio::test]
 async fn documents_set_and_clear_bump_revision_only_on_change() {
     let temp = tempfile::TempDir::new().expect("tempdir");
 

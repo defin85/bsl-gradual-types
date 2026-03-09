@@ -4630,8 +4630,7 @@ async fn p7_form_module_object_completion_uses_default_lsp_owner_hint_path() {
     )
     .await;
 
-    let completion_position =
-        find_utf16_position_after_marker(fixture, "ДляCompletion = Объект.");
+    let completion_position = find_utf16_position_after_marker(fixture, "ДляCompletion = Объект.");
     let completion_labels = lsp_completion_labels_at(&mut service, &uri, completion_position).await;
     assert!(
         completion_labels.iter().any(|label| label == "Ссылка"),
@@ -8210,8 +8209,8 @@ async fn p24_real_scenario_observability_stage_parity_lsp_vs_mcp() {
         "MCP metrics missing parse_result_query stage, stages={mcp_stages:?}"
     );
     assert!(
-        has_positive_counter_for_stage(&mcp_metrics_payload, "parse_result_query"),
-        "MCP stage parse_result_query has no positive counters"
+        !has_positive_counter_for_stage(&mcp_metrics_payload, "parse_result_query"),
+        "MCP semantic scenario must not execute parse_result_query stage"
     );
 
     assert_drilldown_stage_metrics_for_origin(&lsp_metrics_payload, "lsp");

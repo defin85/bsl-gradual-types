@@ -735,24 +735,7 @@ fn collect_members(request: MembersRequest) -> Result<BslMembersResponse, rmcp::
     )
     .ok()
     .flatten();
-    let parse_result = IntellisenseV2Facade::run_parse_result_query(
-        &context,
-        &analysis,
-        program.is_some(),
-        Some(coordinator.as_ref()),
-        |analysis| analysis.parse_result(FileId(1)),
-    )
-    .ok()
-    .flatten();
     let Some(program) = program else {
-        return Ok(BslMembersResponse {
-            analysis_revision,
-            flow_sensitive_enabled,
-            members: Vec::new(),
-            truncated: false,
-        });
-    };
-    let Some(parse_result) = parse_result else {
         return Ok(BslMembersResponse {
             analysis_revision,
             flow_sensitive_enabled,
@@ -778,7 +761,7 @@ fn collect_members(request: MembersRequest) -> Result<BslMembersResponse, rmcp::
 
     let result = completion_runtime
         .block_on(
-            bsl_runtime::application::type_system::get_completion_with_semantic_program_snapshot_v2(
+            bsl_runtime::application::type_system::get_completion_with_semantic_program_snapshot(
                 text.as_str(),
                 position.line,
                 position.character,
@@ -788,7 +771,6 @@ fn collect_members(request: MembersRequest) -> Result<BslMembersResponse, rmcp::
                 abs_path.as_str(),
                 resolver.as_ref(),
                 program,
-                parse_result,
                 member_access_owner_type_hint,
                 flow_sensitive_enabled,
             ),

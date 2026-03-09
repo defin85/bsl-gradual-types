@@ -717,6 +717,7 @@ impl AstToIrConverter {
                         function_name,
                         object_name,
                         object_node,
+                        ..
                     } => {
                         let (object, method) = match (object_name, object_node) {
                             (Some(name), _) => (name.clone(), function_name.clone()),
@@ -758,6 +759,7 @@ impl AstToIrConverter {
                         object_name,
                         member_name,
                         access_kind,
+                        ..
                     } => {
                         let object = match (object_name, object_node) {
                             (Some(name), _) => name.clone(),

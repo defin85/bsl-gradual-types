@@ -1186,6 +1186,96 @@ fn semantic_diagnostics_do_not_include_flow_sensitive_null_safety_by_default() {
     );
 }
 
+#[test]
+fn semantic_diagnostics_use_current_file_text_even_with_stale_parse_snapshot_program() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(310);
+    let text: Arc<str> = Arc::from(
+        "Procedure Test()\n\
+             x = 1;\n\
+             x.UnknownMethod();\n\
+             EndProcedure",
+    );
+
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("deps-semantic-snapshot-mismatch"),
+        deps: default_semantic_deps(),
+    });
+    host.apply_change(Change::SetFileWithSnapshot {
+        file_id,
+        text: text.clone(),
+        version: 1,
+        path: Arc::from("semantic-snapshot-mismatch.bsl"),
+        parse_snapshot: parse_snapshot_for_test(
+            file_id,
+            1,
+            "Procedure Safe()\nEndProcedure",
+            Vec::new(),
+            true,
+            None,
+        ),
+    });
+
+    let diagnostics = host
+        .analysis()
+        .semantic_diagnostics(file_id)
+        .unwrap()
+        .unwrap();
+
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diag| diag.message.contains("UnknownMethod")),
+        "semantic diagnostics must follow current file text, got: {:?}",
+        diagnostics
+    );
+}
+
+#[test]
+fn flow_sensitive_diagnostics_use_current_file_text_even_with_stale_parse_snapshot_program() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(311);
+    let text: Arc<str> = Arc::from(
+        "Procedure Test()\n\
+             x = Null;\n\
+             x.Method();\n\
+             EndProcedure",
+    );
+
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("deps-flow-snapshot-mismatch"),
+        deps: default_semantic_deps(),
+    });
+    host.apply_change(Change::SetFileWithSnapshot {
+        file_id,
+        text,
+        version: 1,
+        path: Arc::from("flow-semantic-snapshot-mismatch.bsl"),
+        parse_snapshot: parse_snapshot_for_test(
+            file_id,
+            1,
+            "Procedure Safe()\nEndProcedure",
+            Vec::new(),
+            true,
+            None,
+        ),
+    });
+
+    let diagnostics = host
+        .analysis()
+        .semantic_diagnostics_flow_sensitive(file_id)
+        .unwrap()
+        .unwrap();
+
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diag| diag.message.contains("может быть Null")),
+        "flow-sensitive diagnostics must follow current file text, got: {:?}",
+        diagnostics
+    );
+}
+
 fn marker_offset(text: &str, marker: &str) -> u32 {
     text.find(marker)
         .unwrap_or_else(|| panic!("marker `{marker}` not found"))

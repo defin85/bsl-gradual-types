@@ -230,6 +230,7 @@ impl SemanticProgram {
                 object_name,
                 member_name,
                 access_kind,
+                object_span,
             } => {
                 // object_node — индекс узла-объекта
                 if let Some(node_idx) = object_node {
@@ -238,6 +239,9 @@ impl SemanticProgram {
                 // object_name теперь Option<String>
                 if let Some(name) = object_name {
                     attributes.insert("object_name".to_string(), name.clone());
+                }
+                if let Some(span) = object_span {
+                    attributes.insert("object_span".to_string(), span.to_string());
                 }
                 attributes.insert("member_name".to_string(), member_name.clone());
                 attributes.insert("access_kind".to_string(), format!("{:?}", access_kind));

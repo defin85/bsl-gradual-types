@@ -360,37 +360,6 @@ impl AnalysisV2 {
         let Some(&file) = self.files.get(&file_id) else {
             return Ok(None);
         };
-        if let Some(snapshot) = self.parse_snapshot_for_file(file_id, file) {
-            let parsed = snapshot.parse_result.clone();
-            let source = file.text(&self.db).clone();
-            if !parsed.syntax_errors.is_empty()
-                && !syntax_errors_only_in_directives(source.as_ref(), &parsed.syntax_errors)
-            {
-                return Ok(Some(Arc::new(Vec::new())));
-            }
-            let file_path = file.path(&self.db).clone();
-            let deps_data = self.deps.data(&self.db).0.clone();
-            let program = build_ir_from_parsed(
-                parsed.clone(),
-                source.as_ref(),
-                file_path.as_ref(),
-                deps_data.clone(),
-            );
-            let type_index = Arc::new(type_inference_v2::build_type_index_with_path(
-                &parsed.program,
-                file_path.as_ref(),
-                deps_data.clone(),
-            ));
-            let detail_level = self.settings.diagnostics_detail_level(&self.db);
-            let diagnostics = collect_semantic_diagnostics_from_program(
-                parsed,
-                program,
-                type_index,
-                deps_data,
-                detail_level,
-            );
-            return Ok(Some(Arc::new(diagnostics)));
-        }
         cancellable(|| semantic_diagnostics(&self.db, file, self.deps, self.settings).0).map(Some)
     }
 
@@ -401,60 +370,6 @@ impl AnalysisV2 {
         let Some(&file) = self.files.get(&file_id) else {
             return Ok(None);
         };
-        if let Some(snapshot) = self.parse_snapshot_for_file(file_id, file) {
-            let base = self
-                .semantic_diagnostics(file_id)?
-                .unwrap_or_else(|| Arc::new(Vec::new()));
-            if base.is_empty() {
-                return Ok(Some(base));
-            }
-            let parsed = snapshot.parse_result.clone();
-            let source = file.text(&self.db).clone();
-            let file_path = file.path(&self.db).clone();
-            let deps_data = self.deps.data(&self.db).0.clone();
-            let program = build_ir_from_parsed(
-                parsed.clone(),
-                source.as_ref(),
-                file_path.as_ref(),
-                deps_data.clone(),
-            );
-            let type_index = Arc::new(type_inference_v2::build_type_index_with_path(
-                &parsed.program,
-                file_path.as_ref(),
-                deps_data.clone(),
-            ));
-            let resolver = deps_data
-                .resolver
-                .clone()
-                .unwrap_or_else(|| Arc::new(TypeResolver::new(deps_data.repository.clone())));
-            let mut diagnostics = (*base).clone();
-            diagnostics.extend(flow_sensitive_null_safety_diagnostics(
-                &program,
-                &type_index,
-                resolver.as_ref(),
-            ));
-            diagnostics.sort_by(|a, b| {
-                let severity_key = |severity: DiagnosticSeverity| match severity {
-                    DiagnosticSeverity::Error => 0_u8,
-                    DiagnosticSeverity::Warning => 1_u8,
-                    DiagnosticSeverity::Info => 2_u8,
-                    DiagnosticSeverity::Hint => 3_u8,
-                };
-                (
-                    a.span.start,
-                    a.span.end,
-                    severity_key(a.severity),
-                    &a.message,
-                )
-                    .cmp(&(
-                        b.span.start,
-                        b.span.end,
-                        severity_key(b.severity),
-                        &b.message,
-                    ))
-            });
-            return Ok(Some(Arc::new(diagnostics)));
-        }
         cancellable(|| {
             semantic_diagnostics_flow_sensitive(&self.db, file, self.deps, self.settings).0
         })

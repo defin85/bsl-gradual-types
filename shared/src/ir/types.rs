@@ -203,6 +203,8 @@ pub enum SemanticNodeKind {
         object_node: Option<usize>,
         /// Имя переменной (для простых переменных, deprecated для цепочек)
         object_name: Option<String>,
+        /// Span выражения-объекта слева от точки для unified semantic hints.
+        object_span: Option<Span>,
         member_name: String,
         /// Тип доступа к члену: метод, свойство или индексатор
         access_kind: MemberAccessKind,
@@ -217,23 +219,15 @@ pub enum SemanticNodeKind {
     ///   - Some(name) для методов переменных: `МассивДанных.Добавить("x")`
     ///   - None для глобальных функций: `Сообщить("текст")`
     ///   - None для сложных выражений: `ПолучитьОбъект().Метод()`
-    /// - `object_type`: **Тип объекта** для вызовов методов (Phase 3: TypeResolution)
-    ///   - Some(TypeResolution) для методов
-    ///   - None для глобальных функций
-    /// - `arg_types`: Типы аргументов вызова (Phase 3: Vec<TypeResolution>)
+    /// - `object_span`: span выражения-объекта слева от точки для unified semantic hints
+    /// - `arg_spans`: span-ы аргументов вызова для unified semantic hints
     ///
     /// # Примеры
     ///
     /// ```bsl
-    /// Сообщить("текст");  // object_name=None, object_type=None
-    /// МассивДанных.Добавить("x");  // object_name=Some("МассивДанных"), object_type=Some(TypeResolution)
+    /// Сообщить("текст");  // object_name=None
+    /// МассивДанных.Добавить("x");  // object_name=Some("МассивДанных"), object_span=Some(...)
     /// ```
-    ///
-    /// # Phase 3: TypeResolution для object_type и arg_types
-    ///
-    /// - `object_type` и `arg_types` теперь содержат полную информацию о типах
-    /// - Для Unknown типов валидация пропускается (graceful degradation)
-    /// - `object_name` по-прежнему String для flow-sensitive анализа (lookup в SymbolTable)
     FunctionCall {
         function_name: String,
         object_name: Option<String>,
@@ -241,6 +235,10 @@ pub enum SemanticNodeKind {
         /// Например: Справочники.Контрагенты.НайтиПоКоду().ПолучитьОбъект()
         /// ПолучитьОбъект будет иметь object_node указывающий на НайтиПоКоду
         object_node: Option<usize>,
+        /// Span выражения-объекта слева от точки для unified semantic hints.
+        object_span: Option<Span>,
+        /// Span-ы аргументов вызова для unified semantic hints.
+        arg_spans: Vec<Span>,
     },
 
     // === Scope tracking ===

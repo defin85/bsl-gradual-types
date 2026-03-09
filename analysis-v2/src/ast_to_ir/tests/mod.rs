@@ -373,12 +373,16 @@ fn test_function_call_with_args() {
         function_name,
         object_name,
         object_node,
+        object_span,
+        arg_spans,
         ..
     } = &ir.nodes[0].kind
     {
         assert_eq!(function_name, "Сообщить");
         assert!(object_name.is_none());
         assert_eq!(*object_node, None);
+        assert_eq!(*object_span, None);
+        assert_eq!(arg_spans.len(), 1);
     } else {
         panic!("Expected FunctionCall");
     }
@@ -724,12 +728,14 @@ fn test_regular_property_access_not_global() {
     if let SemanticNodeKind::MemberAccess {
         object_node,
         object_name,
+        object_span,
         member_name,
         ..
     } = &ir.nodes[0].kind
     {
         assert_eq!(*object_node, None); // Нет вложенного узла
         assert_eq!(object_name.as_ref().unwrap(), "МояПеременная");
+        assert!(object_span.is_some());
         assert_eq!(member_name, "Свойство");
     } else {
         panic!(

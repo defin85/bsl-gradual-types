@@ -140,6 +140,7 @@ impl TypeInferencer {
         }
     }
 
+    #[cfg(test)]
     fn build_index(&self, program: &Program, file_path: &str) -> TypeIndex {
         self.build_index_profiled(program, file_path).index
     }
@@ -1200,6 +1201,7 @@ impl TypeInferencer {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn build_type_index_with_path(
     program: &Program,
     file_path: &str,

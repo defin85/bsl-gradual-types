@@ -11,6 +11,24 @@ use bsl_syntax::ast::Expression;
 use super::converter::AstToIrConverter;
 use super::global_collections::is_global_collection;
 
+fn expression_ast_span(expr: &Expression) -> Span {
+    match expr {
+        Expression::Identifier { span, .. }
+        | Expression::String { span, .. }
+        | Expression::Number { span, .. }
+        | Expression::Boolean { span, .. }
+        | Expression::Date { span, .. }
+        | Expression::Call { span, .. }
+        | Expression::Binary { span, .. }
+        | Expression::Unary { span, .. }
+        | Expression::Ternary { span, .. }
+        | Expression::New { span, .. }
+        | Expression::PropertyAccess { span, .. }
+        | Expression::IndexAccess { span, .. }
+        | Expression::Await { span, .. } => *span,
+    }
+}
+
 impl AstToIrConverter {
     /// Создаёт IR-узлы для hover внутри выражений
     ///
@@ -153,10 +171,15 @@ impl AstToIrConverter {
     pub(crate) fn convert_call_expression(
         &mut self,
         function: Expression,
-        _args: Vec<Expression>,
+        args: Vec<Expression>,
         ast_span: Span,
     ) -> Result<Option<usize>> {
         let span = self.ast_span_to_ir_span(ast_span);
+        let arg_spans = args
+            .iter()
+            .map(expression_ast_span)
+            .map(|span| self.ast_span_to_ir_span(span))
+            .collect();
 
         match function {
             Expression::Identifier { name, .. } => {
@@ -165,6 +188,8 @@ impl AstToIrConverter {
                         function_name: name,
                         object_name: None,
                         object_node: None,
+                        object_span: None,
+                        arg_spans,
                     },
                     span,
                     scope_id: self.current_scope,
@@ -175,6 +200,7 @@ impl AstToIrConverter {
             Expression::PropertyAccess {
                 object, property, ..
             } => {
+                let object_span = self.ast_span_to_ir_span(expression_ast_span(&object));
                 let object_name = if let Expression::Identifier { name, .. } = &*object {
                     Some(name.clone())
                 } else {
@@ -202,6 +228,8 @@ impl AstToIrConverter {
                         function_name: property,
                         object_name,
                         object_node,
+                        object_span: Some(object_span),
+                        arg_spans,
                     },
                     span: expanded_span,
                     scope_id: self.current_scope,
@@ -255,6 +283,7 @@ impl AstToIrConverter {
                     kind: SemanticNodeKind::MemberAccess {
                         object_node: Some(global_node_idx),
                         object_name: None, // Не нужен - используем object_node
+                        object_span: Some(self.ast_span_to_ir_span(*obj_span)),
                         member_name: property.to_string(),
                         access_kind: MemberAccessKind::Property,
                     },
@@ -287,6 +316,7 @@ impl AstToIrConverter {
             kind: SemanticNodeKind::MemberAccess {
                 object_node: object_node_idx,
                 object_name,
+                object_span: Some(self.ast_span_to_ir_span(expression_ast_span(object))),
                 member_name: property.to_string(),
                 access_kind: MemberAccessKind::Property,
             },

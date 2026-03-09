@@ -282,7 +282,6 @@ pub fn semantic_diagnostics(
     cancellation_checkpoint(db);
     let detail_level = settings.diagnostics_detail_level(db);
     let diagnostics = collect_semantic_diagnostics_from_program(
-        parsed,
         program,
         type_index,
         deps_data,
@@ -541,221 +540,55 @@ fn populate_assignment_value_hints(
 }
 
 fn populate_call_and_member_hints(
-    program: &bsl_syntax::ast::Program,
+    program: &SemanticProgram,
     type_index: &type_inference_v2::TypeIndex,
     out: &mut SemanticTypeHints,
 ) {
-    use bsl_syntax::ast::{Expression, Statement};
+    use bsl_shared::ir::SemanticNodeKind;
 
-    fn visit_statement(
-        stmt: &Statement,
-        type_index: &type_inference_v2::TypeIndex,
-        out: &mut SemanticTypeHints,
-    ) {
-        match stmt {
-            Statement::VarDeclaration { .. } => {}
-            Statement::Assignment { target, value, .. } => {
-                visit_expression(target, type_index, out);
-                visit_expression(value, type_index, out);
-            }
-            Statement::If {
-                condition,
-                then_body,
-                else_body,
-                ..
-            } => {
-                visit_expression(condition, type_index, out);
-                for stmt in then_body {
-                    visit_statement(stmt, type_index, out);
-                }
-                if let Some(else_body) = else_body {
-                    for stmt in else_body {
-                        visit_statement(stmt, type_index, out);
-                    }
-                }
-            }
-            Statement::While {
-                condition, body, ..
-            } => {
-                visit_expression(condition, type_index, out);
-                for stmt in body {
-                    visit_statement(stmt, type_index, out);
-                }
-            }
-            Statement::For {
-                start, end, body, ..
-            } => {
-                visit_expression(start, type_index, out);
-                visit_expression(end, type_index, out);
-                for stmt in body {
-                    visit_statement(stmt, type_index, out);
-                }
-            }
-            Statement::ForEach {
-                collection, body, ..
-            } => {
-                visit_expression(collection, type_index, out);
-                for stmt in body {
-                    visit_statement(stmt, type_index, out);
-                }
-            }
-            Statement::Return {
-                value: Some(value), ..
-            } => {
-                visit_expression(value, type_index, out);
-            }
-            Statement::Return { value: None, .. } => {}
-            Statement::Try {
-                try_body,
-                except_body,
-                ..
-            } => {
-                for stmt in try_body {
-                    visit_statement(stmt, type_index, out);
-                }
-                for stmt in except_body {
-                    visit_statement(stmt, type_index, out);
-                }
-            }
-            Statement::Call { expression, .. } => {
-                visit_expression(expression, type_index, out);
-            }
-            Statement::Execute { code, .. } => {
-                visit_expression(code, type_index, out);
-            }
-            Statement::RaiseError {
-                message: Some(message),
-                ..
-            } => {
-                visit_expression(message, type_index, out);
-            }
-            Statement::RaiseError { message: None, .. } => {}
-            Statement::AddHandler { event, handler, .. }
-            | Statement::RemoveHandler { event, handler, .. } => {
-                visit_expression(event, type_index, out);
-                visit_expression(handler, type_index, out);
-            }
-            Statement::Await { expression, .. } => {
-                visit_expression(expression, type_index, out);
-            }
-            Statement::FunctionDecl { body, .. } | Statement::ProcedureDecl { body, .. } => {
-                for stmt in body {
-                    visit_statement(stmt, type_index, out);
-                }
-            }
-            _ => {}
-        }
+    fn receiver_span(
+        program: &SemanticProgram,
+        object_node: Option<usize>,
+        object_span: Option<bsl_shared::ir::Span>,
+    ) -> Option<bsl_shared::ir::Span> {
+        object_span.or_else(|| object_node.and_then(|idx| program.nodes.get(idx).map(|node| node.span)))
     }
 
-    fn visit_expression(
-        expr: &Expression,
-        type_index: &type_inference_v2::TypeIndex,
-        out: &mut SemanticTypeHints,
-    ) {
-        match expr {
-            Expression::Call {
-                function,
-                args,
-                span,
+    for node in &program.nodes {
+        match &node.kind {
+            SemanticNodeKind::FunctionCall {
+                object_node,
+                object_span,
+                arg_spans,
+                ..
             } => {
-                let key_span = call_ir_span(function, *span);
-
-                let arg_types: Vec<TypeResolution> = args
+                let arg_types: Vec<TypeResolution> = arg_spans
                     .iter()
-                    .filter_map(|arg| {
-                        type_index_resolution_for_span(type_index, expression_span(arg))
-                    })
+                    .filter_map(|span| type_index_resolution_for_span(type_index, *span))
                     .collect();
-                out.call_arg_types_by_span.insert(key_span, arg_types);
+                out.call_arg_types_by_span.insert(node.span, arg_types);
 
-                if let Expression::PropertyAccess { object, .. } = function.as_ref() {
-                    if let Some(receiver_type) =
-                        type_index_resolution_for_span(type_index, expression_span(object))
-                    {
+                if let Some(span) = receiver_span(program, *object_node, *object_span) {
+                    if let Some(receiver_type) = type_index_resolution_for_span(type_index, span) {
                         out.call_receiver_type_by_span
-                            .insert(key_span, receiver_type);
+                            .insert(node.span, receiver_type);
                     }
                 }
-
-                visit_expression(function, type_index, out);
-                for arg in args {
-                    visit_expression(arg, type_index, out);
-                }
             }
-            Expression::PropertyAccess { object, span, .. } => {
-                if let Some(receiver_type) =
-                    type_index_resolution_for_span(type_index, expression_span(object))
-                {
-                    out.member_access_object_type_by_span
-                        .insert(*span, receiver_type);
-                }
-                visit_expression(object, type_index, out);
-            }
-            Expression::New { args, .. } => {
-                for arg in args {
-                    visit_expression(arg, type_index, out);
-                }
-            }
-            Expression::Binary { left, right, .. } => {
-                visit_expression(left, type_index, out);
-                visit_expression(right, type_index, out);
-            }
-            Expression::Unary { operand, .. } => {
-                visit_expression(operand, type_index, out);
-            }
-            Expression::Ternary {
-                condition,
-                then_expr,
-                else_expr,
+            SemanticNodeKind::MemberAccess {
+                object_node,
+                object_span,
                 ..
             } => {
-                visit_expression(condition, type_index, out);
-                visit_expression(then_expr, type_index, out);
-                visit_expression(else_expr, type_index, out);
-            }
-            Expression::IndexAccess { object, index, .. } => {
-                visit_expression(object, type_index, out);
-                visit_expression(index, type_index, out);
-            }
-            Expression::Await { expression, .. } => {
-                visit_expression(expression, type_index, out);
+                if let Some(span) = receiver_span(program, *object_node, *object_span) {
+                    if let Some(receiver_type) = type_index_resolution_for_span(type_index, span) {
+                        out.member_access_object_type_by_span
+                            .insert(node.span, receiver_type);
+                    }
+                }
             }
             _ => {}
         }
-    }
-
-    fn call_ir_span(function: &Expression, span: bsl_shared::ir::Span) -> bsl_shared::ir::Span {
-        match function {
-            Expression::PropertyAccess { object, .. } => match object.as_ref() {
-                Expression::Identifier { span: obj_span, .. } => {
-                    bsl_shared::ir::Span::new(obj_span.start, span.end)
-                }
-                _ => span,
-            },
-            _ => span,
-        }
-    }
-
-    fn expression_span(expr: &Expression) -> bsl_shared::ir::Span {
-        match expr {
-            Expression::Identifier { span, .. }
-            | Expression::String { span, .. }
-            | Expression::Number { span, .. }
-            | Expression::Boolean { span, .. }
-            | Expression::Date { span, .. }
-            | Expression::Call { span, .. }
-            | Expression::Binary { span, .. }
-            | Expression::Unary { span, .. }
-            | Expression::Ternary { span, .. }
-            | Expression::New { span, .. }
-            | Expression::PropertyAccess { span, .. }
-            | Expression::IndexAccess { span, .. }
-            | Expression::Await { span, .. } => *span,
-        }
-    }
-
-    for stmt in &program.statements {
-        visit_statement(stmt, type_index, out);
     }
 }
 
@@ -851,7 +684,6 @@ fn build_ir_from_parsed(
 }
 
 fn collect_semantic_diagnostics_from_program(
-    parsed: Arc<bsl_syntax::ast::ParseResult>,
     program: Arc<SemanticProgram>,
     type_index: Arc<type_inference_v2::TypeIndex>,
     deps_data: Arc<SemanticDeps>,
@@ -859,7 +691,7 @@ fn collect_semantic_diagnostics_from_program(
 ) -> Vec<TypeDiagnostic> {
     let mut type_hints = SemanticTypeHints::default();
     populate_assignment_value_hints(&program, &type_index, &mut type_hints);
-    populate_call_and_member_hints(&parsed.program, &type_index, &mut type_hints);
+    populate_call_and_member_hints(&program, &type_index, &mut type_hints);
 
     let resolver = deps_data
         .resolver
@@ -902,4 +734,3 @@ fn collect_semantic_diagnostics_from_program(
     });
     diagnostics
 }
-

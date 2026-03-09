@@ -629,10 +629,6 @@ impl TypeInferencer {
             return TypeResolution::metadata_type(MetadataKind::CommonModule, name, None);
         }
 
-        if let Some(resolved) = self.infer_applied_owner_member_identifier(name, &name_lower, env) {
-            return resolved;
-        }
-
         TypeResolution::undeclared_variable(name)
     }
 

@@ -1213,7 +1213,7 @@ fn no_context_directive_hides_form_context_symbols() {
 }
 
 #[test]
-fn object_module_bare_identifier_resolves_owner_member_before_undeclared() {
+fn object_module_bare_identifier_without_canonical_binding_stays_undeclared() {
     let repository_impl = Arc::new(InMemoryTypeRepository::new());
     repository_impl
         .load_types(vec![RawTypeData {
@@ -1250,17 +1250,16 @@ fn object_module_bare_identifier_resolves_owner_member_before_undeclared() {
     let offset = source.find("ДоговорКонтрагента").expect("identifier") as u32;
     let resolved = index
         .type_at_byte_offset(offset)
-        .expect("type at owner member identifier");
-    assert!(
-        resolved.is_undeclared_variable().is_none(),
-        "owner member must resolve before undeclared: {:?}",
-        resolved
+        .expect("type at bare identifier");
+    assert_eq!(
+        resolved.is_undeclared_variable(),
+        Some("ДоговорКонтрагента"),
+        "bare owner members without canonical binding must stay undeclared"
     );
-    assert_eq!(resolved.type_name(), "Строка");
 }
 
 #[test]
-fn recordset_module_bare_identifier_resolves_owner_member_before_undeclared() {
+fn recordset_module_bare_identifier_without_canonical_binding_stays_undeclared() {
     let repository_impl = Arc::new(InMemoryTypeRepository::new());
     repository_impl
         .load_types(vec![RawTypeData {
@@ -1297,12 +1296,95 @@ fn recordset_module_bare_identifier_resolves_owner_member_before_undeclared() {
     let offset = source.find("ОбменДанными").expect("identifier") as u32;
     let resolved = index
         .type_at_byte_offset(offset)
-        .expect("type at owner member identifier");
-    assert!(
-        resolved.is_undeclared_variable().is_none(),
-        "recordset owner member must resolve before undeclared: {:?}",
-        resolved
+        .expect("type at bare identifier");
+    assert_eq!(
+        resolved.is_undeclared_variable(),
+        Some("ОбменДанными"),
+        "recordset bare owner members without canonical binding must stay undeclared"
     );
+}
+
+#[test]
+fn object_module_explicit_this_object_member_stays_available() {
+    let repository_impl = Arc::new(InMemoryTypeRepository::new());
+    repository_impl
+        .load_types(vec![RawTypeData {
+            name: "Документы.Док1".to_string(),
+            source: RawDataSource::Configuration,
+            facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+            kind: Some(MetadataKind::Document),
+            properties: vec![RawPropertyData {
+                name: "ДоговорКонтрагента".to_string(),
+                prop_type: "Строка".to_string(),
+                is_readonly: false,
+            }],
+            ..Default::default()
+        }])
+        .expect("load types");
+    let repository =
+        repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+    let resolver = Arc::new(TypeResolver::new(repository.clone()));
+    let deps = Arc::new(SemanticDeps {
+        repository,
+        signature_index: SignatureIndex::new(),
+        resolver: Some(resolver),
+        platform_signatures_loaded: true,
+    });
+
+    let source = r#"Процедура Тест()
+    x = ЭтотОбъект.ДоговорКонтрагента;
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let file_path = "Documents/Док1/Ext/ObjectModule.bsl";
+    let index = build_type_index_with_path(&program, file_path, deps);
+
+    let offset = source.rfind("ДоговорКонтрагента").expect("member") as u32;
+    let resolved = index
+        .type_at_byte_offset(offset)
+        .expect("type at explicit owner member");
+    assert_eq!(resolved.type_name(), "Строка");
+}
+
+#[test]
+fn recordset_module_explicit_object_member_stays_available() {
+    let repository_impl = Arc::new(InMemoryTypeRepository::new());
+    repository_impl
+        .load_types(vec![RawTypeData {
+            name: "РегистрыСведений.Регистр1".to_string(),
+            source: RawDataSource::Configuration,
+            facets: vec![FacetKind::Manager, FacetKind::Object],
+            kind: Some(MetadataKind::InformationRegister),
+            properties: vec![RawPropertyData {
+                name: "ОбменДанными".to_string(),
+                prop_type: "Булево".to_string(),
+                is_readonly: false,
+            }],
+            ..Default::default()
+        }])
+        .expect("load types");
+    let repository =
+        repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+    let resolver = Arc::new(TypeResolver::new(repository.clone()));
+    let deps = Arc::new(SemanticDeps {
+        repository,
+        signature_index: SignatureIndex::new(),
+        resolver: Some(resolver),
+        platform_signatures_loaded: true,
+    });
+
+    let source = r#"Процедура Тест()
+    x = Объект.ОбменДанными;
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let file_path = "InformationRegisters/Регистр1/Ext/RecordSetModule.bsl";
+    let index = build_type_index_with_path(&program, file_path, deps);
+
+    let offset = source.rfind("ОбменДанными").expect("member") as u32;
+    let resolved = index
+        .type_at_byte_offset(offset)
+        .expect("type at explicit owner member");
     assert_eq!(resolved.type_name(), "Булево");
 }
 

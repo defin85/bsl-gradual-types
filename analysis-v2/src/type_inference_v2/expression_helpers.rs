@@ -42,34 +42,6 @@ impl TypeInferencer {
         None
     }
 
-    pub(super) fn infer_applied_owner_member_identifier(
-        &self,
-        name: &str,
-        name_lower: &str,
-        env: &TypeEnv,
-    ) -> Option<TypeResolution> {
-        let module_type = env.module_type.as_ref()?;
-
-        if !matches!(
-            module_type,
-            ModuleType::ObjectModule { .. } | ModuleType::RecordSetModule { .. }
-        ) {
-            return None;
-        }
-
-        let owner_resolution = env
-            .variable_resolution("этотобъект")
-            .or_else(|| env.variable_resolution("объект"))?;
-        let resolved = self.resolve_property_type_by_name(&owner_resolution, name_lower)?;
-        tracing::debug!(
-            metric = "applied_owner_member_identifier_fallback_hit_total",
-            identifier = name,
-            owner_type = owner_resolution.type_name(),
-            "Resolved bare identifier via applied owner member fallback"
-        );
-        Some(resolved)
-    }
-
     pub(super) fn resolve_property_type_by_name(
         &self,
         object_type: &TypeResolution,

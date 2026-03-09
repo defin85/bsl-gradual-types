@@ -123,6 +123,15 @@ Search order:
 3. `rg`
 4. `rg --files`
 
+Optional sidecar: `rlm-tools`
+
+- Use `rlm-tools` for low-context exploration when broad `grep`/file reads would dump too much raw text into the conversation.
+- Start with `rlm_start(path, query)`, then use `rlm_execute(session_id, code)` to batch 3-5 related operations in one call: `grep/glob -> read top matches -> aggregate -> print only the conclusion`.
+- Prefer local helpers only: `read_file`, `read_files`, `grep`, `grep_summary`, `grep_read`, `glob_files`, `tree`.
+- Do not use `llm_query` / `llm_query_batched` by default. They require an external API and are not local-only exploration.
+- Treat `rlm-tools` output as exploratory evidence, not final proof. Confirm final facts with direct code evidence via `rg` and targeted file reads.
+- Always close the session with `rlm_end(session_id)` when the exploration thread is complete.
+
 Checklist:
 
 1. Formulate the query as `component + action + context`.
@@ -168,6 +177,10 @@ Mandatory workflow:
   1. `mcp__claude-context__search_code`
   2. `rg`
   3. `rg --files`
+- `rlm-tools` использовать как вспомогательный sidecar, когда нужно просмотреть много файлов и не тащить сырой вывод в контекст.
+- Типовой сценарий для `rlm-tools`: `rlm_start` на корне репо -> 1-3 вызова `rlm_execute` с батчем `grep/read/summary` -> финальная верификация через `rg` и чтение точных файлов -> `rlm_end`.
+- `rlm-tools` не считать источником истины: итоговые утверждения подтверждать прямыми ссылками на код.
+- `llm_query` и `llm_query_batched` в `rlm-tools` по умолчанию не использовать: это уже внешний LLM-вызов, а не локальное исследование.
 - Для первого прохода всегда использовать `extensionFilter: [".rs"]`.
 - Начинать с `limit: 5-8`.
 - Формулировать intent-focused запросы, а не только по имени символа.

@@ -86,6 +86,8 @@
 - индекс не выполняет отдельный semantic inference;
 - индекс не читает `parse_result.program` как источник semantic truth;
 - индекс не реанимирует legacy fallback semantics.
+- индекс сохраняет facet-aware semantic identity конфигурационных типов (`active_facet`, `available_facets` или семантически эквивалентное представление), достаточную для owner/member/property lookup;
+- индекс MAY денормализовать facet lookup для fast queries, но MUST NOT сплющивать facet-aware truth до plain metadata/platform type name, если это меняет member/property semantics.
 
 `derived semantic index` нормативно отделён от discovery/search индексов:
 - search/discovery read-model (`IndexSnapshot` и эквиваленты) может сосуществовать в runtime;
@@ -153,6 +155,17 @@ Observability контракт дополнительно требует:
 
 `ObjectModule` / `RecordSetModule` больше не получают отдельную semantic ветку, которая резолвит bare identifier через implicit owner property lookup вне canonical IR semantics.
 
+Это удаление НЕ означает потерю canonical module-context semantics для explicit контекстных идентификаторов.
+Для `ObjectModule` / `RecordSetModule` в canonical IR/binding model должны остаться явно выраженные binding'и как минимум для:
+- `ЭтотОбъект`;
+- `Объект`.
+
+Эти binding'и:
+- принадлежат canonical binding model, а не fallback-ветке;
+- типизируются owner object facet / recordset object facet для текущего модуля;
+- используются всеми consumers одинаково через shared semantic path;
+- позволяют canonical member access вида `ЭтотОбъект.Свойство` / `Объект.Свойство` без adapter-local или type-index-only эвристик.
+
 Если продукту нужна такая языковая семантика, она должна быть:
 - выражена в canonical IR/binding model;
 - доступна всем consumers одинаково;
@@ -196,6 +209,10 @@ Rejected.
   - Mitigation: derived semantic index сохраняет fast query path и позволяет вынести expensive work в snapshot build.
 - Возможны perf regressions после удаления stale/degraded shortcuts.
   - Mitigation: проектировать derived index как read-optimized projection и обновить perf contracts/gates.
+- Есть риск сохранить canonical bindings, но потерять facet identity при materialization derived semantic index.
+  - Mitigation: зафиксировать отдельный facet-preservation contract и acceptance для `active_facet` / `available_facets`-эквивалентной semantic identity.
+- Есть риск перепутать удаление applied-owner bare identifier fallback с удалением корректного module-context для `ЭтотОбъект` / `Объект`.
+  - Mitigation: явно зафиксировать positive contract для canonical module-context bindings в `ObjectModule` / `RecordSetModule` и acceptance на explicit member access через эти binding'и.
 - Pending changes в `mcp-bsl-agent` могут предполагать старое понимание index path.
   - Mitigation: в apply-stage согласовать dependency/supersede policy до начала реализации.
 - Big-bang cutover повышает интеграционный риск.

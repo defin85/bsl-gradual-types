@@ -23,6 +23,7 @@
 - Переопределить архитектуру `bsl-intellisense-v2` как `IR -> derived semantic index -> interactive queries`.
 - Зафиксировать, что semantic truth может происходить только из canonical IR snapshot текущей revision.
 - Зафиксировать, что `derived semantic index` строится только из IR snapshot и не выполняет самостоятельный semantic inference.
+- Зафиксировать, что canonical semantic core сохраняет facet-aware identity конфигурационных типов (`active_facet` / `available_facets` или семантически эквивалентное представление), а derived semantic index MUST NOT сплющивать её в plain type names, если это меняет owner/member/property semantics.
 - Зафиксировать, что semantic `derived semantic index` остаётся отдельным revision-bound read-model и MUST NOT подменяться discovery/search read-model (`IndexSnapshot` и эквиваленты).
 - Зафиксировать, что discovery/search read-model может использоваться только для search/discovery и MUST NOT backfill-ить semantic surfaces даже при временной недоступности semantic fast index.
 - Удалить как целевой end-state:
@@ -33,6 +34,9 @@
 - Зафиксировать, что система MUST NOT возвращать semantic truth от другой revision под видом exact/current-revision ответа; при недоступности current-revision canonical artifacts ответ остаётся fail-closed.
 - Зафиксировать, что adapters (`LSP`, `Web`, `MCP`, `CLI`) не materialize-ят semantic truth локально и используют shared runtime contract как единственный semantic read path.
 - Зафиксировать explicit quality gates для cutover: bounded low-cardinality fail-closed observability reason codes, representative latency acceptance budgets и запрет на perf-rescue через alternate semantic path.
+- Зафиксировать positive canonical contract для module-context bindings `ЭтотОбъект` / `Объект` в `ObjectModule` / `RecordSetModule`: удаляется только bare-identifier fallback, а explicit context identifiers остаются частью shared IR-derived semantics.
+- Зафиксировать acceptance, которая доказывает canonical owner/member behavior для explicit access через `ЭтотОбъект.Свойство` / `Объект.Свойство` во всех consumers.
+- Зафиксировать acceptance, которая доказывает сохранение facet-aware member/property semantics в canonical pipeline и запрещает flattening configuration facets до plain type names.
 - Согласовать MCP semantic tools с тем же canonical IR + derived-index runtime contract.
 
 ## Impact
@@ -50,6 +54,7 @@
   - user-facing degraded completion/type fallback paths заменяются на explicit unavailable/empty fail-closed behavior;
   - stale semantic ответы больше не маскируются под exact/current-revision semantics;
   - bare identifiers в `ObjectModule` / `RecordSetModule` больше не получают implicit applied-owner resolution вне canonical IR semantics.
+  - explicit context identifiers `ЭтотОбъект` / `Объект` сохраняются, но только как canonical bindings shared IR-derived pipeline, а не как special fallback branch.
 - Coordination:
   - pending change `refactor-bsl-agent-index-backed-search` должен быть согласован с новым определением index path как IR-derived, а не как отдельного semantic source;
   - `IndexSnapshot` и эквиваленты остаются discovery/search-only и не могут выступать rollback-заменой semantic core для interactive queries.

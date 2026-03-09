@@ -80,6 +80,24 @@ Canonical IR MUST содержать или однозначно порожда�
 - **THEN** индекс лишь денормализует lookup для fast queries
 - **AND** не вычисляет альтернативный semantic результат из parse tree или отдельной эвристики
 
+### Requirement: Facet-aware semantic identity сохраняется в canonical pipeline (MUST)
+Для configuration types canonical IR + derived semantic index MUST сохранять facet-aware semantic identity, необходимую для owner/member/property resolution, hover, diagnostics и module-context bindings.
+
+Этот contract MUST сохранять `active_facet` / `available_facets` или семантически эквивалентное представление.
+`derived semantic index` MAY денормализовать facet lookup для fast queries, но MUST NOT сплющивать configuration type до plain metadata/platform type name, если это меняет semantic members, properties или owner behavior.
+
+#### Scenario: ObjectModule explicit binding сохраняет object facet semantics
+- **GIVEN** код в `ObjectModule` использует `ЭтотОбъект` или `Объект`
+- **WHEN** система выполняет `type-at-position`, `hover` или `members`
+- **THEN** semantic result сохраняет object-facet identity owner type текущего модуля
+- **AND** member/property lookup использует object semantics, а не manager/reference substitute
+
+#### Scenario: RecordSetModule explicit binding сохраняет recordset facet semantics
+- **GIVEN** код в `RecordSetModule` использует `ЭтотОбъект` или `Объект`
+- **WHEN** система выполняет `type-at-position`, `hover`, `members` или diagnostics для member access
+- **THEN** semantic result сохраняет recordset object facet текущего owner type
+- **AND** canonical pipeline не теряет members/properties, зависящие от facet-aware lookup
+
 ### Requirement: Semantic fast index отделён от discovery/search read-model (MUST)
 Система MUST различать:
 - semantic fast index для interactive semantic queries;
@@ -171,6 +189,13 @@ Reason taxonomy MUST оставаться low-cardinality и одинаково 
 Система MUST NOT резолвить bare identifiers в `ObjectModule` / `RecordSetModule` через special applied-owner fallback вне canonical IR semantic binding model.
 
 Если implicit module-context identifier semantics нужны продукту, они MUST быть представлены в canonical IR/binding model и одинаково доступны всем consumers.
+
+#### Scenario: Explicit module-context bindings остаются canonical после удаления fallback
+- **GIVEN** код в `ObjectModule` или `RecordSetModule` использует explicit context identifier `ЭтотОбъект` или `Объект`
+- **WHEN** система выполняет `type-at-position`, `hover`, `definition`, `members` или diagnostics для member access от этого identifier
+- **THEN** `ЭтотОбъект` / `Объект` резолвятся через canonical IR/binding model текущей revision
+- **AND** owner/member semantics для такого доступа одинаковы во всех consumers
+- **AND** система не зависит от applied-owner bare identifier fallback branch
 
 #### Scenario: Bare identifier без canonical binding остаётся unresolved
 - **GIVEN** код в `ObjectModule` или `RecordSetModule` содержит bare identifier, который не имеет canonical binding в текущем snapshot

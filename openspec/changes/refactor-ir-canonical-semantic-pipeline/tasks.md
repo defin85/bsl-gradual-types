@@ -1,12 +1,12 @@
 ## 1. Contract
 - [ ] 1.1 Зафиксировать, что canonical IR является единственным semantic source of truth для v2.
 - [ ] 1.2 Зафиксировать, что `derived semantic index` является единственным fast query артефактом и строится только из IR snapshot текущей revision.
-- [ ] 1.3 Зафиксировать fail-closed policy для недоступности canonical semantic артефактов вместо stale/degraded/keyword fallback и запрет на маскировку stale ответа под current-revision semantics.
-- [ ] 1.4 Зафиксировать удаление applied-owner bare identifier fallback как части semantic contract.
-- [ ] 1.5 Зафиксировать, что `parse_result` и другие syntax helpers могут использоваться только для syntax/position extraction, но не как самостоятельный semantic source.
-- [ ] 1.6 Зафиксировать, что semantic `derived semantic index` отделён от discovery/search read-model (`IndexSnapshot` и эквиваленты) и search index MUST NOT быть semantic source для interactive queries.
-- [ ] 1.7 Зафиксировать, что adapters (`LSP`, `Web`, `MCP`, `CLI`) MUST NOT reconstruct semantic truth локально из `parse_result`, текста документа или adapter-local эвристик.
-- [ ] 1.8 Зафиксировать, что canonical semantic core сохраняет facet-aware identity configuration types (`active_facet` / `available_facets` или эквивалент) и не допускает flattening до plain type names, меняющего member/property semantics.
+- [x] 1.3 Зафиксировать fail-closed policy для недоступности canonical semantic артефактов вместо stale/degraded/keyword fallback и запрет на маскировку stale ответа под current-revision semantics.
+- [x] 1.4 Зафиксировать удаление applied-owner bare identifier fallback как части semantic contract.
+- [x] 1.5 Зафиксировать, что `parse_result` и другие syntax helpers могут использоваться только для syntax/position extraction, но не как самостоятельный semantic source.
+- [x] 1.6 Зафиксировать, что semantic `derived semantic index` отделён от discovery/search read-model (`IndexSnapshot` и эквиваленты) и search index MUST NOT быть semantic source для interactive queries.
+- [x] 1.7 Зафиксировать, что adapters (`LSP`, `Web`, `MCP`, `CLI`) MUST NOT reconstruct semantic truth локально из `parse_result`, текста документа или adapter-local эвристик.
+- [x] 1.8 Зафиксировать, что canonical semantic core сохраняет facet-aware identity configuration types (`active_facet` / `available_facets` или эквивалент) и не допускает flattening до plain type names, меняющего member/property semantics.
 
 ## 2. Design
 - [ ] 2.1 Описать минимальные расширения canonical IR, достаточные для owner/member/type/definition queries без parallel semantic inference path.

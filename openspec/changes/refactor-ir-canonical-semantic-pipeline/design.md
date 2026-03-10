@@ -794,6 +794,90 @@ Acceptance bundle для этого change MUST трактовать следу�
 
 Если хотя бы один consumer удерживает этот contract только через private aliasing, stale substitute или operation-specific workaround, cutover считается неуспешным.
 
+### 12. Facet-preservation contract для `derived semantic index`
+
+Facet-aware identity из task `1.8` считается сохранённой только тогда, когда она переживает не только IR construction, но и materialization в `derived semantic index`, shared runtime transport и public DTO surfaces.
+
+Для configuration-backed semantic facts plain type name сам по себе не является достаточной semantic identity.
+1C platform различает manager/object/reference/record set surfaces как разные object families с разными members, properties и operations.
+Следовательно materialized semantic payload MUST хранить facet envelope как authoritative truth, а строковое имя типа может существовать только как presentation projection поверх него.
+
+### 12a. Authoritative materialized fact set
+
+Для любого materialized fact, который может стать receiver/owner/type truth для interactive semantic operation (`type-at-position`, `hover`, `definition`, `members`, `completion`, `diagnostics`), `derived semantic index` MUST сохранять как минимум:
+- configuration owner identity (`metadata kind` + `metadata name`) или семантически эквивалентный canonical key;
+- `active_facet`, если semantic fact относится к конкретной facet surface;
+- `available_facets`, если они известны для данного configuration type;
+- связь между materialized fact и canonical binding/member/definition identity той же revision;
+- достаточное представление для восстановления user-facing type label без отдельного facet guess step.
+
+Нормативное следствие:
+- `TypeResolution`-подобный envelope является authoritative semantic payload;
+- user-facing строка вида `ДокументОбъект.Док1` или `Документы.Док1` MAY кэшироваться в индексе, но MUST NOT становиться единственным semantic carrier;
+- отсутствие `active_facet` допустимо только там, где canonical truth действительно facet-neutral; оно не может возникать как артефакт flattening при materialization.
+
+### 12b. Forbidden materialization shortcuts
+
+`derived semantic index` и shared runtime MUST NOT:
+- заменять configuration identity одной строкой type name и потом восстанавливать facet эвристикой по operation kind или member name;
+- терять `available_facets` при переносе из IR/resolution в queryable runtime payload;
+- нормализовать recordset object facet к manager/reference surface только потому, что у них совпадает metadata owner name;
+- смешивать transport shaping и semantic normalization, когда adapter/DTO слой "дорисовывает" отсутствующий facet после runtime query;
+- считать сериализацию/десериализацию safe, если после round-trip пропадает facet envelope, даже при сохранении `name`.
+
+Если materialized payload не может сохранить facet envelope без потери точности, runtime MUST fail-closed для соответствующего semantic ответа, а не публиковать плоский substitute.
+
+### 12c. Shared runtime verification points
+
+Facet-preservation contract MUST быть проверяемым в трёх точках shared runtime:
+- producer point:
+  - resolver/type inference при построении canonical facts обязан заполнять `active_facet` и `available_facets` для configuration descriptors;
+  - materializer не имеет права обнулять эти поля без явной facet-neutral причины.
+- runtime projection point:
+  - shared semantic managers обязаны прокидывать `active_facet` / `available_facets` в surface DTO без дополнительной semantic normalization;
+  - `TypeInfoDto` и эквивалентные transport shapes считаются projection canonical runtime result, а не вторичным semantic model.
+- consumer semantics point:
+  - metadata/member lookup обязан зависеть от сохранённого active facet;
+  - manager/object/reference/recordset surfaces MUST продолжать возвращать разные member/property sets после materialization и round-trip через runtime responses.
+
+### 12d. Concrete preservation obligations
+
+Cutover acceptance MUST считать facet-preservation недоказанным, если не выполняется хотя бы один из пунктов:
+- object-module binding после shared-runtime query не возвращает `active_facet=Object` вместе с полным `available_facets` owner type;
+- serialization round-trip для public semantic DTO теряет `available_facets` или меняет их порядок/состав без canonical причины;
+- information-register object facet перестаёт expose-ить recordset methods/properties (`Записать`, `ОбменДанными`, `ДополнительныеСвойства`) после materialization;
+- manager-only predefined markers начинают протекать в object facet, или object members исчезают из-за flattening в manager/reference substitute;
+- любой consumer использует `name` как единственный input для member/property lookup, игнорируя facet envelope.
+
+Практически это означает:
+- module-context bindings из section 11 и facet-preservation из section 12 являются одним контрактом, а не двумя независимыми best-effort правилами;
+- acceptance/tests должны доказывать не только наличие facet полей в ответе, но и их поведенческую значимость для member/property semantics;
+- future `contracts/**` и perf/observability artifacts MUST ссылаться на этот facet envelope как на часть canonical semantic truth, если операция возвращает configuration-backed type info.
+
+### 13. Execution matrix `Requirement -> Code Area -> Test Class`
+
+Эта matrix является рабочим source of truth для tasks `3.2` и `3.3`.
+Она фиксирует, где именно живёт обязательное поведение и какие automated assets уже существуют или должны стать authoritative evidence для apply-stage.
+
+| Requirement | Primary code areas | Automated evidence / target test class | Notes for `3.2` / `3.3` |
+| --- | --- | --- | --- |
+| `IntelliSense v2 обеспечивает IDE-grade completion по выражениям` | `bsl-runtime/src/application/intellisense_v2/`; `backend/src/bin/lsp_server/handlers/completion.rs`; `backend/src/bin/lsp_server/server/core.rs`; `bsl-runtime/src/application/type_system/services/completion_service*` | `backend/tests/intellisense_golden_completion_test.rs`; `backend/tests/m8_completion_matrix_golden_v2_test.rs`; `backend/tests/lsp_incremental_completion_test.rs` | `3.2` должен добавить explicit cross-consumer acceptance beyond completion-only golden coverage. |
+| `Инкрементальность и корректность позиций в v2 pipeline` | `backend/src/bin/lsp_server/server/core.rs`; `bsl-runtime/src/application/intellisense_v2/facade.rs`; `analysis-v2/src/lib/analysis_api.rs` | `backend/src/bin/lsp_server/server/core/tests.rs`; `backend/tests/lsp_incremental_completion_test.rs` | Authoritative acceptance обязан явно покрыть immediate-after-`didChange` fail-closed vs exact-current-revision semantics. |
+| `v2 pipeline является единственным источником истины для вывода типов` | `analysis-v2/src/lib/snapshots.rs`; `analysis-v2/src/lib/analysis_api.rs`; `bsl-runtime/src/application/intellisense_v2/mod.rs`; `bsl-agent/src/session/manager_semantic_core.rs` | `bsl-agent/src/session/tests.rs::semantic_helpers_fail_closed_without_precomputed_type_index`; `bsl-runtime/src/application/intellisense_v2/facade/tests.rs` | `3.2` должен зафиксировать parity для `hover`, `definition`, `type-at-position`, `members`, а не только completion/type-at-position. |
+| `Canonical IR и derived semantic index образуют единый semantic core v2` | `analysis-v2/src/type_inference_v2.rs`; `analysis-v2/src/lib/snapshots.rs`; `bsl-runtime/src/application/intellisense_v2/facade.rs` | `analysis-v2/src/type_inference_v2/tests.rs`; `bsl-runtime/src/system/intellisense_index/tests.rs` | Для apply-stage нужен machine-readable trace, что materialized query path не строит alternate inference branch. |
+| `Facet-aware semantic identity сохраняется в canonical pipeline` | `analysis-v2/src/type_inference_v2.rs`; `analysis-v2/src/implicit_bindings.rs`; `shared/src/domain/metadata_lookup.rs`; `bsl-agent/src/session/manager_semantic_core.rs`; `bsl-agent/src/types/mod.rs` | `analysis-v2/src/implicit_bindings/tests.rs`; `analysis-v2/src/type_inference_v2/tests.rs`; `bsl-agent/src/session/tests.rs::collect_type_at_position_preserves_available_facets_for_object_module_binding`; `bsl-api-dtos/src/semantic_dtos/tests.rs`; `shared/src/domain/metadata_lookup/tests.rs`; `backend/tests/undeclared_variable_test.rs` | `3.2` должен объединить module-context and facet-preservation acceptance в один canonical bundle. |
+| `Semantic fast index отделён от discovery/search read-model` | `bsl-runtime/src/system/intellisense_index.rs`; `bsl-runtime/src/application/intellisense_v2/mod.rs`; `bsl-agent/src/session/*search*`; `backend/src/presentation/web/handlers.rs` | `bsl-runtime/src/system/intellisense_index/tests.rs`; `bsl-agent/src/session/tests.rs::symbol_search_and_references_work_via_bounded_blocking_workers`; `bsl-agent/src/session/tests.rs::semantic_helpers_fail_closed_without_precomputed_type_index` | Negative proof "search index never rescues semantic query" остаётся обязательным acceptance asset для `3.2`. |
+| `Adapter surfaces не реконструируют semantic truth локально` | `bsl-runtime/src/application/intellisense_v2/mod.rs`; `backend/src/bin/lsp_server/server/core.rs`; `backend/src/presentation/web/handlers.rs`; `bsl-agent/src/session/manager_semantic_core.rs` | `backend/src/bin/lsp_server/server/core/tests.rs`; `bsl-agent/src/session/tests.rs` | Web/MCP/LSP parity и отсутствие adapter-local semantic substitute должны быть выражены отдельным acceptance набором в `3.2`. |
+| `Canonical semantic queries fail-closed при недоступности артефактов` | `bsl-runtime/src/application/intellisense_v2/facade.rs`; `backend/src/bin/lsp_server/server/core.rs`; `bsl-agent/src/session/manager_semantic_core.rs` | `bsl-runtime/src/application/intellisense_v2/facade/tests.rs`; `backend/src/bin/lsp_server/server/core/tests.rs`; `bsl-agent/src/session/tests.rs::semantic_helpers_fail_closed_without_precomputed_type_index` | `3.2` должен зафиксировать единый fail-closed acceptance across `completion`, `hover`, `definition`, `type-at-position`, `members`. |
+| `Fail-closed observability использует bounded reason codes` | `bsl-runtime/src/system/basic_observability.rs`; `contracts/observability-completion-v2/v1/`; `contracts/observability-diagnostics-v2/v1/`; `scripts/check-versioned-contracts.py` | `bsl-runtime/src/system/basic_observability/tests.rs`; contract policy check `scripts/check-versioned-contracts.py` | `3.3` должен заменить legacy vocabulary на authoritative bounded taxonomy и versioned contract baseline. |
+| `Interactive latency budget защищается canonical fast path, а не fallback semantics` | `backend/src/bin/intellisense_perf.rs`; `backend/src/perf_gate_evaluator.rs`; `scripts/run-intellisense-perf.sh`; `contracts/intellisense-perf-gate/v1/` | `backend/src/bin/intellisense_perf/tests.rs`; `scripts/test-perf-gate-architecture.py`; perf reports under `backend/tests/perf/` | `3.3` должен оформить operation-aware authoritative gate bundle и `intellisense-perf-gate/v2`. |
+| `Applied-owner bare identifier fallback удалён из v2 semantics` | `analysis-v2/src/implicit_bindings.rs`; `analysis-v2/src/type_inference_v2.rs`; `shared/src/domain/metadata_lookup.rs`; `backend/tests/undeclared_variable_test.rs` | `analysis-v2/src/implicit_bindings/tests.rs`; `analysis-v2/src/type_inference_v2/tests.rs`; `backend/tests/undeclared_variable_test.rs`; `bsl-agent/src/session/tests.rs` | `3.2` должен держать explicit module-context positive contract и negative bare-identifier cases в одном acceptance пакете. |
+
+Матрица трактуется fail-closed:
+- если requirement не имеет явного code area или automated evidence class, он считается неготовым к apply-stage;
+- если evidence существует только в одном consumer, requirement не считается доказанным для shared runtime;
+- если evidence живёт только в prose, без test/contract/gate asset, requirement остаётся открытым независимо от степени архитектурной очевидности.
+
 ## Alternatives Considered
 
 ### 1. Оставить `type_index` как независимый semantic pipeline и лишь усилить тесты

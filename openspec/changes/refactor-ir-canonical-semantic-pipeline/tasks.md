@@ -16,10 +16,10 @@
 - [x] 2.5 Описать координацию или supersede-plan для связанных pending MCP/index changes.
 - [x] 2.6 Зафиксировать representative latency fixtures и bounded observability taxonomy как обязательные quality gates cutover, а не как post-factum tuning.
 - [x] 2.7 Зафиксировать positive canonical contract для module-context bindings `ЭтотОбъект` / `Объект` в `ObjectModule` / `RecordSetModule`, чтобы removal of applied-owner fallback не удалил корректную 1C module semantics.
-- [ ] 2.8 Зафиксировать facet-preservation contract для `derived semantic index`: какие facet-aware facts должны переживать materialization и как они проверяются в shared runtime.
+- [x] 2.8 Зафиксировать facet-preservation contract для `derived semantic index`: какие facet-aware facts должны переживать materialization и как они проверяются в shared runtime.
 
 ## 3. Validation Plan
-- [ ] 3.1 Подготовить execution matrix `Requirement -> Code Area -> Test Class`.
+- [x] 3.1 Подготовить execution matrix `Requirement -> Code Area -> Test Class`.
 - [ ] 3.2 Зафиксировать acceptance набор, который доказывает:
   - [ ] exact cross-consumer semantic equivalence
   - [ ] отсутствие adapter-local semantic truth

@@ -2,8 +2,7 @@
 
 pub mod completion_ranking;
 pub mod completion_service;
-#[cfg(test)]
-pub mod completion_target;
+mod completion_target;
 pub mod definition_service;
 mod flow_sensitive;
 pub mod hover_service;

@@ -17,6 +17,7 @@ pub enum CompletionTargetKind {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)]
 pub struct CompletionTarget {
     pub kind: CompletionTargetKind,
     pub receiver_expression: Option<Expression>,
@@ -72,6 +73,7 @@ impl ReceiverChain {
     }
 }
 
+#[allow(dead_code)]
 pub fn extract_completion_target_for_member_access(
     file_content: &str,
     line: u32,
@@ -86,7 +88,12 @@ pub fn extract_completion_target_for_member_access(
 
     let receiver = receiver_expression
         .as_ref()
-        .and_then(receiver_chain_from_expression);
+        .and_then(receiver_chain_from_expression)
+        .or_else(|| {
+            receiver_union_expressions
+                .as_ref()
+                .and_then(|expressions| receiver_chain_from_union_expressions(expressions))
+        });
 
     if receiver_expression.is_none() && receiver_union_expressions.is_none() {
         return None;
@@ -107,6 +114,9 @@ pub fn extract_member_access_receiver_chain(
     column: u32,
 ) -> Option<ReceiverChain> {
     let receiver_text = extract_member_access_receiver_text(file_content, line, column)?;
+    if let Some(receiver_union_expressions) = try_extract_choice_union_expressions(receiver_text) {
+        return receiver_chain_from_union_expressions(&receiver_union_expressions);
+    }
     let receiver_expr = parse_expression_snippet(receiver_text)?;
     receiver_chain_from_expression(&receiver_expr)
 }
@@ -639,6 +649,11 @@ fn receiver_chain_from_expression(expr: &Expression) -> Option<ReceiverChain> {
             head: ReceiverChainHead::ExplicitType(type_name.clone()),
             segments: Vec::new(),
         }),
+        Expression::Ternary {
+            then_expr,
+            else_expr,
+            ..
+        } => receiver_chain_from_alternatives([then_expr.as_ref(), else_expr.as_ref()]),
         Expression::Await { expression, .. } => receiver_chain_from_expression(expression),
         Expression::PropertyAccess {
             object, property, ..
@@ -677,6 +692,23 @@ fn receiver_chain_from_expression(expr: &Expression) -> Option<ReceiverChain> {
         }
         _ => None,
     }
+}
+
+fn receiver_chain_from_union_expressions(expressions: &[Expression]) -> Option<ReceiverChain> {
+    receiver_chain_from_alternatives(expressions.iter())
+}
+
+fn receiver_chain_from_alternatives<'a>(
+    expressions: impl IntoIterator<Item = &'a Expression>,
+) -> Option<ReceiverChain> {
+    let mut chains = expressions.into_iter().map(receiver_chain_from_expression);
+    let first = chains.next().flatten()?;
+    for chain in chains {
+        if chain.as_ref() != Some(&first) {
+            return None;
+        }
+    }
+    Some(first)
 }
 
 #[cfg(test)]

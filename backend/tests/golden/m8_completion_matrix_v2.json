@@ -150,6 +150,12 @@
         "isIncomplete": false,
         "items": [
           {
+            "insertText": "Дата",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "Дата"
+          },
+          {
             "insertText": "Заблокирован",
             "insertTextFormat": null,
             "kind": "METHOD",
@@ -192,6 +198,18 @@
             "label": "МоментВремени"
           },
           {
+            "insertText": "Номер",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "Номер"
+          },
+          {
+            "insertText": "НомерЗаказ",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "НомерЗаказ"
+          },
+          {
             "insertText": "ПолучитьМакет",
             "insertTextFormat": null,
             "kind": "METHOD",
@@ -210,6 +228,18 @@
             "label": "ПолучитьФорму"
           },
           {
+            "insertText": "ПометкаУдаления",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "ПометкаУдаления"
+          },
+          {
+            "insertText": "Проведен",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "Проведен"
+          },
+          {
             "insertText": "ПроверитьЗаполнение",
             "insertTextFormat": null,
             "kind": "METHOD",
@@ -222,70 +252,16 @@
             "label": "Прочитать"
           },
           {
-            "insertText": "Разблокировать",
-            "insertTextFormat": null,
-            "kind": "METHOD",
-            "label": "Разблокировать"
-          },
-          {
-            "insertText": "Скопировать",
-            "insertTextFormat": null,
-            "kind": "METHOD",
-            "label": "Скопировать"
-          },
-          {
-            "insertText": "Удалить",
-            "insertTextFormat": null,
-            "kind": "METHOD",
-            "label": "Удалить"
-          },
-          {
-            "insertText": "УстановитьВремя",
-            "insertTextFormat": null,
-            "kind": "METHOD",
-            "label": "УстановитьВремя"
-          },
-          {
-            "insertText": "УстановитьКомментарийВерсииИсторииДанных",
-            "insertTextFormat": null,
-            "kind": "METHOD",
-            "label": "УстановитьКомментарийВерсииИсторииДанных"
-          },
-          {
-            "insertText": "УстановитьНовыйНомер",
-            "insertTextFormat": null,
-            "kind": "METHOD",
-            "label": "УстановитьНовыйНомер"
-          },
-          {
-            "insertText": "УстановитьПометкуУдаления",
-            "insertTextFormat": null,
-            "kind": "METHOD",
-            "label": "УстановитьПометкуУдаления"
-          },
-          {
-            "insertText": "УстановитьСсылкуНового",
-            "insertTextFormat": null,
-            "kind": "METHOD",
-            "label": "УстановитьСсылкуНового"
-          },
-          {
-            "insertText": "ЭтоНовый",
-            "insertTextFormat": null,
-            "kind": "METHOD",
-            "label": "ЭтоНовый"
-          },
-          {
-            "insertText": "НомерЗаказ",
-            "insertTextFormat": null,
-            "kind": "PROPERTY",
-            "label": "НомерЗаказ"
-          },
-          {
             "insertText": "Работы",
             "insertTextFormat": null,
             "kind": "PROPERTY",
             "label": "Работы"
+          },
+          {
+            "insertText": "Разблокировать",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Разблокировать"
           },
           {
             "insertText": "РеквизитВремя",
@@ -318,6 +294,18 @@
             "label": "РеквизитИндексируемыйДопУпорядочивание"
           },
           {
+            "insertText": "Скопировать",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Скопировать"
+          },
+          {
+            "insertText": "Ссылка",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "Ссылка"
+          },
+          {
             "insertText": "Стороны",
             "insertTextFormat": null,
             "kind": "PROPERTY",
@@ -348,16 +336,28 @@
             "label": "СтроковыйТип4"
           },
           {
-            "insertText": "ЧисловойТип1",
+            "insertText": "Удалить",
             "insertTextFormat": null,
-            "kind": "PROPERTY",
-            "label": "ЧисловойТип1"
+            "kind": "METHOD",
+            "label": "Удалить"
           },
           {
-            "insertText": "ЧисловойТип2",
+            "insertText": "УстановитьВремя",
             "insertTextFormat": null,
-            "kind": "PROPERTY",
-            "label": "ЧисловойТип2"
+            "kind": "METHOD",
+            "label": "УстановитьВремя"
+          },
+          {
+            "insertText": "УстановитьКомментарийВерсииИсторииДанных",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "УстановитьКомментарийВерсииИсторииДанных"
+          },
+          {
+            "insertText": "УстановитьНовыйНомер",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "УстановитьНовыйНомер"
           }
         ],
         "topN": 35
@@ -376,12 +376,6 @@
       "completion": {
         "isIncomplete": false,
         "items": [
-          {
-            "insertText": "Итог",
-            "insertTextFormat": null,
-            "kind": "METHOD",
-            "label": "Итог"
-          },
           {
             "insertText": "Вставить",
             "insertTextFormat": null,
@@ -429,6 +423,12 @@
             "insertTextFormat": null,
             "kind": "METHOD",
             "label": "Индекс"
+          },
+          {
+            "insertText": "Итог",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Итог"
           },
           {
             "insertText": "Количество",
@@ -501,6 +501,12 @@
         "isIncomplete": false,
         "items": [
           {
+            "insertText": "Дата",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "Дата"
+          },
+          {
             "insertText": "Метаданные",
             "insertTextFormat": null,
             "kind": "METHOD",
@@ -511,6 +517,18 @@
             "insertTextFormat": null,
             "kind": "METHOD",
             "label": "МоментВремени"
+          },
+          {
+            "insertText": "Номер",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "Номер"
+          },
+          {
+            "insertText": "НомерЗаказ",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "НомерЗаказ"
           },
           {
             "insertText": "ПолучитьОбъект",
@@ -525,28 +543,22 @@
             "label": "ПолучитьФорму"
           },
           {
+            "insertText": "ПометкаУдаления",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "ПометкаУдаления"
+          },
+          {
+            "insertText": "Проведен",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "Проведен"
+          },
+          {
             "insertText": "Пустая",
             "insertTextFormat": null,
             "kind": "METHOD",
             "label": "Пустая"
-          },
-          {
-            "insertText": "Скопировать",
-            "insertTextFormat": null,
-            "kind": "METHOD",
-            "label": "Скопировать"
-          },
-          {
-            "insertText": "УникальныйИдентификатор",
-            "insertTextFormat": null,
-            "kind": "METHOD",
-            "label": "УникальныйИдентификатор"
-          },
-          {
-            "insertText": "НомерЗаказ",
-            "insertTextFormat": null,
-            "kind": "PROPERTY",
-            "label": "НомерЗаказ"
           },
           {
             "insertText": "Работы",
@@ -585,6 +597,18 @@
             "label": "РеквизитИндексируемыйДопУпорядочивание"
           },
           {
+            "insertText": "Скопировать",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Скопировать"
+          },
+          {
+            "insertText": "Ссылка",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "Ссылка"
+          },
+          {
             "insertText": "Стороны",
             "insertTextFormat": null,
             "kind": "PROPERTY",
@@ -613,6 +637,12 @@
             "insertTextFormat": null,
             "kind": "PROPERTY",
             "label": "СтроковыйТип4"
+          },
+          {
+            "insertText": "УникальныйИдентификатор",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "УникальныйИдентификатор"
           },
           {
             "insertText": "ЧисловойТип1",
@@ -649,12 +679,6 @@
         "isIncomplete": false,
         "items": [
           {
-            "insertText": "Итог",
-            "insertTextFormat": null,
-            "kind": "METHOD",
-            "label": "Итог"
-          },
-          {
             "insertText": "Вставить",
             "insertTextFormat": null,
             "kind": "METHOD",
@@ -697,10 +721,28 @@
             "label": "Индекс"
           },
           {
+            "insertText": "Индексы",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "Индексы"
+          },
+          {
+            "insertText": "Итог",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Итог"
+          },
+          {
             "insertText": "Количество",
             "insertTextFormat": null,
             "kind": "METHOD",
             "label": "Количество"
+          },
+          {
+            "insertText": "Колонки",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "Колонки"
           },
           {
             "insertText": "Найти",
@@ -761,18 +803,6 @@
             "insertTextFormat": null,
             "kind": "METHOD",
             "label": "Удалить"
-          },
-          {
-            "insertText": "Индексы",
-            "insertTextFormat": null,
-            "kind": "PROPERTY",
-            "label": "Индексы"
-          },
-          {
-            "insertText": "Колонки",
-            "insertTextFormat": null,
-            "kind": "PROPERTY",
-            "label": "Колонки"
           }
         ],
         "topN": 35
@@ -791,12 +821,6 @@
         "isIncomplete": false,
         "items": [
           {
-            "insertText": "Итог",
-            "insertTextFormat": null,
-            "kind": "METHOD",
-            "label": "Итог"
-          },
-          {
             "insertText": "Вставить",
             "insertTextFormat": null,
             "kind": "METHOD",
@@ -839,10 +863,28 @@
             "label": "Индекс"
           },
           {
+            "insertText": "Индексы",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "Индексы"
+          },
+          {
+            "insertText": "Итог",
+            "insertTextFormat": null,
+            "kind": "METHOD",
+            "label": "Итог"
+          },
+          {
             "insertText": "Количество",
             "insertTextFormat": null,
             "kind": "METHOD",
             "label": "Количество"
+          },
+          {
+            "insertText": "Колонки",
+            "insertTextFormat": null,
+            "kind": "PROPERTY",
+            "label": "Колонки"
           },
           {
             "insertText": "Найти",
@@ -903,18 +945,6 @@
             "insertTextFormat": null,
             "kind": "METHOD",
             "label": "Удалить"
-          },
-          {
-            "insertText": "Индексы",
-            "insertTextFormat": null,
-            "kind": "PROPERTY",
-            "label": "Индексы"
-          },
-          {
-            "insertText": "Колонки",
-            "insertTextFormat": null,
-            "kind": "PROPERTY",
-            "label": "Колонки"
           }
         ],
         "topN": 35

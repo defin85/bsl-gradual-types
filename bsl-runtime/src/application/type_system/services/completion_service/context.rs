@@ -1,3 +1,4 @@
+use super::super::completion_target::extract_member_access_receiver_chain as extract_member_access_receiver_chain_via_syntax;
 use super::*;
 
 /// Context for auto-completion.
@@ -248,6 +249,20 @@ pub(super) fn is_member_access_context(line_prefix: &str) -> bool {
 }
 
 pub(super) fn extract_member_receiver_chain(
+    content: &str,
+    line: u32,
+    column: u32,
+) -> Option<Vec<String>> {
+    if let Some(chain) = extract_member_access_receiver_chain_via_syntax(content, line, column)
+        .and_then(|chain| chain.to_name_chain())
+    {
+        return Some(chain);
+    }
+
+    extract_member_receiver_chain_tail_heuristic(content, line, column)
+}
+
+fn extract_member_receiver_chain_tail_heuristic(
     content: &str,
     line: u32,
     column: u32,

@@ -87,7 +87,23 @@ pub enum SemanticNodeKind {
     BinaryExpression {
         /// Оператор (например, "+", "<", "=")
         operator: String,
+        /// Индекс левого операнда в `SemanticProgram.nodes`.
+        left_node: Option<usize>,
+        /// Индекс правого операнда в `SemanticProgram.nodes`.
+        right_node: Option<usize>,
     },
+
+    /// Строковый литерал.
+    StringLiteral { value: String },
+
+    /// Числовой литерал.
+    NumberLiteral { value: f64 },
+
+    /// Булев литерал.
+    BooleanLiteral { value: bool },
+
+    /// Литерал даты.
+    DateLiteral { value: String },
 
     /// Объявление функции
     ///
@@ -221,6 +237,8 @@ pub enum SemanticNodeKind {
         object_name: Option<String>,
         /// Span выражения-объекта слева от `[...]`.
         object_span: Option<Span>,
+        /// Индекс узла выражения индекса.
+        index_node: Option<usize>,
         /// Span выражения индекса внутри `[...]`.
         index_span: Option<Span>,
     },
@@ -252,6 +270,8 @@ pub enum SemanticNodeKind {
         object_node: Option<usize>,
         /// Span выражения-объекта слева от точки для unified semantic hints.
         object_span: Option<Span>,
+        /// Индексы узлов аргументов вызова.
+        arg_nodes: Vec<Option<usize>>,
         /// Span-ы аргументов вызова для unified semantic hints.
         arg_spans: Vec<Span>,
     },
@@ -293,6 +313,8 @@ pub enum SemanticNodeKind {
         generic_params: Option<Vec<String>>,
         /// Динамический конструктор через строку: `Новый("Тип")`.
         is_dynamic: bool,
+        /// Индексы узлов аргументов конструктора.
+        arg_nodes: Vec<Option<usize>>,
     },
 }
 

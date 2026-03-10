@@ -189,7 +189,7 @@ impl SemanticProgram {
                     attributes,
                 )
             }
-            SemanticNodeKind::BinaryExpression { operator } => {
+            SemanticNodeKind::BinaryExpression { operator, .. } => {
                 attributes.insert("operator".to_string(), operator.clone());
                 (
                     "BinaryExpression".to_string(),
@@ -197,15 +197,41 @@ impl SemanticProgram {
                     attributes,
                 )
             }
+            SemanticNodeKind::StringLiteral { value } => {
+                attributes.insert("value".to_string(), value.clone());
+                ("StringLiteral".to_string(), Some(value.clone()), attributes)
+            }
+            SemanticNodeKind::NumberLiteral { value } => {
+                attributes.insert("value".to_string(), value.to_string());
+                (
+                    "NumberLiteral".to_string(),
+                    Some(value.to_string()),
+                    attributes,
+                )
+            }
+            SemanticNodeKind::BooleanLiteral { value } => {
+                attributes.insert("value".to_string(), value.to_string());
+                (
+                    "BooleanLiteral".to_string(),
+                    Some(value.to_string()),
+                    attributes,
+                )
+            }
+            SemanticNodeKind::DateLiteral { value } => {
+                attributes.insert("value".to_string(), value.clone());
+                ("DateLiteral".to_string(), Some(value.clone()), attributes)
+            }
             SemanticNodeKind::IfStatement { .. } => ("IfStatement".to_string(), None, attributes),
             SemanticNodeKind::ForLoop { .. } => ("ForLoop".to_string(), None, attributes),
             SemanticNodeKind::WhileLoop { .. } => ("WhileLoop".to_string(), None, attributes),
             SemanticNodeKind::FunctionCall {
                 function_name,
                 object_name,
+                arg_nodes,
                 ..
             } => {
                 attributes.insert("function_name".to_string(), function_name.clone());
+                attributes.insert("arg_count".to_string(), arg_nodes.len().to_string());
 
                 // MILESTONE 3.5: Показываем полное имя вызова (объект.метод)
                 let display_name = if let Some(obj_name) = object_name {
@@ -257,6 +283,7 @@ impl SemanticProgram {
                 object_node,
                 object_name,
                 object_span,
+                index_node,
                 index_span,
             } => {
                 if let Some(node_idx) = object_node {
@@ -267,6 +294,9 @@ impl SemanticProgram {
                 }
                 if let Some(span) = object_span {
                     attributes.insert("object_span".to_string(), span.to_string());
+                }
+                if let Some(node_idx) = index_node {
+                    attributes.insert("index_node".to_string(), node_idx.to_string());
                 }
                 if let Some(span) = index_span {
                     attributes.insert("index_span".to_string(), span.to_string());
@@ -292,9 +322,11 @@ impl SemanticProgram {
                 type_name,
                 is_dynamic,
                 generic_params,
+                arg_nodes,
             } => {
                 attributes.insert("type_name".to_string(), type_name.clone());
                 attributes.insert("is_dynamic".to_string(), is_dynamic.to_string());
+                attributes.insert("arg_count".to_string(), arg_nodes.len().to_string());
 
                 if let Some(params) = generic_params {
                     attributes.insert("generic_params".to_string(), params.join(", "));
@@ -364,13 +396,41 @@ impl SemanticProgram {
 
             // MILESTONE 5.4: FunctionCall может содержать вложенный узел (цепочки методов)
             // Например: Справочники.Контрагенты.НайтиПоКоду().ПолучитьОбъект()
-            FunctionCall { object_node, .. } => object_node.iter().copied().collect(),
+            FunctionCall {
+                object_node,
+                arg_nodes,
+                ..
+            } => object_node
+                .iter()
+                .copied()
+                .chain(arg_nodes.iter().flatten().copied())
+                .collect(),
 
             // MILESTONE 5.4: MemberAccess может содержать вложенный узел (цепочки доступа)
             // Например: Справочники.Контрагенты (GlobalPropertyAccess → MemberAccess)
             MemberAccess { object_node, .. } => object_node.iter().copied().collect(),
 
-            IndexAccess { object_node, .. } => object_node.iter().copied().collect(),
+            IndexAccess {
+                object_node,
+                index_node,
+                ..
+            } => object_node
+                .iter()
+                .copied()
+                .chain(index_node.iter().copied())
+                .collect(),
+
+            BinaryExpression {
+                left_node,
+                right_node,
+                ..
+            } => left_node
+                .iter()
+                .copied()
+                .chain(right_node.iter().copied())
+                .collect(),
+
+            NewExpression { arg_nodes, .. } => arg_nodes.iter().flatten().copied().collect(),
 
             Return { value_node } => value_node.iter().copied().collect(),
 

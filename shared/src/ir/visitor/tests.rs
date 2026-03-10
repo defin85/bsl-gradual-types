@@ -56,6 +56,7 @@ fn test_visitor_counts_nodes() {
             object_name: None,
             object_node: None,
             object_span: None,
+            arg_nodes: Vec::new(),
             arg_spans: Vec::new(),
         },
         span: Span::stub(),

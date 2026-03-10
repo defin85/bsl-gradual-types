@@ -43,16 +43,7 @@ impl AstToIrConverter {
                 function,
                 args,
                 span,
-            } => {
-                let node_idx =
-                    self.convert_call_expression(*function.clone(), args.clone(), *span)?;
-
-                for arg in args {
-                    self.convert_expression_for_hover(arg)?;
-                }
-
-                Ok(node_idx)
-            }
+            } => self.convert_call_expression(*function.clone(), args.clone(), *span),
             Expression::PropertyAccess {
                 object,
                 property,
@@ -80,6 +71,46 @@ impl AstToIrConverter {
                 self.nodes.push(node);
                 Ok(Some(self.nodes.len() - 1))
             }
+            Expression::String { value, span } => {
+                let node = SemanticNode {
+                    kind: SemanticNodeKind::StringLiteral {
+                        value: value.clone(),
+                    },
+                    span: self.ast_span_to_ir_span(*span),
+                    scope_id: self.current_scope,
+                };
+                self.nodes.push(node);
+                Ok(Some(self.nodes.len() - 1))
+            }
+            Expression::Number { value, span } => {
+                let node = SemanticNode {
+                    kind: SemanticNodeKind::NumberLiteral { value: *value },
+                    span: self.ast_span_to_ir_span(*span),
+                    scope_id: self.current_scope,
+                };
+                self.nodes.push(node);
+                Ok(Some(self.nodes.len() - 1))
+            }
+            Expression::Boolean { value, span } => {
+                let node = SemanticNode {
+                    kind: SemanticNodeKind::BooleanLiteral { value: *value },
+                    span: self.ast_span_to_ir_span(*span),
+                    scope_id: self.current_scope,
+                };
+                self.nodes.push(node);
+                Ok(Some(self.nodes.len() - 1))
+            }
+            Expression::Date { value, span } => {
+                let node = SemanticNode {
+                    kind: SemanticNodeKind::DateLiteral {
+                        value: value.clone(),
+                    },
+                    span: self.ast_span_to_ir_span(*span),
+                    scope_id: self.current_scope,
+                };
+                self.nodes.push(node);
+                Ok(Some(self.nodes.len() - 1))
+            }
             Expression::Binary { .. } => {
                 let Expression::Binary {
                     left,
@@ -91,12 +122,14 @@ impl AstToIrConverter {
                     return Ok(None);
                 };
 
-                self.convert_expression_for_hover(left)?;
-                self.convert_expression_for_hover(right)?;
+                let left_node = self.convert_expression_for_hover(left)?;
+                let right_node = self.convert_expression_for_hover(right)?;
 
                 let node = SemanticNode {
                     kind: SemanticNodeKind::BinaryExpression {
                         operator: operator.clone(),
+                        left_node,
+                        right_node,
                     },
                     span: self.ast_span_to_ir_span(*span),
                     scope_id: self.current_scope,
@@ -135,24 +168,24 @@ impl AstToIrConverter {
                     type_name = type_name[1..type_name.len() - 1].to_string();
                 }
 
+                let arg_nodes = args
+                    .iter()
+                    .map(|arg| self.convert_expression_for_hover(arg))
+                    .collect::<Result<Vec<_>>>()?;
+
                 let node = SemanticNode {
                     kind: SemanticNodeKind::NewExpression {
                         type_name,
                         generic_params: None,
                         is_dynamic,
+                        arg_nodes,
                     },
                     span: self.ast_span_to_ir_span(*span),
                     scope_id: self.current_scope,
                 };
 
                 self.nodes.push(node);
-                let node_idx = self.nodes.len() - 1;
-
-                for arg in args {
-                    self.convert_expression_for_hover(arg)?;
-                }
-
-                Ok(Some(node_idx))
+                Ok(Some(self.nodes.len() - 1))
             }
             Expression::IndexAccess { object, index, .. } => {
                 let object_span = self.ast_span_to_ir_span(expression_ast_span(object));
@@ -172,13 +205,14 @@ impl AstToIrConverter {
                     _ if object_name.is_none() => self.convert_expression_for_hover(object)?,
                     _ => None,
                 };
-                self.convert_expression_for_hover(index)?;
+                let index_node = self.convert_expression_for_hover(index)?;
 
                 let node = SemanticNode {
                     kind: SemanticNodeKind::IndexAccess {
                         object_node,
                         object_name,
                         object_span: Some(object_span),
+                        index_node,
                         index_span: Some(index_span),
                     },
                     span: self.ast_span_to_ir_span(expression_ast_span(expr)),
@@ -191,7 +225,6 @@ impl AstToIrConverter {
                 self.convert_expression_for_hover(expression)?;
                 Ok(None)
             }
-            _ => Ok(None),
         }
     }
 
@@ -203,6 +236,10 @@ impl AstToIrConverter {
         ast_span: Span,
     ) -> Result<Option<usize>> {
         let span = self.ast_span_to_ir_span(ast_span);
+        let arg_nodes = args
+            .iter()
+            .map(|arg| self.convert_expression_for_hover(arg))
+            .collect::<Result<Vec<_>>>()?;
         let arg_spans = args
             .iter()
             .map(expression_ast_span)
@@ -217,6 +254,7 @@ impl AstToIrConverter {
                         object_name: None,
                         object_node: None,
                         object_span: None,
+                        arg_nodes,
                         arg_spans,
                     },
                     span,
@@ -257,6 +295,7 @@ impl AstToIrConverter {
                         object_name,
                         object_node,
                         object_span: Some(object_span),
+                        arg_nodes,
                         arg_spans,
                     },
                     span: expanded_span,

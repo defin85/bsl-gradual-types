@@ -333,8 +333,8 @@ fn test_if_statement_with_scope() {
     )
     .unwrap();
 
-    // Должно быть 2 узла: IfStatement + VariableDeclaration
-    assert_eq!(ir.nodes.len(), 2);
+    // Должно быть 3 узла: BooleanLiteral + IfStatement + VariableDeclaration
+    assert_eq!(ir.nodes.len(), 3);
 
     // Должно быть 2 scope: root + then branch
     assert_eq!(ir.symbols.scopes.len(), 2);
@@ -368,23 +368,192 @@ fn test_function_call_with_args() {
     )
     .unwrap();
 
-    assert_eq!(ir.nodes.len(), 1);
+    assert_eq!(ir.nodes.len(), 2);
+    assert!(matches!(
+        ir.nodes[0].kind,
+        SemanticNodeKind::StringLiteral { .. }
+    ));
     if let SemanticNodeKind::FunctionCall {
         function_name,
         object_name,
         object_node,
         object_span,
+        arg_nodes,
         arg_spans,
         ..
-    } = &ir.nodes[0].kind
+    } = &ir.nodes[1].kind
     {
         assert_eq!(function_name, "Сообщить");
         assert!(object_name.is_none());
         assert_eq!(*object_node, None);
         assert_eq!(*object_span, None);
+        assert_eq!(arg_nodes, &vec![Some(0)]);
         assert_eq!(arg_spans.len(), 1);
     } else {
         panic!("Expected FunctionCall");
+    }
+}
+
+#[test]
+fn test_assignment_to_literal_materializes_literal_value_node() {
+    let ast = Program {
+        statements: vec![Statement::Assignment {
+            target: Expression::Identifier {
+                name: "x".to_string(),
+                span: AstSpan::stub(),
+            },
+            value: Expression::Number {
+                value: 42.0,
+                span: AstSpan::stub(),
+            },
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "x = 42;".to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    assert_eq!(ir.nodes.len(), 2);
+
+    if let SemanticNodeKind::NumberLiteral { value } = &ir.nodes[0].kind {
+        assert_eq!(*value, 42.0);
+    } else {
+        panic!(
+            "Expected NumberLiteral at nodes[0], got: {:?}",
+            ir.nodes[0].kind
+        );
+    }
+
+    if let SemanticNodeKind::Assignment {
+        variable,
+        value_node,
+        ..
+    } = &ir.nodes[1].kind
+    {
+        assert_eq!(variable, "x");
+        assert_eq!(*value_node, Some(0));
+    } else {
+        panic!(
+            "Expected Assignment at nodes[1], got: {:?}",
+            ir.nodes[1].kind
+        );
+    }
+}
+
+#[test]
+fn test_binary_expression_keeps_child_nodes() {
+    let ast = Program {
+        statements: vec![Statement::Assignment {
+            target: Expression::Identifier {
+                name: "x".to_string(),
+                span: AstSpan::stub(),
+            },
+            value: Expression::Binary {
+                left: Box::new(Expression::Identifier {
+                    name: "a".to_string(),
+                    span: AstSpan::stub(),
+                }),
+                operator: "+".to_string(),
+                right: Box::new(Expression::Number {
+                    value: 1.0,
+                    span: AstSpan::stub(),
+                }),
+                span: AstSpan::stub(),
+            },
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "x = a + 1;".to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    assert_eq!(ir.nodes.len(), 4);
+    assert!(matches!(
+        ir.nodes[0].kind,
+        SemanticNodeKind::VariableAccess { .. }
+    ));
+    assert!(matches!(
+        ir.nodes[1].kind,
+        SemanticNodeKind::NumberLiteral { .. }
+    ));
+
+    if let SemanticNodeKind::BinaryExpression {
+        operator,
+        left_node,
+        right_node,
+    } = &ir.nodes[2].kind
+    {
+        assert_eq!(operator, "+");
+        assert_eq!(*left_node, Some(0));
+        assert_eq!(*right_node, Some(1));
+    } else {
+        panic!(
+            "Expected BinaryExpression at nodes[2], got: {:?}",
+            ir.nodes[2].kind
+        );
+    }
+}
+
+#[test]
+fn test_new_expression_keeps_argument_nodes() {
+    let ast = Program {
+        statements: vec![Statement::Assignment {
+            target: Expression::Identifier {
+                name: "Описание".to_string(),
+                span: AstSpan::stub(),
+            },
+            value: Expression::New {
+                type_name: "ОписаниеТипов".to_string(),
+                args: vec![Expression::String {
+                    value: "Строка".to_string(),
+                    span: AstSpan::stub(),
+                }],
+                span: AstSpan::stub(),
+            },
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "Описание = Новый ОписаниеТипов(\"Строка\");".to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    assert_eq!(ir.nodes.len(), 3);
+    assert!(matches!(
+        ir.nodes[0].kind,
+        SemanticNodeKind::StringLiteral { .. }
+    ));
+
+    if let SemanticNodeKind::NewExpression {
+        type_name,
+        arg_nodes,
+        ..
+    } = &ir.nodes[1].kind
+    {
+        assert_eq!(type_name, "ОписаниеТипов");
+        assert_eq!(arg_nodes, &vec![Some(0)]);
+    } else {
+        panic!(
+            "Expected NewExpression at nodes[1], got: {:?}",
+            ir.nodes[1].kind
+        );
     }
 }
 
@@ -469,16 +638,16 @@ fn test_function_body_indices() {
     )
     .unwrap();
 
-    // Проверяем, что есть 3 узла: 2 внутренних + FunctionDeclaration
-    assert_eq!(ir.nodes.len(), 3);
+    // Проверяем, что есть 4 узла: VariableDeclaration + NumberLiteral + Assignment + FunctionDeclaration
+    assert_eq!(ir.nodes.len(), 4);
 
     // Проверяем, что FunctionDeclaration содержит индексы тела
-    if let SemanticNodeKind::FunctionDeclaration { body, .. } = &ir.nodes[2].kind {
+    if let SemanticNodeKind::FunctionDeclaration { body, .. } = &ir.nodes[3].kind {
         assert_eq!(body.len(), 2); // VariableDeclaration + Assignment
         assert_eq!(body[0], 0); // Индекс первого узла тела
-        assert_eq!(body[1], 1); // Индекс второго узла тела
+        assert_eq!(body[1], 2); // Индекс второго узла тела
     } else {
-        panic!("Expected FunctionDeclaration at nodes[2]");
+        panic!("Expected FunctionDeclaration at nodes[3]");
     }
 }
 
@@ -777,23 +946,30 @@ fn test_index_access_is_materialized_as_first_class_ir_node() {
     )
     .unwrap();
 
-    assert_eq!(ir.nodes.len(), 2);
+    assert_eq!(ir.nodes.len(), 3);
+
+    assert!(matches!(
+        ir.nodes[0].kind,
+        SemanticNodeKind::StringLiteral { .. }
+    ));
 
     if let SemanticNodeKind::IndexAccess {
         object_node,
         object_name,
         object_span,
+        index_node,
         index_span,
-    } = &ir.nodes[0].kind
+    } = &ir.nodes[1].kind
     {
         assert_eq!(*object_node, None);
         assert_eq!(object_name.as_deref(), Some("Map"));
         assert!(object_span.is_some());
+        assert_eq!(*index_node, Some(0));
         assert!(index_span.is_some());
     } else {
         panic!(
-            "Expected IndexAccess at nodes[0], got: {:?}",
-            ir.nodes[0].kind
+            "Expected IndexAccess at nodes[1], got: {:?}",
+            ir.nodes[1].kind
         );
     }
 
@@ -801,14 +977,14 @@ fn test_index_access_is_materialized_as_first_class_ir_node() {
         variable,
         value_node,
         ..
-    } = &ir.nodes[1].kind
+    } = &ir.nodes[2].kind
     {
         assert_eq!(variable, "Результат");
-        assert_eq!(*value_node, Some(0));
+        assert_eq!(*value_node, Some(1));
     } else {
         panic!(
-            "Expected Assignment at nodes[1], got: {:?}",
-            ir.nodes[1].kind
+            "Expected Assignment at nodes[2], got: {:?}",
+            ir.nodes[2].kind
         );
     }
 }
@@ -849,10 +1025,10 @@ fn test_member_access_keeps_index_access_as_object_node() {
     )
     .unwrap();
 
-    assert_eq!(ir.nodes.len(), 3);
+    assert_eq!(ir.nodes.len(), 4);
 
     assert!(matches!(
-        ir.nodes[0].kind,
+        ir.nodes[1].kind,
         SemanticNodeKind::IndexAccess { .. }
     ));
 
@@ -861,15 +1037,15 @@ fn test_member_access_keeps_index_access_as_object_node() {
         object_name,
         member_name,
         ..
-    } = &ir.nodes[1].kind
+    } = &ir.nodes[2].kind
     {
-        assert_eq!(*object_node, Some(0));
+        assert_eq!(*object_node, Some(1));
         assert!(object_name.is_none());
         assert_eq!(member_name, "Имя");
     } else {
         panic!(
-            "Expected MemberAccess at nodes[1], got: {:?}",
-            ir.nodes[1].kind
+            "Expected MemberAccess at nodes[2], got: {:?}",
+            ir.nodes[2].kind
         );
     }
 }
@@ -914,10 +1090,10 @@ fn test_method_call_keeps_index_access_as_object_node() {
     )
     .unwrap();
 
-    assert_eq!(ir.nodes.len(), 3);
+    assert_eq!(ir.nodes.len(), 4);
 
     assert!(matches!(
-        ir.nodes[0].kind,
+        ir.nodes[1].kind,
         SemanticNodeKind::IndexAccess { .. }
     ));
 
@@ -926,15 +1102,15 @@ fn test_method_call_keeps_index_access_as_object_node() {
         object_name,
         function_name,
         ..
-    } = &ir.nodes[1].kind
+    } = &ir.nodes[2].kind
     {
-        assert_eq!(*object_node, Some(0));
+        assert_eq!(*object_node, Some(1));
         assert!(object_name.is_none());
         assert_eq!(function_name, "Метод");
     } else {
         panic!(
-            "Expected FunctionCall at nodes[1], got: {:?}",
-            ir.nodes[1].kind
+            "Expected FunctionCall at nodes[2], got: {:?}",
+            ir.nodes[2].kind
         );
     }
 }

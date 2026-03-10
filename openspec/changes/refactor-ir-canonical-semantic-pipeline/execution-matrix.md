@@ -3,8 +3,8 @@
 ## Scope
 
 Матрица покрывает обязательные требования из:
-- `openspec/changes/archive/2026-03-10-refactor-ir-canonical-semantic-pipeline/specs/bsl-intellisense-v2/spec.md`
-- `openspec/changes/archive/2026-03-10-refactor-ir-canonical-semantic-pipeline/specs/mcp-bsl-agent/spec.md`
+- `openspec/changes/refactor-ir-canonical-semantic-pipeline/specs/bsl-intellisense-v2/spec.md`
+- `openspec/changes/refactor-ir-canonical-semantic-pipeline/specs/mcp-bsl-agent/spec.md`
 
 ## Requirement -> Code Area -> Test Class
 

@@ -1396,6 +1396,48 @@ fn serve_only_exact_hit_matches_legacy_for_same_snapshot() {
 }
 
 #[test]
+fn current_type_index_serve_only_ready_requires_exact_artifact() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(212);
+    let text: Arc<str> = Arc::from(
+        "Procedure Test()\n\
+             x = 1;\n\
+             x = x + 1;\n\
+             EndProcedure",
+    );
+
+    host.apply_change(Change::SetFileWithSnapshot {
+        file_id,
+        text: text.clone(),
+        version: 1,
+        path: Arc::from("serve-only-ready-exact-hit.bsl"),
+        parse_snapshot: parse_snapshot_for_test(file_id, 1, text.as_ref(), Vec::new(), true, None),
+    });
+
+    let analysis = host.snapshot();
+    assert!(
+        !analysis
+            .current_type_index_serve_only_ready(file_id)
+            .expect("ready before precompute"),
+        "serve-only readiness must stay false before exact artifact precompute"
+    );
+
+    let precompute = analysis
+        .precompute_type_index_for_file(file_id, Some(1), 0)
+        .expect("precompute");
+    assert_eq!(
+        precompute.reason_code,
+        TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeExactStored
+    );
+    assert!(
+        analysis
+            .current_type_index_serve_only_ready(file_id)
+            .expect("ready after precompute"),
+        "serve-only readiness must become true after exact artifact precompute"
+    );
+}
+
+#[test]
 fn serve_only_matches_legacy_for_universal_collections_in_complete_snapshot() {
     let mut host = AnalysisHostV2::default();
     let file_id = FileId(208);
@@ -1854,6 +1896,125 @@ fn serve_only_fails_closed_for_snapshot_fallback_artifact() {
         serve_only.resolution.is_none(),
         "serve-only must fail closed instead of serving degraded artifact"
     );
+}
+
+#[test]
+fn current_type_index_serve_only_ready_rejects_fallback_snapshot_artifact() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(213);
+    let text: Arc<str> = Arc::from(
+        "Procedure Test()\n\
+             x = 1;\n\
+             x = x + 1;\n\
+             EndProcedure",
+    );
+
+    host.apply_change(Change::SetFileWithSnapshot {
+        file_id,
+        text: text.clone(),
+        version: 1,
+        path: Arc::from("serve-only-ready-fallback.bsl"),
+        parse_snapshot: parse_snapshot_for_test(
+            file_id,
+            1,
+            text.as_ref(),
+            vec![ParseChangedRange {
+                start_byte: 0,
+                old_end_byte: 0,
+                new_end_byte: 0,
+            }],
+            true,
+            Some("incremental_fallback"),
+        ),
+    });
+
+    let analysis = host.snapshot();
+    let precompute = analysis
+        .precompute_type_index_for_file(file_id, Some(1), 0)
+        .expect("precompute fallback artifact");
+    assert_eq!(
+        precompute.reason_code,
+        TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeExactStored
+    );
+    assert!(
+        !analysis
+            .current_type_index_serve_only_ready(file_id)
+            .expect("ready for fallback artifact"),
+        "serve-only readiness must stay false when artifact is marked fallback-unavailable"
+    );
+}
+
+#[test]
+fn serve_only_accepts_exact_full_parse_snapshots_for_stateful_lsp_reasons() {
+    for (file_id, reason, path) in [
+        (
+            FileId(214),
+            "no_previous_tree",
+            "serve-only-safe-full-open.bsl",
+        ),
+        (
+            FileId(215),
+            "no_edits_provided",
+            "serve-only-safe-full-change.bsl",
+        ),
+    ] {
+        let mut host = AnalysisHostV2::default();
+        let text: Arc<str> = Arc::from(
+            "Procedure Test()\n\
+                 x = 1;\n\
+                 x = x + 1;\n\
+                 EndProcedure",
+        );
+
+        host.apply_change(Change::SetFileWithSnapshot {
+            file_id,
+            text: text.clone(),
+            version: 1,
+            path: Arc::from(path),
+            parse_snapshot: parse_snapshot_for_test(
+                file_id,
+                1,
+                text.as_ref(),
+                Vec::new(),
+                false,
+                Some(reason),
+            ),
+        });
+
+        let analysis = host.snapshot();
+        let probe = marker_offset(text.as_ref(), "x = x + 1;");
+        let legacy = analysis
+            .type_at_byte_offset(file_id, probe)
+            .expect("legacy type lookup")
+            .expect("legacy type result");
+        let precompute = analysis
+            .precompute_type_index_for_file(file_id, Some(1), 0)
+            .expect("precompute safe full parse artifact");
+        assert_eq!(
+            precompute.reason_code,
+            TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeExactStored,
+            "safe full parse reason {reason} must still store exact artifact"
+        );
+        assert!(
+            analysis
+                .current_type_index_serve_only_ready(file_id)
+                .expect("ready for safe full parse artifact"),
+            "safe full parse reason {reason} must keep serve-only readiness"
+        );
+        let serve_only = analysis
+            .type_at_byte_offset_serve_only_profiled(file_id, probe)
+            .expect("serve-only safe full parse lookup");
+        assert_eq!(
+            serve_only.serve_reason_code,
+            TypeIndexServeReasonCode::TypeIndexExactHit,
+            "safe full parse reason {reason} must preserve exact serve-only lookup"
+        );
+        assert_eq!(
+            serve_only.resolution,
+            Some(legacy),
+            "safe full parse reason {reason} must preserve legacy-equivalent resolution"
+        );
+    }
 }
 
 #[test]

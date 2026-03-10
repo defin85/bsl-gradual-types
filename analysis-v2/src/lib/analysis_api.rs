@@ -207,7 +207,7 @@ impl AnalysisV2 {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             if let Some(artifact) = cache.get_type_index_exact(&key) {
-                if artifact.parse_snapshot_meta.fallback_reason_present {
+                if artifact.parse_snapshot_meta.serve_only_blocked {
                     (
                         None,
                         TypeIndexServeReasonCode::TypeIndexFallbackUnavailable,
@@ -240,6 +240,23 @@ impl AnalysisV2 {
             },
             serve_reason_code: reason_code,
         })
+    }
+
+    pub fn current_type_index_serve_only_ready(&self, file_id: FileId) -> Cancellable<bool> {
+        let Some(&file) = self.files.get(&file_id) else {
+            return Ok(false);
+        };
+
+        let file_version = file.version(&self.db);
+        let key = self.make_type_index_artifact_key(file_id, file_version);
+        let cache = self
+            .derived_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        Ok(cache
+            .get_type_index_exact(&key)
+            .is_some_and(|artifact| !artifact.parse_snapshot_meta.serve_only_blocked))
     }
 
     pub fn file_text(&self, file_id: FileId) -> Cancellable<Option<Arc<str>>> {

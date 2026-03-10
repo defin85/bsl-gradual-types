@@ -10131,13 +10131,21 @@ async fn wait_for_type_index_precompute_completion(
             let tasks = server.type_index_precompute_tasks_v2.lock().await;
             tasks.contains_key(&file_id)
         };
-        if !has_task {
+        let exact_ready = server
+            .analysis_v2
+            .snapshot()
+            .await
+            .current_type_index_serve_only_ready(file_id)
+            .expect("current_type_index_serve_only_ready");
+        if !has_task && exact_ready {
             return;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "type-index precompute did not finish for file_id={}",
-            file_id.0
+            "type-index precompute did not yield current exact serve-only artifact for file_id={} (has_task={}, exact_ready={})",
+            file_id.0,
+            has_task,
+            exact_ready
         );
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
     }

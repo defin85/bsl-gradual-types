@@ -58,7 +58,11 @@ impl TypeIndexArtifactKey {
 pub(crate) struct TypeIndexParseSnapshotMeta {
     pub(crate) incremental: bool,
     pub(crate) changed_ranges_count: usize,
-    pub(crate) fallback_reason_present: bool,
+    pub(crate) serve_only_blocked: bool,
+}
+
+fn parse_snapshot_fallback_reason_blocks_serve_only(reason: &str) -> bool {
+    !matches!(reason, "no_previous_tree" | "no_edits_provided")
 }
 
 impl TypeIndexParseSnapshotMeta {
@@ -69,7 +73,10 @@ impl TypeIndexParseSnapshotMeta {
         Self {
             incremental: snapshot.incremental,
             changed_ranges_count: snapshot.changed_ranges.len(),
-            fallback_reason_present: snapshot.fallback_reason.is_some(),
+            serve_only_blocked: snapshot
+                .fallback_reason
+                .as_deref()
+                .is_some_and(parse_snapshot_fallback_reason_blocks_serve_only),
         }
     }
 }

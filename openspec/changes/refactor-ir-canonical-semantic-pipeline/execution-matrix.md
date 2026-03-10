@@ -43,3 +43,5 @@
 - `semantic-diagnostics` теперь эмитит `UndeclaredVariable` для RHS присваивания, когда canonical semantic hints сообщают undeclared value.
 - backend contract tests закрепляют explicit-binding-only semantics для bare owner members вне `FormModule`.
 - `IntellisenseV2Facade::prepare_ephemeral_operation` теперь прогревает exact type index для shared interactive ephemeral queries (`hover`, `members`, `type_at_position`), а adapter-local precompute удалён из Web/MCP handlers.
+- `analysis-v2` теперь трактует stateful full-parse snapshot reasons `no_previous_tree` и `no_edits_provided` как exact-safe для `serve_only` artifact, а блокирующими остаются только реально degraded fallback reasons.
+- stateful LSP acceptance helpers теперь ждут доступность current exact `serve_only` artifact, а не просто исчезновение background precompute task из server map.

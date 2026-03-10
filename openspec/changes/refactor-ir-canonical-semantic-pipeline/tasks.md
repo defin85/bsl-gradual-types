@@ -12,7 +12,7 @@
 - [x] 2.1 Описать минимальные расширения canonical IR, достаточные для owner/member/type/definition queries без parallel semantic inference path.
 - [x] 2.2 Описать состав `derived semantic index` и contract его построения из одного IR snapshot/revision.
 - [x] 2.3 Описать big-bang cutover для `LSP`, `Web`, `MCP`, `CLI` без long-lived dual runtime behavior в merge state.
-- [ ] 2.4 Описать contract/version impact для `contracts/**`, observability reason taxonomy, adapter boundaries, acceptance и perf expectations после удаления degraded paths и stale-as-current substitute behavior.
+- [x] 2.4 Описать contract/version impact для `contracts/**`, observability reason taxonomy, adapter boundaries, acceptance и perf expectations после удаления degraded paths и stale-as-current substitute behavior.
 - [ ] 2.5 Описать координацию или supersede-plan для связанных pending MCP/index changes.
 - [ ] 2.6 Зафиксировать representative latency fixtures и bounded observability taxonomy как обязательные quality gates cutover, а не как post-factum tuning.
 - [ ] 2.7 Зафиксировать positive canonical contract для module-context bindings `ЭтотОбъект` / `Объект` в `ObjectModule` / `RecordSetModule`, чтобы removal of applied-owner fallback не удалил корректную 1C module semantics.
@@ -36,6 +36,6 @@
 ## Dependencies / Parallelism
 - [x] D1 Пункты 1.1-1.8 блокируют весь design/spec cutover.
 - [x] D2 Пункт 2.1 блокирует 2.2 и semantic spec deltas.
-- [ ] D3 Пункты 2.2-2.4 блокируют validation matrix и contract deltas.
+- [x] D3 Пункты 2.2-2.4 блокируют validation matrix и contract deltas.
 - [ ] D3a Пункт 2.6 блокирует финальную формулировку quality gates и acceptance.
 - [ ] D4 Пункт 2.5 должен быть согласован до apply-stage, чтобы не внедрять конфликтующий MCP runtime path.

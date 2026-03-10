@@ -460,6 +460,92 @@ Deletion boundary merge-state включает как минимум:
 - parse-result-backed операции вне semantic scope этого change;
 - internal cache/build scaffolding, если оно не публикует alternate semantic behavior и не размывает merge-state contract.
 
+### 8. Contract/version impact для `contracts/**` и public DTO boundaries
+
+`contracts/README` уже задаёт базовое правило merge-state:
+- любое breaking изменение machine-readable surface требует новый major directory `vN -> vN+1`;
+- breaking изменение обязано сопровождаться migration note в `changelog.md`;
+- `scripts/check-contract-compatibility-diff.py` становится обязательным merge gate для всех поверхностей, которые этот change реально затрагивает.
+
+Для этого cutover breaking считаются не только shape changes, но и:
+- удаление legacy outcome/reason enum values;
+- переименование или удаление observability labels/counters, на которые опираются внешние dashboards/tests;
+- semantic reinterpretation существующего поля так, что старый consumer мог бы принять stale/degraded semantics за допустимый current-revision ответ.
+
+### 8a. Surface matrix по versioned contracts
+
+`contracts/lsp-completion-v2/v1` считается breaking-affected surface:
+- `v1` закрепляет legacy outcomes `degraded_incomplete` и `fallback_unavailable`;
+- merge-state их удаляет как допустимые публичные completion outcomes;
+- cutover поэтому требует `contracts/lsp-completion-v2/v2/` с migration note;
+- `v2` examples MUST доказывать только два класса semantic поведения: exact current-revision completion или fail-closed current-revision response, без stale/degraded vocabulary.
+
+`contracts/lsp-completion-timeline/v1` считается breaking-affected surface:
+- `v1` timeline outcome set и trace interpretation включают legacy `degraded_incomplete`, `fallback_unavailable`, `wait_not_ready`, `missing_ir` как completion-visible end-state;
+- после cutover timeline MUST описывать canonical-or-fail-closed execution, а не precompute/fallback lifecycle;
+- это требует `contracts/lsp-completion-timeline/v2/` с обновлённым outcome taxonomy и migration note для tooling/dashboard consumers.
+
+`contracts/observability-completion-v2/v1` считается breaking-affected surface:
+- `v1` публично закрепляет `fallback_unavailable_counter`, `type_index_reason_counter_prefix`, `type_index_precompute_*` counters/histograms и legacy reason values (`type_index_stale_served`, `type_index_degraded_incomplete`, `type_index_fallback_unavailable`, ...);
+- merge-state удаляет stale/degraded/type-index-as-truth semantics, поэтому эти labels/counters больше не могут оставаться публичным compatibility baseline;
+- cutover требует `contracts/observability-completion-v2/v2/`, где публичная taxonomy ограничена shared fail-closed reason codes и canonical-path metrics;
+- новый contract MUST избегать high-cardinality label dimensions и MUST NOT вводить adapter-specific reason enums для одной и той же runtime причины.
+
+`contracts/observability-diagnostics-v2/v1` в рамках этого slice остаётся совместимым только при жёстком ограничении scope:
+- `v1` продолжает описывать publish/cancel pipeline diagnostics (`published`, `superseded_*`, `*_cancel`);
+- shared fail-closed reason taxonomy interactive semantic runtime MUST NOT silently подмешиваться в `allowed_reasons` этого `v1`;
+- если последующие slices захотят сделать diagnostics-public observability surface carrier для `missing_canonical_ir` / `missing_semantic_index` / `unavailable_by_contract`, это уже отдельный breaking change и требует `contracts/observability-diagnostics-v2/v2/`.
+
+`contracts/intellisense-perf-gate/v1` считается недостаточным authoritative cutover gate, но major bump откладывается на task `2.6`:
+- `v1` покрывает только completion-centric metrics/profiles;
+- новый merge-state требует representative fixtures и budgets также для `hover`, `definition`, `type-at-position`, `members`;
+- поэтому `v1` остаётся историческим baseline, а task `2.6` должен подготовить `contracts/intellisense-perf-gate/v2/` с расширенным набором fixtures/metrics/report fields;
+- до появления `v2` perf evidence по одному completion-contract не считается достаточным доказательством cutover acceptance.
+
+`contracts/lsp-index-state/v1` не получает обязательного version impact от этого change:
+- cutover меняет semantic source of truth, но не требует менять публичные `states` / `active_operations`;
+- bump допускается только если дальнейшая реализация реально меняет этот DTO shape или machine-readable значения.
+
+### 8b. Adapter boundaries и DTO ownership после cutover
+
+Versioned contract существует только там, где surface уже объявлен в `contracts/**`.
+На момент этого slice:
+- `LSP completion` и completion timeline имеют versioned public contract и обязаны пройти через major bump;
+- observability surfaces имеют versioned public contract и обязаны сохранить bounded shared taxonomy;
+- для `Web`, `MCP`, `CLI` в `contracts/**` пока нет самостоятельного versioned baseline.
+
+Следовательно граница ownership такая:
+- shared semantic runtime владеет semantic truth, fail-closed outcome class и machine-readable reason taxonomy;
+- adapter DTO layer владеет только transport mapping: `CompletionList`, JSON response, MCP result envelope, CLI stdout/stderr/report formatting;
+- adapters MAY выбирать surface-специфичную форму unavailable (`empty`, `None`, `explicit warning/envelope`), но MUST NOT вводить adapter-local semantic reason enums или stale/degraded substitute fields;
+- shared reason codes по умолчанию живут в observability/logging contract, а не в новых public DTO fields;
+- если `Web`, `MCP` или `CLI` потребуется новый стабильно поддерживаемый field/enum для fail-closed semantics, merge должен сначала добавить новый versioned surface в `contracts/**`, а не расширять DTO ad hoc.
+
+Это даёт fail-closed merge-state без скрытого расширения публичного API:
+- semantic truth не зависит от transport DTO;
+- DTO не маскирует stale/degraded answer под success;
+- одна и та же runtime причина даёт один и тот же bounded reason code во всех adapters, даже если transport envelope различается.
+
+### 8c. Acceptance и perf expectations, привязанные к новому merge-state
+
+Для affected versioned surfaces acceptance MUST включать:
+- compatibility-diff against `master` и явную классификацию breaking vs non-breaking;
+- наличие нового `vN` directory и migration note для `lsp-completion-v2`, `lsp-completion-timeline`, `observability-completion-v2`;
+- отсутствие legacy enums/labels `degraded_incomplete`, `fallback_unavailable`, `type_index_stale_served`, `type_index_degraded_incomplete` в новых authoritative contract versions;
+- cross-adapter evidence, что `LSP`, `Web`, `MCP`, `CLI` мапят один shared runtime outcome в свои transport envelopes без adapter-local semantic rescue;
+- evidence, что ни один публичный DTO не маркирует stale result как current-revision success.
+
+Для observability acceptance merge-state MUST дополнительно доказывать:
+- фиксированный low-cardinality reason set (`missing_canonical_ir`, `missing_semantic_index`, `superseded_revision`, `cancelled`, `unavailable_by_contract`);
+- отсутствие свободных labels по revision/file/request id в публичном contract;
+- одинаковую семантику reason codes во всех interactive adapters и отсутствие MCP/Web-only aliases для той же причины.
+
+Perf expectations связываются с тем же merge-state:
+- latency/perf regressions являются quality-gate failure, а не поводом вернуть degraded/stale/search-backed behavior;
+- authoritative perf report для cutover обязан ссылаться на canonical-path runs и fail-closed reason taxonomy, а не на legacy fallback outcomes;
+- до task `2.6` любые perf numbers считаются предварительными, если они не покрывают representative fixtures за пределами completion;
+- после task `2.6` contract-level perf evidence MUST блокировать merge, если pass достигается только за счёт скрытого semantic substitute вместо оптимизации canonical IR/derived semantic index path.
+
 ## Alternatives Considered
 
 ### 1. Оставить `type_index` как независимый semantic pipeline и лишь усилить тесты

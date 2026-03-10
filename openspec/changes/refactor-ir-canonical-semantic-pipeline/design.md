@@ -747,6 +747,53 @@ Cutover MUST NOT быть признан готовым, если выполня
 
 Следовательно merge-state обязан либо расширить эти helpers/contracts до нового authoritative baseline, либо заменить их эквивалентным machine-readable gate bundle до `openspec apply`.
 
+### 11. Positive canonical contract для `ЭтотОбъект` / `Объект` в `ObjectModule` / `RecordSetModule`
+
+Удаление applied-owner bare identifier fallback MUST NOT удалять корректную explicit module-context semantics, которую ожидает платформа 1C в object и record set modules.
+Для этого change `ЭтотОбъект` и `Объект` в `ObjectModule` / `RecordSetModule` считаются не compatibility workaround, а частью canonical semantic contract.
+
+Нормативная опора:
+- в 1C module context object/record set module предоставляет explicit current-context object через `ThisObject`;
+- record set является самостоятельным applied object surface со своим `ThisObject`-driven context, а не суррогатом manager/reference semantics.
+
+Следовательно removal of bare-identifier fallback меняет только неявную applied-owner эвристику.
+Он не имеет права затрагивать explicit identifiers `ЭтотОбъект` / `Объект`, которые уже принадлежат canonical binding model.
+
+### 11a. Binding invariants
+
+Shared runtime MUST обеспечивать следующие инварианты:
+- `ObjectModule` MUST публиковать `ЭтотОбъект` и `Объект` как explicit module-context bindings корневого lexical scope текущей revision.
+- `RecordSetModule` MUST публиковать `ЭтотОбъект` и `Объект` как explicit module-context bindings корневого lexical scope текущей revision.
+- оба имени MUST резолвиться через один canonical binding family, а не через разные adapter-local rules; различается только lexical name, semantic owner fact остаётся одним и тем же.
+- для `ObjectModule` canonical descriptor MUST сохранять owner `FacetKind::Object` applied object, то есть `ДокументОбъект.*`, `СправочникОбъект.*` и совместимые facet-aware configuration types.
+- для `RecordSetModule` canonical descriptor MUST сохранять recordset object facet, то есть `РегистрСведенийНаборЗаписей.*`, `РегистрНакопленияНаборЗаписей.*` и совместимые recordset object types, а не manager/reference/list substitute.
+- `derived semantic index` MUST materialize эти bindings как часть shared semantic runtime state, чтобы `LSP`, `Web`, `MCP`, `CLI` читали один и тот же fact вместо локальной реконструкции.
+
+Практическое следствие:
+- `hover`, `definition`, `type-at-position`, `members` и dotted `completion` через `ЭтотОбъект` и `Объект` MUST видеть один и тот же canonical owner/type surface;
+- diagnostics MUST считать эти identifiers объявленными в `ObjectModule` / `RecordSetModule`;
+- facet-aware identity (`active_facet` / `available_facets` или эквивалент) MUST сохраняться и для binding fact, и для materialized query result.
+
+### 11b. Negative boundary
+
+Этот contract намеренно узкий и fail-closed:
+- он НЕ восстанавливает applied-owner bare identifier fallback для `ДоговорКонтрагента`, `Реквизит`, `ТабличнаяЧасть` и других owner members без explicit receiver;
+- он НЕ разрешает adapter-local injection aliases, keyword heuristics или late reconstruction из текста документа;
+- он НЕ разрешает flattening `ObjectModule` / `RecordSetModule` context до plain owner type name без facet identity;
+- он НЕ разрешает получать эти bindings из discovery/search index или из completion-specific fallback path;
+- он НЕ расширяет scope на другие module types только потому, что у них тоже может существовать `ЭтотОбъект`; для них остаются собственные contracts.
+
+### 11c. Acceptance consequences
+
+Acceptance bundle для этого change MUST трактовать следующий набор как обязательное доказательство positive contract:
+- `type-at-position` на `ЭтотОбъект` и `Объект` в `ObjectModule` возвращает один и тот же object facet owner type;
+- `type-at-position` на `ЭтотОбъект` и `Объект` в `RecordSetModule` возвращает один и тот же recordset facet owner type;
+- explicit dotted member access через `ЭтотОбъект.<member>` и `Объект.<member>` остаётся canonical для `hover`, `definition`, `members` и, где применимо, `completion`;
+- undeclared-variable diagnostics не репортят `ЭтотОбъект` / `Объект` как missing symbols в `ObjectModule` / `RecordSetModule`;
+- bare owner member access без explicit receiver остаётся undeclared после removal of fallback, даже если explicit module-context bindings продолжают работать.
+
+Если хотя бы один consumer удерживает этот contract только через private aliasing, stale substitute или operation-specific workaround, cutover считается неуспешным.
+
 ## Alternatives Considered
 
 ### 1. Оставить `type_index` как независимый semantic pipeline и лишь усилить тесты

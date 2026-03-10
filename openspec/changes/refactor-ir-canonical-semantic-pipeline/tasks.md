@@ -15,7 +15,7 @@
 - [x] 2.4 Описать contract/version impact для `contracts/**`, observability reason taxonomy, adapter boundaries, acceptance и perf expectations после удаления degraded paths и stale-as-current substitute behavior.
 - [x] 2.5 Описать координацию или supersede-plan для связанных pending MCP/index changes.
 - [x] 2.6 Зафиксировать representative latency fixtures и bounded observability taxonomy как обязательные quality gates cutover, а не как post-factum tuning.
-- [ ] 2.7 Зафиксировать positive canonical contract для module-context bindings `ЭтотОбъект` / `Объект` в `ObjectModule` / `RecordSetModule`, чтобы removal of applied-owner fallback не удалил корректную 1C module semantics.
+- [x] 2.7 Зафиксировать positive canonical contract для module-context bindings `ЭтотОбъект` / `Объект` в `ObjectModule` / `RecordSetModule`, чтобы removal of applied-owner fallback не удалил корректную 1C module semantics.
 - [ ] 2.8 Зафиксировать facet-preservation contract для `derived semantic index`: какие facet-aware facts должны переживать materialization и как они проверяются в shared runtime.
 
 ## 3. Validation Plan

@@ -627,6 +627,126 @@ Partial supersede rule:
 - transport/help/shaping changes MAY идти параллельно, если их acceptance явно доказывает отсутствие нового semantic path;
 - если pending change не удаётся cleanly narrow/rebase без размывания semantic boundary, его надо пометить как superseded целиком или разбить на follow-up change до merge, а не тащить ambiguity в apply-stage.
 
+### 10. Representative latency fixtures и bounded taxonomy как обязательный cutover gate
+
+Для этого change quality gates не являются post-factum tuning activity.
+Они входят в merge contract и блокируют apply-stage так же жёстко, как spec deltas и compatibility-diff.
+
+Cutover считается недоказанным, пока одновременно не выполнены все четыре класса gate:
+- contract gate: versioned contracts и compatibility-diff фиксируют новый authoritative baseline;
+- perf gate: authoritative report показывает representative latency/resource evidence для canonical path;
+- observability gate: bounded low-cardinality taxonomy доказана contract/tests/runtime evidence;
+- acceptance gate: cross-consumer сценарии подтверждают, что fail-closed semantics и latency budget достигаются без alternate semantic path.
+
+Исторические completion-only helpers MAY использоваться как вспомогательная автоматизация, но MUST NOT считаться достаточным cutover evidence сами по себе.
+
+### 10a. Representative fixture families
+
+Representative latency suite MUST покрывать не только scale profiles (`small`, `large`, `churn`), но и semantic fixture families.
+Scale profile без semantic fixture не считается representative evidence.
+
+Обязательные fixture families:
+- `steady_member_chain`:
+  - warm current-revision запрос по цепочке member access в обычном semantic path;
+  - обязателен для `completion`, `hover`, `definition`, `type-at-position`, `members`.
+- `post_didChange_current_revision`:
+  - тот же класс запросов сразу после `didChange`/overlay update;
+  - обязан мерить exact-current-revision orchestration (`wait_for_file_version` / snapshot / query) или fail-closed без stale substitute;
+  - обязателен для `completion`, `hover`, `definition`, `type-at-position`, `members`.
+- `object_module_explicit_context`:
+  - explicit access через `ЭтотОбъект` / `Объект` в `ObjectModule`;
+  - обязателен для `hover`, `definition`, `type-at-position`, `members`;
+  - completion обязателен, если fixture содержит explicit dotted access.
+- `recordset_module_explicit_context`:
+  - explicit access через `ЭтотОбъект` / `Объект` в `RecordSetModule`;
+  - обязателен для `hover`, `definition`, `type-at-position`, `members`;
+  - completion обязателен, если fixture содержит explicit dotted access.
+- `incomplete_syntax_member_access`:
+  - syntactically incomplete код, где syntax extraction ещё допустим, а semantic truth обязана оставаться canonical;
+  - completion обязателен всегда;
+  - остальные operations MAY измеряться дополнительно только если их публичный contract реально поддерживает такой incomplete input.
+
+Нормативное следствие:
+- `small|large|churn` остаются scale axis;
+- fixture families остаются semantic axis;
+- authoritative gate обязан явно показывать покрытие обеих осей или эквивалентную machine-readable matrix.
+
+### 10b. Required perf evidence shape
+
+Task `2.6` требует подготовить `contracts/intellisense-perf-gate/v2/` как authoritative perf baseline для этого cutover.
+До появления этого `v2` apply-stage MUST считать perf evidence предварительным.
+
+`intellisense-perf-gate/v2` MUST требовать:
+- machine-readable fixture identifier;
+- machine-readable operation identifier;
+- scale profile (`small`, `large`, `churn` или совместимый bounded enum);
+- обязательный provenance envelope (`change_id`, `generated_at`, `profile`, `schema_version`, `contract_version`);
+- bootstrap/sample policy не слабее текущего `sample_size_min>=5` и `aggregation_rule=median`.
+
+Authoritative perf evidence MUST включать по крайней мере:
+- total duration metric per operation;
+- `wait_for_file_version` latency, если operation проходит через stateful freshness gate;
+- snapshot-preparation latency;
+- canonical semantic query latency (`ir_query` или семантически эквивалентный metric family);
+- resource metrics, достаточные для обнаружения allocator/lock regressions на canonical path.
+
+Для `completion`, `hover`, `definition`, `type-at-position`, `members` contract MUST иметь explicit metric families.
+Опора на generic `other` bucket или completion-only metrics как substitute для остальных operations является gate failure.
+
+Существующий completion harness MAY быть переиспользован как один из runners, но только после расширения:
+- с completion-only профилей на representative operation coverage;
+- с completion-only thresholds на fixture-aware thresholds;
+- с completion-specific fallback counters на canonical fail-closed evidence.
+
+### 10c. Bounded observability taxonomy как contract gate
+
+Authoritative public fail-closed taxonomy для interactive semantic surfaces MUST быть конечной и фиксированной.
+Для cutover acceptance допустим ровно следующий reason set:
+- `missing_canonical_ir`;
+- `missing_semantic_index`;
+- `superseded_revision`;
+- `cancelled`;
+- `unavailable_by_contract`.
+
+Допустимые bounded companion dimensions:
+- `origin`: `lsp`, `web`, `agent`, `runtime`;
+- `operation`: `completion`, `hover`, `definition`, `type-at-position`, `members` и только те дополнительные operations, которые явно включены в versioned contract;
+- при необходимости outcome class уровня `ok` / `fail_closed` / `cancelled`, если он остаётся bounded и одинаково трактуется всеми adapters.
+
+Недопустимо для authoritative cutover artifacts:
+- legacy/public reasons `missing_ir`, `wait_not_ready`, `fallback_unavailable`, `degraded_incomplete`;
+- `type_index_*` reason taxonomy как public semantic gate vocabulary;
+- adapter-specific aliases для одной и той же runtime причины;
+- high-cardinality labels по `revision`, `uri`, `path`, `request_id`, `symbol_id` в публичном contract.
+
+Normalization sink `other` MAY существовать во внутреннем runtime instrumentation, но authoritative cutover tests/reports MUST доказывать нулевое использование `other` для interactive fail-closed taxonomy на representative fixtures.
+
+### 10d. Merge-blocking failure conditions
+
+Cutover MUST NOT быть признан готовым, если выполняется хотя бы одно из условий:
+- отсутствует хотя бы одна обязательная fixture family;
+- отсутствует explicit operation coverage для `completion`, `hover`, `definition`, `type-at-position`, `members`;
+- perf contract/report остаётся completion-only и не доказывает representative semantic coverage;
+- observability artifacts содержат legacy reasons или используют `other` как часть authoritative fail-closed evidence;
+- acceptance/perf pass достигается только потому, что runner или adapter вернул stale/degraded/search-backed semantic substitute;
+- quality gate numbers зафиксированы только в prose без machine-readable contract/report;
+- compatibility-diff или provenance gate не пройдены.
+
+### 10e. Relation to existing helpers and legacy artifacts
+
+Текущие artifacts:
+- `contracts/intellisense-perf-gate/v1`;
+- `scripts/run-intellisense-perf.sh`;
+- `scripts/validate-v2-completion-gates.sh`;
+- `contracts/observability-completion-v2/v1`.
+
+Они остаются полезным transitional baseline, но для этого cutover считаются insufficient authority, потому что:
+- сосредоточены на completion-centric metrics;
+- несут legacy vocabulary (`missing_ir`, `fallback_unavailable`, `type_index_*`);
+- не доказывают full representative coverage по `definition`, `type-at-position`, `members` и module-context fixtures.
+
+Следовательно merge-state обязан либо расширить эти helpers/contracts до нового authoritative baseline, либо заменить их эквивалентным machine-readable gate bundle до `openspec apply`.
+
 ## Alternatives Considered
 
 ### 1. Оставить `type_index` как независимый semantic pipeline и лишь усилить тесты

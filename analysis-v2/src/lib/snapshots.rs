@@ -622,13 +622,13 @@ pub fn type_index(
     let _settings_id = settings.id(db);
     let deps_data = deps.data(db).0.clone();
     let inputs_ms = inputs_started.elapsed().as_millis();
-    let parse_result_started = Instant::now();
-    let parsed = parse_result(db, file, settings).0;
-    let parse_result_ms = parse_result_started.elapsed().as_millis();
+    let ir_started = Instant::now();
+    let program = ir(db, file, deps, settings).0;
+    let ir_ms = ir_started.elapsed().as_millis();
     cancellation_checkpoint(db);
     let build_started = Instant::now();
-    let mut profiled = type_inference_v2::build_type_index_with_path_profiled(
-        &parsed.program,
+    let mut profiled = type_inference_v2::build_type_index_from_semantic_program_with_path_profiled(
+        program.as_ref(),
         file.path(db).as_ref(),
         deps_data,
     );
@@ -639,11 +639,11 @@ pub fn type_index(
     }
     TypeIndexSnapshot::new(
         Arc::new(profiled.index),
-        parse_result_ms,
+        0,
         profiled.profile,
         TypeIndexQueryProfile {
-            inputs_ms,
-            parse_result_query_ms: parse_result_ms,
+            inputs_ms: inputs_ms.saturating_add(ir_ms),
+            parse_result_query_ms: 0,
             build_ms,
             total_ms,
         },

@@ -16,6 +16,7 @@ use bsl_shared::domain::types::{
 use bsl_shared::domain::types::{ConcreteType, TypeResolution, UncertaintyReason, WeightedType};
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::domain::{CodeLocation, ModuleType};
+use bsl_shared::ir::SemanticProgram;
 use bsl_syntax::ast::{CompilerDirective, Expression, ParseError, Program, Statement};
 
 use crate::ast_to_ir::{is_global_collection, lookup_global_collection};
@@ -113,12 +114,15 @@ struct TypeInferencer {
 
 #[path = "type_inference_v2/expression_helpers.rs"]
 mod expression_helpers;
+#[path = "type_inference_v2/ir_projection.rs"]
+mod ir_projection;
 #[path = "type_inference_v2/instance_effects.rs"]
 mod instance_effects;
 #[path = "type_inference_v2/local_function_summaries.rs"]
 mod local_function_summaries;
 
 use self::expression_helpers::{expr_span, signature_lookup_type_name};
+use self::ir_projection::project_semantic_program;
 use self::instance_effects::{
     arbitrary_resolution, merge_resolutions, normalize_schema_value_type, strip_structural_members,
     InstanceBinding, InstanceEffectStore, InstanceId,
@@ -145,10 +149,12 @@ impl TypeInferencer {
         self.build_index_profiled(program, file_path).index
     }
 
+    #[cfg(test)]
     fn build_index_profiled(&self, program: &Program, file_path: &str) -> TypeIndexBuildProfiled {
         self.build_index_internal(program, file_path, None)
     }
 
+    #[cfg(test)]
     fn build_index_from_parse_result_profiled(
         &self,
         parsed: &bsl_syntax::ast::ParseResult,
@@ -163,6 +169,16 @@ impl TypeInferencer {
                 syntax_errors: &parsed.syntax_errors,
             }),
         )
+    }
+
+    fn build_index_from_semantic_program_profiled(
+        &self,
+        program: &SemanticProgram,
+        file_path: &str,
+        recovery: Option<RecoveryContext<'_>>,
+    ) -> TypeIndexBuildProfiled {
+        let projected = project_semantic_program(program);
+        self.build_index_internal(&projected, file_path, recovery)
     }
 
     fn build_index_internal(
@@ -1333,21 +1349,29 @@ pub(crate) fn build_type_index_with_path(
     TypeInferencer::new(deps).build_index(program, file_path)
 }
 
-pub(crate) fn build_type_index_with_path_profiled(
-    program: &Program,
+pub(crate) fn build_type_index_from_semantic_program_with_path_profiled(
+    program: &SemanticProgram,
     file_path: &str,
     deps: Arc<SemanticDeps>,
 ) -> TypeIndexBuildProfiled {
-    TypeInferencer::new(deps).build_index_profiled(program, file_path)
+    TypeInferencer::new(deps).build_index_from_semantic_program_profiled(program, file_path, None)
 }
 
-pub(crate) fn build_type_index_from_parse_result_with_path_profiled(
-    parsed: &bsl_syntax::ast::ParseResult,
+pub(crate) fn build_type_index_from_semantic_program_with_recovery_with_path_profiled(
+    program: &SemanticProgram,
     source_text: &str,
+    syntax_errors: &[ParseError],
     file_path: &str,
     deps: Arc<SemanticDeps>,
 ) -> TypeIndexBuildProfiled {
-    TypeInferencer::new(deps).build_index_from_parse_result_profiled(parsed, source_text, file_path)
+    TypeInferencer::new(deps).build_index_from_semantic_program_profiled(
+        program,
+        file_path,
+        Some(RecoveryContext {
+            source_text,
+            syntax_errors,
+        }),
+    )
 }
 
 #[cfg(test)]
@@ -1359,6 +1383,37 @@ pub(crate) fn build_type_index_from_parse_result_with_path(
 ) -> TypeIndex {
     TypeInferencer::new(deps)
         .build_index_from_parse_result_profiled(parsed, source_text, file_path)
+        .index
+}
+
+#[cfg(test)]
+pub(crate) fn build_type_index_from_semantic_program_with_path(
+    program: &SemanticProgram,
+    file_path: &str,
+    deps: Arc<SemanticDeps>,
+) -> TypeIndex {
+    TypeInferencer::new(deps)
+        .build_index_from_semantic_program_profiled(program, file_path, None)
+        .index
+}
+
+#[cfg(test)]
+pub(crate) fn build_type_index_from_semantic_program_with_recovery_with_path(
+    program: &SemanticProgram,
+    source_text: &str,
+    syntax_errors: &[ParseError],
+    file_path: &str,
+    deps: Arc<SemanticDeps>,
+) -> TypeIndex {
+    TypeInferencer::new(deps)
+        .build_index_from_semantic_program_profiled(
+            program,
+            file_path,
+            Some(RecoveryContext {
+                source_text,
+                syntax_errors,
+            }),
+        )
         .index
 }
 

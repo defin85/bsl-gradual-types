@@ -15,6 +15,19 @@ fn parse(code: &str) -> Program {
     parsed.program
 }
 
+fn ir_program(source: &str, file_path: &str, deps: Arc<SemanticDeps>) -> bsl_shared::ir::SemanticProgram {
+    let parsed = bsl_syntax::parse(source, &ParseOptions::default()).expect("parse ok");
+    crate::AstToIrConverter::convert_with_resolver(
+        parsed.program,
+        source.to_string(),
+        file_path.to_string(),
+        deps.repository.clone(),
+        deps.signature_index.clone(),
+        deps.resolver.clone(),
+    )
+    .expect("convert to ir")
+}
+
 fn structural_member_span_for_literal(source: &str, literal: &str) -> StructuralMemberSpan {
     structural_member_span_for_literal_occurrence(source, literal, 0)
 }
@@ -318,6 +331,79 @@ fn recovers_receiver_type_for_incomplete_bare_member_access_after_assignment() {
         receiver_type.type_name(),
         "Массив<Неопределено>",
         "recovered bare member-access receiver must retain prior assignment type"
+    );
+}
+
+#[test]
+fn builds_type_index_from_semantic_program_for_simple_assignment_and_method_call() {
+    let source = r#"Перем М;
+М = Новый Массив();
+Р = М.Количество();
+"#;
+    let file_path = "test.bsl";
+    let program = parse(source);
+    let deps = deps_with_array_method();
+    let ir_program = ir_program(source, file_path, deps.clone());
+    let legacy_index = build_type_index_with_path(&program, file_path, deps.clone());
+    let ir_index = build_type_index_from_semantic_program_with_path(&ir_program, file_path, deps);
+
+    let array_ident_offset = source
+        .find("\nМ =")
+        .map(|idx| idx + 1)
+        .expect("assignment line start") as u32;
+    assert_eq!(
+        ir_index.type_at_byte_offset(array_ident_offset),
+        legacy_index.type_at_byte_offset(array_ident_offset),
+        "IR-backed builder must preserve assignment type inference contract"
+    );
+
+    let method_call_offset = source.find("Количество").expect("method name") as u32;
+    assert_eq!(
+        ir_index.type_at_byte_offset(method_call_offset),
+        legacy_index.type_at_byte_offset(method_call_offset),
+        "IR-backed builder must preserve method-call return type inference contract"
+    );
+}
+
+#[test]
+fn recovers_receiver_type_from_semantic_program_for_incomplete_bare_member_access() {
+    let source = "Процедура Тест()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.\nКонецПроцедуры\n";
+    let file_path = "test.bsl";
+    let parsed = bsl_syntax::parse(source, &bsl_syntax::ParseOptions::default())
+        .expect("parse with recovery");
+    assert!(
+        parsed.has_errors(),
+        "incomplete bare member access fixture must exercise parser recovery"
+    );
+
+    let deps = deps_with_array_method();
+    let ir_program = crate::AstToIrConverter::convert_with_resolver(
+        parsed.program.clone(),
+        source.to_string(),
+        file_path.to_string(),
+        deps.repository.clone(),
+        deps.signature_index.clone(),
+        deps.resolver.clone(),
+    )
+    .expect("convert to ir");
+    let legacy_index =
+        build_type_index_from_parse_result_with_path(&parsed, source, file_path, deps.clone());
+    let ir_index = build_type_index_from_semantic_program_with_recovery_with_path(
+        &ir_program,
+        source,
+        &parsed.syntax_errors,
+        file_path,
+        deps,
+    );
+
+    let receiver_offset = source
+        .find("    ЛокМассив.\n")
+        .map(|idx| idx + "    ЛокМассив".len() - 1)
+        .expect("receiver offset") as u32;
+    assert_eq!(
+        ir_index.type_at_byte_offset(receiver_offset),
+        legacy_index.type_at_byte_offset(receiver_offset),
+        "IR-backed builder must preserve syntax-only recovery for incomplete member access"
     );
 }
 

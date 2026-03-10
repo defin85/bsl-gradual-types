@@ -131,10 +131,16 @@ impl AnalysisV2 {
             let deps_data = self.deps.data(&self.db).0.clone();
             let file_text = file.text(&self.db).clone();
             let file_path = file.path(&self.db).clone();
+            let Some(program) = self.ir(file_id)? else {
+                return Ok(TypeIndexPrecomputeResult::with_reason(
+                    TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeMissingFile,
+                ));
+            };
             let profiled = cancellable(|| {
-                type_inference_v2::build_type_index_from_parse_result_with_path_profiled(
-                    snapshot.parse_result.as_ref(),
+                type_inference_v2::build_type_index_from_semantic_program_with_recovery_with_path_profiled(
+                    program.as_ref(),
                     file_text.as_ref(),
+                    &snapshot.parse_result.syntax_errors,
                     file_path.as_ref(),
                     deps_data,
                 )

@@ -59,15 +59,15 @@ fn member_access_owner_hint_at_position(
     let line_prefix = line_text.get(..cursor_byte)?;
     let dot_idx = line_prefix.rfind('.')?;
     let receiver = line_prefix.get(..dot_idx)?.trim_end();
-    let (probe_byte, _) = receiver
-        .char_indices()
-        .rev()
-        .find(|(_, ch)| !ch.is_whitespace())?;
-    let probe_utf16 = bsl_analysis_v2::byte_offset_to_utf16(line_text, probe_byte);
+    if receiver.is_empty() {
+        return None;
+    }
+    let probe_utf16 = bsl_analysis_v2::byte_offset_to_utf16(line_text, receiver.len());
     let probe_offset = analysis
         .utf16_position_to_byte_offset(FILE_ID, position.line, probe_utf16)
         .ok()
-        .flatten()?;
+        .flatten()?
+        .saturating_sub(1);
 
     analysis
         .type_at_byte_offset(FILE_ID, probe_offset.min(u32::MAX as usize) as u32)

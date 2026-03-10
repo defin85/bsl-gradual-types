@@ -197,6 +197,41 @@ impl BslLanguageServer {
         }
     }
 
+    pub(crate) async fn wait_for_current_type_index_serve_only_ready_v2(
+        &self,
+        file_id: V2FileId,
+        expected_version: Option<i32>,
+        max_wait: std::time::Duration,
+    ) -> bool {
+        let deadline = tokio::time::Instant::now() + max_wait;
+        loop {
+            let analysis = self.analysis_v2.snapshot().await;
+            let observed_version = analysis.file_version(file_id).ok().flatten();
+            let exact_ready =
+                expected_version.is_none_or(|version| observed_version == Some(version))
+                    && analysis
+                        .current_type_index_serve_only_ready(file_id)
+                        .unwrap_or(false);
+            if exact_ready {
+                return true;
+            }
+
+            let has_matching_task = {
+                let tasks = self.type_index_precompute_tasks_v2.lock().await;
+                tasks.get(&file_id).is_some_and(|task| {
+                    expected_version
+                        .map(|version| task.supersession_key.requested_version == version)
+                        .unwrap_or(true)
+                })
+            };
+            if !has_matching_task || tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+    }
+
     async fn type_index_precompute_checkpoint_v2(
         &self,
         key: super::super::TypeIndexPrecomputeSupersessionKeyV2,

@@ -295,6 +295,33 @@ fn builds_type_index_for_simple_assignment_and_method_call() {
 }
 
 #[test]
+fn recovers_receiver_type_for_incomplete_bare_member_access_after_assignment() {
+    let source = "Процедура Тест()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.\nКонецПроцедуры\n";
+    let parsed = bsl_syntax::parse(source, &bsl_syntax::ParseOptions::default())
+        .expect("parse with recovery");
+    assert!(
+        parsed.has_errors(),
+        "incomplete bare member access fixture must exercise parser recovery"
+    );
+
+    let deps = deps_with_array_method();
+    let index = build_type_index_from_parse_result_with_path(&parsed, source, "test.bsl", deps);
+    let receiver_offset = source
+        .find("    ЛокМассив.\n")
+        .map(|idx| idx + "    ЛокМассив".len() - 1)
+        .expect("receiver offset") as u32;
+    let receiver_type = index
+        .type_at_byte_offset(receiver_offset)
+        .expect("recovered receiver type");
+
+    assert_eq!(
+        receiver_type.type_name(),
+        "Массив<Неопределено>",
+        "recovered bare member-access receiver must retain prior assignment type"
+    );
+}
+
+#[test]
 fn resolves_common_module_method_return_type_from_signature_index() {
     let source = r#"Процедура Тест()
     x = ОбщийМодуль1.Ф1();

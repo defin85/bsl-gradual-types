@@ -127,7 +127,23 @@ impl AnalysisV2 {
             .unwrap_or_default();
         let key = self.make_type_index_artifact_key(file_id, initial_version);
         let exec_started = Instant::now();
-        let index_snapshot = cancellable(|| type_index(&self.db, file, self.deps, self.settings))?;
+        let (type_index, build_profile) = if let Some(snapshot) = self.parse_snapshot_for_file(file_id, file) {
+            let deps_data = self.deps.data(&self.db).0.clone();
+            let file_text = file.text(&self.db).clone();
+            let file_path = file.path(&self.db).clone();
+            let profiled = cancellable(|| {
+                type_inference_v2::build_type_index_from_parse_result_with_path_profiled(
+                    snapshot.parse_result.as_ref(),
+                    file_text.as_ref(),
+                    file_path.as_ref(),
+                    deps_data,
+                )
+            })?;
+            (Arc::new(profiled.index), profiled.profile)
+        } else {
+            let index_snapshot = cancellable(|| type_index(&self.db, file, self.deps, self.settings))?;
+            (index_snapshot.index(), index_snapshot.build_profile())
+        };
         let exec_ms = exec_started.elapsed().as_millis();
         let latest_version = file.version(&self.db);
         if expected_version.is_some_and(|version| version != latest_version) {
@@ -137,15 +153,15 @@ impl AnalysisV2 {
                 stats: TypeIndexPrecomputeStats {
                     queue_wait_ms,
                     exec_ms,
-                    build_ms: index_snapshot.build_profile().total_ms,
+                    build_ms: build_profile.total_ms,
                     ..TypeIndexPrecomputeStats::default()
                 },
             });
         }
 
         let artifact = Arc::new(TypeIndexArtifact {
-            type_index: index_snapshot.index(),
-            build_profile: index_snapshot.build_profile(),
+            type_index,
+            build_profile,
             parse_snapshot_meta,
             produced_at_millis: unix_time_millis(),
         });
@@ -161,7 +177,7 @@ impl AnalysisV2 {
             stats: TypeIndexPrecomputeStats {
                 queue_wait_ms,
                 exec_ms,
-                build_ms: index_snapshot.build_profile().total_ms,
+                build_ms: build_profile.total_ms,
                 evicted_per_file_window_total: store_outcome.evicted_per_file_window_total,
                 evicted_global_guard_total: store_outcome.evicted_global_guard_total,
             },

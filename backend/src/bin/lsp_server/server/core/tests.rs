@@ -2021,6 +2021,13 @@ async fn p29_completion_mode_matrix_parity_on_fixed_revision() {
         let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
 
         initialize_lsp_service(&mut service).await;
+        let server = server_holder
+            .lock()
+            .expect("server holder lock")
+            .as_ref()
+            .cloned()
+            .expect("server instance");
+        prime_server_with_syntax_helper_deps(&server).await;
 
         let uri =
             Url::parse(&format!("file:///test_p29_mode_{}.bsl", scenario.name)).expect("test uri");
@@ -2049,13 +2056,6 @@ async fn p29_completion_mode_matrix_parity_on_fixed_revision() {
             .await
             .expect("didOpen notification");
         assert!(did_open_response.is_none(), "didOpen is a notification");
-
-        let server = server_holder
-            .lock()
-            .expect("server holder lock")
-            .as_ref()
-            .cloned()
-            .expect("server instance");
         let member_character = "    ЛокМассив."
             .chars()
             .map(|ch| ch.len_utf16())
@@ -3050,6 +3050,12 @@ async fn p7_trigger_character_and_invoked_member_access_keep_semantic_parity() {
     let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
 
     initialize_lsp_service(&mut service).await;
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be created");
+    prime_server_with_syntax_helper_deps(&server).await;
 
     let uri = Url::parse("file:///test_p7_trigger_parity.bsl").expect("test uri");
     let text = concat!(
@@ -3100,12 +3106,6 @@ async fn p7_trigger_character_and_invoked_member_access_keep_semantic_parity() {
         .await
         .expect("didChange notification");
     assert!(did_change_response.is_none(), "didChange is a notification");
-
-    let server = server_holder
-        .lock()
-        .expect("server holder lock")
-        .clone()
-        .expect("server must be created");
     let member_character = "    ЛокМассив."
         .chars()
         .map(|ch| ch.len_utf16())
@@ -3156,6 +3156,7 @@ async fn p7_trigger_character_and_invoked_member_access_keep_semantic_parity() {
     };
     let dot_members = extract_labels(&dot_response);
     let invoked_members = extract_labels(&invoked_response);
+    let metrics = coordinator.observability_metrics();
     assert!(
         !dot_members.is_empty(),
         "trigger-character completion must return candidates"
@@ -3171,7 +3172,6 @@ async fn p7_trigger_character_and_invoked_member_access_keep_semantic_parity() {
         invoked_members
     );
 
-    let metrics = coordinator.observability_metrics();
     let counters = metrics
         .get("counters")
         .and_then(|value| value.as_object())
@@ -9076,6 +9076,12 @@ async fn p27_interactive_completion_acceptance_gates_emit_artifact() {
     let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
 
     initialize_lsp_service(&mut service).await;
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be created");
+    prime_server_with_syntax_helper_deps(&server).await;
 
     let uri = Url::parse("file:///test_p27_interactive_acceptance_gate.bsl").expect("test uri");
     let text = concat!(
@@ -9103,12 +9109,6 @@ async fn p27_interactive_completion_acceptance_gates_emit_artifact() {
         .await
         .expect("didOpen notification");
     assert!(did_open_response.is_none(), "didOpen is a notification");
-
-    let server = server_holder
-        .lock()
-        .expect("server holder lock")
-        .clone()
-        .expect("server must be created");
     let member_character = "    ЛокМассив."
         .chars()
         .map(|ch| ch.len_utf16())

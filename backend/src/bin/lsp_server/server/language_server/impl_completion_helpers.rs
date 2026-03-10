@@ -312,19 +312,13 @@ pub(super) fn compute_member_access_owner_hint(
                 }
             };
             owner_hint_receiver_len_chars = Some(receiver.chars().count());
-            let (probe_byte, _) = match receiver
-                .char_indices()
-                .rev()
-                .find(|(_, ch)| !ch.is_whitespace())
-            {
-                Some(probe) => probe,
-                None => {
-                    owner_hint_reason = "no_receiver";
-                    return None;
-                }
-            };
+            if receiver.is_empty() {
+                owner_hint_reason = "no_receiver";
+                return None;
+            }
             Some(bsl_backend::system::positioning::byte_offset_to_utf16(
-                line_text, probe_byte,
+                line_text,
+                receiver.len(),
             ))
         })();
         coordinator.record_completion_stage_latency(
@@ -344,7 +338,7 @@ pub(super) fn compute_member_access_owner_hint(
                 );
                 match offset {
                     Some(offset) => {
-                        let offset = offset.min(u32::MAX as usize) as u32;
+                        let offset = offset.saturating_sub(1).min(u32::MAX as usize) as u32;
                         let owner_hint_type_lookup_started = Instant::now();
                         let hint = {
                             owner_hint_lookup_path = Some("direct");

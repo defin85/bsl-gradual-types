@@ -497,6 +497,30 @@ impl BslLanguageServer {
                         break 'completion_flow Some(completion_incomplete_empty_response());
                     }
 
+                    if member_access_request {
+                        let exact_wait_budget = bsl_runtime::application::intellisense_v2::interactive_freshness_knobs(
+                            bsl_runtime::application::SemanticOperation::Completion,
+                            Some(self.coordinator.as_ref()),
+                        )
+                        .map(|knobs| knobs.wait_budget)
+                        .unwrap_or_default();
+                        let exact_wait_started = Instant::now();
+                        let _ = self
+                            .wait_for_current_type_index_serve_only_ready_v2(
+                                file_id,
+                                Some(expected_version),
+                                exact_wait_budget,
+                            )
+                            .await;
+                        let exact_wait_elapsed = exact_wait_started.elapsed();
+                        self.coordinator.record_completion_stage_latency(
+                            "wait_exact_type_index",
+                            exact_wait_elapsed,
+                        );
+                        timeline_capture
+                            .push_completed_stage("wait_exact_type_index", exact_wait_elapsed);
+                    }
+
                     let query_bundle_started = Instant::now();
                     let (
                         file_content,

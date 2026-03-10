@@ -16,7 +16,7 @@ use bsl_shared::domain::types::{
 use bsl_shared::domain::types::{ConcreteType, TypeResolution, UncertaintyReason, WeightedType};
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::domain::{CodeLocation, ModuleType};
-use bsl_syntax::ast::{Expression, Program, Statement};
+use bsl_syntax::ast::{CompilerDirective, Expression, ParseError, Program, Statement};
 
 use crate::ast_to_ir::{is_global_collection, lookup_global_collection};
 use crate::implicit_bindings::{
@@ -146,6 +146,31 @@ impl TypeInferencer {
     }
 
     fn build_index_profiled(&self, program: &Program, file_path: &str) -> TypeIndexBuildProfiled {
+        self.build_index_internal(program, file_path, None)
+    }
+
+    fn build_index_from_parse_result_profiled(
+        &self,
+        parsed: &bsl_syntax::ast::ParseResult,
+        source_text: &str,
+        file_path: &str,
+    ) -> TypeIndexBuildProfiled {
+        self.build_index_internal(
+            &parsed.program,
+            file_path,
+            Some(RecoveryContext {
+                source_text,
+                syntax_errors: &parsed.syntax_errors,
+            }),
+        )
+    }
+
+    fn build_index_internal(
+        &self,
+        program: &Program,
+        file_path: &str,
+        recovery: Option<RecoveryContext<'_>>,
+    ) -> TypeIndexBuildProfiled {
         let started = Instant::now();
         let mut env = TypeEnv::default();
         let mut index = TypeIndex::default();
@@ -162,7 +187,34 @@ impl TypeInferencer {
 
         let visit_statements_started = Instant::now();
         for stmt in &program.statements {
-            self.visit_statement(stmt, &mut env, &mut index);
+            match stmt {
+                Statement::FunctionDecl {
+                    params,
+                    body,
+                    compiler_directive,
+                    span,
+                    ..
+                }
+                | Statement::ProcedureDecl {
+                    params,
+                    body,
+                    compiler_directive,
+                    span,
+                    ..
+                } => {
+                    let fn_env =
+                        self.visit_callable_body(params, body, *compiler_directive, &env, &mut index);
+                    if let Some(recovery) = recovery {
+                        self.record_incomplete_member_access_recovery_entries(
+                            recovery,
+                            *span,
+                            &fn_env,
+                            &mut index,
+                        );
+                    }
+                }
+                _ => self.visit_statement(stmt, &mut env, &mut index),
+            }
         }
         let visit_statements_ms = visit_statements_started.elapsed().as_millis();
 
@@ -177,6 +229,54 @@ impl TypeInferencer {
                 index_entry_count: index.entries.len() as u64,
             },
             index,
+        }
+    }
+
+    fn visit_callable_body(
+        &self,
+        params: &[String],
+        body: &[Statement],
+        compiler_directive: Option<CompilerDirective>,
+        env: &TypeEnv,
+        index: &mut TypeIndex,
+    ) -> TypeEnv {
+        let mut fn_env = env.clone();
+        if directive_disables_form_context(compiler_directive) {
+            for key in FORM_CONTEXT_BOUND_SYMBOL_KEYS {
+                fn_env.variables.remove(key);
+                fn_env.instance_bindings.remove(key);
+            }
+        }
+        for param in params {
+            fn_env.set_variable_value(param.to_lowercase(), TypeResolution::unknown(), None);
+        }
+        for stmt in body {
+            self.visit_statement(stmt, &mut fn_env, index);
+        }
+        fn_env
+    }
+
+    fn record_incomplete_member_access_recovery_entries(
+        &self,
+        recovery: RecoveryContext<'_>,
+        container_span: bsl_shared::ir::Span,
+        env: &TypeEnv,
+        index: &mut TypeIndex,
+    ) {
+        for error in recovery
+            .syntax_errors
+            .iter()
+            .filter(|error| span_contains(container_span, error.span.start))
+        {
+            let Some((receiver_span, receiver_key)) =
+                extract_incomplete_member_access_receiver(recovery.source_text, error.span)
+            else {
+                continue;
+            };
+            let Some(resolution) = env.variable_resolution(&receiver_key) else {
+                continue;
+            };
+            self.record(receiver_span, resolution, index);
         }
     }
 
@@ -494,26 +594,7 @@ impl TypeInferencer {
                 compiler_directive,
                 ..
             } => {
-                // TODO(v2): полноценное вычисление типов внутри функций на основе call graph.
-                // Пока строим индекс внутри тела, наследуя module-level окружение
-                // (например, implicit переменные модуля формы) и добавляя параметры.
-                let mut fn_env = env.clone();
-                if directive_disables_form_context(*compiler_directive) {
-                    for key in FORM_CONTEXT_BOUND_SYMBOL_KEYS {
-                        fn_env.variables.remove(key);
-                        fn_env.instance_bindings.remove(key);
-                    }
-                }
-                for param in params {
-                    fn_env.set_variable_value(
-                        param.to_lowercase(),
-                        TypeResolution::unknown(),
-                        None,
-                    );
-                }
-                for stmt in body {
-                    self.visit_statement(stmt, &mut fn_env, index);
-                }
+                let _ = self.visit_callable_body(params, body, *compiler_directive, env, index);
             }
             _ => {}
         }
@@ -1201,6 +1282,48 @@ impl TypeInferencer {
     }
 }
 
+#[derive(Clone, Copy)]
+struct RecoveryContext<'a> {
+    source_text: &'a str,
+    syntax_errors: &'a [ParseError],
+}
+
+fn span_contains(span: bsl_shared::ir::Span, offset: u32) -> bool {
+    span.start <= offset && offset < span.end
+}
+
+fn extract_incomplete_member_access_receiver(
+    source_text: &str,
+    error_span: bsl_shared::ir::Span,
+) -> Option<(bsl_shared::ir::Span, String)> {
+    let start = error_span.start as usize;
+    let end = error_span.end as usize;
+    let snippet = source_text.get(start..end)?;
+    let trimmed_start = snippet
+        .char_indices()
+        .find(|(_, ch)| !ch.is_whitespace())
+        .map(|(idx, _)| idx)
+        .unwrap_or(0);
+    let trimmed = snippet.get(trimmed_start..)?.trim_end();
+    let receiver = trimmed.strip_suffix('.')?;
+    if receiver.is_empty()
+        || !receiver
+            .chars()
+            .all(|ch| ch.is_alphanumeric() || ch == '_')
+    {
+        return None;
+    }
+    let receiver_start = error_span.start + trimmed_start as u32;
+    let receiver_end = receiver_start + receiver.len() as u32;
+    Some((
+        bsl_shared::ir::Span {
+            start: receiver_start,
+            end: receiver_end,
+        },
+        receiver.to_lowercase(),
+    ))
+}
+
 #[cfg(test)]
 pub(crate) fn build_type_index_with_path(
     program: &Program,
@@ -1216,6 +1339,27 @@ pub(crate) fn build_type_index_with_path_profiled(
     deps: Arc<SemanticDeps>,
 ) -> TypeIndexBuildProfiled {
     TypeInferencer::new(deps).build_index_profiled(program, file_path)
+}
+
+pub(crate) fn build_type_index_from_parse_result_with_path_profiled(
+    parsed: &bsl_syntax::ast::ParseResult,
+    source_text: &str,
+    file_path: &str,
+    deps: Arc<SemanticDeps>,
+) -> TypeIndexBuildProfiled {
+    TypeInferencer::new(deps).build_index_from_parse_result_profiled(parsed, source_text, file_path)
+}
+
+#[cfg(test)]
+pub(crate) fn build_type_index_from_parse_result_with_path(
+    parsed: &bsl_syntax::ast::ParseResult,
+    source_text: &str,
+    file_path: &str,
+    deps: Arc<SemanticDeps>,
+) -> TypeIndex {
+    TypeInferencer::new(deps)
+        .build_index_from_parse_result_profiled(parsed, source_text, file_path)
+        .index
 }
 
 #[cfg(test)]

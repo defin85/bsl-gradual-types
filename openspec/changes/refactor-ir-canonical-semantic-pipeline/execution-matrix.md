@@ -28,8 +28,8 @@
 1. `analysis-v2/src/lib/snapshots.rs:612` строит `type_index` из `parse_result.program`, а не из IR-derived snapshot.
 2. `analysis-v2/src/lib/analysis_api.rs:190` и `analysis-v2/src/lib/analysis_api.rs:769` продолжают обслуживать interactive type queries через `type_index`.
 3. `backend/src/bin/lsp_server/server/language_server/impl_features_b.rs:117`, `backend/src/bin/lsp_server/server/language_server/impl_features_b.rs:470`, `backend/src/bin/lsp_server/server/language_server/impl_features_c.rs:120`, `backend/src/bin/lsp_server/server/language_server/impl_completion_helpers.rs:353` используют `serve_only` как shared fast path.
-4. `backend/src/presentation/web/handlers.rs:102` и `backend/src/presentation/web/handlers/semantic.rs:59` явно прогревают `type_index` перед hover.
-5. `bsl-agent/src/session/helpers_semantic.rs:102` и `bsl-agent/src/session/helpers_semantic.rs:135` используют `flow_type_at_byte_offset` / `type_at_byte_offset_serve_only` для MCP `type_at_position` и `members`.
+4. `analysis-v2/src/lib/snapshots.rs:612` остаётся общим non-canonical builder для exact artifact, поэтому shared runtime warmup пока ещё упирается в AST-derived `type_index`.
+5. `analysis-v2/src/lib/snapshots.rs:260` и `analysis-v2/src/lib/snapshots.rs:294` продолжают строить diagnostics через `type_index`, а не через canonical IR-derived artifact.
 
 ## Current validation gap
 
@@ -42,3 +42,4 @@
 - `analysis-v2::flow_type_at_byte_offset` больше не выполняет синхронный `type_index` / `parse_result` rescue и берёт base type только через exact `serve_only` artifact.
 - `semantic-diagnostics` теперь эмитит `UndeclaredVariable` для RHS присваивания, когда canonical semantic hints сообщают undeclared value.
 - backend contract tests закрепляют explicit-binding-only semantics для bare owner members вне `FormModule`.
+- `IntellisenseV2Facade::prepare_ephemeral_operation` теперь прогревает exact type index для shared interactive ephemeral queries (`hover`, `members`, `type_at_position`), а adapter-local precompute удалён из Web/MCP handlers.

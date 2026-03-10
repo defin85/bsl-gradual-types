@@ -99,13 +99,6 @@ fn compute_settings_id_v2(diagnostics_detail_level: DetailLevel) -> SettingsId {
     SettingsId::from_hash(blake3::hash(payload.as_bytes()).to_hex().to_string())
 }
 
-fn precompute_hover_type_index(analysis: &bsl_analysis_v2::AnalysisV2) -> anyhow::Result<()> {
-    analysis
-        .precompute_type_index_for_file(V2FileId(1), None, 0)
-        .map_err(|_| anyhow::anyhow!("type index precompute cancelled"))?;
-    Ok(())
-}
-
 fn prepare_ephemeral_web_operation(
     deps_bundle: &DepsBundleV2,
     coordinator: &SystemCoordinator,
@@ -499,7 +492,6 @@ pub async fn get_hover(
             )
             .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
             .ok_or_else(|| anyhow::anyhow!("ir unavailable"))?;
-            precompute_hover_type_index(&analysis)?;
 
             let deps = deps_bundle.semantic_deps.clone();
             let resolver = deps_resolver(&deps);

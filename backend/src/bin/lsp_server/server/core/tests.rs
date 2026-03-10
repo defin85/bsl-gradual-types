@@ -8142,6 +8142,28 @@ async fn p24_real_scenario_observability_stage_parity_lsp_vs_mcp() {
 }
 
 #[tokio::test]
+async fn p25_web_hover_endpoints_use_shared_ephemeral_exact_artifact() {
+    let code = "Процедура Тест()\n\
+    Arr = Новый Массив;\n\
+    Arr.Добавить(1);\n\
+    ДляHover = Arr;\n\
+КонецПроцедуры\n";
+    let position = find_utf16_position_at_marker_tail(code, "ДляHover = Arr");
+
+    let hover_text = web_hover_text_for_code(code, position).await;
+    assert!(
+        hover_text.contains("Массив"),
+        "web hover must expose warmed exact type for ephemeral semantic snapshot, hover={hover_text}"
+    );
+
+    let enhanced_hover_text = web_enhanced_hover_text_for_code(code, position).await;
+    assert!(
+        enhanced_hover_text.contains("Массив"),
+        "web enhanced hover must expose warmed exact type for ephemeral semantic snapshot, hover={enhanced_hover_text}"
+    );
+}
+
+#[tokio::test]
 async fn p25_cross_interface_semantic_parity_lsp_web_mcp_core_tools() {
     const TOOLS_FIXTURE: &str = "Процедура Foo() Экспорт\nКонецПроцедуры\n\nПроцедура Bar()\n    Arr = Новый Массив;\n    Arr.Добавить(1);\n    Foo();\nКонецПроцедуры\n";
     const TARGET_SYMBOL: &str = "Foo";
@@ -9991,6 +10013,41 @@ async fn web_hover_text_for_code(code: &str, position: Position) -> String {
     let payload: serde_json::Value = serde_json::from_slice(&body).expect("web hover payload");
     payload
         .get("hover")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string()
+}
+
+async fn web_enhanced_hover_text_for_code(code: &str, position: Position) -> String {
+    let app = create_router(build_web_test_state(), "backend/static", true);
+    let response = app
+        .oneshot(
+            AxumRequest::post("/api/hover/enhanced")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(axum::body::Body::from(
+                    serde_json::json!({
+                        "code": code,
+                        "line": position.line,
+                        "column": position.character
+                    })
+                    .to_string(),
+                ))
+                .expect("web enhanced hover request"),
+        )
+        .await
+        .expect("web enhanced hover response");
+    assert!(
+        response.status().is_success(),
+        "unexpected web enhanced hover status: {}",
+        response.status()
+    );
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("web enhanced hover body");
+    let payload: serde_json::Value =
+        serde_json::from_slice(&body).expect("web enhanced hover payload");
+    payload
+        .get("hoverText")
         .and_then(|value| value.as_str())
         .unwrap_or_default()
         .to_string()

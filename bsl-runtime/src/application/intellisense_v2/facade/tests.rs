@@ -385,6 +385,107 @@ fn prepare_ephemeral_operation_keeps_discovery_snapshot_outside_semantic_snapsho
 }
 
 #[test]
+fn prepare_ephemeral_operation_warms_exact_type_index_only_for_shared_interactive_queries() {
+    let deps_id = DepsSnapshotId::from_hash("deps_prepared_exact_type_index");
+    let settings = ExecutionSettings {
+        settings_id: SettingsId::from_hash("settings_prepared_exact_type_index"),
+        diagnostics_detail_level: DetailLevel::Full,
+    };
+    let file_id = FileId(9);
+    let file_text: Arc<str> = Arc::from(
+        "Procedure Test()\n\
+             arr = Новый Массив;\n\
+             result = arr;\n\
+             EndProcedure",
+    );
+    let probe = file_text
+        .find("result = arr;")
+        .map(|idx| idx as u32 + "result = ".len() as u32)
+        .expect("probe for exact type index");
+
+    for operation in [
+        SemanticOperation::Hover,
+        SemanticOperation::Members,
+        SemanticOperation::TypeAtPosition,
+    ] {
+        let context = ExecutionContext {
+            origin: ObservabilityOrigin::Web,
+            operation,
+            completion_mode: None,
+            completion_large_churn_active: false,
+            file_id,
+            min_file_version: Some(3),
+            expected_deps_id: Some(deps_id.clone()),
+            flow_sensitive: false,
+            settings: settings.clone(),
+            cancellation: CancellationPolicy::BestEffort,
+        };
+
+        let prepared = IntellisenseV2Facade::prepare_ephemeral_operation(
+            &context,
+            deps_id.clone(),
+            make_deps(),
+            make_index_snapshot("index_prepared_exact_type_index"),
+            file_text.clone(),
+            3,
+            Arc::from("<prepared-exact-type-index>"),
+            None,
+        )
+        .expect("prepare_ephemeral_operation");
+
+        let resolution = prepared
+            .snapshot
+            .analysis
+            .type_at_byte_offset_serve_only(file_id, probe)
+            .expect("serve-only lookup after shared prepare");
+        let type_name = resolution
+            .as_ref()
+            .map(|value| value.type_name())
+            .unwrap_or_default();
+        assert!(
+            type_name.starts_with("Массив"),
+            "shared ephemeral prepare must warm exact type index for {}; got={type_name:?}",
+            operation.as_str()
+        );
+    }
+
+    let diagnostics_context = ExecutionContext {
+        origin: ObservabilityOrigin::Web,
+        operation: SemanticOperation::Diagnostics,
+        completion_mode: None,
+        completion_large_churn_active: false,
+        file_id,
+        min_file_version: Some(3),
+        expected_deps_id: Some(deps_id.clone()),
+        flow_sensitive: false,
+        settings,
+        cancellation: CancellationPolicy::BestEffort,
+    };
+
+    let diagnostics_prepared = IntellisenseV2Facade::prepare_ephemeral_operation(
+        &diagnostics_context,
+        deps_id,
+        make_deps(),
+        make_index_snapshot("index_prepared_exact_type_index_diagnostics"),
+        file_text,
+        3,
+        Arc::from("<prepared-exact-type-index-diagnostics>"),
+        None,
+    )
+    .expect("prepare_ephemeral_operation for diagnostics");
+
+    assert!(
+        diagnostics_prepared
+            .snapshot
+            .analysis
+            .type_at_byte_offset_serve_only(file_id, probe)
+            .expect("serve-only lookup for diagnostics")
+            .is_none(),
+        "diagnostics prepare must not warm exact type index implicitly"
+    );
+}
+
+#[test]
 fn semantic_operation_contract_values_are_stable() {
     assert_eq!(SemanticOperation::Completion.as_str(), "completion");
     assert_eq!(SemanticOperation::Hover.as_str(), "hover");

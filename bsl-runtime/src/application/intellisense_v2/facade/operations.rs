@@ -1,6 +1,15 @@
 use super::*;
 
 impl IntellisenseV2Facade {
+    fn ephemeral_operation_requires_exact_type_index(operation: SemanticOperation) -> bool {
+        matches!(
+            operation,
+            SemanticOperation::Hover
+                | SemanticOperation::Members
+                | SemanticOperation::TypeAtPosition
+        )
+    }
+
     pub async fn snapshot_for_operation(&self, operation: SemanticOperation) -> SemanticSnapshot {
         let queue_priority = RuntimeQueuePriority::for_operation(operation);
         let (analysis, _index_snapshot, deps_id) = self
@@ -179,6 +188,14 @@ impl IntellisenseV2Facade {
             if expected_deps_id != &snapshot.deps_id {
                 return Err(SemanticOutcome::MissingDeps);
             }
+        }
+
+        if Self::ephemeral_operation_requires_exact_type_index(context.operation) {
+            let _ = snapshot.analysis.precompute_type_index_for_file(
+                context.file_id,
+                Some(file_version),
+                0,
+            );
         }
 
         Ok(PreparedOperationSnapshot {

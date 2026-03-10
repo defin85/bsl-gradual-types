@@ -142,14 +142,6 @@ fn member_access_owner_type_hint_at_position(
     }
 }
 
-fn precompute_exact_type_index(
-    analysis: &bsl_analysis_v2::AnalysisV2,
-    file_id: bsl_analysis_v2::FileId,
-    file_version: i32,
-) {
-    let _ = analysis.precompute_type_index_for_file(file_id, Some(file_version), 0);
-}
-
 fn node_at_utf16_position<'a>(
     analysis: &bsl_analysis_v2::AnalysisV2,
     program: &'a bsl_shared::ir::SemanticProgram,

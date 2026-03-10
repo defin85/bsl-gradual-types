@@ -353,7 +353,7 @@ fn semantic_helpers_fail_closed_without_precomputed_type_index() {
 }
 
 #[tokio::test]
-async fn definition_receiver_hint_resolves_object_module_member_definition() {
+async fn definition_resolves_object_module_member_definition_without_request_time_type_lookup() {
     let temp = tempfile::TempDir::new().expect("tempdir");
     let config_root = temp.path();
     let module_rel_path = "Documents/Док1/Ext/ObjectModule.bsl";
@@ -458,9 +458,9 @@ async fn definition_receiver_hint_resolves_object_module_member_definition() {
         .await
         .expect("observability after definition");
     let after_total = type_index_reason_total(&after_metrics.metrics);
-    assert!(
-        after_total > before_total,
-        "definition must emit type-index reasons: before={before_total}, after={after_total}, metrics={}",
+    assert_eq!(
+        after_total, before_total,
+        "definition must reuse current semantic state without extra type-index reasons: before={before_total}, after={after_total}, metrics={}",
         after_metrics.metrics
     );
 }
@@ -1139,7 +1139,8 @@ async fn type_at_position_and_members_emit_interactive_runtime_exec_metrics() {
 }
 
 #[tokio::test]
-async fn type_at_position_members_and_definition_emit_type_index_reason_metrics() {
+async fn type_at_position_and_members_emit_type_index_reason_metrics_while_definition_reuses_current_semantic_state(
+) {
     let temp = tempfile::TempDir::new().expect("tempdir");
 
     let job_manager = Arc::new(JobManager::new());
@@ -1242,9 +1243,9 @@ async fn type_at_position_members_and_definition_emit_type_index_reason_metrics(
         .await
         .expect("observability after members");
     let after_members_total = type_index_reason_total(&after_members_metrics.metrics);
-    assert!(
-        after_members_total > after_type_total,
-        "members must emit type-index reasons: before={after_type_total}, after={after_members_total}, metrics={}",
+    assert_eq!(
+        after_members_total, after_type_total,
+        "members must reuse current semantic state without extra type-index reasons: before={after_type_total}, after={after_members_total}, metrics={}",
         after_members_metrics.metrics
     );
 
@@ -1270,9 +1271,9 @@ async fn type_at_position_members_and_definition_emit_type_index_reason_metrics(
         .await
         .expect("observability after definition");
     let after_definition_total = type_index_reason_total(&after_definition_metrics.metrics);
-    assert!(
-        after_definition_total > after_members_total,
-        "definition must emit type-index reasons: before={after_members_total}, after={after_definition_total}, metrics={}",
+    assert_eq!(
+        after_definition_total, after_members_total,
+        "definition must reuse current semantic state without extra type-index reasons: before={after_members_total}, after={after_definition_total}, metrics={}",
         after_definition_metrics.metrics
     );
 }

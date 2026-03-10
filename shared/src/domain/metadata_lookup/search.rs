@@ -10,6 +10,11 @@ use crate::domain::types::MetadataKind;
 use crate::utils::string_utils::levenshtein_distance;
 
 impl TypeMetadataLookup {
+    /// Возвращает имена объектов метаданных указанного вида из repository-backed contract.
+    pub fn get_metadata_objects_by_kind(&self, kind: MetadataKind) -> Vec<String> {
+        self.repository.get_metadata_objects_by_kind(kind)
+    }
+
     /// Проверяет существование объекта метаданных указанного вида
     ///
     /// # Параметры

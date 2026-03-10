@@ -24,7 +24,7 @@ impl BslLanguageServer {
                     include_flow_sensitive,
                 )
                 .await;
-            let (_context, prepared, expected_version) = match prepared {
+            let (context, prepared, expected_version) = match prepared {
                 Ok(values) => values,
                 Err(outcome) => {
                     debug!(
@@ -62,79 +62,39 @@ impl BslLanguageServer {
                 }
             }
 
-            let (file_content, deps, receiver_type_hint) = {
+            let (file_content, deps, ir_program) = {
                 let analysis = prepared.snapshot.analysis;
-                let index_snapshot = prepared.index_snapshot;
                 let observed_file_version = analysis.file_version(file_id).ok().flatten();
                 let observed_deps_id = Some(prepared.snapshot.deps_id);
                 let observed_settings_id = analysis.settings_id().ok();
                 debug!(
-                    "SignatureHelp v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}, index_snapshot_id={}",
+                    "SignatureHelp v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}",
                     uri,
                     file_id.0,
                     observed_file_version,
                     observed_deps_id.as_ref().map(|v| v.as_str()),
                     observed_settings_id.as_ref().map(|v| v.as_str()),
-                    index_snapshot.id.as_str(),
-                );
-
-                let observed_byte_offset = analysis
-                    .utf16_position_to_byte_offset(file_id, position.line, position.character)
-                    .ok()
-                    .flatten();
-                let observed_point = analysis
-                    .utf16_position_to_point(file_id, position.line, position.character)
-                    .ok()
-                    .flatten();
-                debug!(
-                    "SignatureHelp v2 positioning: uri={}, file_id={}, lsp=({}:{}) -> byte_offset={:?}, point={:?}",
-                    uri,
-                    file_id.0,
-                    position.line,
-                    position.character,
-                    observed_byte_offset,
-                    observed_point,
                 );
 
                 let file_content = analysis.file_text(file_id).ok().flatten();
                 let deps = analysis.deps_data().ok();
+                let ir_program =
+                    bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight(
+                        &context,
+                        &analysis,
+                        Some(self.coordinator.as_ref()),
+                        file_id,
+                    )
+                    .ok()
+                    .flatten();
 
-                let receiver_type_hint = file_content.as_ref().and_then(|text| {
-                    let query = bsl_backend::application::type_system::signature_help_query(
-                        text.as_ref(),
-                        position.line,
-                        position.character,
-                    )?;
-                    let receiver_end_character = query.receiver_end_character?;
-                    let offset = analysis
-                        .utf16_position_to_byte_offset(
-                            file_id,
-                            query.call_start_line,
-                            receiver_end_character,
-                        )
-                        .ok()
-                        .flatten()?;
-                    let offset = offset.min(u32::MAX as usize) as u32;
-                    // Strict serve-only: interactive signatureHelp must not run
-                    // flow-sensitive on-demand parse/type_index compute.
-                    match analysis.type_at_byte_offset_serve_only_profiled(file_id, offset) {
-                        Ok(profiled) => {
-                            self.coordinator.record_intellisense_v2_type_index_reason(
-                                profiled.serve_reason_code.as_str(),
-                            );
-                            profiled.resolution
-                        }
-                        Err(_) => None,
-                    }
-                });
-
-                (file_content, deps, receiver_type_hint)
+                (file_content, deps, ir_program)
             };
 
             let started = Instant::now();
-            let result = match (file_content, deps) {
-                (Some(file_content), Some(deps)) => {
-                    handle_signature_help_v2(file_content, position, receiver_type_hint, deps).await
+            let result = match (file_content, deps, ir_program) {
+                (Some(file_content), Some(deps), Some(ir_program)) => {
+                    handle_signature_help_v2(file_content, position, ir_program, deps).await
                 }
                 _ => None,
             };

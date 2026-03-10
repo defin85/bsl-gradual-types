@@ -536,20 +536,6 @@ impl BslLanguageServer {
                     ) = {
                         let analysis = prepared.snapshot.analysis;
                         let index_snapshot = prepared.index_snapshot;
-                        let member_access_request_for_query = member_access_request;
-                        let last_apply_enqueued_at = self
-                            .latest_apply_enqueued_at_v2
-                            .read()
-                            .await
-                            .get(&file_id)
-                            .copied();
-                        let apply_age_at_query_start_ms =
-                            last_apply_enqueued_at.map(|started_at| {
-                                query_bundle_started
-                                    .saturating_duration_since(started_at)
-                                    .as_millis()
-                            });
-
                         let observed_file_version = analysis.file_version(file_id).ok().flatten();
                         let observed_deps_id = prepared.snapshot.deps_id;
                         let observed_settings_id = analysis.settings_id().ok();
@@ -770,21 +756,10 @@ impl BslLanguageServer {
                                         );
                                     }
 
-                                    let member_access_owner_type_hint =
-                                        super::impl_completion_helpers::compute_member_access_owner_hint(
-                                            &analysis,
-                                            file_id,
-                                            position,
-                                            member_access_request_for_query,
-                                            file_content.as_deref(),
-                                            coordinator_for_query.as_ref(),
-                                            apply_age_at_query_start_ms,
-                                        );
-
                                     (
                                         file_content,
                                         file_path,
-                                        member_access_owner_type_hint,
+                                        None,
                                         deps,
                                         ir_program,
                                         ir_cancelled_after_retry,

@@ -2,9 +2,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use bsl_line_index::LineIndex;
+use bsl_shared::domain::code_location::{CodeLocation, ModuleType};
 use bsl_shared::domain::repository::TypeRepository;
 use bsl_shared::domain::type_definition_location::TypeDefinitionLocation;
-use bsl_shared::domain::types::{ConcreteType, MetadataKind, ResolutionResult, TypeResolution};
+use bsl_shared::domain::types::{
+    ConcreteType, FacetKind, MetadataKind, ResolutionResult, TypeResolution,
+};
 use bsl_shared::ir::{SemanticNodeKind, SemanticProgram, Span};
 
 #[derive(Debug, Clone)]
@@ -36,22 +39,10 @@ pub fn goto_definition_v2(
     deps: Arc<bsl_analysis_v2::SemanticDeps>,
     line: u32,
     character: u32,
-    type_at_position_hint: Option<TypeResolution>,
-    receiver_type_hint: Option<TypeResolution>,
 ) -> Option<DefinitionTarget> {
-    goto_definition_v2_with_source_opt(
-        current_file_path,
-        None,
-        ir_program,
-        deps,
-        line,
-        character,
-        type_at_position_hint,
-        receiver_type_hint,
-    )
+    goto_definition_v2_with_source_opt(current_file_path, None, ir_program, deps, line, character)
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn goto_definition_v2_with_source(
     current_file_path: &str,
     current_file_text: &str,
@@ -59,8 +50,6 @@ pub fn goto_definition_v2_with_source(
     deps: Arc<bsl_analysis_v2::SemanticDeps>,
     line: u32,
     character: u32,
-    type_at_position_hint: Option<TypeResolution>,
-    receiver_type_hint: Option<TypeResolution>,
 ) -> Option<DefinitionTarget> {
     goto_definition_v2_with_source_opt(
         current_file_path,
@@ -69,12 +58,9 @@ pub fn goto_definition_v2_with_source(
         deps,
         line,
         character,
-        type_at_position_hint,
-        receiver_type_hint,
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn goto_definition_v2_with_source_opt(
     current_file_path: &str,
     current_file_text: Option<&str>,
@@ -82,8 +68,6 @@ fn goto_definition_v2_with_source_opt(
     deps: Arc<bsl_analysis_v2::SemanticDeps>,
     line: u32,
     character: u32,
-    type_at_position_hint: Option<TypeResolution>,
-    receiver_type_hint: Option<TypeResolution>,
 ) -> Option<DefinitionTarget> {
     let repo = deps.repository.clone();
 
@@ -91,6 +75,7 @@ fn goto_definition_v2_with_source_opt(
 
     let index = LineIndex::new(text);
     let offset = index.utf16_position_to_byte_offset(text, line, character) as u32;
+    let type_at_position = semantic_type_at_offset(ir_program.as_ref(), offset);
 
     if let Some(node) = ir_program.find_node_at_byte_offset(offset) {
         if let SemanticNodeKind::VariableAccess { name } = &node.kind {
@@ -110,7 +95,9 @@ fn goto_definition_v2_with_source_opt(
         } = &node.kind
         {
             if access_kind.is_method() {
-                if let Some(owner_type) = receiver_type_hint.as_ref().map(TypeResolution::type_name)
+                if let Some(owner_type) = semantic_receiver_type(ir_program.as_ref(), node)
+                    .as_ref()
+                    .map(TypeResolution::type_name)
                 {
                     if let Some(loc) =
                         repo.find_method_definition_location(Some(&owner_type), member_name)
@@ -127,6 +114,23 @@ fn goto_definition_v2_with_source_opt(
                         return definition_target_from_location(loc);
                     }
                 }
+
+                if let Some(target) = current_module_method_definition_target(
+                    repo.as_ref(),
+                    current_file_path,
+                    member_name,
+                ) {
+                    return Some(target);
+                }
+
+                if let Some(span) =
+                    find_local_method_declaration_span(ir_program.as_ref(), member_name)
+                {
+                    return Some(DefinitionTarget {
+                        file_path: PathBuf::from(current_file_path),
+                        span: Some(span),
+                    });
+                }
             }
         }
 
@@ -136,15 +140,16 @@ fn goto_definition_v2_with_source_opt(
             ..
         } = &node.kind
         {
-            let token_at_position = current_file_text
-                .and_then(|text| identifier_at_utf16_position(text, line, character));
+            let receiver_type = semantic_receiver_type(ir_program.as_ref(), node);
+            let owner_type = receiver_type.as_ref().map(|value| value.type_name());
+            let cursor_targets_receiver = receiver_span_for_node(ir_program.as_ref(), node)
+                .map(|span| span.contains(offset) || (offset > 0 && span.contains(offset - 1)))
+                .unwrap_or(false);
 
             // Support "CommonModules.<Name>" namespace navigation in calls like "Модуль.Экспорт()":
             // go-to-definition on receiver should open the module file.
-            if let (Some(token), Some(obj_name)) =
-                (token_at_position.as_deref(), object_name.as_deref())
-            {
-                if token.eq_ignore_ascii_case(obj_name) {
+            if cursor_targets_receiver {
+                if let Some(obj_name) = object_name.as_deref() {
                     // Avoid misrouting when a local variable shadows a common module name.
                     let is_local_var = ir_program
                         .resolve_variable(obj_name, node.scope_id)
@@ -157,7 +162,7 @@ fn goto_definition_v2_with_source_opt(
                         }
                     }
 
-                    if let Some(obj_type) = receiver_type_hint.as_ref() {
+                    if let Some(obj_type) = receiver_type.as_ref() {
                         if is_common_module_type(obj_type) {
                             let type_name = obj_type.type_name();
                             if let Some(raw) = repo.find_type(&type_name) {
@@ -175,19 +180,13 @@ fn goto_definition_v2_with_source_opt(
                         }
                     }
                 }
-            }
-
-            let owner_type = receiver_type_hint.as_ref().map(|value| value.type_name());
-
-            if let Some(loc) =
+            } else if let Some(loc) =
                 repo.find_method_definition_location(owner_type.as_deref(), function_name)
             {
                 return definition_target_from_location(loc);
-            }
-
-            // Common module calls may have Dynamic receiver type (e.g. during partial indexing);
-            // fall back to "ОбщиеМодули.<ModuleName>" when we have a receiver identifier.
-            if let Some(obj_name) = object_name.as_deref() {
+            } else if let Some(obj_name) = object_name.as_deref() {
+                // Common module calls may have Dynamic receiver type (e.g. during partial indexing);
+                // fall back to "ОбщиеМодули.<ModuleName>" when we have a receiver identifier.
                 let common_module_owner = format!("ОбщиеМодули.{}", obj_name);
                 if let Some(loc) =
                     repo.find_method_definition_location(Some(&common_module_owner), function_name)
@@ -196,20 +195,26 @@ fn goto_definition_v2_with_source_opt(
                 }
             }
 
-            if owner_type.is_none() {
-                if let Some(span) =
-                    find_local_method_declaration_span(ir_program.as_ref(), function_name)
-                {
-                    return Some(DefinitionTarget {
-                        file_path: PathBuf::from(current_file_path),
-                        span: Some(span),
-                    });
-                }
+            if let Some(target) = current_module_method_definition_target(
+                repo.as_ref(),
+                current_file_path,
+                function_name,
+            ) {
+                return Some(target);
+            }
+
+            if let Some(span) =
+                find_local_method_declaration_span(ir_program.as_ref(), function_name)
+            {
+                return Some(DefinitionTarget {
+                    file_path: PathBuf::from(current_file_path),
+                    span: Some(span),
+                });
             }
         }
     }
 
-    let type_resolution = type_at_position_hint?;
+    let type_resolution = type_at_position?;
 
     let module_paths = if let ResolutionResult::Concrete(ConcreteType::Configuration(cfg)) =
         &type_resolution.result
@@ -239,88 +244,119 @@ fn is_common_module_type(resolution: &TypeResolution) -> bool {
     }
 }
 
-fn identifier_at_utf16_position(text: &str, line: u32, col_utf16: u32) -> Option<String> {
-    let line_str = text.lines().nth(line as usize)?;
-    let mut byte_idx = utf16_col_to_byte_offset(line_str, col_utf16);
-    if byte_idx > line_str.len() {
-        byte_idx = line_str.len();
-    }
-
-    // If cursor is at a boundary after the identifier, prefer the character to the left.
-    if byte_idx == line_str.len() || !is_ident_char_at_byte(line_str, byte_idx) {
-        if let Some(prev) = prev_char_boundary(line_str, byte_idx) {
-            if is_ident_char_at_byte(line_str, prev) {
-                byte_idx = prev;
-            }
+fn current_module_method_definition_target(
+    repo: &dyn TypeRepository,
+    current_file_path: &str,
+    method_name: &str,
+) -> Option<DefinitionTarget> {
+    for owner_type in current_module_owner_type_candidates(current_file_path) {
+        if let Some(loc) = repo.find_method_definition_location(Some(&owner_type), method_name) {
+            return definition_target_from_location(loc);
         }
     }
 
-    if !is_ident_char_at_byte(line_str, byte_idx) {
-        return None;
-    }
-
-    let start = scan_ident_left(line_str, byte_idx);
-    let end = scan_ident_right(line_str, byte_idx);
-    Some(line_str[start..end].to_string())
+    None
 }
 
-fn utf16_col_to_byte_offset(line: &str, col_utf16: u32) -> usize {
-    let mut units: u32 = 0;
-    for (idx, ch) in line.char_indices() {
-        if units >= col_utf16 {
-            return idx;
+fn current_module_owner_type_candidates(current_file_path: &str) -> Vec<String> {
+    let Ok(location) = CodeLocation::determine_from_path(std::path::Path::new(current_file_path))
+    else {
+        return Vec::new();
+    };
+
+    let Some(owner_type) = location.get_owner_type() else {
+        return Vec::new();
+    };
+
+    let Some((xml_kind, object_name)) = owner_type.split_once('.') else {
+        return vec![owner_type.to_string()];
+    };
+    let Some(kind) = MetadataKind::from_xml_tag(xml_kind) else {
+        return vec![owner_type.to_string()];
+    };
+
+    let facet = match location.module_type {
+        ModuleType::ObjectModule { .. } | ModuleType::RecordSetModule { .. } => {
+            Some(FacetKind::Object)
         }
-        units = units.saturating_add(ch.len_utf16() as u32);
+        ModuleType::ManagerModule { .. } => Some(FacetKind::Manager),
+        ModuleType::FormModule { .. } => None,
+        ModuleType::CommonModule { .. } | ModuleType::Unknown => None,
+    };
+
+    let mut candidates = Vec::with_capacity(2);
+    if let Some(facet) = facet {
+        candidates.push(format!(
+            "{}.{}",
+            kind.faceted_type_prefix(&facet),
+            object_name
+        ));
     }
-    line.len()
+    candidates.push(owner_type.to_string());
+    candidates
 }
 
-fn prev_char_boundary(line: &str, byte_idx: usize) -> Option<usize> {
-    if byte_idx == 0 {
-        return None;
-    }
-    let mut prev = None;
-    for (idx, _) in line.char_indices() {
-        if idx >= byte_idx {
-            return prev;
+fn semantic_type_at_offset(program: &SemanticProgram, offset: u32) -> Option<TypeResolution> {
+    program
+        .semantic_facts
+        .type_at_byte_offset(offset)
+        .or_else(|| {
+            program
+                .find_node_at_byte_offset(offset)
+                .and_then(|node| program.semantic_facts.type_resolution_for_span(node.span))
+        })
+}
+
+fn receiver_span_for_node(
+    program: &SemanticProgram,
+    node: &bsl_shared::ir::SemanticNode,
+) -> Option<Span> {
+    match &node.kind {
+        SemanticNodeKind::MemberAccess {
+            object_node,
+            object_span,
+            ..
         }
-        prev = Some(idx);
+        | SemanticNodeKind::FunctionCall {
+            object_node,
+            object_span,
+            ..
+        } => object_span.or_else(|| {
+            object_node.and_then(|idx| program.nodes.get(idx).map(|candidate| candidate.span))
+        }),
+        _ => None,
     }
-    prev
 }
 
-fn is_ident_char_at_byte(line: &str, byte_idx: usize) -> bool {
-    match line[byte_idx..].chars().next() {
-        Some(ch) => is_ident_char(ch),
-        None => false,
-    }
-}
+fn semantic_receiver_type(
+    program: &SemanticProgram,
+    node: &bsl_shared::ir::SemanticNode,
+) -> Option<TypeResolution> {
+    let span_fallback = |span: Span| {
+        semantic_type_at_offset(program, span.start)
+            .or_else(|| {
+                span.end
+                    .checked_sub(1)
+                    .and_then(|offset| semantic_type_at_offset(program, offset))
+            })
+            .or_else(|| program.semantic_facts.type_resolution_for_span(span))
+    };
 
-fn is_ident_char(ch: char) -> bool {
-    ch == '_' || ch.is_alphanumeric()
-}
-
-fn scan_ident_left(line: &str, byte_idx: usize) -> usize {
-    let mut start = byte_idx;
-    let mut chars: Vec<(usize, char)> = line[..byte_idx].char_indices().collect();
-    while let Some((idx, ch)) = chars.pop() {
-        if !is_ident_char(ch) {
-            break;
-        }
-        start = idx;
+    match &node.kind {
+        SemanticNodeKind::MemberAccess { .. } => program
+            .semantic_facts
+            .member_access_object_type_by_span
+            .get(&node.span)
+            .cloned()
+            .or_else(|| receiver_span_for_node(program, node).and_then(span_fallback)),
+        SemanticNodeKind::FunctionCall { .. } => program
+            .semantic_facts
+            .call_receiver_type_by_span
+            .get(&node.span)
+            .cloned()
+            .or_else(|| receiver_span_for_node(program, node).and_then(span_fallback)),
+        _ => None,
     }
-    start
-}
-
-fn scan_ident_right(line: &str, byte_idx: usize) -> usize {
-    let mut end = line.len();
-    for (idx, ch) in line[byte_idx..].char_indices() {
-        if !is_ident_char(ch) {
-            end = byte_idx + idx;
-            break;
-        }
-    }
-    end
 }
 
 fn find_local_method_declaration_span(

@@ -386,7 +386,7 @@ async fn completion_and_resolve_follow_unified_form_contract() {
 }
 
 #[tokio::test]
-async fn completion_form_module_object_fails_closed_without_shared_owner_hint() {
+async fn completion_form_module_object_uses_ir_contract_without_shared_owner_hint() {
     let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
     let index_snapshot = deps_bundle.index_snapshot.clone();
     let uri = Url::parse("file:///form_module_object_completion_no_hint.bsl").expect("uri");
@@ -420,13 +420,13 @@ async fn completion_form_module_object_fails_closed_without_shared_owner_hint() 
         .map(|item| item.label)
         .collect::<Vec<_>>();
     assert!(
-        !labels.iter().any(|label| label == "Ссылка"),
-        "completion without shared hint must not expose form-data members, labels={:?}",
+        labels.iter().any(|label| label == "Ссылка"),
+        "completion without shared hint must resolve form-data members from canonical IR, labels={:?}",
         labels
     );
     assert!(
-        !labels.iter().any(|label| label == "ПометкаУдаления"),
-        "completion without shared hint must not expose form-data members, labels={:?}",
+        labels.iter().any(|label| label == "ПометкаУдаления"),
+        "completion without shared hint must resolve form-data members from canonical IR, labels={:?}",
         labels
     );
     assert!(

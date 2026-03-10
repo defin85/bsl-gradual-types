@@ -421,10 +421,8 @@ pub(crate) async fn get_completion_with_analysis(
     let collect_started = Instant::now();
 
     if context.member_access {
-        if let Some(owner_hint) = analysis
-            .and_then(|ctx| ctx.member_access_owner_type_hint.as_ref())
-            .filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
-            .cloned()
+        if let Some(owner_hint) =
+            resolve_member_owner_type_sync(analysis, file_content, line, column, "")
         {
             add_methods_from_resolution(metadata_lookup, &owner_hint, &mut candidates, 0);
             add_properties_from_resolution(metadata_lookup, &owner_hint, &mut candidates, 1);
@@ -436,7 +434,7 @@ pub(crate) async fn get_completion_with_analysis(
             if receiver_chain.len() == 1 {
                 let base_name = receiver_chain[0].as_str();
                 if let Some(kind) = get_collection_kind(base_name) {
-                    add_metadata_items(&snapshot, Some(kind), &mut candidates, 1);
+                    add_metadata_items_from_lookup(metadata_lookup, kind, &mut candidates, 1);
                 } else if let Some(type_name) = resolve_type_name(base_name, metadata_lookup) {
                     let resolution = analysis
                         .map(|ctx| ctx.resolver.resolve_expression_sync(&type_name))
@@ -475,7 +473,7 @@ pub(crate) async fn get_completion_with_analysis(
             }
         } else if let Some(base_name) = context.member_base.as_deref() {
             if let Some(kind) = get_collection_kind(base_name) {
-                add_metadata_items(&snapshot, Some(kind), &mut candidates, 1);
+                add_metadata_items_from_lookup(metadata_lookup, kind, &mut candidates, 1);
             } else if let Some(type_name) = resolve_type_name(base_name, metadata_lookup) {
                 let resolution = TypeResolution::explicit(&type_name);
                 add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
@@ -487,25 +485,6 @@ pub(crate) async fn get_completion_with_analysis(
                 add_properties_from_resolution(metadata_lookup, &resolution, &mut candidates, 1);
             }
         }
-
-        if should_degrade_unknown_bare_member_access_to_generic(
-            &context,
-            analysis,
-            file_content,
-            line,
-            column,
-            &candidates,
-        ) {
-            collect_non_member_candidates(
-                analysis,
-                file_content,
-                line,
-                column,
-                file_uri,
-                &snapshot,
-                &mut candidates,
-            );
-        }
     } else {
         collect_non_member_candidates(
             analysis,
@@ -514,6 +493,7 @@ pub(crate) async fn get_completion_with_analysis(
             column,
             file_uri,
             &snapshot,
+            metadata_lookup,
             &mut candidates,
         );
     }
@@ -632,6 +612,7 @@ fn collect_non_member_candidates(
     column: u32,
     file_uri: Option<&str>,
     snapshot: &IndexSnapshot,
+    metadata_lookup: &TypeMetadataLookup,
     candidates: &mut Vec<Candidate>,
 ) {
     let can_collect_locals_from_ir = analysis.and_then(|ctx| ctx.ir_program.as_ref()).is_some();
@@ -644,36 +625,9 @@ fn collect_non_member_candidates(
         add_symbols(snapshot, file_uri, candidates, 0, true);
     }
     add_module_symbols(snapshot, candidates, 1);
-    add_metadata_items(snapshot, None, candidates, 2);
+    add_all_metadata_items_from_lookup(metadata_lookup, candidates, 2);
     add_types(snapshot, candidates, 3);
     add_keywords(snapshot, candidates, 4);
-}
-
-fn should_degrade_unknown_bare_member_access_to_generic(
-    context: &CompletionContext,
-    analysis: Option<&CompletionAnalysisContext<'_>>,
-    file_content: &str,
-    line: u32,
-    column: u32,
-    candidates: &[Candidate],
-) -> bool {
-    if !context.member_access || !candidates.is_empty() {
-        return false;
-    }
-
-    let Some(receiver_chain) = extract_member_receiver_chain(file_content, line, column) else {
-        return false;
-    };
-    if receiver_chain.len() != 1 {
-        return false;
-    }
-
-    let base_name = receiver_chain[0].as_str();
-    if is_implicit_context_symbol(base_name) {
-        return false;
-    }
-
-    !completion_scope_contains_local_symbol(analysis, file_content, line, column, base_name)
 }
 
 #[path = "completion_service/context.rs"]

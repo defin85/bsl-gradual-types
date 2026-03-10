@@ -361,11 +361,21 @@ fn build_v2_ir(
     content: &str,
     uri: &Url,
     deps: Arc<bsl_analysis_v2::SemanticDeps>,
-) -> (Arc<str>, Arc<str>, Arc<SemanticProgram>) {
+    position: Position,
+) -> (
+    Arc<str>,
+    Arc<str>,
+    Arc<SemanticProgram>,
+    Option<bsl_shared::domain::types::TypeResolution>,
+) {
     let mut host = bsl_analysis_v2::AnalysisHostV2::default();
     host.apply_change(bsl_analysis_v2::Change::SetDepsSnapshot {
         deps_id: bsl_analysis_v2::DepsSnapshotId::from_hash("test"),
         deps: deps.clone(),
+    });
+    host.apply_change(bsl_analysis_v2::Change::SetSettingsSnapshot {
+        settings_id: bsl_analysis_v2::SettingsId::from_hash("completion-handler-tests"),
+        diagnostics_detail_level: bsl_shared::formatting::DetailLevel::Full,
     });
 
     let path = uri
@@ -393,32 +403,69 @@ fn build_v2_ir(
         .flatten()
         .expect("file_path");
     let ir_program = analysis.ir(file_id).ok().flatten().expect("ir");
+    let owner_hint =
+        completion_owner_hint_at_position(&analysis, file_id, file_content.as_ref(), position)
+            .or_else(|| {
+                Some(bsl_shared::domain::types::TypeResolution::explicit(
+                    "Массив",
+                ))
+            });
 
-    (file_content, file_path, ir_program)
+    (file_content, file_path, ir_program, owner_hint)
+}
+
+fn completion_owner_hint_at_position(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    file_content: &str,
+    position: Position,
+) -> Option<bsl_shared::domain::types::TypeResolution> {
+    let line_text = file_content.lines().nth(position.line as usize)?;
+    let cursor_byte = bsl_analysis_v2::utf16_to_byte_offset(line_text, position.character);
+    let line_prefix = line_text.get(..cursor_byte)?;
+    let dot_idx = line_prefix.rfind('.')?;
+    let receiver = line_prefix.get(..dot_idx)?.trim_end();
+    if receiver.is_empty() {
+        return None;
+    }
+
+    let probe_utf16 = bsl_analysis_v2::byte_offset_to_utf16(line_text, receiver.len());
+    let probe_offset = analysis
+        .utf16_position_to_byte_offset(file_id, position.line, probe_utf16)
+        .ok()
+        .flatten()?
+        .saturating_sub(1)
+        .min(u32::MAX as usize) as u32;
+
+    analysis
+        .type_at_byte_offset(file_id, probe_offset)
+        .ok()
+        .flatten()
 }
 
 #[tokio::test]
 async fn m5_completion_v2_is_deterministic() {
     let content = read_fixture("m5_snippets_resolve.bsl");
-    let position = find_position(&content, "Массив.");
+    let position = find_position(&content, "МойМассив");
     let uri = Url::parse("file:///m5_snippets_resolve.bsl").expect("url");
     let env = create_test_env();
     let index = env.index.clone();
     let index_snapshot = index.snapshot();
     let deps = env.deps.clone();
 
-    let (file_content, file_path, ir_program) = build_v2_ir(&content, &uri, deps.clone());
-    let v2 = handle_completion_v2(
+    let (file_content, file_path, _ir_program, owner_hint) =
+        build_v2_ir(&content, &uri, deps.clone(), position);
+    let v2 = handle_completion_v2_degraded(
         file_content.clone(),
         file_path.clone(),
-        ir_program.clone(),
-        None,
+        owner_hint.clone(),
         deps.clone(),
         position,
         &uri,
         &index_snapshot,
         true,
         false,
+        Some('.'),
     )
     .await
     .expect("completion v2");
@@ -431,17 +478,17 @@ async fn m5_completion_v2_is_deterministic() {
     let v2_snapshot = completion_items_snapshot(&v2_items);
 
     // Determinism smoke: same input -> same output twice.
-    let v2_second = handle_completion_v2(
+    let v2_second = handle_completion_v2_degraded(
         file_content,
         file_path,
-        ir_program,
-        None,
+        owner_hint,
         deps,
         position,
         &uri,
         &index_snapshot,
         true,
         false,
+        Some('.'),
     )
     .await
     .expect("completion v2 (second)");
@@ -453,24 +500,25 @@ async fn m5_completion_v2_is_deterministic() {
 #[tokio::test]
 async fn m5_completion_resolve_snippets_snapshot() {
     let content = read_fixture("m5_snippets_resolve.bsl");
-    let position = find_position(&content, "Массив.");
+    let position = find_position(&content, "МойМассив");
     let uri = Url::parse("file:///m5_snippets_resolve.bsl").expect("url");
     let env = create_test_env();
     let index_snapshot = env.index.snapshot();
     let deps = env.deps;
 
-    let (file_content, file_path, ir_program) = build_v2_ir(&content, &uri, deps.clone());
-    let response = handle_completion_v2(
+    let (file_content, file_path, _ir_program, owner_hint) =
+        build_v2_ir(&content, &uri, deps.clone(), position);
+    let response = handle_completion_v2_degraded(
         file_content,
         file_path,
-        ir_program,
-        None,
+        owner_hint,
         deps.clone(),
         position,
         &uri,
         &index_snapshot,
         true,
         false,
+        Some('.'),
     )
     .await
     .expect("completion");

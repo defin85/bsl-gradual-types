@@ -753,16 +753,6 @@ fn collect_members(request: MembersRequest) -> Result<BslMembersResponse, rmcp::
         .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())));
     let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
 
-    let member_access_owner_type_hint = member_access_owner_type_hint_at_position(
-        &analysis,
-        FileId(1),
-        text.as_str(),
-        position.line,
-        position.character,
-        flow_sensitive_enabled,
-        Some(coordinator.as_ref()),
-    );
-
     let result = completion_runtime
         .block_on(
             bsl_runtime::application::type_system::get_completion_with_semantic_program_snapshot(
@@ -775,7 +765,7 @@ fn collect_members(request: MembersRequest) -> Result<BslMembersResponse, rmcp::
                 abs_path.as_str(),
                 resolver.as_ref(),
                 program,
-                member_access_owner_type_hint,
+                None,
                 flow_sensitive_enabled,
             ),
         )

@@ -9,16 +9,12 @@ use tracing::info;
 
 use bsl_backend::application::type_system;
 use bsl_line_index::LineIndex;
-use bsl_shared::domain::types::TypeResolution;
 use bsl_shared::ir::SemanticProgram;
 
-#[allow(clippy::too_many_arguments)]
 pub async fn handle_goto_definition_v2(
     file_path: Arc<str>,
     file_content: Arc<str>,
     ir_program: Arc<SemanticProgram>,
-    type_at_position_hint: Option<TypeResolution>,
-    receiver_type_hint: Option<TypeResolution>,
     deps: Arc<bsl_analysis_v2::SemanticDeps>,
     position: Position,
     uri: &Url,
@@ -35,8 +31,6 @@ pub async fn handle_goto_definition_v2(
         deps,
         position.line,
         position.character,
-        type_at_position_hint,
-        receiver_type_hint,
     )?;
 
     let target_uri = Url::from_file_path(&target.file_path).ok()?;

@@ -124,23 +124,6 @@ impl SessionManager {
             });
         };
         report_job_stage(progress.as_ref(), "resolving_definition", 85).await;
-        let type_at_position_hint = type_at_utf16_position(
-            &analysis,
-            FileId(1),
-            position.line,
-            position.character,
-            false,
-            Some(coordinator.as_ref()),
-        );
-        let receiver_type_hint = definition_receiver_type_hint_at_position(
-            &analysis,
-            program.as_ref(),
-            FileId(1),
-            code.as_ref(),
-            position.line,
-            position.character,
-            Some(coordinator.as_ref()),
-        );
         let target = bsl_runtime::application::type_system::goto_definition_v2_with_source(
             abs_path.to_string_lossy().as_ref(),
             code.as_ref(),
@@ -148,8 +131,6 @@ impl SessionManager {
             deps,
             position.line,
             position.character,
-            type_at_position_hint,
-            receiver_type_hint,
         );
 
         let Some(target) = target else {

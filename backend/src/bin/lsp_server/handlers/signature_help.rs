@@ -8,12 +8,12 @@ use tower_lsp::lsp_types::*;
 use tracing::debug;
 
 use bsl_backend::application::type_system;
-use bsl_shared::domain::types::TypeResolution;
+use bsl_shared::ir::SemanticProgram;
 
 pub async fn handle_signature_help_v2(
     file_content: Arc<str>,
     position: Position,
-    receiver_type_hint: Option<TypeResolution>,
+    ir_program: Arc<SemanticProgram>,
     deps: Arc<bsl_analysis_v2::SemanticDeps>,
 ) -> Option<SignatureHelp> {
     debug!(
@@ -25,8 +25,8 @@ pub async fn handle_signature_help_v2(
         file_content.as_ref(),
         position.line,
         position.character,
+        ir_program,
         deps,
-        receiver_type_hint,
     )?;
 
     let parameters = data

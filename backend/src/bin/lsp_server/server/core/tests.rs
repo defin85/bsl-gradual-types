@@ -4924,7 +4924,8 @@ async fn p7_completion_owner_hint_type_lookup_is_serve_only_even_when_flow_sensi
 }
 
 #[tokio::test]
-async fn p7_type_index_serve_reasons_are_emitted_for_all_interactive_operations() {
+async fn p7_hover_emits_type_index_reasons_while_completion_signature_and_definition_reuse_current_semantic_state(
+) {
     const TYPE_INDEX_REASON_PREFIX: &str = "intellisense_v2_type_index_reason_total_reason_";
     const INTERACTIVE_REASON_COUNTER_KEYS: &[&str] = &[
         "intellisense_v2_type_index_reason_total_reason_type_index_exact_hit",
@@ -5042,8 +5043,8 @@ async fn p7_type_index_serve_reasons_are_emitted_for_all_interactive_operations(
     );
     let after_completion = interactive_reason_total(&coordinator);
     assert!(
-        after_completion > before_completion,
-        "completion must emit at least one type_index serve reason"
+        after_completion == before_completion,
+        "completion must reuse current semantic state without extra type_index serve reason"
     );
 
     let before_hover = interactive_reason_total(&coordinator);
@@ -5107,8 +5108,8 @@ async fn p7_type_index_serve_reasons_are_emitted_for_all_interactive_operations(
     );
     let after_signature = interactive_reason_total(&coordinator);
     assert!(
-        after_signature > before_signature,
-        "signatureHelp must emit at least one type_index serve reason"
+        after_signature == before_signature,
+        "signatureHelp must reuse current semantic state without extra type_index serve reason"
     );
 
     let before_definition = interactive_reason_total(&coordinator);
@@ -5140,8 +5141,8 @@ async fn p7_type_index_serve_reasons_are_emitted_for_all_interactive_operations(
     );
     let after_definition = interactive_reason_total(&coordinator);
     assert!(
-        after_definition > before_definition,
-        "definition must emit at least one type_index serve reason"
+        after_definition == before_definition,
+        "definition must reuse current semantic state without extra type_index serve reason"
     );
 
     let metrics = coordinator.observability_metrics();

@@ -564,31 +564,6 @@ pub(super) fn add_local_symbols_from_ir(
     }
 }
 
-pub(super) fn completion_scope_contains_local_symbol(
-    analysis: Option<&CompletionAnalysisContext<'_>>,
-    file_content: &str,
-    line: u32,
-    column: u32,
-    name: &str,
-) -> bool {
-    let Some(ctx) = analysis else {
-        return false;
-    };
-    let Some(ir_program) = ctx.ir_program.as_deref() else {
-        return false;
-    };
-    let Some(scope_position) =
-        resolve_completion_scope_position(ir_program, file_content, line, column)
-    else {
-        return false;
-    };
-
-    let target = name.to_lowercase();
-    collect_local_candidates_from_ir(ir_program, &scope_position)
-        .into_iter()
-        .any(|local| local.name.to_lowercase() == target)
-}
-
 pub(super) fn add_symbols(
     snapshot: &IndexSnapshot,
     file_uri: Option<&str>,
@@ -646,65 +621,60 @@ pub(super) fn add_module_symbols(
     }
 }
 
-pub(super) fn add_metadata_items(
-    snapshot: &IndexSnapshot,
-    kind: Option<MetadataKind>,
+pub(super) fn add_metadata_items_from_lookup(
+    metadata_lookup: &TypeMetadataLookup,
+    kind: MetadataKind,
     target: &mut Vec<Candidate>,
     priority: u8,
 ) {
-    fn format_metadata_detail(kind: MetadataKind, facets: &[FacetKind]) -> String {
-        if facets.is_empty() {
-            return kind.to_russian_name().to_string();
-        }
-        let facets = facets
-            .iter()
-            .map(|facet| facet.display_name())
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("{} ({})", kind.to_russian_name(), facets)
+    let detail = Some(kind.to_russian_name().to_string());
+    for item_name in metadata_lookup.get_metadata_objects_by_kind(kind) {
+        target.push(Candidate::new(
+            CompletionItem::with_details(
+                item_name,
+                CompletionKind::from_metadata_kind(kind),
+                detail.clone(),
+                None,
+            ),
+            priority,
+            None,
+            None,
+            None,
+        ));
     }
+}
 
-    match kind {
-        Some(kind) => {
-            if let Some(items) = snapshot.metadata_index.get(&kind) {
-                for item in items.iter() {
-                    let item_kind = completion_kind_from_index_item(item);
-                    let detail = match item.kind {
-                        IndexItemKind::Metadata(kind) => {
-                            Some(format_metadata_detail(kind, &item.facets))
-                        }
-                        _ => None,
-                    };
-                    target.push(Candidate::new(
-                        CompletionItem::with_details(item.name.clone(), item_kind, detail, None),
-                        priority,
-                        None,
-                        None,
-                        None,
-                    ));
-                }
-            }
-        }
-        None => {
-            for items in snapshot.metadata_index.values() {
-                for item in items.iter() {
-                    let item_kind = completion_kind_from_index_item(item);
-                    let detail = match item.kind {
-                        IndexItemKind::Metadata(kind) => {
-                            Some(format_metadata_detail(kind, &item.facets))
-                        }
-                        _ => None,
-                    };
-                    target.push(Candidate::new(
-                        CompletionItem::with_details(item.name.clone(), item_kind, detail, None),
-                        priority,
-                        None,
-                        None,
-                        None,
-                    ));
-                }
-            }
-        }
+pub(super) fn add_all_metadata_items_from_lookup(
+    metadata_lookup: &TypeMetadataLookup,
+    target: &mut Vec<Candidate>,
+    priority: u8,
+) {
+    const ALL_METADATA_KINDS: &[MetadataKind] = &[
+        MetadataKind::Catalog,
+        MetadataKind::Document,
+        MetadataKind::Register,
+        MetadataKind::Report,
+        MetadataKind::DataProcessor,
+        MetadataKind::Enum,
+        MetadataKind::ChartOfAccounts,
+        MetadataKind::ChartOfCharacteristicTypes,
+        MetadataKind::ChartOfCalculationTypes,
+        MetadataKind::InformationRegister,
+        MetadataKind::AccumulationRegister,
+        MetadataKind::AccountingRegister,
+        MetadataKind::CalculationRegister,
+        MetadataKind::BusinessProcess,
+        MetadataKind::Task,
+        MetadataKind::ExchangePlan,
+        MetadataKind::Constant,
+        MetadataKind::CommonModule,
+        MetadataKind::Role,
+        MetadataKind::Subsystem,
+        MetadataKind::Language,
+    ];
+
+    for kind in ALL_METADATA_KINDS {
+        add_metadata_items_from_lookup(metadata_lookup, *kind, target, priority);
     }
 }
 

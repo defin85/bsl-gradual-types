@@ -3,6 +3,7 @@ use std::sync::Arc;
 use bsl_shared::domain::repository::TypeRepository;
 use bsl_shared::domain::signature_index::{ConstructorSignature, MethodSignature};
 use bsl_shared::domain::types::TypeResolution;
+use bsl_shared::ir::{SemanticNode, SemanticNodeKind, SemanticProgram, Span};
 
 use crate::system::LineIndex;
 
@@ -27,15 +28,16 @@ pub fn get_signature_help_v2(
     file_content: &str,
     line: u32,
     character: u32,
+    ir_program: Arc<SemanticProgram>,
     deps: Arc<bsl_analysis_v2::SemanticDeps>,
-    receiver_type_hint: Option<TypeResolution>,
 ) -> Option<SignatureHelpData> {
     let call_context = signature_help_query(file_content, line, character)?;
+    let receiver_type_hint =
+        signature_receiver_type_from_ir(file_content, &call_context, ir_program.as_ref());
 
     let signature_info = get_signature_for_function_with_repository(
         &call_context.function_name,
         receiver_type_hint.as_ref(),
-        call_context.receiver_text.as_deref(),
         call_context.is_constructor,
         &deps.repository,
     )?;
@@ -392,7 +394,6 @@ fn is_identifier_char(c: char) -> bool {
 fn get_signature_for_function_with_repository(
     function_name: &str,
     receiver_type_hint: Option<&TypeResolution>,
-    receiver_text: Option<&str>,
     is_constructor: bool,
     repository: &Arc<dyn TypeRepository>,
 ) -> Option<SignatureTarget> {
@@ -402,14 +403,107 @@ fn get_signature_for_function_with_repository(
             .map(SignatureTarget::Constructor);
     }
 
-    let owner_type = receiver_type_hint
-        .and_then(signature_owner_type_name)
-        .or_else(|| {
-            receiver_text.and_then(|value| signature_owner_type_from_text(value, repository))
-        });
+    let owner_type = receiver_type_hint.and_then(signature_owner_type_name);
     repository
         .find_method_signature(owner_type.as_deref(), function_name)
         .map(SignatureTarget::Method)
+}
+
+fn signature_receiver_type_from_ir(
+    file_content: &str,
+    call_context: &SignatureHelpQuery,
+    ir_program: &SemanticProgram,
+) -> Option<TypeResolution> {
+    let line_index = LineIndex::new(file_content);
+    let call_start_offset = line_index
+        .utf16_position_to_byte_offset(
+            file_content,
+            call_context.call_start_line,
+            call_context.call_start_character,
+        )
+        .min(u32::MAX as usize) as u32;
+    if let Some(node) = [
+        call_start_offset.saturating_sub(1),
+        call_start_offset,
+        call_start_offset.saturating_add(1),
+    ]
+    .into_iter()
+    .find_map(|offset| ir_program.find_node_at_byte_offset(offset))
+    {
+        if let Some(receiver) = semantic_receiver_type(ir_program, node) {
+            return Some(receiver);
+        }
+    }
+
+    let receiver_end_character = call_context.receiver_end_character?;
+    let byte_offset = line_index
+        .utf16_position_to_byte_offset(
+            file_content,
+            call_context.call_start_line,
+            receiver_end_character,
+        )
+        .min(u32::MAX as usize) as u32;
+    ir_program.semantic_facts.type_at_byte_offset(byte_offset)
+}
+
+fn semantic_type_at_offset(program: &SemanticProgram, offset: u32) -> Option<TypeResolution> {
+    program
+        .semantic_facts
+        .type_at_byte_offset(offset)
+        .or_else(|| {
+            program
+                .find_node_at_byte_offset(offset)
+                .and_then(|node| program.semantic_facts.type_resolution_for_span(node.span))
+        })
+}
+
+fn receiver_span_for_node(program: &SemanticProgram, node: &SemanticNode) -> Option<Span> {
+    match &node.kind {
+        SemanticNodeKind::MemberAccess {
+            object_node,
+            object_span,
+            ..
+        }
+        | SemanticNodeKind::FunctionCall {
+            object_node,
+            object_span,
+            ..
+        } => object_span.or_else(|| {
+            object_node.and_then(|idx| program.nodes.get(idx).map(|candidate| candidate.span))
+        }),
+        _ => None,
+    }
+}
+
+fn semantic_receiver_type(
+    program: &SemanticProgram,
+    node: &SemanticNode,
+) -> Option<TypeResolution> {
+    let span_fallback = |span: Span| {
+        semantic_type_at_offset(program, span.start)
+            .or_else(|| {
+                span.end
+                    .checked_sub(1)
+                    .and_then(|offset| semantic_type_at_offset(program, offset))
+            })
+            .or_else(|| program.semantic_facts.type_resolution_for_span(span))
+    };
+
+    match &node.kind {
+        SemanticNodeKind::MemberAccess { .. } => program
+            .semantic_facts
+            .member_access_object_type_by_span
+            .get(&node.span)
+            .cloned()
+            .or_else(|| receiver_span_for_node(program, node).and_then(span_fallback)),
+        SemanticNodeKind::FunctionCall { .. } => program
+            .semantic_facts
+            .call_receiver_type_by_span
+            .get(&node.span)
+            .cloned()
+            .or_else(|| receiver_span_for_node(program, node).and_then(span_fallback)),
+        _ => None,
+    }
 }
 
 fn signature_owner_type_name(resolution: &TypeResolution) -> Option<String> {
@@ -426,20 +520,6 @@ fn signature_owner_type_name(resolution: &TypeResolution) -> Option<String> {
     } else {
         Some(normalized.to_string())
     }
-}
-
-fn signature_owner_type_from_text(
-    value: &str,
-    repository: &Arc<dyn TypeRepository>,
-) -> Option<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    if repository.find_type(trimmed).is_some() {
-        return Some(trimmed.to_string());
-    }
-    None
 }
 
 enum SignatureTarget {

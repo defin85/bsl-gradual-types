@@ -408,14 +408,7 @@ impl BslLanguageServer {
                 }
             }
 
-            let (
-                file_content,
-                file_path,
-                type_at_position_hint,
-                receiver_type_hint,
-                deps,
-                ir_program,
-            ) = {
+            let (file_content, file_path, deps, ir_program) = {
                 let analysis = prepared.snapshot.analysis;
                 let index_snapshot = prepared.index_snapshot;
 
@@ -458,68 +451,7 @@ impl BslLanguageServer {
                     }
                 }
 
-                let type_at_position_hint = {
-                    let offset = analysis
-                        .utf16_position_to_byte_offset(file_id, position.line, position.character)
-                        .ok()
-                        .flatten();
-                    offset.and_then(|offset| {
-                        let offset = offset.min(u32::MAX as usize) as u32;
-                        // Strict serve-only: definition type hints must not trigger
-                        // on-demand flow/type-index compute in request path.
-                        match analysis.type_at_byte_offset_serve_only_profiled(file_id, offset) {
-                            Ok(profiled) => {
-                                self.coordinator.record_intellisense_v2_type_index_reason(
-                                    profiled.serve_reason_code.as_str(),
-                                );
-                                profiled.resolution
-                            }
-                            Err(_) => None,
-                        }
-                    })
-                };
-                let receiver_type_hint = ir_program.as_ref().and_then(|program| {
-                    let offset = analysis
-                        .utf16_position_to_byte_offset(file_id, position.line, position.character)
-                        .ok()
-                        .flatten()
-                        .map(|offset| offset.min(u32::MAX as usize) as u32)?;
-
-                    let node = program.find_node_at_byte_offset(offset)?;
-
-                    let object_span = match &node.kind {
-                        bsl_shared::ir::SemanticNodeKind::MemberAccess { object_node, .. } => {
-                            object_node.and_then(|idx| program.nodes.get(idx).map(|n| n.span))
-                        }
-                        bsl_shared::ir::SemanticNodeKind::FunctionCall { object_node, .. } => {
-                            object_node.and_then(|idx| program.nodes.get(idx).map(|n| n.span))
-                        }
-                        _ => None,
-                    }?;
-
-                    // Strict serve-only: definition receiver hints must not trigger
-                    // on-demand flow/type-index compute in request path.
-                    match analysis
-                        .type_at_byte_offset_serve_only_profiled(file_id, object_span.start)
-                    {
-                        Ok(profiled) => {
-                            self.coordinator.record_intellisense_v2_type_index_reason(
-                                profiled.serve_reason_code.as_str(),
-                            );
-                            profiled.resolution
-                        }
-                        Err(_) => None,
-                    }
-                });
-
-                (
-                    file_content,
-                    file_path,
-                    type_at_position_hint,
-                    receiver_type_hint,
-                    deps,
-                    ir_program,
-                )
+                (file_content, file_path, deps, ir_program)
             };
 
             let result = match (file_content, file_path, deps, ir_program) {
@@ -528,8 +460,6 @@ impl BslLanguageServer {
                         file_path,
                         file_content,
                         ir_program,
-                        type_at_position_hint,
-                        receiver_type_hint,
                         deps,
                         position,
                         &uri,

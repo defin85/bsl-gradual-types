@@ -39,9 +39,12 @@ Code:
 - `bsl-runtime/src/application/type_system/services/completion_service.rs`
 - `bsl-runtime/src/application/type_system/services/completion_service/member_resolution.rs`
 - `bsl-runtime/src/application/type_system/services/hover_service.rs`
+- `bsl-runtime/src/application/type_system/services/signature_help_service.rs`
 - `backend/src/bin/lsp_server/server/language_server/impl_completion_helpers.rs`
+- `backend/src/bin/lsp_server/server/language_server/impl_features_c.rs`
 - `backend/src/bin/lsp_server/handlers/completion.rs`
 - `backend/src/bin/lsp_server/handlers/hover.rs`
+- `backend/src/bin/lsp_server/handlers/signature_help.rs`
 - `backend/src/presentation/web/handlers.rs`
 - `backend/src/presentation/web/handlers/semantic.rs`
 - `bsl-agent/src/session/helpers_semantic.rs`
@@ -49,20 +52,22 @@ Code:
 
 Tests:
 - `backend/tests/universal_collection_cross_consumer_consistency_test.rs`
-  - `typed_structure_completion_without_shared_owner_hint_fails_closed_in_direct_handler_path`
-  - `typed_value_table_row_completion_without_shared_owner_hint_fails_closed_in_direct_handler_path`
+  - `typed_structure_completion_without_shared_owner_hint_uses_ir_contract_in_direct_handler_path`
+  - `typed_value_table_row_completion_without_shared_owner_hint_uses_ir_contract_in_direct_handler_path`
 - `bsl-runtime/src/application/type_system/services/completion_service/tests.rs`
-  - `completion_implicit_form_object_member_access_fails_closed_without_shared_hint`
+  - `completion_implicit_form_object_member_access_resolves_from_ir_without_shared_hint`
+  - `completion_resolves_member_owner_from_ir_without_owner_hint`
   - `completion_resolves_implicit_form_object_member_access_with_shared_hint`
-  - `implicit_module_context_owner_resolution_requires_shared_hint_for_supported_modules`
+  - `implicit_module_context_owner_resolution_uses_ir_for_supported_modules`
   - `implicit_module_context_owner_resolution_fails_closed_outside_supported_modules`
 - `backend/tests/form_module_object_unified_contract_test.rs`
   - `completion_and_resolve_follow_unified_form_contract`
-  - `completion_form_module_object_fails_closed_without_shared_owner_hint`
+  - `completion_form_module_object_uses_ir_contract_without_shared_owner_hint`
 - `backend/tests/legacy_form_object_alias_outputs_test.rs`
   - `completion_and_resolve_do_not_expose_legacy_form_alias`
 - `backend/src/bin/lsp_server/server/core/tests.rs`
   - `p7_form_module_object_completion_uses_default_lsp_owner_hint_path`
+  - `p7_hover_emits_type_index_reasons_while_completion_signature_and_definition_reuse_current_semantic_state`
   - `p7_typed_structure_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics`
   - `p7_typed_value_table_row_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics`
   - `p7_typed_structure_revision_switch_does_not_leak_stale_structural_members_across_interfaces`
@@ -70,7 +75,7 @@ Tests:
 
 Notes:
 - completion owner resolution больше не содержит bootstrap-only implicit module-context fallback;
-- supported implicit module-context completion работает только через shared owner hint, а no-hint path fail-closed.
+- supported implicit module-context completion работает через IR-derived owner contract на default path, а unsupported/no-binding path остаётся fail-closed.
 
 ## Requirement: Cross-consumer acceptance доказывает semantic equivalence, а не только smoke consistency
 
@@ -95,11 +100,11 @@ Tests:
   - `p7_typed_structure_revision_switch_does_not_leak_stale_structural_members_across_interfaces`
   - `p7_typed_value_table_row_revision_switch_does_not_leak_stale_structural_members_across_interfaces`
 - `backend/tests/universal_collection_cross_consumer_consistency_test.rs`
-  - `typed_structure_completion_without_shared_owner_hint_fails_closed_in_direct_handler_path`
-  - `typed_value_table_row_completion_without_shared_owner_hint_fails_closed_in_direct_handler_path`
+  - `typed_structure_completion_without_shared_owner_hint_uses_ir_contract_in_direct_handler_path`
+  - `typed_value_table_row_completion_without_shared_owner_hint_uses_ir_contract_in_direct_handler_path`
 - `backend/tests/form_module_object_unified_contract_test.rs`
   - `completion_and_resolve_follow_unified_form_contract`
-  - `completion_form_module_object_fails_closed_without_shared_owner_hint`
+  - `completion_form_module_object_uses_ir_contract_without_shared_owner_hint`
 - `backend/tests/legacy_form_object_alias_outputs_test.rs`
   - `completion_and_resolve_do_not_expose_legacy_form_alias`
 - `backend/src/bin/lsp_server/handlers/completion/tests.rs`

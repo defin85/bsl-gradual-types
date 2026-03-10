@@ -76,9 +76,9 @@ pub(super) async fn resolve_member_owner_type(
 
 pub(super) fn resolve_member_owner_type_sync(
     analysis: Option<&CompletionAnalysisContext<'_>>,
-    _file_content: &str,
-    _line: u32,
-    _column: u32,
+    file_content: &str,
+    line: u32,
+    column: u32,
     _base_name: &str,
 ) -> Option<TypeResolution> {
     let ctx = analysis?;
@@ -86,6 +86,7 @@ pub(super) fn resolve_member_owner_type_sync(
         .as_ref()
         .filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
         .cloned()
+        .or_else(|| resolve_member_access_owner_type_from_ir(analysis, file_content, line, column))
 }
 
 pub(super) fn resolve_property_access_type(

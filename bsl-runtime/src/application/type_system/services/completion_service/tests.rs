@@ -1193,7 +1193,7 @@ async fn completion_resolves_variable_type_for_member_access() {
 }
 
 #[tokio::test]
-async fn completion_does_not_infer_member_owner_without_owner_hint() {
+async fn completion_resolves_member_owner_from_ir_without_owner_hint() {
     let repository = Arc::new(InMemoryTypeRepository::new());
     repository
         .load_types(vec![RawTypeData {
@@ -1266,9 +1266,10 @@ async fn completion_does_not_infer_member_owner_without_owner_hint() {
     };
 
     let resolved = resolve_member_owner_type(Some(&ctx), content, line, column, "ТаблЗнач").await;
-    assert!(
-        resolved.is_none(),
-        "owner type must come only from shared resolved hint path"
+    assert_eq!(
+        resolved,
+        owner_hint("ТаблицаЗначений"),
+        "member owner must resolve from canonical IR without adapter-supplied hint"
     );
 
     let result = get_completion_with_analysis(
@@ -1286,24 +1287,19 @@ async fn completion_does_not_infer_member_owner_without_owner_hint() {
 
     let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
     assert!(
-        labels.is_empty(),
-        "member access without shared owner hint must stay fail-closed, labels: {:?}",
-        labels
-    );
-    assert!(
-        !labels.contains(&"Добавить".to_string()),
+        labels.contains(&"Добавить".to_string()),
         "labels: {:?}",
         labels
     );
     assert!(
-        !labels.contains(&"Количество".to_string()),
+        labels.contains(&"Количество".to_string()),
         "labels: {:?}",
         labels
     );
 }
 
 #[tokio::test]
-async fn completion_falls_back_to_generic_items_for_unknown_bare_receiver_member_access() {
+async fn completion_unknown_bare_receiver_member_access_stays_fail_closed() {
     let repository = Arc::new(InMemoryTypeRepository::new());
     repository
         .load_types(vec![RawTypeData {
@@ -1390,24 +1386,24 @@ async fn completion_falls_back_to_generic_items_for_unknown_bare_receiver_member
 
     let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
     assert!(
-        !labels.is_empty(),
-        "unknown bare receiver should degrade to generic completion instead of terminal empty, labels: {:?}",
+        labels.is_empty(),
+        "unknown bare receiver must stay fail-closed instead of degrading to generic completion, labels: {:?}",
         labels
     );
     assert!(
         !labels.contains(&"Добавить".to_string()),
-        "generic fallback must not reconstruct semantic member candidates, labels: {:?}",
+        "fail-closed result must not reconstruct semantic member candidates, labels: {:?}",
         labels
     );
     assert!(
         !labels.contains(&"Количество".to_string()),
-        "generic fallback must not reconstruct semantic member candidates, labels: {:?}",
+        "fail-closed result must not reconstruct semantic member candidates, labels: {:?}",
         labels
     );
 }
 
 #[tokio::test]
-async fn completion_implicit_form_object_member_access_fails_closed_without_shared_hint() {
+async fn completion_implicit_form_object_member_access_resolves_from_ir_without_shared_hint() {
     let repository = Arc::new(InMemoryTypeRepository::new());
     repository
         .load_types(vec![
@@ -1510,12 +1506,12 @@ async fn completion_implicit_form_object_member_access_fails_closed_without_shar
         labels
     );
     assert!(
-        !labels.contains(&"Ссылка".to_string()),
+        labels.contains(&"Ссылка".to_string()),
         "labels: {:?}",
         labels
     );
     assert!(
-        !labels.contains(&"ПометкаУдаления".to_string()),
+        labels.contains(&"ПометкаУдаления".to_string()),
         "labels: {:?}",
         labels
     );
@@ -1738,7 +1734,7 @@ async fn completion_uses_owner_hint_for_member_access_when_flow_sensitive_is_ena
 }
 
 #[test]
-fn implicit_module_context_owner_resolution_requires_shared_hint_for_supported_modules() {
+fn implicit_module_context_owner_resolution_uses_ir_for_supported_modules() {
     let repository = Arc::new(InMemoryTypeRepository::new());
     repository
         .load_types(vec![RawTypeData {
@@ -1821,9 +1817,10 @@ fn implicit_module_context_owner_resolution_requires_shared_hint_for_supported_m
             access_column,
             base_name,
         );
-        assert!(
-            without_hint.is_none(),
-            "implicit module-context owner must fail closed without shared hint for {file_path}:{base_name}"
+        assert_eq!(
+            without_hint,
+            Some(expected.clone()),
+            "implicit module-context owner must resolve from canonical IR for {file_path}:{base_name}"
         );
 
         let ctx_with_hint = CompletionAnalysisContext {

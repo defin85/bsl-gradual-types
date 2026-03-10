@@ -1,5 +1,6 @@
 //! Интеграционный тест: completion по метаданным fixture конфигурации (M5).
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
 
@@ -51,6 +52,7 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
 
     let content = concat!(
         "Процедура Тест()\n",
+        "    Заказ\n",
         "    Документы.\n",
         "    Документы.ЗаказНаряды.\n",
         "    Документы.ЗаказНаряды.СоздатьДокумент().\n",
@@ -93,16 +95,43 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
         "index snapshot should contain document metadata, kinds: {:?}",
         index_snapshot.metadata_index.keys().collect::<Vec<_>>()
     );
+    let mut repository_backed_snapshot = index_snapshot.clone();
+    repository_backed_snapshot.metadata_index = Arc::new(HashMap::new());
 
-    // 1) Документы. -> имена документов + kind/detail
+    // 1) non-member metadata completion не зависит от metadata_index
     let line = 1u32;
+    let line_text = "    Заказ";
+    let result = get_completion_with_semantic_program_snapshot_v2(
+        content,
+        line,
+        utf16_column(line_text),
+        file_uri,
+        &repository_backed_snapshot,
+        &metadata_lookup,
+        "m5_metadata_completion_fixture.bsl",
+        resolver.as_ref(),
+        ir_program.clone(),
+        None,
+        false,
+    )
+    .await
+    .expect("completion ok");
+    let labels: Vec<&str> = result.items.iter().map(|c| c.item.label.as_str()).collect();
+    assert!(
+        labels.contains(&"ЗаказНаряды"),
+        "non-member metadata completion should include ЗаказНаряды without metadata_index, labels: {:?}",
+        labels
+    );
+
+    // 2) Документы. -> имена документов + kind/detail
+    let line = 2u32;
     let line_text = "    Документы.";
     let result = get_completion_with_semantic_program_snapshot_v2(
         content,
         line,
         utf16_column(line_text),
         file_uri,
-        index_snapshot,
+        &repository_backed_snapshot,
         &metadata_lookup,
         "m5_metadata_completion_fixture.bsl",
         resolver.as_ref(),
@@ -137,15 +166,15 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
         "Документы. items should have detail with kind name"
     );
 
-    // 2) Документы.ЗаказНаряды. -> методы менеджера
-    let line = 2u32;
+    // 3) Документы.ЗаказНаряды. -> методы менеджера
+    let line = 3u32;
     let line_text = "    Документы.ЗаказНаряды.";
     let result = get_completion_with_semantic_program_snapshot_v2(
         content,
         line,
         utf16_column(line_text),
         file_uri,
-        index_snapshot,
+        &repository_backed_snapshot,
         &metadata_lookup,
         "m5_metadata_completion_fixture.bsl",
         resolver.as_ref(),
@@ -162,15 +191,15 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
         labels
     );
 
-    // 3) ...СоздатьДокумент(). -> свойства объекта (в т.ч. фасет Ссылка и ТЧ)
-    let line = 3u32;
+    // 4) ...СоздатьДокумент(). -> свойства объекта (в т.ч. фасет Ссылка и ТЧ)
+    let line = 4u32;
     let line_text = "    Документы.ЗаказНаряды.СоздатьДокумент().";
     let result = get_completion_with_semantic_program_snapshot_v2(
         content,
         line,
         utf16_column(line_text),
         file_uri,
-        index_snapshot,
+        &repository_backed_snapshot,
         &metadata_lookup,
         "m5_metadata_completion_fixture.bsl",
         resolver.as_ref(),
@@ -192,15 +221,15 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
         labels
     );
 
-    // 4) ...СоздатьДокумент().ПолучитьСсылкуНового(). -> методы ссылки
-    let line = 4u32;
+    // 5) ...СоздатьДокумент().ПолучитьСсылкуНового(). -> методы ссылки
+    let line = 5u32;
     let line_text = "    Документы.ЗаказНаряды.СоздатьДокумент().ПолучитьСсылкуНового().";
     let result = get_completion_with_semantic_program_snapshot_v2(
         content,
         line,
         utf16_column(line_text),
         file_uri,
-        index_snapshot,
+        &repository_backed_snapshot,
         &metadata_lookup,
         "m5_metadata_completion_fixture.bsl",
         resolver.as_ref(),
@@ -217,15 +246,15 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
         labels
     );
 
-    // 5) ...СоздатьДокумент().Работы. -> методы табличной части (коллекция)
-    let line = 5u32;
+    // 6) ...СоздатьДокумент().Работы. -> методы табличной части (коллекция)
+    let line = 6u32;
     let line_text = "    Документы.ЗаказНаряды.СоздатьДокумент().Работы.";
     let result = get_completion_with_semantic_program_snapshot_v2(
         content,
         line,
         utf16_column(line_text),
         file_uri,
-        index_snapshot,
+        &repository_backed_snapshot,
         &metadata_lookup,
         "m5_metadata_completion_fixture.bsl",
         resolver.as_ref(),
@@ -242,15 +271,15 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
         labels
     );
 
-    // 6) ...Работы.Добавить(). -> свойства строки табличной части
-    let line = 6u32;
+    // 7) ...Работы.Добавить(). -> свойства строки табличной части
+    let line = 7u32;
     let line_text = "    Документы.ЗаказНаряды.СоздатьДокумент().Работы.Добавить().";
     let result = get_completion_with_semantic_program_snapshot_v2(
         content,
         line,
         utf16_column(line_text),
         file_uri,
-        index_snapshot,
+        &repository_backed_snapshot,
         &metadata_lookup,
         "m5_metadata_completion_fixture.bsl",
         resolver.as_ref(),

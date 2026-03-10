@@ -297,69 +297,28 @@ async fn lsp_signature_help_returns_method_and_constructor() {
     let env = build_env();
     let content = r#"Процедура Тест()
     Новый Массив(1, )
-    Массив.Добавить(1, )
+    МойМассив = Новый Массив
+    МойМассив.Добавить(1, )
 КонецПроцедуры"#;
+    let uri = Url::parse("file:///test_signature_help_v2.bsl").expect("test uri");
+    let (_file_content, _file_path, ir_program) = build_v2_ir(content, &uri, env.deps.clone());
 
     let constructor_pos = position_at_marker(content, "Новый Массив(1, ");
-    let method_pos = position_at_marker(content, "Массив.Добавить(1, ");
+    let method_pos = position_at_marker(content, "МойМассив.Добавить(1, ");
 
     let constructor = signature_help_handler::handle_signature_help_v2(
         Arc::from(content.to_string()),
         constructor_pos,
-        None,
+        ir_program.clone(),
         env.deps.clone(),
     )
     .await
     .expect("constructor signature help");
 
-    let receiver_type_hint = {
-        let query = bsl_backend::application::type_system::signature_help_query(
-            content,
-            method_pos.line,
-            method_pos.character,
-        )
-        .expect("signature help query");
-
-        let mut host = AnalysisHostV2::default();
-        host.apply_change(ChangeV2::SetDepsSnapshot {
-            deps_id: DepsSnapshotId::from_hash("test"),
-            deps: env.deps.clone(),
-        });
-        host.apply_change(ChangeV2::SetSettingsSnapshot {
-            settings_id: SettingsId::from_hash("test"),
-            diagnostics_detail_level: DetailLevel::Full,
-        });
-        host.apply_change(ChangeV2::SetFile {
-            file_id: V2FileId(1),
-            text: Arc::from(content.to_string()),
-            version: 0,
-            path: Arc::from("test.bsl"),
-        });
-
-        query
-            .receiver_end_character
-            .and_then(|receiver_end_character| {
-                let analysis = host.snapshot();
-                analysis
-                    .utf16_position_to_byte_offset(
-                        V2FileId(1),
-                        query.call_start_line,
-                        receiver_end_character,
-                    )
-                    .ok()
-                    .flatten()
-                    .and_then(|byte_offset| {
-                        analysis
-                            .type_at_byte_offset(V2FileId(1), byte_offset as u32)
-                            .ok()
-                            .flatten()
-                    })
-            })
-    };
     let method = signature_help_handler::handle_signature_help_v2(
         Arc::from(content.to_string()),
         method_pos,
-        receiver_type_hint,
+        ir_program,
         env.deps,
     )
     .await

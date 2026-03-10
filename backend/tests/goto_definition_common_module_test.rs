@@ -113,8 +113,6 @@ fn goto_definition_resolves_common_module_namespace_and_method() {
         deps.clone(),
         1,
         module_col,
-        None,
-        None,
     )
     .expect("module definition target");
 
@@ -136,21 +134,138 @@ fn goto_definition_resolves_common_module_namespace_and_method() {
         .expect("canonicalize actual module");
     assert_eq!(actual_module, expected_module);
 
+    let target_method =
+        type_system::goto_definition_v2_with_source("inline.bsl", source, ir, deps, 1, method_col)
+            .expect("method definition target");
+    assert!(
+        target_method.span.is_some(),
+        "method definition should include span"
+    );
+}
+
+#[test]
+fn goto_definition_resolves_object_module_method_without_request_time_hints() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+
+    std::fs::write(
+        root.join("Configuration.xml"),
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses">
+  <Configuration uuid="00000000-0000-0000-0000-000000000000">
+    <Properties>
+      <Name>TestConfig</Name>
+      <CompatibilityMode>Version8_3_25</CompatibilityMode>
+    </Properties>
+    <ChildObjects>
+      <Document>Док1</Document>
+    </ChildObjects>
+  </Configuration>
+</MetaDataObject>
+"#,
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(root.join("Documents")).unwrap();
+    std::fs::write(
+        root.join("Documents").join("Док1.xml"),
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses">
+  <Document uuid="00000000-0000-0000-0000-000000000001">
+    <Properties>
+      <Name>Док1</Name>
+    </Properties>
+  </Document>
+</MetaDataObject>
+"#,
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(root.join("Documents").join("Док1").join("Ext")).unwrap();
+    std::fs::write(
+        root.join("Documents")
+            .join("Док1")
+            .join("Ext")
+            .join("ObjectModule.bsl"),
+        concat!(
+            "Процедура МойМетод() Экспорт\n",
+            "КонецПроцедуры\n",
+            "\n",
+            "Процедура Тест()\n",
+            "    ЭтотОбъект.МойМетод();\n",
+            "КонецПроцедуры\n"
+        ),
+    )
+    .unwrap();
+
+    let coordinator = SystemCoordinator::new();
+    coordinator
+        .start_with_paths_blocking(None, Some(Path::new(root)), Some("8.3.25"), None)
+        .expect("startup");
+
+    let deps_bundle = build_deps_bundle_v2(&coordinator, None, Some(root)).expect("deps bundle");
+    let repo = deps_bundle.semantic_deps.repository.clone();
+    let signature_index = deps_bundle.semantic_deps.signature_index.clone();
+    let resolver = deps_bundle
+        .semantic_deps
+        .resolver
+        .clone()
+        .expect("resolver");
+
+    let deps = Arc::new(SemanticDeps {
+        repository: repo.clone(),
+        signature_index: signature_index.clone(),
+        resolver: Some(resolver.clone()),
+        platform_signatures_loaded: false,
+    });
+
+    let source = concat!(
+        "Процедура Тест()\n",
+        "    ЭтотОбъект.МойМетод();\n",
+        "КонецПроцедуры\n"
+    );
+    let parsed = parse(source, &ParseOptions::default()).expect("parse");
+    let ir = AstToIrConverter::convert_with_resolver(
+        parsed.program,
+        source.to_string(),
+        "Documents/Док1/Ext/ObjectModule.bsl".to_string(),
+        repo,
+        signature_index,
+        Some(resolver),
+    )
+    .expect("ir");
+    let ir = Arc::new(ir);
+
+    let call_line = source.lines().nth(1).expect("call line");
+    let method_byte = call_line.find("МойМетод").expect("method name");
+    let method_col = utf16_col(call_line, method_byte);
+
     let target_method = type_system::goto_definition_v2_with_source(
-        "inline.bsl",
+        "Documents/Док1/Ext/ObjectModule.bsl",
         source,
         ir,
         deps,
         1,
         method_col,
-        None,
-        None,
     )
     .expect("method definition target");
+
     assert!(
         target_method.span.is_some(),
-        "method definition should include span"
+        "method definition should include declaration span"
     );
+    let expected_module = root
+        .join("Documents")
+        .join("Док1")
+        .join("Ext")
+        .join("ObjectModule.bsl")
+        .canonicalize()
+        .expect("canonicalize expected module");
+    let actual_module = target_method
+        .file_path
+        .canonicalize()
+        .expect("canonicalize actual module");
+    assert_eq!(actual_module, expected_module);
 }
 
 #[test]
@@ -257,22 +372,12 @@ fn goto_definition_resolves_common_module_method_with_deps_bundle_v2_snapshot() 
         deps.clone(),
         1,
         module_col,
-        None,
-        None,
     )
     .expect("module definition target");
     assert!(target_module.span.is_none());
 
-    let target_method = type_system::goto_definition_v2_with_source(
-        "inline.bsl",
-        source,
-        ir,
-        deps,
-        1,
-        method_col,
-        None,
-        None,
-    )
-    .expect("method definition target");
+    let target_method =
+        type_system::goto_definition_v2_with_source("inline.bsl", source, ir, deps, 1, method_col)
+            .expect("method definition target");
     assert!(target_method.span.is_some());
 }

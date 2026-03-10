@@ -203,6 +203,44 @@ pub(super) fn add_types(snapshot: &IndexSnapshot, target: &mut Vec<Candidate>, p
     }
 }
 
+pub(super) fn resolve_member_access_owner_type_from_ir(
+    analysis: Option<&CompletionAnalysisContext<'_>>,
+    file_content: &str,
+    line: u32,
+    column: u32,
+) -> Option<TypeResolution> {
+    let ctx = analysis?;
+    let ir_program = ctx.ir_program.as_deref()?;
+    let line_text = file_content.lines().nth(line as usize)?;
+    let cursor_byte = utf16_to_byte_offset(line_text, column);
+    let line_prefix = match line_text
+        .get(cursor_byte..)
+        .and_then(|tail| tail.chars().next())
+    {
+        Some('.') => line_text
+            .get(..cursor_byte.saturating_add(1))
+            .unwrap_or(line_text),
+        _ => line_text.get(..cursor_byte)?,
+    };
+    let dot_in_line = line_prefix.rfind('.')?;
+    let receiver = line_prefix.get(..dot_in_line)?.trim_end();
+    if receiver.is_empty() {
+        return None;
+    }
+
+    let probe_utf16 = bsl_analysis_v2::byte_offset_to_utf16(line_text, receiver.len());
+    let line_index = LineIndex::new(file_content);
+    let probe_offset = line_index
+        .utf16_position_to_byte_offset(file_content, line, probe_utf16)
+        .saturating_sub(1)
+        .min(u32::MAX as usize) as u32;
+
+    let resolution = ir_program
+        .semantic_facts
+        .type_at_byte_offset(probe_offset)?;
+    (!resolution.is_unknown() && !resolution.is_dynamic()).then_some(resolution)
+}
+
 pub(super) fn resolve_type_name(
     name: &str,
     metadata_lookup: &TypeMetadataLookup,

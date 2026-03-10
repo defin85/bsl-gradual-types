@@ -48,7 +48,7 @@ static ALLOCATED_BYTES: AtomicU64 = AtomicU64::new(0);
 #[global_allocator]
 static GLOBAL_ALLOCATOR: CountingAllocator = CountingAllocator;
 
-pub(super) fn evaluate_intellisense_perf_profile_for_harness(
+fn evaluate_intellisense_perf_profile_for_harness(
     contract: &serde_json::Value,
     profile: &str,
     current: PerfGateSample,

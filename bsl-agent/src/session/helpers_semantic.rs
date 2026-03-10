@@ -110,6 +110,7 @@ fn type_at_utf16_position(
     }
 }
 
+#[cfg(test)]
 fn member_access_owner_type_hint_at_position(
     analysis: &bsl_analysis_v2::AnalysisV2,
     file_id: bsl_analysis_v2::FileId,
@@ -142,82 +143,6 @@ fn member_access_owner_type_hint_at_position(
     } else {
         serve_only_type_at_byte_offset_with_reason(analysis, file_id, offset, coordinator)
     }
-}
-
-fn definition_receiver_type_hint_at_position(
-    analysis: &bsl_analysis_v2::AnalysisV2,
-    program: &bsl_shared::ir::SemanticProgram,
-    file_id: bsl_analysis_v2::FileId,
-    file_content: &str,
-    line: u32,
-    character: u32,
-    coordinator: Option<&bsl_runtime::system::SystemCoordinator>,
-) -> Option<bsl_shared::domain::types::TypeResolution> {
-    let offset = analysis
-        .utf16_position_to_byte_offset(file_id, line, character)
-        .ok()
-        .flatten()
-        .map(|offset| offset.min(u32::MAX as usize) as u32)?;
-    let node = program.find_node_at_byte_offset(offset)?;
-
-    let object_span = match &node.kind {
-        bsl_shared::ir::SemanticNodeKind::MemberAccess {
-            object_node,
-            object_span,
-            ..
-        } => {
-            object_span.or_else(|| object_node.and_then(|idx| program.nodes.get(idx).map(|node| node.span)))
-        }
-        bsl_shared::ir::SemanticNodeKind::FunctionCall {
-            object_node,
-            object_span,
-            ..
-        } => {
-            object_span.or_else(|| object_node.and_then(|idx| program.nodes.get(idx).map(|node| node.span)))
-        }
-        _ => None,
-    }?;
-
-    let mut fallback = None;
-    let mut probes = Vec::with_capacity(2);
-    if object_span.end > object_span.start {
-        probes.push(object_span.end.saturating_sub(1));
-    }
-    probes.push(object_span.start);
-
-    for probe in probes {
-        let Some(resolution) =
-            serve_only_type_at_byte_offset_with_reason(analysis, file_id, probe, coordinator)
-        else {
-            continue;
-        };
-        if !resolution.is_unknown() && !resolution.is_dynamic() {
-            return Some(resolution);
-        }
-        if fallback.is_none() {
-            fallback = Some(resolution);
-        }
-    }
-
-    let line_based = member_access_owner_type_hint_at_position(
-        analysis,
-        file_id,
-        file_content,
-        line,
-        character,
-        false,
-        coordinator,
-    );
-    if let Some(resolution) = line_based {
-        if !resolution.is_unknown() && !resolution.is_dynamic() {
-            return Some(resolution);
-        }
-        if fallback.is_none() {
-            fallback = Some(resolution);
-        }
-    }
-
-    fallback
 }
 
 fn serve_only_type_at_byte_offset_with_reason(

@@ -11,6 +11,7 @@ use bsl_shared::domain::signature_index::{
 };
 use bsl_shared::domain::types::{ParameterInfo, RawDataSource, RawTypeData};
 use bsl_shared::formatting::DetailLevel;
+use bsl_shared::ir::SemanticProgram;
 
 fn fixture_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -122,14 +123,10 @@ fn create_test_deps() -> Arc<bsl_analysis_v2::SemanticDeps> {
     })
 }
 
-fn compute_receiver_type_hint(
+fn compute_ir_program(
     content: &str,
-    position: Position,
     deps: Arc<bsl_analysis_v2::SemanticDeps>,
-) -> Option<TypeResolution> {
-    let query = type_system::signature_help_query(content, position.line, position.character)?;
-    let receiver_end_character = query.receiver_end_character?;
-
+) -> Arc<SemanticProgram> {
     let mut host = AnalysisHostV2::default();
     host.apply_change(Change::SetDepsSnapshot {
         deps_id: DepsSnapshotId::from_hash("test"),
@@ -149,14 +146,7 @@ fn compute_receiver_type_hint(
     });
 
     let analysis = host.snapshot();
-    let offset = analysis
-        .utf16_position_to_byte_offset(file_id, query.call_start_line, receiver_end_character)
-        .ok()
-        .flatten()?;
-    analysis
-        .type_at_byte_offset(file_id, offset.min(u32::MAX as usize) as u32)
-        .ok()
-        .flatten()
+    analysis.ir(file_id).ok().flatten().expect("ir")
 }
 
 #[tokio::test]
@@ -168,18 +158,21 @@ async fn m5_signature_help_snapshot() {
     let constructor_v2 = handle_signature_help_v2(
         Arc::from(content.clone()),
         constructor_pos,
-        None,
+        compute_ir_program(&content, deps.clone()),
         deps.clone(),
     )
     .await
     .expect("constructor signature help (v2)");
 
-    let method_pos = find_position(&content, "Массив.Добавить(1, ");
-    let receiver_type_hint = compute_receiver_type_hint(&content, method_pos, deps.clone());
-    let method_v2 =
-        handle_signature_help_v2(Arc::from(content), method_pos, receiver_type_hint, deps)
-            .await
-            .expect("method signature help (v2)");
+    let method_pos = find_position(&content, "МойМассив.Добавить(1, ");
+    let method_v2 = handle_signature_help_v2(
+        Arc::from(content.clone()),
+        method_pos,
+        compute_ir_program(&content, deps.clone()),
+        deps,
+    )
+    .await
+    .expect("method signature help (v2)");
 
     let snapshot = serde_json::json!({
         "constructor": {

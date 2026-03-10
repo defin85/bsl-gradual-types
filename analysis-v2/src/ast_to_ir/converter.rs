@@ -472,6 +472,7 @@ impl AstToIrConverter {
                     SemanticNodeKind::IfStatement {
                         then_branch,
                         else_branch,
+                        ..
                     } => {
                         let raw = slice_span(self.source, node.span).unwrap_or("");
                         let condition = extract_condition_from_header(first_line(raw), &node.kind);
@@ -551,7 +552,7 @@ impl AstToIrConverter {
                         (cond_id, vec![merge_id])
                     }
 
-                    SemanticNodeKind::WhileLoop { body }
+                    SemanticNodeKind::WhileLoop { body, .. }
                     | SemanticNodeKind::ForLoop { body, .. }
                     | SemanticNodeKind::ForEachLoop { body, .. } => {
                         let raw = slice_span(self.source, node.span).unwrap_or("");

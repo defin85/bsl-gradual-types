@@ -138,18 +138,36 @@ pub enum SemanticNodeKind {
     // === Control Flow (КРИТИЧНО для Milestone 2.3 flow-sensitive) ===
     /// Условный оператор: `Если условие Тогда ... Иначе ... КонецЕсли`
     IfStatement {
+        /// Индекс узла условия.
+        condition_node: Option<usize>,
         then_branch: Vec<usize>, // Индексы SemanticNode в then ветке
         else_branch: Option<Vec<usize>>,
     },
 
     /// Цикл While: `Пока условие Цикл ... КонецЦикла`
-    WhileLoop { body: Vec<usize> },
+    WhileLoop {
+        /// Индекс узла условия.
+        condition_node: Option<usize>,
+        body: Vec<usize>,
+    },
 
     /// Цикл For: `Для i = 1 По 10 Цикл ... КонецЦикла`
-    ForLoop { variable: String, body: Vec<usize> },
+    ForLoop {
+        variable: String,
+        /// Индекс узла начального выражения диапазона.
+        start_node: Option<usize>,
+        /// Индекс узла конечного выражения диапазона.
+        end_node: Option<usize>,
+        body: Vec<usize>,
+    },
 
     /// Цикл ForEach: `Для Каждого элемент Из коллекция Цикл ... КонецЦикла`
-    ForEachLoop { variable: String, body: Vec<usize> },
+    ForEachLoop {
+        variable: String,
+        /// Индекс узла коллекции.
+        collection_node: Option<usize>,
+        body: Vec<usize>,
+    },
 
     /// Возврат из функции: `Возврат значение;`
     Return { value_node: Option<usize> },

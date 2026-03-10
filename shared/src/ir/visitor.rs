@@ -187,9 +187,16 @@ fn walk_node<V: SemanticVisitor>(
         }
 
         SemanticNodeKind::IfStatement {
+            condition_node,
             then_branch,
             else_branch,
         } => {
+            if let Some(condition_idx) = condition_node {
+                if let Some(child_node) = program.nodes.get(*condition_idx) {
+                    walk_node(child_node, visitor, context, program);
+                }
+            }
+
             // Обходим then ветку
             for &node_idx in then_branch {
                 if let Some(child_node) = program.nodes.get(node_idx) {
@@ -207,9 +214,51 @@ fn walk_node<V: SemanticVisitor>(
             }
         }
 
-        SemanticNodeKind::WhileLoop { body, .. }
-        | SemanticNodeKind::ForLoop { body, .. }
-        | SemanticNodeKind::ForEachLoop { body, .. } => {
+        SemanticNodeKind::WhileLoop {
+            condition_node,
+            body,
+            ..
+        } => {
+            if let Some(condition_idx) = condition_node {
+                if let Some(child_node) = program.nodes.get(*condition_idx) {
+                    walk_node(child_node, visitor, context, program);
+                }
+            }
+            for &node_idx in body {
+                if let Some(child_node) = program.nodes.get(node_idx) {
+                    walk_node(child_node, visitor, context, program);
+                }
+            }
+        }
+
+        SemanticNodeKind::ForLoop {
+            start_node,
+            end_node,
+            body,
+            ..
+        } => {
+            for child_idx in start_node.iter().chain(end_node.iter()) {
+                if let Some(child_node) = program.nodes.get(*child_idx) {
+                    walk_node(child_node, visitor, context, program);
+                }
+            }
+            for &node_idx in body {
+                if let Some(child_node) = program.nodes.get(node_idx) {
+                    walk_node(child_node, visitor, context, program);
+                }
+            }
+        }
+
+        SemanticNodeKind::ForEachLoop {
+            collection_node,
+            body,
+            ..
+        } => {
+            if let Some(collection_idx) = collection_node {
+                if let Some(child_node) = program.nodes.get(*collection_idx) {
+                    walk_node(child_node, visitor, context, program);
+                }
+            }
             // Обходим тело цикла
             for &node_idx in body {
                 if let Some(child_node) = program.nodes.get(node_idx) {

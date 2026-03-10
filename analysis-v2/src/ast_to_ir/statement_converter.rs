@@ -244,7 +244,7 @@ impl AstToIrConverter {
         else_body: Option<Vec<Statement>>,
         ast_span: Span,
     ) -> Result<Option<usize>> {
-        self.convert_expression_for_hover(&condition)?;
+        let condition_node = self.convert_expression_for_hover(&condition)?;
 
         let span = self.ast_span_to_ir_span(ast_span);
 
@@ -284,6 +284,7 @@ impl AstToIrConverter {
 
         let node = SemanticNode {
             kind: SemanticNodeKind::IfStatement {
+                condition_node,
                 then_branch: then_indices,
                 else_branch: else_indices,
             },
@@ -302,7 +303,7 @@ impl AstToIrConverter {
         body: Vec<Statement>,
         ast_span: Span,
     ) -> Result<Option<usize>> {
-        self.convert_expression_for_hover(&condition)?;
+        let condition_node = self.convert_expression_for_hover(&condition)?;
 
         let span = self.ast_span_to_ir_span(ast_span);
 
@@ -321,7 +322,10 @@ impl AstToIrConverter {
         self.current_scope = old_scope;
 
         let node = SemanticNode {
-            kind: SemanticNodeKind::WhileLoop { body: body_indices },
+            kind: SemanticNodeKind::WhileLoop {
+                condition_node,
+                body: body_indices,
+            },
             span,
             scope_id: self.current_scope,
         };
@@ -339,8 +343,8 @@ impl AstToIrConverter {
         body: Vec<Statement>,
         ast_span: Span,
     ) -> Result<Option<usize>> {
-        self.convert_expression_for_hover(&start)?;
-        self.convert_expression_for_hover(&end)?;
+        let start_node = self.convert_expression_for_hover(&start)?;
+        let end_node = self.convert_expression_for_hover(&end)?;
 
         let span = self.ast_span_to_ir_span(ast_span);
 
@@ -365,6 +369,8 @@ impl AstToIrConverter {
         let node = SemanticNode {
             kind: SemanticNodeKind::ForLoop {
                 variable,
+                start_node,
+                end_node,
                 body: body_indices,
             },
             span,
@@ -383,7 +389,7 @@ impl AstToIrConverter {
         body: Vec<Statement>,
         ast_span: Span,
     ) -> Result<Option<usize>> {
-        self.convert_expression_for_hover(&collection)?;
+        let collection_node = self.convert_expression_for_hover(&collection)?;
 
         let span = self.ast_span_to_ir_span(ast_span);
 
@@ -408,6 +414,7 @@ impl AstToIrConverter {
         let node = SemanticNode {
             kind: SemanticNodeKind::ForEachLoop {
                 variable,
+                collection_node,
                 body: body_indices,
             },
             span,

@@ -221,9 +221,31 @@ impl SemanticProgram {
                 attributes.insert("value".to_string(), value.clone());
                 ("DateLiteral".to_string(), Some(value.clone()), attributes)
             }
-            SemanticNodeKind::IfStatement { .. } => ("IfStatement".to_string(), None, attributes),
-            SemanticNodeKind::ForLoop { .. } => ("ForLoop".to_string(), None, attributes),
-            SemanticNodeKind::WhileLoop { .. } => ("WhileLoop".to_string(), None, attributes),
+            SemanticNodeKind::IfStatement { condition_node, .. } => {
+                if let Some(node_idx) = condition_node {
+                    attributes.insert("condition_node".to_string(), node_idx.to_string());
+                }
+                ("IfStatement".to_string(), None, attributes)
+            }
+            SemanticNodeKind::ForLoop {
+                start_node,
+                end_node,
+                ..
+            } => {
+                if let Some(node_idx) = start_node {
+                    attributes.insert("start_node".to_string(), node_idx.to_string());
+                }
+                if let Some(node_idx) = end_node {
+                    attributes.insert("end_node".to_string(), node_idx.to_string());
+                }
+                ("ForLoop".to_string(), None, attributes)
+            }
+            SemanticNodeKind::WhileLoop { condition_node, .. } => {
+                if let Some(node_idx) = condition_node {
+                    attributes.insert("condition_node".to_string(), node_idx.to_string());
+                }
+                ("WhileLoop".to_string(), None, attributes)
+            }
             SemanticNodeKind::FunctionCall {
                 function_name,
                 object_name,
@@ -247,8 +269,15 @@ impl SemanticProgram {
             SemanticNodeKind::TryExcept { .. } => ("TryExcept".to_string(), None, attributes),
             SemanticNodeKind::Break => ("Break".to_string(), None, attributes),
             SemanticNodeKind::Continue => ("Continue".to_string(), None, attributes),
-            SemanticNodeKind::ForEachLoop { variable, .. } => {
+            SemanticNodeKind::ForEachLoop {
+                variable,
+                collection_node,
+                ..
+            } => {
                 attributes.insert("variable".to_string(), variable.clone());
+                if let Some(node_idx) = collection_node {
+                    attributes.insert("collection_node".to_string(), node_idx.to_string());
+                }
                 ("ForEachLoop".to_string(), None, attributes)
             }
             SemanticNodeKind::MemberAccess {
@@ -364,19 +393,47 @@ impl SemanticProgram {
 
             // Существующие узлы с индексами
             IfStatement {
+                condition_node,
                 then_branch,
                 else_branch,
                 ..
             } => {
-                let mut indices = then_branch.clone();
+                let mut indices: Vec<usize> = condition_node.iter().copied().collect();
+                indices.extend(then_branch.clone());
                 if let Some(else_idx) = else_branch {
                     indices.extend(else_idx);
                 }
                 indices
             }
-            WhileLoop { body, .. } => body.clone(),
-            ForLoop { body, .. } => body.clone(),
-            ForEachLoop { body, .. } => body.clone(),
+            WhileLoop {
+                condition_node,
+                body,
+                ..
+            } => condition_node
+                .iter()
+                .copied()
+                .chain(body.iter().copied())
+                .collect(),
+            ForLoop {
+                start_node,
+                end_node,
+                body,
+                ..
+            } => start_node
+                .iter()
+                .copied()
+                .chain(end_node.iter().copied())
+                .chain(body.iter().copied())
+                .collect(),
+            ForEachLoop {
+                collection_node,
+                body,
+                ..
+            } => collection_node
+                .iter()
+                .copied()
+                .chain(body.iter().copied())
+                .collect(),
             TryExcept {
                 try_body,
                 except_body,

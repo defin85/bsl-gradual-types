@@ -76,6 +76,7 @@ pub(super) fn completion_scope_for_enclosing_node(
         SemanticNodeKind::IfStatement {
             then_branch,
             else_branch,
+            ..
         } => {
             let then_scope = scope_from_body_nodes(ir_program, then_branch);
             let then_bounds = body_bounds(ir_program, then_branch);
@@ -161,8 +162,12 @@ pub(super) fn completion_scope_for_enclosing_node(
 
             node.scope_id
         }
-        SemanticNodeKind::ForLoop { variable, body }
-        | SemanticNodeKind::ForEachLoop { variable, body } => resolve_loop_body_scope(
+        SemanticNodeKind::ForLoop {
+            variable, body, ..
+        }
+        | SemanticNodeKind::ForEachLoop {
+            variable, body, ..
+        } => resolve_loop_body_scope(
             ir_program,
             node.scope_id,
             body,
@@ -170,7 +175,7 @@ pub(super) fn completion_scope_for_enclosing_node(
             node.span.start,
         )
         .unwrap_or(node.scope_id),
-        SemanticNodeKind::WhileLoop { body } => {
+        SemanticNodeKind::WhileLoop { body, .. } => {
             resolve_loop_body_scope(ir_program, node.scope_id, body, None, node.span.start)
                 .unwrap_or(node.scope_id)
         }
@@ -324,8 +329,12 @@ pub(super) fn collect_local_candidates_from_ir(
                             push_candidate(&param.name, *body_scope, node.span.start);
                         }
                     }
-                    SemanticNodeKind::ForLoop { variable, body }
-                    | SemanticNodeKind::ForEachLoop { variable, body } => {
+                    SemanticNodeKind::ForLoop {
+                        variable, body, ..
+                    }
+                    | SemanticNodeKind::ForEachLoop {
+                        variable, body, ..
+                    } => {
                         if let Some(loop_scope) = resolve_loop_body_scope(
                             ir_program,
                             node.scope_id,
@@ -422,6 +431,7 @@ pub(super) fn collect_local_candidates_from_node<F>(
         SemanticNodeKind::IfStatement {
             then_branch,
             else_branch,
+            ..
         } => {
             collect_local_candidates_from_body(
                 ir_program,
@@ -455,11 +465,15 @@ pub(super) fn collect_local_candidates_from_node<F>(
                 push_candidate,
             );
         }
-        SemanticNodeKind::WhileLoop { body } => {
+        SemanticNodeKind::WhileLoop { body, .. } => {
             collect_local_candidates_from_body(ir_program, scope_position, body, push_candidate);
         }
-        SemanticNodeKind::ForLoop { variable, body }
-        | SemanticNodeKind::ForEachLoop { variable, body } => {
+        SemanticNodeKind::ForLoop {
+            variable, body, ..
+        }
+        | SemanticNodeKind::ForEachLoop {
+            variable, body, ..
+        } => {
             if let Some(loop_scope) = resolve_loop_body_scope(
                 ir_program,
                 node.scope_id,

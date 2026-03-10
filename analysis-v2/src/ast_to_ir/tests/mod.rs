@@ -336,8 +336,141 @@ fn test_if_statement_with_scope() {
     // Должно быть 3 узла: BooleanLiteral + IfStatement + VariableDeclaration
     assert_eq!(ir.nodes.len(), 3);
 
+    if let SemanticNodeKind::IfStatement {
+        condition_node,
+        then_branch,
+        else_branch,
+    } = &ir.nodes[2].kind
+    {
+        assert_eq!(*condition_node, Some(0));
+        assert_eq!(then_branch, &vec![1]);
+        assert!(else_branch.is_none());
+    } else {
+        panic!("Expected IfStatement at nodes[2]");
+    }
+
     // Должно быть 2 scope: root + then branch
     assert_eq!(ir.symbols.scopes.len(), 2);
+}
+
+#[test]
+fn test_while_loop_keeps_condition_node() {
+    let ast = Program {
+        statements: vec![Statement::While {
+            condition: Expression::Boolean {
+                value: true,
+                span: AstSpan::stub(),
+            },
+            body: vec![],
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "Пока Истина Цикл\nКонецЦикла".to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    assert_eq!(ir.nodes.len(), 2);
+
+    if let SemanticNodeKind::WhileLoop {
+        condition_node,
+        body,
+    } = &ir.nodes[1].kind
+    {
+        assert_eq!(*condition_node, Some(0));
+        assert!(body.is_empty());
+    } else {
+        panic!("Expected WhileLoop at nodes[1]");
+    }
+}
+
+#[test]
+fn test_for_loop_keeps_range_nodes() {
+    let ast = Program {
+        statements: vec![Statement::For {
+            variable: "Счетчик".to_string(),
+            start: Expression::Number {
+                value: 1.0,
+                span: AstSpan::stub(),
+            },
+            end: Expression::Number {
+                value: 10.0,
+                span: AstSpan::stub(),
+            },
+            body: vec![],
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "Для Счетчик = 1 По 10 Цикл\nКонецЦикла".to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    assert_eq!(ir.nodes.len(), 3);
+
+    if let SemanticNodeKind::ForLoop {
+        variable,
+        start_node,
+        end_node,
+        body,
+    } = &ir.nodes[2].kind
+    {
+        assert_eq!(variable, "Счетчик");
+        assert_eq!(*start_node, Some(0));
+        assert_eq!(*end_node, Some(1));
+        assert!(body.is_empty());
+    } else {
+        panic!("Expected ForLoop at nodes[2]");
+    }
+}
+
+#[test]
+fn test_foreach_loop_keeps_collection_node() {
+    let ast = Program {
+        statements: vec![Statement::ForEach {
+            variable: "Элемент".to_string(),
+            collection: Expression::Identifier {
+                name: "Коллекция".to_string(),
+                span: AstSpan::stub(),
+            },
+            body: vec![],
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "Для Каждого Элемент Из Коллекция Цикл\nКонецЦикла".to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    assert_eq!(ir.nodes.len(), 2);
+
+    if let SemanticNodeKind::ForEachLoop {
+        variable,
+        collection_node,
+        body,
+    } = &ir.nodes[1].kind
+    {
+        assert_eq!(variable, "Элемент");
+        assert_eq!(*collection_node, Some(0));
+        assert!(body.is_empty());
+    } else {
+        panic!("Expected ForEachLoop at nodes[1]");
+    }
 }
 
 #[test]

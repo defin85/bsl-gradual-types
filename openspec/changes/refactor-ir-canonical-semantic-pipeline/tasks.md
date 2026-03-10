@@ -11,7 +11,7 @@
 ## 2. Design
 - [x] 2.1 Описать минимальные расширения canonical IR, достаточные для owner/member/type/definition queries без parallel semantic inference path.
 - [x] 2.2 Описать состав `derived semantic index` и contract его построения из одного IR snapshot/revision.
-- [ ] 2.3 Описать big-bang cutover для `LSP`, `Web`, `MCP`, `CLI` без long-lived dual runtime behavior в merge state.
+- [x] 2.3 Описать big-bang cutover для `LSP`, `Web`, `MCP`, `CLI` без long-lived dual runtime behavior в merge state.
 - [ ] 2.4 Описать contract/version impact для `contracts/**`, observability reason taxonomy, adapter boundaries, acceptance и perf expectations после удаления degraded paths и stale-as-current substitute behavior.
 - [ ] 2.5 Описать координацию или supersede-plan для связанных pending MCP/index changes.
 - [ ] 2.6 Зафиксировать representative latency fixtures и bounded observability taxonomy как обязательные quality gates cutover, а не как post-factum tuning.

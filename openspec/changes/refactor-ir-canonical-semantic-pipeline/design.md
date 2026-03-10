@@ -361,6 +361,105 @@ Observability контракт дополнительно требует:
 - отсутствие production runtime dual-path;
 - отсутствие operator-visible rollback semantics, сохраняющих старый parse-result-based semantic core.
 
+### 7a. Adapter cutover contract для `LSP`, `Web`, `MCP`, `CLI`
+
+Big-bang cutover относится к production semantic surfaces, а не ко всем вообще syntax/discovery
+операциям runtime.
+
+В scope этого cutover входят:
+- `LSP`: `completion`, `hover`, `signatureHelp`, `definition`, semantic `diagnostics`, `type-at-position`;
+- `Web`: semantic `hover`, enhanced hover, semantic `diagnostics` и эквивалентные semantic endpoints;
+- `MCP`: `bsl_diagnostics`, `bsl_type_at_position`, `bsl_members`, `bsl_definition`;
+- `CLI`: terminal/batch entry points, которые публикуют production semantic truth или semantic diagnostics через application/runtime layer.
+
+Вне scope этого cutover остаются syntax/discovery surfaces, которые не являются canonical
+semantic consumers этого change, например:
+- `document_symbol`;
+- `rename`;
+- `references`;
+- `symbol_search`;
+- другие parse-result/discovery-first operations, если они не используются как fallback для semantic surfaces.
+
+Нормативное следствие:
+- такие операции MAY жить отдельным migration track;
+- они MUST NOT становиться rescue-path для semantic surfaces после cutover.
+
+### 7b. Shared runtime ownership после cutover
+
+После merge-state ownership разделяется так:
+- shared semantic runtime:
+  - владеет revision/deps/settings gating;
+  - строит canonical IR;
+  - строит/publish-ит derived semantic index;
+  - исполняет semantic queries;
+  - публикует shared observability/outcome contract.
+- adapters:
+  - выполняют transport mapping;
+  - выполняют syntax/position preparation;
+  - выбирают stateful vs ephemeral orchestration;
+  - не materialize-ят semantic truth локально.
+
+Adapter-specific end-state:
+- `LSP`:
+  - остаётся stateful adapter над `prepare_stateful_operation(...)`;
+  - отвечает за `wait_for_file_version`, cancellation policy и LSP transport mapping;
+  - не собирает request-time semantic query bundle из raw `AnalysisV2` calls вне shared runtime query contract.
+- `Web`:
+  - остаётся ephemeral adapter над `prepare_ephemeral_operation(...)`;
+  - отвечает за HTTP payload parsing и response formatting;
+  - не держит отдельный semantic runtime и не подмешивает discovery snapshot в semantic payload.
+- `MCP`:
+  - остаётся ephemeral/session-bound adapter над тем же shared facade/runtime;
+  - отвечает за session/document overlay resolution, job orchestration и MCP DTO mapping;
+  - не строит MCP-only semantic helper path.
+- `CLI`:
+  - остаётся terminal/batch adapter над тем же application/runtime layer;
+  - может использовать offline/ephemeral snapshot preparation;
+  - не имеет права заводить отдельный semantic engine для terminal-only поведения.
+
+### 7c. Merge-state invariants для big-bang cutover
+
+Merge-state MUST удовлетворять одновременно:
+- у всех production semantic adapters один semantic source of truth: canonical IR + derived semantic index;
+- semantic behavior одного и того же snapshot/revision эквивалентен между `LSP`, `Web`, `MCP` и terminal/batch CLI surfaces в пределах их API contract;
+- adapter-specific orchestration не меняет semantic truth, а только способ доставки/ожидания snapshot;
+- exact current-revision artifact является единственным publishable semantic artifact для interactive semantic queries.
+
+Merge-state MUST NOT содержать:
+- runtime feature flag или config knob, который переключает production semantic adapter между old и new semantic engine;
+- adapter-local rollback path на parse-result/type-index legacy semantics;
+- operator-visible режим "temporary degraded semantics";
+- долгоживущий dual-read/dual-write между старым и новым semantic core;
+- acceptance, где один adapter ещё работает на legacy path, а другой уже на canonical path.
+
+Branch-only допустимо до merge:
+- временно держать dual-path scaffolding;
+- собирать дополнительную observability для сравнения;
+- держать helper adapters/bridges, нужные только для миграции тестов и кода.
+
+Но до merge эти branch-only элементы MUST быть либо удалены, либо превращены в чисто internal,
+non-production implementation detail без alternate semantic behavior.
+
+### 7d. Cutover sequencing и deletion boundary
+
+Допустимая последовательность внутри feature branch:
+1. Дособрать shared runtime/query contract над canonical IR + derived semantic index.
+2. Перевести `LSP`, `Web`, `MCP`, `CLI` semantic entry points на этот contract.
+3. Прогнать cross-interface acceptance/parity.
+4. В той же merge-state удалить legacy semantic branches.
+
+Deletion boundary merge-state включает как минимум:
+- adapter-local `serve_only -> full` semantic rescue behavior;
+- adapter-local request-time reconstruction `receiver_type_hint` / `type_at_position_hint`, если она используется как substitute для отсутствующего shared query fact;
+- semantic fallback на discovery/search snapshot;
+- stale-as-current semantic substitute behavior;
+- old observability labels/paths, которые предполагают допустимость degraded semantic answer.
+
+При этом допустимо сохранить:
+- syntax extraction helpers;
+- parse-result-backed операции вне semantic scope этого change;
+- internal cache/build scaffolding, если оно не публикует alternate semantic behavior и не размывает merge-state contract.
+
 ## Alternatives Considered
 
 ### 1. Оставить `type_index` как независимый semantic pipeline и лишь усилить тесты

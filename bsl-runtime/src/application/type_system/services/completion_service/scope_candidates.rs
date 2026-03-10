@@ -562,6 +562,31 @@ pub(super) fn add_local_symbols_from_ir(
     }
 }
 
+pub(super) fn completion_scope_contains_local_symbol(
+    analysis: Option<&CompletionAnalysisContext<'_>>,
+    file_content: &str,
+    line: u32,
+    column: u32,
+    name: &str,
+) -> bool {
+    let Some(ctx) = analysis else {
+        return false;
+    };
+    let Some(ir_program) = ctx.ir_program.as_deref() else {
+        return false;
+    };
+    let Some(scope_position) =
+        resolve_completion_scope_position(ir_program, file_content, line, column)
+    else {
+        return false;
+    };
+
+    let target = name.to_lowercase();
+    collect_local_candidates_from_ir(ir_program, &scope_position)
+        .into_iter()
+        .any(|local| local.name.to_lowercase() == target)
+}
+
 pub(super) fn add_symbols(
     snapshot: &IndexSnapshot,
     file_uri: Option<&str>,

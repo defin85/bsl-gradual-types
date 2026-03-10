@@ -497,20 +497,35 @@ pub(crate) async fn get_completion_with_analysis(
                 add_properties_from_resolution(metadata_lookup, &resolution, &mut candidates, 1);
             }
         }
-    } else {
-        let can_collect_locals_from_ir = analysis.and_then(|ctx| ctx.ir_program.as_ref()).is_some();
 
-        if can_collect_locals_from_ir {
-            add_local_symbols_from_ir(analysis, file_content, line, column, &mut candidates, 0);
-            add_symbols(&snapshot, file_uri, &mut candidates, 0, false);
-        } else {
-            // In fallback mode keep local candidates from the file-bound index.
-            add_symbols(&snapshot, file_uri, &mut candidates, 0, true);
+        if should_degrade_unknown_bare_member_access_to_generic(
+            &context,
+            analysis,
+            file_content,
+            line,
+            column,
+            &candidates,
+        ) {
+            collect_non_member_candidates(
+                analysis,
+                file_content,
+                line,
+                column,
+                file_uri,
+                &snapshot,
+                &mut candidates,
+            );
         }
-        add_module_symbols(&snapshot, &mut candidates, 1);
-        add_metadata_items(&snapshot, None, &mut candidates, 2);
-        add_types(&snapshot, &mut candidates, 3);
-        add_keywords(&snapshot, &mut candidates, 4);
+    } else {
+        collect_non_member_candidates(
+            analysis,
+            file_content,
+            line,
+            column,
+            file_uri,
+            &snapshot,
+            &mut candidates,
+        );
     }
     let collect_elapsed = collect_started.elapsed();
     if let Some(request_id) = trace_request_id {
@@ -618,6 +633,57 @@ pub(crate) async fn get_completion_with_analysis(
             stage_format: format_elapsed,
         },
     })
+}
+
+fn collect_non_member_candidates(
+    analysis: Option<&CompletionAnalysisContext<'_>>,
+    file_content: &str,
+    line: u32,
+    column: u32,
+    file_uri: Option<&str>,
+    snapshot: &IndexSnapshot,
+    candidates: &mut Vec<Candidate>,
+) {
+    let can_collect_locals_from_ir = analysis.and_then(|ctx| ctx.ir_program.as_ref()).is_some();
+
+    if can_collect_locals_from_ir {
+        add_local_symbols_from_ir(analysis, file_content, line, column, candidates, 0);
+        add_symbols(snapshot, file_uri, candidates, 0, false);
+    } else {
+        // In fallback mode keep local candidates from the file-bound index.
+        add_symbols(snapshot, file_uri, candidates, 0, true);
+    }
+    add_module_symbols(snapshot, candidates, 1);
+    add_metadata_items(snapshot, None, candidates, 2);
+    add_types(snapshot, candidates, 3);
+    add_keywords(snapshot, candidates, 4);
+}
+
+fn should_degrade_unknown_bare_member_access_to_generic(
+    context: &CompletionContext,
+    analysis: Option<&CompletionAnalysisContext<'_>>,
+    file_content: &str,
+    line: u32,
+    column: u32,
+    candidates: &[Candidate],
+) -> bool {
+    if !context.member_access || !candidates.is_empty() {
+        return false;
+    }
+
+    let Some(receiver_chain) = extract_member_receiver_chain(file_content, line, column) else {
+        return false;
+    };
+    if receiver_chain.len() != 1 {
+        return false;
+    }
+
+    let base_name = receiver_chain[0].as_str();
+    if is_implicit_context_symbol(base_name) {
+        return false;
+    }
+
+    !completion_scope_contains_local_symbol(analysis, file_content, line, column, base_name)
 }
 
 #[path = "completion_service/context.rs"]

@@ -1306,6 +1306,111 @@ async fn completion_does_not_infer_member_owner_without_owner_hint() {
 }
 
 #[tokio::test]
+async fn completion_falls_back_to_generic_items_for_unknown_bare_receiver_member_access() {
+    let repository = Arc::new(InMemoryTypeRepository::new());
+    repository
+        .load_types(vec![RawTypeData {
+            name: "ТаблицаЗначений".to_string(),
+            source: RawDataSource::Platform,
+            methods: vec![RawMethodData {
+                name: "Добавить".to_string(),
+                return_type: "Булево".to_string(),
+                ..Default::default()
+            }],
+            properties: vec![RawPropertyData {
+                name: "Количество".to_string(),
+                prop_type: "Число".to_string(),
+                is_readonly: true,
+            }],
+            ..Default::default()
+        }])
+        .expect("load types");
+
+    let repo: Arc<dyn bsl_shared::domain::repository::TypeRepository> = repository.clone();
+    let resolver = Arc::new(TypeResolver::new(repo.clone()));
+    let metadata_lookup = TypeMetadataLookup::new(repo.clone());
+
+    let index = IntellisenseIndexStore::new("cfg", "platform");
+    index.set_keywords(vec![IndexItem::new(
+        "Процедура",
+        IndexItemKind::Keyword,
+        crate::system::IndexKind::Keyword,
+    )]);
+    let content = concat!(
+        "Процедура Тест()\n",
+        "    ТаблЗнач = Новый ТаблицаЗначений;\n",
+        "    ТаблЗначКолонки.\n",
+        "КонецПроцедуры\n"
+    );
+    let line = 2;
+    let line_text = "    ТаблЗначКолонки.";
+    let column = line_text.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+
+    let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+        signature_index: repo.get_signature_index_clone(),
+        resolver: Some(resolver.clone()),
+        repository: repo.clone(),
+        platform_signatures_loaded: false,
+    });
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(ChangeV2::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("test"),
+        deps,
+    });
+    host.apply_change(ChangeV2::SetSettingsSnapshot {
+        settings_id: SettingsId::from_hash("test"),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+    host.apply_change(ChangeV2::SetFile {
+        file_id: V2FileId(1),
+        text: Arc::from(content.to_string()),
+        version: 0,
+        path: Arc::from("completion_unknown_receiver_member_access_test.bsl"),
+    });
+    let analysis = host.analysis();
+    let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
+
+    let ctx = CompletionAnalysisContext {
+        ir_program: Some(ir_program),
+        resolver: resolver.as_ref(),
+        file_path: "completion_unknown_receiver_member_access_test.bsl",
+        parse_result: None,
+        member_access_owner_type_hint: None,
+        include_flow_sensitive: false,
+    };
+
+    let result = get_completion_with_analysis(
+        content,
+        line,
+        column,
+        Some("completion_unknown_receiver_member_access_test.bsl"),
+        &index,
+        &metadata_lookup,
+        Some(&ctx),
+        None,
+    )
+    .await
+    .expect("completion ok");
+
+    let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
+    assert!(
+        !labels.is_empty(),
+        "unknown bare receiver should degrade to generic completion instead of terminal empty, labels: {:?}",
+        labels
+    );
+    assert!(
+        !labels.contains(&"Добавить".to_string()),
+        "generic fallback must not reconstruct semantic member candidates, labels: {:?}",
+        labels
+    );
+    assert!(
+        !labels.contains(&"Количество".to_string()),
+        "generic fallback must not reconstruct semantic member candidates, labels: {:?}",
+        labels
+    );
+}
+
+#[tokio::test]
 async fn completion_implicit_form_object_member_access_fails_closed_without_shared_hint() {
     let repository = Arc::new(InMemoryTypeRepository::new());
     repository

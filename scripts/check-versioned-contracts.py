@@ -32,11 +32,39 @@ REQUIRED_V1_COMPLETION_OUTCOMES = {
     "fallback_unavailable",
 }
 
+REQUIRED_V2_COMPLETION_TRANSPORT_OUTCOMES = {
+    "ok_non_empty",
+    "ok_empty",
+}
+
+REQUIRED_V2_COMPLETION_SEMANTIC_CONTRACT_CLASSES = {
+    "exact_current_revision",
+    "fail_closed_current_revision",
+}
+
 REQUIRED_V1_TERMINAL_EMPTY_REASONS = {
     "ok_empty",
     "fallback_unavailable",
     "missing_ir",
     "wait_not_ready",
+}
+
+REQUIRED_V2_ANTI_RESCUE_GUARD_COUNTERS = {
+    "intellisense_v2_interactive_stale_served_total",
+    "intellisense_v2_completion_stale_fallback_total",
+}
+
+REQUIRED_V2_OBSERVABILITY_COMPLETION_OUTCOMES = {
+    "ok_non_empty",
+    "ok_empty",
+    "cancelled",
+    "handler_error",
+    "missing_deps",
+    "missing_file_content",
+    "missing_file_path",
+    "missing_ir",
+    "wait_not_ready",
+    "fallback_unavailable",
 }
 
 REQUIRED_V1_PERF_GATE_PROFILES = {
@@ -224,6 +252,25 @@ def validate_surface_contract(surface_dir: Path) -> None:
                 f"{contract_path}: outcomes must include {sorted(REQUIRED_V1_COMPLETION_OUTCOMES)}",
             )
 
+        if surface_dir.name == "lsp-completion-v2" and major == 2:
+            completion = contract.get("completion")
+            ensure(isinstance(completion, dict), f"{contract_path}: completion must be object")
+            trigger_modes = set(completion.get("trigger_modes", []))
+            transport_outcomes = set(completion.get("transport_outcomes", []))
+            semantic_contract_classes = set(completion.get("semantic_contract_classes", []))
+            ensure(
+                REQUIRED_V1_COMPLETION_TRIGGER_MODES.issubset(trigger_modes),
+                f"{contract_path}: trigger_modes must include {sorted(REQUIRED_V1_COMPLETION_TRIGGER_MODES)}",
+            )
+            ensure(
+                transport_outcomes == REQUIRED_V2_COMPLETION_TRANSPORT_OUTCOMES,
+                f"{contract_path}: transport_outcomes must equal {sorted(REQUIRED_V2_COMPLETION_TRANSPORT_OUTCOMES)}",
+            )
+            ensure(
+                semantic_contract_classes == REQUIRED_V2_COMPLETION_SEMANTIC_CONTRACT_CLASSES,
+                f"{contract_path}: semantic_contract_classes must equal {sorted(REQUIRED_V2_COMPLETION_SEMANTIC_CONTRACT_CLASSES)}",
+            )
+
         if surface_dir.name == "observability-completion-v2" and major == 1:
             metrics = contract.get("metrics")
             ensure(isinstance(metrics, dict), f"{contract_path}: metrics must be object")
@@ -241,6 +288,37 @@ def validate_surface_contract(surface_dir: Path) -> None:
                 metrics.get("fallback_unavailable_counter")
                 == "intellisense_v2_completion_result_total_fallback_unavailable",
                 f"{contract_path}: fallback_unavailable_counter mismatch",
+            )
+
+        if surface_dir.name == "observability-completion-v2" and major == 2:
+            metrics = contract.get("metrics")
+            ensure(isinstance(metrics, dict), f"{contract_path}: metrics must be object")
+            trigger_modes = set(metrics.get("allowed_trigger_modes", []))
+            terminal_reasons = set(metrics.get("allowed_terminal_empty_reasons", []))
+            anti_rescue_guard_counters = set(
+                metrics.get("anti_rescue_guard_zero_expected_counters", [])
+            )
+            completion_outcomes = set(metrics.get("allowed_completion_outcomes", []))
+            ensure(
+                REQUIRED_V1_COMPLETION_TRIGGER_MODES.issubset(trigger_modes),
+                f"{contract_path}: allowed_trigger_modes must include {sorted(REQUIRED_V1_COMPLETION_TRIGGER_MODES)}",
+            )
+            ensure(
+                REQUIRED_V1_TERMINAL_EMPTY_REASONS.issubset(terminal_reasons),
+                f"{contract_path}: allowed_terminal_empty_reasons must include {sorted(REQUIRED_V1_TERMINAL_EMPTY_REASONS)}",
+            )
+            ensure(
+                anti_rescue_guard_counters == REQUIRED_V2_ANTI_RESCUE_GUARD_COUNTERS,
+                f"{contract_path}: anti_rescue_guard_zero_expected_counters must equal {sorted(REQUIRED_V2_ANTI_RESCUE_GUARD_COUNTERS)}",
+            )
+            ensure(
+                completion_outcomes == REQUIRED_V2_OBSERVABILITY_COMPLETION_OUTCOMES,
+                f"{contract_path}: allowed_completion_outcomes must equal {sorted(REQUIRED_V2_OBSERVABILITY_COMPLETION_OUTCOMES)}",
+            )
+            ensure(
+                metrics.get("completion_result_counter_prefix")
+                == "intellisense_v2_completion_result_total_",
+                f"{contract_path}: completion_result_counter_prefix mismatch",
             )
 
         if surface_dir.name == "intellisense-perf-gate" and major == 1:

@@ -278,15 +278,9 @@ pub fn semantic_diagnostics(
     }
 
     let program = ir(db, file, deps, settings).0;
-    let type_index = type_index(db, file, deps, settings).index();
     cancellation_checkpoint(db);
     let detail_level = settings.diagnostics_detail_level(db);
-    let diagnostics = collect_semantic_diagnostics_from_program(
-        program,
-        type_index,
-        deps_data,
-        detail_level,
-    );
+    let diagnostics = collect_semantic_diagnostics_from_program(program, deps_data, detail_level);
     SemanticDiagnosticsSnapshot(Arc::new(diagnostics))
 }
 
@@ -304,15 +298,17 @@ pub fn semantic_diagnostics_flow_sensitive(
     let base = semantic_diagnostics(db, file, deps, settings).0;
     cancellation_checkpoint(db);
 
-    // Если base пустой из-за синтаксических ошибок, всё равно не пытаемся добавлять flow-sensitive.
-    if base.is_empty() {
+    let parsed = parse_result(db, file, settings).0;
+    cancellation_checkpoint(db);
+    if !parsed.syntax_errors.is_empty()
+        && !syntax_errors_only_in_directives(file.text(db), &parsed.syntax_errors)
+    {
         return SemanticDiagnosticsSnapshot(base);
     }
 
-    let deps_data = deps.data(db).0.clone();
     let program = ir(db, file, deps, settings).0;
-    let type_index = type_index(db, file, deps, settings).index();
     cancellation_checkpoint(db);
+    let deps_data = deps.data(db).0.clone();
     let resolver = deps_data
         .resolver
         .clone()
@@ -320,11 +316,7 @@ pub fn semantic_diagnostics_flow_sensitive(
 
     let mut diagnostics = (*base).clone();
     cancellation_checkpoint(db);
-    diagnostics.extend(flow_sensitive_null_safety_diagnostics(
-        &program,
-        &type_index,
-        resolver.as_ref(),
-    ));
+    diagnostics.extend(flow_sensitive_null_safety_diagnostics(&program, resolver.as_ref()));
     diagnostics.sort_by(|a, b| {
         let severity_key = |severity: DiagnosticSeverity| match severity {
             DiagnosticSeverity::Error => 0_u8,
@@ -391,7 +383,6 @@ fn flow_type_at_byte_offset_impl(
 
 fn flow_sensitive_null_safety_diagnostics(
     program: &SemanticProgram,
-    type_index: &type_inference_v2::TypeIndex,
     resolver: &TypeResolver,
 ) -> Vec<TypeDiagnostic> {
     use bsl_shared::domain::types::{ConcreteType, PlatformType, ResolutionResult, SpecialType};
@@ -474,7 +465,7 @@ fn flow_sensitive_null_safety_diagnostics(
         else {
             continue;
         };
-        let Some(resolution) = type_index_resolution_for_span(type_index, *value_span) else {
+        let Some(resolution) = program.semantic_facts.type_resolution_for_span(*value_span) else {
             continue;
         };
         if is_nullish_resolution(&resolution) {
@@ -521,29 +512,7 @@ fn flow_sensitive_null_safety_diagnostics(
         .collect()
 }
 
-fn populate_assignment_value_hints(
-    program: &SemanticProgram,
-    type_index: &type_inference_v2::TypeIndex,
-    out: &mut SemanticTypeHints,
-) {
-    use bsl_shared::ir::SemanticNodeKind;
-
-    for node in &program.nodes {
-        let SemanticNodeKind::Assignment { value_span, .. } = &node.kind else {
-            continue;
-        };
-        if let Some(resolution) = type_index_resolution_for_span(type_index, *value_span) {
-            out.assignment_value_type_by_span
-                .insert(node.span, resolution);
-        }
-    }
-}
-
-fn populate_call_and_member_hints(
-    program: &SemanticProgram,
-    type_index: &type_inference_v2::TypeIndex,
-    out: &mut SemanticTypeHints,
-) {
+fn semantic_type_hints_from_program(program: &SemanticProgram) -> SemanticTypeHints {
     use bsl_shared::ir::SemanticNodeKind;
 
     fn receiver_span(
@@ -554,8 +523,18 @@ fn populate_call_and_member_hints(
         object_span.or_else(|| object_node.and_then(|idx| program.nodes.get(idx).map(|node| node.span)))
     }
 
+    let mut hints = SemanticTypeHints::default();
+
     for node in &program.nodes {
         match &node.kind {
+            SemanticNodeKind::Assignment { value_span, .. } => {
+                if let Some(resolution) = program.semantic_facts.type_resolution_for_span(*value_span)
+                {
+                    hints
+                        .assignment_value_type_by_span
+                        .insert(node.span, resolution);
+                }
+            }
             SemanticNodeKind::FunctionCall {
                 object_node,
                 object_span,
@@ -564,13 +543,15 @@ fn populate_call_and_member_hints(
             } => {
                 let arg_types: Vec<TypeResolution> = arg_spans
                     .iter()
-                    .filter_map(|span| type_index_resolution_for_span(type_index, *span))
+                    .filter_map(|span| program.semantic_facts.type_resolution_for_span(*span))
                     .collect();
-                out.call_arg_types_by_span.insert(node.span, arg_types);
+                hints.call_arg_types_by_span.insert(node.span, arg_types);
 
                 if let Some(span) = receiver_span(program, *object_node, *object_span) {
-                    if let Some(receiver_type) = type_index_resolution_for_span(type_index, span) {
-                        out.call_receiver_type_by_span
+                    if let Some(receiver_type) = program.semantic_facts.type_resolution_for_span(span)
+                    {
+                        hints
+                            .call_receiver_type_by_span
                             .insert(node.span, receiver_type);
                     }
                 }
@@ -581,8 +562,10 @@ fn populate_call_and_member_hints(
                 ..
             } => {
                 if let Some(span) = receiver_span(program, *object_node, *object_span) {
-                    if let Some(receiver_type) = type_index_resolution_for_span(type_index, span) {
-                        out.member_access_object_type_by_span
+                    if let Some(receiver_type) = program.semantic_facts.type_resolution_for_span(span)
+                    {
+                        hints
+                            .member_access_object_type_by_span
                             .insert(node.span, receiver_type);
                     }
                 }
@@ -590,22 +573,8 @@ fn populate_call_and_member_hints(
             _ => {}
         }
     }
-}
 
-fn type_index_resolution_for_span(
-    type_index: &type_inference_v2::TypeIndex,
-    span: bsl_shared::ir::Span,
-) -> Option<TypeResolution> {
-    if let Some(exact) = type_index.type_for_exact_span(span) {
-        return Some(exact);
-    }
-    if span.start == span.end {
-        return type_index.type_at_byte_offset(span.start);
-    }
-    let end_inclusive = span.end.saturating_sub(1);
-    type_index
-        .type_at_byte_offset(end_inclusive)
-        .or_else(|| type_index.type_at_byte_offset(span.start))
+    hints
 }
 
 #[salsa::tracked]
@@ -673,7 +642,16 @@ fn build_ir_from_parsed(
         deps_data.signature_index.clone(),
         deps_data.resolver.clone(),
     ) {
-        Ok(program) => Arc::new(program),
+        Ok(mut program) => {
+            type_inference_v2::materialize_semantic_facts_with_recovery_with_path_profiled(
+                &mut program,
+                parsed.as_ref(),
+                source,
+                file_path,
+                deps_data,
+            );
+            Arc::new(program)
+        }
         Err(_err) => {
             let mut program = SemanticProgram::new();
             program.source_info.path = file_path.to_string();
@@ -685,13 +663,10 @@ fn build_ir_from_parsed(
 
 fn collect_semantic_diagnostics_from_program(
     program: Arc<SemanticProgram>,
-    type_index: Arc<type_inference_v2::TypeIndex>,
     deps_data: Arc<SemanticDeps>,
     detail_level: DetailLevel,
 ) -> Vec<TypeDiagnostic> {
-    let mut type_hints = SemanticTypeHints::default();
-    populate_assignment_value_hints(&program, &type_index, &mut type_hints);
-    populate_call_and_member_hints(&program, &type_index, &mut type_hints);
+    let type_hints = semantic_type_hints_from_program(&program);
 
     let resolver = deps_data
         .resolver

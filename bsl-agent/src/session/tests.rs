@@ -47,6 +47,22 @@ fn counter_value(metrics: &serde_json::Value, key: &str) -> u64 {
         .unwrap_or(0)
 }
 
+fn type_index_reason_total(metrics: &serde_json::Value) -> u64 {
+    metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .map(|counters| {
+            counters
+                .iter()
+                .filter(|(key, _)| {
+                    key.starts_with("intellisense_v2_type_index_reason_total_reason_")
+                })
+                .map(|(_, value)| value.as_u64().unwrap_or(0))
+                .sum()
+        })
+        .unwrap_or(0)
+}
+
 fn assert_unified_intellisense_v2_stage_contract(metrics: &serde_json::Value) {
     let counters = metrics
         .get("counters")
@@ -313,7 +329,7 @@ fn semantic_helpers_fail_closed_without_precomputed_type_index() {
 
     let analysis = host.analysis();
     assert!(
-        type_at_utf16_position(&analysis, bsl_analysis_v2::FileId(1), 1, 10, false).is_none(),
+        type_at_utf16_position(&analysis, bsl_analysis_v2::FileId(1), 1, 10, false, None).is_none(),
         "type-at-position helper must fail closed without exact type_index artifact"
     );
 
@@ -329,9 +345,123 @@ fn semantic_helpers_fail_closed_without_precomputed_type_index() {
             2,
             member_column,
             false,
+            None,
         )
         .is_none(),
         "member-access helper must fail closed without exact type_index artifact"
+    );
+}
+
+#[tokio::test]
+async fn definition_receiver_hint_resolves_object_module_member_definition() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let config_root = temp.path();
+    let module_rel_path = "Documents/Док1/Ext/ObjectModule.bsl";
+    let module_path = config_root.join(module_rel_path);
+    let module_code = concat!(
+        "Процедура МойМетод() Экспорт\n",
+        "КонецПроцедуры\n",
+        "\n",
+        "Процедура Тест()\n",
+        "    ЭтотОбъект.МойМетод();\n",
+        "КонецПроцедуры\n"
+    );
+
+    std::fs::write(
+        config_root.join("Configuration.xml"),
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses">
+  <Configuration uuid="00000000-0000-0000-0000-000000000000">
+    <Properties>
+      <Name>TestConfig</Name>
+      <CompatibilityMode>Version8_3_25</CompatibilityMode>
+    </Properties>
+    <ChildObjects>
+      <Document>Док1</Document>
+    </ChildObjects>
+  </Configuration>
+</MetaDataObject>
+"#,
+    )
+    .expect("write Configuration.xml");
+    std::fs::create_dir_all(module_path.parent().expect("module parent"))
+        .expect("mkdir object module");
+    std::fs::write(
+        config_root.join("Documents/Док1.xml"),
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses">
+  <Document uuid="00000000-0000-0000-0000-000000000001">
+    <Properties>
+      <Name>Док1</Name>
+    </Properties>
+  </Document>
+</MetaDataObject>
+"#,
+    )
+    .expect("write document xml");
+    std::fs::write(&module_path, module_code).expect("write object module");
+
+    let job_manager = Arc::new(JobManager::new());
+    let manager = Arc::new(SessionManager::new());
+    let open = manager
+        .open(
+            WorkspaceOpenParams {
+                roots: vec![config_root.to_string_lossy().to_string()],
+                platform_docs_archive: None,
+                platform_version: Some("8.3.25".to_string()),
+                configuration_path: Some(config_root.to_string_lossy().to_string()),
+                mode: None,
+            },
+            Arc::clone(&job_manager),
+        )
+        .await
+        .expect("open");
+    wait_startup(job_manager.as_ref(), &open).await;
+
+    let call_line = module_code.lines().nth(4).expect("call line");
+    let method_byte = call_line.find("МойМетод").expect("method byte");
+    let method_column = call_line[..method_byte]
+        .chars()
+        .map(|ch| ch.len_utf16())
+        .sum::<usize>()
+        .min(u32::MAX as usize) as u32;
+
+    let before_metrics = manager
+        .observability_metrics_get(&open.session_id)
+        .await
+        .expect("observability before definition");
+    let before_total = type_index_reason_total(&before_metrics.metrics);
+
+    let definition = manager
+        .bsl_definition(BslDefinitionParams {
+            session_id: open.session_id.clone(),
+            symbol_id: None,
+            file: Some(FileRef {
+                doc: DocumentRef::Path(module_path.to_string_lossy().to_string()),
+                text: None,
+                version: None,
+            }),
+            position: Some(Position {
+                line: 4,
+                character: method_column,
+            }),
+        })
+        .await
+        .expect("definition");
+
+    let location = definition.location.expect("definition location");
+    assert_eq!(location.file.path, module_rel_path);
+    assert_eq!(location.range.start.line, 0);
+
+    let after_metrics = manager
+        .observability_metrics_get(&open.session_id)
+        .await
+        .expect("observability after definition");
+    let after_total = type_index_reason_total(&after_metrics.metrics);
+    assert!(
+        after_total > before_total,
+        "definition must emit type-index reasons: before={before_total}, after={after_total}, metrics={}",
+        after_metrics.metrics
     );
 }
 
@@ -1005,6 +1135,145 @@ async fn type_at_position_and_members_emit_interactive_runtime_exec_metrics() {
         after_members_exec_total > after_type_exec_total,
         "members should increment {metric_key}: before={after_type_exec_total}, after={after_members_exec_total}, metrics={}",
         after_members_metrics.metrics
+    );
+}
+
+#[tokio::test]
+async fn type_at_position_members_and_definition_emit_type_index_reason_metrics() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+
+    let job_manager = Arc::new(JobManager::new());
+    let manager = Arc::new(SessionManager::new());
+    let open = manager
+        .open(
+            WorkspaceOpenParams {
+                roots: vec![temp.path().to_string_lossy().to_string()],
+                platform_docs_archive: None,
+                platform_version: None,
+                configuration_path: None,
+                mode: None,
+            },
+            Arc::clone(&job_manager),
+        )
+        .await
+        .expect("open");
+    wait_startup(job_manager.as_ref(), &open).await;
+
+    let session_id = open.session_id.clone();
+    let root_id = open.roots[0].root_id.clone();
+    let overlay_file = FileRef {
+        doc: DocumentRef::Canonical(CanonicalDocumentRef {
+            root_id,
+            path: "src/CommonModules/Foo/Module.bsl".to_string(),
+        }),
+        text: Some(
+            "Procedure Foo()\nEndProcedure\nProcedure Test()\n    arr = Новый Массив;\n    Foo();\n    arr.\nEndProcedure\n"
+                .to_string(),
+        ),
+        version: Some(1),
+    };
+    manager
+        .documents_set(
+            &session_id,
+            &[WorkspaceDocumentsSetFile::File(overlay_file.clone())],
+            true,
+        )
+        .await
+        .expect("documents_set");
+
+    let file = FileRef {
+        doc: overlay_file.doc.clone(),
+        text: None,
+        version: None,
+    };
+
+    let baseline_metrics = manager
+        .observability_metrics_get(&session_id)
+        .await
+        .expect("observability baseline");
+    let baseline_total = type_index_reason_total(&baseline_metrics.metrics);
+
+    let type_response = manager
+        .bsl_type_at_position(BslTypeAtPositionParams {
+            session_id: session_id.clone(),
+            file: file.clone(),
+            position: Position {
+                line: 5,
+                character: 6,
+            },
+            include_flow_sensitive: false,
+        })
+        .await
+        .expect("type_at_position");
+    assert!(
+        type_response.warnings.is_empty(),
+        "type_at_position warnings: {:?}",
+        type_response.warnings
+    );
+
+    let after_type_metrics = manager
+        .observability_metrics_get(&session_id)
+        .await
+        .expect("observability after type_at_position");
+    let after_type_total = type_index_reason_total(&after_type_metrics.metrics);
+    assert!(
+        after_type_total > baseline_total,
+        "type_at_position must emit type-index reasons: before={baseline_total}, after={after_type_total}, metrics={}",
+        after_type_metrics.metrics
+    );
+
+    let members = manager
+        .bsl_members(BslMembersParams {
+            session_id: session_id.clone(),
+            file: file.clone(),
+            position: Position {
+                line: 5,
+                character: 8,
+            },
+            limit: 50,
+            include_flow_sensitive: false,
+        })
+        .await
+        .expect("members");
+    assert!(!members.truncated, "members query must stay complete");
+
+    let after_members_metrics = manager
+        .observability_metrics_get(&session_id)
+        .await
+        .expect("observability after members");
+    let after_members_total = type_index_reason_total(&after_members_metrics.metrics);
+    assert!(
+        after_members_total > after_type_total,
+        "members must emit type-index reasons: before={after_type_total}, after={after_members_total}, metrics={}",
+        after_members_metrics.metrics
+    );
+
+    let definition = manager
+        .bsl_definition(BslDefinitionParams {
+            session_id,
+            symbol_id: None,
+            file: Some(file),
+            position: Some(Position {
+                line: 4,
+                character: 4,
+            }),
+        })
+        .await
+        .expect("definition");
+    assert!(
+        definition.location.is_some(),
+        "definition should resolve Foo()"
+    );
+
+    let after_definition_metrics = manager
+        .observability_metrics_get(&open.session_id)
+        .await
+        .expect("observability after definition");
+    let after_definition_total = type_index_reason_total(&after_definition_metrics.metrics);
+    assert!(
+        after_definition_total > after_members_total,
+        "definition must emit type-index reasons: before={after_members_total}, after={after_definition_total}, metrics={}",
+        after_definition_metrics.metrics
     );
 }
 

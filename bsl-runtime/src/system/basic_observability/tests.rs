@@ -684,7 +684,7 @@ fn runtime_stage_registry_and_projection_contract_require_explicit_updates() {
 
 #[test]
 fn type_index_reason_metrics_are_exported_with_bounded_reasons() {
-    let contract = contract_json("observability-completion-v2/v1/contract.json");
+    let contract = contract_json("observability-completion-v2/v2/contract.json");
     let metrics_contract = contract
         .get("metrics")
         .and_then(|value| value.as_object())
@@ -914,21 +914,12 @@ fn parse_result_query_tracks_operation_dimension() {
 }
 
 #[test]
-fn completion_outcome_exports_degraded_and_fallback_unavailable() {
+fn completion_outcome_exports_fallback_unavailable() {
     let observability = BasicObservability::default();
-    observability.record_intellisense_v2_completion_outcome("degraded_incomplete");
     observability.record_intellisense_v2_completion_outcome("fallback_unavailable");
 
     let exported = observability.get_metrics().export_metrics();
     let counters = counters(&exported);
-    assert_eq!(
-        counter_value(
-            counters,
-            "intellisense_v2_completion_result_total_degraded_incomplete"
-        ),
-        1,
-        "degraded_incomplete outcome must be exported"
-    );
     assert_eq!(
         counter_value(
             counters,
@@ -990,8 +981,8 @@ fn completion_trigger_and_terminal_empty_metrics_normalize_labels() {
 }
 
 #[test]
-fn completion_v1_contract_matches_runtime_outcomes_and_modes() {
-    let contract = contract_json("lsp-completion-v2/v1/contract.json");
+fn completion_v2_contract_matches_runtime_outcomes_and_modes() {
+    let contract = contract_json("lsp-completion-v2/v2/contract.json");
     let completion = contract
         .get("completion")
         .and_then(|value| value.as_object())
@@ -1032,18 +1023,13 @@ fn completion_v1_contract_matches_runtime_outcomes_and_modes() {
         .iter()
         .map(|value| value.as_str().expect("outcome string").to_string())
         .collect();
-    let expected_outcomes: BTreeSet<String> = [
-        "ok_non_empty",
-        "ok_empty",
-        "degraded_incomplete",
-        "fallback_unavailable",
-    ]
-    .iter()
-    .map(|value| value.to_string())
-    .collect();
+    let expected_outcomes: BTreeSet<String> = ["ok_non_empty", "ok_empty", "fallback_unavailable"]
+        .iter()
+        .map(|value| value.to_string())
+        .collect();
     assert_eq!(
         outcomes, expected_outcomes,
-        "contract outcomes must match v1 completion baseline"
+        "contract outcomes must match current completion baseline"
     );
 
     let observability = BasicObservability::default();
@@ -1063,10 +1049,6 @@ fn completion_v1_contract_matches_runtime_outcomes_and_modes() {
             "intellisense_v2_completion_result_total_ok_empty",
         ),
         (
-            "degraded_incomplete",
-            "intellisense_v2_completion_result_total_degraded_incomplete",
-        ),
-        (
             "fallback_unavailable",
             "intellisense_v2_completion_result_total_fallback_unavailable",
         ),
@@ -1083,8 +1065,8 @@ fn completion_v1_contract_matches_runtime_outcomes_and_modes() {
 }
 
 #[test]
-fn observability_completion_v1_contract_matches_runtime_metric_labels() {
-    let contract = contract_json("observability-completion-v2/v1/contract.json");
+fn observability_completion_v2_contract_matches_runtime_metric_labels() {
+    let contract = contract_json("observability-completion-v2/v2/contract.json");
     let metrics_contract = contract
         .get("metrics")
         .and_then(|value| value.as_object())
@@ -1480,8 +1462,6 @@ fn completion_owner_hint_metrics_are_exported_with_bounded_reasons() {
         "type_miss",
         "cancelled",
         "type_index_exact_hit",
-        "type_index_stale_served",
-        "type_index_degraded_incomplete",
         "type_index_fallback_unavailable",
         "unexpected_reason",
     ];
@@ -1718,8 +1698,6 @@ fn completion_owner_hint_metrics_are_exported_with_bounded_reasons() {
         "type_miss",
         "cancelled",
         "type_index_exact_hit",
-        "type_index_stale_served",
-        "type_index_degraded_incomplete",
         "type_index_fallback_unavailable",
         "other",
     ] {

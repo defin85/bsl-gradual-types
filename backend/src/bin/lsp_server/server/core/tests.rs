@@ -10,8 +10,7 @@ use bsl_agent::server::types::{
 use bsl_agent::session::SessionManager;
 use bsl_agent::types::JobStateDto;
 use bsl_backend::perf_gate_evaluator::{
-    evaluate_scale_aware_gate, get_report_u64, validate_parity_cutover_evidence,
-    validate_scale_aware_baseline_schema, PARITY_DRIFT_RATE_MAX_FOR_CUTOVER,
+    get_report_u64, validate_parity_cutover_evidence, PARITY_DRIFT_RATE_MAX_FOR_CUTOVER,
     PARITY_PAIRS_TOTAL_MIN_FOR_CUTOVER,
 };
 use bsl_backend::presentation::web::{create_router, AppState};
@@ -4929,15 +4928,11 @@ async fn p7_type_index_serve_reasons_are_emitted_for_all_interactive_operations(
     const TYPE_INDEX_REASON_PREFIX: &str = "intellisense_v2_type_index_reason_total_reason_";
     const INTERACTIVE_REASON_COUNTER_KEYS: &[&str] = &[
         "intellisense_v2_type_index_reason_total_reason_type_index_exact_hit",
-        "intellisense_v2_type_index_reason_total_reason_type_index_stale_served",
-        "intellisense_v2_type_index_reason_total_reason_type_index_degraded_incomplete",
         "intellisense_v2_type_index_reason_total_reason_type_index_fallback_unavailable",
         "intellisense_v2_type_index_reason_total_reason_other",
     ];
     const ALLOWED_TYPE_INDEX_REASON_SUFFIXES: &[&str] = &[
         "type_index_exact_hit",
-        "type_index_stale_served",
-        "type_index_degraded_incomplete",
         "type_index_fallback_unavailable",
         "type_index_precompute_exact_stored",
         "type_index_precompute_superseded",
@@ -11712,7 +11707,7 @@ fn synthetic_scale_aware_report(
 #[test]
 fn scale_aware_baseline_schema_requires_explicit_pass_fail_summary() {
     let baseline = synthetic_scale_aware_report("baseline", 100.0, 100.0, 100.0, 0.0);
-    let err = validate_scale_aware_baseline_schema(&baseline)
+    let err = validate_scale_aware_baseline_schema_for_acceptance(&baseline)
         .expect_err("baseline without gate.pass must be rejected");
     assert!(
         err.contains("gate.pass"),
@@ -11726,7 +11721,7 @@ fn scale_aware_baseline_schema_accepts_required_shape() {
     baseline["gate"] = serde_json::json!({
         "pass": true
     });
-    validate_scale_aware_baseline_schema(&baseline)
+    validate_scale_aware_baseline_schema_for_acceptance(&baseline)
         .expect("baseline with required gate summary and metrics should validate");
 }
 
@@ -11882,9 +11877,9 @@ async fn p31_scale_aware_large_small_completion_gate_live() {
         std::fs::read_to_string(&baseline_path).expect("read scale-aware baseline file");
     let baseline_report: serde_json::Value =
         serde_json::from_str(&baseline_raw).expect("parse scale-aware baseline json");
-    validate_scale_aware_baseline_schema(&baseline_report)
+    validate_scale_aware_baseline_schema_for_acceptance(&baseline_report)
         .expect("validate scale-aware baseline schema");
-    let gate = evaluate_scale_aware_gate(&report, &baseline_report)
+    let gate = evaluate_scale_aware_gate_for_acceptance(&report, &baseline_report)
         .expect("evaluate scale-aware large/small gate");
     report["baseline"] = serde_json::json!({
         "path": baseline_path,

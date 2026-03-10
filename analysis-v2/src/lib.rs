@@ -222,8 +222,6 @@ pub struct TypeAtByteOffsetProfiledResult {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypeIndexServeReasonCode {
     TypeIndexExactHit,
-    TypeIndexStaleServed,
-    TypeIndexDegradedIncomplete,
     TypeIndexFallbackUnavailable,
 }
 
@@ -231,8 +229,6 @@ impl TypeIndexServeReasonCode {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::TypeIndexExactHit => "type_index_exact_hit",
-            Self::TypeIndexStaleServed => "type_index_stale_served",
-            Self::TypeIndexDegradedIncomplete => "type_index_degraded_incomplete",
             Self::TypeIndexFallbackUnavailable => "type_index_fallback_unavailable",
         }
     }

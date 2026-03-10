@@ -184,6 +184,7 @@ impl SessionManager {
                                 position.line,
                                 position.character,
                                 false,
+                                Some(coordinator.as_ref()),
                             ) {
                                 text.push_line(&format!(
                                     "type_at_position: {}",

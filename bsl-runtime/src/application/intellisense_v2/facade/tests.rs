@@ -1194,7 +1194,7 @@ async fn interactive_prepare_timeout_rejects_stale_when_gap_exceeds_default() {
 }
 
 #[tokio::test]
-async fn interactive_prepare_timeout_rejects_stale_when_age_exceeds_default() {
+async fn interactive_prepare_timeout_rejects_preexisting_snapshot_and_stays_bounded() {
     let file_id = FileId(111);
     let deps_id = DepsSnapshotId::from_hash("deps_stale_age");
     let settings_id = SettingsId::from_hash("settings");
@@ -1221,7 +1221,8 @@ async fn interactive_prepare_timeout_rejects_stale_when_age_exceeds_default() {
     }]);
     let _ = runtime.snapshot().await;
 
-    // Default max_stale_age is 1000ms; exceed it to verify age-based stale rejection.
+    // Older snapshots are no longer eligible for semantic rescue; keep an older snapshot only
+    // to verify that the runtime still fails closed within the configured wait budget.
     tokio::time::sleep(Duration::from_millis(1100)).await;
 
     let context = ExecutionContext {
@@ -1248,17 +1249,17 @@ async fn interactive_prepare_timeout_rejects_stale_when_age_exceeds_default() {
     let elapsed = started.elapsed();
     assert!(
         matches!(result, Err(SemanticOutcome::StaleVersion)),
-        "stale fallback must be rejected when stale age exceeds configured bound"
+        "interactive preparation must fail closed instead of reviving an older snapshot"
     );
     let min_expected = Duration::from_millis(wait_budget_ms.saturating_sub(30));
     let max_expected = Duration::from_millis(wait_budget_ms.saturating_add(400));
     assert!(
             elapsed >= min_expected,
-            "stale-age reject should spend wait budget before fail (elapsed={elapsed:?}, budget_ms={wait_budget_ms})"
+            "bounded fail-closed reject should spend wait budget before fail (elapsed={elapsed:?}, budget_ms={wait_budget_ms})"
         );
     assert!(
             elapsed <= max_expected,
-            "stale-age reject should stay bounded near wait budget (elapsed={elapsed:?}, budget_ms={wait_budget_ms})"
+            "bounded fail-closed reject should stay near wait budget (elapsed={elapsed:?}, budget_ms={wait_budget_ms})"
         );
 
     runtime.shutdown_for_test().await;

@@ -130,8 +130,17 @@ impl SessionManager {
             position.line,
             position.character,
             false,
+            Some(coordinator.as_ref()),
         );
-        let receiver_type_hint = None;
+        let receiver_type_hint = definition_receiver_type_hint_at_position(
+            &analysis,
+            program.as_ref(),
+            FileId(1),
+            code.as_ref(),
+            position.line,
+            position.character,
+            Some(coordinator.as_ref()),
+        );
         let target = bsl_runtime::application::type_system::goto_definition_v2_with_source(
             abs_path.to_string_lossy().as_ref(),
             code.as_ref(),

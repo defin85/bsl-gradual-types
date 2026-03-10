@@ -43,6 +43,13 @@ pub async fn get_enhanced_hover(
                 Arc::from("hover_request.bsl"),
             )?;
             let analysis = prepared.snapshot.analysis;
+            record_type_index_reason_at_utf16_position(
+                &analysis,
+                V2FileId(1),
+                line,
+                column,
+                coordinator.as_ref(),
+            );
             let file_content = analysis
                 .file_text(V2FileId(1))
                 .map_err(|_| anyhow::anyhow!("file_text cancelled"))?

@@ -282,3 +282,180 @@ fn parity_cutover_accepts_valid_evidence() {
 
     validate_parity_cutover_evidence(&report).expect("valid parity evidence should pass");
 }
+
+fn scale_aware_phase_with_counters(
+    completion_p95: f64,
+    wait_p95: f64,
+    snapshot_p95: f64,
+    ir_p95: f64,
+    count: u64,
+    wait_budget_exhausted_total: u64,
+    stale_served_total: u64,
+    stale_fallback_total: u64,
+    fallback_unavailable_total: u64,
+) -> Value {
+    json!({
+        "metrics": {
+            "completion_duration_ms": { "p95": completion_p95, "count": count },
+            "intellisense_v2_wait_for_file_version_completion_ms": { "p95": wait_p95, "count": count },
+            "intellisense_v2_snapshot_completion_ms": { "p95": snapshot_p95, "count": count },
+            "intellisense_v2_ir_query_completion_ms": { "p95": ir_p95, "count": count },
+            "intellisense_v2_interactive_wait_budget_exhausted_total": wait_budget_exhausted_total,
+            "intellisense_v2_interactive_stale_served_total": stale_served_total,
+            "intellisense_v2_completion_stale_fallback_total": stale_fallback_total,
+            "intellisense_v2_completion_fallback_unavailable_total": fallback_unavailable_total
+        }
+    })
+}
+
+fn scale_aware_phase(
+    completion_p95: f64,
+    wait_p95: f64,
+    snapshot_p95: f64,
+    ir_p95: f64,
+    count: u64,
+) -> Value {
+    scale_aware_phase_with_counters(
+        completion_p95,
+        wait_p95,
+        snapshot_p95,
+        ir_p95,
+        count,
+        0,
+        0,
+        0,
+        0,
+    )
+}
+
+fn scale_aware_profile(phases: [Value; 3], warm_total: u64, warm_cancelled: u64) -> Value {
+    let mut warm = phases[2].clone();
+    warm["completion_total"] = json!(warm_total);
+    warm["completion_cancelled_total"] = json!(warm_cancelled);
+
+    json!({
+        "start": phases[0],
+        "cold": phases[1],
+        "warm": warm
+    })
+}
+
+fn scale_aware_report(
+    large: [Value; 3],
+    small: [Value; 3],
+    large_total: u64,
+    large_cancelled: u64,
+    small_total: u64,
+    small_cancelled: u64,
+) -> Value {
+    json!({
+        "profiles": {
+            "large": scale_aware_profile(large, large_total, large_cancelled),
+            "small": scale_aware_profile(small, small_total, small_cancelled),
+        }
+    })
+}
+
+#[test]
+fn scale_aware_gate_fails_closed_when_authoritative_report_contains_semantic_substitute_metrics() {
+    let baseline = scale_aware_report(
+        [
+            scale_aware_phase(4200.0, 3200.0, 700.0, 320.0, 60),
+            scale_aware_phase(4000.0, 3000.0, 680.0, 300.0, 80),
+            scale_aware_phase(4000.0, 3000.0, 650.0, 280.0, 120),
+        ],
+        [
+            scale_aware_phase(300.0, 8.0, 4.0, 180.0, 60),
+            scale_aware_phase(280.0, 6.0, 3.0, 170.0, 80),
+            scale_aware_phase(250.0, 5.0, 2.0, 160.0, 120),
+        ],
+        120,
+        6,
+        120,
+        3,
+    );
+    let current = scale_aware_report(
+        [
+            scale_aware_phase(3100.0, 1800.0, 600.0, 260.0, 60),
+            scale_aware_phase(2950.0, 1700.0, 560.0, 240.0, 80),
+            scale_aware_phase_with_counters(2900.0, 1700.0, 540.0, 220.0, 120, 10, 1, 1, 4),
+        ],
+        [
+            scale_aware_phase(300.0, 7.0, 3.0, 180.0, 60),
+            scale_aware_phase(290.0, 6.0, 3.0, 170.0, 80),
+            scale_aware_phase_with_counters(300.0, 5.0, 2.0, 165.0, 120, 10, 0, 0, 1),
+        ],
+        120,
+        8,
+        120,
+        5,
+    );
+
+    let gate = evaluate_scale_aware_gate(&current, &baseline).expect("gate evaluation");
+    assert_eq!(gate.get("pass").and_then(Value::as_bool), Some(false));
+    assert_eq!(
+        gate.get("anti_rescue_guard")
+            .and_then(|value| value.get("pass"))
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        gate.get("anti_rescue_guard")
+            .and_then(|value| value.get("semantic_substitute_detected"))
+            .and_then(Value::as_bool),
+        Some(true)
+    );
+}
+
+#[test]
+fn scale_aware_gate_keeps_fail_closed_miss_rate_as_diagnostic_without_marking_semantic_substitute()
+{
+    let baseline = scale_aware_report(
+        [
+            scale_aware_phase(4200.0, 3200.0, 700.0, 320.0, 60),
+            scale_aware_phase(4000.0, 3000.0, 680.0, 300.0, 80),
+            scale_aware_phase(4000.0, 3000.0, 650.0, 280.0, 120),
+        ],
+        [
+            scale_aware_phase(300.0, 8.0, 4.0, 180.0, 60),
+            scale_aware_phase(280.0, 6.0, 3.0, 170.0, 80),
+            scale_aware_phase(250.0, 5.0, 2.0, 160.0, 120),
+        ],
+        120,
+        6,
+        120,
+        3,
+    );
+    let current = scale_aware_report(
+        [
+            scale_aware_phase(3100.0, 1800.0, 600.0, 260.0, 60),
+            scale_aware_phase(2950.0, 1700.0, 560.0, 240.0, 80),
+            scale_aware_phase_with_counters(2900.0, 1700.0, 540.0, 220.0, 120, 10, 0, 0, 4),
+        ],
+        [
+            scale_aware_phase(300.0, 7.0, 3.0, 180.0, 60),
+            scale_aware_phase(290.0, 6.0, 3.0, 170.0, 80),
+            scale_aware_phase_with_counters(300.0, 5.0, 2.0, 165.0, 120, 10, 0, 0, 1),
+        ],
+        120,
+        8,
+        120,
+        5,
+    );
+
+    let gate = evaluate_scale_aware_gate(&current, &baseline).expect("gate evaluation");
+    assert_eq!(gate.get("pass").and_then(Value::as_bool), Some(true));
+    assert_eq!(
+        gate.get("anti_rescue_guard")
+            .and_then(|value| value.get("pass"))
+            .and_then(Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        gate.get("anti_rescue_guard")
+            .and_then(|value| value.get("rates"))
+            .and_then(|value| value.get("large_warm_fallback_unavailable_per_budget_exhausted"))
+            .and_then(Value::as_f64),
+        Some(0.4)
+    );
+}

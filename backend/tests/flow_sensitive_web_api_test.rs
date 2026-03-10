@@ -30,6 +30,22 @@ fn test_state() -> AppState {
     }
 }
 
+fn type_index_reason_total(metrics: &serde_json::Value) -> u64 {
+    metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .map(|counters| {
+            counters
+                .iter()
+                .filter(|(key, _)| {
+                    key.starts_with("intellisense_v2_type_index_reason_total_reason_")
+                })
+                .map(|(_, value)| value.as_u64().unwrap_or(0))
+                .sum()
+        })
+        .unwrap_or(0)
+}
+
 #[tokio::test]
 async fn semantic_tree_rejects_legacy_include_flow_sensitive() {
     let app = create_router(test_state(), "backend/static", true);
@@ -137,5 +153,64 @@ async fn diagnostics_includes_null_safety_only_when_enabled() {
         flow_has_null_warning,
         "expected flow-sensitive diagnostics to include null-safety warnings, json={}",
         json_flow
+    );
+}
+
+#[tokio::test]
+async fn hover_endpoints_emit_type_index_reason_metrics() {
+    let state = test_state();
+    let coordinator = state.system_coordinator.clone();
+    let app = create_router(state, "backend/static", true);
+
+    let code = "Процедура T()\n    Arr = Новый Массив;\n    ДляHover = Arr;\nКонецПроцедуры\n";
+    let baseline_total = type_index_reason_total(&coordinator.observability_metrics());
+
+    let hover_resp = app
+        .clone()
+        .oneshot(
+            Request::post("/api/hover")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(axum::body::Body::from(
+                    json!({
+                        "code": code,
+                        "line": 2,
+                        "column": 15
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(hover_resp.status().is_success());
+
+    let after_hover_total = type_index_reason_total(&coordinator.observability_metrics());
+    assert!(
+        after_hover_total > baseline_total,
+        "web hover must emit type-index reasons: before={baseline_total}, after={after_hover_total}"
+    );
+
+    let enhanced_hover_resp = app
+        .oneshot(
+            Request::post("/api/hover/enhanced")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(axum::body::Body::from(
+                    json!({
+                        "code": code,
+                        "line": 2,
+                        "column": 15
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(enhanced_hover_resp.status().is_success());
+
+    let after_enhanced_total = type_index_reason_total(&coordinator.observability_metrics());
+    assert!(
+        after_enhanced_total > after_hover_total,
+        "web enhanced hover must emit type-index reasons: before={after_hover_total}, after={after_enhanced_total}"
     );
 }

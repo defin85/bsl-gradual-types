@@ -300,14 +300,14 @@ impl TypeInferencer {
             inferencer: &TypeInferencer,
             body: &[Statement],
             env: &mut TypeEnv,
-            index: &mut TypeIndex,
+            facts: &mut SemanticFacts,
             out: &mut ReturnTypeSet,
         ) {
             for stmt in body {
                 match stmt {
                     Statement::Return { value, .. } => {
                         if let Some(expr) = value {
-                            let t = inferencer.infer_expr(expr, env, index);
+                            let t = inferencer.infer_expr(expr, env, facts);
                             out.insert_resolution(&t);
                         } else {
                             out.insert_named("Неопределено");
@@ -319,16 +319,16 @@ impl TypeInferencer {
                         else_body,
                         ..
                     } => {
-                        let _ = inferencer.infer_expr(condition, env, index);
+                        let _ = inferencer.infer_expr(condition, env, facts);
                         let mut then_env = env.clone();
-                        collect_return_type_names(inferencer, then_body, &mut then_env, index, out);
+                        collect_return_type_names(inferencer, then_body, &mut then_env, facts, out);
                         if let Some(else_body) = else_body {
                             let mut else_env = env.clone();
                             collect_return_type_names(
                                 inferencer,
                                 else_body,
                                 &mut else_env,
-                                index,
+                                facts,
                                 out,
                             );
                         }
@@ -336,9 +336,9 @@ impl TypeInferencer {
                     Statement::While {
                         condition, body, ..
                     } => {
-                        let _ = inferencer.infer_expr(condition, env, index);
+                        let _ = inferencer.infer_expr(condition, env, facts);
                         let mut body_env = env.clone();
-                        collect_return_type_names(inferencer, body, &mut body_env, index, out);
+                        collect_return_type_names(inferencer, body, &mut body_env, facts, out);
                     }
                     Statement::For {
                         variable,
@@ -347,13 +347,13 @@ impl TypeInferencer {
                         body,
                         ..
                     } => {
-                        let _ = inferencer.infer_expr(start, env, index);
-                        let _ = inferencer.infer_expr(end, env, index);
+                        let _ = inferencer.infer_expr(start, env, facts);
+                        let _ = inferencer.infer_expr(end, env, facts);
                         let mut body_env = env.clone();
                         body_env
                             .variables
                             .insert(variable.to_lowercase(), TypeResolution::primitive("Число"));
-                        collect_return_type_names(inferencer, body, &mut body_env, index, out);
+                        collect_return_type_names(inferencer, body, &mut body_env, facts, out);
                     }
                     Statement::ForEach {
                         variable,
@@ -361,12 +361,12 @@ impl TypeInferencer {
                         body,
                         ..
                     } => {
-                        let _ = inferencer.infer_expr(collection, env, index);
+                        let _ = inferencer.infer_expr(collection, env, facts);
                         let mut body_env = env.clone();
                         body_env
                             .variables
                             .insert(variable.to_lowercase(), TypeResolution::unknown());
-                        collect_return_type_names(inferencer, body, &mut body_env, index, out);
+                        collect_return_type_names(inferencer, body, &mut body_env, facts, out);
                     }
                     Statement::Try {
                         try_body,
@@ -374,18 +374,18 @@ impl TypeInferencer {
                         ..
                     } => {
                         let mut try_env = env.clone();
-                        collect_return_type_names(inferencer, try_body, &mut try_env, index, out);
+                        collect_return_type_names(inferencer, try_body, &mut try_env, facts, out);
                         let mut except_env = env.clone();
                         collect_return_type_names(
                             inferencer,
                             except_body,
                             &mut except_env,
-                            index,
+                            facts,
                             out,
                         );
                     }
                     Statement::FunctionDecl { .. } | Statement::ProcedureDecl { .. } => {}
-                    _ => inferencer.visit_statement(stmt, env, index),
+                    _ => inferencer.visit_statement(stmt, env, facts),
                 }
             }
         }
@@ -577,13 +577,13 @@ impl TypeInferencer {
                             .insert(p.to_lowercase(), TypeResolution::unknown());
                     }
 
-                    let mut scratch_index = TypeIndex::default();
+                    let mut scratch_facts = SemanticFacts::default();
                     let mut return_types = ReturnTypeSet::default();
                     collect_return_type_names(
                         self,
                         def.body,
                         &mut fn_env,
-                        &mut scratch_index,
+                        &mut scratch_facts,
                         &mut return_types,
                     );
 

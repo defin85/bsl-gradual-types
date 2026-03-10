@@ -32,9 +32,10 @@ fn test_assignment_with_undeclared_value_reports_undeclared_variable() {
     let mut visitor =
         SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
     let mut hints = SemanticTypeHints::default();
-    hints
-        .assignment_value_type_by_span
-        .insert(assignment_span, TypeResolution::undeclared_variable("НомерЗаказ"));
+    hints.assignment_value_type_by_span.insert(
+        assignment_span,
+        TypeResolution::undeclared_variable("НомерЗаказ"),
+    );
     visitor.set_type_hints(Some(&hints));
     let mut context = FlowContext::new(program.symbols.root_scope);
     visitor.visit_node(&program.nodes[0], &mut context);
@@ -42,8 +43,7 @@ fn test_assignment_with_undeclared_value_reports_undeclared_variable() {
     let errors = visitor.into_errors();
     assert!(
         errors.iter().any(|diag| {
-            diag.message.contains("Необъявленная переменная")
-                && diag.message.contains("НомерЗаказ")
+            diag.message.contains("Необъявленная переменная") && diag.message.contains("НомерЗаказ")
         }),
         "assignment value with undeclared variable must emit diagnostic, got: {:?}",
         errors

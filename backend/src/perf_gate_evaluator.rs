@@ -203,7 +203,6 @@ pub fn evaluate_scale_aware_gate(
     const SMALL_COMPLETION_RATIO_MAX: f64 = 1.25;
     const MAX_CANCELLED_RATE: f64 = 0.10;
     const MIN_COMPLETION_TOTAL: u64 = 50;
-    const MAX_STALE_FALLBACK_UNAVAILABLE_PER_BUDGET_EXHAUSTED: f64 = 0.20;
 
     let large_current_wait = get_report_metric_f64(
         current_report,
@@ -336,6 +335,36 @@ pub fn evaluate_scale_aware_gate(
         "warm",
         "intellisense_v2_completion_stale_fallback_total",
     )?;
+    let large_start_stale_served_total = phase_counter(
+        "large",
+        "start",
+        "intellisense_v2_interactive_stale_served_total",
+    )?;
+    let large_cold_stale_served_total = phase_counter(
+        "large",
+        "cold",
+        "intellisense_v2_interactive_stale_served_total",
+    )?;
+    let large_warm_stale_served_total = phase_counter(
+        "large",
+        "warm",
+        "intellisense_v2_interactive_stale_served_total",
+    )?;
+    let small_start_stale_served_total = phase_counter(
+        "small",
+        "start",
+        "intellisense_v2_interactive_stale_served_total",
+    )?;
+    let small_cold_stale_served_total = phase_counter(
+        "small",
+        "cold",
+        "intellisense_v2_interactive_stale_served_total",
+    )?;
+    let small_warm_stale_served_total = phase_counter(
+        "small",
+        "warm",
+        "intellisense_v2_interactive_stale_served_total",
+    )?;
 
     let large_warm_budget_exhausted_total = phase_counter(
         "large",
@@ -357,28 +386,24 @@ pub fn evaluate_scale_aware_gate(
         "warm",
         "intellisense_v2_completion_fallback_unavailable_total",
     )?;
-    let large_warm_stale_served_total = phase_counter(
-        "large",
-        "warm",
-        "intellisense_v2_interactive_stale_served_total",
-    )?;
-    let small_warm_stale_served_total = phase_counter(
-        "small",
-        "warm",
-        "intellisense_v2_interactive_stale_served_total",
-    )?;
 
     let large_warm_fallback_unavailable_rate = large_warm_fallback_unavailable_total as f64
         / large_warm_budget_exhausted_total.max(1) as f64;
     let small_warm_fallback_unavailable_rate = small_warm_fallback_unavailable_total as f64
         / small_warm_budget_exhausted_total.max(1) as f64;
-    let stale_fastpath_exercised =
-        large_warm_stale_fallback_total > 0 || small_warm_stale_fallback_total > 0;
-    let stale_fastpath_pass = !stale_fastpath_exercised
-        || (large_warm_fallback_unavailable_rate
-            <= MAX_STALE_FALLBACK_UNAVAILABLE_PER_BUDGET_EXHAUSTED
-            && small_warm_fallback_unavailable_rate
-                <= MAX_STALE_FALLBACK_UNAVAILABLE_PER_BUDGET_EXHAUSTED);
+    let semantic_substitute_detected = large_start_stale_fallback_total > 0
+        || large_cold_stale_fallback_total > 0
+        || large_warm_stale_fallback_total > 0
+        || small_start_stale_fallback_total > 0
+        || small_cold_stale_fallback_total > 0
+        || small_warm_stale_fallback_total > 0
+        || large_start_stale_served_total > 0
+        || large_cold_stale_served_total > 0
+        || large_warm_stale_served_total > 0
+        || small_start_stale_served_total > 0
+        || small_cold_stale_served_total > 0
+        || small_warm_stale_served_total > 0;
+    let anti_rescue_guard_pass = !semantic_substitute_detected;
     let large_warm_dominant_stage = current_report
         .get("profiles")
         .and_then(|value| value.get("large"))
@@ -401,7 +426,7 @@ pub fn evaluate_scale_aware_gate(
         && small_cancelled_rate <= MAX_CANCELLED_RATE
         && large_completion_total >= MIN_COMPLETION_TOTAL
         && small_completion_total >= MIN_COMPLETION_TOTAL
-        && stale_fastpath_pass;
+        && anti_rescue_guard_pass;
 
     Ok(serde_json::json!({
         "pass": pass,
@@ -418,24 +443,28 @@ pub fn evaluate_scale_aware_gate(
             "large_warm": large_warm_dominant_stage,
             "small_warm": small_warm_dominant_stage
         },
-        "stale_fastpath": {
-            "evaluated": stale_fastpath_exercised,
-            "pass": stale_fastpath_pass,
+        "anti_rescue_guard": {
+            "semantic_substitute_detected": semantic_substitute_detected,
+            "pass": anti_rescue_guard_pass,
             "counts": {
                 "large": {
+                    "start_stale_served_total": large_start_stale_served_total,
                     "start_stale_fallback_total": large_start_stale_fallback_total,
+                    "cold_stale_served_total": large_cold_stale_served_total,
                     "cold_stale_fallback_total": large_cold_stale_fallback_total,
+                    "warm_stale_served_total": large_warm_stale_served_total,
                     "warm_stale_fallback_total": large_warm_stale_fallback_total,
                     "warm_budget_exhausted_total": large_warm_budget_exhausted_total,
-                    "warm_stale_served_total": large_warm_stale_served_total,
                     "warm_fallback_unavailable_total": large_warm_fallback_unavailable_total
                 },
                 "small": {
+                    "start_stale_served_total": small_start_stale_served_total,
                     "start_stale_fallback_total": small_start_stale_fallback_total,
+                    "cold_stale_served_total": small_cold_stale_served_total,
                     "cold_stale_fallback_total": small_cold_stale_fallback_total,
+                    "warm_stale_served_total": small_warm_stale_served_total,
                     "warm_stale_fallback_total": small_warm_stale_fallback_total,
                     "warm_budget_exhausted_total": small_warm_budget_exhausted_total,
-                    "warm_stale_served_total": small_warm_stale_served_total,
                     "warm_fallback_unavailable_total": small_warm_fallback_unavailable_total
                 }
             },
@@ -453,8 +482,7 @@ pub fn evaluate_scale_aware_gate(
             "large_completion_ratio_max": LARGE_COMPLETION_RATIO_MAX,
             "small_completion_ratio_max": SMALL_COMPLETION_RATIO_MAX,
             "completion_cancelled_rate_max": MAX_CANCELLED_RATE,
-            "min_completion_total": MIN_COMPLETION_TOTAL,
-            "stale_fallback_unavailable_per_budget_exhausted_max": MAX_STALE_FALLBACK_UNAVAILABLE_PER_BUDGET_EXHAUSTED
+            "min_completion_total": MIN_COMPLETION_TOTAL
         }
     }))
 }

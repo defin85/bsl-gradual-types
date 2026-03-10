@@ -1,5 +1,5 @@
 use super::*;
-use bsl_shared::ir::{SemanticProgram, SymbolTable};
+use bsl_shared::ir::{SemanticFacts, SemanticProgram, SymbolTable};
 
 #[test]
 fn test_generate_dark_theme() {
@@ -11,6 +11,7 @@ fn test_generate_dark_theme() {
             content_hash: 0,
         },
         cfg: None,
+        semantic_facts: SemanticFacts::default(),
     };
     let html = generate_semantic_html(
         &program,
@@ -35,6 +36,7 @@ fn test_generate_light_theme() {
             content_hash: 0,
         },
         cfg: None,
+        semantic_facts: SemanticFacts::default(),
     };
     let html = generate_semantic_html(
         &program,

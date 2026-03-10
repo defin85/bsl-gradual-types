@@ -26,6 +26,7 @@
 mod cfg;
 mod dto;
 mod program;
+mod semantic_facts;
 mod span;
 mod symbol_table;
 mod types;
@@ -52,6 +53,7 @@ pub use cfg::{
 
 // Re-exports: SemanticProgram
 pub use program::SemanticProgram;
+pub use semantic_facts::{SemanticFacts, SemanticTypeEntry};
 
 // Re-exports: visitor pattern
 pub use visitor::{walk_program, FlowContext, SemanticVisitor};

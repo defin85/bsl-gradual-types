@@ -127,9 +127,8 @@ impl AnalysisV2 {
             .unwrap_or_default();
         let key = self.make_type_index_artifact_key(file_id, initial_version);
         let exec_started = Instant::now();
-        let (type_index, build_profile) = if let Some(snapshot) = self.parse_snapshot_for_file(file_id, file) {
+        let (type_index, build_profile) = if let Some(_snapshot) = self.parse_snapshot_for_file(file_id, file) {
             let deps_data = self.deps.data(&self.db).0.clone();
-            let file_text = file.text(&self.db).clone();
             let file_path = file.path(&self.db).clone();
             let Some(program) = self.ir(file_id)? else {
                 return Ok(TypeIndexPrecomputeResult::with_reason(
@@ -137,10 +136,8 @@ impl AnalysisV2 {
                 ));
             };
             let profiled = cancellable(|| {
-                type_inference_v2::build_type_index_from_semantic_program_with_recovery_with_path_profiled(
+                type_inference_v2::build_type_index_from_semantic_program_with_path_profiled(
                     program.as_ref(),
-                    file_text.as_ref(),
-                    &snapshot.parse_result.syntax_errors,
                     file_path.as_ref(),
                     deps_data,
                 )
@@ -351,9 +348,10 @@ impl AnalysisV2 {
                 return Ok(Some(reused));
             }
             let deps_data = self.deps.data(&self.db).0.clone();
+            let parsed = parse_result(&self.db, file, self.settings).0;
             let file_path = file.path(&self.db);
             let program = build_ir_from_parsed(
-                snapshot.parse_result.clone(),
+                parsed,
                 source.as_ref(),
                 file_path.as_ref(),
                 deps_data,

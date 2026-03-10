@@ -182,7 +182,6 @@ impl BasicObservability {
             "missing_file_path" => "intellisense_v2_completion_result_total_missing_file_path",
             "missing_deps" => "intellisense_v2_completion_result_total_missing_deps",
             "missing_ir" => "intellisense_v2_completion_result_total_missing_ir",
-            "degraded_incomplete" => "intellisense_v2_completion_result_total_degraded_incomplete",
             "fallback_unavailable" => {
                 "intellisense_v2_completion_result_total_fallback_unavailable"
             }

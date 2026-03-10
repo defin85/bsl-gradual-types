@@ -620,42 +620,35 @@ Adapter-local reimplementation этих политик MUST NOT использо
 - **THEN** проверка завершается ошибкой
 - **AND** изменение не считается принятым до восстановления parity
 
-### Requirement: LSP interactive операции v2 используют latency-priority freshness policy с явными лимитами (MUST)
-Для `completion`, `hover`, `signatureHelp` система MUST применять latency-priority policy:
+### Requirement: LSP interactive операции v2 используют bounded wait + fail-closed freshness policy (MUST)
+Для `completion`, `hover`, `signatureHelp` система MUST применять freshness policy:
 - сначала пытаться обслужить `requested file version` по фактически `applied_version`;
 - ждать не дольше `intellisense_v2_interactive_wait_budget_ms` (дефолт `120ms`, если ключ не задан);
-- после исчерпания wait budget допускать stale fallback только на snapshot того же `file_id`, который удовлетворяет обоим ограничениям:
-  - `version_gap <= intellisense_v2_interactive_max_stale_version_gap` (дефолт `1`);
-  - `stale_age_ms <= intellisense_v2_interactive_max_stale_age_ms` (дефолт `1000ms`).
+- после исчерпания wait budget завершать запрос fail-closed для текущей revision без stale semantic substitute.
 
-Runtime knobs MUST валидироваться и приводиться к допустимым диапазонам:
-- `intellisense_v2_interactive_wait_budget_ms` в диапазон `[10, 2000]`;
-- `intellisense_v2_interactive_max_stale_version_gap` в диапазон `[0, 10]`;
-- `intellisense_v2_interactive_max_stale_age_ms` в диапазон `[0, 10000]`.
+Runtime knob MUST валидироваться и приводиться к диапазону:
+- `intellisense_v2_interactive_wait_budget_ms` в диапазон `[10, 2000]`.
 
-Stale fallback MUST использовать snapshot, согласованный по `deps_id` и `settings_id` с текущим запросом. Snapshot с несовпадающими `deps_id` или `settings_id` MUST NOT быть использован как stale fallback.
+Snapshot с несовпадающими `deps_id` или `settings_id`, а также snapshot предыдущей revision, MUST NOT использоваться как semantic substitute для interactive ответа.
 
 Дополнительно для completion:
-- при timeout/cancel на latest-path и наличии допустимого stale snapshot система MUST возвращать stale completion как частичный ответ (`isIncomplete=true`);
-- при timeout/cancel и отсутствии допустимого stale snapshot система MUST завершать запрос быстро (без блокировки сверх wait budget) и MAY вернуть empty/partial ответ;
-- completion MUST NOT деградировать в "пусто" исключительно из-за transient latest cancel, если доступен допустимый stale snapshot.
+- при timeout/cancel на latest-path система MUST завершать запрос быстро (без блокировки сверх wait budget) и MAY вернуть empty/partial fail-closed ответ;
+- completion MUST NOT использовать stale completion как substitute для текущей revision;
+- observability MUST фиксировать bounded fail-closed причину и guardrail-счётчики stale пути должны оставаться нулевыми.
 
-Система MUST явно сигнализировать stale-serving в observability.
-
-#### Scenario: Первый completion после правки отдаёт частичный stale ответ
+#### Scenario: Первый completion после правки остаётся current-revision exact-or-fail-closed
 - **GIVEN** пользователь ввёл новую строку и `received_version=V+1`, но `applied_version=V`
 - **AND** latest-path запрос для `V+1` не завершился в wait budget
 - **WHEN** IDE запрашивает completion
-- **THEN** сервер возвращает stale-compatible completion по версии `V`
-- **AND** ответ помечен `isIncomplete=true`
+- **THEN** сервер возвращает fail-closed ответ для версии `V+1`
+- **AND** не возвращает semantic payload версии `V` под видом текущего результата
 - **AND** запрос завершается без ожидания секундного хвоста
 
-#### Scenario: Нет подходящего stale snapshot
+#### Scenario: Нет current-revision artifact в пределах wait budget
 - **GIVEN** requested версия ещё не ready по `applied_version`
-- **AND** последний snapshot превышает допустимый `version_gap` или `stale_age_ms`, либо несовместим по `deps_id/settings_id`
 - **WHEN** IDE запрашивает hover/signatureHelp/completion
 - **THEN** сервер не блокируется дольше wait budget
-- **AND** сервер не использует несовместимый stale snapshot
+- **AND** сервер не использует snapshot предыдущей revision как semantic substitute
 
 ### Requirement: Diagnostics publish остаётся strict latest-version и monotonic по ревизии (MUST)
 Система MUST публиковать `diagnostics` только для актуальной requested version документа.
@@ -732,7 +725,7 @@ Interactive-класс MAY заимствовать background reserve толь�
 - **THEN** diagnostics получает минимум background-прогресс
 - **AND** система не уходит в starvation diagnostics
 
-### Requirement: Observability контракт отражает stale/singleflight/priority поведение фиксированными ключами (MUST)
+### Requirement: Observability контракт отражает fail-closed/singleflight/priority поведение фиксированными ключами (MUST)
 Система MUST предоставлять в observability snapshot следующие ключи метрик.
 
 Counter keys:
@@ -757,11 +750,11 @@ Histogram keys:
 - `intellisense_v2_runtime_exec_background_ms`
 - `intellisense_v2_revision_lag_versions`
 
-#### Scenario: Метрики показывают lag и fallback причину
-- **GIVEN** completion обслуживается через stale fallback из-за отставания applied revision
+#### Scenario: Метрики показывают lag и fail-closed причину
+- **GIVEN** completion завершается fail-closed из-за отставания applied revision
 - **WHEN** запрашивается snapshot observability
-- **THEN** snapshot содержит обязательные stale/fallback/lag ключи
-- **AND** `revision_lag_versions` и fallback counters отражают факт lag-driven ответа
+- **THEN** snapshot содержит обязательные wait-budget/fallback-unavailable/lag ключи
+- **AND** `revision_lag_versions` отражает факт lag-driven miss, а stale guardrail counters остаются нулевыми
 
 ### Requirement: Interactive latency quality gate фиксирует warm-path SLO (MUST)
 Система MUST выполнять интерактивный latency gate для completion v2 в двух профилях одного тестового цикла:
@@ -1399,28 +1392,26 @@ Completion и diagnostics MUST использовать один и тот же 
 - **THEN** затронутые стадии используют changed ranges для локального пересчета
 - **AND** полный пересчет выполняется только при невозможности безопасного range-режима
 
-### Requirement: Completion under large-module churn использует dual-path bounded fastpath (MUST)
-Для интерактивного completion на больших модулях в состоянии churn система MUST применять двухфазную стратегию:
-- latest-path через exact precomputed artifact (`serve-only`);
-- bounded stale/degraded fallback после исчерпания wait budget или при отсутствии exact artifact.
+### Requirement: Completion under large-module churn использует bounded wait и fail-closed current-revision path (MUST)
+Для интерактивного completion на больших модулях в состоянии churn система MUST использовать только exact current-revision precomputed artifact (`serve-only`) или явный fail-closed miss для текущей revision.
 
 Completion under churn MUST NOT блокироваться секундными хвостами ожидания latest-path.
 Интерактивный request path MUST NOT запускать sync parse/index compute, даже если exact artifact еще недоступен.
 
-#### Scenario: Under churn completion отдаёт bounded ответ без sync parse/index
+#### Scenario: Under churn completion отдаёт bounded fail-closed ответ без sync parse/index
 - **GIVEN** большой модуль находится в активном churn режиме
 - **AND** exact latest artifact временно недоступен в пределах wait budget
 - **WHEN** IDE запрашивает completion
-- **THEN** сервер возвращает bounded stale/degraded ответ
+- **THEN** сервер возвращает bounded fail-closed response для текущей revision
 - **AND** sync parse/index compute не выполняется в интерактивном request path
 
-### Requirement: После stale serve система выполняет асинхронный latest refresh без user-facing блокировки (MUST)
-После выдачи stale completion система MUST запускать background refresh latest snapshot.
+### Requirement: После fail-closed miss система выполняет асинхронный latest refresh без user-facing блокировки (MUST)
+После bounded fail-closed completion miss система MUST продолжать или запускать background refresh latest snapshot.
 
-Если stale snapshot недоступен или невалиден, completion MUST завершаться быстро в пределах bounded policy без длительного блокирования.
+Fail-closed miss MUST завершаться быстро в пределах bounded policy без длительного блокирования пользователя.
 
-#### Scenario: Stale serve запускает background refresh
-- **GIVEN** completion был обслужен через stale fallback
+#### Scenario: Fail-closed miss запускает или продолжает background refresh
+- **GIVEN** completion завершился fail-closed из-за недоступности exact latest artifact
 - **WHEN** пользователь продолжает работу
 - **THEN** latest refresh выполняется асинхронно в фоне
 - **AND** последующие completion запросы могут перейти на latest без блокирующего ожидания предыдущего refresh
@@ -1430,7 +1421,8 @@ Scale-aware gate MUST публиковать отдельные pass/fail оце
 
 Gate MUST включать как минимум:
 - latency метрики (`completion_duration_ms`, stage-level breakdown);
-- stale/fallback counters (`stale_served`, `fallback_unavailable`, `wait_budget_exhausted`);
+- fail-closed counters (`fallback_unavailable`, `wait_budget_exhausted`);
+- stale guardrail counters (`stale_served`, `stale_fallback`), которые на authoritative fixtures MUST оставаться нулевыми;
 - sample sufficiency для warm фазы.
 
 #### Scenario: Churn regression выявляется независимо от non-churn профиля
@@ -1512,8 +1504,8 @@ Gate MUST падать, если baseline artifact отсутствует, по�
 Система MUST поддерживать versioned contract baseline для интерактивного completion v2 в `contracts/**`.
 
 Baseline MUST покрывать как минимум:
-- completion surface: trigger context semantics (`TriggerCharacter`, `Invoked`, `TriggerForIncompleteCompletions`, `None`) и outcome классы (`ok_non_empty`, `ok_empty`, `degraded_incomplete`, `fallback_unavailable`);
-- observability surface: trigger mode метрики, parity drift, member-access terminal-empty и fallback_unavailable счётчики.
+- completion surface: trigger context semantics (`TriggerCharacter`, `Invoked`, `TriggerForIncompleteCompletions`, `None`) и outcome классы (`ok_non_empty`, `ok_empty`, `fallback_unavailable`);
+- observability surface: trigger mode метрики, parity drift, member-access terminal-empty, fail-closed счётчики и bounded `type_index` reason taxonomy без stale/degraded public labels.
 
 #### Scenario: Изменение completion semantics требует обновления contract baseline
 - **GIVEN** разработчик меняет semantics интерактивного completion v2 или имена/лейблы связанных метрик
@@ -1541,12 +1533,12 @@ Baseline MUST покрывать как минимум:
 
 В request path MUST NOT запускаться синхронный тяжелый compute `parse_result/type_index` для получения ответа пользователю.
 
-При cache miss система MUST завершать запрос в bounded времени через допустимый degraded outcome (`stale`, `degraded_incomplete`, `fallback_unavailable`) и MUST NOT блокировать ответ длительным пересчетом.
+При cache miss система MUST завершать запрос в bounded времени через fail-closed outcome (`fallback_unavailable`) и MUST NOT блокировать ответ длительным пересчетом.
 
 #### Scenario: Cache miss не запускает sync тяжелый compute в интерактивном запросе
 - **GIVEN** интерактивный completion запрос пришел до готовности exact artifact
 - **WHEN** request path обрабатывает запрос
-- **THEN** ответ возвращается в bounded времени с допустимым degraded outcome
+- **THEN** ответ возвращается в bounded времени с fail-closed outcome для текущей revision
 - **AND** sync parse/index compute для этого запроса не выполняется
 
 ### Requirement: Invalidation артефактов `type_index` детерминирован по `deps_id/settings_id` (MUST)
@@ -1557,12 +1549,13 @@ Baseline MUST покрывать как минимум:
 - **AND** runtime переключился на `deps=D2`
 - **WHEN** приходит интерактивный запрос для `(F, V)`
 - **THEN** artifact `(D1, S1)` не используется как exact latest
-- **AND** система использует policy для bounded fallback/recompute по новому ключу
+- **AND** система отвечает fail-closed для нового ключа, пока exact artifact `(D2, S1)` не станет доступен
 
 ### Requirement: Observability контур различает precompute и serve outcomes low-cardinality метками (MUST)
 Система MUST публиковать low-cardinality observability метрики отдельно для:
 - precompute queue wait/exec/build;
-- serving outcomes (`exact`, `stale`, `degraded_incomplete`, `fallback_unavailable`);
+- serving outcomes (`exact`, `fallback_unavailable`);
+- anti-rescue guard counters (`stale_served`, `stale_fallback`), которые MUST оставаться нулевыми на authoritative fixtures;
 - supersede/cancel причин precompute jobs.
 
 #### Scenario: Root-cause latency виден как precompute lag vs serve miss
@@ -1670,14 +1663,12 @@ Global guard eviction MUST NOT удалять актуальный exact artifac
 ### Requirement: Serve-only `type_index` outcomes публикуются единообразно для всех interactive операций (MUST)
 Для интерактивных операций, использующих serve-only type lookup (`completion`, `hover`, `signatureHelp`, `definition`), система MUST публиковать `type_index` serve outcome reason из bounded taxonomy:
 - `type_index_exact_hit`
-- `type_index_stale_served`
-- `type_index_degraded_incomplete`
 - `type_index_fallback_unavailable`
 
 Unknown reason labels MUST быть сведены в `other` и сопровождаться контрактным сигналом нарушения, без увеличения cardinality.
 
 #### Scenario: Hover cache miss фиксируется как `type_index_fallback_unavailable`
-- **GIVEN** hover запрошен до готовности exact/stale artifact
+- **GIVEN** hover запрошен до готовности exact artifact
 - **WHEN** serve-only path завершает запрос без on-demand compute
 - **THEN** публикуется reason `type_index_fallback_unavailable`
 - **AND** reason учитывается в том же low-cardinality контракте, что и completion/signatureHelp/definition
@@ -1932,4 +1923,3 @@ Reason taxonomy MUST оставаться low-cardinality и одинаково 
 - **WHEN** система выполняет type-at-position, hover или diagnostics для этого identifier
 - **THEN** identifier остаётся unresolved согласно canonical semantic contract
 - **AND** система не резолвит его через applied-owner fallback branch
-

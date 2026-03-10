@@ -11,6 +11,7 @@ fn test_condition_hover_includes_expected_actual_and_certainty() {
 
     let node = SemanticNode {
         kind: SemanticNodeKind::IfStatement {
+            condition_node: None,
             then_branch: Vec::new(),
             else_branch: None,
         },
@@ -29,7 +30,10 @@ fn test_condition_hover_includes_uncertainty_reason() {
     let metadata_lookup = TypeMetadataLookup::new(repo);
 
     let node = SemanticNode {
-        kind: SemanticNodeKind::WhileLoop { body: Vec::new() },
+        kind: SemanticNodeKind::WhileLoop {
+            condition_node: None,
+            body: Vec::new(),
+        },
         span: Span::stub(),
         scope_id: ScopeId(0),
     };

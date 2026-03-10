@@ -17,8 +17,6 @@ pub struct RuntimePerfKnobs {
 #[derive(Debug, Clone, Copy)]
 pub struct InteractiveFreshnessKnobs {
     pub wait_budget: Duration,
-    pub max_stale_version_gap: i32,
-    pub max_stale_age: Duration,
 }
 
 impl InteractiveFreshnessKnobs {
@@ -29,28 +27,12 @@ impl InteractiveFreshnessKnobs {
             Duration::from_millis(10),
             Duration::from_millis(2000),
         );
-        let (max_stale_version_gap, stale_gap_clamped) = read_clamped_i32(
-            RuntimeKey::IntellisenseV2InteractiveMaxStaleVersionGap,
-            1,
-            0,
-            10,
-        );
-        let (max_stale_age, stale_age_clamped) = read_clamped_duration(
-            RuntimeKey::IntellisenseV2InteractiveMaxStaleAgeMs,
-            Duration::from_millis(1000),
-            Duration::from_millis(0),
-            Duration::from_millis(10_000),
-        );
-        if wait_budget_clamped || stale_gap_clamped || stale_age_clamped {
+        if wait_budget_clamped {
             if let Some(coordinator) = observability {
                 coordinator.record_intellisense_v2_interactive_knob_clamped();
             }
         }
-        Self {
-            wait_budget,
-            max_stale_version_gap,
-            max_stale_age,
-        }
+        Self { wait_budget }
     }
 }
 
@@ -255,19 +237,6 @@ fn read_clamped_duration(
     } else {
         (raw, false)
     }
-}
-
-fn read_clamped_i32(key: RuntimeKey, default: i32, min: i32, max: i32) -> (i32, bool) {
-    let raw = global_runtime_config()
-        .get_u64(key)
-        .unwrap_or(default as u64);
-    let raw_i32 = if raw > i32::MAX as u64 {
-        i32::MAX
-    } else {
-        raw as i32
-    };
-    let clamped = raw_i32.clamp(min, max);
-    (clamped, clamped != raw_i32)
 }
 
 fn read_clamped_u8(key: RuntimeKey, default: u8, min: u8, max: u8) -> (u8, bool) {

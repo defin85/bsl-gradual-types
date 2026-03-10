@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, FileId as V2FileId, SettingsId};
 use bsl_backend::application::get_completion_with_semantic_program_snapshot;
 use bsl_backend::perf_gate_evaluator::{
-    evaluate_intellisense_perf_profile, validate_cutover_evidence_authority,
-    validate_perf_report_provenance, PerfGateSample, PerfGateThresholds,
+    validate_cutover_evidence_authority, validate_perf_report_provenance, PerfGateSample,
+    PerfGateThresholds,
 };
 use bsl_backend::system::{build_deps_bundle_v2, SystemCoordinator};
 use bsl_shared::domain::resolver::TypeResolver;
@@ -47,6 +47,18 @@ static ALLOCATED_BYTES: AtomicU64 = AtomicU64::new(0);
 
 #[global_allocator]
 static GLOBAL_ALLOCATOR: CountingAllocator = CountingAllocator;
+
+pub(super) fn evaluate_intellisense_perf_profile_for_harness(
+    contract: &serde_json::Value,
+    profile: &str,
+    current: PerfGateSample,
+    baseline: Option<PerfGateSample>,
+    thresholds: PerfGateThresholds,
+) -> serde_json::Value {
+    bsl_backend::perf_gate_evaluator::evaluate_intellisense_perf_profile(
+        contract, profile, current, baseline, thresholds,
+    )
+}
 
 // SAFETY: The wrapper delegates all allocation behavior to the standard system allocator
 // while only updating lock-free atomics for measurement.

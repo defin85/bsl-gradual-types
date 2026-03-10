@@ -636,6 +636,7 @@ fn collect_type_at_position(
         position.line,
         position.character,
         flow_sensitive_enabled,
+        Some(coordinator.as_ref()),
     )
     .map(|resolution| TypeInfoDto {
         name: user_facing_resolution_type_name(&resolution),
@@ -759,6 +760,7 @@ fn collect_members(request: MembersRequest) -> Result<BslMembersResponse, rmcp::
         position.line,
         position.character,
         flow_sensitive_enabled,
+        Some(coordinator.as_ref()),
     );
 
     let result = completion_runtime
@@ -801,7 +803,9 @@ fn collect_members(request: MembersRequest) -> Result<BslMembersResponse, rmcp::
         })
         .collect::<Vec<_>>();
 
-    members.sort_by(|a, b| (a.kind.as_str(), a.name.as_str()).cmp(&(b.kind.as_str(), b.name.as_str())));
+    members.sort_by(|a, b| {
+        (a.kind.as_str(), a.name.as_str()).cmp(&(b.kind.as_str(), b.name.as_str()))
+    });
     let truncated = members.len() > limit as usize || result.is_incomplete;
     if members.len() > limit as usize {
         members.truncate(limit as usize);

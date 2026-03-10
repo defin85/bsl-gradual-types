@@ -16,7 +16,7 @@ use bsl_shared::domain::types::{
 use bsl_shared::domain::types::{ConcreteType, TypeResolution, UncertaintyReason, WeightedType};
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::domain::{CodeLocation, ModuleType};
-use bsl_shared::ir::SemanticProgram;
+use bsl_shared::ir::{SemanticFacts, SemanticProgram, SemanticTypeEntry};
 use bsl_syntax::ast::{CompilerDirective, Expression, ParseError, Program, Statement};
 
 use crate::ast_to_ir::{is_global_collection, lookup_global_collection};
@@ -25,15 +25,9 @@ use crate::implicit_bindings::{
 };
 use crate::SemanticDeps;
 
-#[derive(Debug, Clone)]
-pub(crate) struct TypeIndexEntry {
-    pub span: bsl_shared::ir::Span,
-    pub resolution: TypeResolution,
-}
-
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TypeIndex {
-    entries: Vec<TypeIndexEntry>,
+    entries: Vec<SemanticTypeEntry>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -53,12 +47,17 @@ pub(crate) struct TypeIndexBuildProfiled {
     pub profile: TypeIndexBuildProfile,
 }
 
+#[derive(Debug, Clone)]
+struct SemanticFactsBuildProfiled {
+    facts: SemanticFacts,
+    profile: TypeIndexBuildProfile,
+}
+
 impl TypeIndex {
-    pub(crate) fn type_for_exact_span(&self, span: bsl_shared::ir::Span) -> Option<TypeResolution> {
-        self.entries
-            .iter()
-            .find(|entry| entry.span == span)
-            .map(|entry| entry.resolution.clone())
+    fn from_semantic_facts(facts: &SemanticFacts) -> Self {
+        Self {
+            entries: facts.type_entries.clone(),
+        }
     }
 
     pub(crate) fn type_at_byte_offset(&self, byte_offset: u32) -> Option<TypeResolution> {
@@ -70,8 +69,6 @@ impl TypeIndex {
                 .map(|entry| entry.resolution.clone())
         };
 
-        // Аналогично IR `find_node_at_byte_offset`: если курсор на границе `end`,
-        // пробуем сместиться на 1 байт влево.
         find(byte_offset).or_else(|| byte_offset.checked_sub(1).and_then(find))
     }
 }
@@ -114,15 +111,12 @@ struct TypeInferencer {
 
 #[path = "type_inference_v2/expression_helpers.rs"]
 mod expression_helpers;
-#[path = "type_inference_v2/ir_projection.rs"]
-mod ir_projection;
 #[path = "type_inference_v2/instance_effects.rs"]
 mod instance_effects;
 #[path = "type_inference_v2/local_function_summaries.rs"]
 mod local_function_summaries;
 
 use self::expression_helpers::{expr_span, signature_lookup_type_name};
-use self::ir_projection::project_semantic_program;
 use self::instance_effects::{
     arbitrary_resolution, merge_resolutions, normalize_schema_value_type, strip_structural_members,
     InstanceBinding, InstanceEffectStore, InstanceId,
@@ -151,7 +145,11 @@ impl TypeInferencer {
 
     #[cfg(test)]
     fn build_index_profiled(&self, program: &Program, file_path: &str) -> TypeIndexBuildProfiled {
-        self.build_index_internal(program, file_path, None)
+        let profiled = self.build_facts_internal(program, file_path, None);
+        TypeIndexBuildProfiled {
+            index: TypeIndex::from_semantic_facts(&profiled.facts),
+            profile: profiled.profile,
+        }
     }
 
     #[cfg(test)]
@@ -161,14 +159,18 @@ impl TypeInferencer {
         source_text: &str,
         file_path: &str,
     ) -> TypeIndexBuildProfiled {
-        self.build_index_internal(
+        let profiled = self.build_facts_internal(
             &parsed.program,
             file_path,
             Some(RecoveryContext {
                 source_text,
                 syntax_errors: &parsed.syntax_errors,
             }),
-        )
+        );
+        TypeIndexBuildProfiled {
+            index: TypeIndex::from_semantic_facts(&profiled.facts),
+            profile: profiled.profile,
+        }
     }
 
     fn build_index_from_semantic_program_profiled(
@@ -177,19 +179,22 @@ impl TypeInferencer {
         file_path: &str,
         recovery: Option<RecoveryContext<'_>>,
     ) -> TypeIndexBuildProfiled {
-        let projected = project_semantic_program(program);
-        self.build_index_internal(&projected, file_path, recovery)
+        let _ = (file_path, recovery);
+        TypeIndexBuildProfiled {
+            index: TypeIndex::from_semantic_facts(&program.semantic_facts),
+            profile: projection_build_profile(program),
+        }
     }
 
-    fn build_index_internal(
+    fn build_facts_internal(
         &self,
         program: &Program,
         file_path: &str,
         recovery: Option<RecoveryContext<'_>>,
-    ) -> TypeIndexBuildProfiled {
+    ) -> SemanticFactsBuildProfiled {
         let started = Instant::now();
         let mut env = TypeEnv::default();
-        let mut index = TypeIndex::default();
+        let mut facts = SemanticFacts::default();
 
         let seed_started = Instant::now();
         self.seed_module_context(file_path, &mut env);
@@ -218,23 +223,25 @@ impl TypeInferencer {
                     span,
                     ..
                 } => {
-                    let fn_env =
-                        self.visit_callable_body(params, body, *compiler_directive, &env, &mut index);
+                    let fn_env = self.visit_callable_body(
+                        params,
+                        body,
+                        *compiler_directive,
+                        &env,
+                        &mut facts,
+                    );
                     if let Some(recovery) = recovery {
                         self.record_incomplete_member_access_recovery_entries(
-                            recovery,
-                            *span,
-                            &fn_env,
-                            &mut index,
+                            recovery, *span, &fn_env, &mut facts,
                         );
                     }
                 }
-                _ => self.visit_statement(stmt, &mut env, &mut index),
+                _ => self.visit_statement(stmt, &mut env, &mut facts),
             }
         }
         let visit_statements_ms = visit_statements_started.elapsed().as_millis();
 
-        TypeIndexBuildProfiled {
+        SemanticFactsBuildProfiled {
             profile: TypeIndexBuildProfile {
                 seed_module_context_ms,
                 local_function_summaries_ms,
@@ -242,9 +249,9 @@ impl TypeInferencer {
                 total_ms: started.elapsed().as_millis(),
                 statement_count: program.statements.len() as u64,
                 local_function_summary_count,
-                index_entry_count: index.entries.len() as u64,
+                index_entry_count: facts.type_entries.len() as u64,
             },
-            index,
+            facts,
         }
     }
 
@@ -254,7 +261,7 @@ impl TypeInferencer {
         body: &[Statement],
         compiler_directive: Option<CompilerDirective>,
         env: &TypeEnv,
-        index: &mut TypeIndex,
+        facts: &mut SemanticFacts,
     ) -> TypeEnv {
         let mut fn_env = env.clone();
         if directive_disables_form_context(compiler_directive) {
@@ -267,7 +274,7 @@ impl TypeInferencer {
             fn_env.set_variable_value(param.to_lowercase(), TypeResolution::unknown(), None);
         }
         for stmt in body {
-            self.visit_statement(stmt, &mut fn_env, index);
+            self.visit_statement(stmt, &mut fn_env, facts);
         }
         fn_env
     }
@@ -277,7 +284,7 @@ impl TypeInferencer {
         recovery: RecoveryContext<'_>,
         container_span: bsl_shared::ir::Span,
         env: &TypeEnv,
-        index: &mut TypeIndex,
+        facts: &mut SemanticFacts,
     ) {
         for error in recovery
             .syntax_errors
@@ -292,7 +299,7 @@ impl TypeInferencer {
             let Some(resolution) = env.variable_resolution(&receiver_key) else {
                 continue;
             };
-            self.record(receiver_span, resolution, index);
+            self.record(receiver_span, resolution, facts);
         }
     }
 
@@ -446,7 +453,7 @@ impl TypeInferencer {
         resolution
     }
 
-    fn visit_statement(&self, stmt: &Statement, env: &mut TypeEnv, index: &mut TypeIndex) {
+    fn visit_statement(&self, stmt: &Statement, env: &mut TypeEnv, facts: &mut SemanticFacts) {
         match stmt {
             Statement::VarDeclaration {
                 name, type_hint, ..
@@ -457,8 +464,15 @@ impl TypeInferencer {
                     .unwrap_or_else(TypeResolution::unknown);
                 env.set_variable_value(name.to_lowercase(), resolution, None);
             }
-            Statement::Assignment { target, value, .. } => {
-                let value_type = self.infer_expr(value, env, index);
+            Statement::Assignment {
+                target,
+                value,
+                span,
+            } => {
+                let value_type = self.infer_expr(value, env, facts);
+                facts
+                    .assignment_value_type_by_span
+                    .insert(*span, value_type.clone());
                 if let Expression::Identifier { name, .. } = target {
                     let key = name.to_lowercase();
                     let description_type = self.extract_type_from_description_expr(value, env);
@@ -476,7 +490,7 @@ impl TypeInferencer {
                     // Hover/type-at-position на имени переменной после присваивания
                     // должен видеть новый тип.
                     if let Some(updated) = env.variable_resolution(&key) {
-                        self.record(expr_span(target), updated, index);
+                        self.record(expr_span(target), updated, facts);
                     }
                 }
             }
@@ -486,16 +500,16 @@ impl TypeInferencer {
                 else_body,
                 ..
             } => {
-                let _ = self.infer_expr(condition, env, index);
+                let _ = self.infer_expr(condition, env, facts);
                 let base_env = env.clone();
                 let mut then_env = base_env.clone();
                 for stmt in then_body {
-                    self.visit_statement(stmt, &mut then_env, index);
+                    self.visit_statement(stmt, &mut then_env, facts);
                 }
                 let mut else_env = base_env.clone();
                 if let Some(else_body) = else_body {
                     for stmt in else_body {
-                        self.visit_statement(stmt, &mut else_env, index);
+                        self.visit_statement(stmt, &mut else_env, facts);
                     }
                 }
                 *env = self.merge_control_flow_env(&base_env, &then_env, &else_env);
@@ -503,11 +517,11 @@ impl TypeInferencer {
             Statement::While {
                 condition, body, ..
             } => {
-                let _ = self.infer_expr(condition, env, index);
+                let _ = self.infer_expr(condition, env, facts);
                 let base_env = env.clone();
                 let mut body_env = base_env.clone();
                 for stmt in body {
-                    self.visit_statement(stmt, &mut body_env, index);
+                    self.visit_statement(stmt, &mut body_env, facts);
                 }
                 *env = self.merge_control_flow_env(&base_env, &body_env, &base_env);
             }
@@ -518,8 +532,8 @@ impl TypeInferencer {
                 body,
                 ..
             } => {
-                let _ = self.infer_expr(start, env, index);
-                let _ = self.infer_expr(end, env, index);
+                let _ = self.infer_expr(start, env, facts);
+                let _ = self.infer_expr(end, env, facts);
                 let base_env = env.clone();
                 let mut body_env = base_env.clone();
                 body_env.set_variable_value(
@@ -528,7 +542,7 @@ impl TypeInferencer {
                     None,
                 );
                 for stmt in body {
-                    self.visit_statement(stmt, &mut body_env, index);
+                    self.visit_statement(stmt, &mut body_env, facts);
                 }
                 *env = self.merge_control_flow_env(&base_env, &body_env, &base_env);
             }
@@ -538,7 +552,7 @@ impl TypeInferencer {
                 body,
                 ..
             } => {
-                let collection_type = self.infer_expr(collection, env, index);
+                let collection_type = self.infer_expr(collection, env, facts);
                 let base_env = env.clone();
                 let mut body_env = base_env.clone();
                 let foreach_binding = self.binding_for_foreach_collection(collection, env);
@@ -551,14 +565,14 @@ impl TypeInferencer {
                     foreach_binding.map(|(_resolution, binding)| binding),
                 );
                 for stmt in body {
-                    self.visit_statement(stmt, &mut body_env, index);
+                    self.visit_statement(stmt, &mut body_env, facts);
                 }
                 *env = self.merge_control_flow_env(&base_env, &body_env, &base_env);
             }
             Statement::Return {
                 value: Some(value), ..
             } => {
-                let _ = self.infer_expr(value, env, index);
+                let _ = self.infer_expr(value, env, facts);
             }
             Statement::Return { value: None, .. } => {}
             Statement::Try {
@@ -569,34 +583,34 @@ impl TypeInferencer {
                 let base_env = env.clone();
                 let mut try_env = base_env.clone();
                 for stmt in try_body {
-                    self.visit_statement(stmt, &mut try_env, index);
+                    self.visit_statement(stmt, &mut try_env, facts);
                 }
                 let mut except_env = base_env.clone();
                 for stmt in except_body {
-                    self.visit_statement(stmt, &mut except_env, index);
+                    self.visit_statement(stmt, &mut except_env, facts);
                 }
                 *env = self.merge_control_flow_env(&base_env, &try_env, &except_env);
             }
             Statement::Call { expression, .. } => {
-                let _ = self.infer_expr(expression, env, index);
+                let _ = self.infer_expr(expression, env, facts);
             }
             Statement::Execute { code, .. } => {
-                let _ = self.infer_expr(code, env, index);
+                let _ = self.infer_expr(code, env, facts);
             }
             Statement::RaiseError {
                 message: Some(message),
                 ..
             } => {
-                let _ = self.infer_expr(message, env, index);
+                let _ = self.infer_expr(message, env, facts);
             }
             Statement::RaiseError { message: None, .. } => {}
             Statement::AddHandler { event, handler, .. }
             | Statement::RemoveHandler { event, handler, .. } => {
-                let _ = self.infer_expr(event, env, index);
-                let _ = self.infer_expr(handler, env, index);
+                let _ = self.infer_expr(event, env, facts);
+                let _ = self.infer_expr(handler, env, facts);
             }
             Statement::Await { expression, .. } => {
-                let _ = self.infer_expr(expression, env, index);
+                let _ = self.infer_expr(expression, env, facts);
             }
             Statement::FunctionDecl {
                 params,
@@ -610,7 +624,7 @@ impl TypeInferencer {
                 compiler_directive,
                 ..
             } => {
-                let _ = self.visit_callable_body(params, body, *compiler_directive, env, index);
+                let _ = self.visit_callable_body(params, body, *compiler_directive, env, facts);
             }
             _ => {}
         }
@@ -620,16 +634,18 @@ impl TypeInferencer {
         &self,
         span: bsl_shared::ir::Span,
         resolution: TypeResolution,
-        index: &mut TypeIndex,
+        facts: &mut SemanticFacts,
     ) {
-        index.entries.push(TypeIndexEntry { span, resolution });
+        facts
+            .type_entries
+            .push(SemanticTypeEntry { span, resolution });
     }
 
     fn infer_expr(
         &self,
         expr: &Expression,
         env: &mut TypeEnv,
-        index: &mut TypeIndex,
+        facts: &mut SemanticFacts,
     ) -> TypeResolution {
         let resolution = match expr {
             Expression::Number { .. } => TypeResolution::primitive("Число"),
@@ -639,34 +655,40 @@ impl TypeInferencer {
             Expression::Identifier { name, .. } => self.infer_identifier(name, env),
             Expression::New {
                 type_name, args, ..
-            } => self.infer_new_expression(type_name, args, env, index),
+            } => self.infer_new_expression(type_name, args, env, facts),
             Expression::PropertyAccess {
                 object, property, ..
             } => {
-                let object_resolution = self.infer_expr(object, env, index);
-                self.infer_property_access(&object_resolution, property)
+                let object_resolution = self.infer_expr(object, env, facts);
+                let resolution = self.infer_property_access(&object_resolution, property);
+                facts
+                    .member_access_object_type_by_span
+                    .insert(expr_span(expr), object_resolution);
+                resolution
             }
-            Expression::Call { function, args, .. } => self.infer_call(function, args, env, index),
+            Expression::Call { function, args, .. } => {
+                self.infer_call(function, args, env, facts, expr_span(expr))
+            }
             Expression::Binary {
                 left,
                 operator,
                 right,
                 ..
             } => {
-                let left_type = self.infer_expr(left, env, index);
-                let right_type = self.infer_expr(right, env, index);
+                let left_type = self.infer_expr(left, env, facts);
+                let right_type = self.infer_expr(right, env, facts);
                 self.infer_binary(operator, &left_type, &right_type)
             }
-            Expression::Unary { operand, .. } => self.infer_expr(operand, env, index),
+            Expression::Unary { operand, .. } => self.infer_expr(operand, env, facts),
             Expression::Ternary {
                 condition,
                 then_expr,
                 else_expr,
                 ..
             } => {
-                let _ = self.infer_expr(condition, env, index);
-                let then_type = self.infer_expr(then_expr, env, index);
-                let else_type = self.infer_expr(else_expr, env, index);
+                let _ = self.infer_expr(condition, env, facts);
+                let then_type = self.infer_expr(then_expr, env, facts);
+                let else_type = self.infer_expr(else_expr, env, facts);
                 // TODO(v2): union типов.
                 if then_type
                     .type_name()
@@ -682,14 +704,14 @@ impl TypeInferencer {
                 index: index_expr,
                 ..
             } => {
-                let object_resolution = self.infer_expr(object, env, index);
-                let _ = self.infer_expr(index_expr, env, index);
+                let object_resolution = self.infer_expr(object, env, facts);
+                let _ = self.infer_expr(index_expr, env, facts);
                 self.resolve_index_access(expr, object, index_expr, &object_resolution, env)
             }
-            Expression::Await { expression, .. } => self.infer_expr(expression, env, index),
+            Expression::Await { expression, .. } => self.infer_expr(expression, env, facts),
         };
 
-        self.record(expr_span(expr), resolution.clone(), index);
+        self.record(expr_span(expr), resolution.clone(), facts);
         resolution
     }
 
@@ -735,7 +757,7 @@ impl TypeInferencer {
         type_name: &str,
         args: &[Expression],
         env: &mut TypeEnv,
-        index: &mut TypeIndex,
+        facts: &mut SemanticFacts,
     ) -> TypeResolution {
         let clean = type_name.trim().trim_end_matches("()").trim();
         let mut resolution = match clean {
@@ -762,7 +784,7 @@ impl TypeInferencer {
 
         let arg_types: Vec<TypeResolution> = args
             .iter()
-            .map(|arg| self.infer_expr(arg, env, index))
+            .map(|arg| self.infer_expr(arg, env, facts))
             .collect();
 
         if clean == "Структура" {
@@ -799,21 +821,28 @@ impl TypeInferencer {
         function: &Expression,
         args: &[Expression],
         env: &mut TypeEnv,
-        index: &mut TypeIndex,
+        facts: &mut SemanticFacts,
+        call_span: bsl_shared::ir::Span,
     ) -> TypeResolution {
         let arg_types: Vec<TypeResolution> = args
             .iter()
-            .map(|arg| self.infer_expr(arg, env, index))
+            .map(|arg| self.infer_expr(arg, env, facts))
             .collect();
+        facts
+            .call_arg_types_by_span
+            .insert(call_span, arg_types.clone());
 
         match function {
             Expression::Identifier { name, .. } => self.infer_global_function_call(name, env),
             Expression::PropertyAccess {
                 object, property, ..
             } => {
-                let receiver = self.infer_expr(object, env, index);
+                let receiver = self.infer_expr(object, env, facts);
+                facts
+                    .call_receiver_type_by_span
+                    .insert(call_span, receiver.clone());
                 if let Some(resolved) = self.try_apply_universal_collection_method(
-                    object, property, args, &arg_types, env, index,
+                    object, property, args, &arg_types, env, facts,
                 ) {
                     return resolved;
                 }
@@ -937,7 +966,7 @@ impl TypeInferencer {
         args: &[Expression],
         arg_types: &[TypeResolution],
         env: &mut TypeEnv,
-        _index: &mut TypeIndex,
+        facts: &mut SemanticFacts,
     ) -> Option<TypeResolution> {
         if property.eq_ignore_ascii_case("Вставить") || property.eq_ignore_ascii_case("Установить")
         {
@@ -951,7 +980,7 @@ impl TypeInferencer {
                         value_type,
                         expr_span(&args[0]),
                     );
-                    let receiver = self.infer_expr(object, env, _index);
+                    let receiver = self.infer_expr(object, env, facts);
                     return Some(self.infer_method_call(&receiver, property));
                 }
 
@@ -965,7 +994,7 @@ impl TypeInferencer {
                             None,
                         );
                     }
-                    let receiver = self.infer_expr(object, env, _index);
+                    let receiver = self.infer_expr(object, env, facts);
                     return Some(self.infer_method_call(&receiver, property));
                 }
             }
@@ -986,7 +1015,7 @@ impl TypeInferencer {
                         expr_span(args.first().unwrap_or(object)),
                     );
                 }
-                let receiver = self.infer_expr(object, env, _index);
+                let receiver = self.infer_expr(object, env, facts);
                 return Some(self.infer_method_call(&receiver, property));
             }
 
@@ -1304,6 +1333,14 @@ struct RecoveryContext<'a> {
     syntax_errors: &'a [ParseError],
 }
 
+fn projection_build_profile(program: &SemanticProgram) -> TypeIndexBuildProfile {
+    TypeIndexBuildProfile {
+        statement_count: program.nodes.len() as u64,
+        index_entry_count: program.semantic_facts.type_entries.len() as u64,
+        ..TypeIndexBuildProfile::default()
+    }
+}
+
 fn span_contains(span: bsl_shared::ir::Span, offset: u32) -> bool {
     span.start <= offset && offset < span.end
 }
@@ -1322,11 +1359,7 @@ fn extract_incomplete_member_access_receiver(
         .unwrap_or(0);
     let trimmed = snippet.get(trimmed_start..)?.trim_end();
     let receiver = trimmed.strip_suffix('.')?;
-    if receiver.is_empty()
-        || !receiver
-            .chars()
-            .all(|ch| ch.is_alphanumeric() || ch == '_')
-    {
+    if receiver.is_empty() || !receiver.chars().all(|ch| ch.is_alphanumeric() || ch == '_') {
         return None;
     }
     let receiver_start = error_span.start + trimmed_start as u32;
@@ -1357,21 +1390,23 @@ pub(crate) fn build_type_index_from_semantic_program_with_path_profiled(
     TypeInferencer::new(deps).build_index_from_semantic_program_profiled(program, file_path, None)
 }
 
-pub(crate) fn build_type_index_from_semantic_program_with_recovery_with_path_profiled(
-    program: &SemanticProgram,
+pub(crate) fn materialize_semantic_facts_with_recovery_with_path_profiled(
+    program: &mut SemanticProgram,
+    parsed: &bsl_syntax::ast::ParseResult,
     source_text: &str,
-    syntax_errors: &[ParseError],
     file_path: &str,
     deps: Arc<SemanticDeps>,
-) -> TypeIndexBuildProfiled {
-    TypeInferencer::new(deps).build_index_from_semantic_program_profiled(
-        program,
+) -> TypeIndexBuildProfile {
+    let profiled = TypeInferencer::new(deps).build_facts_internal(
+        &parsed.program,
         file_path,
         Some(RecoveryContext {
             source_text,
-            syntax_errors,
+            syntax_errors: &parsed.syntax_errors,
         }),
-    )
+    );
+    program.semantic_facts = profiled.facts;
+    profiled.profile
 }
 
 #[cfg(test)]

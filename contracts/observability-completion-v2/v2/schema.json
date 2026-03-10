@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "observability-completion-v2 contract v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "surface",
+    "major_version",
+    "schema_version",
+    "compatibility",
+    "metrics"
+  ],
+  "properties": {
+    "surface": {
+      "type": "string",
+      "const": "observability-completion-v2"
+    },
+    "major_version": {
+      "type": "integer",
+      "const": 2
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "breaking_change_requires_major_bump",
+        "breaking_change_requires_migration_note"
+      ],
+      "properties": {
+        "breaking_change_requires_major_bump": {
+          "type": "boolean",
+          "const": true
+        },
+        "breaking_change_requires_migration_note": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trigger_mode_counter_prefix",
+        "parity_drift_counter_prefix",
+        "member_access_terminal_empty_counter_prefix",
+        "completion_result_counter_prefix",
+        "interactive_wait_budget_exhausted_counter",
+        "runtime_queue_wait_interactive_counter",
+        "runtime_queue_wait_background_counter",
+        "runtime_exec_interactive_counter",
+        "runtime_exec_background_counter",
+        "runtime_queue_wait_interactive_histogram",
+        "runtime_queue_wait_background_histogram",
+        "runtime_exec_interactive_histogram",
+        "runtime_exec_background_histogram",
+        "anti_rescue_guard_zero_expected_counters",
+        "allowed_trigger_modes",
+        "allowed_terminal_empty_reasons",
+        "allowed_completion_outcomes"
+      ],
+      "properties": {
+        "trigger_mode_counter_prefix": {
+          "type": "string",
+          "const": "intellisense_v2_completion_trigger_mode_total_mode_"
+        },
+        "parity_drift_counter_prefix": {
+          "type": "string",
+          "const": "intellisense_v2_completion_parity_drift_total_mode_"
+        },
+        "member_access_terminal_empty_counter_prefix": {
+          "type": "string",
+          "const": "intellisense_v2_completion_member_access_terminal_empty_total_mode_"
+        },
+        "completion_result_counter_prefix": {
+          "type": "string",
+          "const": "intellisense_v2_completion_result_total_"
+        },
+        "interactive_wait_budget_exhausted_counter": {
+          "type": "string",
+          "const": "intellisense_v2_interactive_wait_budget_exhausted_total"
+        },
+        "runtime_queue_wait_interactive_counter": {
+          "type": "string",
+          "const": "intellisense_v2_runtime_queue_wait_interactive_total"
+        },
+        "runtime_queue_wait_background_counter": {
+          "type": "string",
+          "const": "intellisense_v2_runtime_queue_wait_background_total"
+        },
+        "runtime_exec_interactive_counter": {
+          "type": "string",
+          "const": "intellisense_v2_runtime_exec_interactive_total"
+        },
+        "runtime_exec_background_counter": {
+          "type": "string",
+          "const": "intellisense_v2_runtime_exec_background_total"
+        },
+        "runtime_queue_wait_interactive_histogram": {
+          "type": "string",
+          "const": "intellisense_v2_runtime_queue_wait_interactive_ms"
+        },
+        "runtime_queue_wait_background_histogram": {
+          "type": "string",
+          "const": "intellisense_v2_runtime_queue_wait_background_ms"
+        },
+        "runtime_exec_interactive_histogram": {
+          "type": "string",
+          "const": "intellisense_v2_runtime_exec_interactive_ms"
+        },
+        "runtime_exec_background_histogram": {
+          "type": "string",
+          "const": "intellisense_v2_runtime_exec_background_ms"
+        },
+        "anti_rescue_guard_zero_expected_counters": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "intellisense_v2_interactive_stale_served_total",
+              "intellisense_v2_completion_stale_fallback_total"
+            ]
+          }
+        },
+        "allowed_trigger_modes": {
+          "type": "array",
+          "minItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "trigger_character",
+              "invoked",
+              "trigger_for_incomplete",
+              "none"
+            ]
+          }
+        },
+        "allowed_terminal_empty_reasons": {
+          "type": "array",
+          "minItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "ok_empty",
+              "fallback_unavailable",
+              "missing_ir",
+              "wait_not_ready"
+            ]
+          }
+        },
+        "allowed_completion_outcomes": {
+          "type": "array",
+          "minItems": 10,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "ok_non_empty",
+              "ok_empty",
+              "cancelled",
+              "handler_error",
+              "missing_deps",
+              "missing_file_content",
+              "missing_file_path",
+              "missing_ir",
+              "wait_not_ready",
+              "fallback_unavailable"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

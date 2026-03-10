@@ -478,18 +478,11 @@ fn interactive_knobs_clamp_and_emit_metric() {
         .expect("env lock should not be poisoned");
 
     let _wait_guard = EnvVarGuard::set("BSL_INTELLISENSE_V2_INTERACTIVE_WAIT_BUDGET_MS", "999999");
-    let _gap_guard = EnvVarGuard::set(
-        "BSL_INTELLISENSE_V2_INTERACTIVE_MAX_STALE_VERSION_GAP",
-        "999",
-    );
-    let _age_guard = EnvVarGuard::set("BSL_INTELLISENSE_V2_INTERACTIVE_MAX_STALE_AGE_MS", "999999");
 
     let coordinator = SystemCoordinator::new();
     let knobs = interactive_freshness_knobs(SemanticOperation::Completion, Some(&coordinator))
         .expect("completion should use interactive knobs");
     assert_eq!(knobs.wait_budget, Duration::from_millis(2000));
-    assert_eq!(knobs.max_stale_version_gap, 10);
-    assert_eq!(knobs.max_stale_age, Duration::from_millis(10_000));
 
     let metrics = coordinator.observability_metrics();
     let counters = metrics

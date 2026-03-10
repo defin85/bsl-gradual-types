@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "lsp-completion-v2 contract v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "surface",
+    "major_version",
+    "schema_version",
+    "compatibility",
+    "completion",
+    "examples"
+  ],
+  "properties": {
+    "surface": {
+      "type": "string",
+      "const": "lsp-completion-v2"
+    },
+    "major_version": {
+      "type": "integer",
+      "const": 2
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "breaking_change_requires_major_bump",
+        "breaking_change_requires_migration_note"
+      ],
+      "properties": {
+        "breaking_change_requires_major_bump": {
+          "type": "boolean",
+          "const": true
+        },
+        "breaking_change_requires_migration_note": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    },
+    "completion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trigger_modes",
+        "transport_outcomes",
+        "semantic_contract_classes"
+      ],
+      "properties": {
+        "trigger_modes": {
+          "type": "array",
+          "minItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "trigger_character",
+              "invoked",
+              "trigger_for_incomplete",
+              "none"
+            ]
+          }
+        },
+        "transport_outcomes": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "ok_non_empty",
+              "ok_empty"
+            ]
+          }
+        },
+        "semantic_contract_classes": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "exact_current_revision",
+              "fail_closed_current_revision"
+            ]
+          }
+        }
+      }
+    },
+    "examples": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "member_access_trigger_character_exact_current_revision",
+        "member_access_trigger_character_fail_closed_current_revision"
+      ],
+      "properties": {
+        "member_access_trigger_character_exact_current_revision": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "trigger_mode",
+            "semantic_contract",
+            "expected_transport_outcome"
+          ],
+          "properties": {
+            "trigger_mode": {
+              "type": "string",
+              "const": "trigger_character"
+            },
+            "semantic_contract": {
+              "type": "string",
+              "const": "exact_current_revision"
+            },
+            "expected_transport_outcome": {
+              "type": "string",
+              "const": "ok_non_empty"
+            }
+          }
+        },
+        "member_access_trigger_character_fail_closed_current_revision": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "trigger_mode",
+            "semantic_contract",
+            "expected_transport_outcome"
+          ],
+          "properties": {
+            "trigger_mode": {
+              "type": "string",
+              "const": "trigger_character"
+            },
+            "semantic_contract": {
+              "type": "string",
+              "const": "fail_closed_current_revision"
+            },
+            "expected_transport_outcome": {
+              "type": "string",
+              "const": "ok_empty"
+            }
+          }
+        }
+      }
+    }
+  }
+}

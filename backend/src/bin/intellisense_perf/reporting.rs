@@ -251,7 +251,7 @@ pub(super) fn compare_reports(
     let baseline_p99 = baseline.metrics.p99_ms.max(0.000_001);
     let ratio_p95 = current.metrics.p95_ms / baseline_p95;
     let ratio_p99 = current.metrics.p99_ms / baseline_p99;
-    let evaluation = evaluate_intellisense_perf_profile(
+    let evaluation = super::evaluate_intellisense_perf_profile_for_harness(
         contract,
         profile,
         PerfGateSample {

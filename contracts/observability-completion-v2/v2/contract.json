@@ -1,0 +1,52 @@
+{
+  "surface": "observability-completion-v2",
+  "major_version": 2,
+  "schema_version": 1,
+  "compatibility": {
+    "breaking_change_requires_major_bump": true,
+    "breaking_change_requires_migration_note": true
+  },
+  "metrics": {
+    "trigger_mode_counter_prefix": "intellisense_v2_completion_trigger_mode_total_mode_",
+    "parity_drift_counter_prefix": "intellisense_v2_completion_parity_drift_total_mode_",
+    "member_access_terminal_empty_counter_prefix": "intellisense_v2_completion_member_access_terminal_empty_total_mode_",
+    "completion_result_counter_prefix": "intellisense_v2_completion_result_total_",
+    "interactive_wait_budget_exhausted_counter": "intellisense_v2_interactive_wait_budget_exhausted_total",
+    "runtime_queue_wait_interactive_counter": "intellisense_v2_runtime_queue_wait_interactive_total",
+    "runtime_queue_wait_background_counter": "intellisense_v2_runtime_queue_wait_background_total",
+    "runtime_exec_interactive_counter": "intellisense_v2_runtime_exec_interactive_total",
+    "runtime_exec_background_counter": "intellisense_v2_runtime_exec_background_total",
+    "runtime_queue_wait_interactive_histogram": "intellisense_v2_runtime_queue_wait_interactive_ms",
+    "runtime_queue_wait_background_histogram": "intellisense_v2_runtime_queue_wait_background_ms",
+    "runtime_exec_interactive_histogram": "intellisense_v2_runtime_exec_interactive_ms",
+    "runtime_exec_background_histogram": "intellisense_v2_runtime_exec_background_ms",
+    "anti_rescue_guard_zero_expected_counters": [
+      "intellisense_v2_interactive_stale_served_total",
+      "intellisense_v2_completion_stale_fallback_total"
+    ],
+    "allowed_trigger_modes": [
+      "trigger_character",
+      "invoked",
+      "trigger_for_incomplete",
+      "none"
+    ],
+    "allowed_terminal_empty_reasons": [
+      "ok_empty",
+      "fallback_unavailable",
+      "missing_ir",
+      "wait_not_ready"
+    ],
+    "allowed_completion_outcomes": [
+      "ok_non_empty",
+      "ok_empty",
+      "cancelled",
+      "handler_error",
+      "missing_deps",
+      "missing_file_content",
+      "missing_file_path",
+      "missing_ir",
+      "wait_not_ready",
+      "fallback_unavailable"
+    ]
+  }
+}

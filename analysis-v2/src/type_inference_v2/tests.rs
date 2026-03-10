@@ -15,17 +15,29 @@ fn parse(code: &str) -> Program {
     parsed.program
 }
 
-fn ir_program(source: &str, file_path: &str, deps: Arc<SemanticDeps>) -> bsl_shared::ir::SemanticProgram {
+fn ir_program(
+    source: &str,
+    file_path: &str,
+    deps: Arc<SemanticDeps>,
+) -> bsl_shared::ir::SemanticProgram {
     let parsed = bsl_syntax::parse(source, &ParseOptions::default()).expect("parse ok");
-    crate::AstToIrConverter::convert_with_resolver(
-        parsed.program,
+    let mut program = crate::AstToIrConverter::convert_with_resolver(
+        parsed.program.clone(),
         source.to_string(),
         file_path.to_string(),
         deps.repository.clone(),
         deps.signature_index.clone(),
         deps.resolver.clone(),
     )
-    .expect("convert to ir")
+    .expect("convert to ir");
+    super::materialize_semantic_facts_with_recovery_with_path_profiled(
+        &mut program,
+        &parsed,
+        source,
+        file_path,
+        deps,
+    );
+    program
 }
 
 fn structural_member_span_for_literal(source: &str, literal: &str) -> StructuralMemberSpan {
@@ -309,7 +321,8 @@ fn builds_type_index_for_simple_assignment_and_method_call() {
 
 #[test]
 fn recovers_receiver_type_for_incomplete_bare_member_access_after_assignment() {
-    let source = "Процедура Тест()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.\nКонецПроцедуры\n";
+    let source =
+        "Процедура Тест()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.\nКонецПроцедуры\n";
     let parsed = bsl_syntax::parse(source, &bsl_syntax::ParseOptions::default())
         .expect("parse with recovery");
     assert!(
@@ -366,8 +379,35 @@ fn builds_type_index_from_semantic_program_for_simple_assignment_and_method_call
 }
 
 #[test]
+fn semantic_program_index_uses_materialized_facts_instead_of_reseeding_path() {
+    let deps = deps_with_array_method();
+    let source = r#"Процедура Тест()
+    x = ЭтотОбъект;
+    y = Объект;
+КонецПроцедуры
+"#;
+    let canonical_file_path = "Documents/Док1/Ext/ObjectModule.bsl";
+    let ir_program = ir_program(source, canonical_file_path, deps.clone());
+    let ir_index =
+        build_type_index_from_semantic_program_with_path(&ir_program, "inline.bsl", deps);
+
+    let this_object_offset = source.find("ЭтотОбъект").expect("ЭтотОбъект") as u32;
+    let this_object = ir_index
+        .type_at_byte_offset(this_object_offset)
+        .expect("type at ЭтотОбъект");
+    assert_eq!(this_object.type_name(), "ДокументОбъект.Док1");
+
+    let object_offset = source.find("Объект").expect("Объект") as u32;
+    let object = ir_index
+        .type_at_byte_offset(object_offset)
+        .expect("type at Объект");
+    assert_eq!(object.type_name(), "ДокументОбъект.Док1");
+}
+
+#[test]
 fn recovers_receiver_type_from_semantic_program_for_incomplete_bare_member_access() {
-    let source = "Процедура Тест()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.\nКонецПроцедуры\n";
+    let source =
+        "Процедура Тест()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.\nКонецПроцедуры\n";
     let file_path = "test.bsl";
     let parsed = bsl_syntax::parse(source, &bsl_syntax::ParseOptions::default())
         .expect("parse with recovery");
@@ -377,7 +417,7 @@ fn recovers_receiver_type_from_semantic_program_for_incomplete_bare_member_acces
     );
 
     let deps = deps_with_array_method();
-    let ir_program = crate::AstToIrConverter::convert_with_resolver(
+    let mut ir_program = crate::AstToIrConverter::convert_with_resolver(
         parsed.program.clone(),
         source.to_string(),
         file_path.to_string(),
@@ -386,6 +426,13 @@ fn recovers_receiver_type_from_semantic_program_for_incomplete_bare_member_acces
         deps.resolver.clone(),
     )
     .expect("convert to ir");
+    super::materialize_semantic_facts_with_recovery_with_path_profiled(
+        &mut ir_program,
+        &parsed,
+        source,
+        file_path,
+        deps.clone(),
+    );
     let legacy_index =
         build_type_index_from_parse_result_with_path(&parsed, source, file_path, deps.clone());
     let ir_index = build_type_index_from_semantic_program_with_recovery_with_path(

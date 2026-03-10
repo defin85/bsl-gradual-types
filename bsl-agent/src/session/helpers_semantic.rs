@@ -93,6 +93,7 @@ fn type_at_utf16_position(
     line: u32,
     character: u32,
     include_flow_sensitive: bool,
+    coordinator: Option<&bsl_runtime::system::SystemCoordinator>,
 ) -> Option<bsl_shared::domain::types::TypeResolution> {
     let byte_offset = analysis
         .utf16_position_to_byte_offset(file_id, line, character)
@@ -100,12 +101,12 @@ fn type_at_utf16_position(
         .flatten()? as u32;
 
     if include_flow_sensitive {
-        analysis.flow_type_at_byte_offset(file_id, byte_offset).ok().flatten()
-    } else {
         analysis
-            .type_at_byte_offset_serve_only(file_id, byte_offset)
+            .flow_type_at_byte_offset(file_id, byte_offset)
             .ok()
             .flatten()
+    } else {
+        serve_only_type_at_byte_offset_with_reason(analysis, file_id, byte_offset, coordinator)
     }
 }
 
@@ -116,6 +117,7 @@ fn member_access_owner_type_hint_at_position(
     line: u32,
     character: u32,
     include_flow_sensitive: bool,
+    coordinator: Option<&bsl_runtime::system::SystemCoordinator>,
 ) -> Option<bsl_shared::domain::types::TypeResolution> {
     let line_text = file_content.lines().nth(line as usize)?;
     let cursor_byte = bsl_analysis_v2::utf16_to_byte_offset(line_text, character);
@@ -133,13 +135,104 @@ fn member_access_owner_type_hint_at_position(
         .saturating_sub(1);
     let offset = offset.min(u32::MAX as usize) as u32;
     if include_flow_sensitive {
-        analysis.flow_type_at_byte_offset(file_id, offset).ok().flatten()
-    } else {
         analysis
-            .type_at_byte_offset_serve_only(file_id, offset)
+            .flow_type_at_byte_offset(file_id, offset)
             .ok()
             .flatten()
+    } else {
+        serve_only_type_at_byte_offset_with_reason(analysis, file_id, offset, coordinator)
     }
+}
+
+fn definition_receiver_type_hint_at_position(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    program: &bsl_shared::ir::SemanticProgram,
+    file_id: bsl_analysis_v2::FileId,
+    file_content: &str,
+    line: u32,
+    character: u32,
+    coordinator: Option<&bsl_runtime::system::SystemCoordinator>,
+) -> Option<bsl_shared::domain::types::TypeResolution> {
+    let offset = analysis
+        .utf16_position_to_byte_offset(file_id, line, character)
+        .ok()
+        .flatten()
+        .map(|offset| offset.min(u32::MAX as usize) as u32)?;
+    let node = program.find_node_at_byte_offset(offset)?;
+
+    let object_span = match &node.kind {
+        bsl_shared::ir::SemanticNodeKind::MemberAccess {
+            object_node,
+            object_span,
+            ..
+        } => {
+            object_span.or_else(|| object_node.and_then(|idx| program.nodes.get(idx).map(|node| node.span)))
+        }
+        bsl_shared::ir::SemanticNodeKind::FunctionCall {
+            object_node,
+            object_span,
+            ..
+        } => {
+            object_span.or_else(|| object_node.and_then(|idx| program.nodes.get(idx).map(|node| node.span)))
+        }
+        _ => None,
+    }?;
+
+    let mut fallback = None;
+    let mut probes = Vec::with_capacity(2);
+    if object_span.end > object_span.start {
+        probes.push(object_span.end.saturating_sub(1));
+    }
+    probes.push(object_span.start);
+
+    for probe in probes {
+        let Some(resolution) =
+            serve_only_type_at_byte_offset_with_reason(analysis, file_id, probe, coordinator)
+        else {
+            continue;
+        };
+        if !resolution.is_unknown() && !resolution.is_dynamic() {
+            return Some(resolution);
+        }
+        if fallback.is_none() {
+            fallback = Some(resolution);
+        }
+    }
+
+    let line_based = member_access_owner_type_hint_at_position(
+        analysis,
+        file_id,
+        file_content,
+        line,
+        character,
+        false,
+        coordinator,
+    );
+    if let Some(resolution) = line_based {
+        if !resolution.is_unknown() && !resolution.is_dynamic() {
+            return Some(resolution);
+        }
+        if fallback.is_none() {
+            fallback = Some(resolution);
+        }
+    }
+
+    fallback
+}
+
+fn serve_only_type_at_byte_offset_with_reason(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    byte_offset: u32,
+    coordinator: Option<&bsl_runtime::system::SystemCoordinator>,
+) -> Option<bsl_shared::domain::types::TypeResolution> {
+    let profiled = analysis
+        .type_at_byte_offset_serve_only_profiled(file_id, byte_offset)
+        .ok()?;
+    if let Some(coordinator) = coordinator {
+        coordinator.record_intellisense_v2_type_index_reason(profiled.serve_reason_code.as_str());
+    }
+    profiled.resolution
 }
 
 fn node_at_utf16_position<'a>(

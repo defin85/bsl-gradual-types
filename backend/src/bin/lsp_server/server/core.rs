@@ -64,6 +64,21 @@ fn duration_from_millis_u128(value_ms: u128) -> Duration {
     Duration::from_millis(value_ms.min(u64::MAX as u128) as u64)
 }
 
+#[cfg(test)]
+pub(crate) fn validate_scale_aware_baseline_schema_for_acceptance(
+    baseline_report: &serde_json::Value,
+) -> Result<(), String> {
+    bsl_backend::perf_gate_evaluator::validate_scale_aware_baseline_schema(baseline_report)
+}
+
+#[cfg(test)]
+pub(crate) fn evaluate_scale_aware_gate_for_acceptance(
+    current_report: &serde_json::Value,
+    baseline_report: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    bsl_backend::perf_gate_evaluator::evaluate_scale_aware_gate(current_report, baseline_report)
+}
+
 impl BslLanguageServer {
     pub fn new(client: Client, coordinator: Arc<SystemCoordinator>) -> Self {
         let default_settings = BslSettings::default();

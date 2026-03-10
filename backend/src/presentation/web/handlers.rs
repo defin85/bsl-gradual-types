@@ -137,6 +137,28 @@ fn prepare_ephemeral_web_operation(
     Ok((context, prepared))
 }
 
+fn record_type_index_reason_at_utf16_position(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: V2FileId,
+    line: u32,
+    column: u32,
+    coordinator: &SystemCoordinator,
+) {
+    let Some(byte_offset) = analysis
+        .utf16_position_to_byte_offset(file_id, line, column)
+        .ok()
+        .flatten()
+    else {
+        return;
+    };
+    let byte_offset = byte_offset.min(u32::MAX as usize) as u32;
+    let Ok(profiled) = analysis.type_at_byte_offset_serve_only_profiled(file_id, byte_offset)
+    else {
+        return;
+    };
+    coordinator.record_intellisense_v2_type_index_reason(profiled.serve_reason_code.as_str());
+}
+
 fn validation_error_type(message: &str) -> &'static str {
     if message.contains("не существует") {
         "NonExistentMethod"
@@ -479,6 +501,13 @@ pub async fn get_hover(
                 Arc::from("hover_request.bsl"),
             )?;
             let analysis = prepared.snapshot.analysis;
+            record_type_index_reason_at_utf16_position(
+                &analysis,
+                V2FileId(1),
+                line,
+                column,
+                coordinator.as_ref(),
+            );
             let file_content = analysis
                 .file_text(V2FileId(1))
                 .map_err(|_| anyhow::anyhow!("file_text cancelled"))?

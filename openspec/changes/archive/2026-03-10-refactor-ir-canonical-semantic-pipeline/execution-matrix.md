@@ -3,8 +3,8 @@
 ## Scope
 
 Матрица покрывает обязательные требования из:
-- `openspec/changes/refactor-ir-canonical-semantic-pipeline/specs/bsl-intellisense-v2/spec.md`
-- `openspec/changes/refactor-ir-canonical-semantic-pipeline/specs/mcp-bsl-agent/spec.md`
+- `openspec/changes/archive/2026-03-10-refactor-ir-canonical-semantic-pipeline/specs/bsl-intellisense-v2/spec.md`
+- `openspec/changes/archive/2026-03-10-refactor-ir-canonical-semantic-pipeline/specs/mcp-bsl-agent/spec.md`
 
 ## Requirement -> Code Area -> Test Class
 
@@ -23,25 +23,24 @@
 | Applied-owner bare identifier fallback MUST stay removed; explicit `ЭтотОбъект` / `Объект` bindings MUST remain canonical | `analysis-v2/src/implicit_bindings.rs`, `analysis-v2/src/ast_to_ir/converter.rs`, `analysis-v2/src/type_inference_v2.rs`, `bsl-runtime/src/application/type_system/services/completion_service/member_resolution.rs` | `analysis-v2/src/type_inference_v2/tests.rs`, `analysis-v2/src/implicit_bindings/tests.rs`, `backend/tests/contextual_implicit_object_matrix_test.rs`, `backend/tests/undeclared_variable_test.rs`, `bsl-agent/src/session/tests.rs` |
 | MCP semantic tools MUST use the same shared runtime rooted in canonical IR + derived index | `bsl-agent/src/session/manager_semantic_core.rs`, `bsl-agent/src/session/manager_semantic_navigation.rs`, `bsl-agent/src/session/helpers_semantic.rs`, `bsl-runtime/src/application/intellisense_v2/facade/operations.rs` | `bsl-agent/src/session/tests.rs`, `backend/src/bin/lsp_server/server/core/tests.rs`, `bsl-agent/tests/stdio_integration.rs` |
 
-## Immediate hotspots for code changes
+## Closed implementation hotspots
 
-1. `analysis-v2/src/lib/snapshots.rs:612` строит `type_index` из `parse_result.program`, а не из IR-derived snapshot.
-2. `analysis-v2/src/lib/analysis_api.rs:190` и `analysis-v2/src/lib/analysis_api.rs:769` продолжают обслуживать interactive type queries через `type_index`.
-3. `backend/src/bin/lsp_server/server/language_server/impl_features_b.rs:117`, `backend/src/bin/lsp_server/server/language_server/impl_features_b.rs:470`, `backend/src/bin/lsp_server/server/language_server/impl_features_c.rs:120`, `backend/src/bin/lsp_server/server/language_server/impl_completion_helpers.rs:353` используют `serve_only` как shared fast path.
-4. `analysis-v2/src/lib/snapshots.rs:612` остаётся общим non-canonical builder для exact artifact, поэтому shared runtime warmup пока ещё упирается в AST-derived `type_index`.
-5. `analysis-v2/src/lib/snapshots.rs:260` и `analysis-v2/src/lib/snapshots.rs:294` продолжают строить diagnostics через `type_index`, а не через canonical IR-derived artifact.
+1. `shared/src/ir/semantic_facts.rs`, `shared/src/ir/program.rs`, `analysis-v2/src/ast_to_ir/converter.rs` и `analysis-v2/src/type_inference_v2.rs` теперь материализуют semantic facts в canonical IR и строят exact semantic index как projection того же snapshot без повторного inference по projected `Program`.
+2. `analysis-v2/src/lib/snapshots.rs` и `analysis-v2/src/lib/analysis_api.rs` обслуживают diagnostics и interactive queries из IR-derived facts текущей revision; stale parse snapshot больше не может подменять current text при semantic extraction.
+3. `bsl-agent/src/session/helpers_semantic.rs`, `bsl-agent/src/session/manager_semantic_navigation.rs`, `backend/src/presentation/web/handlers/semantic.rs` и `backend/src/presentation/web/handlers.rs` убрали adapter-local rescue/precompute и используют shared bounded type-index reason taxonomy на default path.
+4. `contracts/lsp-completion-v2/v2/`, `contracts/lsp-completion-timeline/v2/`, `contracts/observability-completion-v2/v2/`, `docs/guides/lsp-v2-latency-policy.md`, `backend/src/perf_gate_evaluator.rs` и `backend/src/bin/intellisense_perf/reporting.rs` выровнены под fail-closed cutover без stale/degraded contract drift.
 
-## Current validation gap
+## Validation status
 
-Матрица фиксирует покрытие, но один ключевой architectural gap ещё остаётся в runtime:
-- `type_index` пока строится от `parse_result.program`, а не как projection от canonical IR.
+Обязательный runtime gap закрыт:
+- exact semantic index больше не строится из `parse_result.program`; canonical semantic facts живут в `SemanticProgram` и материализуются в derived index из того же IR snapshot.
+- MCP/Web/LSP используют один shared semantic runtime contract и одну bounded observability taxonomy на default path.
+- checked-in contracts, docs и perf/acceptance gates больше не объявляют stale/degraded substitute допустимым semantic поведением.
 
-## Implemented slice
+## Implemented acceptance slice
 
-Зафиксированный в этой сессии runtime slice:
-- `analysis-v2::flow_type_at_byte_offset` больше не выполняет синхронный `type_index` / `parse_result` rescue и берёт base type только через exact `serve_only` artifact.
-- `semantic-diagnostics` теперь эмитит `UndeclaredVariable` для RHS присваивания, когда canonical semantic hints сообщают undeclared value.
-- backend contract tests закрепляют explicit-binding-only semantics для bare owner members вне `FormModule`.
-- `IntellisenseV2Facade::prepare_ephemeral_operation` теперь прогревает exact type index для shared interactive ephemeral queries (`hover`, `members`, `type_at_position`), а adapter-local precompute удалён из Web/MCP handlers.
-- `analysis-v2` теперь трактует stateful full-parse snapshot reasons `no_previous_tree` и `no_edits_provided` как exact-safe для `serve_only` artifact, а блокирующими остаются только реально degraded fallback reasons.
-- stateful LSP acceptance helpers теперь ждут доступность current exact `serve_only` artifact, а не просто исчезновение background precompute task из server map.
+В этой сессии зафиксированы и прогнаны ключевые acceptance-доказательства:
+- `analysis-v2` tests подтверждают IR-derived materialization, current-text correctness и сохранение explicit/facet-aware semantics.
+- `bsl-agent` tests подтверждают receiver-hint parity для `definition` и shared type-index reason metrics для `type_at_position` / `members` / `definition`.
+- `backend` web/LSP acceptance tests подтверждают fail-closed observability, scale-aware perf gates и отсутствие adapter-local semantic rescue path.
+- versioned contracts и perf-gate architecture checks подтверждают, что shipped operational surfaces соответствуют runtime cutover.

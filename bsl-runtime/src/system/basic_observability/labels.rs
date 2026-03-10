@@ -102,11 +102,6 @@ pub(super) const OBSERVABILITY_ORIGIN_REGISTRY: &[(&str, &str)] = &[
 
 pub(super) const TYPE_INDEX_REASON_REGISTRY: &[(&str, &str)] = &[
     ("type_index_exact_hit", "type_index_exact_hit"),
-    ("type_index_stale_served", "type_index_stale_served"),
-    (
-        "type_index_degraded_incomplete",
-        "type_index_degraded_incomplete",
-    ),
     (
         "type_index_fallback_unavailable",
         "type_index_fallback_unavailable",
@@ -162,11 +157,6 @@ pub(super) const COMPLETION_OWNER_HINT_REASON_REGISTRY: &[(&str, &str)] = &[
     ("type_miss", "type_miss"),
     ("cancelled", "cancelled"),
     ("type_index_exact_hit", "type_index_exact_hit"),
-    ("type_index_stale_served", "type_index_stale_served"),
-    (
-        "type_index_degraded_incomplete",
-        "type_index_degraded_incomplete",
-    ),
     (
         "type_index_fallback_unavailable",
         "type_index_fallback_unavailable",

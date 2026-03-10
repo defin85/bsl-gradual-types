@@ -5,6 +5,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::cfg::ControlFlowGraph;
+use super::semantic_facts::SemanticFacts;
 use super::span::SourceInfo;
 use super::symbol_table::{ScopeId, SymbolTable};
 use super::types::{SemanticNode, SemanticNodeKind};
@@ -26,6 +27,10 @@ pub struct SemanticProgram {
 
     /// Граф потока управления (для flow-sensitive анализа)
     pub cfg: Option<ControlFlowGraph>,
+
+    /// Canonical semantic facts materialized once for this IR snapshot.
+    #[serde(default)]
+    pub semantic_facts: SemanticFacts,
 }
 
 impl SemanticProgram {
@@ -39,6 +44,7 @@ impl SemanticProgram {
                 content_hash: 0,
             },
             cfg: None,
+            semantic_facts: SemanticFacts::default(),
         }
     }
 

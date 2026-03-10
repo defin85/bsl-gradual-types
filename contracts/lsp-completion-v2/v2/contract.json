@@ -1,0 +1,37 @@
+{
+  "surface": "lsp-completion-v2",
+  "major_version": 2,
+  "schema_version": 1,
+  "compatibility": {
+    "breaking_change_requires_major_bump": true,
+    "breaking_change_requires_migration_note": true
+  },
+  "completion": {
+    "trigger_modes": [
+      "trigger_character",
+      "invoked",
+      "trigger_for_incomplete",
+      "none"
+    ],
+    "transport_outcomes": [
+      "ok_non_empty",
+      "ok_empty"
+    ],
+    "semantic_contract_classes": [
+      "exact_current_revision",
+      "fail_closed_current_revision"
+    ]
+  },
+  "examples": {
+    "member_access_trigger_character_exact_current_revision": {
+      "trigger_mode": "trigger_character",
+      "semantic_contract": "exact_current_revision",
+      "expected_transport_outcome": "ok_non_empty"
+    },
+    "member_access_trigger_character_fail_closed_current_revision": {
+      "trigger_mode": "trigger_character",
+      "semantic_contract": "fail_closed_current_revision",
+      "expected_transport_outcome": "ok_empty"
+    }
+  }
+}

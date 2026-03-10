@@ -207,11 +207,11 @@ impl BslLanguageServer {
         loop {
             let analysis = self.analysis_v2.snapshot().await;
             let observed_version = analysis.file_version(file_id).ok().flatten();
-            let exact_ready =
-                expected_version.is_none_or(|version| observed_version == Some(version))
-                    && analysis
-                        .current_type_index_serve_only_ready(file_id)
-                        .unwrap_or(false);
+            let exact_ready = expected_version
+                .is_none_or(|version| observed_version == Some(version))
+                && analysis
+                    .current_type_index_serve_only_ready(file_id)
+                    .unwrap_or(false);
             if exact_ready {
                 return true;
             }

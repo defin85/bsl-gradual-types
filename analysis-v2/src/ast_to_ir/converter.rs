@@ -165,6 +165,7 @@ impl AstToIrConverter {
                 content_hash: hash_content(&source),
             },
             cfg,
+            semantic_facts: SemanticFacts::default(),
         })
     }
 

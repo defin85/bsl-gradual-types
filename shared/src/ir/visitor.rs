@@ -245,9 +245,7 @@ fn direct_child_indices(node: &SemanticNode) -> Vec<usize> {
             .copied()
             .chain(arg_nodes.iter().flatten().copied())
             .collect(),
-        SemanticNodeKind::MemberAccess { object_node, .. } => {
-            object_node.iter().copied().collect()
-        }
+        SemanticNodeKind::MemberAccess { object_node, .. } => object_node.iter().copied().collect(),
         SemanticNodeKind::IndexAccess {
             object_node,
             index_node,
@@ -340,7 +338,11 @@ fn walk_node<V: SemanticVisitor>(
             then_node,
             else_node,
         } => {
-            for child_idx in condition_node.iter().chain(then_node.iter()).chain(else_node.iter()) {
+            for child_idx in condition_node
+                .iter()
+                .chain(then_node.iter())
+                .chain(else_node.iter())
+            {
                 if let Some(child_node) = program.nodes.get(*child_idx) {
                     walk_node(child_node, visitor, context, program);
                 }

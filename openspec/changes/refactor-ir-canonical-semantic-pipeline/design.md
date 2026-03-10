@@ -42,6 +42,9 @@
 - `hover`, `signatureHelp`, `definition`, completion owner-hint и MCP/Web `type-at-position` активно используют `serve_only`/`type_index` fast paths.
 - `completion_missing_ir_policy_decision` и связанные adapter paths поддерживают degraded availability contract.
 - `infer_applied_owner_member_identifier` сохраняет отдельную module-context semantic policy.
+- `SemanticNodeKind::{MemberAccess, FunctionCall, IndexAccess}` уже хранит canonical topology выражения (`object_node`, `object_span`, `arg_nodes`, `arg_spans`), но resolved receiver/member facts дочитываются не из IR, а через `type_index` lookups по span.
+- `SymbolTable` сегодня доказывает visibility/declaration span, но `VariableState` не несёт canonical binding type/origin; typed module-context bindings (`ЭтотОбъект`, `Объект`, `ЭтаФорма`, `Параметры`) живут в `implicit_bindings` / seed logic, а не в typed IR contract.
+- `definition` сейчас реконструирует target из `type_at_position_hint`, `receiver_type_hint` и repository lookups, потому что canonical IR не публикует binding/member definition anchors.
 
 ## Architecture Drivers
 
@@ -70,11 +73,67 @@
 
 Но `parse_result` не считается самостоятельным semantic source.
 
+### 1a. Минимальные расширения canonical IR фиксируются как additive semantic facts
+
+Цель `2.1` не в создании второго semantic graph, а в том, чтобы существующий `SemanticProgram`
+нёс минимальный набор canonical facts, из которых можно построить все interactive queries без
+parallel semantic inference path.
+
+Нормативные принципы:
+- сохраняется один `SemanticProgram` с теми же `SemanticNodeKind`, `SymbolTable`, `CFG` и node-index topology;
+- минимальные расширения добавляются как canonical semantic facts внутри `SemanticProgram`
+  (или семантически эквивалентного IR-owned storage), а не как отдельный parse-result/type-index pipeline;
+- existing `TypeResolution` и `TypeDefinitionLocation` переиспользуются как canonical value objects;
+- всё, что является только денормализованным lookup по byte/span/revision, остаётся зоной ответственности `derived semantic index`, а не canonical IR.
+
+Минимально обязательные canonical facts:
+- `BindingFact` для identifier-producing bindings:
+  - stable binding identity;
+  - origin (`local_decl`, `param`, `implicit_module_context`, `global_function`, `common_module`, `global_collection`, или эквивалентный bounded enum);
+  - owning scope и declaration anchor/span;
+  - typed descriptor (`ContextualTypeDescriptor`, `TypeResolution` или семантически эквивалентная canonical форма) для bindings, у которых тип известен на snapshot build.
+- `ExpressionTypeFact` для expression-producing nodes:
+  - `node_id/span -> base TypeResolution`;
+  - exact expression surface, который обслуживает `type-at-position`, `hover`, completion owner hints и diagnostics;
+  - обязательное сохранение `active_facet` / `available_facets` без flattening.
+- `ReceiverFact` для `MemberAccess`, `FunctionCall`, `IndexAccess`:
+  - canonical receiver node/span;
+  - optional binding identity receiver-а, если он происходит из identifier binding;
+  - base receiver `TypeResolution`, который больше не требуется восстанавливать через request-time `type_index` lookup по owner span.
+- `MemberFact` для `MemberAccess` и method-oriented `FunctionCall`:
+  - canonical owner `TypeResolution`;
+  - access kind (`property`, `method`, `indexer`);
+  - resolved member identity/name в форме, достаточной для metadata lookup и validation;
+  - optional result-type / callable-signature anchor, если этот факт уже известен на snapshot build.
+- `DefinitionAnchorFact` для go-to-definition:
+  - local declaration anchors для variable/parameter/function/procedure bindings;
+  - configuration/type anchors через `TypeDefinitionLocation`;
+  - common-module и config-member anchors там, где repository-backed definition уже определим на canonical path.
+
+Эта минимальная модель должна покрывать следующие классы запросов:
+- owner/member queries: `ReceiverFact` + `MemberFact`;
+- type-at-position и hover base truth: `ExpressionTypeFact`;
+- definition: `BindingFact` + `DefinitionAnchorFact`;
+- explicit module-context semantics: `BindingFact(origin=implicit_module_context)` для `ЭтотОбъект` / `Объект` и других supported bindings.
+
+Явные границы минимального расширения:
+- canonical IR НЕ обязан хранить per-byte lookup maps, smallest-containing-node indexes или serve-only caches;
+- canonical IR НЕ должен дублировать `type_index` в виде второго списка `span -> TypeResolution`, живущего отдельно от node/binding facts;
+- `parse_result` MAY помогать syntax extraction для неполного кода, но MUST NOT синтезировать отсутствующие `BindingFact` / `ExpressionTypeFact` / `DefinitionAnchorFact`;
+- flow-sensitive narrowing остаётся overlay поверх base `ExpressionTypeFact`, а не альтернативным semantic source.
+
+Следствие для cutover:
+- текущие `SemanticTypeHints` и `type_index`-backed owner/type hints становятся derived projection от этих canonical facts;
+- typed module-context bindings перестают быть seed-only detail type inference и становятся частью shared IR contract;
+- `definition` больше не требует request-time semantic reconstruction из `receiver_type_hint` / `type_at_position_hint`, кроме чтения уже построенных canonical anchors.
+
 ### 2. `derived semantic index` является read-model projection от IR
 
 Новый `derived semantic index` является единственным fast query слоем для интерактивных операций.
 
-Он строится только из canonical IR snapshot текущей revision и может содержать денормализованные lookup-структуры, например:
+Он строится только из canonical IR snapshot текущей revision и материализует
+denormalized lookup-структуры над canonical facts, описанными выше. Он может содержать,
+например:
 - `byte/span -> TypeResolution`;
 - receiver/member lookup;
 - member identity lookup;

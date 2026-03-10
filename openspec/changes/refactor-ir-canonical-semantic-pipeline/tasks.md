@@ -1,6 +1,6 @@
 ## 1. Contract
-- [ ] 1.1 Зафиксировать, что canonical IR является единственным semantic source of truth для v2.
-- [ ] 1.2 Зафиксировать, что `derived semantic index` является единственным fast query артефактом и строится только из IR snapshot текущей revision.
+- [x] 1.1 Зафиксировать, что canonical IR является единственным semantic source of truth для v2.
+- [x] 1.2 Зафиксировать, что `derived semantic index` является единственным fast query артефактом и строится только из IR snapshot текущей revision.
 - [x] 1.3 Зафиксировать fail-closed policy для недоступности canonical semantic артефактов вместо stale/degraded/keyword fallback и запрет на маскировку stale ответа под current-revision semantics.
 - [x] 1.4 Зафиксировать удаление applied-owner bare identifier fallback как части semantic contract.
 - [x] 1.5 Зафиксировать, что `parse_result` и другие syntax helpers могут использоваться только для syntax/position extraction, но не как самостоятельный semantic source.
@@ -9,7 +9,7 @@
 - [x] 1.8 Зафиксировать, что canonical semantic core сохраняет facet-aware identity configuration types (`active_facet` / `available_facets` или эквивалент) и не допускает flattening до plain type names, меняющего member/property semantics.
 
 ## 2. Design
-- [ ] 2.1 Описать минимальные расширения canonical IR, достаточные для owner/member/type/definition queries без parallel semantic inference path.
+- [x] 2.1 Описать минимальные расширения canonical IR, достаточные для owner/member/type/definition queries без parallel semantic inference path.
 - [ ] 2.2 Описать состав `derived semantic index` и contract его построения из одного IR snapshot/revision.
 - [ ] 2.3 Описать big-bang cutover для `LSP`, `Web`, `MCP`, `CLI` без long-lived dual runtime behavior в merge state.
 - [ ] 2.4 Описать contract/version impact для `contracts/**`, observability reason taxonomy, adapter boundaries, acceptance и perf expectations после удаления degraded paths и stale-as-current substitute behavior.
@@ -34,8 +34,8 @@
 - [ ] 3.5 Прогнать `openspec validate refactor-ir-canonical-semantic-pipeline --strict --no-interactive`.
 
 ## Dependencies / Parallelism
-- [ ] D1 Пункты 1.1-1.8 блокируют весь design/spec cutover.
-- [ ] D2 Пункт 2.1 блокирует 2.2 и semantic spec deltas.
+- [x] D1 Пункты 1.1-1.8 блокируют весь design/spec cutover.
+- [x] D2 Пункт 2.1 блокирует 2.2 и semantic spec deltas.
 - [ ] D3 Пункты 2.2-2.4 блокируют validation matrix и contract deltas.
 - [ ] D3a Пункт 2.6 блокирует финальную формулировку quality gates и acceptance.
 - [ ] D4 Пункт 2.5 должен быть согласован до apply-stage, чтобы не внедрять конфликтующий MCP runtime path.

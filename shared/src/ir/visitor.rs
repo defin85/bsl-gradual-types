@@ -3,6 +3,7 @@
 //! Позволяет выполнять различные анализы над IR без изменения самой структуры.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use super::*;
 
@@ -139,12 +140,150 @@ pub trait SemanticVisitor {
 /// ```
 pub fn walk_program<V: SemanticVisitor>(program: &SemanticProgram, visitor: &mut V) {
     let mut context = FlowContext::new(program.symbols.root_scope);
+    let child_indices: HashSet<usize> = program
+        .nodes
+        .iter()
+        .flat_map(direct_child_indices)
+        .collect();
 
     // Обходим только root-level узлы (избегаем двойного обхода вложенных узлов)
-    for node in &program.nodes {
-        if node.scope_id == program.symbols.root_scope {
+    for (idx, node) in program.nodes.iter().enumerate() {
+        if node.scope_id == program.symbols.root_scope && !child_indices.contains(&idx) {
             walk_node(node, visitor, &mut context, program);
         }
+    }
+}
+
+fn direct_child_indices(node: &SemanticNode) -> Vec<usize> {
+    match &node.kind {
+        SemanticNodeKind::VariableDeclaration {
+            initial_value_node, ..
+        } => initial_value_node.iter().copied().collect(),
+        SemanticNodeKind::Assignment { value_node, .. }
+        | SemanticNodeKind::Return { value_node } => value_node.iter().copied().collect(),
+        SemanticNodeKind::BinaryExpression {
+            left_node,
+            right_node,
+            ..
+        } => left_node
+            .iter()
+            .copied()
+            .chain(right_node.iter().copied())
+            .collect(),
+        SemanticNodeKind::UnaryExpression { operand_node, .. } => {
+            operand_node.iter().copied().collect()
+        }
+        SemanticNodeKind::TernaryExpression {
+            condition_node,
+            then_node,
+            else_node,
+        } => condition_node
+            .iter()
+            .copied()
+            .chain(then_node.iter().copied())
+            .chain(else_node.iter().copied())
+            .collect(),
+        SemanticNodeKind::AwaitExpression { expression_node }
+        | SemanticNodeKind::AwaitStatement { expression_node } => {
+            expression_node.iter().copied().collect()
+        }
+        SemanticNodeKind::FunctionDeclaration { body, .. }
+        | SemanticNodeKind::ProcedureDeclaration { body, .. }
+        | SemanticNodeKind::BlockScope {
+            statements: body, ..
+        } => body.clone(),
+        SemanticNodeKind::IfStatement {
+            condition_node,
+            then_branch,
+            else_branch,
+        } => {
+            let mut indices: Vec<usize> = condition_node.iter().copied().collect();
+            indices.extend(then_branch.iter().copied());
+            if let Some(else_branch) = else_branch {
+                indices.extend(else_branch.iter().copied());
+            }
+            indices
+        }
+        SemanticNodeKind::WhileLoop {
+            condition_node,
+            body,
+        }
+        | SemanticNodeKind::ForEachLoop {
+            collection_node: condition_node,
+            body,
+            ..
+        } => condition_node
+            .iter()
+            .copied()
+            .chain(body.iter().copied())
+            .collect(),
+        SemanticNodeKind::ForLoop {
+            start_node,
+            end_node,
+            body,
+            ..
+        } => start_node
+            .iter()
+            .copied()
+            .chain(end_node.iter().copied())
+            .chain(body.iter().copied())
+            .collect(),
+        SemanticNodeKind::TryExcept {
+            try_body,
+            except_body,
+        } => try_body
+            .iter()
+            .copied()
+            .chain(except_body.iter().copied())
+            .collect(),
+        SemanticNodeKind::FunctionCall {
+            object_node,
+            arg_nodes,
+            ..
+        } => object_node
+            .iter()
+            .copied()
+            .chain(arg_nodes.iter().flatten().copied())
+            .collect(),
+        SemanticNodeKind::MemberAccess { object_node, .. } => {
+            object_node.iter().copied().collect()
+        }
+        SemanticNodeKind::IndexAccess {
+            object_node,
+            index_node,
+            ..
+        } => object_node
+            .iter()
+            .copied()
+            .chain(index_node.iter().copied())
+            .collect(),
+        SemanticNodeKind::NewExpression { arg_nodes, .. } => {
+            arg_nodes.iter().flatten().copied().collect()
+        }
+        SemanticNodeKind::ExecuteStatement { code_node } => code_node.iter().copied().collect(),
+        SemanticNodeKind::RaiseErrorStatement { message_node } => {
+            message_node.iter().copied().collect()
+        }
+        SemanticNodeKind::AddHandlerStatement {
+            event_node,
+            handler_node,
+        }
+        | SemanticNodeKind::RemoveHandlerStatement {
+            event_node,
+            handler_node,
+        } => event_node
+            .iter()
+            .copied()
+            .chain(handler_node.iter().copied())
+            .collect(),
+        SemanticNodeKind::VariableAccess { .. }
+        | SemanticNodeKind::StringLiteral { .. }
+        | SemanticNodeKind::NumberLiteral { .. }
+        | SemanticNodeKind::BooleanLiteral { .. }
+        | SemanticNodeKind::DateLiteral { .. }
+        | SemanticNodeKind::GlobalPropertyAccess { .. }
+        | SemanticNodeKind::Break
+        | SemanticNodeKind::Continue => Vec::new(),
     }
 }
 
@@ -184,6 +323,35 @@ fn walk_node<V: SemanticVisitor>(
             };
             context.update_variable_state(variable.clone(), updated);
             let _ = value_node;
+        }
+
+        SemanticNodeKind::UnaryExpression { operand_node, .. } => {
+            if let Some(operand_idx) = operand_node {
+                if let Some(child_node) = program.nodes.get(*operand_idx) {
+                    walk_node(child_node, visitor, context, program);
+                }
+            }
+        }
+
+        SemanticNodeKind::TernaryExpression {
+            condition_node,
+            then_node,
+            else_node,
+        } => {
+            for child_idx in condition_node.iter().chain(then_node.iter()).chain(else_node.iter()) {
+                if let Some(child_node) = program.nodes.get(*child_idx) {
+                    walk_node(child_node, visitor, context, program);
+                }
+            }
+        }
+
+        SemanticNodeKind::AwaitExpression { expression_node }
+        | SemanticNodeKind::AwaitStatement { expression_node } => {
+            if let Some(expression_idx) = expression_node {
+                if let Some(child_node) = program.nodes.get(*expression_idx) {
+                    walk_node(child_node, visitor, context, program);
+                }
+            }
         }
 
         SemanticNodeKind::IfStatement {
@@ -281,6 +449,37 @@ fn walk_node<V: SemanticVisitor>(
             // Обходим except блок
             for &node_idx in except_body {
                 if let Some(child_node) = program.nodes.get(node_idx) {
+                    walk_node(child_node, visitor, context, program);
+                }
+            }
+        }
+
+        SemanticNodeKind::ExecuteStatement { code_node } => {
+            if let Some(code_idx) = code_node {
+                if let Some(child_node) = program.nodes.get(*code_idx) {
+                    walk_node(child_node, visitor, context, program);
+                }
+            }
+        }
+
+        SemanticNodeKind::RaiseErrorStatement { message_node } => {
+            if let Some(message_idx) = message_node {
+                if let Some(child_node) = program.nodes.get(*message_idx) {
+                    walk_node(child_node, visitor, context, program);
+                }
+            }
+        }
+
+        SemanticNodeKind::AddHandlerStatement {
+            event_node,
+            handler_node,
+        }
+        | SemanticNodeKind::RemoveHandlerStatement {
+            event_node,
+            handler_node,
+        } => {
+            for child_idx in event_node.iter().chain(handler_node.iter()) {
+                if let Some(child_node) = program.nodes.get(*child_idx) {
                     walk_node(child_node, visitor, context, program);
                 }
             }

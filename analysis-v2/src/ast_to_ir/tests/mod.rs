@@ -474,6 +474,428 @@ fn test_foreach_loop_keeps_collection_node() {
 }
 
 #[test]
+fn test_execute_statement_keeps_code_node() {
+    let ast = Program {
+        statements: vec![Statement::Execute {
+            code: Expression::String {
+                value: "Сообщить(1)".to_string(),
+                span: AstSpan::stub(),
+            },
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "Выполнить(\"Сообщить(1)\");".to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    assert_eq!(ir.nodes.len(), 2);
+    assert!(matches!(
+        ir.nodes[0].kind,
+        SemanticNodeKind::StringLiteral { .. }
+    ));
+    if let SemanticNodeKind::ExecuteStatement { code_node } = &ir.nodes[1].kind {
+        assert_eq!(*code_node, Some(0));
+    } else {
+        panic!("Expected ExecuteStatement at nodes[1]");
+    }
+}
+
+#[test]
+fn test_raise_error_statement_keeps_message_node() {
+    let ast = Program {
+        statements: vec![Statement::RaiseError {
+            message: Some(Expression::String {
+                value: "Ошибка".to_string(),
+                span: AstSpan::stub(),
+            }),
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "ВызватьИсключение(\"Ошибка\");".to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    assert_eq!(ir.nodes.len(), 2);
+    assert!(matches!(
+        ir.nodes[0].kind,
+        SemanticNodeKind::StringLiteral { .. }
+    ));
+    if let SemanticNodeKind::RaiseErrorStatement { message_node } = &ir.nodes[1].kind {
+        assert_eq!(*message_node, Some(0));
+    } else {
+        panic!("Expected RaiseErrorStatement at nodes[1]");
+    }
+}
+
+#[test]
+fn test_add_handler_statement_keeps_event_and_handler_nodes() {
+    let ast = Program {
+        statements: vec![Statement::AddHandler {
+            event: Expression::Identifier {
+                name: "Событие".to_string(),
+                span: AstSpan::stub(),
+            },
+            handler: Expression::Identifier {
+                name: "Обработчик".to_string(),
+                span: AstSpan::stub(),
+            },
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "ДобавитьОбработчик Событие, Обработчик;".to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    assert_eq!(ir.nodes.len(), 3);
+    if let SemanticNodeKind::AddHandlerStatement {
+        event_node,
+        handler_node,
+    } = &ir.nodes[2].kind
+    {
+        assert_eq!(*event_node, Some(0));
+        assert_eq!(*handler_node, Some(1));
+    } else {
+        panic!("Expected AddHandlerStatement at nodes[2]");
+    }
+}
+
+#[test]
+fn test_remove_handler_statement_keeps_event_and_handler_nodes() {
+    let ast = Program {
+        statements: vec![Statement::RemoveHandler {
+            event: Expression::Identifier {
+                name: "Событие".to_string(),
+                span: AstSpan::stub(),
+            },
+            handler: Expression::Identifier {
+                name: "Обработчик".to_string(),
+                span: AstSpan::stub(),
+            },
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "УдалитьОбработчик Событие, Обработчик;".to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    assert_eq!(ir.nodes.len(), 3);
+    if let SemanticNodeKind::RemoveHandlerStatement {
+        event_node,
+        handler_node,
+    } = &ir.nodes[2].kind
+    {
+        assert_eq!(*event_node, Some(0));
+        assert_eq!(*handler_node, Some(1));
+    } else {
+        panic!("Expected RemoveHandlerStatement at nodes[2]");
+    }
+}
+
+#[test]
+fn test_await_statement_keeps_expression_node() {
+    let ast = Program {
+        statements: vec![Statement::Await {
+            expression: Expression::Identifier {
+                name: "АсинхронныйВызов".to_string(),
+                span: AstSpan::stub(),
+            },
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "Ждать АсинхронныйВызов;".to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    assert_eq!(ir.nodes.len(), 2);
+    if let SemanticNodeKind::AwaitStatement { expression_node } = &ir.nodes[1].kind {
+        assert_eq!(*expression_node, Some(0));
+    } else {
+        panic!("Expected AwaitStatement at nodes[1]");
+    }
+}
+
+#[test]
+fn test_unary_expression_materializes_operand_node() {
+    let ast = Program {
+        statements: vec![Statement::Assignment {
+            target: Expression::Identifier {
+                name: "x".to_string(),
+                span: AstSpan::stub(),
+            },
+            value: Expression::Unary {
+                operator: "-".to_string(),
+                operand: Box::new(Expression::Number {
+                    value: 42.0,
+                    span: AstSpan::stub(),
+                }),
+                span: AstSpan::stub(),
+            },
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "x = -42;".to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    assert_eq!(ir.nodes.len(), 3);
+
+    if let SemanticNodeKind::UnaryExpression {
+        operator,
+        operand_node,
+    } = &ir.nodes[1].kind
+    {
+        assert_eq!(operator, "-");
+        assert_eq!(*operand_node, Some(0));
+    } else {
+        panic!("Expected UnaryExpression at nodes[1]");
+    }
+
+    if let SemanticNodeKind::Assignment { value_node, .. } = &ir.nodes[2].kind {
+        assert_eq!(*value_node, Some(1));
+    } else {
+        panic!("Expected Assignment at nodes[2]");
+    }
+}
+
+#[test]
+fn test_ternary_expression_materializes_branch_nodes() {
+    let ast = Program {
+        statements: vec![Statement::Assignment {
+            target: Expression::Identifier {
+                name: "x".to_string(),
+                span: AstSpan::stub(),
+            },
+            value: Expression::Ternary {
+                condition: Box::new(Expression::Boolean {
+                    value: true,
+                    span: AstSpan::stub(),
+                }),
+                then_expr: Box::new(Expression::Number {
+                    value: 1.0,
+                    span: AstSpan::stub(),
+                }),
+                else_expr: Box::new(Expression::Number {
+                    value: 2.0,
+                    span: AstSpan::stub(),
+                }),
+                span: AstSpan::stub(),
+            },
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "x = ?(Истина, 1, 2);".to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    assert_eq!(ir.nodes.len(), 5);
+
+    if let SemanticNodeKind::TernaryExpression {
+        condition_node,
+        then_node,
+        else_node,
+    } = &ir.nodes[3].kind
+    {
+        assert_eq!(*condition_node, Some(0));
+        assert_eq!(*then_node, Some(1));
+        assert_eq!(*else_node, Some(2));
+    } else {
+        panic!("Expected TernaryExpression at nodes[3]");
+    }
+
+    if let SemanticNodeKind::Assignment { value_node, .. } = &ir.nodes[4].kind {
+        assert_eq!(*value_node, Some(3));
+    } else {
+        panic!("Expected Assignment at nodes[4]");
+    }
+}
+
+#[test]
+fn test_await_expression_materializes_wrapped_expression_node() {
+    let ast = Program {
+        statements: vec![Statement::Assignment {
+            target: Expression::Identifier {
+                name: "x".to_string(),
+                span: AstSpan::stub(),
+            },
+            value: Expression::Await {
+                expression: Box::new(Expression::Call {
+                    function: Box::new(Expression::Identifier {
+                        name: "Получить".to_string(),
+                        span: AstSpan::stub(),
+                    }),
+                    args: vec![],
+                    span: AstSpan::stub(),
+                }),
+                span: AstSpan::stub(),
+            },
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "x = await Получить();".to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    assert_eq!(ir.nodes.len(), 3);
+
+    if let SemanticNodeKind::AwaitExpression { expression_node } = &ir.nodes[1].kind {
+        assert_eq!(*expression_node, Some(0));
+    } else {
+        panic!("Expected AwaitExpression at nodes[1]");
+    }
+
+    if let SemanticNodeKind::Assignment { value_node, .. } = &ir.nodes[2].kind {
+        assert_eq!(*value_node, Some(1));
+    } else {
+        panic!("Expected Assignment at nodes[2]");
+    }
+}
+
+#[test]
+fn test_expression_carrying_statements_materialize_operand_nodes() {
+    let ast = Program {
+        statements: vec![
+            Statement::Execute {
+                code: Expression::String {
+                    value: "Код".to_string(),
+                    span: AstSpan::stub(),
+                },
+                span: AstSpan::stub(),
+            },
+            Statement::RaiseError {
+                message: Some(Expression::String {
+                    value: "Ошибка".to_string(),
+                    span: AstSpan::stub(),
+                }),
+                span: AstSpan::stub(),
+            },
+            Statement::AddHandler {
+                event: Expression::Identifier {
+                    name: "Событие".to_string(),
+                    span: AstSpan::stub(),
+                },
+                handler: Expression::Identifier {
+                    name: "Обработчик".to_string(),
+                    span: AstSpan::stub(),
+                },
+                span: AstSpan::stub(),
+            },
+            Statement::RemoveHandler {
+                event: Expression::Identifier {
+                    name: "Событие".to_string(),
+                    span: AstSpan::stub(),
+                },
+                handler: Expression::Identifier {
+                    name: "Обработчик".to_string(),
+                    span: AstSpan::stub(),
+                },
+                span: AstSpan::stub(),
+            },
+            Statement::Await {
+                expression: Expression::Call {
+                    function: Box::new(Expression::Identifier {
+                        name: "Получить".to_string(),
+                        span: AstSpan::stub(),
+                    }),
+                    args: vec![],
+                    span: AstSpan::stub(),
+                },
+                span: AstSpan::stub(),
+            },
+        ],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "Выполнить(\"Код\");\nВызватьИсключение \"Ошибка\";\nДобавитьОбработчик Событие, Обработчик;\nУдалитьОбработчик Событие, Обработчик;\nAwait Получить();".to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    assert_eq!(ir.nodes.len(), 12);
+
+    assert!(matches!(
+        ir.nodes[1].kind,
+        SemanticNodeKind::ExecuteStatement { code_node: Some(0) }
+    ));
+    assert!(matches!(
+        ir.nodes[3].kind,
+        SemanticNodeKind::RaiseErrorStatement {
+            message_node: Some(2)
+        }
+    ));
+    assert!(matches!(
+        ir.nodes[6].kind,
+        SemanticNodeKind::AddHandlerStatement {
+            event_node: Some(4),
+            handler_node: Some(5)
+        }
+    ));
+    assert!(matches!(
+        ir.nodes[9].kind,
+        SemanticNodeKind::RemoveHandlerStatement {
+            event_node: Some(7),
+            handler_node: Some(8)
+        }
+    ));
+    assert!(matches!(
+        ir.nodes[11].kind,
+        SemanticNodeKind::AwaitStatement {
+            expression_node: Some(10)
+        }
+    ));
+}
+
+#[test]
 fn test_function_call_with_args() {
     let ast = Program {
         statements: vec![Statement::Call {

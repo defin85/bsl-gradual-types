@@ -197,6 +197,36 @@ impl SemanticProgram {
                     attributes,
                 )
             }
+            SemanticNodeKind::UnaryExpression { operator, .. } => {
+                attributes.insert("operator".to_string(), operator.clone());
+                (
+                    "UnaryExpression".to_string(),
+                    Some(format!("{}<expr>", operator)),
+                    attributes,
+                )
+            }
+            SemanticNodeKind::TernaryExpression {
+                condition_node,
+                then_node,
+                else_node,
+            } => {
+                if let Some(node_idx) = condition_node {
+                    attributes.insert("condition_node".to_string(), node_idx.to_string());
+                }
+                if let Some(node_idx) = then_node {
+                    attributes.insert("then_node".to_string(), node_idx.to_string());
+                }
+                if let Some(node_idx) = else_node {
+                    attributes.insert("else_node".to_string(), node_idx.to_string());
+                }
+                ("TernaryExpression".to_string(), None, attributes)
+            }
+            SemanticNodeKind::AwaitExpression { expression_node } => {
+                if let Some(node_idx) = expression_node {
+                    attributes.insert("expression_node".to_string(), node_idx.to_string());
+                }
+                ("AwaitExpression".to_string(), None, attributes)
+            }
             SemanticNodeKind::StringLiteral { value } => {
                 attributes.insert("value".to_string(), value.clone());
                 ("StringLiteral".to_string(), Some(value.clone()), attributes)
@@ -279,6 +309,48 @@ impl SemanticProgram {
                     attributes.insert("collection_node".to_string(), node_idx.to_string());
                 }
                 ("ForEachLoop".to_string(), None, attributes)
+            }
+            SemanticNodeKind::ExecuteStatement { code_node } => {
+                if let Some(node_idx) = code_node {
+                    attributes.insert("code_node".to_string(), node_idx.to_string());
+                }
+                ("ExecuteStatement".to_string(), None, attributes)
+            }
+            SemanticNodeKind::RaiseErrorStatement { message_node } => {
+                if let Some(node_idx) = message_node {
+                    attributes.insert("message_node".to_string(), node_idx.to_string());
+                }
+                ("RaiseErrorStatement".to_string(), None, attributes)
+            }
+            SemanticNodeKind::AddHandlerStatement {
+                event_node,
+                handler_node,
+            } => {
+                if let Some(node_idx) = event_node {
+                    attributes.insert("event_node".to_string(), node_idx.to_string());
+                }
+                if let Some(node_idx) = handler_node {
+                    attributes.insert("handler_node".to_string(), node_idx.to_string());
+                }
+                ("AddHandlerStatement".to_string(), None, attributes)
+            }
+            SemanticNodeKind::RemoveHandlerStatement {
+                event_node,
+                handler_node,
+            } => {
+                if let Some(node_idx) = event_node {
+                    attributes.insert("event_node".to_string(), node_idx.to_string());
+                }
+                if let Some(node_idx) = handler_node {
+                    attributes.insert("handler_node".to_string(), node_idx.to_string());
+                }
+                ("RemoveHandlerStatement".to_string(), None, attributes)
+            }
+            SemanticNodeKind::AwaitStatement { expression_node } => {
+                if let Some(node_idx) = expression_node {
+                    attributes.insert("expression_node".to_string(), node_idx.to_string());
+                }
+                ("AwaitStatement".to_string(), None, attributes)
             }
             SemanticNodeKind::MemberAccess {
                 object_node,
@@ -487,7 +559,41 @@ impl SemanticProgram {
                 .chain(right_node.iter().copied())
                 .collect(),
 
+            UnaryExpression { operand_node, .. } => operand_node.iter().copied().collect(),
+
+            TernaryExpression {
+                condition_node,
+                then_node,
+                else_node,
+            } => condition_node
+                .iter()
+                .copied()
+                .chain(then_node.iter().copied())
+                .chain(else_node.iter().copied())
+                .collect(),
+
+            AwaitExpression { expression_node } => expression_node.iter().copied().collect(),
+
             NewExpression { arg_nodes, .. } => arg_nodes.iter().flatten().copied().collect(),
+
+            ExecuteStatement { code_node } => code_node.iter().copied().collect(),
+
+            RaiseErrorStatement { message_node } => message_node.iter().copied().collect(),
+
+            AddHandlerStatement {
+                event_node,
+                handler_node,
+            }
+            | RemoveHandlerStatement {
+                event_node,
+                handler_node,
+            } => event_node
+                .iter()
+                .copied()
+                .chain(handler_node.iter().copied())
+                .collect(),
+
+            AwaitStatement { expression_node } => expression_node.iter().copied().collect(),
 
             Return { value_node } => value_node.iter().copied().collect(),
 

@@ -137,20 +137,48 @@ impl AstToIrConverter {
                 self.nodes.push(node);
                 Ok(Some(self.nodes.len() - 1))
             }
-            Expression::Unary { operand, .. } => {
-                self.convert_expression_for_hover(operand)?;
-                Ok(None)
+            Expression::Unary { .. } => {
+                let Expression::Unary {
+                    operator,
+                    operand,
+                    span,
+                } = expr
+                else {
+                    return Ok(None);
+                };
+
+                let operand_node = self.convert_expression_for_hover(operand)?;
+                let node = SemanticNode {
+                    kind: SemanticNodeKind::UnaryExpression {
+                        operator: operator.clone(),
+                        operand_node,
+                    },
+                    span: self.ast_span_to_ir_span(*span),
+                    scope_id: self.current_scope,
+                };
+                self.nodes.push(node);
+                Ok(Some(self.nodes.len() - 1))
             }
             Expression::Ternary {
                 condition,
                 then_expr,
                 else_expr,
-                ..
+                span,
             } => {
-                self.convert_expression_for_hover(condition)?;
-                self.convert_expression_for_hover(then_expr)?;
-                self.convert_expression_for_hover(else_expr)?;
-                Ok(None)
+                let condition_node = self.convert_expression_for_hover(condition)?;
+                let then_node = self.convert_expression_for_hover(then_expr)?;
+                let else_node = self.convert_expression_for_hover(else_expr)?;
+                let node = SemanticNode {
+                    kind: SemanticNodeKind::TernaryExpression {
+                        condition_node,
+                        then_node,
+                        else_node,
+                    },
+                    span: self.ast_span_to_ir_span(*span),
+                    scope_id: self.current_scope,
+                };
+                self.nodes.push(node);
+                Ok(Some(self.nodes.len() - 1))
             }
             Expression::New { .. } => {
                 let Expression::New {
@@ -221,9 +249,19 @@ impl AstToIrConverter {
                 self.nodes.push(node);
                 Ok(Some(self.nodes.len() - 1))
             }
-            Expression::Await { expression, .. } => {
-                self.convert_expression_for_hover(expression)?;
-                Ok(None)
+            Expression::Await { .. } => {
+                let Expression::Await { expression, span } = expr else {
+                    return Ok(None);
+                };
+
+                let expression_node = self.convert_expression_for_hover(expression)?;
+                let node = SemanticNode {
+                    kind: SemanticNodeKind::AwaitExpression { expression_node },
+                    span: self.ast_span_to_ir_span(*span),
+                    scope_id: self.current_scope,
+                };
+                self.nodes.push(node);
+                Ok(Some(self.nodes.len() - 1))
             }
         }
     }

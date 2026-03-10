@@ -142,3 +142,89 @@ fn test_flow_context_tracks_initialization() {
 
     assert_eq!(tracker.initialized_on_access, vec![false, true]);
 }
+
+#[test]
+fn test_visitor_traverses_expression_bearing_statement_operands() {
+    use std::collections::BTreeSet;
+
+    let mut program = SemanticProgram::new();
+
+    for function_name in [
+        "ВычислитьКод",
+        "ПолучитьСообщение",
+        "ПолучитьСобытие",
+        "ПолучитьОбработчик",
+        "УдаляемоеСобытие",
+        "УдаляемыйОбработчик",
+        "АсинхронныйВызов",
+    ] {
+        program.nodes.push(SemanticNode {
+            kind: SemanticNodeKind::FunctionCall {
+                function_name: function_name.to_string(),
+                object_name: None,
+                object_node: None,
+                object_span: None,
+                arg_nodes: Vec::new(),
+                arg_spans: Vec::new(),
+            },
+            span: Span::stub(),
+            scope_id: program.symbols.root_scope,
+        });
+    }
+
+    program.nodes.push(SemanticNode {
+        kind: SemanticNodeKind::ExecuteStatement { code_node: Some(0) },
+        span: Span::stub(),
+        scope_id: program.symbols.root_scope,
+    });
+    program.nodes.push(SemanticNode {
+        kind: SemanticNodeKind::RaiseErrorStatement {
+            message_node: Some(1),
+        },
+        span: Span::stub(),
+        scope_id: program.symbols.root_scope,
+    });
+    program.nodes.push(SemanticNode {
+        kind: SemanticNodeKind::AddHandlerStatement {
+            event_node: Some(2),
+            handler_node: Some(3),
+        },
+        span: Span::stub(),
+        scope_id: program.symbols.root_scope,
+    });
+    program.nodes.push(SemanticNode {
+        kind: SemanticNodeKind::RemoveHandlerStatement {
+            event_node: Some(4),
+            handler_node: Some(5),
+        },
+        span: Span::stub(),
+        scope_id: program.symbols.root_scope,
+    });
+    program.nodes.push(SemanticNode {
+        kind: SemanticNodeKind::AwaitStatement {
+            expression_node: Some(6),
+        },
+        span: Span::stub(),
+        scope_id: program.symbols.root_scope,
+    });
+
+    struct FunctionNameTracker {
+        names: BTreeSet<String>,
+    }
+
+    impl SemanticVisitor for FunctionNameTracker {
+        fn visit_node(&mut self, node: &SemanticNode, _context: &mut FlowContext) {
+            let SemanticNodeKind::FunctionCall { function_name, .. } = &node.kind else {
+                return;
+            };
+            self.names.insert(function_name.clone());
+        }
+    }
+
+    let mut tracker = FunctionNameTracker {
+        names: BTreeSet::new(),
+    };
+    walk_program(&program, &mut tracker);
+
+    assert_eq!(tracker.names.len(), 7);
+}

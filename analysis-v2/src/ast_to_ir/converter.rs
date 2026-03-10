@@ -843,6 +843,9 @@ impl AstToIrConverter {
                     SemanticNodeKind::FunctionDeclaration { .. }
                     | SemanticNodeKind::ProcedureDeclaration { .. } => None,
                     SemanticNodeKind::BinaryExpression { .. }
+                    | SemanticNodeKind::UnaryExpression { .. }
+                    | SemanticNodeKind::TernaryExpression { .. }
+                    | SemanticNodeKind::AwaitExpression { .. }
                     | SemanticNodeKind::VariableAccess { .. }
                     | SemanticNodeKind::GlobalPropertyAccess { .. } => None,
                     _ => Some(idx),

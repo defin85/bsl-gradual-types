@@ -93,6 +93,22 @@ pub enum SemanticNodeKind {
         right_node: Option<usize>,
     },
 
+    /// Унарное выражение: `-x`, `Не Флаг`
+    UnaryExpression {
+        operator: String,
+        operand_node: Option<usize>,
+    },
+
+    /// Тернарное выражение.
+    TernaryExpression {
+        condition_node: Option<usize>,
+        then_node: Option<usize>,
+        else_node: Option<usize>,
+    },
+
+    /// Await-обёртка над выражением.
+    AwaitExpression { expression_node: Option<usize> },
+
     /// Строковый литерал.
     StringLiteral { value: String },
 
@@ -168,6 +184,27 @@ pub enum SemanticNodeKind {
         collection_node: Option<usize>,
         body: Vec<usize>,
     },
+
+    /// Выполнение динамического кода: `Выполнить(expr)`.
+    ExecuteStatement { code_node: Option<usize> },
+
+    /// Поднятие исключения.
+    RaiseErrorStatement { message_node: Option<usize> },
+
+    /// Добавление обработчика события.
+    AddHandlerStatement {
+        event_node: Option<usize>,
+        handler_node: Option<usize>,
+    },
+
+    /// Удаление обработчика события.
+    RemoveHandlerStatement {
+        event_node: Option<usize>,
+        handler_node: Option<usize>,
+    },
+
+    /// Await на уровне statement.
+    AwaitStatement { expression_node: Option<usize> },
 
     /// Возврат из функции: `Возврат значение;`
     Return { value_node: Option<usize> },

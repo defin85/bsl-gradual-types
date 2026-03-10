@@ -140,6 +140,90 @@ impl AstToIrConverter {
                 Ok(Some(self.nodes.len() - 1))
             }
 
+            Statement::Execute {
+                code,
+                span: ast_span,
+            } => {
+                let code_node = self.convert_expression_for_hover(&code)?;
+                let node = SemanticNode {
+                    kind: SemanticNodeKind::ExecuteStatement { code_node },
+                    span: self.ast_span_to_ir_span(ast_span),
+                    scope_id: self.current_scope,
+                };
+                self.nodes.push(node);
+                Ok(Some(self.nodes.len() - 1))
+            }
+
+            Statement::RaiseError {
+                message,
+                span: ast_span,
+            } => {
+                let message_node = if let Some(ref message) = message {
+                    self.convert_expression_for_hover(message)?
+                } else {
+                    None
+                };
+                let node = SemanticNode {
+                    kind: SemanticNodeKind::RaiseErrorStatement { message_node },
+                    span: self.ast_span_to_ir_span(ast_span),
+                    scope_id: self.current_scope,
+                };
+                self.nodes.push(node);
+                Ok(Some(self.nodes.len() - 1))
+            }
+
+            Statement::AddHandler {
+                event,
+                handler,
+                span: ast_span,
+            } => {
+                let event_node = self.convert_expression_for_hover(&event)?;
+                let handler_node = self.convert_expression_for_hover(&handler)?;
+                let node = SemanticNode {
+                    kind: SemanticNodeKind::AddHandlerStatement {
+                        event_node,
+                        handler_node,
+                    },
+                    span: self.ast_span_to_ir_span(ast_span),
+                    scope_id: self.current_scope,
+                };
+                self.nodes.push(node);
+                Ok(Some(self.nodes.len() - 1))
+            }
+
+            Statement::RemoveHandler {
+                event,
+                handler,
+                span: ast_span,
+            } => {
+                let event_node = self.convert_expression_for_hover(&event)?;
+                let handler_node = self.convert_expression_for_hover(&handler)?;
+                let node = SemanticNode {
+                    kind: SemanticNodeKind::RemoveHandlerStatement {
+                        event_node,
+                        handler_node,
+                    },
+                    span: self.ast_span_to_ir_span(ast_span),
+                    scope_id: self.current_scope,
+                };
+                self.nodes.push(node);
+                Ok(Some(self.nodes.len() - 1))
+            }
+
+            Statement::Await {
+                expression,
+                span: ast_span,
+            } => {
+                let expression_node = self.convert_expression_for_hover(&expression)?;
+                let node = SemanticNode {
+                    kind: SemanticNodeKind::AwaitStatement { expression_node },
+                    span: self.ast_span_to_ir_span(ast_span),
+                    scope_id: self.current_scope,
+                };
+                self.nodes.push(node);
+                Ok(Some(self.nodes.len() - 1))
+            }
+
             Statement::FunctionDecl {
                 name,
                 params,
@@ -163,8 +247,8 @@ impl AstToIrConverter {
             }
 
             _ => {
-                // Другие statement типы пока пропускаем
-                // TODO: Добавить Goto, Label, Execute, RaiseError, AddHandler, RemoveHandler, Await
+                // Другие statement типы пока пропускаем.
+                // Goto/Label семантических operand-фактов для type_index не несут.
                 Ok(None)
             }
         }

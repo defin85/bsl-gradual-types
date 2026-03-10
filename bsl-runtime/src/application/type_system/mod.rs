@@ -35,10 +35,15 @@ pub use services::completion_service::{
 };
 pub use services::completion_service::{get_completion, CompletionContext, CompletionStats};
 pub use services::definition_service::{
-    goto_definition_v2, goto_definition_v2_with_source, DefinitionTarget,
+    definition_exact_type_index_available_at_position, goto_definition_v2,
+    goto_definition_v2_with_source, goto_definition_v2_with_source_and_analysis, DefinitionTarget,
 };
-pub use services::hover_service::get_hover_info_with_semantic_program;
+pub use services::hover_service::{
+    get_hover_info_with_semantic_program, hover_exact_type_index_available_at_position,
+};
 pub use services::signature_help_service::{
-    get_signature_help_v2, signature_help_query, SignatureHelpData, SignatureHelpQuery,
+    get_signature_help_v2, get_signature_help_v2_with_analysis,
+    signature_help_exact_type_index_available_at_position, signature_help_query, SignatureHelpData,
+    SignatureHelpQuery,
 };
 pub use services::web_api_service;

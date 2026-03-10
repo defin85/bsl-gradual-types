@@ -27,6 +27,11 @@ impl BslLanguageServer {
             let (context, prepared, expected_version) = match prepared {
                 Ok(values) => values,
                 Err(outcome) => {
+                    super::helpers::record_lsp_interactive_fail_closed_reason(
+                        self.coordinator.as_ref(),
+                        "signature_help",
+                        super::helpers::lsp_fail_closed_reason_from_prepare_outcome(outcome),
+                    );
                     debug!(
                         uri = %uri,
                         file_id = file_id.0,
@@ -62,7 +67,7 @@ impl BslLanguageServer {
                 }
             }
 
-            let (file_content, deps, ir_program) = {
+            let (analysis, file_content, deps, ir_program) = {
                 let analysis = prepared.snapshot.analysis;
                 let observed_file_version = analysis.file_version(file_id).ok().flatten();
                 let observed_deps_id = Some(prepared.snapshot.deps_id);
@@ -88,15 +93,53 @@ impl BslLanguageServer {
                     .ok()
                     .flatten();
 
-                (file_content, deps, ir_program)
+                (analysis, file_content, deps, ir_program)
             };
 
             let started = Instant::now();
             let result = match (file_content, deps, ir_program) {
                 (Some(file_content), Some(deps), Some(ir_program)) => {
-                    handle_signature_help_v2(file_content, position, ir_program, deps).await
+                    let exact_type_index_available = bsl_runtime::application::type_system::signature_help_exact_type_index_available_at_position(
+                        file_content.as_ref(),
+                        position.line,
+                        position.character,
+                        &analysis,
+                        file_id,
+                    );
+                    let signature_help = handle_signature_help_v2(
+                        &analysis,
+                        file_id,
+                        file_content,
+                        position,
+                        ir_program,
+                        deps,
+                        Some(self.coordinator.as_ref()),
+                    );
+                    if signature_help.is_none() && !exact_type_index_available {
+                        super::helpers::record_lsp_interactive_fail_closed_reason(
+                            self.coordinator.as_ref(),
+                            "signature_help",
+                            "missing_semantic_index",
+                        );
+                    }
+                    signature_help
                 }
-                _ => None,
+                (None, _, _) | (Some(_), None, _) => {
+                    super::helpers::record_lsp_interactive_fail_closed_reason(
+                        self.coordinator.as_ref(),
+                        "signature_help",
+                        "unavailable_by_contract",
+                    );
+                    None
+                }
+                (Some(_), Some(_), None) => {
+                    super::helpers::record_lsp_interactive_fail_closed_reason(
+                        self.coordinator.as_ref(),
+                        "signature_help",
+                        "missing_canonical_ir",
+                    );
+                    None
+                }
             };
             let elapsed = started.elapsed();
             self.coordinator.record_signature_help_latency(elapsed);

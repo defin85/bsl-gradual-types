@@ -42,6 +42,11 @@ impl BslLanguageServer {
             let (context, prepared, expected_version) = match prepared {
                 Ok(values) => values,
                 Err(outcome) => {
+                    super::helpers::record_lsp_interactive_fail_closed_reason(
+                        self.coordinator.as_ref(),
+                        "hover",
+                        super::helpers::lsp_fail_closed_reason_from_prepare_outcome(outcome),
+                    );
                     debug!(
                         uri = %uri,
                         file_id = file_id.0,
@@ -154,7 +159,16 @@ impl BslLanguageServer {
             let settings = self.settings.read().await;
             let result = match (file_content, file_path, deps, ir_program) {
                 (Some(file_content), Some(file_path), Some(deps), Some(ir_program)) => {
-                    handle_hover_v2(
+                    let exact_type_index_available =
+                        bsl_runtime::application::type_system::hover_exact_type_index_available_at_position(
+                            &analysis,
+                            file_id,
+                            file_content.as_ref(),
+                            position.line,
+                            position.character,
+                            ir_program.as_ref(),
+                        );
+                    let hover = handle_hover_v2(
                         &analysis,
                         file_id,
                         file_content,
@@ -165,9 +179,32 @@ impl BslLanguageServer {
                         &uri,
                         &settings.hover,
                         include_flow_sensitive,
-                    )
+                    );
+                    if hover.is_none() && !exact_type_index_available {
+                        super::helpers::record_lsp_interactive_fail_closed_reason(
+                            self.coordinator.as_ref(),
+                            "hover",
+                            "missing_semantic_index",
+                        );
+                    }
+                    hover
                 }
-                _ => None,
+                (None, _, _, _) | (Some(_), None, _, _) | (Some(_), Some(_), None, _) => {
+                    super::helpers::record_lsp_interactive_fail_closed_reason(
+                        self.coordinator.as_ref(),
+                        "hover",
+                        "unavailable_by_contract",
+                    );
+                    None
+                }
+                (Some(_), Some(_), Some(_), None) => {
+                    super::helpers::record_lsp_interactive_fail_closed_reason(
+                        self.coordinator.as_ref(),
+                        "hover",
+                        "missing_canonical_ir",
+                    );
+                    None
+                }
             };
 
             Ok(result)
@@ -373,6 +410,11 @@ impl BslLanguageServer {
             let (context, prepared, expected_version) = match prepared {
                 Ok(values) => values,
                 Err(outcome) => {
+                    super::helpers::record_lsp_interactive_fail_closed_reason(
+                        self.coordinator.as_ref(),
+                        "definition",
+                        super::helpers::lsp_fail_closed_reason_from_prepare_outcome(outcome),
+                    );
                     debug!(
                         uri = %uri,
                         file_id = file_id.0,
@@ -408,7 +450,7 @@ impl BslLanguageServer {
                 }
             }
 
-            let (file_content, file_path, deps, ir_program) = {
+            let (analysis, file_content, file_path, deps, ir_program) = {
                 let analysis = prepared.snapshot.analysis;
                 let index_snapshot = prepared.index_snapshot;
 
@@ -451,22 +493,53 @@ impl BslLanguageServer {
                     }
                 }
 
-                (file_content, file_path, deps, ir_program)
+                (analysis, file_content, file_path, deps, ir_program)
             };
 
             let result = match (file_content, file_path, deps, ir_program) {
                 (Some(file_content), Some(file_path), Some(deps), Some(ir_program)) => {
-                    handle_goto_definition_v2(
+                    let exact_type_index_available = bsl_runtime::application::type_system::definition_exact_type_index_available_at_position(
+                        &analysis,
+                        file_id,
+                        position.line,
+                        position.character,
+                    );
+                    let definition = handle_goto_definition_v2(
+                        &analysis,
+                        file_id,
                         file_path,
                         file_content,
                         ir_program,
                         deps,
                         position,
                         &uri,
-                    )
-                    .await
+                        Some(self.coordinator.as_ref()),
+                    );
+                    if definition.is_none() && !exact_type_index_available {
+                        super::helpers::record_lsp_interactive_fail_closed_reason(
+                            self.coordinator.as_ref(),
+                            "definition",
+                            "missing_semantic_index",
+                        );
+                    }
+                    definition
                 }
-                _ => None,
+                (None, _, _, _) | (Some(_), None, _, _) | (Some(_), Some(_), None, _) => {
+                    super::helpers::record_lsp_interactive_fail_closed_reason(
+                        self.coordinator.as_ref(),
+                        "definition",
+                        "unavailable_by_contract",
+                    );
+                    None
+                }
+                (Some(_), Some(_), Some(_), None) => {
+                    super::helpers::record_lsp_interactive_fail_closed_reason(
+                        self.coordinator.as_ref(),
+                        "definition",
+                        "missing_canonical_ir",
+                    );
+                    None
+                }
             };
 
             Ok(result)

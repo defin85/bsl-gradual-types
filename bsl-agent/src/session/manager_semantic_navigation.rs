@@ -91,6 +91,11 @@ impl SessionManager {
         ) {
             Ok(values) => values,
             Err(_) => {
+                coordinator.record_intellisense_v2_interactive_fail_closed_reason(
+                    "agent",
+                    "definition",
+                    "missing_canonical_ir",
+                );
                 return Ok(BslDefinitionResponse {
                     analysis_revision,
                     location: None,
@@ -109,6 +114,11 @@ impl SessionManager {
             |analysis| analysis.ir(FileId(1)),
         );
         let Some(program) = program_query.ok().flatten() else {
+            coordinator.record_intellisense_v2_interactive_fail_closed_reason(
+                "agent",
+                "definition",
+                "missing_canonical_ir",
+            );
             return Ok(BslDefinitionResponse {
                 analysis_revision,
                 location: None,
@@ -124,16 +134,34 @@ impl SessionManager {
             });
         };
         report_job_stage(progress.as_ref(), "resolving_definition", 85).await;
-        let target = bsl_runtime::application::type_system::goto_definition_v2_with_source(
-            abs_path.to_string_lossy().as_ref(),
-            code.as_ref(),
-            program,
-            deps,
-            position.line,
-            position.character,
-        );
+        let exact_type_index_available =
+            bsl_runtime::application::type_system::definition_exact_type_index_available_at_position(
+                &analysis,
+                FileId(1),
+                position.line,
+                position.character,
+            );
+        let target =
+            bsl_runtime::application::type_system::goto_definition_v2_with_source_and_analysis(
+                abs_path.to_string_lossy().as_ref(),
+                code.as_ref(),
+                &analysis,
+                FileId(1),
+                program,
+                deps,
+                position.line,
+                position.character,
+                Some(coordinator.as_ref()),
+            );
 
         let Some(target) = target else {
+            if !exact_type_index_available {
+                coordinator.record_intellisense_v2_interactive_fail_closed_reason(
+                    "agent",
+                    "definition",
+                    "missing_semantic_index",
+                );
+            }
             return Ok(BslDefinitionResponse {
                 analysis_revision,
                 location: None,

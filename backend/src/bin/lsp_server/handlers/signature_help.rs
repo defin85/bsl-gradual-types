@@ -10,23 +10,29 @@ use tracing::debug;
 use bsl_backend::application::type_system;
 use bsl_shared::ir::SemanticProgram;
 
-pub async fn handle_signature_help_v2(
+pub fn handle_signature_help_v2(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
     file_content: Arc<str>,
     position: Position,
     ir_program: Arc<SemanticProgram>,
     deps: Arc<bsl_analysis_v2::SemanticDeps>,
+    coordinator: Option<&bsl_runtime::system::SystemCoordinator>,
 ) -> Option<SignatureHelp> {
     debug!(
         "SignatureHelp v2 requested at {}:{}",
         position.line, position.character
     );
 
-    let data = type_system::get_signature_help_v2(
+    let data = type_system::get_signature_help_v2_with_analysis(
         file_content.as_ref(),
         position.line,
         position.character,
+        Some(analysis),
+        Some(file_id),
         ir_program,
         deps,
+        coordinator,
     )?;
 
     let parameters = data

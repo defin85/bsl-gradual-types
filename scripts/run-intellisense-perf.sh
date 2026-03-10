@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPORT_DIR="${ROOT_DIR}/backend/tests/perf/reports"
 BASELINE_DIR="${ROOT_DIR}/backend/tests/perf/baselines"
-CONTRACT_PATH="${ROOT_DIR}/contracts/intellisense-perf-gate/v1/contract.json"
+CONTRACT_PATH="${ROOT_DIR}/contracts/intellisense-perf-gate/v2/contract.json"
 THRESHOLD_RESOURCE="${THRESHOLD_RESOURCE:-1.15}"
 THRESHOLD_P95="${THRESHOLD_P95:-1.10}"
 THRESHOLD_P99="${THRESHOLD_P99:-1.15}"

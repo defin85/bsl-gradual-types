@@ -82,51 +82,125 @@ fn find_position(content: &str, marker: &str) -> Option<(u32, u32)> {
 }
 
 pub(super) struct IterationContext<'a> {
-    pub(super) index_snapshot: &'a bsl_backend::system::IndexSnapshot,
+    pub(super) facade: &'a bsl_backend::application::IntellisenseV2Facade,
+    pub(super) deps_id: &'a bsl_analysis_v2::DepsSnapshotId,
+    pub(super) settings: bsl_backend::application::ExecutionSettings,
+    pub(super) coordinator: &'a SystemCoordinator,
     pub(super) metadata_lookup: &'a TypeMetadataLookup,
     pub(super) resolver: &'a TypeResolver,
     pub(super) cases: &'a [PreparedCase],
 }
 
 pub(super) async fn run_iterations(
-    host: &mut AnalysisHostV2,
     context: &IterationContext<'_>,
     iterations: usize,
     churn_state: &mut Option<ChurnRuntimeState>,
     content_by_file: &mut HashMap<String, Arc<str>>,
+    version_by_file: &mut HashMap<String, i32>,
     mut output: Option<OutputTargets<'_>>,
 ) -> Result<()> {
     for iteration in 0..iterations {
-        maybe_apply_churn(host, churn_state, content_by_file, iteration)?;
-        let analysis = host.analysis();
+        maybe_apply_churn(
+            context.facade,
+            churn_state,
+            content_by_file,
+            version_by_file,
+            iteration,
+        )?;
         for case in context.cases {
             let started = Instant::now();
             let alloc_before = allocation_snapshot();
-            let case_content = content_by_file
+            let mut ir_elapsed_ms = 0.0;
+            let expected_version = version_by_file
                 .get(case.file_uri.as_str())
-                .cloned()
-                .unwrap_or_else(|| case.content.clone());
+                .copied()
+                .unwrap_or(0);
+            let execution = bsl_backend::application::ExecutionContext {
+                origin: bsl_backend::application::ObservabilityOrigin::Runtime,
+                operation: bsl_backend::application::SemanticOperation::Completion,
+                completion_mode: Some("perf_harness"),
+                completion_large_churn_active: false,
+                file_id: case.file_id,
+                min_file_version: Some(expected_version),
+                expected_deps_id: Some(context.deps_id.clone()),
+                flow_sensitive: false,
+                settings: context.settings.clone(),
+                cancellation: bsl_backend::application::CancellationPolicy::Ignore,
+            };
+            let result = async {
+                let prepared = context
+                    .facade
+                    .prepare_stateful_operation(&execution, Some(context.coordinator))
+                    .await
+                    .map_err(|outcome| {
+                        anyhow::anyhow!(
+                            "prepare_stateful_operation failed: {}",
+                            outcome.as_str()
+                        )
+                    })?;
+                let analysis = prepared.snapshot.analysis;
+                let case_content = analysis
+                    .file_text(case.file_id)
+                    .ok()
+                    .flatten()
+                    .or_else(|| content_by_file.get(case.file_uri.as_str()).cloned())
+                    .unwrap_or_else(|| case.content.clone());
+                let file_path = analysis
+                    .file_path(case.file_id)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_else(|| Arc::from(case.file_uri.clone()));
+                let _deps = analysis.deps_data().ok().context("deps unavailable")?;
 
-            let ir_started = Instant::now();
-            let ir_program = analysis
-                .ir(case.file_id)
+                let member_access_owner_type_hint =
+                    if completion_request_targets_member_access(
+                        case_content.as_ref(),
+                        case.line,
+                        case.column,
+                    ) {
+                        let _ = analysis.precompute_type_index_for_file(
+                            case.file_id,
+                            Some(expected_version),
+                            0,
+                        );
+                        completion_owner_hint_at_position(
+                            &analysis,
+                            case.file_id,
+                            case_content.as_ref(),
+                            case.line,
+                            case.column,
+                        )
+                    } else {
+                        None
+                    };
+
+                let ir_started = Instant::now();
+                let ir_program = bsl_backend::application::IntellisenseV2Facade::run_ir_query_singleflight(
+                    &execution,
+                    &analysis,
+                    Some(context.coordinator),
+                    case.file_id,
+                )
                 .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
                 .context("ir unavailable")?;
-            let ir_elapsed_ms = ir_started.elapsed().as_secs_f64() * 1000.0;
+                ir_elapsed_ms = ir_started.elapsed().as_secs_f64() * 1000.0;
 
-            let result = get_completion_with_semantic_program_snapshot(
-                case_content.as_ref(),
-                case.line,
-                case.column,
-                Some(case.file_uri.as_str()),
-                context.index_snapshot,
-                context.metadata_lookup,
-                case.file_uri.as_str(),
-                context.resolver,
-                ir_program,
-                None,
-                false,
-            )
+                bsl_backend::application::get_completion_with_semantic_program_snapshot_v2_with_trigger_hint(
+                    case_content.as_ref(),
+                    case.line,
+                    case.column,
+                    Some(case.file_uri.as_str()),
+                    prepared.index_snapshot.as_ref(),
+                    context.metadata_lookup,
+                    file_path.as_ref(),
+                    context.resolver,
+                    ir_program,
+                    member_access_owner_type_hint,
+                    false,
+                    None,
+                )
+                .await
+            }
             .await;
             let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
             let alloc_after = allocation_snapshot();
@@ -161,6 +235,14 @@ pub(super) fn build_content_by_file_map(cases: &[PreparedCase]) -> HashMap<Strin
     for case in cases {
         map.entry(case.file_uri.clone())
             .or_insert_with(|| case.content.clone());
+    }
+    map
+}
+
+pub(super) fn build_file_version_map(cases: &[PreparedCase]) -> HashMap<String, i32> {
+    let mut map = HashMap::new();
+    for case in cases {
+        map.entry(case.file_uri.clone()).or_insert(0);
     }
     map
 }
@@ -209,9 +291,10 @@ pub(super) fn build_churn_state(
 }
 
 fn maybe_apply_churn(
-    host: &mut AnalysisHostV2,
+    facade: &bsl_backend::application::IntellisenseV2Facade,
     churn_state: &mut Option<ChurnRuntimeState>,
     content_by_file: &mut HashMap<String, Arc<str>>,
+    version_by_file: &mut HashMap<String, i32>,
     iteration: usize,
 ) -> Result<()> {
     let Some(state) = churn_state.as_mut() else {
@@ -225,15 +308,18 @@ fn maybe_apply_churn(
     let churned_content = build_churned_content(state.plan.base_content.as_ref(), state.revision);
     let churned_content_arc: Arc<str> = Arc::from(churned_content);
 
+    let mut changes = Vec::with_capacity(state.plan.target_file_ids.len());
     for file_id in &state.plan.target_file_ids {
-        host.apply_change(ChangeV2::SetFile {
+        changes.push(ChangeV2::SetFile {
             file_id: *file_id,
             text: churned_content_arc.clone(),
             version: state.next_version,
             path: state.plan.target_file_path.clone(),
         });
     }
+    facade.apply_changes(changes);
     content_by_file.insert(state.plan.target_file_uri.clone(), churned_content_arc);
+    version_by_file.insert(state.plan.target_file_uri.clone(), state.next_version);
     state.next_version = state.next_version.saturating_add(1);
 
     Ok(())
@@ -260,4 +346,65 @@ pub(super) struct OutputTargets<'a> {
     pub(super) allocated_bytes_total: &'a mut u64,
     pub(super) lock_wait_ms_total: &'a mut f64,
     pub(super) lock_contention_events_total: &'a mut u64,
+}
+
+fn completion_request_targets_member_access(text: &str, line: u32, column: u32) -> bool {
+    let Some(line_text) = text.lines().nth(line as usize) else {
+        return false;
+    };
+    let column_index =
+        bsl_analysis_v2::utf16_to_byte_offset(line_text, column).min(line_text.len());
+    let line_prefix = line_text.get(..column_index).unwrap_or(line_text);
+    let line_prefix = if line_text
+        .get(column_index..)
+        .and_then(|tail| tail.chars().next())
+        == Some('.')
+    {
+        format!("{line_prefix}.")
+    } else {
+        line_prefix.to_string()
+    };
+
+    let trimmed = line_prefix.trim_end();
+    let Some(dot_pos) = trimmed.rfind('.') else {
+        return false;
+    };
+    let after_dot = trimmed[dot_pos + 1..].trim_start();
+    after_dot.is_empty() || after_dot.chars().all(is_completion_identifier_char)
+}
+
+fn is_completion_identifier_char(ch: char) -> bool {
+    ch == '_' || ch.is_alphanumeric()
+}
+
+fn completion_owner_hint_at_position(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    file_content: &str,
+    line: u32,
+    column: u32,
+) -> Option<bsl_shared::domain::types::TypeResolution> {
+    let line_text = file_content.lines().nth(line as usize)?;
+    let cursor_byte = bsl_analysis_v2::utf16_to_byte_offset(line_text, column).min(line_text.len());
+    let line_prefix = line_text.get(..cursor_byte)?;
+    let dot_idx = line_prefix.rfind('.')?;
+    let receiver = line_prefix.get(..dot_idx)?.trim_end();
+    if receiver.is_empty() {
+        return None;
+    }
+
+    let probe_utf16 = bsl_analysis_v2::byte_offset_to_utf16(line_text, receiver.len());
+    let probe_offset = analysis
+        .utf16_position_to_byte_offset(file_id, line, probe_utf16)
+        .ok()
+        .flatten()?
+        .saturating_sub(1)
+        .min(u32::MAX as usize) as u32;
+    let profiled = analysis
+        .type_at_byte_offset_serve_only_profiled(file_id, probe_offset)
+        .ok()?;
+
+    profiled
+        .resolution
+        .filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
 }

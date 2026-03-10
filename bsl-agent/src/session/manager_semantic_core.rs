@@ -602,6 +602,11 @@ fn collect_type_at_position(
     ) {
         Ok(values) => values,
         Err(_) => {
+            coordinator.record_intellisense_v2_interactive_fail_closed_reason(
+                "agent",
+                "type_at_position",
+                "missing_canonical_ir",
+            );
             return Ok(BslTypeAtPositionResponse {
                 analysis_revision,
                 flow_sensitive_enabled,
@@ -621,6 +626,11 @@ fn collect_type_at_position(
         |analysis| analysis.ir(FileId(1)),
     );
     let Some(program) = program_query.ok().flatten() else {
+        coordinator.record_intellisense_v2_interactive_fail_closed_reason(
+            "agent",
+            "type_at_position",
+            "missing_canonical_ir",
+        );
         return Ok(BslTypeAtPositionResponse {
             analysis_revision,
             flow_sensitive_enabled,
@@ -651,6 +661,13 @@ fn collect_type_at_position(
             .map(|facet| format!("{:?}", facet))
             .collect(),
     });
+    if !flow_sensitive_enabled && type_info.is_none() {
+        coordinator.record_intellisense_v2_interactive_fail_closed_reason(
+            "agent",
+            "type_at_position",
+            "missing_semantic_index",
+        );
+    }
 
     let node = node_at_utf16_position(
         &analysis,
@@ -718,6 +735,11 @@ fn collect_members(request: MembersRequest) -> Result<BslMembersResponse, rmcp::
     ) {
         Ok(values) => values,
         Err(_) => {
+            coordinator.record_intellisense_v2_interactive_fail_closed_reason(
+                "agent",
+                "members",
+                "missing_canonical_ir",
+            );
             return Ok(BslMembersResponse {
                 analysis_revision,
                 flow_sensitive_enabled,
@@ -739,6 +761,11 @@ fn collect_members(request: MembersRequest) -> Result<BslMembersResponse, rmcp::
     .ok()
     .flatten();
     let Some(program) = program else {
+        coordinator.record_intellisense_v2_interactive_fail_closed_reason(
+            "agent",
+            "members",
+            "missing_canonical_ir",
+        );
         return Ok(BslMembersResponse {
             analysis_revision,
             flow_sensitive_enabled,

@@ -1,10 +1,10 @@
 use super::*;
 use crate::jobs::JobManager;
 use crate::server::types::{
-    BslDiagnosticsParams, BslMembersParams, BslReferencesParams, BslSymbolSearchParams,
-    BslTypeAtPositionParams, CanonicalDocumentRef, ContextExpandParams, ContextFocus,
-    ContextInclude, ContextPackParams, DocumentRef, FileRef, Position, WorkspaceDocumentsSetFile,
-    WorkspaceOpenParams, WorkspaceScope, WorkspaceScopeTagged,
+    BslDefinitionParams, BslDiagnosticsParams, BslMembersParams, BslReferencesParams,
+    BslSymbolSearchParams, BslTypeAtPositionParams, CanonicalDocumentRef, ContextExpandParams,
+    ContextFocus, ContextInclude, ContextPackParams, DocumentRef, FileRef, Position,
+    WorkspaceDocumentsSetFile, WorkspaceOpenParams, WorkspaceScope, WorkspaceScopeTagged,
 };
 use crate::types::JobStateDto;
 use std::sync::Arc;
@@ -353,7 +353,83 @@ fn semantic_helpers_fail_closed_without_precomputed_type_index() {
 }
 
 #[tokio::test]
-async fn definition_resolves_object_module_member_definition_without_request_time_type_lookup() {
+async fn definition_without_target_does_not_emit_bounded_public_reason_metric() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+
+    let job_manager = Arc::new(JobManager::new());
+    let manager = Arc::new(SessionManager::new());
+    let open = manager
+        .open(
+            WorkspaceOpenParams {
+                roots: vec![temp.path().to_string_lossy().to_string()],
+                platform_docs_archive: None,
+                platform_version: None,
+                configuration_path: None,
+                mode: None,
+            },
+            Arc::clone(&job_manager),
+        )
+        .await
+        .expect("open");
+    wait_startup(job_manager.as_ref(), &open).await;
+
+    let session_id = open.session_id.clone();
+    let root_id = open.roots[0].root_id.clone();
+    let file = FileRef {
+        doc: DocumentRef::Canonical(CanonicalDocumentRef {
+            root_id,
+            path: "Documents/Док1/Ext/ObjectModule.bsl".to_string(),
+        }),
+        text: Some(
+            concat!(
+                "Процедура Тест()\n",
+                "    ЭтотОбъект.Несуществующий();\n",
+                "КонецПроцедуры\n"
+            )
+            .to_string(),
+        ),
+        version: Some(1),
+    };
+
+    let metric_key =
+        "intellisense_v2_fail_closed_reason_total_origin_agent_operation_definition_reason_missing_semantic_index";
+    let baseline_metrics = manager
+        .observability_metrics_get(&session_id)
+        .await
+        .expect("observability baseline");
+    let baseline_total = counter_value(&baseline_metrics.metrics, metric_key);
+
+    let response = manager
+        .bsl_definition(BslDefinitionParams {
+            session_id: session_id.clone(),
+            symbol_id: None,
+            file: Some(file),
+            position: Some(Position {
+                line: 1,
+                character: 16,
+            }),
+        })
+        .await
+        .expect("definition");
+    assert!(
+        response.location.is_none(),
+        "definition without target must stay empty"
+    );
+
+    let after_metrics = manager
+        .observability_metrics_get(&session_id)
+        .await
+        .expect("observability after type_at_position");
+    let after_total = counter_value(&after_metrics.metrics, metric_key);
+    assert!(
+        after_total == baseline_total,
+        "agent definition without target must not emit bounded public fail-closed reason metric: before={baseline_total}, after={after_total}, metrics={}",
+        after_metrics.metrics
+    );
+}
+
+#[tokio::test]
+async fn definition_resolves_object_module_member_definition_via_shared_exact_type_index() {
     let temp = tempfile::TempDir::new().expect("tempdir");
     let config_root = temp.path();
     let module_rel_path = "Documents/Док1/Ext/ObjectModule.bsl";
@@ -458,9 +534,9 @@ async fn definition_resolves_object_module_member_definition_without_request_tim
         .await
         .expect("observability after definition");
     let after_total = type_index_reason_total(&after_metrics.metrics);
-    assert_eq!(
-        after_total, before_total,
-        "definition must reuse current semantic state without extra type-index reasons: before={before_total}, after={after_total}, metrics={}",
+    assert!(
+        after_total > before_total,
+        "definition must emit shared type-index serve reasons on the default MCP path: before={before_total}, after={after_total}, metrics={}",
         after_metrics.metrics
     );
 }
@@ -1139,8 +1215,7 @@ async fn type_at_position_and_members_emit_interactive_runtime_exec_metrics() {
 }
 
 #[tokio::test]
-async fn type_at_position_and_members_emit_type_index_reason_metrics_while_definition_reuses_current_semantic_state(
-) {
+async fn type_at_position_members_and_definition_emit_shared_type_index_reason_metrics() {
     let temp = tempfile::TempDir::new().expect("tempdir");
 
     let job_manager = Arc::new(JobManager::new());
@@ -1271,9 +1346,9 @@ async fn type_at_position_and_members_emit_type_index_reason_metrics_while_defin
         .await
         .expect("observability after definition");
     let after_definition_total = type_index_reason_total(&after_definition_metrics.metrics);
-    assert_eq!(
-        after_definition_total, after_members_total,
-        "definition must reuse current semantic state without extra type-index reasons: before={after_members_total}, after={after_definition_total}, metrics={}",
+    assert!(
+        after_definition_total > after_members_total,
+        "definition must emit at least one shared type-index serve reason on the default MCP path: before={after_members_total}, after={after_definition_total}, metrics={}",
         after_definition_metrics.metrics
     );
 }

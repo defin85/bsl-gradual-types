@@ -407,6 +407,8 @@ fn prepare_ephemeral_operation_warms_exact_type_index_only_for_shared_interactiv
         SemanticOperation::Hover,
         SemanticOperation::Members,
         SemanticOperation::TypeAtPosition,
+        SemanticOperation::SignatureHelp,
+        SemanticOperation::Definition,
     ] {
         let context = ExecutionContext {
             origin: ObservabilityOrigin::Web,

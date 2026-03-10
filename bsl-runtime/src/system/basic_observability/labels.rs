@@ -163,6 +163,24 @@ pub(super) const COMPLETION_OWNER_HINT_REASON_REGISTRY: &[(&str, &str)] = &[
     ),
 ];
 
+pub(super) const SHARED_FAIL_CLOSED_REASON_REGISTRY: &[(&str, &str)] = &[
+    ("missing_canonical_ir", "missing_canonical_ir"),
+    ("missing_semantic_index", "missing_semantic_index"),
+    ("superseded_revision", "superseded_revision"),
+    ("cancelled", "cancelled"),
+    ("unavailable_by_contract", "unavailable_by_contract"),
+    ("missing_ir", "missing_canonical_ir"),
+    ("fallback_unavailable", "missing_semantic_index"),
+    ("type_index_fallback_unavailable", "missing_semantic_index"),
+    ("wait_not_ready", "missing_semantic_index"),
+    ("stale_version", "superseded_revision"),
+    ("superseded", "superseded_revision"),
+    ("queue_rejected", "unavailable_by_contract"),
+    ("missing_deps", "unavailable_by_contract"),
+    ("missing_file_content", "unavailable_by_contract"),
+    ("missing_file_path", "unavailable_by_contract"),
+];
+
 pub(super) const LEGACY_WAIT_FOR_FILE_VERSION_METRICS_REGISTRY: &[(&str, (&str, &str))] = &[
     (
         "completion",
@@ -465,13 +483,10 @@ pub(super) fn normalize_completion_parity_overlap_bucket_label(bucket: &str) -> 
 }
 
 pub(super) fn normalize_completion_terminal_reason_label(reason: &str) -> &'static str {
-    match reason {
-        "ok_empty" => "ok_empty",
-        "fallback_unavailable" => "fallback_unavailable",
-        "missing_ir" => "missing_ir",
-        "wait_not_ready" => "wait_not_ready",
-        _ => "other",
+    if reason == "ok_empty" {
+        return "ok_empty";
     }
+    normalize_shared_fail_closed_reason_label(reason)
 }
 
 pub(super) fn normalize_completion_owner_hint_reason_label(reason: &str) -> &'static str {
@@ -480,6 +495,27 @@ pub(super) fn normalize_completion_owner_hint_reason_label(reason: &str) -> &'st
 
 pub(super) fn normalize_type_index_reason_label(reason: &str) -> &'static str {
     registry_label(reason, TYPE_INDEX_REASON_REGISTRY, "other")
+}
+
+pub(super) fn normalize_shared_fail_closed_reason_label(reason: &str) -> &'static str {
+    registry_label(reason, SHARED_FAIL_CLOSED_REASON_REGISTRY, "other")
+}
+
+pub(super) fn normalize_public_completion_outcome_label(outcome: &str) -> &'static str {
+    match outcome {
+        "ok_non_empty" => "ok_non_empty",
+        "ok_empty" => "ok_empty",
+        "cancelled" | "superseded" => "cancelled",
+        "handler_error" => "handler_error",
+        "wait_not_ready"
+        | "missing_file_content"
+        | "missing_file_path"
+        | "missing_deps"
+        | "missing_ir"
+        | "fallback_unavailable"
+        | "queue_rejected" => "fail_closed",
+        _ => "other",
+    }
 }
 
 pub(super) fn normalize_completion_resource_reason_label(reason: &str) -> &'static str {

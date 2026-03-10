@@ -207,6 +207,53 @@ fn build_v2_ir(
     (file_content, file_path, ir_program)
 }
 
+fn build_v2_analysis_ir(
+    content: &str,
+    uri: &Url,
+    deps: Arc<bsl_analysis_v2::SemanticDeps>,
+) -> (
+    bsl_analysis_v2::AnalysisV2,
+    V2FileId,
+    Arc<str>,
+    Arc<SemanticProgram>,
+) {
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(ChangeV2::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("test-analysis"),
+        deps,
+    });
+    host.apply_change(ChangeV2::SetSettingsSnapshot {
+        settings_id: SettingsId::from_hash("test-analysis"),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+
+    let path = uri
+        .to_file_path()
+        .ok()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|| uri.to_string());
+    let file_id = V2FileId(1);
+    host.apply_change(ChangeV2::SetFile {
+        file_id,
+        text: Arc::from(content.to_string()),
+        version: 0,
+        path: Arc::from(path),
+    });
+
+    let analysis = host.analysis();
+    analysis
+        .precompute_type_index_for_file(file_id, Some(0), 0)
+        .expect("precompute exact type index");
+    let file_content = analysis
+        .file_text(file_id)
+        .ok()
+        .flatten()
+        .expect("file_text");
+    let ir_program = analysis.ir(file_id).ok().flatten().expect("ir");
+
+    (analysis, file_id, file_content, ir_program)
+}
+
 #[tokio::test]
 async fn lsp_completion_returns_items_and_stats() {
     let env = build_env();
@@ -301,27 +348,32 @@ async fn lsp_signature_help_returns_method_and_constructor() {
     МойМассив.Добавить(1, )
 КонецПроцедуры"#;
     let uri = Url::parse("file:///test_signature_help_v2.bsl").expect("test uri");
-    let (_file_content, _file_path, ir_program) = build_v2_ir(content, &uri, env.deps.clone());
+    let (analysis, file_id, file_content, ir_program) =
+        build_v2_analysis_ir(content, &uri, env.deps.clone());
 
     let constructor_pos = position_at_marker(content, "Новый Массив(1, ");
     let method_pos = position_at_marker(content, "МойМассив.Добавить(1, ");
 
     let constructor = signature_help_handler::handle_signature_help_v2(
-        Arc::from(content.to_string()),
+        &analysis,
+        file_id,
+        file_content.clone(),
         constructor_pos,
         ir_program.clone(),
         env.deps.clone(),
+        None,
     )
-    .await
     .expect("constructor signature help");
 
     let method = signature_help_handler::handle_signature_help_v2(
-        Arc::from(content.to_string()),
+        &analysis,
+        file_id,
+        file_content,
         method_pos,
         ir_program,
         env.deps,
+        None,
     )
-    .await
     .expect("method signature help");
 
     let constructor_label = constructor

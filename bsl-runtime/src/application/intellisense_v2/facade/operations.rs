@@ -7,6 +7,8 @@ impl IntellisenseV2Facade {
             SemanticOperation::Hover
                 | SemanticOperation::Members
                 | SemanticOperation::TypeAtPosition
+                | SemanticOperation::SignatureHelp
+                | SemanticOperation::Definition
         )
     }
 

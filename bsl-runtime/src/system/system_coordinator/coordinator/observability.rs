@@ -76,6 +76,16 @@ impl SystemCoordinator {
             .record_intellisense_v2_completion_owner_hint_result(reason);
     }
 
+    pub fn record_intellisense_v2_interactive_fail_closed_reason(
+        &self,
+        origin: &str,
+        operation: &str,
+        reason: &str,
+    ) {
+        self.observability
+            .record_intellisense_v2_interactive_fail_closed_reason(origin, operation, reason);
+    }
+
     pub fn record_intellisense_v2_type_index_reason(&self, reason: &str) {
         self.observability
             .record_intellisense_v2_type_index_reason(reason);

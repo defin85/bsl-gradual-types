@@ -104,7 +104,7 @@ pub(super) fn contract_version_from_contract(contract: &serde_json::Value) -> St
             .get("major_version")
             .and_then(|value| value.as_u64()),
     ) {
-        (Some("intellisense-perf-gate"), Some(1)) => "v1".to_string(),
+        (Some("intellisense-perf-gate"), Some(2)) => "v2".to_string(),
         _ => "unknown".to_string(),
     }
 }

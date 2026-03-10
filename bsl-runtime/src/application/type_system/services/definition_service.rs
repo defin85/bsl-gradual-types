@@ -10,6 +10,8 @@ use bsl_shared::domain::types::{
 };
 use bsl_shared::ir::{SemanticNodeKind, SemanticProgram, Span};
 
+use crate::system::SystemCoordinator;
+
 #[derive(Debug, Clone)]
 pub struct DefinitionTarget {
     pub file_path: PathBuf,
@@ -40,7 +42,17 @@ pub fn goto_definition_v2(
     line: u32,
     character: u32,
 ) -> Option<DefinitionTarget> {
-    goto_definition_v2_with_source_opt(current_file_path, None, ir_program, deps, line, character)
+    goto_definition_v2_with_source_opt(
+        current_file_path,
+        None,
+        None,
+        None,
+        ir_program,
+        deps,
+        line,
+        character,
+        None,
+    )
 }
 
 pub fn goto_definition_v2_with_source(
@@ -54,20 +66,67 @@ pub fn goto_definition_v2_with_source(
     goto_definition_v2_with_source_opt(
         current_file_path,
         Some(current_file_text),
+        None,
+        None,
         ir_program,
         deps,
         line,
         character,
+        None,
     )
+}
+
+pub fn goto_definition_v2_with_source_and_analysis(
+    current_file_path: &str,
+    current_file_text: &str,
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    ir_program: Arc<SemanticProgram>,
+    deps: Arc<bsl_analysis_v2::SemanticDeps>,
+    line: u32,
+    character: u32,
+    coordinator: Option<&SystemCoordinator>,
+) -> Option<DefinitionTarget> {
+    goto_definition_v2_with_source_opt(
+        current_file_path,
+        Some(current_file_text),
+        Some(analysis),
+        Some(file_id),
+        ir_program,
+        deps,
+        line,
+        character,
+        coordinator,
+    )
+}
+
+pub fn definition_exact_type_index_available_at_position(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    line: u32,
+    character: u32,
+) -> bool {
+    let Some(offset) = analysis
+        .utf16_position_to_byte_offset(file_id, line, character)
+        .ok()
+        .flatten()
+    else {
+        return true;
+    };
+    let offset = offset.min(u32::MAX as usize) as u32;
+    exact_type_index_available(analysis, file_id, offset, None)
 }
 
 fn goto_definition_v2_with_source_opt(
     current_file_path: &str,
     current_file_text: Option<&str>,
+    analysis: Option<&bsl_analysis_v2::AnalysisV2>,
+    file_id: Option<bsl_analysis_v2::FileId>,
     ir_program: Arc<SemanticProgram>,
     deps: Arc<bsl_analysis_v2::SemanticDeps>,
     line: u32,
     character: u32,
+    coordinator: Option<&SystemCoordinator>,
 ) -> Option<DefinitionTarget> {
     let repo = deps.repository.clone();
 
@@ -75,7 +134,13 @@ fn goto_definition_v2_with_source_opt(
 
     let index = LineIndex::new(text);
     let offset = index.utf16_position_to_byte_offset(text, line, character) as u32;
-    let type_at_position = semantic_type_at_offset(ir_program.as_ref(), offset);
+    if let (Some(analysis), Some(file_id)) = (analysis, file_id) {
+        if !exact_type_index_available(analysis, file_id, offset, coordinator) {
+            return None;
+        }
+    }
+    let type_at_position =
+        semantic_type_at_offset(ir_program.as_ref(), analysis, file_id, offset, coordinator);
 
     if let Some(node) = ir_program.find_node_at_byte_offset(offset) {
         if let SemanticNodeKind::VariableAccess { name } = &node.kind {
@@ -95,9 +160,15 @@ fn goto_definition_v2_with_source_opt(
         } = &node.kind
         {
             if access_kind.is_method() {
-                if let Some(owner_type) = semantic_receiver_type(ir_program.as_ref(), node)
-                    .as_ref()
-                    .map(TypeResolution::type_name)
+                if let Some(owner_type) = semantic_receiver_type(
+                    ir_program.as_ref(),
+                    analysis,
+                    file_id,
+                    node,
+                    coordinator,
+                )
+                .as_ref()
+                .map(TypeResolution::type_name)
                 {
                     if let Some(loc) =
                         repo.find_method_definition_location(Some(&owner_type), member_name)
@@ -140,7 +211,8 @@ fn goto_definition_v2_with_source_opt(
             ..
         } = &node.kind
         {
-            let receiver_type = semantic_receiver_type(ir_program.as_ref(), node);
+            let receiver_type =
+                semantic_receiver_type(ir_program.as_ref(), analysis, file_id, node, coordinator);
             let owner_type = receiver_type.as_ref().map(|value| value.type_name());
             let cursor_targets_receiver = receiver_span_for_node(ir_program.as_ref(), node)
                 .map(|span| span.contains(offset) || (offset > 0 && span.contains(offset - 1)))
@@ -296,7 +368,16 @@ fn current_module_owner_type_candidates(current_file_path: &str) -> Vec<String> 
     candidates
 }
 
-fn semantic_type_at_offset(program: &SemanticProgram, offset: u32) -> Option<TypeResolution> {
+fn semantic_type_at_offset(
+    program: &SemanticProgram,
+    analysis: Option<&bsl_analysis_v2::AnalysisV2>,
+    file_id: Option<bsl_analysis_v2::FileId>,
+    offset: u32,
+    coordinator: Option<&SystemCoordinator>,
+) -> Option<TypeResolution> {
+    if let (Some(analysis), Some(file_id)) = (analysis, file_id) {
+        return serve_only_type_at_offset(analysis, file_id, offset, coordinator);
+    }
     program
         .semantic_facts
         .type_at_byte_offset(offset)
@@ -330,14 +411,22 @@ fn receiver_span_for_node(
 
 fn semantic_receiver_type(
     program: &SemanticProgram,
+    analysis: Option<&bsl_analysis_v2::AnalysisV2>,
+    file_id: Option<bsl_analysis_v2::FileId>,
     node: &bsl_shared::ir::SemanticNode,
+    coordinator: Option<&SystemCoordinator>,
 ) -> Option<TypeResolution> {
+    if let (Some(analysis), Some(file_id)) = (analysis, file_id) {
+        return receiver_span_for_node(program, node)
+            .and_then(|span| serve_only_type_in_span(analysis, file_id, span, coordinator));
+    }
+
     let span_fallback = |span: Span| {
-        semantic_type_at_offset(program, span.start)
+        semantic_type_at_offset(program, None, None, span.start, None)
             .or_else(|| {
                 span.end
                     .checked_sub(1)
-                    .and_then(|offset| semantic_type_at_offset(program, offset))
+                    .and_then(|offset| semantic_type_at_offset(program, None, None, offset, None))
             })
             .or_else(|| program.semantic_facts.type_resolution_for_span(span))
     };
@@ -357,6 +446,55 @@ fn semantic_receiver_type(
             .or_else(|| receiver_span_for_node(program, node).and_then(span_fallback)),
         _ => None,
     }
+}
+
+fn serve_only_type_in_span(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    span: Span,
+    coordinator: Option<&SystemCoordinator>,
+) -> Option<TypeResolution> {
+    serve_only_type_at_offset(analysis, file_id, span.start, coordinator).or_else(|| {
+        span.end
+            .checked_sub(1)
+            .and_then(|offset| serve_only_type_at_offset(analysis, file_id, offset, coordinator))
+    })
+}
+
+fn serve_only_type_at_offset(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    byte_offset: u32,
+    coordinator: Option<&SystemCoordinator>,
+) -> Option<TypeResolution> {
+    let profiled = serve_only_profiled(analysis, file_id, byte_offset, coordinator)?;
+    profiled.resolution
+}
+
+fn exact_type_index_available(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    byte_offset: u32,
+    coordinator: Option<&SystemCoordinator>,
+) -> bool {
+    serve_only_profiled(analysis, file_id, byte_offset, coordinator).is_some_and(|profiled| {
+        profiled.serve_reason_code == bsl_analysis_v2::TypeIndexServeReasonCode::TypeIndexExactHit
+    })
+}
+
+fn serve_only_profiled(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    byte_offset: u32,
+    coordinator: Option<&SystemCoordinator>,
+) -> Option<bsl_analysis_v2::TypeAtByteOffsetProfiledResult> {
+    let profiled = analysis
+        .type_at_byte_offset_serve_only_profiled(file_id, byte_offset)
+        .ok()?;
+    if let Some(coordinator) = coordinator {
+        coordinator.record_intellisense_v2_type_index_reason(profiled.serve_reason_code.as_str());
+    }
+    Some(profiled)
 }
 
 fn find_local_method_declaration_span(

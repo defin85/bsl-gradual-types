@@ -48,6 +48,48 @@ pub fn get_hover_info_with_semantic_program(
     )
 }
 
+pub fn hover_exact_type_index_available_at_position(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    file_content: &str,
+    line: u32,
+    column: u32,
+    ir_program: &SemanticProgram,
+) -> bool {
+    let Some(byte_offset) = analysis
+        .utf16_position_to_byte_offset(file_id, line, column)
+        .ok()
+        .flatten()
+        .map(|offset| offset.min(u32::MAX as usize) as u32)
+    else {
+        return true;
+    };
+
+    if exact_type_index_available_at_probe(analysis, file_id, byte_offset) {
+        return true;
+    }
+
+    if let Some(span) = identifier_span_at_byte_offset(file_content, byte_offset as usize) {
+        if exact_type_index_available_at_span(analysis, file_id, span) {
+            return true;
+        }
+    }
+
+    if let Some(node) = ir_program.find_node_at_byte_offset(byte_offset) {
+        if exact_type_index_available_at_span(analysis, file_id, node.span) {
+            return true;
+        }
+    }
+
+    if let Some(span) = indexed_expression_span_at_byte_offset(file_content, byte_offset as usize) {
+        if exact_type_index_available_at_span(analysis, file_id, span) {
+            return true;
+        }
+    }
+
+    false
+}
+
 #[allow(clippy::too_many_arguments)]
 fn compute_hover_info_from_ir(
     ir_program: &SemanticProgram,
@@ -273,6 +315,32 @@ fn type_at_owner_span(
     }
 
     fallback
+}
+
+fn exact_type_index_available_at_span(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    span: Span,
+) -> bool {
+    exact_type_index_available_at_probe(analysis, file_id, span.start)
+        || span
+            .end
+            .checked_sub(1)
+            .is_some_and(|probe| exact_type_index_available_at_probe(analysis, file_id, probe))
+}
+
+fn exact_type_index_available_at_probe(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    probe: u32,
+) -> bool {
+    analysis
+        .type_at_byte_offset_serve_only_profiled(file_id, probe)
+        .ok()
+        .is_some_and(|profiled| {
+            profiled.serve_reason_code
+                == bsl_analysis_v2::TypeIndexServeReasonCode::TypeIndexExactHit
+        })
 }
 
 fn identifier_span_at_byte_offset(file_content: &str, byte_offset: usize) -> Option<Span> {

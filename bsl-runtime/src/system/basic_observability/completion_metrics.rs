@@ -174,21 +174,12 @@ impl BasicObservability {
     }
 
     pub fn record_intellisense_v2_completion_outcome(&self, outcome: &str) {
-        let metric = match outcome {
-            "wait_not_ready" => "intellisense_v2_completion_result_total_wait_not_ready",
-            "missing_file_content" => {
-                "intellisense_v2_completion_result_total_missing_file_content"
-            }
-            "missing_file_path" => "intellisense_v2_completion_result_total_missing_file_path",
-            "missing_deps" => "intellisense_v2_completion_result_total_missing_deps",
-            "missing_ir" => "intellisense_v2_completion_result_total_missing_ir",
-            "fallback_unavailable" => {
-                "intellisense_v2_completion_result_total_fallback_unavailable"
-            }
+        let metric = match normalize_public_completion_outcome_label(outcome) {
+            "ok_non_empty" => "intellisense_v2_completion_result_total_ok_non_empty",
+            "ok_empty" => "intellisense_v2_completion_result_total_ok_empty",
+            "fail_closed" => "intellisense_v2_completion_result_total_fail_closed",
             "cancelled" => "intellisense_v2_completion_result_total_cancelled",
             "handler_error" => "intellisense_v2_completion_result_total_handler_error",
-            "ok_empty" => "intellisense_v2_completion_result_total_ok_empty",
-            "ok_non_empty" => "intellisense_v2_completion_result_total_ok_non_empty",
             _ => "intellisense_v2_completion_result_total_other",
         };
         self.metrics.increment(metric);
@@ -248,6 +239,27 @@ impl BasicObservability {
         let reason = normalize_completion_owner_hint_reason_label(reason);
         let key = format!("intellisense_v2_completion_owner_hint_result_total_reason_{reason}");
         self.metrics.increment(&key);
+    }
+
+    pub fn record_intellisense_v2_interactive_fail_closed_reason(
+        &self,
+        origin: &str,
+        operation: &str,
+        reason: &str,
+    ) {
+        let origin = normalize_observability_origin_label(origin);
+        let operation = normalize_operation_label(operation);
+        let is_known_reason = SHARED_FAIL_CLOSED_REASON_REGISTRY
+            .iter()
+            .any(|(raw, _normalized)| *raw == reason);
+        let reason = normalize_shared_fail_closed_reason_label(reason);
+        let key = format!(
+            "intellisense_v2_fail_closed_reason_total_origin_{origin}_operation_{operation}_reason_{reason}"
+        );
+        self.metrics.increment(&key);
+        if !is_known_reason {
+            self.record_observability_contract_violation("unknown_fail_closed_reason");
+        }
     }
 
     pub fn record_intellisense_v2_type_index_reason(&self, reason: &str) {

@@ -3451,6 +3451,15 @@ async fn p7_first_completion_after_received_advance_fails_closed_empty() {
         .get("intellisense_v2_completion_fallback_unavailable_total")
         .and_then(|value| value.as_u64())
         .unwrap_or(0);
+    let fail_closed_reason_total = counters
+        .iter()
+        .filter(|(key, _)| {
+            key.starts_with(
+                "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_completion_",
+            )
+        })
+        .map(|(_, value)| value.as_u64().unwrap_or(0))
+        .sum::<u64>();
     assert!(
         stale_fallback_total == 0,
         "stale fallback counter must stay zero under fail-closed contract"
@@ -3458,6 +3467,10 @@ async fn p7_first_completion_after_received_advance_fails_closed_empty() {
     assert!(
         fallback_unavailable_total > 0,
         "fail-closed completion miss must record fallback_unavailable"
+    );
+    assert!(
+        fail_closed_reason_total > 0,
+        "fail-closed completion miss must emit bounded public reason metrics"
     );
 
     drain_task.abort();
@@ -3644,6 +3657,15 @@ async fn p7_large_churn_budget_timeout_returns_fail_closed_empty_response() {
         .get("intellisense_v2_completion_fallback_unavailable_total")
         .and_then(|value| value.as_u64())
         .unwrap_or(0);
+    let fail_closed_reason_total = counters
+        .iter()
+        .filter(|(key, _)| {
+            key.starts_with(
+                "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_completion_",
+            )
+        })
+        .map(|(_, value)| value.as_u64().unwrap_or(0))
+        .sum::<u64>();
     assert!(
         stale_fallback_total == 0,
         "stale fallback counter must stay zero under fail-closed churn path"
@@ -3651,6 +3673,10 @@ async fn p7_large_churn_budget_timeout_returns_fail_closed_empty_response() {
     assert!(
         fallback_unavailable_total > 0,
         "fail-closed churn path must record fallback_unavailable"
+    );
+    assert!(
+        fail_closed_reason_total > 0,
+        "fail-closed churn path must emit bounded public reason metrics"
     );
 
     drain_task.abort();
@@ -3833,9 +3859,9 @@ async fn p7_large_churn_budget_timeout_without_prior_completion_returns_fail_clo
 }
 
 #[tokio::test]
-async fn p7_hover_cache_miss_emits_type_index_fallback_unavailable_reason() {
+async fn p7_hover_cache_miss_emits_bounded_fail_closed_reason() {
     const FALLBACK_REASON_KEY: &str =
-        "intellisense_v2_type_index_reason_total_reason_type_index_fallback_unavailable";
+        "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_hover_reason_missing_semantic_index";
 
     let coordinator = Arc::new(SystemCoordinator::new());
     let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
@@ -3927,7 +3953,7 @@ async fn p7_hover_cache_miss_emits_type_index_fallback_unavailable_reason() {
     let after_hover = fallback_reason_total(&coordinator);
     assert!(
         after_hover > before_hover,
-        "hover cache miss must emit type_index_fallback_unavailable reason"
+        "hover cache miss must emit bounded public fail-closed reason"
     );
 
     drain_task.abort();
@@ -4016,6 +4042,171 @@ Map.Вставить(\"k\", Новый ТаблицаЗначений);\n\
     assert!(
         hover.is_none(),
         "hover cache miss on map index access must not synthesize legacy fallback payload: {hover_value:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p7_legitimate_empty_interactive_results_do_not_emit_fail_closed_reasons() {
+    const HOVER_REASON_KEY: &str =
+        "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_hover_reason_missing_semantic_index";
+    const SIGNATURE_REASON_KEY: &str =
+        "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_signature_help_reason_missing_semantic_index";
+    const DEFINITION_REASON_KEY: &str =
+        "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_definition_reason_missing_semantic_index";
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().unwrap() = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let fixture = "Процедура Тест()\n\
+    МойМассив = Новый Массив;\n\
+    МойМассив.Несуществующий(1);\n\
+КонецПроцедуры\n";
+    let uri = Url::parse("file:///test_p7_legitimate_empty_interactive_results.bsl").expect("uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: fixture.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let metric_total = |metric_key: &str| -> u64 {
+        let metrics = coordinator.observability_metrics();
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        read_u64_metric(counters.get(metric_key))
+    };
+
+    let before_hover = metric_total(HOVER_REASON_KEY);
+    let hover_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/hover")
+                .id(9111)
+                .params(
+                    serde_json::to_value(HoverParams {
+                        text_document_position_params: TextDocumentPositionParams {
+                            text_document: TextDocumentIdentifier { uri: uri.clone() },
+                            position: Position::new(1, 0),
+                        },
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                    })
+                    .expect("HoverParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("hover request");
+    assert!(
+        hover_response.is_some(),
+        "hover must return a response envelope even when result is empty"
+    );
+    let after_hover = metric_total(HOVER_REASON_KEY);
+    assert_eq!(
+        after_hover, before_hover,
+        "legitimate empty hover result must not emit fail-closed reason"
+    );
+
+    let before_signature = metric_total(SIGNATURE_REASON_KEY);
+    let signature_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/signatureHelp")
+                .id(9112)
+                .params(
+                    serde_json::to_value(tower_lsp::lsp_types::SignatureHelpParams {
+                        text_document_position_params: TextDocumentPositionParams {
+                            text_document: TextDocumentIdentifier { uri: uri.clone() },
+                            position: find_utf16_position_after_marker(
+                                fixture,
+                                "МойМассив.Несуществующий(",
+                            ),
+                        },
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                        context: None,
+                    })
+                    .expect("SignatureHelpParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("signatureHelp request");
+    assert!(
+        signature_response.is_some(),
+        "signatureHelp must return a response envelope even when result is empty"
+    );
+    let after_signature = metric_total(SIGNATURE_REASON_KEY);
+    assert_eq!(
+        after_signature, before_signature,
+        "unknown method signatureHelp result must not emit fail-closed reason"
+    );
+
+    let before_definition = metric_total(DEFINITION_REASON_KEY);
+    let definition_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/definition")
+                .id(9113)
+                .params(
+                    serde_json::to_value(GotoDefinitionParams {
+                        text_document_position_params: TextDocumentPositionParams {
+                            text_document: TextDocumentIdentifier { uri: uri.clone() },
+                            position: find_utf16_position_after_marker(fixture, "МойМассив."),
+                        },
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                        partial_result_params: PartialResultParams::default(),
+                    })
+                    .expect("GotoDefinitionParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("definition request");
+    assert!(
+        definition_response.is_some(),
+        "definition must return a response envelope even when result is empty"
+    );
+    let after_definition = metric_total(DEFINITION_REASON_KEY);
+    assert_eq!(
+        after_definition, before_definition,
+        "unknown method definition result must not emit fail-closed reason"
     );
 
     drain_task.abort();
@@ -4924,8 +5115,7 @@ async fn p7_completion_owner_hint_type_lookup_is_serve_only_even_when_flow_sensi
 }
 
 #[tokio::test]
-async fn p7_hover_emits_type_index_reasons_while_completion_signature_and_definition_reuse_current_semantic_state(
-) {
+async fn p7_interactive_default_paths_emit_shared_type_index_reasons_on_exact_lookups() {
     const TYPE_INDEX_REASON_PREFIX: &str = "intellisense_v2_type_index_reason_total_reason_";
     const INTERACTIVE_REASON_COUNTER_KEYS: &[&str] = &[
         "intellisense_v2_type_index_reason_total_reason_type_index_exact_hit",
@@ -5108,8 +5298,8 @@ async fn p7_hover_emits_type_index_reasons_while_completion_signature_and_defini
     );
     let after_signature = interactive_reason_total(&coordinator);
     assert!(
-        after_signature == before_signature,
-        "signatureHelp must reuse current semantic state without extra type_index serve reason"
+        after_signature > before_signature,
+        "signatureHelp must emit at least one type_index serve reason on the shared default path"
     );
 
     let before_definition = interactive_reason_total(&coordinator);
@@ -5141,8 +5331,8 @@ async fn p7_hover_emits_type_index_reasons_while_completion_signature_and_defini
     );
     let after_definition = interactive_reason_total(&coordinator);
     assert!(
-        after_definition == before_definition,
-        "definition must reuse current semantic state without extra type_index serve reason"
+        after_definition > before_definition,
+        "definition must emit at least one type_index serve reason on the shared default path"
     );
 
     let metrics = coordinator.observability_metrics();
@@ -8884,7 +9074,7 @@ async fn p26_interactive_warm_path_completion_slo_smoke_conf_big() {
 
 #[tokio::test]
 async fn p27_interactive_completion_acceptance_gates_emit_artifact() {
-    const CHANGE_ID: &str = "refactor-v2-completion-event-driven-pipeline";
+    const CHANGE_ID: &str = "refactor-ir-canonical-semantic-pipeline";
     const ITERATIONS: u64 = 120;
     const MAX_P95_MS: f64 = 300.0;
     const MAX_P99_MS: f64 = 800.0;
@@ -9203,13 +9393,24 @@ async fn p27_interactive_completion_acceptance_gates_emit_artifact() {
 
     let first_trigger_success_rate =
         first_trigger_success_total as f64 / first_trigger_total.max(1) as f64;
-    let terminal_empty_missing_ir_total = sum_counters_by_prefix_and_substring(
-        counters,
-        "intellisense_v2_completion_member_access_terminal_empty_total_",
-        "_reason_missing_ir",
-    );
+    let terminal_empty_fail_closed_total = [
+        "missing_canonical_ir",
+        "missing_semantic_index",
+        "superseded_revision",
+        "cancelled",
+        "unavailable_by_contract",
+    ]
+    .into_iter()
+    .map(|reason| {
+        sum_counters_by_prefix_and_substring(
+            counters,
+            "intellisense_v2_completion_member_access_terminal_empty_total_",
+            &format!("_reason_{reason}"),
+        )
+    })
+    .sum::<u64>();
     let terminal_empty_rate =
-        terminal_empty_missing_ir_total as f64 / first_trigger_total.max(1) as f64;
+        terminal_empty_fail_closed_total as f64 / first_trigger_total.max(1) as f64;
     let parity_drift_total = sum_counters_by_prefix(
         counters,
         "intellisense_v2_completion_parity_drift_total_mode_",
@@ -9253,7 +9454,7 @@ async fn p27_interactive_completion_acceptance_gates_emit_artifact() {
             "completion_p95_ms_max": MAX_P95_MS,
             "completion_p99_ms_max": MAX_P99_MS,
             "first_trigger_success_rate_min": MIN_FIRST_TRIGGER_SUCCESS_RATE,
-            "terminal_empty_missing_ir_rate_max": MAX_TERMINAL_EMPTY_RATE,
+            "terminal_empty_fail_closed_rate_max": MAX_TERMINAL_EMPTY_RATE,
             "parity_mismatch_rate_max": MAX_PARITY_MISMATCH_RATE,
             "parity_pairs_total_min": PARITY_PAIRS_TOTAL_MIN_FOR_CUTOVER,
             "parity_drift_rate_max": PARITY_DRIFT_RATE_MAX_FOR_CUTOVER
@@ -9264,8 +9465,8 @@ async fn p27_interactive_completion_acceptance_gates_emit_artifact() {
             "first_trigger_success_total": first_trigger_success_total,
             "first_trigger_total": first_trigger_total,
             "first_trigger_success_rate": first_trigger_success_rate,
-            "terminal_empty_missing_ir_total": terminal_empty_missing_ir_total,
-            "terminal_empty_missing_ir_rate": terminal_empty_rate,
+            "terminal_empty_fail_closed_total": terminal_empty_fail_closed_total,
+            "terminal_empty_fail_closed_rate": terminal_empty_rate,
             "parity_drift_total": parity_drift_total,
             "parity_pairs_total": parity_pairs_total,
             "parity_mismatch_rate": parity_mismatch_rate,
@@ -9316,7 +9517,7 @@ async fn p27_interactive_completion_acceptance_gates_emit_artifact() {
     );
     assert!(
         terminal_empty_rate <= MAX_TERMINAL_EMPTY_RATE,
-        "acceptance gate failed: terminal-empty(missing_ir) rate={:.4} > {:.4}",
+        "acceptance gate failed: terminal-empty(fail_closed) rate={:.4} > {:.4}",
         terminal_empty_rate,
         MAX_TERMINAL_EMPTY_RATE
     );

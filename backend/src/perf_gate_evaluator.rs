@@ -544,7 +544,7 @@ pub fn evaluate_intellisense_perf_profile(
         contract.get("surface").and_then(|v| v.as_str()),
         contract.get("major_version").and_then(|v| v.as_u64()),
     ) {
-        (Some("intellisense-perf-gate"), Some(1)) => "v1".to_string(),
+        (Some("intellisense-perf-gate"), Some(2)) => "v2".to_string(),
         _ => {
             reason_codes.insert("unsupported_contract_version".to_string());
             "unknown".to_string()

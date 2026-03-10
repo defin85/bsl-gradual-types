@@ -6,6 +6,7 @@ use bsl_shared::domain::types::TypeResolution;
 use bsl_shared::ir::{SemanticNode, SemanticNodeKind, SemanticProgram, Span};
 
 use crate::system::LineIndex;
+use crate::system::SystemCoordinator;
 
 #[derive(Debug, Clone)]
 pub struct SignatureHelpData {
@@ -31,9 +32,51 @@ pub fn get_signature_help_v2(
     ir_program: Arc<SemanticProgram>,
     deps: Arc<bsl_analysis_v2::SemanticDeps>,
 ) -> Option<SignatureHelpData> {
+    get_signature_help_v2_with_analysis(
+        file_content,
+        line,
+        character,
+        None,
+        None,
+        ir_program,
+        deps,
+        None,
+    )
+}
+
+pub fn get_signature_help_v2_with_analysis(
+    file_content: &str,
+    line: u32,
+    character: u32,
+    analysis: Option<&bsl_analysis_v2::AnalysisV2>,
+    file_id: Option<bsl_analysis_v2::FileId>,
+    ir_program: Arc<SemanticProgram>,
+    deps: Arc<bsl_analysis_v2::SemanticDeps>,
+    coordinator: Option<&SystemCoordinator>,
+) -> Option<SignatureHelpData> {
     let call_context = signature_help_query(file_content, line, character)?;
-    let receiver_type_hint =
-        signature_receiver_type_from_ir(file_content, &call_context, ir_program.as_ref());
+    if let (Some(analysis), Some(file_id)) = (analysis, file_id) {
+        let probe_offset = LineIndex::new(file_content)
+            .utf16_position_to_byte_offset(file_content, line, character)
+            .min(u32::MAX as usize) as u32;
+        if !exact_type_index_available(analysis, file_id, probe_offset, coordinator) {
+            return None;
+        }
+    }
+    let receiver_type_hint = signature_receiver_type(
+        file_content,
+        &call_context,
+        ir_program.as_ref(),
+        analysis,
+        file_id,
+        coordinator,
+    );
+    if call_context.receiver_text.is_some()
+        && !call_context.is_constructor
+        && receiver_type_hint.is_none()
+    {
+        return None;
+    }
 
     let signature_info = get_signature_for_function_with_repository(
         &call_context.function_name,
@@ -61,6 +104,23 @@ pub fn get_signature_help_v2(
         parameters,
         active_parameter: active_param,
     })
+}
+
+pub fn signature_help_exact_type_index_available_at_position(
+    file_content: &str,
+    line: u32,
+    character: u32,
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+) -> bool {
+    if signature_help_query(file_content, line, character).is_none() {
+        return true;
+    }
+
+    let probe_offset = LineIndex::new(file_content)
+        .utf16_position_to_byte_offset(file_content, line, character)
+        .min(u32::MAX as usize) as u32;
+    exact_type_index_available(analysis, file_id, probe_offset, None)
 }
 
 pub fn signature_help_query(
@@ -446,6 +506,56 @@ fn signature_receiver_type_from_ir(
     ir_program.semantic_facts.type_at_byte_offset(byte_offset)
 }
 
+fn signature_receiver_type(
+    file_content: &str,
+    call_context: &SignatureHelpQuery,
+    ir_program: &SemanticProgram,
+    analysis: Option<&bsl_analysis_v2::AnalysisV2>,
+    file_id: Option<bsl_analysis_v2::FileId>,
+    coordinator: Option<&SystemCoordinator>,
+) -> Option<TypeResolution> {
+    if let (Some(analysis), Some(file_id)) = (analysis, file_id) {
+        let line_index = LineIndex::new(file_content);
+        let call_start_offset = line_index
+            .utf16_position_to_byte_offset(
+                file_content,
+                call_context.call_start_line,
+                call_context.call_start_character,
+            )
+            .min(u32::MAX as usize) as u32;
+        if let Some(node) = [
+            call_start_offset.saturating_sub(1),
+            call_start_offset,
+            call_start_offset.saturating_add(1),
+        ]
+        .into_iter()
+        .find_map(|offset| ir_program.find_node_at_byte_offset(offset))
+        {
+            if let Some(receiver) = semantic_receiver_type_with_exact_index(
+                analysis,
+                file_id,
+                ir_program,
+                node,
+                coordinator,
+            ) {
+                return Some(receiver);
+            }
+        }
+
+        let receiver_end_character = call_context.receiver_end_character?;
+        let byte_offset = line_index
+            .utf16_position_to_byte_offset(
+                file_content,
+                call_context.call_start_line,
+                receiver_end_character,
+            )
+            .min(u32::MAX as usize) as u32;
+        return serve_only_type_at_offset(analysis, file_id, byte_offset, coordinator);
+    }
+
+    signature_receiver_type_from_ir(file_content, call_context, ir_program)
+}
+
 fn semantic_type_at_offset(program: &SemanticProgram, offset: u32) -> Option<TypeResolution> {
     program
         .semantic_facts
@@ -504,6 +614,66 @@ fn semantic_receiver_type(
             .or_else(|| receiver_span_for_node(program, node).and_then(span_fallback)),
         _ => None,
     }
+}
+
+fn semantic_receiver_type_with_exact_index(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    program: &SemanticProgram,
+    node: &SemanticNode,
+    coordinator: Option<&SystemCoordinator>,
+) -> Option<TypeResolution> {
+    receiver_span_for_node(program, node)
+        .and_then(|span| serve_only_type_in_span(analysis, file_id, span, coordinator))
+}
+
+fn serve_only_type_in_span(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    span: Span,
+    coordinator: Option<&SystemCoordinator>,
+) -> Option<TypeResolution> {
+    serve_only_type_at_offset(analysis, file_id, span.start, coordinator).or_else(|| {
+        span.end
+            .checked_sub(1)
+            .and_then(|offset| serve_only_type_at_offset(analysis, file_id, offset, coordinator))
+    })
+}
+
+fn serve_only_type_at_offset(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    byte_offset: u32,
+    coordinator: Option<&SystemCoordinator>,
+) -> Option<TypeResolution> {
+    let profiled = serve_only_profiled(analysis, file_id, byte_offset, coordinator)?;
+    profiled.resolution
+}
+
+fn exact_type_index_available(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    byte_offset: u32,
+    coordinator: Option<&SystemCoordinator>,
+) -> bool {
+    serve_only_profiled(analysis, file_id, byte_offset, coordinator).is_some_and(|profiled| {
+        profiled.serve_reason_code == bsl_analysis_v2::TypeIndexServeReasonCode::TypeIndexExactHit
+    })
+}
+
+fn serve_only_profiled(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    byte_offset: u32,
+    coordinator: Option<&SystemCoordinator>,
+) -> Option<bsl_analysis_v2::TypeAtByteOffsetProfiledResult> {
+    let profiled = analysis
+        .type_at_byte_offset_serve_only_profiled(file_id, byte_offset)
+        .ok()?;
+    if let Some(coordinator) = coordinator {
+        coordinator.record_intellisense_v2_type_index_reason(profiled.serve_reason_code.as_str());
+    }
+    Some(profiled)
 }
 
 fn signature_owner_type_name(resolution: &TypeResolution) -> Option<String> {

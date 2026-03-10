@@ -444,6 +444,45 @@ fn completion_owner_hint_at_position(
 }
 
 #[tokio::test]
+async fn completion_member_access_fails_closed_without_shared_owner_hint() {
+    let content = concat!(
+        "Процедура Тест()\n",
+        "    МойМассив = Новый Массив;\n",
+        "    МойМассив.\n",
+        "КонецПроцедуры\n"
+    );
+    let position = find_position(content, "МойМассив.");
+    let uri = Url::parse("file:///completion_member_access_fail_closed.bsl").expect("url");
+    let env = create_test_env();
+    let index_snapshot = env.index.snapshot();
+    let deps = env.deps;
+
+    let (file_content, file_path, ir_program, _owner_hint) =
+        build_v2_ir(content, &uri, deps.clone(), position);
+    let response = handle_completion_v2_with_trigger_hint(
+        file_content,
+        file_path,
+        ir_program,
+        None,
+        deps,
+        position,
+        &uri,
+        &index_snapshot,
+        true,
+        false,
+        Some('.'),
+    )
+    .await
+    .expect("completion");
+
+    let items = extract_items(response.response);
+    assert!(
+        items.is_empty(),
+        "member-access completion must fail closed without shared owner hint even when IR is available"
+    );
+}
+
+#[tokio::test]
 async fn m5_completion_v2_is_deterministic() {
     let content = read_fixture("m5_snippets_resolve.bsl");
     let position = find_position(&content, "МойМассив");

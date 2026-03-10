@@ -132,12 +132,7 @@ impl CompletionTimelineCapture {
     fn push_terminal_stage(&mut self, outcome: &str) {
         let status = match outcome {
             "cancelled" | "superseded" => CompletionTimelineStageStatus::Cancelled,
-            "handler_error"
-            | "queue_rejected"
-            | "wait_not_ready"
-            | "missing_deps"
-            | "missing_file_content"
-            | "missing_file_path" => CompletionTimelineStageStatus::Failed,
+            "fail_closed" | "handler_error" => CompletionTimelineStageStatus::Failed,
             "skipped" => CompletionTimelineStageStatus::Skipped,
             _ => CompletionTimelineStageStatus::Completed,
         };
@@ -176,6 +171,48 @@ impl CompletionTimelineCapture {
             dominant_stage,
             stages: self.stages,
         }
+    }
+}
+
+fn completion_public_timeline_outcome(outcome: &str) -> &'static str {
+    match outcome {
+        "ok_non_empty" => "ok_non_empty",
+        "ok_empty" => "ok_empty",
+        "cancelled" => "cancelled",
+        "superseded" => "superseded",
+        "handler_error" => "handler_error",
+        "wait_not_ready"
+        | "missing_file_content"
+        | "missing_file_path"
+        | "missing_deps"
+        | "missing_ir"
+        | "fallback_unavailable"
+        | "queue_rejected" => "fail_closed",
+        _ => "fail_closed",
+    }
+}
+
+fn completion_public_fail_closed_reason(outcome: &str) -> Option<&'static str> {
+    match outcome {
+        "missing_ir" => Some("missing_canonical_ir"),
+        "fallback_unavailable" | "wait_not_ready" => Some("missing_semantic_index"),
+        "superseded" => Some("superseded_revision"),
+        "cancelled" => Some("cancelled"),
+        "missing_deps" | "missing_file_content" | "missing_file_path" | "queue_rejected" => {
+            Some("unavailable_by_contract")
+        }
+        _ => None,
+    }
+}
+
+fn completion_prepare_error_outcome(
+    outcome: bsl_runtime::application::SemanticOutcome,
+) -> &'static str {
+    match outcome {
+        bsl_runtime::application::SemanticOutcome::StaleVersion => "superseded",
+        bsl_runtime::application::SemanticOutcome::MissingDeps => "missing_deps",
+        bsl_runtime::application::SemanticOutcome::Cancelled => "cancelled",
+        _ => "wait_not_ready",
     }
 }
 
@@ -346,6 +383,7 @@ impl BslLanguageServer {
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
         }
         let mut completion_outcome: Option<&'static str> = None;
+        let mut completion_fail_closed_reason_override: Option<&'static str> = None;
         let mut observed_file_version_for_completion: Option<i32> = None;
         let mut member_access_observed = false;
         let mut cancel_event_emitted = false;
@@ -600,6 +638,29 @@ impl BslLanguageServer {
                                     let file_content = analysis.file_text(file_id).ok().flatten();
                                     let file_path = analysis.file_path(file_id).ok().flatten();
                                     let deps = analysis.deps_data().ok();
+                                    let member_access_owner_type_hint =
+                                        file_content.as_deref().and_then(|text| {
+                                            completion_request_targets_member_access(
+                                                text,
+                                                position,
+                                                trigger_char_hint,
+                                            )
+                                            .then(|| {
+                                                let _ = analysis.precompute_type_index_for_file(
+                                                    file_id,
+                                                    Some(expected_version),
+                                                    0,
+                                                );
+                                                completion_member_access_owner_type_hint_at_position(
+                                                    &analysis,
+                                                    file_id,
+                                                    text,
+                                                    position,
+                                                    Some(coordinator_for_query.as_ref()),
+                                                )
+                                            })
+                                            .flatten()
+                                        });
                                     coordinator_for_query.record_completion_stage_latency(
                                         "query_bundle_deps_and_file_snapshot",
                                         deps_and_file_snapshot_started.elapsed(),
@@ -615,7 +676,7 @@ impl BslLanguageServer {
                                         return (
                                             file_content,
                                             file_path,
-                                            None,
+                                            member_access_owner_type_hint,
                                             deps,
                                             None,
                                             false,
@@ -709,7 +770,7 @@ impl BslLanguageServer {
                                         return (
                                             file_content,
                                             file_path,
-                                            None,
+                                            member_access_owner_type_hint,
                                             deps,
                                             ir_program,
                                             ir_cancelled_after_retry,
@@ -748,7 +809,7 @@ impl BslLanguageServer {
                                         return (
                                             file_content,
                                             file_path,
-                                            None,
+                                            member_access_owner_type_hint,
                                             deps,
                                             ir_program,
                                             ir_cancelled_after_retry,
@@ -759,7 +820,7 @@ impl BslLanguageServer {
                                     (
                                         file_content,
                                         file_path,
-                                        None,
+                                        member_access_owner_type_hint,
                                         deps,
                                         ir_program,
                                         ir_cancelled_after_retry,
@@ -838,6 +899,14 @@ impl BslLanguageServer {
                         })
                         .unwrap_or(member_access_request);
                     member_access_observed = member_access_context;
+                    if member_access_context && member_access_owner_type_hint.is_none() {
+                        self.coordinator
+                            .record_intellisense_v2_completion_fallback_unavailable();
+                        completion_outcome.get_or_insert("wait_not_ready");
+                        completion_fail_closed_reason_override
+                            .get_or_insert("unavailable_by_contract");
+                        break 'completion_flow Some(completion_empty_response(false));
+                    }
                     if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
                         event_driven_guards_enabled,
                         self,
@@ -957,7 +1026,7 @@ impl BslLanguageServer {
                     completion_response
                 }
                 Err(outcome) => {
-                    completion_outcome = Some("wait_not_ready");
+                    completion_outcome = Some(completion_prepare_error_outcome(outcome));
                     debug!(
                         uri = %uri,
                         file_id = file_id.0,
@@ -1000,7 +1069,15 @@ impl BslLanguageServer {
         )
         .await;
 
-        let timeline_outcome = completion_outcome.unwrap_or("ok_empty");
+        if let Some(reason) = completion_fail_closed_reason_override
+            .or_else(|| completion_outcome.and_then(completion_public_fail_closed_reason))
+        {
+            self.coordinator
+                .record_intellisense_v2_interactive_fail_closed_reason("lsp", "completion", reason);
+        }
+
+        let timeline_outcome =
+            completion_public_timeline_outcome(completion_outcome.unwrap_or("ok_empty"));
         timeline_capture.push_terminal_stage(timeline_outcome);
         if !shadow_internal_request {
             let trace = timeline_capture.into_trace(
@@ -1106,5 +1183,29 @@ mod tests {
         assert_eq!(capture.stages.len(), 1);
         assert_eq!(capture.stages[0].name, "terminal");
         assert_eq!(capture.stages[0].status, "cancelled");
+    }
+
+    #[test]
+    fn terminal_stage_marks_fail_closed_as_failed() {
+        let mut capture = sample_capture();
+        capture.push_terminal_stage("fail_closed");
+        assert_eq!(capture.stages.len(), 1);
+        assert_eq!(capture.stages[0].name, "terminal");
+        assert_eq!(capture.stages[0].status, "failed");
+    }
+
+    #[test]
+    fn public_timeline_outcome_collapses_legacy_fail_closed_labels() {
+        for outcome in [
+            "wait_not_ready",
+            "missing_file_content",
+            "missing_file_path",
+            "missing_deps",
+            "missing_ir",
+            "fallback_unavailable",
+            "queue_rejected",
+        ] {
+            assert_eq!(completion_public_timeline_outcome(outcome), "fail_closed");
+        }
     }
 }

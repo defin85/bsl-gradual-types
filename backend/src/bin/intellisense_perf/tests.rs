@@ -1,6 +1,8 @@
 use super::*;
 use crate::reporting::is_report_contract_version_compatible;
+use bsl_shared::TypeRepository;
 use serde_json::json;
+use std::sync::Arc;
 
 #[test]
 fn build_churned_content_switches_marker_without_growth() {
@@ -96,7 +98,7 @@ fn missing_resource_metric_keys_accepts_complete_numeric_metrics() {
 fn missing_required_metric_comparison_is_fail_closed() {
     let contract = json!({
         "surface": "intellisense-perf-gate",
-        "major_version": 1
+        "major_version": 2
     });
     let report = PerfReport {
         scenario: "small".to_string(),
@@ -105,7 +107,7 @@ fn missing_required_metric_comparison_is_fail_closed() {
         warmup: 0,
         change_id: None,
         provenance: None,
-        contract_version: "v1".to_string(),
+        contract_version: "v2".to_string(),
         metrics: PerfMetrics {
             total_requests: 1,
             count: 1,
@@ -136,17 +138,17 @@ fn missing_required_metric_comparison_is_fail_closed() {
 
 #[test]
 fn report_contract_version_compatibility_allows_unknown_baseline_only() {
-    assert!(is_report_contract_version_compatible("v1", "v1", "unknown"));
-    assert!(is_report_contract_version_compatible("v1", "v1", "v1"));
-    assert!(!is_report_contract_version_compatible("v1", "v2", "v1"));
-    assert!(!is_report_contract_version_compatible("v1", "v1", "v2"));
+    assert!(is_report_contract_version_compatible("v2", "v2", "unknown"));
+    assert!(is_report_contract_version_compatible("v2", "v2", "v2"));
+    assert!(!is_report_contract_version_compatible("v2", "v1", "v2"));
+    assert!(!is_report_contract_version_compatible("v2", "v2", "v1"));
 }
 
 #[test]
 fn compare_reports_fails_with_unsupported_contract_version() {
     let contract = json!({
         "surface": "intellisense-perf-gate",
-        "major_version": 1,
+        "major_version": 2,
         "input": {
             "required_profiles": ["small", "large", "churn"]
         },
@@ -186,7 +188,7 @@ fn compare_reports_fails_with_unsupported_contract_version() {
         warmup: 0,
         change_id: None,
         provenance: None,
-        contract_version: "v1".to_string(),
+        contract_version: "v2".to_string(),
         metrics: PerfMetrics {
             total_requests: 1,
             count: 1,
@@ -204,7 +206,7 @@ fn compare_reports_fails_with_unsupported_contract_version() {
         comparison: None,
     };
     let baseline = PerfReport {
-        contract_version: "v2".to_string(),
+        contract_version: "v1".to_string(),
         ..current.clone()
     };
 
@@ -290,5 +292,138 @@ fn provenance_failure_comparison_is_fail_closed() {
     assert_eq!(
         comparison.reason_codes,
         vec!["provenance_missing_for_authoritative_run".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn run_iterations_uses_shared_runtime_preparation_for_completion_cases() {
+    let repository_impl = Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
+    repository_impl
+        .load_types(vec![bsl_shared::domain::types::RawTypeData {
+            name: "Массив".to_string(),
+            source: bsl_shared::domain::types::RawDataSource::Platform,
+            methods: vec![bsl_shared::domain::types::RawMethodData {
+                name: "Добавить".to_string(),
+                return_type: "Булево".to_string(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }])
+        .expect("load types");
+    let repository =
+        repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+    let resolver = Arc::new(bsl_shared::domain::resolver::TypeResolver::new(
+        repository.clone(),
+    ));
+    let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+        signature_index: repository.get_signature_index_clone(),
+        resolver: Some(resolver.clone()),
+        repository: repository.clone(),
+        platform_signatures_loaded: false,
+    });
+    let metadata_lookup = TypeMetadataLookup::new(repository.clone());
+    let index_snapshot =
+        Arc::new(bsl_backend::system::IntellisenseIndexStore::new("cfg", "platform").snapshot());
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let settings = bsl_backend::application::ExecutionSettings {
+        settings_id: SettingsId::from_hash("perf-runtime-test"),
+        diagnostics_detail_level: DetailLevel::Full,
+    };
+    let deps_id = bsl_analysis_v2::DepsSnapshotId::from_hash("perf-runtime-test");
+    let file_id = V2FileId(1);
+    let file_uri = "/tmp/intellisense_perf_runtime_test.bsl".to_string();
+    let content: Arc<str> = Arc::from(
+        concat!(
+            "Процедура Тест()\n",
+            "    МойМассив = Новый Массив;\n",
+            "    МойМассив.\n",
+            "КонецПроцедуры\n"
+        )
+        .to_string(),
+    );
+
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(ChangeV2::SetDepsSnapshot {
+        deps_id: deps_id.clone(),
+        deps: deps.clone(),
+    });
+    host.apply_change(ChangeV2::SetSettingsSnapshot {
+        settings_id: settings.settings_id.clone(),
+        diagnostics_detail_level: settings.diagnostics_detail_level,
+    });
+    host.apply_change(ChangeV2::SetFile {
+        file_id,
+        text: content.clone(),
+        version: 0,
+        path: Arc::from(file_uri.clone()),
+    });
+
+    let facade = bsl_backend::application::IntellisenseV2Facade::new(
+        host,
+        index_snapshot,
+        Some(coordinator.clone()),
+    );
+    let case = PreparedCase {
+        file_id,
+        file_uri: file_uri.clone(),
+        content: content.clone(),
+        line: 2,
+        column: "    МойМассив."
+            .chars()
+            .map(|ch| ch.len_utf16())
+            .sum::<usize>() as u32,
+    };
+    let cases = vec![case];
+    let context = IterationContext {
+        facade: &facade,
+        deps_id: &deps_id,
+        settings,
+        coordinator: coordinator.as_ref(),
+        metadata_lookup: &metadata_lookup,
+        resolver: resolver.as_ref(),
+        cases: &cases,
+    };
+    let mut content_by_file = build_content_by_file_map(&cases);
+    let mut version_by_file = build_file_version_map(&cases);
+    let mut churn_state = None;
+    let mut durations = Vec::new();
+    let mut errors = 0usize;
+    let mut incomplete = 0usize;
+    let mut allocation_count_total = 0u64;
+    let mut allocated_bytes_total = 0u64;
+    let mut lock_wait_ms_total = 0.0;
+    let mut lock_contention_events_total = 0u64;
+
+    run_iterations(
+        &context,
+        1,
+        &mut churn_state,
+        &mut content_by_file,
+        &mut version_by_file,
+        Some(OutputTargets {
+            durations: &mut durations,
+            errors: &mut errors,
+            incomplete: &mut incomplete,
+            allocation_count_total: &mut allocation_count_total,
+            allocated_bytes_total: &mut allocated_bytes_total,
+            lock_wait_ms_total: &mut lock_wait_ms_total,
+            lock_contention_events_total: &mut lock_contention_events_total,
+        }),
+    )
+    .await
+    .expect("run_iterations");
+
+    assert_eq!(
+        errors, 0,
+        "shared runtime completion iteration must not error"
+    );
+    assert_eq!(
+        incomplete, 0,
+        "shared runtime completion iteration must stay complete"
+    );
+    assert_eq!(
+        durations.len(),
+        1,
+        "expected one measured completion iteration"
     );
 }

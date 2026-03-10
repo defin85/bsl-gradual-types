@@ -161,6 +161,26 @@ pub async fn handle_completion_v2_with_trigger_hint(
         .clone()
         .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())));
     let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
+    let member_access_request = completion_request_targets_member_access(
+        file_content.as_ref(),
+        position,
+        trigger_char_hint,
+    );
+    let member_access_owner_type_hint =
+        member_access_owner_type_hint.filter(|hint| !hint.is_unknown() && !hint.is_dynamic());
+
+    // Default LSP delivery must not reconstruct owner type from IR when the shared
+    // exact owner hint is unavailable for a member-access request.
+    if member_access_request && member_access_owner_type_hint.is_none() {
+        return Some(CompletionResponseWithStats {
+            response: CompletionResponse::List(CompletionList {
+                is_incomplete: false,
+                items: vec![],
+            }),
+            stats: None,
+            had_error: false,
+        });
+    }
 
     let completion = get_completion_with_semantic_program_snapshot_with_trigger_hint(
         file_content.as_ref(),
@@ -215,6 +235,43 @@ pub async fn handle_completion_v2_with_trigger_hint(
             })
         }
     }
+}
+
+fn completion_request_targets_member_access(
+    text: &str,
+    position: Position,
+    trigger_char_hint: Option<char>,
+) -> bool {
+    if trigger_char_hint == Some('.') {
+        return true;
+    }
+
+    let Some(line_text) = text.lines().nth(position.line as usize) else {
+        return false;
+    };
+    let column_index =
+        bsl_analysis_v2::utf16_to_byte_offset(line_text, position.character).min(line_text.len());
+    let line_prefix = line_text.get(..column_index).unwrap_or(line_text);
+    let line_prefix = if line_text
+        .get(column_index..)
+        .and_then(|tail| tail.chars().next())
+        == Some('.')
+    {
+        format!("{line_prefix}.")
+    } else {
+        line_prefix.to_string()
+    };
+
+    let trimmed = line_prefix.trim_end();
+    let Some(dot_pos) = trimmed.rfind('.') else {
+        return false;
+    };
+    let after_dot = trimmed[dot_pos + 1..].trim_start();
+    after_dot.is_empty() || after_dot.chars().all(is_completion_identifier_char)
+}
+
+fn is_completion_identifier_char(ch: char) -> bool {
+    ch == '_' || ch.is_alphanumeric()
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -11,26 +11,32 @@ use bsl_backend::application::type_system;
 use bsl_line_index::LineIndex;
 use bsl_shared::ir::SemanticProgram;
 
-pub async fn handle_goto_definition_v2(
+pub fn handle_goto_definition_v2(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
     file_path: Arc<str>,
     file_content: Arc<str>,
     ir_program: Arc<SemanticProgram>,
     deps: Arc<bsl_analysis_v2::SemanticDeps>,
     position: Position,
     uri: &Url,
+    coordinator: Option<&bsl_runtime::system::SystemCoordinator>,
 ) -> Option<GotoDefinitionResponse> {
     info!(
         "Go to definition v2 requested at {}:{} (uri={}, file_path={})",
         position.line, position.character, uri, file_path
     );
 
-    let target = type_system::goto_definition_v2_with_source(
+    let target = type_system::goto_definition_v2_with_source_and_analysis(
         file_path.as_ref(),
         file_content.as_ref(),
+        analysis,
+        file_id,
         ir_program,
         deps,
         position.line,
         position.character,
+        coordinator,
     )?;
 
     let target_uri = Url::from_file_path(&target.file_path).ok()?;

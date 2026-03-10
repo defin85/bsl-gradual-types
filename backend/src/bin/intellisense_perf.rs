@@ -14,7 +14,6 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 
 use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, FileId as V2FileId, SettingsId};
-use bsl_backend::application::get_completion_with_semantic_program_snapshot;
 use bsl_backend::perf_gate_evaluator::{
     validate_cutover_evidence_authority, validate_perf_report_provenance, PerfGateSample,
     PerfGateThresholds,
@@ -401,7 +400,7 @@ async fn main() -> Result<()> {
         workspace_root
             .join("contracts")
             .join("intellisense-perf-gate")
-            .join("v1")
+            .join("v2")
             .join("contract.json")
     });
     let contract = read_json_value(&contract_path)?;
@@ -429,7 +428,7 @@ async fn main() -> Result<()> {
         .or(scenario.platform_version.as_deref());
 
     let prepared = prepare_cases(&scenario.cases, &workspace_root)?;
-    let coordinator = SystemCoordinator::new();
+    let coordinator = Arc::new(SystemCoordinator::new());
     coordinator
         .start_with_paths_blocking(
             syntax_helper_path.as_deref(),
@@ -452,6 +451,10 @@ async fn main() -> Result<()> {
         .clone()
         .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())));
     let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
+    let settings = bsl_backend::application::ExecutionSettings {
+        settings_id: SettingsId::from_hash("intellisense-perf"),
+        diagnostics_detail_level: DetailLevel::Full,
+    };
 
     let mut host = AnalysisHostV2::default();
     host.apply_change(ChangeV2::SetDepsSnapshot {
@@ -459,8 +462,8 @@ async fn main() -> Result<()> {
         deps: deps.clone(),
     });
     host.apply_change(ChangeV2::SetSettingsSnapshot {
-        settings_id: SettingsId::from_hash("intellisense-perf"),
-        diagnostics_detail_level: DetailLevel::Full,
+        settings_id: settings.settings_id.clone(),
+        diagnostics_detail_level: settings.diagnostics_detail_level,
     });
 
     for case in &prepared {
@@ -471,11 +474,20 @@ async fn main() -> Result<()> {
             path: Arc::from(case.file_uri.clone()),
         });
     }
+    let facade = bsl_backend::application::IntellisenseV2Facade::new(
+        host,
+        deps_bundle.index_snapshot.clone(),
+        Some(coordinator.clone()),
+    );
 
     let mut churn_state = build_churn_state(&scenario, &prepared)?;
     let mut content_by_file = build_content_by_file_map(&prepared);
+    let mut version_by_file = build_file_version_map(&prepared);
     let iteration_context = IterationContext {
-        index_snapshot: deps_bundle.index_snapshot.as_ref(),
+        facade: &facade,
+        deps_id: &deps_bundle.deps_id,
+        settings,
+        coordinator: coordinator.as_ref(),
         metadata_lookup: &metadata_lookup,
         resolver: resolver.as_ref(),
         cases: &prepared,
@@ -483,11 +495,11 @@ async fn main() -> Result<()> {
 
     if args.warmup > 0 {
         run_iterations(
-            &mut host,
             &iteration_context,
             args.warmup,
             &mut churn_state,
             &mut content_by_file,
+            &mut version_by_file,
             None,
         )
         .await?;
@@ -495,11 +507,11 @@ async fn main() -> Result<()> {
 
     let mut measured = MeasuredResults::default();
     run_iterations(
-        &mut host,
         &iteration_context,
         args.iterations,
         &mut churn_state,
         &mut content_by_file,
+        &mut version_by_file,
         Some(OutputTargets {
             durations: &mut measured.durations_ms,
             errors: &mut measured.errors,

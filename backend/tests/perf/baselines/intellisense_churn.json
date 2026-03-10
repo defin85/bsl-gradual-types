@@ -32,7 +32,7 @@
     "max_incomplete_rate": 0.0,
     "error_rate": 0.0,
     "incomplete_rate": 0.0,
-    "contract_version": "v1",
+    "contract_version": "v2",
     "verdict": "fail",
     "reason_codes": [
       "lock_wait_budget_exceeded"

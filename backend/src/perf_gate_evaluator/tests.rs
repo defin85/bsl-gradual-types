@@ -4,7 +4,7 @@ use serde_json::json;
 fn contract_fixture() -> Value {
     serde_json::json!({
         "surface": "intellisense-perf-gate",
-        "major_version": 1,
+        "major_version": 2,
         "input": {
             "required_profiles": ["small", "large", "churn"]
         },
@@ -138,7 +138,7 @@ fn perf_gate_fails_closed_for_missing_baseline_in_blocking_mode() {
 #[test]
 fn provenance_allows_legacy_local_without_expected_change_id() {
     let report = json!({
-        "contract_version": "v1",
+        "contract_version": "v2",
         "metrics": {}
     });
 
@@ -148,7 +148,7 @@ fn provenance_allows_legacy_local_without_expected_change_id() {
 #[test]
 fn provenance_requires_change_id_when_expected_is_provided() {
     let report = json!({
-        "contract_version": "v1",
+        "contract_version": "v2",
         "metrics": {}
     });
 
@@ -181,7 +181,7 @@ fn provenance_rejects_invalid_change_id_format() {
 }
 
 #[test]
-fn provenance_accepts_optional_v1_provenance_payload() {
+fn provenance_accepts_optional_v2_provenance_payload() {
     let report = json!({
         "change_id": "refactor-v2-contract-first-hardening",
         "provenance": {
@@ -189,7 +189,7 @@ fn provenance_accepts_optional_v1_provenance_payload() {
             "generated_at": "2026-03-03T19:00:00Z",
             "profile": "small",
             "schema_version": 1,
-            "contract_version": "v1"
+            "contract_version": "v2"
         }
     });
 

@@ -683,29 +683,29 @@ fn runtime_stage_registry_and_projection_contract_require_explicit_updates() {
 }
 
 #[test]
-fn type_index_reason_metrics_are_exported_with_bounded_reasons() {
-    let contract = contract_json("observability-completion-v2/v2/contract.json");
+fn interactive_fail_closed_reason_metrics_are_exported_with_bounded_reasons() {
+    let contract = contract_json("observability-completion-v2/v3/contract.json");
     let metrics_contract = contract
         .get("metrics")
         .and_then(|value| value.as_object())
         .expect("metrics contract section");
     let reason_prefix = metrics_contract
-        .get("type_index_reason_counter_prefix")
+        .get("interactive_fail_closed_reason_counter_prefix")
         .and_then(|value| value.as_str())
-        .expect("type_index reason counter prefix");
+        .expect("interactive fail-closed reason counter prefix");
     assert_eq!(
         reason_prefix,
-        "intellisense_v2_type_index_reason_total_reason_"
+        "intellisense_v2_fail_closed_reason_total_origin_"
     );
     let contract_reasons: Vec<String> = metrics_contract
-        .get("allowed_type_index_reasons")
+        .get("allowed_fail_closed_reasons")
         .and_then(|value| value.as_array())
-        .expect("allowed_type_index_reasons")
+        .expect("allowed_fail_closed_reasons")
         .iter()
         .map(|value| {
             value
                 .as_str()
-                .expect("allowed type_index reason string")
+                .expect("allowed fail-closed reason string")
                 .to_string()
         })
         .collect();
@@ -713,27 +713,35 @@ fn type_index_reason_metrics_are_exported_with_bounded_reasons() {
     let observability = BasicObservability::default();
     for reason in &contract_reasons {
         assert_eq!(
-            normalize_type_index_reason_label(reason),
+            normalize_shared_fail_closed_reason_label(reason),
             reason,
-            "contract type-index reason must stay in bounded normalization set"
+            "contract fail-closed reason must stay in bounded normalization set"
         );
-        observability.record_intellisense_v2_type_index_reason(reason);
+        observability.record_intellisense_v2_interactive_fail_closed_reason(
+            "lsp",
+            "completion",
+            reason,
+        );
     }
-    observability.record_intellisense_v2_type_index_reason("unexpected_reason");
+    observability.record_intellisense_v2_interactive_fail_closed_reason(
+        "lsp",
+        "completion",
+        "unexpected_reason",
+    );
 
     let exported = observability.get_metrics().export_metrics();
     let counters = counters(&exported);
     for reason in &contract_reasons {
-        let key = format!("{reason_prefix}{reason}");
+        let key = format!("{reason_prefix}lsp_operation_completion_reason_{reason}");
         assert!(
             counter_value(counters, &key) > 0,
-            "type-index reason counter must be exported for {reason}"
+            "fail-closed reason counter must be exported for {reason}"
         );
     }
-    let other_key = format!("{reason_prefix}other");
+    let other_key = format!("{reason_prefix}lsp_operation_completion_reason_other");
     assert!(
         counter_value(counters, &other_key) > 0,
-        "type-index reason counter must collapse unknown reasons into other"
+        "fail-closed reason counter must collapse unknown reasons into other"
     );
     assert_eq!(
         counter_value(
@@ -746,10 +754,10 @@ fn type_index_reason_metrics_are_exported_with_bounded_reasons() {
     assert_eq!(
         counter_value(
             counters,
-            "intellisense_v2_observability_contract_violation_reason_unknown_type_index_reason",
+            "intellisense_v2_observability_contract_violation_reason_unknown_fail_closed_reason",
         ),
         1,
-        "unknown type-index reason must emit dedicated contract-violation reason"
+        "unknown fail-closed reason must emit dedicated contract-violation reason"
     );
 }
 
@@ -914,7 +922,7 @@ fn parse_result_query_tracks_operation_dimension() {
 }
 
 #[test]
-fn completion_outcome_exports_fallback_unavailable() {
+fn completion_outcome_exports_fail_closed_for_legacy_fail_closed_label() {
     let observability = BasicObservability::default();
     observability.record_intellisense_v2_completion_outcome("fallback_unavailable");
 
@@ -923,10 +931,10 @@ fn completion_outcome_exports_fallback_unavailable() {
     assert_eq!(
         counter_value(
             counters,
-            "intellisense_v2_completion_result_total_fallback_unavailable"
+            "intellisense_v2_completion_result_total_fail_closed"
         ),
         1,
-        "fallback_unavailable outcome must be exported"
+        "legacy fail-closed outcome must collapse into public fail_closed class"
     );
 }
 
@@ -981,7 +989,7 @@ fn completion_trigger_and_terminal_empty_metrics_normalize_labels() {
 }
 
 #[test]
-fn completion_v2_contract_matches_runtime_outcomes_and_modes() {
+fn completion_v2_contract_matches_runtime_transport_and_trigger_modes() {
     let contract = contract_json("lsp-completion-v2/v2/contract.json");
     let completion = contract
         .get("completion")
@@ -1016,57 +1024,38 @@ fn completion_v2_contract_matches_runtime_outcomes_and_modes() {
         );
     }
 
-    let outcomes: BTreeSet<String> = completion
-        .get("outcomes")
+    let transport_outcomes: BTreeSet<String> = completion
+        .get("transport_outcomes")
         .and_then(|value| value.as_array())
-        .expect("outcomes array")
+        .expect("transport_outcomes array")
         .iter()
-        .map(|value| value.as_str().expect("outcome string").to_string())
+        .map(|value| {
+            value
+                .as_str()
+                .expect("transport outcome string")
+                .to_string()
+        })
         .collect();
-    let expected_outcomes: BTreeSet<String> = ["ok_non_empty", "ok_empty", "fallback_unavailable"]
+    let expected_transport_outcomes: BTreeSet<String> = ["ok_non_empty", "ok_empty"]
         .iter()
         .map(|value| value.to_string())
         .collect();
     assert_eq!(
-        outcomes, expected_outcomes,
-        "contract outcomes must match current completion baseline"
+        transport_outcomes, expected_transport_outcomes,
+        "contract transport outcomes must match canonical/fail-closed completion transport baseline"
     );
 
-    let observability = BasicObservability::default();
-    for outcome in &outcomes {
-        observability.record_intellisense_v2_completion_outcome(outcome);
-    }
-
-    let exported = observability.get_metrics().export_metrics();
-    let counters = counters(&exported);
-    for (outcome, metric) in [
-        (
-            "ok_non_empty",
-            "intellisense_v2_completion_result_total_ok_non_empty",
-        ),
-        (
-            "ok_empty",
-            "intellisense_v2_completion_result_total_ok_empty",
-        ),
-        (
-            "fallback_unavailable",
-            "intellisense_v2_completion_result_total_fallback_unavailable",
-        ),
-    ] {
+    for outcome in &transport_outcomes {
         assert!(
-            outcomes.contains(outcome),
-            "contract must include outcome {outcome}"
-        );
-        assert!(
-            counter_value(counters, metric) > 0,
-            "runtime must export contract outcome metric {metric}"
+            expected_transport_outcomes.contains(outcome),
+            "contract must include transport outcome {outcome}"
         );
     }
 }
 
 #[test]
-fn observability_completion_v2_contract_matches_runtime_metric_labels() {
-    let contract = contract_json("observability-completion-v2/v2/contract.json");
+fn observability_completion_v3_contract_matches_runtime_metric_labels() {
+    let contract = contract_json("observability-completion-v2/v3/contract.json");
     let metrics_contract = contract
         .get("metrics")
         .and_then(|value| value.as_object())
@@ -1095,17 +1084,17 @@ fn observability_completion_v2_contract_matches_runtime_metric_labels() {
     );
     assert_eq!(
         metrics_contract
-            .get("fallback_unavailable_counter")
+            .get("completion_result_counter_prefix")
             .and_then(|value| value.as_str())
-            .expect("fallback_unavailable counter"),
-        "intellisense_v2_completion_result_total_fallback_unavailable"
+            .expect("completion result counter prefix"),
+        "intellisense_v2_completion_result_total_"
     );
     assert_eq!(
         metrics_contract
-            .get("type_index_reason_counter_prefix")
+            .get("interactive_fail_closed_reason_counter_prefix")
             .and_then(|value| value.as_str())
-            .expect("type_index reason counter prefix"),
-        "intellisense_v2_type_index_reason_total_reason_"
+            .expect("interactive fail-closed reason counter prefix"),
+        "intellisense_v2_fail_closed_reason_total_origin_"
     );
 
     let trigger_modes: Vec<String> = metrics_contract
@@ -1132,46 +1121,50 @@ fn observability_completion_v2_contract_matches_runtime_metric_labels() {
                 .to_string()
         })
         .collect();
-    let type_index_reasons: Vec<String> = metrics_contract
-        .get("allowed_type_index_reasons")
+    let fail_closed_reasons: Vec<String> = metrics_contract
+        .get("allowed_fail_closed_reasons")
         .and_then(|value| value.as_array())
-        .expect("allowed_type_index_reasons")
+        .expect("allowed_fail_closed_reasons")
         .iter()
         .map(|value| {
             value
                 .as_str()
-                .expect("allowed type_index reason string")
+                .expect("allowed fail-closed reason string")
                 .to_string()
         })
         .collect();
-    let type_index_reason_prefix = metrics_contract
-        .get("type_index_reason_counter_prefix")
+    let completion_outcomes: Vec<String> = metrics_contract
+        .get("allowed_completion_outcomes")
+        .and_then(|value| value.as_array())
+        .expect("allowed_completion_outcomes")
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .expect("allowed completion outcome string")
+                .to_string()
+        })
+        .collect();
+    let fail_closed_reason_prefix = metrics_contract
+        .get("interactive_fail_closed_reason_counter_prefix")
         .and_then(|value| value.as_str())
-        .expect("type_index reason counter prefix");
-    let precompute_queue_wait_counter = metrics_contract
-        .get("type_index_precompute_queue_wait_counter")
+        .expect("interactive fail-closed reason counter prefix");
+    let runtime_queue_wait_interactive_counter = metrics_contract
+        .get("runtime_queue_wait_interactive_counter")
         .and_then(|value| value.as_str())
-        .expect("type_index precompute queue wait counter");
-    let precompute_exec_counter = metrics_contract
-        .get("type_index_precompute_exec_counter")
+        .expect("runtime_queue_wait_interactive_counter");
+    let runtime_exec_interactive_counter = metrics_contract
+        .get("runtime_exec_interactive_counter")
         .and_then(|value| value.as_str())
-        .expect("type_index precompute exec counter");
-    let precompute_build_exec_counter = metrics_contract
-        .get("type_index_precompute_build_exec_counter")
+        .expect("runtime_exec_interactive_counter");
+    let runtime_queue_wait_interactive_histogram = metrics_contract
+        .get("runtime_queue_wait_interactive_histogram")
         .and_then(|value| value.as_str())
-        .expect("type_index precompute build exec counter");
-    let precompute_queue_wait_histogram = metrics_contract
-        .get("type_index_precompute_queue_wait_histogram")
+        .expect("runtime_queue_wait_interactive_histogram");
+    let runtime_exec_interactive_histogram = metrics_contract
+        .get("runtime_exec_interactive_histogram")
         .and_then(|value| value.as_str())
-        .expect("type_index precompute queue wait histogram");
-    let precompute_exec_histogram = metrics_contract
-        .get("type_index_precompute_exec_histogram")
-        .and_then(|value| value.as_str())
-        .expect("type_index precompute exec histogram");
-    let precompute_build_exec_histogram = metrics_contract
-        .get("type_index_precompute_build_exec_histogram")
-        .and_then(|value| value.as_str())
-        .expect("type_index precompute build exec histogram");
+        .expect("runtime_exec_interactive_histogram");
 
     let observability = BasicObservability::default();
     for mode in &trigger_modes {
@@ -1194,30 +1187,40 @@ fn observability_completion_v2_contract_matches_runtime_metric_labels() {
             "contract terminal reason must remain in bounded normalization set"
         );
     }
-    for reason in &type_index_reasons {
-        observability.record_intellisense_v2_type_index_reason(reason);
-        assert_eq!(
-            normalize_type_index_reason_label(reason),
+    for reason in &fail_closed_reasons {
+        observability.record_intellisense_v2_interactive_fail_closed_reason(
+            "lsp",
+            "completion",
             reason,
-            "contract type_index reason must remain in bounded normalization set"
+        );
+        assert_eq!(
+            normalize_shared_fail_closed_reason_label(reason),
+            reason,
+            "contract fail-closed reason must remain in bounded normalization set"
         );
     }
-    observability.record_intellisense_v2_runtime_queue_wait_latency_with_origin(
+    observability.record_intellisense_v2_runtime_queue_wait_class_latency_with_origin(
         "lsp",
-        "type_index_precompute",
+        "interactive",
         Duration::from_millis(3),
     );
-    observability.record_intellisense_v2_runtime_exec_latency_with_origin(
+    observability.record_intellisense_v2_runtime_exec_class_latency_with_origin(
         "lsp",
-        "type_index_precompute",
+        "interactive",
         Duration::from_millis(5),
     );
-    observability.record_intellisense_v2_runtime_exec_latency_with_origin(
-        "lsp",
-        "type_index_precompute_build",
-        Duration::from_millis(2),
-    );
-    observability.record_intellisense_v2_completion_outcome("fallback_unavailable");
+    for outcome in &completion_outcomes {
+        let raw_outcome = match outcome.as_str() {
+            "fail_closed" => "fallback_unavailable",
+            value => value,
+        };
+        observability.record_intellisense_v2_completion_outcome(raw_outcome);
+        assert_eq!(
+            normalize_public_completion_outcome_label(raw_outcome),
+            outcome,
+            "contract completion outcome must remain in bounded normalization set"
+        );
+    }
 
     let exported = observability.get_metrics().export_metrics();
     let counters = counters(&exported);
@@ -1243,43 +1246,36 @@ fn observability_completion_v2_contract_matches_runtime_metric_labels() {
             "terminal-empty counter must be exported for reason {reason}"
         );
     }
-    for reason in &type_index_reasons {
-        let reason_key = format!("{type_index_reason_prefix}{reason}");
+    for reason in &fail_closed_reasons {
+        let reason_key =
+            format!("{fail_closed_reason_prefix}lsp_operation_completion_reason_{reason}");
         assert!(
             counter_value(counters, &reason_key) > 0,
-            "type-index reason counter must be exported for reason {reason}"
+            "interactive fail-closed reason counter must be exported for reason {reason}"
         );
     }
     assert!(
-        counter_value(counters, precompute_queue_wait_counter) > 0,
-        "precompute queue wait counter must be projected via contract key"
+        counter_value(counters, runtime_queue_wait_interactive_counter) > 0,
+        "runtime queue wait counter must be projected via contract key"
     );
     assert!(
-        counter_value(counters, precompute_exec_counter) > 0,
-        "precompute exec counter must be projected via contract key"
+        counter_value(counters, runtime_exec_interactive_counter) > 0,
+        "runtime exec counter must be projected via contract key"
     );
     assert!(
-        counter_value(counters, precompute_build_exec_counter) > 0,
-        "precompute build exec counter must be projected via contract key"
+        histogram_count(histograms, runtime_queue_wait_interactive_histogram) > 0,
+        "runtime queue wait histogram must be projected via contract key"
     );
     assert!(
-        histogram_count(histograms, precompute_queue_wait_histogram) > 0,
-        "precompute queue wait histogram must be projected via contract key"
-    );
-    assert!(
-        histogram_count(histograms, precompute_exec_histogram) > 0,
-        "precompute exec histogram must be projected via contract key"
-    );
-    assert!(
-        histogram_count(histograms, precompute_build_exec_histogram) > 0,
-        "precompute build exec histogram must be projected via contract key"
+        histogram_count(histograms, runtime_exec_interactive_histogram) > 0,
+        "runtime exec histogram must be projected via contract key"
     );
     assert!(
         counter_value(
             counters,
-            "intellisense_v2_completion_result_total_fallback_unavailable"
+            "intellisense_v2_completion_result_total_fail_closed"
         ) > 0,
-        "fallback_unavailable counter must be exported"
+        "fail_closed completion outcome counter must be exported"
     );
 }
 

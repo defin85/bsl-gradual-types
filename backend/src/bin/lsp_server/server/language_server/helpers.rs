@@ -7,6 +7,25 @@ pub(super) fn effective_include_flow_sensitive(
     request_override.unwrap_or(enable_flow_sensitive_setting)
 }
 
+pub(super) fn lsp_fail_closed_reason_from_prepare_outcome(
+    outcome: bsl_runtime::application::SemanticOutcome,
+) -> &'static str {
+    match outcome {
+        bsl_runtime::application::SemanticOutcome::StaleVersion => "superseded_revision",
+        bsl_runtime::application::SemanticOutcome::Cancelled => "cancelled",
+        bsl_runtime::application::SemanticOutcome::MissingDeps => "unavailable_by_contract",
+        _ => "missing_canonical_ir",
+    }
+}
+
+pub(super) fn record_lsp_interactive_fail_closed_reason(
+    coordinator: &bsl_runtime::system::SystemCoordinator,
+    operation: &str,
+    reason: &str,
+) {
+    coordinator.record_intellisense_v2_interactive_fail_closed_reason("lsp", operation, reason);
+}
+
 pub(super) fn should_schedule_profile(
     trigger: bsl_runtime::application::DiagnosticsTrigger,
     profile: bsl_runtime::application::DiagnosticsProfile,
@@ -180,6 +199,82 @@ pub(super) fn completion_request_targets_member_access(
     };
     let after_dot = trimmed[dot_pos + 1..].trim_start();
     after_dot.is_empty() || after_dot.chars().all(is_completion_identifier_char)
+}
+
+pub(super) fn completion_member_access_owner_type_hint_at_position(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    file_content: &str,
+    position: Position,
+    coordinator: Option<&bsl_runtime::system::SystemCoordinator>,
+) -> Option<bsl_shared::domain::types::TypeResolution> {
+    let Some(line_text) = file_content.lines().nth(position.line as usize) else {
+        if let Some(coordinator) = coordinator {
+            coordinator.record_intellisense_v2_completion_owner_hint_result("no_line");
+        }
+        return None;
+    };
+    let cursor_byte = bsl_analysis_v2::utf16_to_byte_offset(line_text, position.character);
+    let Some(line_prefix) = line_text.get(..cursor_byte.min(line_text.len())) else {
+        if let Some(coordinator) = coordinator {
+            coordinator.record_intellisense_v2_completion_owner_hint_result("offset_unresolved");
+        }
+        return None;
+    };
+    let Some(dot_idx) = line_prefix.rfind('.') else {
+        if let Some(coordinator) = coordinator {
+            coordinator.record_intellisense_v2_completion_owner_hint_result("no_dot");
+        }
+        return None;
+    };
+    let receiver = line_prefix.get(..dot_idx)?.trim_end();
+    if receiver.is_empty() {
+        if let Some(coordinator) = coordinator {
+            coordinator.record_intellisense_v2_completion_owner_hint_result("no_receiver");
+        }
+        return None;
+    }
+
+    let probe_utf16 = bsl_analysis_v2::byte_offset_to_utf16(line_text, receiver.len());
+    let Some(probe_offset) = analysis
+        .utf16_position_to_byte_offset(file_id, position.line, probe_utf16)
+        .ok()
+        .flatten()
+    else {
+        if let Some(coordinator) = coordinator {
+            coordinator.record_intellisense_v2_completion_owner_hint_result("offset_unresolved");
+        }
+        return None;
+    };
+    let probe_offset = probe_offset.saturating_sub(1).min(u32::MAX as usize) as u32;
+    let profiled = match analysis.type_at_byte_offset_serve_only_profiled(file_id, probe_offset) {
+        Ok(profiled) => profiled,
+        Err(_) => {
+            if let Some(coordinator) = coordinator {
+                coordinator
+                    .record_intellisense_v2_completion_owner_hint_result("offset_unresolved");
+            }
+            return None;
+        }
+    };
+
+    if let Some(coordinator) = coordinator {
+        coordinator.record_intellisense_v2_completion_owner_hint_lookup_path("direct");
+    }
+
+    let resolution = profiled
+        .resolution
+        .filter(|hint| !hint.is_unknown() && !hint.is_dynamic());
+
+    if let Some(coordinator) = coordinator {
+        coordinator.record_intellisense_v2_completion_owner_hint_result(if resolution.is_some() {
+            "type_hit"
+        } else {
+            "type_miss"
+        });
+    }
+
+    resolution
 }
 
 pub(super) fn completion_labels_fingerprint(response: &CompletionResponse) -> Vec<String> {

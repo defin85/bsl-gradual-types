@@ -123,10 +123,10 @@ fn create_test_deps() -> Arc<bsl_analysis_v2::SemanticDeps> {
     })
 }
 
-fn compute_ir_program(
+fn build_analysis_host(
     content: &str,
     deps: Arc<bsl_analysis_v2::SemanticDeps>,
-) -> Arc<SemanticProgram> {
+) -> (bsl_analysis_v2::AnalysisV2, Arc<SemanticProgram>, V2FileId) {
     let mut host = AnalysisHostV2::default();
     host.apply_change(Change::SetDepsSnapshot {
         deps_id: DepsSnapshotId::from_hash("test"),
@@ -146,32 +146,41 @@ fn compute_ir_program(
     });
 
     let analysis = host.snapshot();
-    analysis.ir(file_id).ok().flatten().expect("ir")
+    let ir_program = analysis.ir(file_id).ok().flatten().expect("ir");
+    (analysis, ir_program, file_id)
 }
 
 #[tokio::test]
 async fn m5_signature_help_snapshot() {
     let content = read_fixture("m5_signature_help.bsl");
     let deps = create_test_deps();
+    let (analysis, ir_program, file_id) = build_analysis_host(&content, deps.clone());
+    analysis
+        .precompute_type_index_for_file(file_id, Some(0), 0)
+        .expect("precompute exact type index");
 
     let constructor_pos = find_position(&content, "Новый Массив(1, ");
     let constructor_v2 = handle_signature_help_v2(
+        &analysis,
+        file_id,
         Arc::from(content.clone()),
         constructor_pos,
-        compute_ir_program(&content, deps.clone()),
+        ir_program.clone(),
         deps.clone(),
+        None,
     )
-    .await
     .expect("constructor signature help (v2)");
 
     let method_pos = find_position(&content, "МойМассив.Добавить(1, ");
     let method_v2 = handle_signature_help_v2(
+        &analysis,
+        file_id,
         Arc::from(content.clone()),
         method_pos,
-        compute_ir_program(&content, deps.clone()),
+        ir_program,
         deps,
+        None,
     )
-    .await
     .expect("method signature help (v2)");
 
     let snapshot = serde_json::json!({
@@ -186,4 +195,32 @@ async fn m5_signature_help_snapshot() {
     });
 
     assert_snapshot("m5_signature_help.json", &snapshot);
+}
+
+#[tokio::test]
+async fn signature_help_fails_closed_without_exact_type_index_artifact() {
+    let deps = create_test_deps();
+    let content = concat!(
+        "Процедура Тест()\n",
+        "    МойМассив = Новый Массив;\n",
+        "    МойМассив.Добавить(1, );\n",
+        "КонецПроцедуры\n"
+    );
+    let (analysis, ir_program, file_id) = build_analysis_host(content, deps.clone());
+    let position = find_position(content, "МойМассив.Добавить(1, ");
+
+    let result = handle_signature_help_v2(
+        &analysis,
+        file_id,
+        Arc::from(content.to_string()),
+        position,
+        ir_program,
+        deps,
+        None,
+    );
+
+    assert!(
+        result.is_none(),
+        "signatureHelp must fail closed without exact type_index artifact"
+    );
 }

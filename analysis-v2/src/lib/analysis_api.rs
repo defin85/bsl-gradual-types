@@ -771,16 +771,12 @@ impl AnalysisV2 {
         file_id: FileId,
         byte_offset: u32,
     ) -> Cancellable<Option<TypeResolution>> {
-        let Some(&file) = self.files.get(&file_id) else {
+        let Some(base) = self.type_at_byte_offset_serve_only(file_id, byte_offset)? else {
             return Ok(None);
         };
-        cancellable(|| {
-            let program = ir(&self.db, file, self.deps, self.settings).0;
-            let index = type_index(&self.db, file, self.deps, self.settings).index();
-            let base = index
-                .type_at_byte_offset(byte_offset)
-                .unwrap_or_else(TypeResolution::unknown);
-            flow_type_at_byte_offset_impl(program.as_ref(), byte_offset, base)
-        })
+        let Some(program) = self.ir(file_id)? else {
+            return Ok(None);
+        };
+        cancellable(|| flow_type_at_byte_offset_impl(program.as_ref(), byte_offset, base))
     }
 }

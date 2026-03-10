@@ -297,6 +297,17 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                 else {
                     return;
                 };
+                if let Some(var_name) = value_type.is_undeclared_variable() {
+                    let error_kind = TypeErrorKind::UndeclaredVariable {
+                        variable_name: var_name.to_string(),
+                        method_name: None,
+                        param_index: None,
+                    };
+                    let diagnostic =
+                        error_kind.to_diagnostic_with_detail(node.span, self.detail_level);
+                    self.errors.push(diagnostic);
+                    return;
+                }
                 // Если тип значения помечен как Unknown с конкретной причиной (например, TypeNotFound),
                 // генерируем диагностическую ошибку на месте присваивания.
                 if let Some(mut kind) = self.validator.validate_from_resolution(value_type) {

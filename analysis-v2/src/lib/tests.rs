@@ -1901,6 +1901,51 @@ fn serve_only_fallback_unavailable_on_miss_without_sync_compute() {
 }
 
 #[test]
+fn flow_type_fails_closed_without_exact_artifact() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(2041);
+    let text: Arc<str> = Arc::from(
+        "Procedure Test()\n\
+             x = 1;\n\
+             x = x + 1;\n\
+             EndProcedure",
+    );
+
+    host.apply_change(Change::SetFile {
+        file_id,
+        text: text.clone(),
+        version: 1,
+        path: Arc::from("flow-type-miss.bsl"),
+    });
+
+    let analysis = host.snapshot();
+    let probe = marker_offset(text.as_ref(), "x = x + 1;");
+    let counters_before = salsa_event_counters_snapshot();
+    let flow_type = analysis
+        .flow_type_at_byte_offset(file_id, probe)
+        .expect("flow type lookup");
+    let counters_after = salsa_event_counters_snapshot();
+    assert!(
+        flow_type.is_none(),
+        "flow-sensitive type lookup must fail closed without exact semantic artifact"
+    );
+    assert_eq!(
+        counters_after
+            .will_execute_type_index
+            .saturating_sub(counters_before.will_execute_type_index),
+        0,
+        "flow-sensitive miss must not execute salsa type_index query"
+    );
+    assert_eq!(
+        counters_after
+            .will_execute_parse_result
+            .saturating_sub(counters_before.will_execute_parse_result),
+        0,
+        "flow-sensitive miss must not execute salsa parse_result query"
+    );
+}
+
+#[test]
 fn precompute_returns_superseded_when_expected_version_is_stale() {
     let mut host = AnalysisHostV2::default();
     let file_id = FileId(205);

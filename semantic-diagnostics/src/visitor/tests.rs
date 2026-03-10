@@ -6,6 +6,54 @@ use bsl_shared::domain::types::{Certainty, FacetKind}; // Phase 4: Moved from ma
 use bsl_shared::ir::{SemanticNode, SemanticNodeKind, Span};
 
 #[test]
+fn test_assignment_with_undeclared_value_reports_undeclared_variable() {
+    use bsl_shared::domain::types::TypeResolution;
+    use std::sync::Arc;
+
+    let repository = Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
+    let metadata = TypeMetadataLookup::new(repository.clone());
+    let validator = TypeValidator::new(&metadata);
+    let resolver = TypeResolver::new(repository);
+    let signature_index = SignatureIndex::new();
+    let mut program = SemanticProgram::new();
+
+    let assignment_span = Span::new(0, 24);
+    let value_span = Span::new(15, 24);
+    program.nodes.push(SemanticNode {
+        kind: SemanticNodeKind::Assignment {
+            variable: "Проверка".to_string(),
+            value_node: None,
+            value_span,
+        },
+        span: assignment_span,
+        scope_id: program.symbols.root_scope,
+    });
+
+    let mut visitor =
+        SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
+    let mut hints = SemanticTypeHints::default();
+    hints
+        .assignment_value_type_by_span
+        .insert(assignment_span, TypeResolution::undeclared_variable("НомерЗаказ"));
+    visitor.set_type_hints(Some(&hints));
+    let mut context = FlowContext::new(program.symbols.root_scope);
+    visitor.visit_node(&program.nodes[0], &mut context);
+
+    let errors = visitor.into_errors();
+    assert!(
+        errors.iter().any(|diag| {
+            diag.message.contains("Необъявленная переменная")
+                && diag.message.contains("НомерЗаказ")
+        }),
+        "assignment value with undeclared variable must emit diagnostic, got: {:?}",
+        errors
+            .iter()
+            .map(|diag| diag.message.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn test_visitor_detects_nonexistent_method() {
     use bsl_shared::domain::types::TypeResolution;
     use std::sync::Arc;

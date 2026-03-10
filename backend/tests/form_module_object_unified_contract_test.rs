@@ -450,7 +450,7 @@ async fn completion_form_module_object_fails_closed_without_shared_owner_hint() 
 }
 
 #[test]
-fn owner_member_fallback_is_applied_only_outside_form_module() {
+fn bare_owner_members_without_canonical_binding_stay_undeclared() {
     let form_deps_bundle = support::deps_bundle_v2_with_syntax_helper();
     let applied_deps_bundle = deps_bundle_v2_with_conf_fixture();
 
@@ -491,8 +491,8 @@ fn owner_member_fallback_is_applied_only_outside_form_module() {
         object_code,
     );
     assert!(
-        !has_undeclared(&object_diagnostics, "НомерЗаказ"),
-        "ObjectModule must resolve bare owner members via fallback, diagnostics={:?}",
+        has_undeclared(&object_diagnostics, "НомерЗаказ"),
+        "ObjectModule bare owner member must stay undeclared without explicit canonical binding, diagnostics={:?}",
         messages(&object_diagnostics)
     );
 
@@ -509,18 +509,18 @@ fn owner_member_fallback_is_applied_only_outside_form_module() {
         recordset_code,
     );
     assert!(
-        !has_undeclared(&recordset_diagnostics, "ТестовыйРесурс"),
-        "RecordSetModule must resolve bare owner member ТестовыйРесурс, diagnostics={:?}",
+        has_undeclared(&recordset_diagnostics, "ТестовыйРесурс"),
+        "RecordSetModule bare owner member ТестовыйРесурс must stay undeclared without explicit canonical binding, diagnostics={:?}",
         messages(&recordset_diagnostics)
     );
     assert!(
-        !has_undeclared(&recordset_diagnostics, "ТестовыйРеквизит"),
-        "RecordSetModule must resolve bare owner member ТестовыйРеквизит, diagnostics={:?}",
+        has_undeclared(&recordset_diagnostics, "ТестовыйРеквизит"),
+        "RecordSetModule bare owner member ТестовыйРеквизит must stay undeclared without explicit canonical binding, diagnostics={:?}",
         messages(&recordset_diagnostics)
     );
     assert!(
-        !has_undeclared(&recordset_diagnostics, "ТестовоеИзмерение"),
-        "RecordSetModule must resolve bare owner member ТестовоеИзмерение, diagnostics={:?}",
+        has_undeclared(&recordset_diagnostics, "ТестовоеИзмерение"),
+        "RecordSetModule bare owner member ТестовоеИзмерение must stay undeclared without explicit canonical binding, diagnostics={:?}",
         messages(&recordset_diagnostics)
     );
 }
@@ -551,8 +551,8 @@ fn recordset_module_resolves_system_members_and_manager_path_call() {
 
     let code = concat!(
         "Процедура Тест()\n",
-        "    Проверка1 = ОбменДанными.Загрузка;\n",
-        "    Проверка2 = ДополнительныеСвойства.Свойство(\"Ключ\");\n",
+        "    Проверка1 = Объект.ОбменДанными.Загрузка;\n",
+        "    Проверка2 = Объект.ДополнительныеСвойства.Свойство(\"Ключ\");\n",
         "    Проверка3 = РегистрыСведений.ТестовыйРегистрСведений.ВладелецБезопасногоХранилища();\n",
         "КонецПроцедуры\n",
     );
@@ -572,13 +572,18 @@ fn recordset_module_resolves_system_members_and_manager_path_call() {
         })
     };
     assert!(
+        !has_undeclared("Объект"),
+        "RecordSetModule explicit canonical binding Объект must stay resolved, diagnostics={:?}",
+        messages
+    );
+    assert!(
         !has_undeclared("ОбменДанными"),
-        "RecordSetModule must resolve bare owner member ОбменДанными, diagnostics={:?}",
+        "RecordSetModule explicit member access through Объект must keep ОбменДанными available, diagnostics={:?}",
         messages
     );
     assert!(
         !has_undeclared("ДополнительныеСвойства"),
-        "RecordSetModule must resolve bare owner member ДополнительныеСвойства, diagnostics={:?}",
+        "RecordSetModule explicit member access through Объект must keep ДополнительныеСвойства available, diagnostics={:?}",
         messages
     );
 

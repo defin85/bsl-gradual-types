@@ -75,8 +75,7 @@ pub enum SemanticNodeKind {
         value_node: Option<usize>, // MILESTONE 3.5: индекс узла value expression (для hover)
         /// Span правой части присваивания (value expression) в исходном коде.
         ///
-        /// Нужен даже когда `value_node` отсутствует (например, для `Null`/`Неопределено`,
-        /// которые не конвертируются в отдельные IR-узлы для hover).
+        /// Нужен даже когда `value_node` отсутствует.
         value_span: Span,
     },
 
@@ -120,6 +119,12 @@ pub enum SemanticNodeKind {
 
     /// Литерал даты.
     DateLiteral { value: String },
+
+    /// Литерал `Null`.
+    NullLiteral,
+
+    /// Литерал `Неопределено` / `Undefined`.
+    UndefinedLiteral,
 
     /// Объявление функции
     ///

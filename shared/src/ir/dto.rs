@@ -251,6 +251,16 @@ impl SemanticProgram {
                 attributes.insert("value".to_string(), value.clone());
                 ("DateLiteral".to_string(), Some(value.clone()), attributes)
             }
+            SemanticNodeKind::NullLiteral => (
+                "NullLiteral".to_string(),
+                Some("Null".to_string()),
+                attributes,
+            ),
+            SemanticNodeKind::UndefinedLiteral => (
+                "UndefinedLiteral".to_string(),
+                Some("Неопределено".to_string()),
+                attributes,
+            ),
             SemanticNodeKind::IfStatement { condition_node, .. } => {
                 if let Some(node_idx) = condition_node {
                     attributes.insert("condition_node".to_string(), node_idx.to_string());

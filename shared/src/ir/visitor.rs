@@ -281,6 +281,8 @@ fn direct_child_indices(node: &SemanticNode) -> Vec<usize> {
         | SemanticNodeKind::NumberLiteral { .. }
         | SemanticNodeKind::BooleanLiteral { .. }
         | SemanticNodeKind::DateLiteral { .. }
+        | SemanticNodeKind::NullLiteral
+        | SemanticNodeKind::UndefinedLiteral
         | SemanticNodeKind::GlobalPropertyAccess { .. }
         | SemanticNodeKind::Break
         | SemanticNodeKind::Continue => Vec::new(),

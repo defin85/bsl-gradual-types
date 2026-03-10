@@ -1002,6 +1002,75 @@ fn test_assignment_to_literal_materializes_literal_value_node() {
 }
 
 #[test]
+fn test_assignment_to_null_materializes_special_literal_value_node() {
+    let ast = Program {
+        statements: vec![Statement::Assignment {
+            target: Expression::Identifier {
+                name: "x".to_string(),
+                span: AstSpan::stub(),
+            },
+            value: Expression::Identifier {
+                name: "Null".to_string(),
+                span: AstSpan::stub(),
+            },
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "x = Null;".to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    assert_eq!(ir.nodes.len(), 2);
+    assert!(matches!(ir.nodes[0].kind, SemanticNodeKind::NullLiteral));
+
+    if let SemanticNodeKind::Assignment { value_node, .. } = &ir.nodes[1].kind {
+        assert_eq!(*value_node, Some(0));
+    } else {
+        panic!("Expected Assignment at nodes[1]");
+    }
+}
+
+#[test]
+fn test_return_undefined_materializes_special_literal_value_node() {
+    let ast = Program {
+        statements: vec![Statement::Return {
+            value: Some(Expression::Identifier {
+                name: "Неопределено".to_string(),
+                span: AstSpan::stub(),
+            }),
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "Возврат Неопределено;".to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    assert_eq!(ir.nodes.len(), 2);
+    assert!(matches!(
+        ir.nodes[0].kind,
+        SemanticNodeKind::UndefinedLiteral
+    ));
+
+    if let SemanticNodeKind::Return { value_node } = &ir.nodes[1].kind {
+        assert_eq!(*value_node, Some(0));
+    } else {
+        panic!("Expected Return at nodes[1]");
+    }
+}
+
+#[test]
 fn test_binary_expression_keeps_child_nodes() {
     let ast = Program {
         statements: vec![Statement::Assignment {

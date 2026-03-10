@@ -464,3 +464,41 @@ fn test_await_statement_children_include_expression_node_in_dto() {
     assert_eq!(await_node.children.len(), 1);
     assert_eq!(await_node.children[0].kind, "VariableAccess");
 }
+
+#[test]
+fn test_null_literal_is_rendered_in_dto() {
+    let mut program = SemanticProgram::new();
+    let source = "Null";
+
+    program.nodes.push(SemanticNode {
+        kind: SemanticNodeKind::NullLiteral,
+        span: Span::new(0, 4),
+        scope_id: program.symbols.root_scope,
+    });
+
+    let line_index = LineIndex::new(source);
+    let dto = program.to_dto(false, false, source, &line_index);
+
+    let node = dto.root_nodes.first().expect("null literal root node");
+    assert_eq!(node.kind, "NullLiteral");
+    assert_eq!(node.name.as_deref(), Some("Null"));
+}
+
+#[test]
+fn test_undefined_literal_is_rendered_in_dto() {
+    let mut program = SemanticProgram::new();
+    let source = "Неопределено";
+
+    program.nodes.push(SemanticNode {
+        kind: SemanticNodeKind::UndefinedLiteral,
+        span: Span::new(0, source.len() as u32),
+        scope_id: program.symbols.root_scope,
+    });
+
+    let line_index = LineIndex::new(source);
+    let dto = program.to_dto(false, false, source, &line_index);
+
+    let node = dto.root_nodes.first().expect("undefined literal root node");
+    assert_eq!(node.kind, "UndefinedLiteral");
+    assert_eq!(node.name.as_deref(), Some("Неопределено"));
+}

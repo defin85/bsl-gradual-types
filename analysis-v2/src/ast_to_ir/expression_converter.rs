@@ -55,11 +55,28 @@ impl AstToIrConverter {
             }
             Expression::Identifier { name, span } => {
                 let name_lower = name.to_lowercase();
-                if matches!(
-                    name_lower.as_str(),
-                    "неопределено" | "null" | "истина" | "ложь" | "true" | "false"
-                ) {
+                if matches!(name_lower.as_str(), "истина" | "ложь" | "true" | "false") {
                     return Ok(None);
+                }
+
+                if name_lower == "null" {
+                    let node = SemanticNode {
+                        kind: SemanticNodeKind::NullLiteral,
+                        span: self.ast_span_to_ir_span(*span),
+                        scope_id: self.current_scope,
+                    };
+                    self.nodes.push(node);
+                    return Ok(Some(self.nodes.len() - 1));
+                }
+
+                if matches!(name_lower.as_str(), "неопределено" | "undefined") {
+                    let node = SemanticNode {
+                        kind: SemanticNodeKind::UndefinedLiteral,
+                        span: self.ast_span_to_ir_span(*span),
+                        scope_id: self.current_scope,
+                    };
+                    self.nodes.push(node);
+                    return Ok(Some(self.nodes.len() - 1));
                 }
 
                 let node = SemanticNode {

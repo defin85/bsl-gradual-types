@@ -546,6 +546,87 @@ Perf expectations связываются с тем же merge-state:
 - до task `2.6` любые perf numbers считаются предварительными, если они не покрывают representative fixtures за пределами completion;
 - после task `2.6` contract-level perf evidence MUST блокировать merge, если pass достигается только за счёт скрытого semantic substitute вместо оптимизации canonical IR/derived semantic index path.
 
+### 9. Coordination / supersede-plan для pending MCP/index changes
+
+Этот change становится architectural source of truth для всех активных change-треков, которые затрагивают:
+- MCP semantic tools;
+- runtime index vocabulary;
+- versioned observability/perf contracts;
+- adapter/runtime boundaries между search/discovery и semantic truth.
+
+Цель coordination не в том, чтобы автоматически закрыть все соседние change-id, а в том, чтобы до apply-stage исключить merge, где разные pending changes заново вводят неоднозначную границу между:
+- `derived semantic index` как canonical semantic fast path;
+- `IndexSnapshot` и search indexes как discovery/read-model path;
+- adapter transport shaping и semantic runtime truth.
+
+### 9a. `refactor-bsl-agent-index-backed-search` не supersede-ится целиком, но получает жёсткое narrowing
+
+`refactor-bsl-agent-index-backed-search` остаётся допустимым active change только в discovery/search scope:
+- `bsl_types_search_start`;
+- `bsl_symbol_search_start`;
+- `bsl_references_start`;
+- parity search endpoints и shared candidate-retrieval facade поверх `IndexSnapshot`.
+
+Для него обязательны следующие coordination rules:
+- `IndexSnapshot` и связанные search indexes MAY быть primary path только для discovery/search queries;
+- они MUST NOT становиться semantic source для `bsl_type_at_position`, `bsl_members`, `bsl_definition`, `bsl_diagnostics`, `hover`, `completion`, `definition`, `type-at-position` и других semantic surfaces этого change;
+- search-specific fallback/rollback semantics MAY существовать только для search tools и MUST NOT переиспользоваться semantic adapters;
+- operator override вроде `BSL_AGENT_INDEX_SEARCH=0` допустим только для search/discovery contract и MUST NOT переключать semantic runtime обратно на legacy path;
+- search observability (`search_path`, `fallback_reason`, `legacy_forced`) MUST жить в отдельной taxonomy и MUST NOT маскироваться под shared semantic fail-closed reason codes;
+- wording `index-backed` в этом change MUST трактоваться как `IndexSnapshot`/discovery path, а не как generic license использовать любой index как semantic truth.
+
+Partial supersede rule:
+- если `refactor-bsl-agent-index-backed-search` в будущих правках попытается распространить `IndexSnapshot`, fallback path или rollout override на semantic MCP tools, эти части считаются superseded данным change и не подлежат merge;
+- при таком конфликте корректный путь не rollback, а выделение follow-up change с новой явной spec/delta поверх уже принятого semantic boundary.
+
+### 9b. `update-bsl-agent-mcp-ergonomics` остаётся совместимым только как transport/help layer
+
+`update-bsl-agent-mcp-ergonomics` не supersede-ится, если остаётся в своём scope:
+- `mcp_help`;
+- `build_info`;
+- operator-facing error wording;
+- convenience wrappers над уже существующими canonical runtime paths.
+
+Для него обязательны rules:
+- `bsl_diagnostics_file_start(...)` MUST оставаться thin wrapper над тем же canonical diagnostics path, что и `bsl_diagnostics_start`;
+- convenience wrappers MUST NOT добавлять MCP-only semantic cache, MCP-only fail-open behavior или отдельный runtime branch;
+- help/README/build_info MAY объяснять fail-closed semantics, но MUST NOT описывать legacy semantic rescue как поддерживаемый operator workflow.
+
+### 9c. `add-bsl-agent-compact-diagnostics-mode` остаётся shape-only change
+
+`add-bsl-agent-compact-diagnostics-mode` не supersede-ится, если его scope ограничен post-query shaping:
+- compact/grouped serialization;
+- summary fields;
+- severity filtering;
+- omission of repeated/null transport fields.
+
+Для него обязательны rules:
+- shaping MUST применяться только к уже полученному canonical diagnostics result;
+- compact mode MUST NOT вводить второй diagnostics pipeline, MCP-only semantic hints или alternate semantic source;
+- compact payload MUST NOT становиться carrier для rollout/debug/provenance полей, которые обходят versioned observability contract.
+
+### 9d. `rewrite-v2-observability-perf-pipeline` остаётся downstream rewrite, а не blocker текущего cutover
+
+`rewrite-v2-observability-perf-pipeline` не supersede-ит текущий change и не может откладывать его contract cleanup.
+
+Для него обязательны rules:
+- пока rewrite не реализован, bounded taxonomy и version-impact решения из section 8 остаются authoritative v2 baseline;
+- dual-write/canary MAY существовать только внутри observability materialization pipeline и MUST NOT означать dual semantic runtime behavior;
+- rewrite MUST NOT возвращать legacy degraded/stale/type-index reason labels в качестве временной production-совместимости для semantic surfaces;
+- если rewrite захочет изменить versioned surfaces, он обязан делать это отдельным explicit major-bump migration поверх уже зафиксированного cutover contract, а не заменять его задним числом.
+
+### 9e. Apply-stage precedence и merge rules
+
+До `openspec apply` действует следующая precedence:
+1. Этот change владеет semantic boundary между canonical IR/derived semantic index и search/discovery indexes.
+2. Pending MCP/search/observability changes обязаны rebase-иться на этот boundary, а не переопределять его.
+3. При конфликте между convenience/search/telemetry change и canonical semantic contract побеждает fail-closed semantic boundary этого change.
+
+Практические merge rules:
+- изменения в `analysis-v2`, `bsl-runtime` facade/query contract и `bsl-agent` semantic managers считаются semantic-boundary-sensitive и не должны принимать generic `index-backed`/`fallback` wording без явного уточнения `search-only` vs `semantic`;
+- transport/help/shaping changes MAY идти параллельно, если их acceptance явно доказывает отсутствие нового semantic path;
+- если pending change не удаётся cleanly narrow/rebase без размывания semantic boundary, его надо пометить как superseded целиком или разбить на follow-up change до merge, а не тащить ambiguity в apply-stage.
+
 ## Alternatives Considered
 
 ### 1. Оставить `type_index` как независимый semantic pipeline и лишь усилить тесты

@@ -155,14 +155,11 @@ fn matrix_cases() -> Vec<MatrixCase> {
     ]
 }
 
-fn build_ir_and_parse(
+fn build_ir(
     deps_bundle: &DepsBundleV2,
     file_path: &str,
     code: &str,
-) -> (
-    Arc<bsl_shared::ir::SemanticProgram>,
-    Arc<bsl_syntax::ast::ParseResult>,
-) {
+) -> Arc<bsl_shared::ir::SemanticProgram> {
     let mut host = AnalysisHostV2::default();
     host.apply_change(ChangeV2::SetDepsSnapshot {
         deps_id: deps_bundle.deps_id.clone(),
@@ -180,14 +177,7 @@ fn build_ir_and_parse(
     });
 
     let analysis = host.analysis();
-    let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
-    let parse_result = analysis
-        .parse_result(V2FileId(1))
-        .ok()
-        .flatten()
-        .expect("parse_result");
-
-    (ir_program, parse_result)
+    analysis.ir(V2FileId(1)).ok().flatten().expect("ir")
 }
 
 #[tokio::test]
@@ -217,8 +207,7 @@ async fn m8_completion_matrix_golden_v2() {
         );
         let (line, column) =
             intellisense_testkit::find_marker_position(&content, case.typed_prefix);
-        let (ir_program, parse_result) =
-            build_ir_and_parse(deps_bundle.as_ref(), file_path, &content);
+        let ir_program = build_ir(deps_bundle.as_ref(), file_path, &content);
 
         let result = get_completion_with_semantic_program_snapshot_v2(
             &content,
@@ -230,7 +219,6 @@ async fn m8_completion_matrix_golden_v2() {
             file_path,
             resolver.as_ref(),
             ir_program,
-            parse_result,
             None,
             false,
         )

@@ -541,7 +541,6 @@ async fn completion_labels_non_member(
         ir_program: Some(ir_program),
         resolver,
         file_path,
-        parse_result: None,
         member_access_owner_type_hint: None,
         include_flow_sensitive: false,
     };
@@ -1158,7 +1157,6 @@ async fn completion_resolves_variable_type_for_member_access() {
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path: "completion_test.bsl",
-        parse_result: None,
         member_access_owner_type_hint: owner_hint("ТаблицаЗначений"),
         include_flow_sensitive: false,
     };
@@ -1263,7 +1261,6 @@ async fn completion_does_not_infer_member_owner_without_owner_hint() {
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path: "completion_no_owner_hint_test.bsl",
-        parse_result: None,
         member_access_owner_type_hint: None,
         include_flow_sensitive: false,
     };
@@ -1374,7 +1371,6 @@ async fn completion_falls_back_to_generic_items_for_unknown_bare_receiver_member
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path: "completion_unknown_receiver_member_access_test.bsl",
-        parse_result: None,
         member_access_owner_type_hint: None,
         include_flow_sensitive: false,
     };
@@ -1490,7 +1486,6 @@ async fn completion_implicit_form_object_member_access_fails_closed_without_shar
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path,
-        parse_result: None,
         member_access_owner_type_hint: None,
         include_flow_sensitive: false,
     };
@@ -1620,7 +1615,6 @@ async fn completion_resolves_implicit_form_object_member_access_with_shared_hint
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path,
-        parse_result: None,
         member_access_owner_type_hint,
         include_flow_sensitive: false,
     };
@@ -1718,7 +1712,6 @@ async fn completion_uses_owner_hint_for_member_access_when_flow_sensitive_is_ena
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path: "completion_narrowing_test.bsl",
-        parse_result: None,
         member_access_owner_type_hint: owner_hint("Строка"),
         include_flow_sensitive: true,
     };
@@ -1817,7 +1810,6 @@ fn implicit_module_context_owner_resolution_requires_shared_hint_for_supported_m
             ir_program: Some(ir_program),
             resolver: resolver.as_ref(),
             file_path,
-            parse_result: None,
             member_access_owner_type_hint: None,
             include_flow_sensitive: false,
         };
@@ -1838,7 +1830,6 @@ fn implicit_module_context_owner_resolution_requires_shared_hint_for_supported_m
             ir_program: Some(ctx_without_hint.ir_program.expect("ir program available")),
             resolver: resolver.as_ref(),
             file_path,
-            parse_result: None,
             member_access_owner_type_hint: Some(expected.clone()),
             include_flow_sensitive: false,
         };
@@ -1895,7 +1886,6 @@ fn implicit_module_context_owner_resolution_fails_closed_outside_supported_modul
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path: "CommonModules/ОбщегоНазначения/Ext/Module.bsl",
-        parse_result: None,
         member_access_owner_type_hint: None,
         include_flow_sensitive: false,
     };
@@ -1978,7 +1968,6 @@ async fn completion_resolves_nested_member_access_chain() {
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path: "completion_nested_chain_test.bsl",
-        parse_result: None,
         member_access_owner_type_hint: owner_hint("КоллекцияКолонокТаблицыЗначений"),
         include_flow_sensitive: false,
     };
@@ -2080,17 +2069,10 @@ async fn completion_supports_member_access_after_method_call() {
     });
     let analysis = host.analysis();
     let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
-    let parse_result = analysis
-        .parse_result(V2FileId(1))
-        .ok()
-        .flatten()
-        .expect("parse_result");
-
     let ctx = CompletionAnalysisContext {
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path: "completion_call_chain_test.bsl",
-        parse_result: Some(parse_result),
         member_access_owner_type_hint: owner_hint("КолонкаТаблицыЗначений"),
         include_flow_sensitive: false,
     };
@@ -2175,17 +2157,10 @@ async fn completion_supports_member_access_after_index_access() {
     });
     let analysis = host.analysis();
     let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
-    let parse_result = analysis
-        .parse_result(V2FileId(1))
-        .ok()
-        .flatten()
-        .expect("parse_result");
-
     let ctx = CompletionAnalysisContext {
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path: "completion_index_access_test.bsl",
-        parse_result: Some(parse_result),
         member_access_owner_type_hint: owner_hint("КолонкаТаблицыЗначений"),
         include_flow_sensitive: false,
     };
@@ -2270,17 +2245,10 @@ async fn completion_supports_member_access_after_map_index_access() {
     });
     let analysis = host.analysis();
     let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
-    let parse_result = analysis
-        .parse_result(V2FileId(1))
-        .ok()
-        .flatten()
-        .expect("parse_result");
-
     let ctx = CompletionAnalysisContext {
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path: "completion_map_index_access_test.bsl",
-        parse_result: Some(parse_result),
         member_access_owner_type_hint: owner_hint("КолонкаТаблицыЗначений"),
         include_flow_sensitive: false,
     };
@@ -2303,7 +2271,7 @@ async fn completion_supports_member_access_after_map_index_access() {
 }
 
 #[tokio::test]
-async fn completion_does_not_infer_map_index_owner_without_shared_hint_even_with_parse_result() {
+async fn completion_does_not_infer_map_index_owner_without_shared_hint() {
     let repository = Arc::new(InMemoryTypeRepository::new());
     repository
         .load_types(vec![
@@ -2365,17 +2333,10 @@ async fn completion_does_not_infer_map_index_owner_without_shared_hint_even_with
     });
     let analysis = host.analysis();
     let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
-    let parse_result = analysis
-        .parse_result(V2FileId(1))
-        .ok()
-        .flatten()
-        .expect("parse_result");
-
     let ctx = CompletionAnalysisContext {
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path: "completion_map_index_access_no_hint_test.bsl",
-        parse_result: Some(parse_result),
         member_access_owner_type_hint: None,
         include_flow_sensitive: false,
     };
@@ -2466,17 +2427,10 @@ async fn completion_supports_member_access_after_ternary_expression() {
     });
     let analysis = host.analysis();
     let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
-    let parse_result = analysis
-        .parse_result(V2FileId(1))
-        .ok()
-        .flatten()
-        .expect("parse_result");
-
     let ctx = CompletionAnalysisContext {
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path: "completion_ternary_test.bsl",
-        parse_result: Some(parse_result),
         member_access_owner_type_hint: None,
         include_flow_sensitive: false,
     };
@@ -2575,17 +2529,10 @@ async fn completion_supports_member_access_after_choice_expression() {
     });
     let analysis = host.analysis();
     let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
-    let parse_result = analysis
-        .parse_result(V2FileId(1))
-        .ok()
-        .flatten()
-        .expect("parse_result");
-
     let ctx = CompletionAnalysisContext {
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path: "completion_choice_test.bsl",
-        parse_result: Some(parse_result),
         member_access_owner_type_hint: None,
         include_flow_sensitive: false,
     };
@@ -2687,17 +2634,10 @@ async fn completion_substitutes_faceted_metadata_name_in_return_type() {
     });
     let analysis = host.analysis();
     let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
-    let parse_result = analysis
-        .parse_result(V2FileId(1))
-        .ok()
-        .flatten()
-        .expect("parse_result");
-
     let ctx = CompletionAnalysisContext {
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path: "completion_facet_substitution_test.bsl",
-        parse_result: Some(parse_result),
         member_access_owner_type_hint: owner_hint("Справочники.Контрагенты"),
         include_flow_sensitive: false,
     };

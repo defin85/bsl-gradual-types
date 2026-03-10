@@ -83,11 +83,6 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
         .ok()
         .flatten()
         .expect("ir");
-    let parse_result = analysis
-        .parse_result(bsl_analysis_v2::FileId(1))
-        .ok()
-        .flatten()
-        .expect("parse_result");
 
     let file_uri = Some("file:///m5_metadata_completion_fixture.bsl");
     let index_snapshot = deps_bundle.index_snapshot.as_ref();
@@ -112,7 +107,6 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
         "m5_metadata_completion_fixture.bsl",
         resolver.as_ref(),
         ir_program.clone(),
-        parse_result.clone(),
         None,
         false,
     )
@@ -156,7 +150,6 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
         "m5_metadata_completion_fixture.bsl",
         resolver.as_ref(),
         ir_program.clone(),
-        parse_result.clone(),
         None,
         false,
     )
@@ -182,7 +175,6 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
         "m5_metadata_completion_fixture.bsl",
         resolver.as_ref(),
         ir_program.clone(),
-        parse_result.clone(),
         None,
         false,
     )
@@ -213,7 +205,6 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
         "m5_metadata_completion_fixture.bsl",
         resolver.as_ref(),
         ir_program.clone(),
-        parse_result.clone(),
         None,
         false,
     )
@@ -239,7 +230,6 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
         "m5_metadata_completion_fixture.bsl",
         resolver.as_ref(),
         ir_program.clone(),
-        parse_result.clone(),
         None,
         false,
     )
@@ -265,7 +255,6 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
         "m5_metadata_completion_fixture.bsl",
         resolver.as_ref(),
         ir_program,
-        parse_result,
         None,
         false,
     )

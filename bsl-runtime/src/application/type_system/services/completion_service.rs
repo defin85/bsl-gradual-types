@@ -95,8 +95,6 @@ pub(crate) struct CompletionAnalysisContext<'a> {
     pub ir_program: Option<Arc<SemanticProgram>>,
     pub resolver: &'a TypeResolver,
     pub file_path: &'a str,
-    #[allow(dead_code)]
-    pub parse_result: Option<Arc<bsl_syntax::ast::ParseResult>>,
     pub member_access_owner_type_hint: Option<TypeResolution>,
     #[allow(dead_code)]
     pub include_flow_sensitive: bool,
@@ -151,7 +149,6 @@ pub async fn get_completion_with_semantic_program(
         ir_program: Some(ir_program),
         resolver,
         file_path,
-        parse_result: None,
         member_access_owner_type_hint,
         include_flow_sensitive: false,
     };
@@ -219,7 +216,6 @@ pub async fn get_completion_with_semantic_program_snapshot_with_trigger_hint(
         ir_program: Some(ir_program),
         resolver,
         file_path,
-        parse_result: None,
         member_access_owner_type_hint,
         include_flow_sensitive,
     };
@@ -248,7 +244,6 @@ pub async fn get_completion_with_semantic_program_snapshot_v2(
     file_path: &str,
     resolver: &TypeResolver,
     ir_program: Arc<SemanticProgram>,
-    parse_result: Arc<bsl_syntax::ast::ParseResult>,
     member_access_owner_type_hint: Option<TypeResolution>,
     include_flow_sensitive: bool,
 ) -> Result<CompletionResult> {
@@ -262,7 +257,6 @@ pub async fn get_completion_with_semantic_program_snapshot_v2(
         file_path,
         resolver,
         ir_program,
-        parse_result,
         member_access_owner_type_hint,
         include_flow_sensitive,
         None,
@@ -281,7 +275,6 @@ pub async fn get_completion_with_semantic_program_snapshot_v2_with_trigger_hint(
     file_path: &str,
     resolver: &TypeResolver,
     ir_program: Arc<SemanticProgram>,
-    parse_result: Arc<bsl_syntax::ast::ParseResult>,
     member_access_owner_type_hint: Option<TypeResolution>,
     include_flow_sensitive: bool,
     trigger_char_hint: Option<char>,
@@ -290,7 +283,6 @@ pub async fn get_completion_with_semantic_program_snapshot_v2_with_trigger_hint(
         ir_program: Some(ir_program),
         resolver,
         file_path,
-        parse_result: Some(parse_result),
         member_access_owner_type_hint,
         include_flow_sensitive,
     };
@@ -318,7 +310,6 @@ pub async fn get_completion_with_semantic_hint_snapshot_with_trigger_hint(
     metadata_lookup: &TypeMetadataLookup,
     file_path: &str,
     resolver: &TypeResolver,
-    parse_result: Option<Arc<bsl_syntax::ast::ParseResult>>,
     member_access_owner_type_hint: Option<TypeResolution>,
     include_flow_sensitive: bool,
     trigger_char_hint: Option<char>,
@@ -327,7 +318,6 @@ pub async fn get_completion_with_semantic_hint_snapshot_with_trigger_hint(
         ir_program: None,
         resolver,
         file_path,
-        parse_result,
         member_access_owner_type_hint,
         include_flow_sensitive,
     };

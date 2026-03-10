@@ -3,7 +3,7 @@
 //! M3 (IntelliSense v2): determine receiver expression for member access completion (`expr.`)
 //! using syntax AST (bsl-syntax) rather than tail-of-line string heuristics.
 
-use bsl_syntax::ast::{Expression, ParseResult, Program, Statement};
+use bsl_syntax::ast::{Expression, Program, Statement};
 
 use crate::application::type_system::extractors::symbol_extractor::utf16_to_byte_offset;
 
@@ -76,7 +76,6 @@ pub fn extract_completion_target_for_member_access(
     file_content: &str,
     line: u32,
     column: u32,
-    _parse_result: &ParseResult,
 ) -> Option<CompletionTarget> {
     let receiver_text = extract_member_access_receiver_text(file_content, line, column)?;
     let receiver_union_expressions = try_extract_choice_union_expressions(receiver_text);
@@ -106,7 +105,6 @@ pub fn extract_member_access_receiver_chain(
     file_content: &str,
     line: u32,
     column: u32,
-    _parse_result: &ParseResult,
 ) -> Option<ReceiverChain> {
     let receiver_text = extract_member_access_receiver_text(file_content, line, column)?;
     let receiver_expr = parse_expression_snippet(receiver_text)?;
@@ -118,7 +116,6 @@ pub fn extract_member_access_receiver_expression(
     file_content: &str,
     line: u32,
     column: u32,
-    _parse_result: &ParseResult,
 ) -> Option<Expression> {
     let receiver_text = extract_member_access_receiver_text(file_content, line, column)?;
     parse_expression_snippet(receiver_text)

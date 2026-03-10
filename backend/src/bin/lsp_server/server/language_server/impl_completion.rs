@@ -498,12 +498,13 @@ impl BslLanguageServer {
                     }
 
                     if member_access_request {
-                        let exact_wait_budget = bsl_runtime::application::intellisense_v2::interactive_freshness_knobs(
-                            bsl_runtime::application::SemanticOperation::Completion,
-                            Some(self.coordinator.as_ref()),
-                        )
-                        .map(|knobs| knobs.wait_budget)
-                        .unwrap_or_default();
+                        let exact_wait_budget =
+                            bsl_runtime::application::intellisense_v2::interactive_freshness_knobs(
+                                bsl_runtime::application::SemanticOperation::Completion,
+                                Some(self.coordinator.as_ref()),
+                            )
+                            .map(|knobs| knobs.wait_budget)
+                            .unwrap_or_default();
                         let exact_wait_started = Instant::now();
                         let _ = self
                             .wait_for_current_type_index_serve_only_ready_v2(
@@ -525,7 +526,6 @@ impl BslLanguageServer {
                     let (
                         file_content,
                         file_path,
-                        parse_result,
                         member_access_owner_type_hint,
                         deps,
                         ir_program,
@@ -630,7 +630,6 @@ impl BslLanguageServer {
                                             file_content,
                                             file_path,
                                             None,
-                                            None,
                                             deps,
                                             None,
                                             false,
@@ -725,18 +724,12 @@ impl BslLanguageServer {
                                             file_content,
                                             file_path,
                                             None,
-                                            None,
                                             deps,
                                             ir_program,
                                             ir_cancelled_after_retry,
                                             true,
                                         );
                                     }
-                                    // Strict serve-only completion path: do not run
-                                    // parse_result query in interactive request flow.
-                                    let parse_result: Option<Arc<bsl_syntax::ast::ParseResult>> =
-                                        None;
-
                                     if bsl_runtime::system::global_runtime_config()
                                         .get_bool(
                                             bsl_runtime::system::RuntimeKey::IntellisenseV2P4Smoke,
@@ -758,25 +751,6 @@ impl BslLanguageServer {
                                         }
                                     }
 
-                                    if bsl_runtime::system::global_runtime_config()
-                                        .get_bool(
-                                            bsl_runtime::system::RuntimeKey::IntellisenseV2P3Smoke,
-                                        )
-                                        .unwrap_or(false)
-                                    {
-                                        match parse_result.as_ref() {
-                                            Some(parsed) => debug!(
-                                                "Completion v2 parse_result: uri={}, file_id={}, syntax_errors={}",
-                                                uri_for_query,
-                                                file_id.0,
-                                                parsed.syntax_errors.len()
-                                            ),
-                                            None => debug!(
-                                                "Completion v2 parse_result: uri={}, file_id={} (unavailable)",
-                                                uri_for_query, file_id.0
-                                            ),
-                                        }
-                                    }
                                     if cancellation_token_for_query
                                         .as_ref()
                                         .is_some_and(|token| token.is_cancelled())
@@ -788,7 +762,6 @@ impl BslLanguageServer {
                                         return (
                                             file_content,
                                             file_path,
-                                            parse_result,
                                             None,
                                             deps,
                                             ir_program,
@@ -811,7 +784,6 @@ impl BslLanguageServer {
                                     (
                                         file_content,
                                         file_path,
-                                        parse_result,
                                         member_access_owner_type_hint,
                                         deps,
                                         ir_program,
@@ -825,7 +797,6 @@ impl BslLanguageServer {
                         let (
                             file_content,
                             file_path,
-                            parse_result,
                             member_access_owner_type_hint,
                             deps,
                             ir_program,
@@ -840,7 +811,7 @@ impl BslLanguageServer {
                                     error = %join_error,
                                     "Completion v2: interactive query task failed"
                                 );
-                                (None, None, None, None, None, None, true, true)
+                                (None, None, None, None, None, true, true)
                             }
                         };
                         if (ir_cancelled_after_retry || query_checkpoint_cancelled)
@@ -867,7 +838,6 @@ impl BslLanguageServer {
                         (
                             file_content,
                             file_path,
-                            parse_result,
                             member_access_owner_type_hint,
                             deps,
                             ir_program,
@@ -916,7 +886,6 @@ impl BslLanguageServer {
                                 file_content,
                                 file_path,
                                 ir_program,
-                                parse_result,
                                 member_access_owner_type_hint,
                                 deps,
                                 position,
@@ -950,7 +919,6 @@ impl BslLanguageServer {
                                 member_access_context,
                                 file_content,
                                 file_path,
-                                parse_result,
                                 member_access_owner_type_hint,
                                 deps,
                                 position,

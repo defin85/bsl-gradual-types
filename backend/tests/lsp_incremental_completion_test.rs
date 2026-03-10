@@ -38,12 +38,7 @@ fn apply_file(
     version: i32,
     file_path: &str,
     content: &str,
-) -> (
-    Arc<str>,
-    Arc<str>,
-    Arc<bsl_shared::ir::SemanticProgram>,
-    Arc<bsl_syntax::ast::ParseResult>,
-) {
+) -> (Arc<str>, Arc<str>, Arc<bsl_shared::ir::SemanticProgram>) {
     host.apply_change(ChangeV2::SetFile {
         file_id,
         text: Arc::from(content.to_string()),
@@ -63,13 +58,7 @@ fn apply_file(
         .flatten()
         .expect("file_path");
     let ir_program = analysis.ir(file_id).ok().flatten().expect("ir");
-    let parse_result = analysis
-        .parse_result(file_id)
-        .ok()
-        .flatten()
-        .expect("parse_result");
-
-    (file_content, file_path, ir_program, parse_result)
+    (file_content, file_path, ir_program)
 }
 
 fn member_access_owner_hint_at_position(
@@ -128,7 +117,7 @@ async fn apply_and_complete_at_member_dot_in_fixture(
     let content =
         format!("Процедура M8()\n{setup}    __tmp = {expr}{statement_suffix}\nКонецПроцедуры\n");
 
-    let (file_content, file_path, ir_program, parse_result) =
+    let (file_content, file_path, ir_program) =
         apply_file(host, file_id, version, file_path, &content);
 
     let tmp_line = 1 + setup.bytes().filter(|byte| *byte == b'\n').count() as u32;
@@ -148,7 +137,6 @@ async fn apply_and_complete_at_member_dot_in_fixture(
         file_content,
         file_path,
         ir_program,
-        Some(parse_result),
         owner_hint,
         deps_bundle.semantic_deps.clone(),
         position,
@@ -209,7 +197,7 @@ async fn m8_lsp_incremental_typing_triggers_completion_on_dot() {
         );
 
         version = version.saturating_add(1);
-        let (file_content, file_path, ir_program, parse_result) =
+        let (file_content, file_path, ir_program) =
             apply_file(&mut host, file_id, version, file_path, &content);
 
         if !typed.ends_with('.') {
@@ -241,7 +229,6 @@ async fn m8_lsp_incremental_typing_triggers_completion_on_dot() {
             file_content,
             file_path,
             ir_program,
-            Some(parse_result),
             owner_hint,
             deps_bundle.semantic_deps.clone(),
             position,
@@ -418,7 +405,7 @@ async fn m8_lsp_completion_inside_string_and_comment_does_not_suggest_member_acc
         "КонецПроцедуры\n",
     );
 
-    let (file_content, file_path, ir_program, parse_result) =
+    let (file_content, file_path, ir_program) =
         apply_file(&mut host, file_id, 1, file_path, content);
 
     let position_in_string = Position {
@@ -429,7 +416,6 @@ async fn m8_lsp_completion_inside_string_and_comment_does_not_suggest_member_acc
         file_content.clone(),
         file_path.clone(),
         ir_program.clone(),
-        Some(parse_result.clone()),
         None,
         deps_bundle.semantic_deps.clone(),
         position_in_string,
@@ -452,7 +438,6 @@ async fn m8_lsp_completion_inside_string_and_comment_does_not_suggest_member_acc
         file_content,
         file_path,
         ir_program,
-        Some(parse_result),
         None,
         deps_bundle.semantic_deps.clone(),
         position_in_comment,
@@ -484,13 +469,12 @@ async fn m8_lsp_completion_form_module_suggests_implicit_context_symbols() {
         "    Этот\n",
         "КонецПроцедуры\n",
     );
-    let (file_content, resolved_file_path, ir_program, parse_result) =
+    let (file_content, resolved_file_path, ir_program) =
         apply_file(&mut host, file_id, 1, module_path, content_this);
     let response = completion_handler::handle_completion_v2(
         file_content,
         resolved_file_path,
         ir_program,
-        Some(parse_result),
         None,
         deps_bundle.semantic_deps.clone(),
         Position {
@@ -516,13 +500,12 @@ async fn m8_lsp_completion_form_module_suggests_implicit_context_symbols() {
         "    Пар\n",
         "КонецПроцедуры\n",
     );
-    let (file_content, resolved_file_path, ir_program, parse_result) =
+    let (file_content, resolved_file_path, ir_program) =
         apply_file(&mut host, file_id, 2, module_path, content_params);
     let response = completion_handler::handle_completion_v2(
         file_content,
         resolved_file_path,
         ir_program,
-        Some(parse_result),
         None,
         deps_bundle.semantic_deps.clone(),
         Position {
@@ -561,13 +544,12 @@ async fn m8_lsp_completion_form_module_no_context_hides_implicit_context_symbols
         "    Этот\n",
         "КонецПроцедуры\n",
     );
-    let (file_content, resolved_file_path, ir_program, parse_result) =
+    let (file_content, resolved_file_path, ir_program) =
         apply_file(&mut host, file_id, 1, module_path, content_this);
     let response = completion_handler::handle_completion_v2(
         file_content,
         resolved_file_path,
         ir_program,
-        Some(parse_result),
         None,
         deps_bundle.semantic_deps.clone(),
         Position {
@@ -594,13 +576,12 @@ async fn m8_lsp_completion_form_module_no_context_hides_implicit_context_symbols
         "    Пар\n",
         "КонецПроцедуры\n",
     );
-    let (file_content, resolved_file_path, ir_program, parse_result) =
+    let (file_content, resolved_file_path, ir_program) =
         apply_file(&mut host, file_id, 2, module_path, content_params);
     let response = completion_handler::handle_completion_v2(
         file_content,
         resolved_file_path,
         ir_program,
-        Some(parse_result),
         None,
         deps_bundle.semantic_deps.clone(),
         Position {
@@ -634,13 +615,12 @@ async fn m8_lsp_completion_manager_module_suggests_implicit_object_symbols() {
     let mut host = setup_host(deps_bundle.as_ref());
 
     let content_this = concat!("Процедура Тест()\n", "    Этот\n", "КонецПроцедуры\n",);
-    let (file_content, resolved_file_path, ir_program, parse_result) =
+    let (file_content, resolved_file_path, ir_program) =
         apply_file(&mut host, file_id, 1, module_path, content_this);
     let response = completion_handler::handle_completion_v2(
         file_content,
         resolved_file_path,
         ir_program,
-        Some(parse_result),
         None,
         deps_bundle.semantic_deps.clone(),
         Position {
@@ -662,13 +642,12 @@ async fn m8_lsp_completion_manager_module_suggests_implicit_object_symbols() {
     );
 
     let content_object = concat!("Процедура Тест()\n", "    Об\n", "КонецПроцедуры\n",);
-    let (file_content, resolved_file_path, ir_program, parse_result) =
+    let (file_content, resolved_file_path, ir_program) =
         apply_file(&mut host, file_id, 2, module_path, content_object);
     let response = completion_handler::handle_completion_v2(
         file_content,
         resolved_file_path,
         ir_program,
-        Some(parse_result),
         None,
         deps_bundle.semantic_deps.clone(),
         Position {
@@ -702,13 +681,12 @@ async fn m8_lsp_completion_object_module_suggests_implicit_object_symbols() {
     let mut host = setup_host(deps_bundle.as_ref());
 
     let content_this = concat!("Процедура Тест()\n", "    Этот\n", "КонецПроцедуры\n",);
-    let (file_content, resolved_file_path, ir_program, parse_result) =
+    let (file_content, resolved_file_path, ir_program) =
         apply_file(&mut host, file_id, 1, module_path, content_this);
     let response = completion_handler::handle_completion_v2(
         file_content,
         resolved_file_path,
         ir_program,
-        Some(parse_result),
         None,
         deps_bundle.semantic_deps.clone(),
         Position {
@@ -730,13 +708,12 @@ async fn m8_lsp_completion_object_module_suggests_implicit_object_symbols() {
     );
 
     let content_object = concat!("Процедура Тест()\n", "    Об\n", "КонецПроцедуры\n",);
-    let (file_content, resolved_file_path, ir_program, parse_result) =
+    let (file_content, resolved_file_path, ir_program) =
         apply_file(&mut host, file_id, 2, module_path, content_object);
     let response = completion_handler::handle_completion_v2(
         file_content,
         resolved_file_path,
         ir_program,
-        Some(parse_result),
         None,
         deps_bundle.semantic_deps.clone(),
         Position {
@@ -770,13 +747,12 @@ async fn m8_lsp_completion_recordset_module_suggests_implicit_object_symbols() {
     let mut host = setup_host(deps_bundle.as_ref());
 
     let content_this = concat!("Процедура Тест()\n", "    Этот\n", "КонецПроцедуры\n",);
-    let (file_content, resolved_file_path, ir_program, parse_result) =
+    let (file_content, resolved_file_path, ir_program) =
         apply_file(&mut host, file_id, 1, module_path, content_this);
     let response = completion_handler::handle_completion_v2(
         file_content,
         resolved_file_path,
         ir_program,
-        Some(parse_result),
         None,
         deps_bundle.semantic_deps.clone(),
         Position {
@@ -798,13 +774,12 @@ async fn m8_lsp_completion_recordset_module_suggests_implicit_object_symbols() {
     );
 
     let content_object = concat!("Процедура Тест()\n", "    Об\n", "КонецПроцедуры\n",);
-    let (file_content, resolved_file_path, ir_program, parse_result) =
+    let (file_content, resolved_file_path, ir_program) =
         apply_file(&mut host, file_id, 2, module_path, content_object);
     let response = completion_handler::handle_completion_v2(
         file_content,
         resolved_file_path,
         ir_program,
-        Some(parse_result),
         None,
         deps_bundle.semantic_deps.clone(),
         Position {

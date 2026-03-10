@@ -499,7 +499,6 @@ pub(super) async fn resolve_completion_without_ir(
     _member_access_context: bool,
     _file_content: Arc<str>,
     _file_path: Arc<str>,
-    _parse_result: Option<Arc<bsl_syntax::ast::ParseResult>>,
     _member_access_owner_type_hint: Option<bsl_shared::domain::types::TypeResolution>,
     _deps: Arc<bsl_analysis_v2::SemanticDeps>,
     _position: Position,

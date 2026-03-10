@@ -40,12 +40,7 @@ fn apply_file(
     file_id: V2FileId,
     file_path: &str,
     content: &str,
-) -> (
-    Arc<str>,
-    Arc<str>,
-    Arc<bsl_shared::ir::SemanticProgram>,
-    Arc<bsl_syntax::ast::ParseResult>,
-) {
+) -> (Arc<str>, Arc<str>, Arc<bsl_shared::ir::SemanticProgram>) {
     host.apply_change(ChangeV2::SetFile {
         file_id,
         text: Arc::from(content.to_string()),
@@ -65,13 +60,7 @@ fn apply_file(
         .flatten()
         .expect("file_path");
     let ir_program = analysis.ir(file_id).ok().flatten().expect("ir");
-    let parse_result = analysis
-        .parse_result(file_id)
-        .ok()
-        .flatten()
-        .expect("parse_result");
-
-    (file_content, file_path, ir_program, parse_result)
+    (file_content, file_path, ir_program)
 }
 
 fn shared_owner_hint_at_marker(
@@ -164,7 +153,7 @@ async fn completion_and_resolve_do_not_expose_legacy_form_alias() {
     );
 
     let mut host = setup_host(deps_bundle.as_ref());
-    let (file_content, resolved_file_path, ir_program, parse_result) =
+    let (file_content, resolved_file_path, ir_program) =
         apply_file(&mut host, V2FileId(1), file_path, content);
     let member_access_owner_type_hint =
         shared_owner_hint_at_marker(&host, V2FileId(1), content, "x = Объект");
@@ -177,7 +166,6 @@ async fn completion_and_resolve_do_not_expose_legacy_form_alias() {
         file_content,
         resolved_file_path,
         ir_program,
-        Some(parse_result),
         member_access_owner_type_hint,
         deps_bundle.semantic_deps.clone(),
         Position {
@@ -252,7 +240,7 @@ async fn completion_catalog_form_module_object_includes_intrinsic_properties() {
     );
 
     let mut host = setup_host(deps_bundle.as_ref());
-    let (file_content, resolved_file_path, ir_program, parse_result) =
+    let (file_content, resolved_file_path, ir_program) =
         apply_file(&mut host, V2FileId(1), file_path, content);
     let object_offset = content.find("x = Объект").expect("Объект offset") + "x = ".len();
     let object_offset = object_offset as u32;
@@ -269,7 +257,6 @@ async fn completion_catalog_form_module_object_includes_intrinsic_properties() {
         file_content,
         resolved_file_path,
         ir_program,
-        Some(parse_result),
         member_access_owner_type_hint,
         deps_bundle.semantic_deps.clone(),
         Position {

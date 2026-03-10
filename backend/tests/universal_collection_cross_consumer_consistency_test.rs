@@ -137,11 +137,6 @@ async fn assert_cross_consumer_consistency_with_shared_owner_hint(
         .flatten()
         .expect("file_path");
     let ir_program = analysis.ir(FILE_ID).ok().flatten().expect("ir");
-    let parse_result = analysis
-        .parse_result(FILE_ID)
-        .ok()
-        .flatten()
-        .expect("parse_result");
 
     let completion_offset =
         byte_offset_of(code_template, completion_prefix) + completion_prefix.len();
@@ -158,7 +153,6 @@ async fn assert_cross_consumer_consistency_with_shared_owner_hint(
         file_content.clone(),
         resolved_file_path.clone(),
         ir_program,
-        Some(parse_result),
         Some(shared_owner_hint),
         deps_bundle.semantic_deps.clone(),
         completion_position,
@@ -263,11 +257,6 @@ async fn assert_completion_with_shared_owner_hint(
         .flatten()
         .expect("file_path");
     let ir_program = analysis.ir(FILE_ID).ok().flatten().expect("ir");
-    let parse_result = analysis
-        .parse_result(FILE_ID)
-        .ok()
-        .flatten()
-        .expect("parse_result");
 
     let completion_offset =
         byte_offset_of(code_template, completion_prefix) + completion_prefix.len();
@@ -285,7 +274,6 @@ async fn assert_completion_with_shared_owner_hint(
         file_content,
         resolved_file_path,
         ir_program,
-        Some(parse_result),
         Some(shared_owner_hint),
         deps_bundle.semantic_deps.clone(),
         completion_position,
@@ -339,11 +327,6 @@ async fn typed_structure_completion_without_shared_owner_hint_fails_closed_in_di
         .flatten()
         .expect("file_path");
     let ir_program = analysis.ir(FILE_ID).ok().flatten().expect("ir");
-    let parse_result = analysis
-        .parse_result(FILE_ID)
-        .ok()
-        .flatten()
-        .expect("parse_result");
     let completion_offset = byte_offset_of(code, "    probe = S.") + "    probe = S.".len();
     let completion_position = byte_offset_to_utf16_position(code, completion_offset);
 
@@ -359,7 +342,6 @@ async fn typed_structure_completion_without_shared_owner_hint_fails_closed_in_di
         file_content,
         resolved_file_path,
         ir_program,
-        Some(parse_result),
         None,
         deps_bundle.semantic_deps.clone(),
         completion_position,
@@ -390,7 +372,7 @@ async fn typed_structure_completion_without_shared_owner_hint_fails_closed_in_di
                         | Some(CompletionItemKind::METHOD)
                 )
         }),
-        "direct handler path must not reconstruct structural member/property candidate from parse_result fallback, labels={labels:?}"
+        "direct handler path must not reconstruct structural member/property candidate without shared owner hint, labels={labels:?}"
     );
 }
 
@@ -423,11 +405,6 @@ async fn typed_value_table_row_completion_without_shared_owner_hint_fails_closed
         .flatten()
         .expect("file_path");
     let ir_program = analysis.ir(FILE_ID).ok().flatten().expect("ir");
-    let parse_result = analysis
-        .parse_result(FILE_ID)
-        .ok()
-        .flatten()
-        .expect("parse_result");
     let completion_offset = byte_offset_of(code, "    probe = Стр.") + "    probe = Стр.".len();
     let completion_position = byte_offset_to_utf16_position(code, completion_offset);
 
@@ -443,7 +420,6 @@ async fn typed_value_table_row_completion_without_shared_owner_hint_fails_closed
         file_content,
         resolved_file_path,
         ir_program,
-        Some(parse_result),
         None,
         deps_bundle.semantic_deps.clone(),
         completion_position,

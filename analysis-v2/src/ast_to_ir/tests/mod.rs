@@ -746,6 +746,200 @@ fn test_regular_property_access_not_global() {
 }
 
 #[test]
+fn test_index_access_is_materialized_as_first_class_ir_node() {
+    let ast = Program {
+        statements: vec![Statement::Assignment {
+            target: Expression::Identifier {
+                name: "Результат".to_string(),
+                span: AstSpan::stub(),
+            },
+            value: Expression::IndexAccess {
+                object: Box::new(Expression::Identifier {
+                    name: "Map".to_string(),
+                    span: AstSpan::stub(),
+                }),
+                index: Box::new(Expression::String {
+                    value: "k".to_string(),
+                    span: AstSpan::stub(),
+                }),
+                span: AstSpan::stub(),
+            },
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "Результат = Map[\"k\"];".to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    assert_eq!(ir.nodes.len(), 2);
+
+    if let SemanticNodeKind::IndexAccess {
+        object_node,
+        object_name,
+        object_span,
+        index_span,
+    } = &ir.nodes[0].kind
+    {
+        assert_eq!(*object_node, None);
+        assert_eq!(object_name.as_deref(), Some("Map"));
+        assert!(object_span.is_some());
+        assert!(index_span.is_some());
+    } else {
+        panic!(
+            "Expected IndexAccess at nodes[0], got: {:?}",
+            ir.nodes[0].kind
+        );
+    }
+
+    if let SemanticNodeKind::Assignment {
+        variable,
+        value_node,
+        ..
+    } = &ir.nodes[1].kind
+    {
+        assert_eq!(variable, "Результат");
+        assert_eq!(*value_node, Some(0));
+    } else {
+        panic!(
+            "Expected Assignment at nodes[1], got: {:?}",
+            ir.nodes[1].kind
+        );
+    }
+}
+
+#[test]
+fn test_member_access_keeps_index_access_as_object_node() {
+    let ast = Program {
+        statements: vec![Statement::Assignment {
+            target: Expression::Identifier {
+                name: "Результат".to_string(),
+                span: AstSpan::stub(),
+            },
+            value: Expression::PropertyAccess {
+                object: Box::new(Expression::IndexAccess {
+                    object: Box::new(Expression::Identifier {
+                        name: "Map".to_string(),
+                        span: AstSpan::stub(),
+                    }),
+                    index: Box::new(Expression::String {
+                        value: "k".to_string(),
+                        span: AstSpan::stub(),
+                    }),
+                    span: AstSpan::stub(),
+                }),
+                property: "Имя".to_string(),
+                span: AstSpan::stub(),
+            },
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "Результат = Map[\"k\"].Имя;".to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    assert_eq!(ir.nodes.len(), 3);
+
+    assert!(matches!(
+        ir.nodes[0].kind,
+        SemanticNodeKind::IndexAccess { .. }
+    ));
+
+    if let SemanticNodeKind::MemberAccess {
+        object_node,
+        object_name,
+        member_name,
+        ..
+    } = &ir.nodes[1].kind
+    {
+        assert_eq!(*object_node, Some(0));
+        assert!(object_name.is_none());
+        assert_eq!(member_name, "Имя");
+    } else {
+        panic!(
+            "Expected MemberAccess at nodes[1], got: {:?}",
+            ir.nodes[1].kind
+        );
+    }
+}
+
+#[test]
+fn test_method_call_keeps_index_access_as_object_node() {
+    let ast = Program {
+        statements: vec![Statement::Assignment {
+            target: Expression::Identifier {
+                name: "Результат".to_string(),
+                span: AstSpan::stub(),
+            },
+            value: Expression::Call {
+                function: Box::new(Expression::PropertyAccess {
+                    object: Box::new(Expression::IndexAccess {
+                        object: Box::new(Expression::Identifier {
+                            name: "Map".to_string(),
+                            span: AstSpan::stub(),
+                        }),
+                        index: Box::new(Expression::String {
+                            value: "k".to_string(),
+                            span: AstSpan::stub(),
+                        }),
+                        span: AstSpan::stub(),
+                    }),
+                    property: "Метод".to_string(),
+                    span: AstSpan::stub(),
+                }),
+                args: vec![],
+                span: AstSpan::stub(),
+            },
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "Результат = Map[\"k\"].Метод();".to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    assert_eq!(ir.nodes.len(), 3);
+
+    assert!(matches!(
+        ir.nodes[0].kind,
+        SemanticNodeKind::IndexAccess { .. }
+    ));
+
+    if let SemanticNodeKind::FunctionCall {
+        object_node,
+        object_name,
+        function_name,
+        ..
+    } = &ir.nodes[1].kind
+    {
+        assert_eq!(*object_node, Some(0));
+        assert!(object_name.is_none());
+        assert_eq!(function_name, "Метод");
+    } else {
+        panic!(
+            "Expected FunctionCall at nodes[1], got: {:?}",
+            ir.nodes[1].kind
+        );
+    }
+}
+
+#[test]
 fn test_global_property_access_for_accounting_registers() {
     // Тест: РегистрыБухгалтерии.Хозрасчетный создаёт GlobalPropertyAccess + MemberAccess
     let ast = Program {

@@ -253,6 +253,32 @@ impl SemanticProgram {
 
                 ("MemberAccess".to_string(), Some(description), attributes)
             }
+            SemanticNodeKind::IndexAccess {
+                object_node,
+                object_name,
+                object_span,
+                index_span,
+            } => {
+                if let Some(node_idx) = object_node {
+                    attributes.insert("object_node".to_string(), node_idx.to_string());
+                }
+                if let Some(name) = object_name {
+                    attributes.insert("object_name".to_string(), name.clone());
+                }
+                if let Some(span) = object_span {
+                    attributes.insert("object_span".to_string(), span.to_string());
+                }
+                if let Some(span) = index_span {
+                    attributes.insert("index_span".to_string(), span.to_string());
+                }
+
+                let description = object_name
+                    .as_ref()
+                    .map(|name| format!("{name}[...]"))
+                    .unwrap_or_else(|| "<expr>[...]".to_string());
+
+                ("IndexAccess".to_string(), Some(description), attributes)
+            }
             SemanticNodeKind::BlockScope { .. } => ("BlockScope".to_string(), None, attributes),
             SemanticNodeKind::GlobalPropertyAccess { name } => {
                 attributes.insert("name".to_string(), name.clone());
@@ -343,6 +369,8 @@ impl SemanticProgram {
             // MILESTONE 5.4: MemberAccess может содержать вложенный узел (цепочки доступа)
             // Например: Справочники.Контрагенты (GlobalPropertyAccess → MemberAccess)
             MemberAccess { object_node, .. } => object_node.iter().copied().collect(),
+
+            IndexAccess { object_node, .. } => object_node.iter().copied().collect(),
 
             Return { value_node } => value_node.iter().copied().collect(),
 

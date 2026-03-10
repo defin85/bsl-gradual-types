@@ -210,6 +210,21 @@ pub enum SemanticNodeKind {
         access_kind: MemberAccessKind,
     },
 
+    /// Индексированный доступ: `obj[index]`
+    ///
+    /// Нужен как first-class node, чтобы canonical IR мог выражать indexed receiver
+    /// в цепочках вида `Map["k"].Метод()` и `a[i].Свойство`.
+    IndexAccess {
+        /// Индекс вложенного узла-объекта для цепочек.
+        object_node: Option<usize>,
+        /// Имя переменной-объекта для простого случая `name[index]`.
+        object_name: Option<String>,
+        /// Span выражения-объекта слева от `[...]`.
+        object_span: Option<Span>,
+        /// Span выражения индекса внутри `[...]`.
+        index_span: Option<Span>,
+    },
+
     /// Вызов функции или метода: `Функция()` или `объект.Метод(args)`
     ///
     /// # Семантика полей

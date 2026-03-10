@@ -155,9 +155,37 @@ impl AstToIrConverter {
                 Ok(Some(node_idx))
             }
             Expression::IndexAccess { object, index, .. } => {
-                self.convert_expression_for_hover(object)?;
+                let object_span = self.ast_span_to_ir_span(expression_ast_span(object));
+                let index_span = self.ast_span_to_ir_span(expression_ast_span(index));
+                let object_name = if let Expression::Identifier { name, .. } = &**object {
+                    Some(name.clone())
+                } else {
+                    None
+                };
+                let object_node = match &**object {
+                    Expression::PropertyAccess {
+                        object: inner_obj,
+                        property,
+                        span,
+                    } => self.convert_property_access_expression(inner_obj, property, *span)?,
+                    Expression::IndexAccess { .. } => self.convert_expression_for_hover(object)?,
+                    _ if object_name.is_none() => self.convert_expression_for_hover(object)?,
+                    _ => None,
+                };
                 self.convert_expression_for_hover(index)?;
-                Ok(None)
+
+                let node = SemanticNode {
+                    kind: SemanticNodeKind::IndexAccess {
+                        object_node,
+                        object_name,
+                        object_span: Some(object_span),
+                        index_span: Some(index_span),
+                    },
+                    span: self.ast_span_to_ir_span(expression_ast_span(expr)),
+                    scope_id: self.current_scope,
+                };
+                self.nodes.push(node);
+                Ok(Some(self.nodes.len() - 1))
             }
             Expression::Await { expression, .. } => {
                 self.convert_expression_for_hover(expression)?;

@@ -101,6 +101,10 @@ impl SemanticProgram {
                         object_name.as_deref().unwrap_or("?"),
                         member_name
                     ),
+                    SemanticNodeKind::IndexAccess { object_name, .. } => format!(
+                        "IndexAccess({}[...])",
+                        object_name.as_deref().unwrap_or("?")
+                    ),
                     SemanticNodeKind::VariableDeclaration { name, .. } => {
                         format!("VarDecl({})", name)
                     }
@@ -119,8 +123,9 @@ impl SemanticProgram {
                     let type_priority = match &node.kind {
                         SemanticNodeKind::FunctionCall { .. } => 0,
                         SemanticNodeKind::MemberAccess { .. } => 1,
-                        SemanticNodeKind::VariableAccess { .. } => 2,
-                        SemanticNodeKind::VariableDeclaration { .. } => 3,
+                        SemanticNodeKind::IndexAccess { .. } => 2,
+                        SemanticNodeKind::VariableAccess { .. } => 3,
+                        SemanticNodeKind::VariableDeclaration { .. } => 4,
                         SemanticNodeKind::Assignment { .. } => 10,
                         _ => 5,
                     };
@@ -144,6 +149,10 @@ impl SemanticProgram {
                         "FunctionCall({}.{})",
                         object_name.as_deref().unwrap_or("?"),
                         function_name
+                    ),
+                    SemanticNodeKind::IndexAccess { object_name, .. } => format!(
+                        "IndexAccess({}[...])",
+                        object_name.as_deref().unwrap_or("?")
                     ),
                     _ => format!("{:?}", node.kind),
                 };
@@ -211,6 +220,14 @@ impl SemanticProgram {
                 ..
             } => Some(obj_name.clone()),
             SemanticNodeKind::MemberAccess {
+                object_name: None, ..
+            } => None,
+
+            SemanticNodeKind::IndexAccess {
+                object_name: Some(obj_name),
+                ..
+            } => Some(obj_name.clone()),
+            SemanticNodeKind::IndexAccess {
                 object_name: None, ..
             } => None,
 

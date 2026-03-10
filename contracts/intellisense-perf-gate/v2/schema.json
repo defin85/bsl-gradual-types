@@ -1,0 +1,382 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "intellisense-perf-gate contract v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "surface",
+    "major_version",
+    "schema_version",
+    "compatibility",
+    "input",
+    "coverage",
+    "baseline",
+    "report",
+    "evaluator"
+  ],
+  "properties": {
+    "surface": {
+      "type": "string",
+      "const": "intellisense-perf-gate"
+    },
+    "major_version": {
+      "type": "integer",
+      "const": 2
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "breaking_change_requires_major_bump",
+        "breaking_change_requires_migration_note"
+      ],
+      "properties": {
+        "breaking_change_requires_major_bump": {
+          "type": "boolean",
+          "const": true
+        },
+        "breaking_change_requires_migration_note": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_profiles",
+        "required_latency_metrics",
+        "required_resource_metrics"
+      ],
+      "properties": {
+        "required_profiles": {
+          "type": "array",
+          "minItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "small",
+              "large",
+              "churn"
+            ]
+          }
+        },
+        "required_latency_metrics": {
+          "type": "array",
+          "minItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "completion_duration_ms",
+              "intellisense_v2_wait_for_file_version_completion_ms",
+              "intellisense_v2_snapshot_completion_ms",
+              "intellisense_v2_ir_query_completion_ms"
+            ]
+          }
+        },
+        "required_resource_metrics": {
+          "type": "array",
+          "minItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "allocations_per_completion",
+              "allocated_bytes_per_completion",
+              "lock_wait_ms_per_completion",
+              "lock_contention_events_per_completion"
+            ]
+          }
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operation_coverage_mode",
+        "reported_operations",
+        "missing_representative_operations",
+        "authoritative_for_cutover_acceptance"
+      ],
+      "properties": {
+        "operation_coverage_mode": {
+          "type": "string",
+          "const": "completion_only"
+        },
+        "reported_operations": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "completion"
+            ]
+          }
+        },
+        "missing_representative_operations": {
+          "type": "array",
+          "minItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "hover",
+              "definition",
+              "type_at_position",
+              "members"
+            ]
+          }
+        },
+        "authoritative_for_cutover_acceptance": {
+          "type": "boolean",
+          "const": false
+        }
+      }
+    },
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "absolute_latency_ceilings_ms",
+        "resource_budget_ceilings",
+        "bootstrap_policy"
+      ],
+      "properties": {
+        "absolute_latency_ceilings_ms": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "small",
+            "large",
+            "churn"
+          ],
+          "properties": {
+            "small": {
+              "$ref": "#/$defs/ceilingPair"
+            },
+            "large": {
+              "$ref": "#/$defs/ceilingPair"
+            },
+            "churn": {
+              "$ref": "#/$defs/ceilingPair"
+            }
+          }
+        },
+        "resource_budget_ceilings": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "small",
+            "large",
+            "churn"
+          ],
+          "properties": {
+            "small": {
+              "$ref": "#/$defs/resourceBudget"
+            },
+            "large": {
+              "$ref": "#/$defs/resourceBudget"
+            },
+            "churn": {
+              "$ref": "#/$defs/resourceBudget"
+            }
+          }
+        },
+        "bootstrap_policy": {
+          "$ref": "#/$defs/bootstrapPolicy"
+        }
+      }
+    },
+    "report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_fields",
+        "verdict_enum"
+      ],
+      "properties": {
+        "required_fields": {
+          "type": "array",
+          "minItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "contract_version",
+              "verdict",
+              "reason_codes",
+              "profiles"
+            ]
+          }
+        },
+        "verdict_enum": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "fail"
+            ]
+          }
+        },
+        "optional_provenance_fields": {
+          "type": "array",
+          "minItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "change_id",
+              "generated_at",
+              "profile",
+              "schema_version",
+              "contract_version"
+            ]
+          }
+        },
+        "change_id_source_priority": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "--change-id",
+              "OPENSPEC_CHANGE_ID"
+            ]
+          }
+        }
+      }
+    },
+    "evaluator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason_codes"
+      ],
+      "properties": {
+        "reason_codes": {
+          "type": "array",
+          "minItems": 18,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "missing_required_metric_field",
+              "unsupported_contract_version",
+              "latency_relative_ratio_exceeded",
+              "latency_absolute_ceiling_exceeded",
+              "allocation_budget_exceeded",
+              "lock_wait_budget_exceeded",
+              "lock_contention_budget_exceeded",
+              "protected_acceptance_asset_modified",
+              "change_criticality_missing_or_unknown",
+              "test_first_evidence_missing_or_invalid",
+              "initial_budget_not_fixed",
+              "perf_gate_architecture_violation",
+              "provenance_missing_for_authoritative_run",
+              "provenance_mismatch_expected_change_id",
+              "provenance_invalid",
+              "provenance_non_authoritative_cutover_evidence",
+              "parity_evidence_insufficient",
+              "parity_drift_threshold_exceeded"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "ceilingPair": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "p95",
+        "p99"
+      ],
+      "properties": {
+        "p95": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "p99": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "resourceBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allocations_per_completion",
+        "allocated_bytes_per_completion",
+        "lock_wait_ms_per_completion",
+        "lock_contention_events_per_completion"
+      ],
+      "properties": {
+        "allocations_per_completion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "allocated_bytes_per_completion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "lock_wait_ms_per_completion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "lock_contention_events_per_completion": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "bootstrapPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_profiles",
+        "sample_size_min",
+        "aggregation_rule"
+      ],
+      "properties": {
+        "required_profiles": {
+          "type": "array",
+          "minItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "small",
+              "large",
+              "churn"
+            ]
+          }
+        },
+        "sample_size_min": {
+          "type": "integer",
+          "minimum": 5
+        },
+        "aggregation_rule": {
+          "type": "string",
+          "const": "median"
+        }
+      }
+    }
+  }
+}

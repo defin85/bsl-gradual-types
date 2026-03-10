@@ -14,8 +14,15 @@ RE_VERSION_DIR = re.compile(r"^v([1-9]\d*)$")
 
 REQUIRED_SURFACES = {
     "lsp-completion-v2",
+    "lsp-completion-timeline",
     "intellisense-perf-gate",
     "observability-completion-v2",
+}
+
+REQUIRED_LATEST_MAJORS = {
+    "lsp-completion-timeline": 3,
+    "intellisense-perf-gate": 2,
+    "observability-completion-v2": 3,
 }
 
 REQUIRED_V1_COMPLETION_TRIGGER_MODES = {
@@ -67,6 +74,56 @@ REQUIRED_V2_OBSERVABILITY_COMPLETION_OUTCOMES = {
     "fallback_unavailable",
 }
 
+REQUIRED_V3_TIMELINE_OUTCOMES = {
+    "ok_non_empty",
+    "ok_empty",
+    "cancelled",
+    "superseded",
+    "handler_error",
+    "fail_closed",
+}
+
+REQUIRED_V3_TERMINAL_EMPTY_REASONS = {
+    "ok_empty",
+    "missing_canonical_ir",
+    "missing_semantic_index",
+    "superseded_revision",
+    "cancelled",
+    "unavailable_by_contract",
+}
+
+REQUIRED_V3_OBSERVABILITY_COMPLETION_OUTCOMES = {
+    "ok_non_empty",
+    "ok_empty",
+    "fail_closed",
+    "cancelled",
+    "handler_error",
+}
+
+REQUIRED_V3_FAIL_CLOSED_REASONS = {
+    "missing_canonical_ir",
+    "missing_semantic_index",
+    "superseded_revision",
+    "cancelled",
+    "unavailable_by_contract",
+}
+
+REQUIRED_V3_FAIL_CLOSED_ORIGINS = {
+    "lsp",
+    "web",
+    "agent",
+    "runtime",
+}
+
+REQUIRED_V3_FAIL_CLOSED_OPERATIONS = {
+    "completion",
+    "hover",
+    "signature_help",
+    "definition",
+    "members",
+    "type_at_position",
+}
+
 REQUIRED_V1_PERF_GATE_PROFILES = {
     "small",
     "large",
@@ -100,6 +157,17 @@ REQUIRED_V1_PERF_GATE_REASON_CODES = {
     "test_first_evidence_missing_or_invalid",
     "initial_budget_not_fixed",
     "perf_gate_architecture_violation",
+}
+
+REQUIRED_V2_PERF_GATE_REPORTED_OPERATIONS = {
+    "completion",
+}
+
+REQUIRED_V2_PERF_GATE_MISSING_OPERATIONS = {
+    "hover",
+    "definition",
+    "type_at_position",
+    "members",
 }
 
 
@@ -203,6 +271,12 @@ def validate_surface_contract(surface_dir: Path) -> None:
         majors == expected,
         f"{surface_dir}: expected contiguous versions {expected}, got {majors}",
     )
+    expected_latest_major = REQUIRED_LATEST_MAJORS.get(surface_dir.name)
+    if expected_latest_major is not None:
+        ensure(
+            majors[-1] == expected_latest_major,
+            f"{surface_dir}: expected latest major v{expected_latest_major}, got v{majors[-1]}",
+        )
 
     for major, version_dir in versions:
         contract_path = version_dir / "contract.json"
@@ -321,7 +395,58 @@ def validate_surface_contract(surface_dir: Path) -> None:
                 f"{contract_path}: completion_result_counter_prefix mismatch",
             )
 
-        if surface_dir.name == "intellisense-perf-gate" and major == 1:
+        if surface_dir.name == "observability-completion-v2" and major == 3:
+            metrics = contract.get("metrics")
+            ensure(isinstance(metrics, dict), f"{contract_path}: metrics must be object")
+            trigger_modes = set(metrics.get("allowed_trigger_modes", []))
+            terminal_reasons = set(metrics.get("allowed_terminal_empty_reasons", []))
+            anti_rescue_guard_counters = set(
+                metrics.get("anti_rescue_guard_zero_expected_counters", [])
+            )
+            completion_outcomes = set(metrics.get("allowed_completion_outcomes", []))
+            fail_closed_reasons = set(metrics.get("allowed_fail_closed_reasons", []))
+            origins = set(metrics.get("allowed_fail_closed_origins", []))
+            operations = set(metrics.get("allowed_fail_closed_operations", []))
+            ensure(
+                REQUIRED_V1_COMPLETION_TRIGGER_MODES.issubset(trigger_modes),
+                f"{contract_path}: allowed_trigger_modes must include {sorted(REQUIRED_V1_COMPLETION_TRIGGER_MODES)}",
+            )
+            ensure(
+                terminal_reasons == REQUIRED_V3_TERMINAL_EMPTY_REASONS,
+                f"{contract_path}: allowed_terminal_empty_reasons must equal {sorted(REQUIRED_V3_TERMINAL_EMPTY_REASONS)}",
+            )
+            ensure(
+                anti_rescue_guard_counters == REQUIRED_V2_ANTI_RESCUE_GUARD_COUNTERS,
+                f"{contract_path}: anti_rescue_guard_zero_expected_counters must equal {sorted(REQUIRED_V2_ANTI_RESCUE_GUARD_COUNTERS)}",
+            )
+            ensure(
+                completion_outcomes == REQUIRED_V3_OBSERVABILITY_COMPLETION_OUTCOMES,
+                f"{contract_path}: allowed_completion_outcomes must equal {sorted(REQUIRED_V3_OBSERVABILITY_COMPLETION_OUTCOMES)}",
+            )
+            ensure(
+                fail_closed_reasons == REQUIRED_V3_FAIL_CLOSED_REASONS,
+                f"{contract_path}: allowed_fail_closed_reasons must equal {sorted(REQUIRED_V3_FAIL_CLOSED_REASONS)}",
+            )
+            ensure(
+                origins == REQUIRED_V3_FAIL_CLOSED_ORIGINS,
+                f"{contract_path}: allowed_fail_closed_origins must equal {sorted(REQUIRED_V3_FAIL_CLOSED_ORIGINS)}",
+            )
+            ensure(
+                operations == REQUIRED_V3_FAIL_CLOSED_OPERATIONS,
+                f"{contract_path}: allowed_fail_closed_operations must equal {sorted(REQUIRED_V3_FAIL_CLOSED_OPERATIONS)}",
+            )
+            ensure(
+                metrics.get("completion_result_counter_prefix")
+                == "intellisense_v2_completion_result_total_",
+                f"{contract_path}: completion_result_counter_prefix mismatch",
+            )
+            ensure(
+                metrics.get("interactive_fail_closed_reason_counter_prefix")
+                == "intellisense_v2_fail_closed_reason_total_origin_",
+                f"{contract_path}: interactive_fail_closed_reason_counter_prefix mismatch",
+            )
+
+        if surface_dir.name == "intellisense-perf-gate" and major in {1, 2}:
             input_obj = contract.get("input")
             ensure(isinstance(input_obj, dict), f"{contract_path}: input must be object")
             required_profiles = set(input_obj.get("required_profiles", []))
@@ -419,6 +544,39 @@ def validate_surface_contract(surface_dir: Path) -> None:
             ensure(
                 REQUIRED_V1_PERF_GATE_REASON_CODES.issubset(reason_codes),
                 f"{contract_path}: evaluator.reason_codes must include {sorted(REQUIRED_V1_PERF_GATE_REASON_CODES)}",
+            )
+
+            if major == 2:
+                coverage = contract.get("coverage")
+                ensure(isinstance(coverage, dict), f"{contract_path}: coverage must be object")
+                reported_operations = set(coverage.get("reported_operations", []))
+                missing_operations = set(
+                    coverage.get("missing_representative_operations", [])
+                )
+                ensure(
+                    coverage.get("operation_coverage_mode") == "completion_only",
+                    f"{contract_path}: coverage.operation_coverage_mode must be 'completion_only'",
+                )
+                ensure(
+                    reported_operations == REQUIRED_V2_PERF_GATE_REPORTED_OPERATIONS,
+                    f"{contract_path}: coverage.reported_operations must equal {sorted(REQUIRED_V2_PERF_GATE_REPORTED_OPERATIONS)}",
+                )
+                ensure(
+                    missing_operations == REQUIRED_V2_PERF_GATE_MISSING_OPERATIONS,
+                    f"{contract_path}: coverage.missing_representative_operations must equal {sorted(REQUIRED_V2_PERF_GATE_MISSING_OPERATIONS)}",
+                )
+                ensure(
+                    coverage.get("authoritative_for_cutover_acceptance") is False,
+                    f"{contract_path}: coverage.authoritative_for_cutover_acceptance must be false",
+                )
+
+        if surface_dir.name == "lsp-completion-timeline" and major == 3:
+            response = contract.get("response")
+            ensure(isinstance(response, dict), f"{contract_path}: response must be object")
+            outcomes = set(response.get("outcomes", []))
+            ensure(
+                outcomes == REQUIRED_V3_TIMELINE_OUTCOMES,
+                f"{contract_path}: response.outcomes must equal {sorted(REQUIRED_V3_TIMELINE_OUTCOMES)}",
             )
 
 

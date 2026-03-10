@@ -87,10 +87,11 @@ Legacy config surface:
 
 Counters:
 
+- `intellisense_v2_completion_result_total_{ok_non_empty|ok_empty|fail_closed|cancelled|handler_error}`
+- `intellisense_v2_fail_closed_reason_total_origin_<origin>_operation_<operation>_reason_<reason>`
 - `intellisense_v2_interactive_wait_budget_exhausted_total`
 - `intellisense_v2_interactive_stale_served_total`
 - `intellisense_v2_completion_stale_fallback_total`
-- `intellisense_v2_completion_fallback_unavailable_total`
 - `intellisense_v2_interactive_knob_clamped_total`
 - `intellisense_v2_singleflight_leader_total`
 - `intellisense_v2_singleflight_shared_total`
@@ -107,18 +108,35 @@ Histograms:
 - `intellisense_v2_runtime_exec_interactive_ms`
 - `intellisense_v2_runtime_exec_background_ms`
 
+Bounded fail-closed taxonomy:
+
+- reasons: `missing_canonical_ir`, `missing_semantic_index`, `superseded_revision`, `cancelled`, `unavailable_by_contract`
+- origins: `lsp`, `web`, `agent`, `runtime`
+- operations in public metric labels use snake_case suffixes, for example:
+  - `completion`
+  - `hover`
+  - `definition`
+  - `signature_help`
+  - `members`
+  - `type_at_position`
+
 Rates:
 
 - `intellisense_v2_parse_result_singleflight_shared_rate`
 - `intellisense_v2_parse_result_query_cancel_rate`
 - `completion_incomplete_rate`
 - `completion_error_rate`
-- `intellisense_v2_completion_fallback_unavailable_total / intellisense_v2_interactive_wait_budget_exhausted_total`
 
 Legacy stale counters остаются guardrail-метриками и на authoritative fixtures должны оставаться нулевыми:
 
 - `intellisense_v2_interactive_stale_served_total == 0`
 - `intellisense_v2_completion_stale_fallback_total == 0`
+
+Legacy/internal note:
+
+- старые completion-only assets в репозитории всё ещё могут содержать `terminal_empty_missing_ir_rate`
+  или `intellisense_v2_completion_fallback_unavailable_total` как исторические/internal сигналы;
+  authoritative public baseline для change больше не использует их как bounded taxonomy.
 
 ## Alerting Baseline (warm-path)
 
@@ -126,8 +144,9 @@ Legacy stale counters остаются guardrail-метриками и на auth
 
 - `intellisense_v2_observability_contract_violation_total > 0` за интервал прогона.
 - `intellisense_v2_interactive_stale_served_total > 0` или `intellisense_v2_completion_stale_fallback_total > 0` на authoritative run.
+- рост `intellisense_v2_fail_closed_reason_total_origin_<origin>_operation_<operation>_reason_missing_semantic_index`
+  на representative fixtures: это fail-closed availability signal, но не повод возвращать stale/degraded rescue.
 - `intellisense_v2_parse_result_singleflight_shared_rate < 0.15` (низкая эффективность singleflight).
 - `intellisense_v2_parse_result_query_cancel_rate > 0.20` (чрезмерные cancellations в parse-stage).
 - `intellisense_v2_runtime_queue_wait_interactive_ms.p95 > 500ms` (interactive starvation risk).
-- рост `intellisense_v2_completion_fallback_unavailable_total` на representative fixtures: это fail-closed availability signal, но не повод возвращать stale/degraded semantic rescue.
 - `completion_incomplete_rate > 0.30` или `completion_error_rate > 0.05`.

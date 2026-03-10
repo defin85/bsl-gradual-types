@@ -1,0 +1,131 @@
+{
+  "surface": "intellisense-perf-gate",
+  "major_version": 2,
+  "schema_version": 1,
+  "compatibility": {
+    "breaking_change_requires_major_bump": true,
+    "breaking_change_requires_migration_note": true
+  },
+  "input": {
+    "required_profiles": [
+      "small",
+      "large",
+      "churn"
+    ],
+    "required_latency_metrics": [
+      "completion_duration_ms",
+      "intellisense_v2_wait_for_file_version_completion_ms",
+      "intellisense_v2_snapshot_completion_ms",
+      "intellisense_v2_ir_query_completion_ms"
+    ],
+    "required_resource_metrics": [
+      "allocations_per_completion",
+      "allocated_bytes_per_completion",
+      "lock_wait_ms_per_completion",
+      "lock_contention_events_per_completion"
+    ]
+  },
+  "coverage": {
+    "operation_coverage_mode": "completion_only",
+    "reported_operations": [
+      "completion"
+    ],
+    "missing_representative_operations": [
+      "hover",
+      "definition",
+      "type_at_position",
+      "members"
+    ],
+    "authoritative_for_cutover_acceptance": false
+  },
+  "baseline": {
+    "absolute_latency_ceilings_ms": {
+      "small": {
+        "p95": 300,
+        "p99": 600
+      },
+      "large": {
+        "p95": 1500,
+        "p99": 3000
+      },
+      "churn": {
+        "p95": 1800,
+        "p99": 3500
+      }
+    },
+    "resource_budget_ceilings": {
+      "small": {
+        "allocations_per_completion": 2000000,
+        "allocated_bytes_per_completion": 200000000,
+        "lock_wait_ms_per_completion": 5000,
+        "lock_contention_events_per_completion": 5000
+      },
+      "large": {
+        "allocations_per_completion": 5000000,
+        "allocated_bytes_per_completion": 500000000,
+        "lock_wait_ms_per_completion": 10000,
+        "lock_contention_events_per_completion": 10000
+      },
+      "churn": {
+        "allocations_per_completion": 6000000,
+        "allocated_bytes_per_completion": 600000000,
+        "lock_wait_ms_per_completion": 15000,
+        "lock_contention_events_per_completion": 15000
+      }
+    },
+    "bootstrap_policy": {
+      "required_profiles": [
+        "small",
+        "large",
+        "churn"
+      ],
+      "sample_size_min": 5,
+      "aggregation_rule": "median"
+    }
+  },
+  "report": {
+    "required_fields": [
+      "contract_version",
+      "verdict",
+      "reason_codes",
+      "profiles"
+    ],
+    "optional_provenance_fields": [
+      "change_id",
+      "generated_at",
+      "profile",
+      "schema_version",
+      "contract_version"
+    ],
+    "change_id_source_priority": [
+      "--change-id",
+      "OPENSPEC_CHANGE_ID"
+    ],
+    "verdict_enum": [
+      "pass",
+      "fail"
+    ]
+  },
+  "evaluator": {
+    "reason_codes": [
+      "missing_required_metric_field",
+      "unsupported_contract_version",
+      "latency_relative_ratio_exceeded",
+      "latency_absolute_ceiling_exceeded",
+      "allocation_budget_exceeded",
+      "lock_wait_budget_exceeded",
+      "lock_contention_budget_exceeded",
+      "protected_acceptance_asset_modified",
+      "change_criticality_missing_or_unknown",
+      "test_first_evidence_missing_or_invalid",
+      "initial_budget_not_fixed",
+      "perf_gate_architecture_violation",
+      "provenance_missing_for_authoritative_run",
+      "provenance_mismatch_expected_change_id",
+      "provenance_invalid",
+      "provenance_non_authoritative_cutover_evidence",
+      "parity_evidence_insufficient",
+      "parity_drift_threshold_exceeded"
+    ]
+  }
+}

@@ -163,16 +163,27 @@ BSL_V2_PERF_GATE_BLOCKING=1 PERF_WARMUP=1 PERF_ITERATIONS=5 THRESHOLD_P95=50 THR
 - Baselines: `backend/tests/perf/baselines/`
 - Отчёты: `backend/tests/perf/reports/`
 
+**Ограничение текущего checked-in path:** этот harness по-прежнему собирает
+completion-centric baseline. `contracts/intellisense-perf-gate/v2/` теперь явно
+фиксирует этот факт и помечает отсутствие representative coverage для `hover`,
+`definition`, `type_at_position`, `members`. Не считай эти артефакты доказательством
+full cutover perf coverage.
+
 ---
 
-### `validate-v2-completion-gates.sh` - Acceptance gates для `improve-v2-completion-interactive-reliability`
+### `validate-v2-completion-gates.sh` - Acceptance gates для `refactor-ir-canonical-semantic-pipeline`
 
-**Назначение:** воспроизводимый fail-fast прогон acceptance gates для задач `3.6/3.7`:
+**Назначение:** воспроизводимый fail-fast прогон checked-in completion acceptance gates
+для `refactor-ir-canonical-semantic-pipeline`:
 - completion latency: `p95 <= 300ms`, `p99 <= 800ms`;
 - first-trigger success rate: `>= 99%`;
-- terminal-empty (`missing_ir`) rate: `<= 0.5%`;
+- terminal-empty (`missing_canonical_ir`; legacy report key `terminal_empty_missing_ir_rate`) rate: `<= 0.5%`;
 - parity mismatch rate: `<= 1%`;
 - strict-валидация change через OpenSpec.
+
+**Честное ограничение:** скрипт валидирует только checked-in completion acceptance asset.
+Он не доказывает operation-aware perf/acceptance coverage для `hover`, `definition`,
+`type_at_position`, `members`.
 
 **Использование:**
 ```bash
@@ -182,9 +193,9 @@ BSL_V2_PERF_GATE_BLOCKING=1 PERF_WARMUP=1 PERF_ITERATIONS=5 THRESHOLD_P95=50 THR
 **Важно:** скрипт не зависит от `.github/workflows/*` и предназначен для локального запуска или внешнего CI (например, Jenkins/GitLab Runner).
 
 **Артефакты:**
-- `backend/tests/perf/reports/improve-v2-completion-interactive-reliability-gate.json`
-- `backend/tests/perf/reports/improve-v2-completion-interactive-reliability-gate.md`
-- `backend/tests/perf/reports/improve-v2-completion-interactive-reliability-openspec-validate.log`
+- `backend/tests/perf/reports/refactor-ir-canonical-semantic-pipeline-completion-gate.json`
+- `backend/tests/perf/reports/refactor-ir-canonical-semantic-pipeline-completion-gate.md`
+- `backend/tests/perf/reports/refactor-ir-canonical-semantic-pipeline-openspec-validate.log`
 
 ---
 

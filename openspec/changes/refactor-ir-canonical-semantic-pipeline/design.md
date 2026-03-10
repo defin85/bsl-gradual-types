@@ -154,6 +154,126 @@ denormalized lookup-структуры над canonical facts, описанны�
 - недоступность semantic fast index не даёт права backfill-ить semantic surfaces через discovery/search index;
 - координация с pending search changes должна сохранять это разделение явно.
 
+### 2a. Логический состав `derived semantic index`
+
+`derived semantic index` состоит из одного payload-а и optional operational envelope.
+Payload является semantic read-model; envelope хранит только operational metadata.
+
+Обязательные логические разделы payload:
+- `position surface index`:
+  - отображает byte offset / span на минимальную semantic surface (`node_id`, `binding_id`, `member access`, `call surface`);
+  - служит общей входной точкой для `type-at-position`, `hover`, `definition`, `signatureHelp`, `members`;
+  - заменяет разрозненные request-time probe-эвристики по owner span.
+- `expression type table`:
+  - materialize-ит `ExpressionTypeFact` для expression-producing nodes и queryable spans;
+  - хранит base `TypeResolution` в форме, пригодной для exact lookup без повторного inference;
+  - сохраняет facet-aware identity в той же canonical форме, что и IR.
+- `binding lookup table`:
+  - materialize-ит `BindingFact` для declaration/use sites;
+  - связывает source occurrence с binding identity, declaration anchor и binding origin;
+  - покрывает local symbols, params, explicit module-context bindings, common modules и другие canonical bindings.
+- `receiver/member query table`:
+  - materialize-ит `ReceiverFact` и `MemberFact` для `MemberAccess`, `FunctionCall`, `IndexAccess`;
+  - хранит canonical owner type, access kind и resolved member identity;
+  - даёт fast lookup для completion owner hints, hover property/method formatting, signatureHelp и semantic validation.
+- `call query table`:
+  - хранит receiver type, argument types и callable anchor для call surfaces;
+  - заменяет текущие `call_receiver_type_by_span` / `call_arg_types_by_span` как primary semantic source;
+  - допускает thin projections для signature and overload selection, но не новый inference step.
+- `definition anchor table`:
+  - materialize-ит `DefinitionAnchorFact` для binding/member/type navigation;
+  - покрывает local declarations, local functions/procedures, type anchors и repository-backed member definitions, уже выраженные на canonical path.
+- `diagnostic hint views`:
+  - могут публиковаться как thin denormalized views поверх тех же payload tables;
+  - включают текущие категории наподобие `assignment_value_type`, `call_receiver_type`, `call_arg_types`, `member_access_object_type`;
+  - не образуют отдельный semantic artifact и не вычисляются независимо от общего index payload.
+
+Запрещённый состав payload:
+- отдельный `parse_result`-derived semantic table;
+- отдельный stale/degraded payload для serve-only;
+- discovery/search entities, нужные только для text/symbol search;
+- дублирующий full graph semantic model рядом с canonical IR.
+
+### 2b. Artifact envelope и identity contract
+
+`derived semantic index` публикуется как revision-bound artifact с двумя уровнями идентичности:
+- semantic payload identity:
+  - один canonical IR snapshot;
+  - один semantic deps snapshot;
+  - один settings snapshot;
+  - один file revision.
+- operational cache key:
+  - `file_id`;
+  - `file_version`;
+  - `deps_id`;
+  - `settings_id`;
+  - или семантически эквивалентный exact key без скрытых ambient inputs.
+
+Envelope MAY содержать только bounded operational metadata:
+- `produced_at`;
+- build profile / latency counters;
+- parse/incremental provenance, если это нужно для observability;
+- cache retention / invalidation bookkeeping.
+
+Envelope MUST NOT:
+- менять semantic payload shape между exact и serve-only mode;
+- разрешать публикацию partially-built semantic payload;
+- быть вторым semantic source of truth.
+
+Физическое retention-window хранение старых artifacts допустимо только как cache policy.
+Это не меняет semantic contract:
+- interactive surfaces читают только exact artifact текущего key/revision;
+- stale entries MAY существовать в кеше, но MUST NOT обслуживать semantic queries;
+- invalidation по `deps_id` / `settings_id` / revision должна удалять или делать unreadable exact artifacts, чей key больше не совпадает с current snapshot.
+
+### 2c. Contract построения и публикации из одного IR snapshot
+
+Build contract для `derived semantic index`:
+- входом является один canonical IR snapshot, уже связанный с exact revision/deps/settings;
+- все payload tables строятся в одном build transaction;
+- публикация в cache/runtime является atomic publish одного complete artifact;
+- при неудаче build не публикуется degraded или partial semantic artifact.
+
+Build MUST:
+- читать semantic truth только из canonical IR snapshot и embedded canonical facts;
+- быть deterministic для одинакового `(IR snapshot, deps_id, settings_id, file_version)` input set;
+- использовать stable IR/node/binding identities, чтобы все tables ссылались на один и тот же semantic payload;
+- порождать одинаково согласованные `position -> binding/type/member/definition` результаты для всех consumers.
+
+Build MUST NOT:
+- выполнять новый semantic inference из `parse_result.program`, raw syntax tree или document text;
+- запрашивать discovery/search read-model как источник semantic data;
+- recompute-ить owner/member truth отдельно для каждой table;
+- публиковать special fallback artifact для неполного кода, superseded revision или blocked incremental parse scenario.
+
+Неполный код допускается только в пределах уже построенного canonical IR snapshot:
+- syntax helpers могут помочь получить current parse snapshot для IR build;
+- после того как IR snapshot построен, `derived semantic index` работает только с этим IR snapshot;
+- если canonical IR snapshot отсутствует или признан недоступным, semantic index не публикуется.
+
+### 2d. Query contract и переход от текущих artifacts
+
+`derived semantic index` должен обслуживать query surfaces без повторной materialization semantic truth:
+- `type-at-position`:
+  - exact base type приходит из `position surface index` + `expression type table`;
+  - flow-sensitive overlay затем работает поверх этого base result.
+- `hover`:
+  - symbol/type lookup идёт через `position surface index`, `binding lookup table`, `expression type table`, `receiver/member query table`;
+  - property/method hover не должен повторно вычислять owner type через span probes.
+- `signatureHelp`:
+  - receiver и argument semantics читаются из `call query table`.
+- `definition`:
+  - binding/member/type navigation читает `binding lookup table` + `definition anchor table`, а не request-time reconstruction через `receiver_type_hint`.
+- `semantic diagnostics`:
+  - используют `diagnostic hint views` как projection от того же artifact, а не отдельные per-visitor semantic hints.
+
+Следствия для текущей реализации:
+- нынешний `TypeIndexArtifact` является transitional названием и должен эволюционировать в artifact,
+  который содержит не только `type_at_byte_offset`, но полный `derived semantic index` payload;
+- `SemanticTypeHints` должны стать thin view над `derived semantic index`, а не отдельным hand-populated layer;
+- on-demand `type_index(...)` compute path допустим только как temporary implementation scaffold;
+- merge-state contract остаётся exact-precomputed/read-only для semantic queries текущей revision.
+
 ### 3. Interactive queries используют только canonical IR или derived semantic index
 
 Целевой read path:

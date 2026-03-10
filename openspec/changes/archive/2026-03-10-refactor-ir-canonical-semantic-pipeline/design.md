@@ -878,6 +878,179 @@ Cutover acceptance MUST считать facet-preservation недоказанны
 - если evidence существует только в одном consumer, requirement не считается доказанным для shared runtime;
 - если evidence живёт только в prose, без test/contract/gate asset, requirement остаётся открытым независимо от степени архитектурной очевидности.
 
+### 14. Acceptance bundle для shared semantic truth
+
+Task `3.2` считается выполненным только если apply-stage опирается не на разрозненные smoke-tests, а на единый acceptance bundle с общими fixtures, одинаковыми verdict rules и machine-readable итогом.
+
+Acceptance bundle MUST использовать один canonical fixture vocabulary и как минимум две оси:
+- consumer axis: `runtime`, `lsp`, `web`, `mcp`, `cli` или документированное подмножество, если конкретный surface в merge-state не публикует данный interactive operation;
+- semantic axis: `steady_current_revision`, `post_didChange_current_revision`, `fail_closed_missing_artifact`, `module_context_binding`, `facet_preservation`, `search_isolation`.
+
+Authoritative acceptance verdict MUST формироваться per fixture/per operation/per consumer.
+Prose summary без machine-readable per-surface verdict не считается достаточным доказательством.
+
+### 14a. Cross-consumer equivalence bundle
+
+Обязательный bundle `cross_consumer_semantic_equivalence` MUST доказывать, что один canonical snapshot даёт эквивалентный semantic verdict во всех публичных consumers.
+
+Минимальный набор проверок:
+- `type-at-position`:
+  - runtime resolution используется как canonical oracle;
+  - `lsp`, `mcp` и `web`-surface projections MUST согласовываться с тем же type identity;
+  - `cli`-surface MUST либо публиковать ту же type projection, либо явно оставаться transport-only wrapper без alternate semantic computation.
+- `members` / `completion`:
+  - `lsp` и `mcp` MUST возвращать совпадающий canonical member set для одного и того же receiver fixture;
+  - если `web` публикует hover-only shape, он MUST подтверждать тот же receiver/type truth, а не отдельный member oracle.
+- `hover` / `definition` / `references`:
+  - `lsp` и `mcp` MUST совпадать по canonical symbol/type anchor;
+  - `web` MUST подтверждать тот же type/owner meaning там, где его payload не хранит raw anchors.
+- `diagnostics`:
+  - runtime, `lsp` и `web` MUST выдавать одинаковый semantic verdict на unknown-member / undeclared-variable fixtures той же revision.
+
+Acceptance считается проваленным, если:
+- любой consumer расходится по canonical type/member/definition verdict с shared runtime;
+- одна поверхность возвращает fail-closed, а другая synthetic semantic answer для того же current-revision fixture;
+- transport-specific formatting скрывает semantic drift вместо явного машинного verdict.
+
+### 14b. No adapter-local semantic truth bundle
+
+Обязательный bundle `no_adapter_local_semantic_truth` MUST доказывать, что adapters используют shared semantic runtime как единственный semantic read path.
+
+Проверки MUST включать:
+- отсутствие semantic ответа у `mcp`/`web`/`lsp`, если shared runtime deliberately лишён precomputed semantic artifact той же revision;
+- отрицательный кейс, где adapter не может "достроить" type/member truth из текста документа, `parse_result`, keyword fallback или legacy helper;
+- parity check, что один и тот же miss приводит к fail-closed verdict, а не к surface-specific degraded answer.
+
+Нормативное следствие:
+- adapter test, который проходит только при наличии private fallback branch, считается invalid acceptance;
+- thin transport shaping разрешён, локальная semantic reconstruction запрещена.
+
+### 14c. Search isolation and fail-closed revision bundle
+
+Обязательный bundle `search_isolation_and_revision_integrity` MUST одновременно доказывать:
+- search/discovery index остаётся полезным только для search/references/discovery сценариев;
+- interactive semantic operation не использует search index как rescue path;
+- после `didChange`/revision switch stale semantic payload не маскируется под current revision.
+
+Для этого bundle нужны как минимум три класса fixtures:
+- `received_version_ahead`:
+  - immediate interactive request после advance latest-received version;
+  - ожидаемый verdict: exact-current-revision или empty/unavailable fail-closed, но не stale substitute.
+- `revision_switch_structural_member_removal`:
+  - member присутствует в `v1`, исчезает в `v2`;
+  - ожидаемый verdict: `lsp`, `mcp`, `web`, runtime diagnostics согласованно не протекают stale member.
+- `semantic_artifact_missing_but_search_alive`:
+  - symbol search / references остаются работоспособны;
+  - semantic `type-at-position`, `hover`, `definition`, `members`, `completion` остаются fail-closed.
+
+Acceptance недействителен, если search-based result используется как косвенное оправдание того, что semantic path "почти работает".
+
+### 14d. Module-context and facet-preservation bundle
+
+Обязательный bundle `module_context_and_facet_preservation` MUST объединять positive contract из sections `11` и `12`.
+Разносить их на независимые acceptance suites нельзя, потому что explicit module-context bindings и facet envelope являются одним semantic fact chain.
+
+Минимальный обязательный набор:
+- `ObjectModule`:
+  - `ЭтотОбъект` и `Объект` дают одинаковый canonical object-facet verdict в `type-at-position`, `hover`, `members` и, где применимо, `completion`;
+  - undeclared diagnostics не считают эти identifiers missing.
+- `RecordSetModule`:
+  - `ЭтотОбъект` и `Объект` дают canonical recordset-object verdict;
+  - recordset-specific members/properties (`Записать`, `ОбменДанными`, `ДополнительныеСвойства`) сохраняются после materialization.
+- `bare_identifier_removed`:
+  - owner member без explicit receiver остаётся unresolved/undeclared;
+  - никакой consumer не получает его через legacy applied-owner fallback.
+- `facet_roundtrip`:
+  - runtime response и public DTO round-trip сохраняют `active_facet` / `available_facets`;
+  - manager-only markers не протекают в object facet, object-specific members не исчезают после serialization/materialization.
+
+### 14e. Acceptance artifact shape
+
+Authoritative acceptance report MUST содержать:
+- `change_id`, `generated_at`, `schema_version`, `contract_version`;
+- `fixtures[]` с bounded enum fixture kind;
+- `operations[]` с bounded enum operation kind;
+- `consumers[]` с bounded enum consumer kind;
+- per-check verdict (`pass` / `fail`) и bounded reason code;
+- ссылку на source test asset или contract asset, который породил verdict.
+
+Если acceptance report не может указать, какой automated asset породил verdict, соответствующий check считается несуществующим.
+
+### 15. Quality gates для tests, contracts, observability и perf
+
+Task `3.3` требует stacked gate contract.
+Cutover готов только если одновременно зелёные все gate classes ниже; partial green не допускается.
+
+### 15a. Semantic test gate
+
+Semantic test gate MUST включать:
+- unit/property-level suites для canonical facts (`analysis-v2`, `shared`, `bsl-agent`);
+- integration suites для cross-consumer parity (`backend/src/bin/lsp_server/server/core/tests.rs`);
+- regression suites для undeclared/module-context/facet-preservation behavior;
+- strict `openspec validate` для самого change.
+
+Semantic test gate считается проваленным, если:
+- хотя бы один обязательный acceptance bundle из section `14` не имеет automated asset;
+- parity доказана только для completion, но не для `hover`, `definition`, `type-at-position`, `members`, `diagnostics`;
+- required negative cases (`fail_closed`, `bare_identifier_removed`, `search_isolation`) отсутствуют.
+
+### 15b. Contract and compatibility gate
+
+Contract gate MUST включать:
+- versioned contract validation через `scripts/check-versioned-contracts.py`;
+- compatibility diff gate для `contracts/**` согласно `contracts/README.md`;
+- migration-note/major-bump policy для breaking surfaces;
+- explicit contract ownership для `lsp-completion-v2`, `lsp-completion-timeline`, `observability-completion-v2`, `observability-diagnostics-v2`, `intellisense-perf-gate`.
+
+Gate считается проваленным, если:
+- authoritative cutover использует legacy contract vocabulary как baseline;
+- breaking drift не сопровождается major bump и migration note;
+- compatibility report отсутствует или не machine-readable.
+
+### 15c. Observability and bounded-reason gate
+
+Observability gate MUST доказывать:
+- bounded reason taxonomy для interactive fail-closed surfaces;
+- bounded origin/operation dimensions;
+- отсутствие adapter-specific aliases для одинаковой runtime причины;
+- zero-authority reliance на `other` или legacy public reasons в authoritative artifacts.
+
+Authoritative evidence этого gate:
+- runtime observability tests;
+- versioned observability contracts;
+- acceptance artifact from section `14`, который ссылается только на bounded reason set.
+
+### 15d. Perf and anti-rescue gate
+
+Perf gate MUST использовать representative fixtures и operation-aware evidence из sections `10` и `13`.
+Его green verdict недействителен, если latency budget выполняется за счёт semantic degradation.
+
+Явно запрещённые способы "починить" latency regression:
+- вернуть stale snapshot как будто это current revision answer;
+- переключить часть operations на degraded/search-backed/keyword substitute;
+- скрыть semantic miss через transport-specific empty-success shape без bounded fail-closed reason;
+- засчитать completion-only perf profile как доказательство для `hover`, `definition`, `type-at-position`, `members`.
+
+Следовательно task `3.4` считается частью этого gate и требует правила:
+- любой perf report, acceptance report или observability report MUST считаться invalid, если соответствующий run зафиксировал stale/degraded/search-backed semantic substitute как механизм удержания latency budget.
+
+Дополнительные blocking conditions:
+- `stale_fallback_total > 0` на authoritative fixtures;
+- `fallback_unavailable` трактуется как fail-closed miss, но не как успешный semantic substitute;
+- отсутствие operation-specific metrics для non-completion surfaces;
+- отсутствие architecture-boundary proof через `scripts/check-perf-gate-architecture.py` или эквивалентный automated check.
+
+### 15e. Gate execution order
+
+Apply-stage MUST исполнять gates в следующем порядке:
+1. `openspec validate refactor-ir-canonical-semantic-pipeline --strict --no-interactive`
+2. semantic/unit/integration acceptance suites
+3. contract validation + compatibility diff
+4. observability bounded-reason validation
+5. perf gate + anti-rescue validation
+
+Если любой предыдущий gate красный, последующие green verdicts не имеют release-authority.
+
 ## Alternatives Considered
 
 ### 1. Оставить `type_index` как независимый semantic pipeline и лишь усилить тесты

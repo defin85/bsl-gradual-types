@@ -20,18 +20,18 @@
 
 ## 3. Validation Plan
 - [x] 3.1 Подготовить execution matrix `Requirement -> Code Area -> Test Class`.
-- [ ] 3.2 Зафиксировать acceptance набор, который доказывает:
-  - [ ] exact cross-consumer semantic equivalence
-  - [ ] отсутствие adapter-local semantic truth
-  - [ ] отсутствие semantic answers из discovery/search index
-  - [ ] fail-closed behavior при miss canonical IR/index
-  - [ ] отсутствие stale semantic ответа, замаскированного под current revision
-  - [ ] removal of bare-identifier fallback semantics
-  - [ ] сохранение canonical explicit module-context semantics для `ЭтотОбъект` / `Объект` в `ObjectModule` / `RecordSetModule`
-  - [ ] сохранение facet-aware member/property semantics без flattening `active_facet` / `available_facets`
-- [ ] 3.3 Зафиксировать набор quality gates для cutover: tests, contracts, bounded fail-closed reason codes, representative latency budgets и observability/perf checks.
-- [ ] 3.4 Зафиксировать, что latency regressions не могут закрываться через возврат stale/degraded/search-backed semantic substitute.
-- [ ] 3.5 Прогнать `openspec validate refactor-ir-canonical-semantic-pipeline --strict --no-interactive`.
+- [x] 3.2 Зафиксировать acceptance набор, который доказывает:
+  - [x] exact cross-consumer semantic equivalence
+  - [x] отсутствие adapter-local semantic truth
+  - [x] отсутствие semantic answers из discovery/search index
+  - [x] fail-closed behavior при miss canonical IR/index
+  - [x] отсутствие stale semantic ответа, замаскированного под current revision
+  - [x] removal of bare-identifier fallback semantics
+  - [x] сохранение canonical explicit module-context semantics для `ЭтотОбъект` / `Объект` в `ObjectModule` / `RecordSetModule`
+  - [x] сохранение facet-aware member/property semantics без flattening `active_facet` / `available_facets`
+- [x] 3.3 Зафиксировать набор quality gates для cutover: tests, contracts, bounded fail-closed reason codes, representative latency budgets и observability/perf checks.
+- [x] 3.4 Зафиксировать, что latency regressions не могут закрываться через возврат stale/degraded/search-backed semantic substitute.
+- [x] 3.5 Прогнать `openspec validate refactor-ir-canonical-semantic-pipeline --strict --no-interactive`.
 
 ## Dependencies / Parallelism
 - [x] D1 Пункты 1.1-1.8 блокируют весь design/spec cutover.

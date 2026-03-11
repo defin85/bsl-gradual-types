@@ -530,29 +530,13 @@ fn completion_owner_hint_at_position(
     line: u32,
     column: u32,
 ) -> Option<bsl_shared::domain::types::TypeResolution> {
-    let line_text = file_content.lines().nth(line as usize)?;
-    let cursor_byte = bsl_analysis_v2::utf16_to_byte_offset(line_text, column).min(line_text.len());
-    let line_prefix = line_text.get(..cursor_byte)?;
-    let dot_idx = line_prefix.rfind('.')?;
-    let receiver = line_prefix.get(..dot_idx)?.trim_end();
-    if receiver.is_empty() {
-        return None;
-    }
-
-    let probe_utf16 = bsl_analysis_v2::byte_offset_to_utf16(line_text, receiver.len());
-    let probe_offset = analysis
-        .utf16_position_to_byte_offset(file_id, line, probe_utf16)
-        .ok()
-        .flatten()?
-        .saturating_sub(1)
-        .min(u32::MAX as usize) as u32;
-    let profiled = analysis
-        .type_at_byte_offset_serve_only_profiled(file_id, probe_offset)
-        .ok()?;
-
-    profiled
-        .resolution
-        .filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
+    bsl_backend::application::completion_member_access_owner_type_hint_from_analysis(
+        analysis,
+        file_id,
+        file_content,
+        line,
+        column,
+    )
 }
 
 fn type_at_position(

@@ -6,6 +6,7 @@
 //! - Проверки загрузки конфигурации
 
 use super::TypeMetadataLookup;
+use crate::domain::types::RawDataSource;
 use crate::domain::types::MetadataKind;
 use crate::utils::string_utils::levenshtein_distance;
 
@@ -152,5 +153,32 @@ impl TypeMetadataLookup {
     pub fn is_configuration_loaded(&self) -> bool {
         let stats = self.repository.get_stats();
         stats.configuration_types > 0
+    }
+
+    /// Возвращает type completion labels из repository-backed contract.
+    ///
+    /// Semantic completion v2 использует этот список на canonical path вместо
+    /// discovery/search `IndexSnapshot`.
+    pub fn get_completion_type_names(&self) -> Vec<String> {
+        self.repository
+            .get_all_types()
+            .into_iter()
+            .filter(|raw| !matches!(raw.source, RawDataSource::Configuration))
+            .map(|raw| raw.name)
+            .collect()
+    }
+
+    /// Возвращает глобальные функции из repository-backed signature contract.
+    pub fn get_global_function_names(&self) -> Vec<String> {
+        let mut names = self
+            .repository
+            .get_signature_index_clone()
+            .get_global_functions()
+            .keys()
+            .map(|name| name.display().to_string())
+            .collect::<Vec<_>>();
+        names.sort();
+        names.dedup();
+        names
     }
 }

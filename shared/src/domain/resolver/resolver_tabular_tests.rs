@@ -145,6 +145,31 @@ fn test_tabular_section_facet_is_collection() {
 }
 
 #[test]
+fn test_resolve_tabular_section_via_object_facet() {
+    let repo = create_test_repository_with_tabular_sections();
+    let resolver = TypeResolver::new(repo);
+
+    let resolution = resolver.resolve_expression_sync("ДокументОбъект.ЗаказНаряды.Работы");
+
+    assert!(matches!(resolution.result, ResolutionResult::Generic(_)));
+    assert_eq!(resolution.active_facet, Some(FacetKind::Collection));
+
+    if let ResolutionResult::Generic(generic) = resolution.result {
+        assert_eq!(generic.base_type, "ТабличнаяЧасть");
+        assert_eq!(generic.type_params.len(), 1);
+        match &generic.type_params[0] {
+            ConcreteType::TabularRow(row_type) => {
+                assert_eq!(row_type.parent_type, "Документы.ЗаказНаряды");
+                assert_eq!(row_type.tabular_section_name, "Работы");
+                assert_eq!(row_type.get_full_name(), "СтрокаРаботы");
+                assert_eq!(row_type.get_attribute_name(0), Some("ВидРаботы"));
+            }
+            other => panic!("Expected TabularRow in Generic type_params, got {:?}", other),
+        }
+    }
+}
+
+#[test]
 fn test_tabular_row_type_full_name() {
     let repo = create_test_repository_with_tabular_sections();
     let resolver = TypeResolver::new(repo.clone());

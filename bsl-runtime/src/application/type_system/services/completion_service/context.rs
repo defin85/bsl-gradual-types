@@ -1,4 +1,4 @@
-use super::super::completion_target::extract_member_access_receiver_chain as extract_member_access_receiver_chain_via_syntax;
+use super::super::completion_target::extract_member_access_receiver_spans;
 use super::*;
 
 /// Context for auto-completion.
@@ -180,6 +180,18 @@ pub(super) fn add_keywords(snapshot: &IndexSnapshot, target: &mut Vec<Candidate>
     }
 }
 
+pub(super) fn add_default_keywords(target: &mut Vec<Candidate>, priority: u8) {
+    for keyword in DEFAULT_KEYWORDS {
+        target.push(Candidate::new(
+            CompletionItem::new((*keyword).to_string(), CompletionKind::Keyword),
+            priority,
+            None,
+            None,
+            None,
+        ));
+    }
+}
+
 pub(super) fn add_types(snapshot: &IndexSnapshot, target: &mut Vec<Candidate>, priority: u8) {
     for item in snapshot.type_index.values() {
         if matches!(
@@ -203,52 +215,92 @@ pub(super) fn add_types(snapshot: &IndexSnapshot, target: &mut Vec<Candidate>, p
     }
 }
 
+pub(super) fn add_repository_types_from_lookup(
+    metadata_lookup: &TypeMetadataLookup,
+    target: &mut Vec<Candidate>,
+    priority: u8,
+) {
+    for type_name in metadata_lookup.get_completion_type_names() {
+        target.push(Candidate::new(
+            CompletionItem::new(type_name, CompletionKind::Type),
+            priority,
+            None,
+            None,
+            None,
+        ));
+    }
+}
+
+pub(super) fn add_global_functions_from_lookup(
+    metadata_lookup: &TypeMetadataLookup,
+    target: &mut Vec<Candidate>,
+    priority: u8,
+) {
+    for function_name in metadata_lookup.get_global_function_names() {
+        target.push(Candidate::new(
+            CompletionItem::new(function_name, CompletionKind::Function),
+            priority,
+            None,
+            None,
+            Some(SymbolScope::Module),
+        ));
+    }
+}
+
+#[cfg(test)]
 pub(super) fn resolve_member_access_owner_type_from_ir(
     analysis: Option<&CompletionAnalysisContext<'_>>,
     file_content: &str,
     line: u32,
     column: u32,
 ) -> Option<TypeResolution> {
-    let ctx = analysis?;
-    let ir_program = ctx.ir_program.as_deref()?;
-    let line_text = file_content.lines().nth(line as usize)?;
-    let cursor_byte = utf16_to_byte_offset(line_text, column);
-    let line_prefix = match line_text
-        .get(cursor_byte..)
-        .and_then(|tail| tail.chars().next())
-    {
-        Some('.') => line_text
-            .get(..cursor_byte.saturating_add(1))
-            .unwrap_or(line_text),
-        _ => line_text.get(..cursor_byte)?,
-    };
-    let dot_in_line = line_prefix.rfind('.')?;
-    let receiver = line_prefix.get(..dot_in_line)?.trim_end();
-    if receiver.is_empty() {
-        return None;
-    }
-
-    let probe_utf16 = bsl_analysis_v2::byte_offset_to_utf16(line_text, receiver.len());
-    let line_index = LineIndex::new(file_content);
-    let probe_offset = line_index
-        .utf16_position_to_byte_offset(file_content, line, probe_utf16)
-        .saturating_sub(1)
-        .min(u32::MAX as usize) as u32;
-
-    let resolution = ir_program
-        .semantic_facts
-        .type_at_byte_offset(probe_offset)?;
-    (!resolution.is_unknown() && !resolution.is_dynamic()).then_some(resolution)
+    resolve_member_access_owner_types_from_ir(analysis, file_content, line, column)
+        .into_iter()
+        .next()
 }
 
-pub(super) fn resolve_type_name(
-    name: &str,
-    metadata_lookup: &TypeMetadataLookup,
-) -> Option<String> {
-    let resolution = TypeResolution::explicit(name);
-    metadata_lookup
-        .get_raw_type(&resolution)
-        .map(|raw| raw.name)
+pub(super) fn resolve_member_access_owner_types_from_ir(
+    analysis: Option<&CompletionAnalysisContext<'_>>,
+    file_content: &str,
+    line: u32,
+    column: u32,
+) -> Vec<TypeResolution> {
+    let Some(ctx) = analysis else {
+        return Vec::new();
+    };
+    let Some(ir_program) = ctx.ir_program.as_deref() else {
+        return Vec::new();
+    };
+    let Some(spans) = extract_member_access_receiver_spans(file_content, line, column) else {
+        return Vec::new();
+    };
+
+    let mut resolutions = Vec::new();
+    for span in spans {
+        let span = bsl_shared::ir::Span::new(span.start, span.end);
+        let resolution = ir_program
+            .semantic_facts
+            .type_resolution_for_span(span)
+            .or_else(|| {
+                ir_program
+                    .nodes
+                    .iter()
+                    .filter(|node| node.span.start <= span.start && node.span.end >= span.end)
+                    .min_by_key(|node| node.span.len())
+                    .and_then(|node| ir_program.semantic_facts.type_resolution_for_span(node.span))
+            });
+        let Some(resolution) = resolution else {
+            continue;
+        };
+        if resolution.is_unknown() || resolution.is_dynamic() {
+            continue;
+        }
+        if !resolutions.contains(&resolution) {
+            resolutions.push(resolution);
+        }
+    }
+
+    resolutions
 }
 
 pub(super) fn extract_member_base(line_prefix: &str) -> Option<String> {
@@ -284,166 +336,6 @@ pub(super) fn is_member_access_context(line_prefix: &str) -> bool {
     };
     let after_dot = trimmed[dot_pos + 1..].trim_start();
     after_dot.is_empty() || after_dot.chars().all(is_identifier_char)
-}
-
-pub(super) fn extract_member_receiver_chain(
-    content: &str,
-    line: u32,
-    column: u32,
-) -> Option<Vec<String>> {
-    if let Some(chain) = extract_member_access_receiver_chain_via_syntax(content, line, column)
-        .and_then(|chain| chain.to_name_chain())
-    {
-        return Some(chain);
-    }
-
-    extract_member_receiver_chain_tail_heuristic(content, line, column)
-}
-
-fn extract_member_receiver_chain_tail_heuristic(
-    content: &str,
-    line: u32,
-    column: u32,
-) -> Option<Vec<String>> {
-    let lines: Vec<&str> = content.lines().collect();
-    let line_content = *lines.get(line as usize)?;
-    let column_index = utf16_to_byte_offset(line_content, column);
-    let line_prefix = trim_to_window(&line_content[..column_index], CONTEXT_WINDOW_CHARS);
-    let trimmed = line_prefix.trim_end();
-    let dot_pos = trimmed.rfind('.')?;
-    let receiver_expr = trimmed[..dot_pos].trim_end();
-    if receiver_expr.is_empty() {
-        return None;
-    }
-    extract_identifier_chain_tail(receiver_expr)
-}
-
-pub(super) fn extract_identifier_chain_tail(expr: &str) -> Option<Vec<String>> {
-    let chars: Vec<char> = expr.chars().collect();
-    if chars.is_empty() {
-        return None;
-    }
-
-    let mut end = chars.len();
-    let mut parts_rev: Vec<String> = Vec::new();
-
-    loop {
-        while end > 0 && chars[end - 1].is_whitespace() {
-            end -= 1;
-        }
-        if end == 0 {
-            break;
-        }
-
-        let mut start = end;
-        while start > 0 && is_identifier_char(chars[start - 1]) {
-            start -= 1;
-        }
-        if start == end {
-            return None;
-        }
-        parts_rev.push(chars[start..end].iter().collect());
-
-        end = start;
-        while end > 0 && chars[end - 1].is_whitespace() {
-            end -= 1;
-        }
-        if end == 0 {
-            break;
-        }
-        if chars[end - 1] != '.' {
-            break;
-        }
-        end -= 1;
-    }
-
-    if parts_rev.is_empty() {
-        return None;
-    }
-    parts_rev.reverse();
-    Some(parts_rev)
-}
-
-pub(super) async fn resolve_member_chain_owner_type(
-    analysis: Option<&CompletionAnalysisContext<'_>>,
-    file_content: &str,
-    line: u32,
-    column: u32,
-    receiver_chain: &[String],
-    _snapshot: &IndexSnapshot,
-    metadata_lookup: &TypeMetadataLookup,
-) -> Option<TypeResolution> {
-    resolve_member_chain_owner_type_sync(
-        analysis,
-        file_content,
-        line,
-        column,
-        receiver_chain,
-        _snapshot,
-        metadata_lookup,
-    )
-}
-
-pub(super) fn resolve_member_chain_owner_type_sync(
-    analysis: Option<&CompletionAnalysisContext<'_>>,
-    file_content: &str,
-    line: u32,
-    column: u32,
-    receiver_chain: &[String],
-    _snapshot: &IndexSnapshot,
-    metadata_lookup: &TypeMetadataLookup,
-) -> Option<TypeResolution> {
-    if receiver_chain.is_empty() {
-        return None;
-    }
-
-    let base_name = receiver_chain[0].as_str();
-    let mut start_index = 1usize;
-    let mut owner = if let Some(kind) = get_collection_kind(base_name) {
-        let object_name = receiver_chain.get(1)?;
-        start_index = 2;
-        let expr = format!("{}.{}", base_name, object_name);
-        analysis
-            .map(|ctx| ctx.resolver.resolve_expression_sync(&expr))
-            .unwrap_or_else(|| {
-                TypeResolution::metadata_type(kind, object_name, Some(FacetKind::Manager))
-            })
-    } else if let Some(type_name) = resolve_type_name(base_name, metadata_lookup) {
-        analysis
-            .map(|ctx| ctx.resolver.resolve_expression_sync(&type_name))
-            .unwrap_or_else(|| TypeResolution::explicit(&type_name))
-    } else {
-        resolve_member_owner_type_sync(analysis, file_content, line, column, base_name)?
-    };
-
-    let resolver = analysis.map(|ctx| ctx.resolver);
-    for member_name in receiver_chain.iter().skip(start_index) {
-        if owner.is_unknown() {
-            return None;
-        }
-
-        if let Some(resolved) =
-            resolve_property_access_type(resolver, metadata_lookup, &owner, member_name)
-        {
-            owner = resolved;
-            continue;
-        }
-
-        if let Some(resolved) =
-            resolve_method_call_return_type(resolver, metadata_lookup, &owner, member_name)
-        {
-            owner = resolved;
-            continue;
-        }
-
-        return None;
-    }
-
-    if owner.is_unknown() {
-        None
-    } else {
-        Some(owner)
-    }
 }
 
 pub(super) fn trim_to_window(line_prefix: &str, window: usize) -> String {

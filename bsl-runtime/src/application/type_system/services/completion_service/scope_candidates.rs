@@ -564,6 +564,49 @@ pub(super) fn add_local_symbols_from_ir(
     }
 }
 
+pub(super) fn add_module_routines_from_ir(
+    analysis: Option<&CompletionAnalysisContext<'_>>,
+    file_content: &str,
+    line: u32,
+    column: u32,
+    target: &mut Vec<Candidate>,
+    priority: u8,
+) {
+    let Some(ctx) = analysis else {
+        return;
+    };
+    let Some(ir_program) = ctx.ir_program.as_deref() else {
+        return;
+    };
+    let Some(scope_position) =
+        resolve_completion_scope_position(ir_program, file_content, line, column)
+    else {
+        return;
+    };
+
+    for node in ir_program.nodes.iter() {
+        if node.span.start > scope_position.byte_offset {
+            continue;
+        }
+
+        let Some(name) = (match &node.kind {
+            SemanticNodeKind::FunctionDeclaration { name, .. }
+            | SemanticNodeKind::ProcedureDeclaration { name, .. } => Some(name),
+            _ => None,
+        }) else {
+            continue;
+        };
+
+        target.push(Candidate::new(
+            CompletionItem::new(name.clone(), CompletionKind::Function),
+            priority,
+            None,
+            None,
+            Some(SymbolScope::Module),
+        ));
+    }
+}
+
 pub(super) fn add_symbols(
     snapshot: &IndexSnapshot,
     file_uri: Option<&str>,

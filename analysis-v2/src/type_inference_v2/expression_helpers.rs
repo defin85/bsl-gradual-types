@@ -61,6 +61,22 @@ impl TypeInferencer {
             .into_iter()
             .find(|p| p.name.to_lowercase() == property_key)?;
 
+        if self
+            .metadata_lookup
+            .get_tabular_sections(object_type)
+            .into_iter()
+            .any(|section| section.name.eq_ignore_ascii_case(&prop.name))
+        {
+            let resolved = self.resolver.resolve_expression_sync(&format!(
+                "{}.{}",
+                object_type.type_name(),
+                prop.name
+            ));
+            if !resolved.is_unknown() {
+                return Some(resolved);
+            }
+        }
+
         if let Some(resolved) = self.try_resolve_configuration_type(&prop.prop_type) {
             return Some(resolved);
         }

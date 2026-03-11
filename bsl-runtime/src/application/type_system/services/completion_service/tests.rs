@@ -1,5 +1,6 @@
 use super::*;
-use crate::system::{IndexItem, SymbolKind, SymbolScope};
+use crate::application::type_system::services::completion_target::extract_member_access_receiver_spans;
+use crate::system::{IndexItem, SymbolKind, SymbolScope, TypeKind};
 use bsl_analysis_v2::{
     AnalysisHostV2, Change as ChangeV2, DepsSnapshotId, FileId as V2FileId, SettingsId,
 };
@@ -1044,30 +1045,91 @@ async fn completion_non_member_after_try_end_does_not_leak_except_locals() {
 }
 
 #[tokio::test]
-async fn completion_non_member_uses_index_for_non_local_symbols_only() {
-    let content = concat!("Процедура Тест()\n", "    Инд\n", "КонецПроцедуры\n");
+async fn completion_non_member_semantic_path_ignores_polluted_index_snapshot() {
+    let content = concat!("Процедура Тест()\n", "    Кан\n", "КонецПроцедуры\n");
     let file_path = "completion_lexical_sources_test.bsl";
-    let (index, metadata_lookup, resolver, ir_program) =
-        build_non_member_completion_fixture(content, file_path);
+    let repository = Arc::new(InMemoryTypeRepository::new());
+    let method = MethodSignature::new(
+        "КанонГлобал".to_string(),
+        None,
+        vec![],
+        None,
+        None,
+        None,
+        SignatureSource::Configuration,
+        None,
+        ContextRequirements::default(),
+    );
+    repository.add_global_function_signature("КанонГлобал", method);
+
+    let repo: Arc<dyn TypeRepository> = repository.clone();
+    let metadata_lookup = TypeMetadataLookup::new(repo.clone());
+    let resolver = Arc::new(TypeResolver::new(repo.clone()));
 
     let uri = "file:///completion_lexical_sources_test.bsl";
+    let index = IntellisenseIndexStore::new("cfg", "platform");
     let mut local_from_index = IndexItem::new(
-        "ИндексЛокал",
+        "КанонЛокалИзИндекса",
         IndexItemKind::Symbol(SymbolKind::Variable),
         crate::system::IndexKind::Symbol,
     );
     local_from_index.scope = Some(SymbolScope::Local);
 
     let mut module_from_index = IndexItem::new(
-        "ИндексМодуль",
+        "КанонМодульИзИндекса",
         IndexItemKind::Symbol(SymbolKind::Function),
         crate::system::IndexKind::Symbol,
     );
     module_from_index.scope = Some(SymbolScope::Module);
 
-    index.replace_symbols_for_uri(uri, vec![local_from_index, module_from_index]);
+    let fake_type_from_index = IndexItem::new(
+        "КанонТипИзИндекса",
+        IndexItemKind::Type(TypeKind::Platform),
+        crate::system::IndexKind::Type,
+    );
+    let fake_keyword_from_index = IndexItem::new(
+        "КанонКлючевикИзИндекса".to_string(),
+        IndexItemKind::Keyword,
+        crate::system::IndexKind::Keyword,
+    );
 
-    let column = "    Инд".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+    index.replace_symbols_for_uri(uri, vec![local_from_index, module_from_index]);
+    index.replace_modules_for_key(
+        "completion_lexical_sources_test",
+        vec![IndexItem::new(
+            "КанонГлобалИзModuleIndex".to_string(),
+            IndexItemKind::Symbol(SymbolKind::Function),
+            crate::system::IndexKind::Module,
+        )],
+    );
+    index.upsert_type(fake_type_from_index);
+    index.set_keywords(vec![fake_keyword_from_index]);
+
+    let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+        signature_index: repo.get_signature_index_clone(),
+        resolver: Some(resolver.clone()),
+        repository: repo,
+        platform_signatures_loaded: false,
+    });
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(ChangeV2::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("semantic"),
+        deps,
+    });
+    host.apply_change(ChangeV2::SetSettingsSnapshot {
+        settings_id: SettingsId::from_hash("semantic"),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+    host.apply_change(ChangeV2::SetFile {
+        file_id: V2FileId(1),
+        text: Arc::from(content.to_string()),
+        version: 0,
+        path: Arc::from(file_path.to_string()),
+    });
+    let analysis = host.analysis();
+    let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
+
+    let column = "    Кан".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
     let labels = completion_labels_non_member(
         content,
         1,
@@ -1082,12 +1144,32 @@ async fn completion_non_member_uses_index_for_non_local_symbols_only() {
     .await;
 
     assert!(
-        labels.iter().any(|label| label == "ИндексМодуль"),
+        labels.iter().any(|label| label == "КанонГлобал"),
         "labels: {:?}",
         labels
     );
     assert!(
-        !labels.iter().any(|label| label == "ИндексЛокал"),
+        !labels.iter().any(|label| label == "КанонЛокалИзИндекса"),
+        "labels: {:?}",
+        labels
+    );
+    assert!(
+        !labels.iter().any(|label| label == "КанонМодульИзИндекса"),
+        "labels: {:?}",
+        labels
+    );
+    assert!(
+        !labels.iter().any(|label| label == "КанонГлобалИзModuleIndex"),
+        "labels: {:?}",
+        labels
+    );
+    assert!(
+        !labels.iter().any(|label| label == "КанонТипИзИндекса"),
+        "labels: {:?}",
+        labels
+    );
+    assert!(
+        !labels.iter().any(|label| label == "КанонКлючевикИзИндекса"),
         "labels: {:?}",
         labels
     );
@@ -1444,6 +1526,98 @@ async fn completion_unknown_bare_receiver_member_access_ignores_polluted_index_s
     assert!(
         !labels.contains(&"Процедура".to_string()),
         "member-access semantic miss must not degrade to keyword/index completion, labels: {:?}",
+        labels
+    );
+}
+
+#[tokio::test]
+async fn completion_member_access_does_not_reconstruct_type_name_without_canonical_owner() {
+    let repository = Arc::new(InMemoryTypeRepository::new());
+    repository
+        .load_types(vec![RawTypeData {
+            name: "TypeA".to_string(),
+            source: RawDataSource::Platform,
+            methods: vec![RawMethodData {
+                name: "DoWork".to_string(),
+                return_type: "Булево".to_string(),
+                ..Default::default()
+            }],
+            properties: vec![RawPropertyData {
+                name: "Prop".to_string(),
+                prop_type: "Строка".to_string(),
+                is_readonly: true,
+            }],
+            ..Default::default()
+        }])
+        .expect("load types");
+
+    let repo: Arc<dyn bsl_shared::domain::repository::TypeRepository> = repository.clone();
+    let resolver = Arc::new(TypeResolver::new(repo.clone()));
+    let metadata_lookup = TypeMetadataLookup::new(repo.clone());
+    let index = IntellisenseIndexStore::new("cfg", "platform");
+    let content = concat!(
+        "Процедура Тест()\n",
+        "    TypeA.\n",
+        "КонецПроцедуры\n"
+    );
+    let line = 1;
+    let line_text = "    TypeA.";
+    let column = line_text.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+
+    let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+        signature_index: repo.get_signature_index_clone(),
+        resolver: Some(resolver.clone()),
+        repository: repo.clone(),
+        platform_signatures_loaded: false,
+    });
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(ChangeV2::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("test"),
+        deps,
+    });
+    host.apply_change(ChangeV2::SetSettingsSnapshot {
+        settings_id: SettingsId::from_hash("test"),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+    host.apply_change(ChangeV2::SetFile {
+        file_id: V2FileId(1),
+        text: Arc::from(content.to_string()),
+        version: 0,
+        path: Arc::from("completion_type_name_receiver_without_owner_hint_test.bsl"),
+    });
+    let analysis = host.analysis();
+    let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
+
+    let ctx = CompletionAnalysisContext {
+        ir_program: Some(ir_program),
+        resolver: resolver.as_ref(),
+        file_path: "completion_type_name_receiver_without_owner_hint_test.bsl",
+        member_access_owner_type_hint: None,
+        include_flow_sensitive: false,
+    };
+
+    let result = get_completion_with_analysis(
+        content,
+        line,
+        column,
+        Some("completion_type_name_receiver_without_owner_hint_test.bsl"),
+        &index,
+        &metadata_lookup,
+        Some(&ctx),
+        None,
+    )
+    .await
+    .expect("completion ok");
+
+    let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
+    assert!(
+        labels.is_empty(),
+        "bare type-name receiver without canonical owner binding must stay fail-closed, labels: {:?}",
+        labels
+    );
+    assert!(
+        !labels.contains(&"DoWork".to_string()) && !labels.contains(&"Prop".to_string()),
+        "semantic member candidates must not be reconstructed from repository type names, labels: {:?}",
         labels
     );
 }
@@ -2406,6 +2580,187 @@ async fn completion_does_not_infer_map_index_owner_without_shared_hint() {
 }
 
 #[tokio::test]
+async fn completion_does_not_infer_type_name_member_access_without_canonical_owner_hint() {
+    let repository = Arc::new(InMemoryTypeRepository::new());
+    repository
+        .load_types(vec![RawTypeData {
+            name: "ТаблицаЗначений".to_string(),
+            source: RawDataSource::Platform,
+            methods: vec![RawMethodData {
+                name: "Добавить".to_string(),
+                return_type: "Булево".to_string(),
+                ..Default::default()
+            }],
+            properties: vec![RawPropertyData {
+                name: "Количество".to_string(),
+                prop_type: "Число".to_string(),
+                is_readonly: true,
+            }],
+            ..Default::default()
+        }])
+        .expect("load types");
+
+    let repo: Arc<dyn bsl_shared::domain::repository::TypeRepository> = repository.clone();
+    let resolver = Arc::new(TypeResolver::new(repo.clone()));
+    let metadata_lookup = TypeMetadataLookup::new(repo.clone());
+
+    let index = IntellisenseIndexStore::new("cfg", "platform");
+    let content = concat!(
+        "Процедура Тест()\n",
+        "    ТаблицаЗначений.\n",
+        "КонецПроцедуры\n"
+    );
+    let line = 1;
+    let line_text = "    ТаблицаЗначений.";
+    let column = line_text.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+
+    let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+        signature_index: repo.get_signature_index_clone(),
+        resolver: Some(resolver.clone()),
+        repository: repo.clone(),
+        platform_signatures_loaded: false,
+    });
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(ChangeV2::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("test"),
+        deps,
+    });
+    host.apply_change(ChangeV2::SetSettingsSnapshot {
+        settings_id: SettingsId::from_hash("test"),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+    host.apply_change(ChangeV2::SetFile {
+        file_id: V2FileId(1),
+        text: Arc::from(content.to_string()),
+        version: 0,
+        path: Arc::from("completion_type_name_no_hint_test.bsl"),
+    });
+    let analysis = host.analysis();
+    let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
+    let ctx = CompletionAnalysisContext {
+        ir_program: Some(ir_program),
+        resolver: resolver.as_ref(),
+        file_path: "completion_type_name_no_hint_test.bsl",
+        member_access_owner_type_hint: None,
+        include_flow_sensitive: false,
+    };
+
+    let result = get_completion_with_analysis(
+        content,
+        line,
+        column,
+        Some("completion_type_name_no_hint_test.bsl"),
+        &index,
+        &metadata_lookup,
+        Some(&ctx),
+        None,
+    )
+    .await
+    .expect("completion ok");
+
+    let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
+    assert!(
+        !labels.contains(&"Добавить".to_string()) && !labels.contains(&"Количество".to_string()),
+        "type-name member access without canonical owner hint must fail closed, labels: {:?}",
+        labels
+    );
+}
+
+#[tokio::test]
+async fn completion_does_not_infer_type_name_member_chain_without_canonical_owner_hint() {
+    let repository = Arc::new(InMemoryTypeRepository::new());
+    repository
+        .load_types(vec![
+            RawTypeData {
+                name: "ТаблицаЗначений".to_string(),
+                source: RawDataSource::Platform,
+                properties: vec![RawPropertyData {
+                    name: "Колонки".to_string(),
+                    prop_type: "КоллекцияКолонокТаблицыЗначений".to_string(),
+                    is_readonly: true,
+                }],
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "КоллекцияКолонокТаблицыЗначений".to_string(),
+                source: RawDataSource::Platform,
+                methods: vec![RawMethodData {
+                    name: "Добавить".to_string(),
+                    return_type: "КолонкаТаблицыЗначений".to_string(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        ])
+        .expect("load types");
+
+    let repo: Arc<dyn bsl_shared::domain::repository::TypeRepository> = repository.clone();
+    let resolver = Arc::new(TypeResolver::new(repo.clone()));
+    let metadata_lookup = TypeMetadataLookup::new(repo.clone());
+
+    let index = IntellisenseIndexStore::new("cfg", "platform");
+    let content = concat!(
+        "Процедура Тест()\n",
+        "    ТаблицаЗначений.Колонки.\n",
+        "КонецПроцедуры\n"
+    );
+    let line = 1;
+    let line_text = "    ТаблицаЗначений.Колонки.";
+    let column = line_text.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+
+    let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+        signature_index: repo.get_signature_index_clone(),
+        resolver: Some(resolver.clone()),
+        repository: repo.clone(),
+        platform_signatures_loaded: false,
+    });
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(ChangeV2::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("test"),
+        deps,
+    });
+    host.apply_change(ChangeV2::SetSettingsSnapshot {
+        settings_id: SettingsId::from_hash("test"),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+    host.apply_change(ChangeV2::SetFile {
+        file_id: V2FileId(1),
+        text: Arc::from(content.to_string()),
+        version: 0,
+        path: Arc::from("completion_type_name_chain_no_hint_test.bsl"),
+    });
+    let analysis = host.analysis();
+    let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
+    let ctx = CompletionAnalysisContext {
+        ir_program: Some(ir_program),
+        resolver: resolver.as_ref(),
+        file_path: "completion_type_name_chain_no_hint_test.bsl",
+        member_access_owner_type_hint: None,
+        include_flow_sensitive: false,
+    };
+
+    let result = get_completion_with_analysis(
+        content,
+        line,
+        column,
+        Some("completion_type_name_chain_no_hint_test.bsl"),
+        &index,
+        &metadata_lookup,
+        Some(&ctx),
+        None,
+    )
+    .await
+    .expect("completion ok");
+
+    let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
+    assert!(
+        !labels.contains(&"Добавить".to_string()),
+        "type-name member chain without canonical owner hint must fail closed, labels: {:?}",
+        labels
+    );
+}
+
+#[tokio::test]
 async fn completion_supports_member_access_after_ternary_expression() {
     let repository = Arc::new(InMemoryTypeRepository::new());
     repository
@@ -2477,6 +2832,40 @@ async fn completion_supports_member_access_after_ternary_expression() {
         member_access_owner_type_hint: None,
         include_flow_sensitive: false,
     };
+    let receiver_spans =
+        extract_member_access_receiver_spans(content, line, column).expect("receiver spans");
+    let receiver_debug: Vec<(String, Option<String>)> = receiver_spans
+        .iter()
+        .map(|span| {
+            let text = content[span.start as usize..span.end as usize].to_string();
+            let resolution = ctx
+                .ir_program
+                .as_ref()
+                .and_then(|program| {
+                    program.semantic_facts.type_resolution_for_span(bsl_shared::ir::Span::new(
+                        span.start,
+                        span.end,
+                    ))
+                })
+                .map(|value| value.type_name());
+            let indexed = analysis
+                .type_at_byte_offset(V2FileId(1), span.end.saturating_sub(1))
+                .ok()
+                .flatten()
+                .map(|value| value.type_name());
+            (text, resolution.or(indexed))
+        })
+        .collect();
+    let owner_types =
+        resolve_member_access_owner_types_from_ir(Some(&ctx), content, line, column);
+    assert_eq!(
+        owner_types
+            .iter()
+            .map(TypeResolution::type_name)
+            .collect::<Vec<_>>(),
+        vec!["TypeA".to_string(), "TypeB".to_string()],
+        "ternary receiver must resolve canonical owner alternatives from IR; receiver_debug={receiver_debug:?}"
+    );
 
     let result = get_completion_with_analysis(
         content,
@@ -2579,6 +2968,40 @@ async fn completion_supports_member_access_after_choice_expression() {
         member_access_owner_type_hint: None,
         include_flow_sensitive: false,
     };
+    let receiver_spans =
+        extract_member_access_receiver_spans(content, line, column).expect("receiver spans");
+    let receiver_debug: Vec<(String, Option<String>)> = receiver_spans
+        .iter()
+        .map(|span| {
+            let text = content[span.start as usize..span.end as usize].to_string();
+            let resolution = ctx
+                .ir_program
+                .as_ref()
+                .and_then(|program| {
+                    program.semantic_facts.type_resolution_for_span(bsl_shared::ir::Span::new(
+                        span.start,
+                        span.end,
+                    ))
+                })
+                .map(|value| value.type_name());
+            let indexed = analysis
+                .type_at_byte_offset(V2FileId(1), span.end.saturating_sub(1))
+                .ok()
+                .flatten()
+                .map(|value| value.type_name());
+            (text, resolution.or(indexed))
+        })
+        .collect();
+    let owner_types =
+        resolve_member_access_owner_types_from_ir(Some(&ctx), content, line, column);
+    assert_eq!(
+        owner_types
+            .iter()
+            .map(TypeResolution::type_name)
+            .collect::<Vec<_>>(),
+        vec!["TypeA".to_string(), "TypeB".to_string()],
+        "choice receiver must resolve canonical owner alternatives from IR; receiver_debug={receiver_debug:?}"
+    );
 
     let result = get_completion_with_analysis(
         content,

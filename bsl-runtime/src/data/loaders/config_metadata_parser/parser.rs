@@ -337,6 +337,7 @@ impl UniversalMetadataParser {
         metadata.standard_attributes = standard_attributes;
         metadata.tabular_sections = tabular_sections;
         metadata.enum_values = enum_values;
+        metadata.metadata_xml_path = Some(xml_path.to_path_buf());
         if let Some(value) = number_type {
             metadata.properties.insert("NumberType".to_string(), value);
         }

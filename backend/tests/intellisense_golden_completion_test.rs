@@ -107,7 +107,7 @@ async fn golden_completion_prefix_keyword() {
 }
 
 #[tokio::test]
-async fn golden_completion_member_access_methods() {
+async fn golden_completion_member_access_without_semantic_owner_is_empty() {
     let content = "Массив.";
     let snapshot = snapshot_completion(content, 0, 7, None).await;
     intellisense_testkit::assert_snapshot("m8_completion_member_access.json", &snapshot);

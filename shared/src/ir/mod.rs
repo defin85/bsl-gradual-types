@@ -53,7 +53,9 @@ pub use cfg::{
 
 // Re-exports: SemanticProgram
 pub use program::SemanticProgram;
-pub use semantic_facts::{SemanticFacts, SemanticTypeEntry};
+pub use semantic_facts::{
+    SemanticConstructorTarget, SemanticFacts, SemanticMethodTarget, SemanticTypeEntry,
+};
 
 // Re-exports: visitor pattern
 pub use visitor::{walk_program, FlowContext, SemanticVisitor};

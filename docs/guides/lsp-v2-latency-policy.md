@@ -6,8 +6,11 @@
 
 ## Operation Classes
 
-- `interactive`: `completion`, `hover`, `signatureHelp`
-- `background`: `diagnostics` и остальные неинтерактивные операции
+Runtime queue priority для LSP v2 сейчас фиксирован так:
+
+- `interactive`: `completion`, `hover`, `signatureHelp`, `definition`
+- `background`: `diagnostics` и остальные non-priority операции (`type_at_position`,
+  `members`, `document_symbol`, `references`, `rename`, `symbol_search`)
 
 ## Interactive Freshness Policy
 
@@ -17,6 +20,9 @@
 2. Ожидание ограничено `intellisense_v2_interactive_wait_budget_ms` (default `120ms`, clamp `[10, 2000]`).
 3. Если бюджет ожидания исчерпан или exact current-revision semantic artifacts ещё недоступны, операция завершается fail-closed для текущей revision.
 4. Default runtime path не публикует stale/degraded/search-backed semantic substitute и не маскирует semantic truth другой revision под current response.
+
+`type_at_position` и `members` в shared runtime тоже обязаны читать exact current-revision canonical
+artifact, но по scheduler-классу они не относятся к LSP interactive-priority очереди.
 
 ## Diagnostics Freshness Policy
 

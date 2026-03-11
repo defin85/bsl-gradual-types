@@ -14,7 +14,7 @@ mod lsp_completion_tests {
     use bsl_shared::domain::types::{RawDataSource, RawMethodData, RawTypeData};
 
     #[tokio::test]
-    async fn completion_returns_methods_for_platform_type() {
+    async fn completion_member_access_without_semantic_owner_stays_empty() {
         let index = IntellisenseIndexStore::new("cfg", "platform");
         index.upsert_type(IndexItem::new(
             "Массив",
@@ -42,7 +42,11 @@ mod lsp_completion_tests {
             .expect("completion ok");
 
         let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
-        assert!(labels.contains(&"Добавить".to_string()));
+        assert!(
+            labels.is_empty(),
+            "raw helper without canonical member owner must stay fail-closed, labels: {:?}",
+            labels
+        );
     }
 
     #[tokio::test]

@@ -10,12 +10,38 @@
 //! - New выражения
 //! - Await выражения
 
-use crate::ast::Expression;
+use crate::ast::{Expression, Span};
 use tracing::debug;
 use tree_sitter::Node;
 
 use super::span::node_to_span;
 use super::utils::node_text;
+
+fn expression_span(expr: &Expression) -> Span {
+    match expr {
+        Expression::Identifier { span, .. }
+        | Expression::String { span, .. }
+        | Expression::Number { span, .. }
+        | Expression::Boolean { span, .. }
+        | Expression::Date { span, .. }
+        | Expression::Call { span, .. }
+        | Expression::Binary { span, .. }
+        | Expression::Unary { span, .. }
+        | Expression::Ternary { span, .. }
+        | Expression::New { span, .. }
+        | Expression::PropertyAccess { span, .. }
+        | Expression::IndexAccess { span, .. }
+        | Expression::Await { span, .. } => *span,
+    }
+}
+
+fn combine_access_span(object: &Expression, property_span: Span) -> Span {
+    let object_span = expression_span(object);
+    Span::new(
+        object_span.start.min(property_span.start),
+        object_span.end.max(property_span.end),
+    )
+}
 
 /// Конвертировать expression узел
 pub fn convert_expression(node: &Node, source: &str) -> Result<Option<Expression>, String> {
@@ -179,6 +205,7 @@ fn convert_access(node: &Node, source: &str) -> Result<Option<Expression>, Strin
     let mut cursor = node.walk();
     let mut object = None;
     let mut property_name = None;
+    let mut property_span = None;
     let mut method_call_node = None;
     let mut index_expr = None;
 
@@ -195,11 +222,15 @@ fn convert_access(node: &Node, source: &str) -> Result<Option<Expression>, Strin
                         name: node_text(&child, source),
                         span: node_to_span(&child, source),
                     });
+                } else if property_name.is_none() {
+                    property_name = Some(node_text(&child, source));
+                    property_span = Some(node_to_span(&child, source));
                 }
             }
             "property" => {
                 // Свойство после точки
                 property_name = Some(node_text(&child, source));
+                property_span = Some(node_to_span(&child, source));
             }
             "method_call" => {
                 // Вызов метода после точки
@@ -331,9 +362,11 @@ fn convert_access(node: &Node, source: &str) -> Result<Option<Expression>, Strin
         }
         // Случай 2: access содержит property -> это PropertyAccess
         (None, Some(obj), Some(prop)) => Ok(Some(Expression::PropertyAccess {
+            span: property_span
+                .map(|property_span| combine_access_span(&obj, property_span))
+                .unwrap_or(span),
             object: Box::new(obj),
             property: prop,
-            span,
         })),
         // Случай 3: только объект (leaf node)
         (None, Some(obj), None) => Ok(Some(obj)),
@@ -516,6 +549,7 @@ fn convert_property_access(node: &Node, source: &str) -> Result<Option<Expressio
     let mut cursor = node.walk();
     let mut object = None;
     let mut property = String::new();
+    let mut property_span = None;
     let mut index_expr = None;
 
     for child in node.children(&mut cursor) {
@@ -530,6 +564,7 @@ fn convert_property_access(node: &Node, source: &str) -> Result<Option<Expressio
                     });
                 } else {
                     property = node_text(&child, source);
+                    property_span = Some(node_to_span(&child, source));
                 }
             }
             // BUGFIX: tree-sitter-bsl использует "access" узел для объекта
@@ -550,6 +585,7 @@ fn convert_property_access(node: &Node, source: &str) -> Result<Option<Expressio
             }
             "property" => {
                 property = node_text(&child, source);
+                property_span = Some(node_to_span(&child, source));
             }
             "index" => {
                 // index access: property_access { access, "[", index(expression), "]" }
@@ -573,9 +609,11 @@ fn convert_property_access(node: &Node, source: &str) -> Result<Option<Expressio
 
     match object {
         Some(obj) if !property.is_empty() => Ok(Some(Expression::PropertyAccess {
+            span: property_span
+                .map(|property_span| combine_access_span(&obj, property_span))
+                .unwrap_or(span),
             object: Box::new(obj),
             property,
-            span,
         })),
         Some(obj) => {
             // Preserve the stable receiver for incomplete member access like `obj.`

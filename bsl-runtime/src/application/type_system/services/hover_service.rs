@@ -56,38 +56,11 @@ pub fn hover_exact_type_index_available_at_position(
     column: u32,
     ir_program: &SemanticProgram,
 ) -> bool {
-    let Some(byte_offset) = analysis
-        .utf16_position_to_byte_offset(file_id, line, column)
+    let _ = (file_content, line, column, ir_program);
+    analysis
+        .current_type_index_serve_only_ready(file_id)
         .ok()
-        .flatten()
-        .map(|offset| offset.min(u32::MAX as usize) as u32)
-    else {
-        return true;
-    };
-
-    if exact_type_index_available_at_probe(analysis, file_id, byte_offset) {
-        return true;
-    }
-
-    if let Some(span) = identifier_span_at_byte_offset(file_content, byte_offset as usize) {
-        if exact_type_index_available_at_span(analysis, file_id, span) {
-            return true;
-        }
-    }
-
-    if let Some(node) = ir_program.find_node_at_byte_offset(byte_offset) {
-        if exact_type_index_available_at_span(analysis, file_id, node.span) {
-            return true;
-        }
-    }
-
-    if let Some(span) = indexed_expression_span_at_byte_offset(file_content, byte_offset as usize) {
-        if exact_type_index_available_at_span(analysis, file_id, span) {
-            return true;
-        }
-    }
-
-    false
+        .unwrap_or(true)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -116,30 +89,24 @@ fn compute_hover_info_from_ir(
     let node_at_position =
         byte_offset.and_then(|offset| ir_program.find_node_at_byte_offset(offset));
     let word_under_cursor = extract_word_at_position(file_content, line, column);
-    let mut type_at_cursor = byte_offset.and_then(|offset| {
-        // Strict serve-only: hover must not trigger on-demand flow/type-index compute.
-        analysis
-            .type_at_byte_offset_serve_only(file_id, offset)
-            .ok()
-            .flatten()
-    });
+    let mut type_at_cursor = byte_offset.and_then(|offset| semantic_type_at_offset(ir_program, offset));
     if type_at_cursor.is_none() {
         if let Some(offset) = byte_offset {
             if let Some(identifier_span) =
                 identifier_span_at_byte_offset(file_content, offset as usize)
             {
-                type_at_cursor = type_at_owner_span(analysis, file_id, identifier_span);
+                type_at_cursor = semantic_type_at_span(ir_program, identifier_span);
             }
         }
     }
     if type_at_cursor.is_none() {
         if let Some(node) = node_at_position {
-            type_at_cursor = type_at_owner_span(analysis, file_id, node.span);
+            type_at_cursor = semantic_type_at_span(ir_program, node.span);
         }
     }
     let indexed_expression_hover = byte_offset.and_then(|offset| {
         let span = indexed_expression_span_at_byte_offset(file_content, offset as usize)?;
-        let resolution = type_at_owner_span(analysis, file_id, span)?;
+        let resolution = semantic_type_at_span(ir_program, span)?;
         if resolution.is_unknown() || resolution.is_dynamic() {
             return None;
         }
@@ -178,7 +145,7 @@ fn compute_hover_info_from_ir(
                 let owner_span = object_node
                     .and_then(|idx| ir_program.nodes.get(idx).map(|n| n.span))
                     .unwrap_or(node.span);
-                let owner_resolution = type_at_owner_span(analysis, file_id, owner_span)
+                let owner_resolution = semantic_type_at_span(ir_program, owner_span)
                     .unwrap_or_else(TypeResolution::unknown);
 
                 let (prop_type, is_readonly) = metadata_lookup
@@ -214,11 +181,10 @@ fn compute_hover_info_from_ir(
             if let Some(node) = control_node_at_position(ir_program, offset) {
                 if control_hover_requested(node, word) {
                     return format_control_flow_hover(
-                        analysis,
-                        file_id,
                         file_content,
                         line,
                         column,
+                        ir_program,
                         node,
                     )
                     .or_else(|| {
@@ -284,62 +250,29 @@ fn compute_hover_info_from_ir(
     None
 }
 
-fn type_at_owner_span(
-    analysis: &bsl_analysis_v2::AnalysisV2,
-    file_id: bsl_analysis_v2::FileId,
+fn semantic_type_at_span(
+    program: &SemanticProgram,
     span: Span,
 ) -> Option<TypeResolution> {
-    let mut fallback: Option<TypeResolution> = None;
-    let mut probes = Vec::with_capacity(2);
-
-    if span.end > span.start {
-        probes.push(span.end.saturating_sub(1));
-    }
-    probes.push(span.start);
-
-    for probe in probes {
-        let resolution = analysis
-            .type_at_byte_offset_serve_only(file_id, probe)
-            .ok()
-            .flatten();
-        let Some(resolution) = resolution else {
-            continue;
-        };
-
-        if !resolution.is_unknown() && !resolution.is_dynamic() {
-            return Some(resolution);
-        }
-        if fallback.is_none() {
-            fallback = Some(resolution);
-        }
-    }
-
-    fallback
+    program
+        .semantic_facts
+        .type_resolution_for_span(span)
+        .or_else(|| semantic_type_at_offset(program, span.start))
+        .or_else(|| {
+            span.end
+                .checked_sub(1)
+                .and_then(|probe| semantic_type_at_offset(program, probe))
+        })
 }
 
-fn exact_type_index_available_at_span(
-    analysis: &bsl_analysis_v2::AnalysisV2,
-    file_id: bsl_analysis_v2::FileId,
-    span: Span,
-) -> bool {
-    exact_type_index_available_at_probe(analysis, file_id, span.start)
-        || span
-            .end
-            .checked_sub(1)
-            .is_some_and(|probe| exact_type_index_available_at_probe(analysis, file_id, probe))
-}
-
-fn exact_type_index_available_at_probe(
-    analysis: &bsl_analysis_v2::AnalysisV2,
-    file_id: bsl_analysis_v2::FileId,
-    probe: u32,
-) -> bool {
-    analysis
-        .type_at_byte_offset_serve_only_profiled(file_id, probe)
-        .ok()
-        .is_some_and(|profiled| {
-            profiled.serve_reason_code
-                == bsl_analysis_v2::TypeIndexServeReasonCode::TypeIndexExactHit
+fn semantic_type_at_offset(program: &SemanticProgram, probe: u32) -> Option<TypeResolution> {
+    program
+        .semantic_facts
+        .type_at_byte_offset(probe)
+        .or_else(|| {
+            program
+                .find_node_at_byte_offset(probe)
+                .and_then(|node| program.semantic_facts.type_resolution_for_span(node.span))
         })
 }
 
@@ -481,11 +414,10 @@ fn span_contains_position(span: Span, byte_offset: u32) -> bool {
 }
 
 fn format_control_flow_hover(
-    analysis: &bsl_analysis_v2::AnalysisV2,
-    file_id: bsl_analysis_v2::FileId,
     file_content: &str,
     line: u32,
     column: u32,
+    ir_program: &SemanticProgram,
     node: &SemanticNode,
 ) -> Option<String> {
     let _ = column;
@@ -563,11 +495,7 @@ fn format_control_flow_hover(
     };
 
     let probe_abs = line_start.checked_add(probe_in_line.try_into().ok()?)?;
-    let actual_type = analysis
-        .type_at_byte_offset_serve_only(file_id, probe_abs)
-        .ok()
-        .flatten()
-        .unwrap_or_else(TypeResolution::unknown);
+    let actual_type = semantic_type_at_offset(ir_program, probe_abs).unwrap_or_else(TypeResolution::unknown);
 
     let mut out = String::new();
     out.push_str(&title);

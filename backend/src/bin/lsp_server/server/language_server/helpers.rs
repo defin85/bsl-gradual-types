@@ -208,63 +208,23 @@ pub(super) fn completion_member_access_owner_type_hint_at_position(
     position: Position,
     coordinator: Option<&bsl_runtime::system::SystemCoordinator>,
 ) -> Option<bsl_shared::domain::types::TypeResolution> {
-    let Some(line_text) = file_content.lines().nth(position.line as usize) else {
+    let Some(_line_text) = file_content.lines().nth(position.line as usize) else {
         if let Some(coordinator) = coordinator {
             coordinator.record_intellisense_v2_completion_owner_hint_result("no_line");
         }
         return None;
     };
-    let cursor_byte = bsl_analysis_v2::utf16_to_byte_offset(line_text, position.character);
-    let Some(line_prefix) = line_text.get(..cursor_byte.min(line_text.len())) else {
-        if let Some(coordinator) = coordinator {
-            coordinator.record_intellisense_v2_completion_owner_hint_result("offset_unresolved");
-        }
-        return None;
-    };
-    let Some(dot_idx) = line_prefix.rfind('.') else {
-        if let Some(coordinator) = coordinator {
-            coordinator.record_intellisense_v2_completion_owner_hint_result("no_dot");
-        }
-        return None;
-    };
-    let receiver = line_prefix.get(..dot_idx)?.trim_end();
-    if receiver.is_empty() {
-        if let Some(coordinator) = coordinator {
-            coordinator.record_intellisense_v2_completion_owner_hint_result("no_receiver");
-        }
-        return None;
-    }
-
-    let probe_utf16 = bsl_analysis_v2::byte_offset_to_utf16(line_text, receiver.len());
-    let Some(probe_offset) = analysis
-        .utf16_position_to_byte_offset(file_id, position.line, probe_utf16)
-        .ok()
-        .flatten()
-    else {
-        if let Some(coordinator) = coordinator {
-            coordinator.record_intellisense_v2_completion_owner_hint_result("offset_unresolved");
-        }
-        return None;
-    };
-    let probe_offset = probe_offset.saturating_sub(1).min(u32::MAX as usize) as u32;
-    let profiled = match analysis.type_at_byte_offset_serve_only_profiled(file_id, probe_offset) {
-        Ok(profiled) => profiled,
-        Err(_) => {
-            if let Some(coordinator) = coordinator {
-                coordinator
-                    .record_intellisense_v2_completion_owner_hint_result("offset_unresolved");
-            }
-            return None;
-        }
-    };
+    let resolution = bsl_runtime::application::completion_member_access_owner_type_hint_from_analysis(
+        analysis,
+        file_id,
+        file_content,
+        position.line,
+        position.character,
+    );
 
     if let Some(coordinator) = coordinator {
         coordinator.record_intellisense_v2_completion_owner_hint_lookup_path("direct");
     }
-
-    let resolution = profiled
-        .resolution
-        .filter(|hint| !hint.is_unknown() && !hint.is_dynamic());
 
     if let Some(coordinator) = coordinator {
         coordinator.record_intellisense_v2_completion_owner_hint_result(if resolution.is_some() {

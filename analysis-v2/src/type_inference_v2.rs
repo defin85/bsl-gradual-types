@@ -2,21 +2,28 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
 use bsl_shared::domain::is_configuration_type_pattern;
 use bsl_shared::domain::resolver::TypeResolver;
-use bsl_shared::domain::signature_index::SignatureIndex;
+use bsl_shared::domain::signature_index::{MethodSignature, SignatureIndex, SignatureSource};
 use bsl_shared::domain::types::MetadataKind;
 use bsl_shared::domain::types::{
     Certainty, ContextualTypeDescriptor, FacetKind, GenericType, ResolutionMetadata,
     ResolutionResult, ResolutionSource,
 };
-use bsl_shared::domain::types::{ConcreteType, TypeResolution, UncertaintyReason, WeightedType};
+use bsl_shared::domain::types::{
+    ConcreteType, ParameterInfo, TypeResolution, UncertaintyReason, WeightedType,
+};
+use bsl_shared::domain::TypeDefinitionLocation;
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::domain::{CodeLocation, ModuleType};
-use bsl_shared::ir::{SemanticFacts, SemanticProgram, SemanticTypeEntry};
+use bsl_shared::ir::{
+    SemanticConstructorTarget, SemanticFacts, SemanticMethodTarget, SemanticProgram,
+    SemanticTypeEntry,
+};
 use bsl_syntax::ast::{CompilerDirective, Expression, ParseError, Program, Statement};
 
 use crate::ast_to_ir::{is_global_collection, lookup_global_collection};
@@ -80,6 +87,7 @@ struct TypeEnv {
     description_type_bindings: HashMap<String, TypeResolution>,
     instance_effects: InstanceEffectStore,
     local_function_summaries: Arc<HashMap<String, LocalFunctionSummary>>,
+    current_file_path: Arc<str>,
     module_type: Option<ModuleType>,
 }
 
@@ -91,6 +99,7 @@ impl Default for TypeEnv {
             description_type_bindings: HashMap::new(),
             instance_effects: InstanceEffectStore::default(),
             local_function_summaries: Arc::new(HashMap::new()),
+            current_file_path: Arc::from(""),
             module_type: None,
         }
     }
@@ -100,6 +109,9 @@ impl Default for TypeEnv {
 struct LocalFunctionSummary {
     return_type: TypeResolution,
     may_fallthrough: bool,
+    params: Vec<String>,
+    declaration_span: bsl_shared::ir::Span,
+    is_function: bool,
 }
 
 struct TypeInferencer {
@@ -195,6 +207,7 @@ impl TypeInferencer {
         let started = Instant::now();
         let mut env = TypeEnv::default();
         let mut facts = SemanticFacts::default();
+        env.current_file_path = Arc::from(file_path.to_string());
 
         let seed_started = Instant::now();
         self.seed_module_context(file_path, &mut env);
@@ -234,10 +247,27 @@ impl TypeInferencer {
                         self.record_incomplete_member_access_recovery_entries(
                             recovery, *span, &fn_env, &mut facts,
                         );
+                        self.record_incomplete_call_target_recovery_entries(
+                            recovery, *span, &fn_env, &mut facts,
+                        );
                     }
                 }
                 _ => self.visit_statement(stmt, &mut env, &mut facts),
             }
+        }
+        if let Some(recovery) = recovery {
+            self.record_incomplete_member_access_recovery_entries(
+                recovery,
+                bsl_shared::ir::Span::new(0, recovery.source_text.len() as u32),
+                &env,
+                &mut facts,
+            );
+            self.record_incomplete_call_target_recovery_entries(
+                recovery,
+                bsl_shared::ir::Span::new(0, recovery.source_text.len() as u32),
+                &env,
+                &mut facts,
+            );
         }
         let visit_statements_ms = visit_statements_started.elapsed().as_millis();
 
@@ -286,20 +316,160 @@ impl TypeInferencer {
         env: &TypeEnv,
         facts: &mut SemanticFacts,
     ) {
-        for error in recovery
-            .syntax_errors
-            .iter()
-            .filter(|error| span_contains(container_span, error.span.start))
-        {
-            let Some((receiver_span, receiver_key)) =
-                extract_incomplete_member_access_receiver(recovery.source_text, error.span)
+        if recovery.syntax_errors.is_empty() {
+            return;
+        }
+
+        let mut dot_offsets =
+            incomplete_member_access_dot_offsets_within_span(recovery.source_text, container_span);
+        for error in recovery.syntax_errors {
+            if let Some(dot_offset) =
+                find_incomplete_member_access_dot_offset(recovery.source_text, error.span)
+            {
+                if !dot_offsets.contains(&dot_offset) {
+                    dot_offsets.push(dot_offset);
+                }
+            }
+        }
+
+        for dot_offset in dot_offsets {
+            for (receiver_span, receiver_expr_text) in
+                extract_incomplete_member_access_receiver_slices_at_dot_offset(
+                    recovery.source_text,
+                    dot_offset,
+                )
+            {
+                let Some(receiver_expr) = parse_recovery_expression_snippet(receiver_expr_text)
+                else {
+                    continue;
+                };
+
+                let mut scratch_env = env.clone();
+                let mut scratch_facts = SemanticFacts::default();
+                let resolution =
+                    self.infer_expr(&receiver_expr, &mut scratch_env, &mut scratch_facts);
+                if resolution.is_unknown() || resolution.is_dynamic() {
+                    continue;
+                }
+
+                self.record(receiver_span, resolution, facts);
+            }
+
+            let Some((member_span, member_expr_text)) =
+                extract_incomplete_member_access_target_slice_at_dot_offset(
+                    recovery.source_text,
+                    dot_offset,
+                )
             else {
                 continue;
             };
-            let Some(resolution) = env.variable_resolution(&receiver_key) else {
+
+            let resolution = parse_recovery_expression_snippet(member_expr_text)
+                .map(|member_expr| {
+                    let mut scratch_env = env.clone();
+                    let mut scratch_facts = SemanticFacts::default();
+                    self.infer_expr(&member_expr, &mut scratch_env, &mut scratch_facts)
+                })
+                .unwrap_or_else(|| self.resolver.resolve_expression_sync(member_expr_text));
+            if resolution.is_unknown() || resolution.is_dynamic() {
                 continue;
-            };
-            self.record(receiver_span, resolution, facts);
+            }
+
+            self.record(member_span, resolution.clone(), facts);
+            self.record_definition_location(member_span, &resolution, facts);
+        }
+    }
+
+    fn record_incomplete_call_target_recovery_entries(
+        &self,
+        recovery: RecoveryContext<'_>,
+        container_span: bsl_shared::ir::Span,
+        env: &TypeEnv,
+        facts: &mut SemanticFacts,
+    ) {
+        if recovery.syntax_errors.is_empty() {
+            return;
+        }
+
+        let mut candidates = Vec::new();
+        for error in recovery.syntax_errors {
+            for candidate in
+                incomplete_call_recovery_candidates_on_error_line(recovery.source_text, error.span)
+            {
+                if !span_contains(container_span, candidate.call_span.start) {
+                    continue;
+                }
+                if candidates
+                    .iter()
+                    .any(|existing: &IncompleteCallRecoveryCandidate| {
+                        existing.call_span == candidate.call_span
+                            && existing.member_span == candidate.member_span
+                    })
+                {
+                    continue;
+                }
+                candidates.push(candidate);
+            }
+            for anchor in recovery_call_anchor_offsets(recovery.source_text, error.span) {
+                let Some(candidate) =
+                    incomplete_call_recovery_candidate_at_offset(recovery.source_text, anchor)
+                else {
+                    continue;
+                };
+                if !span_contains(container_span, candidate.call_span.start) {
+                    continue;
+                }
+                if candidates
+                    .iter()
+                    .any(|existing: &IncompleteCallRecoveryCandidate| {
+                        existing.call_span == candidate.call_span
+                            && existing.member_span == candidate.member_span
+                    })
+                {
+                    continue;
+                }
+                candidates.push(candidate);
+            }
+        }
+
+        for candidate in candidates {
+            match candidate.kind {
+                IncompleteCallRecoveryKind::Constructor { type_name } => {
+                    self.record_constructor_target(candidate.call_span, &type_name, facts);
+                }
+                IncompleteCallRecoveryKind::Method {
+                    receiver_expr,
+                    method_name,
+                } => {
+                    let Some(receiver_expr) =
+                        parse_recovery_expression_snippet(receiver_expr.as_str())
+                    else {
+                        continue;
+                    };
+                    let mut scratch_env = env.clone();
+                    let mut scratch_facts = SemanticFacts::default();
+                    let receiver =
+                        self.infer_expr(&receiver_expr, &mut scratch_env, &mut scratch_facts);
+                    if receiver.is_unknown() || receiver.is_dynamic() {
+                        continue;
+                    }
+
+                    let Some(target) =
+                        self.semantic_method_target(&receiver, &method_name)
+                            .filter(|target| {
+                                target.signature.is_some() || target.definition_location.is_some()
+                            })
+                    else {
+                        continue;
+                    };
+                    self.record_method_target(
+                        candidate.member_span,
+                        candidate.call_span,
+                        target,
+                        facts,
+                    );
+                }
+            }
         }
     }
 
@@ -641,6 +811,18 @@ impl TypeInferencer {
             .push(SemanticTypeEntry { span, resolution });
     }
 
+    fn record_definition_location(
+        &self,
+        span: bsl_shared::ir::Span,
+        resolution: &TypeResolution,
+        facts: &mut SemanticFacts,
+    ) {
+        let Some(location) = self.semantic_definition_location(resolution) else {
+            return;
+        };
+        facts.definition_locations_by_span.insert(span, location);
+    }
+
     fn infer_expr(
         &self,
         expr: &Expression,
@@ -655,7 +837,11 @@ impl TypeInferencer {
             Expression::Identifier { name, .. } => self.infer_identifier(name, env),
             Expression::New {
                 type_name, args, ..
-            } => self.infer_new_expression(type_name, args, env, facts),
+            } => {
+                let resolution = self.infer_new_expression(type_name, args, env, facts);
+                self.record_constructor_target(expr_span(expr), type_name, facts);
+                resolution
+            }
             Expression::PropertyAccess {
                 object, property, ..
             } => {
@@ -712,6 +898,7 @@ impl TypeInferencer {
         };
 
         self.record(expr_span(expr), resolution.clone(), facts);
+        self.record_definition_location(expr_span(expr), &resolution, facts);
         resolution
     }
 
@@ -833,21 +1020,43 @@ impl TypeInferencer {
             .insert(call_span, arg_types.clone());
 
         match function {
-            Expression::Identifier { name, .. } => self.infer_global_function_call(name, env),
+            Expression::Identifier { name, .. } => {
+                if let Some(target) =
+                    self.semantic_identifier_call_target(name, env)
+                        .filter(|target| {
+                            target.signature.is_some() || target.definition_location.is_some()
+                        })
+                {
+                    facts.call_method_targets_by_span.insert(call_span, target);
+                }
+                self.infer_global_function_call(name, env)
+            }
             Expression::PropertyAccess {
                 object, property, ..
             } => {
                 let receiver = self.infer_expr(object, env, facts);
+                let method_target =
+                    self.semantic_method_target(&receiver, property)
+                        .filter(|target| {
+                            target.signature.is_some() || target.definition_location.is_some()
+                        });
                 facts
                     .call_receiver_type_by_span
                     .insert(call_span, receiver.clone());
                 if let Some(resolved) = self.try_apply_universal_collection_method(
                     object, property, args, &arg_types, env, facts,
                 ) {
+                    if let Some(target) = method_target {
+                        self.record_method_target(expr_span(function), call_span, target, facts);
+                    }
                     return resolved;
                 }
 
-                self.infer_method_call(&receiver, property)
+                let resolved = self.infer_method_call(&receiver, property);
+                if let Some(target) = method_target {
+                    self.record_method_target(expr_span(function), call_span, target, facts);
+                }
+                resolved
             }
             _ => TypeResolution::unknown(),
         }
@@ -1271,9 +1480,73 @@ impl TypeInferencer {
         TypeResolution::unknown()
     }
 
+    fn semantic_identifier_call_target(
+        &self,
+        name: &str,
+        env: &TypeEnv,
+    ) -> Option<SemanticMethodTarget> {
+        let name_lower = name.to_lowercase();
+        if let Some(local) = env.local_function_summaries.get(&name_lower) {
+            let return_type = (!local.return_type.is_unknown() && !local.return_type.is_dynamic())
+                .then(|| local.return_type.type_name());
+            let signature = MethodSignature::new(
+                name.to_string(),
+                None,
+                local
+                    .params
+                    .iter()
+                    .map(|param_name| ParameterInfo {
+                        name: param_name.clone(),
+                        type_name: None,
+                        is_optional: false,
+                        default_value: None,
+                        description: None,
+                    })
+                    .collect(),
+                if local.is_function { return_type } else { None },
+                None,
+                None,
+                SignatureSource::UserCode,
+                local.return_type.active_facet.clone(),
+                Default::default(),
+            );
+            let definition_location = TypeDefinitionLocation::user_defined(
+                PathBuf::from(env.current_file_path.as_ref()),
+                local.declaration_span.start,
+                local.declaration_span.end,
+            );
+            return Some(SemanticMethodTarget {
+                owner_type: None,
+                method_name: name.to_string(),
+                signature: Some(signature),
+                definition_location: Some(definition_location),
+            });
+        }
+
+        let signature = self.deps.repository.find_method_signature(None, name);
+        let definition_location = self
+            .deps
+            .repository
+            .find_method_definition_location(None, name);
+        if signature.is_none() && definition_location.is_none() {
+            return None;
+        }
+
+        Some(SemanticMethodTarget {
+            owner_type: None,
+            method_name: name.to_string(),
+            signature,
+            definition_location,
+        })
+    }
+
     fn infer_method_call(&self, receiver: &TypeResolution, method: &str) -> TypeResolution {
         let type_name = signature_lookup_type_name(receiver);
         let metadata_name = SignatureIndex::extract_metadata_name(&type_name);
+        let method_key = method.to_lowercase();
+        if let Some(resolved) = self.try_resolve_tabular_section_row_method(receiver, &method_key) {
+            return resolved;
+        }
         let concretize_return_type = |return_type: &str| -> String {
             let Some(metadata_name) = metadata_name else {
                 return return_type.to_string();
@@ -1298,6 +1571,26 @@ impl TypeInferencer {
             return_type.to_string()
         };
 
+        let resolve_lookup_method = |methods: Vec<bsl_shared::domain::types::RawMethodData>| {
+            methods
+                .into_iter()
+                .find(|item| item.name.to_lowercase() == method_key)
+                .and_then(|item| (!item.return_type.is_empty()).then_some(item.return_type))
+                .map(|return_type| concretize_return_type(&return_type))
+                .and_then(|return_type| {
+                    self.try_resolve_configuration_type(&return_type)
+                        .or_else(|| Some(self.resolver.resolve_expression_sync(&return_type)))
+                })
+        };
+
+        if matches!(receiver.result, ResolutionResult::Generic(_)) {
+            if let Some(resolved) =
+                resolve_lookup_method(self.metadata_lookup.get_methods(receiver))
+            {
+                return resolved;
+            }
+        }
+
         if let Some(sig) = self.signature_index.find_method(&type_name, method) {
             if let Some(return_type) = sig.return_type.as_deref().filter(|s| !s.is_empty()) {
                 let return_type = concretize_return_type(return_type);
@@ -1308,22 +1601,141 @@ impl TypeInferencer {
             }
         }
 
-        let methods = self.metadata_lookup.get_methods(receiver);
-        let method_key = method.to_lowercase();
-        if let Some(m) = methods
-            .into_iter()
-            .find(|m| m.name.to_lowercase() == method_key)
-        {
-            if let Some(return_type) = (!m.return_type.is_empty()).then_some(m.return_type) {
-                let return_type = concretize_return_type(&return_type);
-                if let Some(resolved) = self.try_resolve_configuration_type(&return_type) {
-                    return resolved;
-                }
-                return self.resolver.resolve_expression_sync(&return_type);
-            }
+        if let Some(resolved) = resolve_lookup_method(self.metadata_lookup.get_methods(receiver)) {
+            return resolved;
         }
 
         TypeResolution::unknown()
+    }
+
+    fn try_resolve_tabular_section_row_method(
+        &self,
+        receiver: &TypeResolution,
+        method_key: &str,
+    ) -> Option<TypeResolution> {
+        if !matches!(method_key, "добавить" | "получить") {
+            return None;
+        }
+
+        let type_name = receiver.type_name();
+        let item_type = type_name
+            .strip_prefix("ТабличнаяЧасть<")
+            .and_then(|tail| tail.strip_suffix('>'))?
+            .trim();
+        if item_type.is_empty() {
+            return None;
+        }
+
+        let resolved_type_name = if self.deps.repository.find_type(item_type).is_some() {
+            item_type.to_string()
+        } else {
+            let row_type_name = format!("Строка{item_type}");
+            if self.deps.repository.find_type(&row_type_name).is_some() {
+                row_type_name
+            } else {
+                return None;
+            }
+        };
+
+        Some(TypeResolution::explicit(&resolved_type_name))
+    }
+
+    fn semantic_method_target(
+        &self,
+        receiver: &TypeResolution,
+        method_name: &str,
+    ) -> Option<SemanticMethodTarget> {
+        if receiver.is_unknown() || receiver.is_dynamic() {
+            return None;
+        }
+
+        let owner_type = signature_lookup_type_name(receiver);
+        let owner_type = owner_type.trim();
+        if owner_type.is_empty() {
+            return None;
+        }
+
+        Some(SemanticMethodTarget {
+            owner_type: Some(owner_type.to_string()),
+            method_name: method_name.to_string(),
+            signature: self
+                .deps
+                .repository
+                .find_method_signature(Some(owner_type), method_name),
+            definition_location: self
+                .deps
+                .repository
+                .find_method_definition_location(Some(owner_type), method_name),
+        })
+    }
+
+    fn semantic_definition_location(
+        &self,
+        resolution: &TypeResolution,
+    ) -> Option<TypeDefinitionLocation> {
+        match &resolution.result {
+            ResolutionResult::Concrete(ConcreteType::Configuration(cfg)) => {
+                let type_key = format!("{}.{}", cfg.kind.to_prefix(), cfg.name);
+                let raw = self.deps.repository.find_type(&type_key)?;
+                let metadata_path = raw.metadata_path?;
+                Some(TypeDefinitionLocation::configuration_with_modules(
+                    metadata_path,
+                    raw.module_paths.unwrap_or_default(),
+                ))
+            }
+            ResolutionResult::Concrete(ConcreteType::TabularRow(tabular_row)) => {
+                let raw = self.deps.repository.find_type(&tabular_row.parent_type)?;
+                let metadata_path = raw.metadata_path?;
+                Some(TypeDefinitionLocation::configuration_with_modules(
+                    metadata_path,
+                    raw.module_paths.unwrap_or_default(),
+                ))
+            }
+            ResolutionResult::Concrete(ConcreteType::Primitive(_))
+            | ResolutionResult::Concrete(ConcreteType::Special(_))
+            | ResolutionResult::Generic(_)
+            | ResolutionResult::Nullable(_)
+            | ResolutionResult::Union(_)
+            | ResolutionResult::Intersection(_) => resolution.get_definition_location(),
+            ResolutionResult::Concrete(ConcreteType::Platform(_))
+            | ResolutionResult::Concrete(ConcreteType::GlobalFunction(_))
+            | ResolutionResult::Dynamic => None,
+        }
+    }
+
+    fn record_method_target(
+        &self,
+        member_span: bsl_shared::ir::Span,
+        call_span: bsl_shared::ir::Span,
+        target: SemanticMethodTarget,
+        facts: &mut SemanticFacts,
+    ) {
+        facts
+            .call_method_targets_by_span
+            .insert(call_span, target.clone());
+        facts
+            .member_method_targets_by_span
+            .insert(member_span, target);
+    }
+
+    fn record_constructor_target(
+        &self,
+        span: bsl_shared::ir::Span,
+        type_name: &str,
+        facts: &mut SemanticFacts,
+    ) {
+        let type_name = type_name.trim().trim_end_matches("()").trim();
+        if type_name.is_empty() {
+            return;
+        }
+
+        facts.constructor_targets_by_span.insert(
+            span,
+            SemanticConstructorTarget {
+                type_name: type_name.to_string(),
+                signature: self.deps.repository.find_constructor(type_name),
+            },
+        );
     }
 }
 
@@ -1331,6 +1743,24 @@ impl TypeInferencer {
 struct RecoveryContext<'a> {
     source_text: &'a str,
     syntax_errors: &'a [ParseError],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct IncompleteCallRecoveryCandidate {
+    member_span: bsl_shared::ir::Span,
+    call_span: bsl_shared::ir::Span,
+    kind: IncompleteCallRecoveryKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum IncompleteCallRecoveryKind {
+    Constructor {
+        type_name: String,
+    },
+    Method {
+        receiver_expr: String,
+        method_name: String,
+    },
 }
 
 fn projection_build_profile(program: &SemanticProgram) -> TypeIndexBuildProfile {
@@ -1345,32 +1775,1117 @@ fn span_contains(span: bsl_shared::ir::Span, offset: u32) -> bool {
     span.start <= offset && offset < span.end
 }
 
-fn extract_incomplete_member_access_receiver(
+fn recovery_call_anchor_offsets(source_text: &str, error_span: bsl_shared::ir::Span) -> Vec<usize> {
+    let len = source_text.len();
+    let mut offsets = Vec::new();
+    for offset in [
+        error_span.start as usize,
+        error_span.end as usize,
+        error_span.start.saturating_sub(1) as usize,
+        error_span.end.saturating_sub(1) as usize,
+    ] {
+        let clamped = offset.min(len);
+        if !offsets.contains(&clamped) {
+            offsets.push(clamped);
+        }
+    }
+    offsets
+}
+
+fn incomplete_call_recovery_candidate_at_offset(
+    source_text: &str,
+    anchor_offset: usize,
+) -> Option<IncompleteCallRecoveryCandidate> {
+    let prefix = source_text.get(..anchor_offset)?;
+    let (open_paren_offset, call_span_end) =
+        if let Some(open_paren_offset) = find_last_unclosed_call_paren_offset(prefix) {
+            (open_paren_offset, open_paren_offset.saturating_add(1))
+        } else {
+            let open_paren_offset =
+                find_last_incomplete_argument_call_paren_offset(source_text, anchor_offset)?;
+            let (_, line_end) = trimmed_line_bounds_at_offset(source_text, open_paren_offset)?;
+            (open_paren_offset, line_end)
+        };
+    let before_paren = source_text.get(..open_paren_offset)?;
+    let head_text = extract_expression_suffix(before_paren)?;
+    let head_span = source_slice_span(source_text, head_text)?;
+    let call_span =
+        bsl_shared::ir::Span::new(head_span.start, call_span_end.min(u32::MAX as usize) as u32);
+    let head = extract_recovery_call_head(head_text)?;
+
+    Some(IncompleteCallRecoveryCandidate {
+        member_span: head_span,
+        call_span,
+        kind: head,
+    })
+}
+
+fn incomplete_call_recovery_candidates_on_error_line(
     source_text: &str,
     error_span: bsl_shared::ir::Span,
-) -> Option<(bsl_shared::ir::Span, String)> {
-    let start = error_span.start as usize;
-    let end = error_span.end as usize;
-    let snippet = source_text.get(start..end)?;
-    let trimmed_start = snippet
-        .char_indices()
-        .find(|(_, ch)| !ch.is_whitespace())
-        .map(|(idx, _)| idx)
-        .unwrap_or(0);
-    let trimmed = snippet.get(trimmed_start..)?.trim_end();
-    let receiver = trimmed.strip_suffix('.')?;
-    if receiver.is_empty() || !receiver.chars().all(|ch| ch.is_alphanumeric() || ch == '_') {
+) -> Vec<IncompleteCallRecoveryCandidate> {
+    let Some((line_start, line_end)) =
+        line_bounds_for_offset(source_text, error_span.start as usize)
+    else {
+        return Vec::new();
+    };
+    let Some(line_text) = source_text.get(line_start..line_end) else {
+        return Vec::new();
+    };
+
+    let chars: Vec<(usize, char)> = line_text.char_indices().collect();
+    let mut out = Vec::new();
+    let mut in_string = false;
+    let mut idx = 0usize;
+    while idx < chars.len() {
+        let (byte_idx, ch) = chars[idx];
+        let next = chars.get(idx + 1).map(|(_, ch)| *ch);
+
+        if in_string {
+            if ch == '"' {
+                if next == Some('"') {
+                    idx += 2;
+                    continue;
+                }
+                in_string = false;
+            }
+            idx += 1;
+            continue;
+        }
+
+        if ch == '/' && next == Some('/') {
+            break;
+        }
+
+        if ch == '"' {
+            in_string = true;
+            idx += 1;
+            continue;
+        }
+
+        if ch == '(' {
+            let prefix_end = line_start.saturating_add(byte_idx);
+            let Some(before_paren) = source_text.get(line_start..prefix_end) else {
+                idx += 1;
+                continue;
+            };
+            let Some(head_text) = extract_expression_suffix(before_paren) else {
+                idx += 1;
+                continue;
+            };
+            let Some(head_span) = source_slice_span(source_text, head_text) else {
+                idx += 1;
+                continue;
+            };
+            let Some(kind) = extract_recovery_call_head(head_text) else {
+                idx += 1;
+                continue;
+            };
+            let open_paren_u32 = line_start.saturating_add(byte_idx).min(u32::MAX as usize) as u32;
+            out.push(IncompleteCallRecoveryCandidate {
+                member_span: head_span,
+                call_span: bsl_shared::ir::Span::new(
+                    head_span.start,
+                    open_paren_u32.saturating_add(1),
+                ),
+                kind,
+            });
+        }
+
+        idx += 1;
+    }
+
+    out
+}
+
+fn line_bounds_for_offset(source_text: &str, offset: usize) -> Option<(usize, usize)> {
+    if source_text.is_empty() {
         return None;
     }
-    let receiver_start = error_span.start + trimmed_start as u32;
-    let receiver_end = receiver_start + receiver.len() as u32;
+
+    let clamped = offset.min(source_text.len().saturating_sub(1));
+    let line_start = source_text
+        .get(..clamped)
+        .and_then(|prefix| prefix.rfind('\n').map(|idx| idx + 1))
+        .unwrap_or_default();
+    let line_end = source_text
+        .get(clamped..)
+        .and_then(|suffix| suffix.find('\n').map(|idx| clamped + idx))
+        .unwrap_or(source_text.len());
+    Some((line_start, line_end))
+}
+
+fn find_last_unclosed_call_paren_offset(prefix: &str) -> Option<usize> {
+    let chars: Vec<(usize, char)> = prefix.char_indices().collect();
+    let mut stack: Vec<usize> = Vec::new();
+    let mut in_string = false;
+    let mut in_block_comment = false;
+    let mut idx = 0usize;
+
+    while idx < chars.len() {
+        let (byte_idx, ch) = chars[idx];
+        let next = chars.get(idx + 1).map(|(_, ch)| *ch);
+
+        if in_string {
+            if ch == '"' {
+                if next == Some('"') {
+                    idx += 2;
+                    continue;
+                }
+                in_string = false;
+            }
+            idx += 1;
+            continue;
+        }
+
+        if in_block_comment {
+            if ch == '*' && next == Some('/') {
+                in_block_comment = false;
+                idx += 2;
+                continue;
+            }
+            idx += 1;
+            continue;
+        }
+
+        if ch == '/' && next == Some('/') {
+            while idx < chars.len() && chars[idx].1 != '\n' {
+                idx += 1;
+            }
+            continue;
+        }
+
+        if ch == '/' && next == Some('*') {
+            in_block_comment = true;
+            idx += 2;
+            continue;
+        }
+
+        if ch == '"' {
+            in_string = true;
+            idx += 1;
+            continue;
+        }
+
+        match ch {
+            '(' => stack.push(byte_idx),
+            ')' => {
+                stack.pop();
+            }
+            _ => {}
+        }
+
+        idx += 1;
+    }
+
+    stack.pop()
+}
+
+fn find_last_incomplete_argument_call_paren_offset(
+    source_text: &str,
+    anchor_offset: usize,
+) -> Option<usize> {
+    let (line_start, line_end) = trimmed_line_bounds_at_offset(source_text, anchor_offset)?;
+    let line_text = source_text.get(line_start..line_end)?;
+
+    line_text
+        .char_indices()
+        .rev()
+        .find_map(|(offset, ch)| (ch == '(').then_some(offset))
+        .and_then(|offset| {
+            call_tail_has_missing_argument(line_text.get(offset..)?)
+                .then_some(line_start.saturating_add(offset))
+        })
+}
+
+fn trimmed_line_bounds_at_offset(
+    source_text: &str,
+    anchor_offset: usize,
+) -> Option<(usize, usize)> {
+    if source_text.is_empty() {
+        return None;
+    }
+
+    let clamped = anchor_offset.min(source_text.len().saturating_sub(1));
+    let line_start = source_text
+        .get(..clamped)
+        .and_then(|prefix| prefix.rfind('\n').map(|idx| idx + 1))
+        .unwrap_or_default();
+    let line_end_raw = source_text
+        .get(clamped..)
+        .and_then(|suffix| suffix.find('\n').map(|idx| clamped + idx))
+        .unwrap_or(source_text.len());
+    let line_text = source_text.get(line_start..line_end_raw)?;
+    let trimmed_end = line_start.saturating_add(line_text.trim_end().len());
+    Some((line_start, trimmed_end))
+}
+
+fn call_tail_has_missing_argument(tail: &str) -> bool {
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut pending_argument = false;
+
+    for ch in tail.chars() {
+        if in_string {
+            if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+
+        if ch == '"' {
+            in_string = true;
+            if depth == 1 {
+                pending_argument = false;
+            }
+            continue;
+        }
+
+        match ch {
+            '(' => {
+                depth += 1;
+                if depth == 1 {
+                    pending_argument = false;
+                }
+            }
+            ')' => {
+                if depth == 1 && pending_argument {
+                    return true;
+                }
+                if depth > 0 {
+                    depth -= 1;
+                }
+            }
+            ',' if depth == 1 => pending_argument = true,
+            _ if depth == 1 && !ch.is_whitespace() => pending_argument = false,
+            _ => {}
+        }
+    }
+
+    pending_argument
+}
+
+fn extract_recovery_call_head(text: &str) -> Option<IncompleteCallRecoveryKind> {
+    let trimmed = text.trim_end();
+
+    if let Some(type_name) = extract_recovery_constructor_name(trimmed) {
+        return Some(IncompleteCallRecoveryKind::Constructor { type_name });
+    }
+
+    if let Some(dot_byte_pos) = trimmed.rfind('.') {
+        let after_dot = trimmed.get(dot_byte_pos + 1..)?.trim_start();
+        let method_name = after_dot
+            .chars()
+            .take_while(|ch| recovery_call_identifier_char(*ch))
+            .collect::<String>();
+        if method_name.is_empty() {
+            return None;
+        }
+
+        let receiver_expr = trimmed.get(..dot_byte_pos)?.trim_end();
+        if receiver_expr.is_empty() {
+            return None;
+        }
+
+        return Some(IncompleteCallRecoveryKind::Method {
+            receiver_expr: receiver_expr.to_string(),
+            method_name,
+        });
+    }
+
+    let function_name = trimmed
+        .chars()
+        .rev()
+        .take_while(|ch| recovery_call_identifier_char(*ch))
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect::<String>();
+    if function_name.is_empty() || recovery_call_control_keyword(&function_name) {
+        return None;
+    }
+
+    None
+}
+
+fn extract_recovery_constructor_name(text: &str) -> Option<String> {
+    let mut iter = text.split_whitespace();
+    let keyword = iter.next()?;
+    if !keyword.eq_ignore_ascii_case("Новый") {
+        return None;
+    }
+
+    let remainder: String = iter.collect::<Vec<_>>().join(" ");
+    let normalized: String = remainder.chars().filter(|ch| !ch.is_whitespace()).collect();
+    if normalized.is_empty() {
+        return None;
+    }
+
+    normalized
+        .chars()
+        .all(|ch| ch == '.' || recovery_call_identifier_char(ch))
+        .then_some(normalized)
+}
+
+fn recovery_call_control_keyword(value: &str) -> bool {
+    matches!(
+        value.to_lowercase().as_str(),
+        "если"
+            | "иначеесли"
+            | "пока"
+            | "для"
+            | "каждого"
+            | "попытка"
+            | "исключение"
+            | "конецесли"
+            | "конеццикла"
+            | "конецпопытки"
+            | "конецпроцедуры"
+            | "конецфункции"
+            | "возврат"
+            | "выбор"
+            | "когда"
+            | "иначе"
+    )
+}
+
+fn recovery_call_identifier_char(ch: char) -> bool {
+    ch.is_alphanumeric() || ch == '_' || ('А'..='я').contains(&ch) || ch == 'Ё' || ch == 'ё'
+}
+
+fn extract_incomplete_member_access_receiver_slices(
+    source_text: &str,
+    error_span: bsl_shared::ir::Span,
+) -> Vec<(bsl_shared::ir::Span, &str)> {
+    let Some(dot_offset) = find_incomplete_member_access_dot_offset(source_text, error_span) else {
+        return Vec::new();
+    };
+    extract_incomplete_member_access_receiver_slices_at_dot_offset(source_text, dot_offset)
+}
+
+fn extract_incomplete_member_access_receiver_slices_at_dot_offset(
+    source_text: &str,
+    dot_offset: usize,
+) -> Vec<(bsl_shared::ir::Span, &str)> {
+    let Some(receiver_slices) =
+        extract_incomplete_member_access_receiver_slice_texts(source_text, dot_offset)
+    else {
+        return Vec::new();
+    };
+
+    receiver_slices
+        .into_iter()
+        .filter_map(|slice| source_slice_span(source_text, slice).map(|span| (span, slice)))
+        .collect()
+}
+
+fn extract_incomplete_member_access_target_slice_at_dot_offset(
+    source_text: &str,
+    dot_offset: usize,
+) -> Option<(bsl_shared::ir::Span, &str)> {
+    let line_start = source_text
+        .get(..dot_offset)?
+        .rfind('\n')
+        .map(|idx| idx + 1)
+        .unwrap_or_default();
+    let line_end = source_text
+        .get(dot_offset..)?
+        .find('\n')
+        .map(|idx| dot_offset + idx)
+        .unwrap_or(source_text.len());
+    let line_text = source_text.get(line_start..line_end)?;
+    let dot_in_line = dot_offset.checked_sub(line_start)?;
+    let tail = line_text.get(dot_in_line + 1..)?;
+    let leading_ws = tail.len().saturating_sub(tail.trim_start().len());
+    let tail = tail.get(leading_ws..)?;
+    let member_len = tail
+        .char_indices()
+        .take_while(|(_, ch)| recovery_call_identifier_char(*ch))
+        .last()
+        .map(|(idx, ch)| idx + ch.len_utf8())
+        .unwrap_or_default();
+    if member_len == 0 {
+        return None;
+    }
+
+    let receiver_slices =
+        extract_incomplete_member_access_receiver_slice_texts(source_text, dot_offset)?;
+    let receiver_expr_text = *receiver_slices.first()?;
+    let receiver_span = source_slice_span(source_text, receiver_expr_text)?;
+    let member_end = line_start
+        .saturating_add(dot_in_line)
+        .saturating_add(1)
+        .saturating_add(leading_ws)
+        .saturating_add(member_len);
+    let full_text = source_text.get(receiver_span.start as usize..member_end)?;
     Some((
-        bsl_shared::ir::Span {
-            start: receiver_start,
-            end: receiver_end,
-        },
-        receiver.to_lowercase(),
+        bsl_shared::ir::Span::new(
+            receiver_span.start,
+            member_end.min(u32::MAX as usize) as u32,
+        ),
+        full_text,
     ))
+}
+
+fn incomplete_member_access_dot_offsets_within_span(
+    source_text: &str,
+    container_span: bsl_shared::ir::Span,
+) -> Vec<usize> {
+    let start = container_span.start as usize;
+    let end = (container_span.end as usize).min(source_text.len());
+    let Some(container_text) = source_text.get(start..end) else {
+        return Vec::new();
+    };
+
+    let mut offsets = Vec::new();
+    let mut cursor = start;
+    for chunk in container_text.split_inclusive('\n') {
+        let line_text = chunk.strip_suffix('\n').unwrap_or(chunk);
+        let line_text = line_text.strip_suffix('\r').unwrap_or(line_text);
+        if let Some(dot_in_line) = line_text.rfind('.') {
+            let valid_tail = line_text
+                .get(dot_in_line + 1..)
+                .is_some_and(looks_like_incomplete_member_access_tail);
+            if valid_tail {
+                offsets.push(cursor.saturating_add(dot_in_line));
+            }
+        }
+        cursor = cursor.saturating_add(chunk.len());
+    }
+
+    offsets
+}
+
+fn looks_like_incomplete_member_access_tail(tail: &str) -> bool {
+    let trimmed = tail.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+
+    let mut saw_identifier_char = false;
+    for ch in trimmed.chars() {
+        if ch == ';' {
+            continue;
+        }
+        if ch == '_' || ch.is_alphanumeric() {
+            saw_identifier_char = true;
+            continue;
+        }
+        if ch.is_whitespace() {
+            continue;
+        }
+        return false;
+    }
+
+    saw_identifier_char
+}
+
+fn find_incomplete_member_access_dot_offset(
+    source_text: &str,
+    error_span: bsl_shared::ir::Span,
+) -> Option<usize> {
+    let start = error_span.start as usize;
+    let end = (error_span.end as usize).min(source_text.len());
+
+    if let Some(snippet) = source_text.get(start..end) {
+        let trimmed_start = snippet
+            .char_indices()
+            .find_map(|(idx, ch)| (!ch.is_whitespace()).then_some(idx))
+            .unwrap_or_default();
+        if let Some(trimmed) = snippet.get(trimmed_start..) {
+            let trimmed = trimmed.trim_end();
+            if trimmed.ends_with('.') {
+                return Some(
+                    start
+                        .saturating_add(trimmed_start)
+                        .saturating_add(trimmed.len().saturating_sub(1)),
+                );
+            }
+        }
+    }
+
+    line_end_dot_offset(source_text, end.saturating_sub(1))
+        .or_else(|| line_end_dot_offset(source_text, start))
+}
+
+fn line_end_dot_offset(source_text: &str, offset: usize) -> Option<usize> {
+    if source_text.is_empty() {
+        return None;
+    }
+
+    let clamped = offset.min(source_text.len().saturating_sub(1));
+    let line_start = source_text
+        .get(..clamped)
+        .and_then(|prefix| prefix.rfind('\n').map(|idx| idx + 1))
+        .unwrap_or_default();
+    let line_end = source_text
+        .get(clamped..)
+        .and_then(|suffix| suffix.find('\n').map(|idx| clamped + idx))
+        .unwrap_or(source_text.len());
+    let line_text = source_text.get(line_start..line_end)?;
+    let trimmed = line_text.trim_end();
+    let dot_in_line = trimmed.rfind('.')?;
+    if trimmed
+        .get(dot_in_line + 1..)
+        .is_some_and(|tail| !tail.trim().is_empty())
+    {
+        return None;
+    }
+
+    Some(line_start.saturating_add(dot_in_line))
+}
+
+fn extract_incomplete_member_access_receiver_slice_texts(
+    source_text: &str,
+    dot_offset: usize,
+) -> Option<Vec<&str>> {
+    let file_prefix = source_text.get(..dot_offset)?;
+    if let Some(choice_text) = extract_choice_expression(file_prefix) {
+        return extract_choice_result_expression_slices(choice_text);
+    }
+
+    let line_start = file_prefix
+        .rfind('\n')
+        .map(|idx| idx + 1)
+        .unwrap_or_default();
+    let line_prefix = source_text.get(line_start..dot_offset)?;
+    let receiver_expr_text = extract_expression_suffix(line_prefix)?;
+    let receiver_expr_text = strip_wrapping_parentheses(receiver_expr_text.trim());
+    if receiver_expr_text.is_empty() {
+        return None;
+    }
+
+    if let Some(choice_text) = extract_choice_expression(receiver_expr_text) {
+        return extract_choice_result_expression_slices(choice_text);
+    }
+
+    Some(
+        extract_ternary_result_expression_slices(receiver_expr_text)
+            .unwrap_or_else(|| vec![receiver_expr_text]),
+    )
+}
+
+fn parse_recovery_expression_snippet(expr_text: &str) -> Option<Expression> {
+    let synthetic = format!(
+        "Procedure __Recovery__()\n    __tmp = {};\nEndProcedure\n",
+        expr_text
+    );
+    let parse = bsl_syntax::parse_fast(&synthetic).ok()?;
+    find_first_assignment_value(&parse.program)
+}
+
+fn find_first_assignment_value(program: &Program) -> Option<Expression> {
+    for stmt in &program.statements {
+        if let Some(value) = find_first_assignment_value_in_statement(stmt) {
+            return Some(value);
+        }
+    }
+
+    None
+}
+
+fn find_first_assignment_value_in_statement(stmt: &Statement) -> Option<Expression> {
+    match stmt {
+        Statement::Assignment { value, .. } => Some(value.clone()),
+        Statement::FunctionDecl { body, .. } | Statement::ProcedureDecl { body, .. } => body
+            .iter()
+            .find_map(find_first_assignment_value_in_statement),
+        _ => None,
+    }
+}
+
+fn strip_wrapping_parentheses(text: &str) -> &str {
+    let mut out = text.trim();
+    loop {
+        let Some(stripped) = try_strip_one_pair_of_parens(out) else {
+            return out;
+        };
+        out = stripped.trim();
+    }
+}
+
+fn try_strip_one_pair_of_parens(text: &str) -> Option<&str> {
+    if !text.starts_with('(') || !text.ends_with(')') {
+        return None;
+    }
+
+    let mut depth: i32 = 0;
+    let mut in_string = false;
+
+    for (idx, ch) in text.char_indices() {
+        if in_string {
+            if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+
+        if ch == '"' {
+            in_string = true;
+            continue;
+        }
+
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth < 0 {
+                    return None;
+                }
+                if depth == 0 && idx.saturating_add(ch.len_utf8()) != text.len() {
+                    return None;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if depth != 0 {
+        return None;
+    }
+
+    text.get(1..text.len().saturating_sub(1))
+}
+
+fn extract_expression_suffix(prefix: &str) -> Option<&str> {
+    let trimmed = prefix.trim_end();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let start = find_expression_start(trimmed);
+    let expr = trimmed.get(start..)?.trim();
+    if expr.is_empty() {
+        None
+    } else {
+        Some(expr)
+    }
+}
+
+fn find_expression_start(prefix: &str) -> usize {
+    let mut paren_depth: i32 = 0;
+    let mut bracket_depth: i32 = 0;
+    let mut in_string = false;
+
+    let chars: Vec<(usize, char)> = prefix.char_indices().collect();
+    for &(idx, ch) in chars.iter().rev() {
+        if in_string {
+            if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+
+        match ch {
+            '"' => {
+                in_string = true;
+                continue;
+            }
+            ')' => {
+                paren_depth += 1;
+                continue;
+            }
+            '(' => {
+                if paren_depth > 0 {
+                    paren_depth -= 1;
+                    continue;
+                }
+                return idx + ch.len_utf8();
+            }
+            ']' => {
+                bracket_depth += 1;
+                continue;
+            }
+            '[' => {
+                if bracket_depth > 0 {
+                    bracket_depth -= 1;
+                    continue;
+                }
+                return idx + ch.len_utf8();
+            }
+            _ => {}
+        }
+
+        if paren_depth != 0 || bracket_depth != 0 {
+            continue;
+        }
+
+        match ch {
+            ';' | ',' | '=' | '+' | '-' | '*' | '/' => return idx + ch.len_utf8(),
+            _ => {}
+        }
+    }
+
+    0
+}
+
+fn extract_choice_result_expression_slices(receiver_expr_text: &str) -> Option<Vec<&str>> {
+    let start_offset = receiver_expr_text
+        .char_indices()
+        .find_map(|(idx, ch)| (!ch.is_whitespace()).then_some(idx))
+        .unwrap_or(receiver_expr_text.len());
+
+    let lower = receiver_expr_text.to_lowercase();
+    if lower.len() != receiver_expr_text.len() {
+        return None;
+    }
+
+    if keyword_at(&lower, start_offset, "выбор").is_none()
+        && keyword_at(&lower, start_offset, "case").is_none()
+    {
+        return None;
+    }
+
+    let keywords = collect_choice_keywords(receiver_expr_text, &lower, start_offset);
+    if keywords.is_empty() {
+        return None;
+    }
+
+    let end_start = keywords
+        .iter()
+        .rfind(|kw| kw.kind == ChoiceKeywordKind::End)
+        .map(|kw| kw.start)?;
+
+    let mut out: Vec<&str> = Vec::new();
+
+    for kw in &keywords {
+        if kw.kind != ChoiceKeywordKind::Then || kw.end > end_start {
+            continue;
+        }
+
+        let expr_start = skip_ws(receiver_expr_text, kw.end);
+        let expr_end = keywords
+            .iter()
+            .filter(|next| next.start >= expr_start)
+            .filter(|next| {
+                matches!(
+                    next.kind,
+                    ChoiceKeywordKind::When | ChoiceKeywordKind::Else | ChoiceKeywordKind::End
+                )
+            })
+            .map(|next| next.start)
+            .min()
+            .unwrap_or(receiver_expr_text.len());
+
+        let expr = receiver_expr_text.get(expr_start..expr_end)?.trim();
+        if !expr.is_empty() {
+            out.push(expr);
+        }
+    }
+
+    if let Some(else_kw) = keywords
+        .iter()
+        .find(|kw| kw.kind == ChoiceKeywordKind::Else && kw.end <= end_start)
+        .copied()
+    {
+        let expr_start = skip_ws(receiver_expr_text, else_kw.end);
+        let expr = receiver_expr_text.get(expr_start..end_start)?.trim();
+        if !expr.is_empty() {
+            out.push(expr);
+        }
+    }
+
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+fn extract_ternary_result_expression_slices(receiver_expr_text: &str) -> Option<Vec<&str>> {
+    let trimmed = receiver_expr_text.trim();
+    if !trimmed.starts_with("?(") || !trimmed.ends_with(')') {
+        return None;
+    }
+
+    let inner = trimmed.get(2..trimmed.len().saturating_sub(1))?;
+    let parts = split_top_level_csv(inner);
+    if parts.len() != 3 {
+        return None;
+    }
+
+    let then_expr = parts.get(1)?.trim();
+    let else_expr = parts.get(2)?.trim();
+    if then_expr.is_empty() || else_expr.is_empty() {
+        return None;
+    }
+
+    Some(vec![then_expr, else_expr])
+}
+
+fn split_top_level_csv(text: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0usize;
+    let mut paren_depth: i32 = 0;
+    let mut bracket_depth: i32 = 0;
+    let mut in_string = false;
+
+    for (idx, ch) in text.char_indices() {
+        if in_string {
+            if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+
+        match ch {
+            '"' => in_string = true,
+            '(' => paren_depth += 1,
+            ')' => paren_depth -= 1,
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth -= 1,
+            ',' if paren_depth == 0 && bracket_depth == 0 => {
+                if let Some(part) = text.get(start..idx) {
+                    parts.push(part);
+                }
+                start = idx.saturating_add(ch.len_utf8());
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(part) = text.get(start..) {
+        parts.push(part);
+    }
+
+    parts
+}
+
+fn source_slice_span(source: &str, slice: &str) -> Option<bsl_shared::ir::Span> {
+    let slice_start = slice.as_ptr() as usize;
+    let source_start = source.as_ptr() as usize;
+    let start = slice_start.checked_sub(source_start)?;
+    let end = start.checked_add(slice.len())?;
+    if end > source.len() {
+        return None;
+    }
+
+    Some(bsl_shared::ir::Span {
+        start: start.min(u32::MAX as usize) as u32,
+        end: end.min(u32::MAX as usize) as u32,
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChoiceKeywordKind {
+    Case,
+    When,
+    Then,
+    Else,
+    End,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ChoiceKeyword {
+    kind: ChoiceKeywordKind,
+    start: usize,
+    end: usize,
+}
+
+fn extract_choice_expression(receiver_expr_text: &str) -> Option<&str> {
+    let trimmed = receiver_expr_text.trim_end();
+    let lower = trimmed.to_lowercase();
+    if lower.len() != trimmed.len() {
+        return None;
+    }
+
+    let keywords = collect_choice_keywords(trimmed, &lower, 0);
+    if keywords.is_empty() {
+        return None;
+    }
+
+    let mut stack: Vec<usize> = Vec::new();
+    let mut matched_start: Option<usize> = None;
+    for kw in &keywords {
+        match kw.kind {
+            ChoiceKeywordKind::Case => stack.push(kw.start),
+            ChoiceKeywordKind::End => {
+                let Some(case_start) = stack.pop() else {
+                    continue;
+                };
+                if kw.end == trimmed.len() {
+                    matched_start = Some(case_start);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let start = matched_start?;
+    trimmed.get(start..)
+}
+
+fn collect_choice_keywords(
+    receiver_expr_text: &str,
+    lower: &str,
+    start_offset: usize,
+) -> Vec<ChoiceKeyword> {
+    let mut keywords: Vec<ChoiceKeyword> = Vec::new();
+    let mut i = start_offset;
+    let mut in_string = false;
+    let mut paren_depth: i32 = 0;
+    let mut bracket_depth: i32 = 0;
+
+    while i < receiver_expr_text.len() {
+        let ch = receiver_expr_text[i..].chars().next().unwrap_or('\0');
+        let ch_len = ch.len_utf8().max(1);
+
+        if in_string {
+            if ch == '"' {
+                let next_i = i.saturating_add(ch_len);
+                let is_escaped_quote = receiver_expr_text
+                    .get(next_i..)
+                    .and_then(|rest| rest.chars().next())
+                    .is_some_and(|next_ch| next_ch == '"');
+
+                if is_escaped_quote {
+                    i = next_i.saturating_add(1);
+                    continue;
+                }
+                in_string = false;
+            }
+
+            i = i.saturating_add(ch_len);
+            continue;
+        }
+
+        match ch {
+            '"' => {
+                in_string = true;
+                i = i.saturating_add(ch_len);
+                continue;
+            }
+            '(' => {
+                paren_depth = paren_depth.saturating_add(1);
+                i = i.saturating_add(ch_len);
+                continue;
+            }
+            ')' => {
+                if paren_depth > 0 {
+                    paren_depth -= 1;
+                }
+                i = i.saturating_add(ch_len);
+                continue;
+            }
+            '[' => {
+                bracket_depth = bracket_depth.saturating_add(1);
+                i = i.saturating_add(ch_len);
+                continue;
+            }
+            ']' => {
+                if bracket_depth > 0 {
+                    bracket_depth -= 1;
+                }
+                i = i.saturating_add(ch_len);
+                continue;
+            }
+            _ => {}
+        }
+
+        if paren_depth == 0 && bracket_depth == 0 {
+            if let Some(end) =
+                keyword_at(lower, i, "выбор").or_else(|| keyword_at(lower, i, "case"))
+            {
+                keywords.push(ChoiceKeyword {
+                    kind: ChoiceKeywordKind::Case,
+                    start: i,
+                    end,
+                });
+                i = end;
+                continue;
+            }
+
+            if let Some(end) =
+                keyword_at(lower, i, "когда").or_else(|| keyword_at(lower, i, "when"))
+            {
+                keywords.push(ChoiceKeyword {
+                    kind: ChoiceKeywordKind::When,
+                    start: i,
+                    end,
+                });
+                i = end;
+                continue;
+            }
+
+            if let Some(end) =
+                keyword_at(lower, i, "тогда").or_else(|| keyword_at(lower, i, "then"))
+            {
+                keywords.push(ChoiceKeyword {
+                    kind: ChoiceKeywordKind::Then,
+                    start: i,
+                    end,
+                });
+                i = end;
+                continue;
+            }
+
+            if let Some(end) =
+                keyword_at(lower, i, "иначе").or_else(|| keyword_at(lower, i, "else"))
+            {
+                keywords.push(ChoiceKeyword {
+                    kind: ChoiceKeywordKind::Else,
+                    start: i,
+                    end,
+                });
+                i = end;
+                continue;
+            }
+
+            if let Some(end) = keyword_at(lower, i, "конецвыбора")
+                .or_else(|| keyword_at(lower, i, "endcase"))
+                .or_else(|| keyword_at(lower, i, "конец"))
+                .or_else(|| keyword_at(lower, i, "end"))
+            {
+                keywords.push(ChoiceKeyword {
+                    kind: ChoiceKeywordKind::End,
+                    start: i,
+                    end,
+                });
+                i = end;
+                continue;
+            }
+        }
+
+        i = i.saturating_add(ch_len);
+    }
+
+    keywords
+}
+
+fn skip_ws(text: &str, mut idx: usize) -> usize {
+    while let Some(ch) = text.get(idx..).and_then(|rest| rest.chars().next()) {
+        if ch.is_whitespace() {
+            idx = idx.saturating_add(ch.len_utf8());
+        } else {
+            break;
+        }
+    }
+
+    idx
+}
+
+fn keyword_at(lower: &str, idx: usize, keyword: &str) -> Option<usize> {
+    let rest = lower.get(idx..)?;
+    if !rest.starts_with(keyword) {
+        return None;
+    }
+
+    let before = lower.get(..idx)?.chars().next_back();
+    if before.is_some_and(is_word_char) {
+        return None;
+    }
+
+    let end = idx.saturating_add(keyword.len());
+    let after = lower.get(end..)?.chars().next();
+    if after.is_some_and(is_word_char) {
+        return None;
+    }
+
+    Some(end)
+}
+
+fn is_word_char(ch: char) -> bool {
+    ch == '_' || ch.is_alphanumeric()
 }
 
 #[cfg(test)]

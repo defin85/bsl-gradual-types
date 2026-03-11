@@ -2,7 +2,7 @@
   "schema_version": "v1",
   "contract_version": "quality-gates-v1",
   "change_id": "refactor-ir-canonical-semantic-pipeline",
-  "generated_at": "2026-03-11T16:15:00+03:00",
+  "generated_at": "2026-03-11T20:03:54+03:00",
   "overall": {
     "verdict": "pass",
     "gates_total": 6,
@@ -22,7 +22,8 @@
       "verdict": "pass",
       "reason_code": "acceptance_bundle_complete",
       "artifacts": [
-        "openspec/changes/refactor-ir-canonical-semantic-pipeline/validation/acceptance-report.json"
+        "openspec/changes/refactor-ir-canonical-semantic-pipeline/validation/acceptance-report.json",
+        "openspec/changes/refactor-ir-canonical-semantic-pipeline/execution-matrix.md"
       ]
     },
     {
@@ -73,7 +74,8 @@
       ],
       "artifacts": [
         "openspec/changes/refactor-ir-canonical-semantic-pipeline/tasks.md",
-        "openspec/changes/refactor-ir-canonical-semantic-pipeline/specs/bsl-intellisense-v2/spec.md"
+        "openspec/changes/refactor-ir-canonical-semantic-pipeline/specs/bsl-intellisense-v2/spec.md",
+        "openspec/changes/refactor-ir-canonical-semantic-pipeline/specs/mcp-bsl-agent/spec.md"
       ]
     },
     {
@@ -81,12 +83,11 @@
       "verdict": "pass",
       "reason_code": "docs_match_shipped_contract",
       "artifacts": [
+        "docs/guides/type-lookup-architecture.md",
+        "docs/architecture/components-detailed.md",
+        "docs/guides/lsp-v2-latency-policy.md",
         "docs/api/web-api-reference.md",
-        "docs/roadmap/mcp-bsl-agent/api.md",
-        "backend/src/presentation/web/handlers.rs",
-        "backend/tests/flow_sensitive_web_api_test.rs",
-        "bsl-agent/src/types/mod.rs",
-        "bsl-agent/src/session/manager_semantic_core.rs"
+        "openspec/changes/refactor-ir-canonical-semantic-pipeline/execution-matrix.md"
       ]
     }
   ]

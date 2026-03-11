@@ -4,11 +4,12 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
 
-use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, SettingsId};
+use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, FileId as V2FileId, SettingsId};
 use bsl_backend::application::get_completion_with_semantic_program_snapshot_v2;
 use bsl_backend::system::DepsBundleV2;
 use bsl_shared::domain::types::FacetKind;
 use bsl_shared::domain::types::MetadataKind;
+use bsl_shared::domain::TypeResolution;
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::formatting::DetailLevel;
 
@@ -72,16 +73,20 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
         settings_id: SettingsId::from_hash("m5-metadata-completion"),
         diagnostics_detail_level: DetailLevel::Full,
     });
+    let file_id = V2FileId(1);
     host.apply_change(ChangeV2::SetFile {
-        file_id: bsl_analysis_v2::FileId(1),
+        file_id,
         text: Arc::from(content.to_string()),
         version: 0,
         path: Arc::from("m5_metadata_completion_fixture.bsl"),
     });
 
     let analysis = host.analysis();
+    analysis
+        .precompute_type_index_for_file(file_id, None, 0)
+        .expect("type index precompute");
     let ir_program = analysis
-        .ir(bsl_analysis_v2::FileId(1))
+        .ir(file_id)
         .ok()
         .flatten()
         .expect("ir");
@@ -126,6 +131,39 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
     // 2) Документы. -> имена документов + kind/detail
     let line = 2u32;
     let line_text = "    Документы.";
+    assert!(
+        analysis
+            .current_type_index_serve_only_ready(file_id)
+            .expect("serve-only readiness"),
+        "Документы. fixture must have exact serve-only artifact"
+    );
+    let documents_probe = content
+        .find("Документы")
+        .map(|idx| idx + "Документы".len() - 1)
+        .expect("Документы probe") as u32;
+    let documents_profiled = analysis
+        .type_at_byte_offset_serve_only_profiled(file_id, documents_probe)
+        .expect("Документы serve-only lookup");
+    assert_eq!(
+        documents_profiled
+            .resolution
+            .as_ref()
+            .map(TypeResolution::type_name),
+        Some("Документы".to_string()),
+        "Документы. fixture must materialize exact owner type before completion"
+    );
+    let owner_hint = support::completion_owner_hint_for_position(
+        &analysis,
+        file_id,
+        content,
+        line,
+        utf16_column(line_text),
+    );
+    assert_eq!(
+        owner_hint.as_ref().map(TypeResolution::type_name),
+        Some("Документы".to_string()),
+        "Документы. should surface canonical owner hint before completion"
+    );
     let result = get_completion_with_semantic_program_snapshot_v2(
         content,
         line,
@@ -136,7 +174,7 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
         "m5_metadata_completion_fixture.bsl",
         resolver.as_ref(),
         ir_program.clone(),
-        None,
+        owner_hint,
         false,
     )
     .await
@@ -169,6 +207,13 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
     // 3) Документы.ЗаказНаряды. -> методы менеджера
     let line = 3u32;
     let line_text = "    Документы.ЗаказНаряды.";
+    let owner_hint = support::completion_owner_hint_for_position(
+        &analysis,
+        file_id,
+        content,
+        line,
+        utf16_column(line_text),
+    );
     let result = get_completion_with_semantic_program_snapshot_v2(
         content,
         line,
@@ -179,7 +224,7 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
         "m5_metadata_completion_fixture.bsl",
         resolver.as_ref(),
         ir_program.clone(),
-        None,
+        owner_hint,
         false,
     )
     .await
@@ -194,6 +239,13 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
     // 4) ...СоздатьДокумент(). -> свойства объекта (в т.ч. фасет Ссылка и ТЧ)
     let line = 4u32;
     let line_text = "    Документы.ЗаказНаряды.СоздатьДокумент().";
+    let owner_hint = support::completion_owner_hint_for_position(
+        &analysis,
+        file_id,
+        content,
+        line,
+        utf16_column(line_text),
+    );
     let result = get_completion_with_semantic_program_snapshot_v2(
         content,
         line,
@@ -204,7 +256,7 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
         "m5_metadata_completion_fixture.bsl",
         resolver.as_ref(),
         ir_program.clone(),
-        None,
+        owner_hint,
         false,
     )
     .await
@@ -224,6 +276,13 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
     // 5) ...СоздатьДокумент().ПолучитьСсылкуНового(). -> методы ссылки
     let line = 5u32;
     let line_text = "    Документы.ЗаказНаряды.СоздатьДокумент().ПолучитьСсылкуНового().";
+    let owner_hint = support::completion_owner_hint_for_position(
+        &analysis,
+        file_id,
+        content,
+        line,
+        utf16_column(line_text),
+    );
     let result = get_completion_with_semantic_program_snapshot_v2(
         content,
         line,
@@ -234,7 +293,7 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
         "m5_metadata_completion_fixture.bsl",
         resolver.as_ref(),
         ir_program.clone(),
-        None,
+        owner_hint,
         false,
     )
     .await
@@ -249,6 +308,13 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
     // 6) ...СоздатьДокумент().Работы. -> методы табличной части (коллекция)
     let line = 6u32;
     let line_text = "    Документы.ЗаказНаряды.СоздатьДокумент().Работы.";
+    let owner_hint = support::completion_owner_hint_for_position(
+        &analysis,
+        file_id,
+        content,
+        line,
+        utf16_column(line_text),
+    );
     let result = get_completion_with_semantic_program_snapshot_v2(
         content,
         line,
@@ -259,7 +325,7 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
         "m5_metadata_completion_fixture.bsl",
         resolver.as_ref(),
         ir_program.clone(),
-        None,
+        owner_hint,
         false,
     )
     .await
@@ -274,6 +340,13 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
     // 7) ...Работы.Добавить(). -> свойства строки табличной части
     let line = 7u32;
     let line_text = "    Документы.ЗаказНаряды.СоздатьДокумент().Работы.Добавить().";
+    let owner_hint = support::completion_owner_hint_for_position(
+        &analysis,
+        file_id,
+        content,
+        line,
+        utf16_column(line_text),
+    );
     let result = get_completion_with_semantic_program_snapshot_v2(
         content,
         line,
@@ -284,7 +357,7 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
         "m5_metadata_completion_fixture.bsl",
         resolver.as_ref(),
         ir_program,
-        None,
+        owner_hint,
         false,
     )
     .await

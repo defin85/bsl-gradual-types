@@ -45,6 +45,7 @@ fn create_test_repository_with_n_methods(method_count: usize) -> Arc<InMemoryTyp
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     };
 
     repo.load_types(vec![test_type]).unwrap();
@@ -80,6 +81,7 @@ fn create_test_repository_with_n_properties(property_count: usize) -> Arc<InMemo
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     };
 
     repo.load_types(vec![test_type]).unwrap();

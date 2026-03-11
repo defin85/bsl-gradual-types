@@ -19,13 +19,15 @@ use bsl_analysis_v2::{
 use bsl_backend::system::{
     IndexItem, IndexItemKind, IndexKind, IndexSnapshot, IntellisenseIndexStore, TypeKind,
 };
+use bsl_runtime::application::type_system::signature_help_query;
+use bsl_runtime::system::LineIndex;
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::signature_index::{
     ConstructorSignature, MethodSignature, SignatureIndex, SignatureSource,
 };
 use bsl_shared::domain::type_id::TypeId;
 use bsl_shared::domain::types::{
-    ParameterInfo, RawDataSource, RawMethodData, RawParamData, RawTypeData,
+    ParameterInfo, RawDataSource, RawMethodData, RawParamData, RawTypeData, TypeResolution,
 };
 use bsl_shared::formatting::DetailLevel;
 use bsl_shared::ir::SemanticProgram;
@@ -255,7 +257,7 @@ fn build_v2_analysis_ir(
 }
 
 #[tokio::test]
-async fn lsp_completion_returns_items_and_stats() {
+async fn lsp_completion_member_access_without_owner_hint_is_fail_closed() {
     let env = build_env();
     let content = "Массив.";
     let position = position_at_marker(content, "Массив.");
@@ -267,6 +269,40 @@ async fn lsp_completion_returns_items_and_stats() {
         file_path,
         ir_program,
         None,
+        env.deps.clone(),
+        position,
+        &uri,
+        &env.index_snapshot,
+        false,
+        false,
+    )
+    .await
+    .expect("completion response");
+
+    assert!(!response.had_error);
+    assert!(response.stats.is_none());
+
+    let items = match response.response {
+        CompletionResponse::List(list) => list.items,
+        CompletionResponse::Array(list) => list,
+    };
+
+    assert!(items.is_empty(), "items: {:?}", items);
+}
+
+#[tokio::test]
+async fn lsp_completion_returns_items_and_stats_with_owner_hint() {
+    let env = build_env();
+    let content = "Массив.";
+    let position = position_at_marker(content, "Массив.");
+    let uri = Url::parse("file:///m8_lsp_completion.bsl").expect("url");
+
+    let (file_content, file_path, ir_program) = build_v2_ir(content, &uri, env.deps.clone());
+    let response = completion_handler::handle_completion_v2(
+        file_content,
+        file_path,
+        ir_program,
+        Some(TypeResolution::explicit("Массив")),
         env.deps.clone(),
         position,
         &uri,
@@ -300,7 +336,7 @@ async fn lsp_completion_resolve_respects_snippet_support() {
         file_content,
         file_path,
         ir_program,
-        None,
+        Some(TypeResolution::explicit("Массив")),
         env.deps.clone(),
         position,
         &uri,
@@ -391,6 +427,290 @@ async fn lsp_signature_help_returns_method_and_constructor() {
         .unwrap_or("");
     assert!(method_label.contains("Добавить("));
     assert_eq!(method.active_parameter, Some(1));
+}
+
+#[tokio::test]
+async fn lsp_signature_help_uses_semantic_facts_with_empty_request_time_repository() {
+    let env = build_env();
+    let content = r#"Процедура Тест()
+    Новый Массив(1, )
+    МойМассив = Новый Массив
+    МойМассив.Добавить(1, )
+КонецПроцедуры"#;
+    let uri = Url::parse("file:///test_signature_help_v2_empty_repo.bsl").expect("test uri");
+    let (analysis, file_id, file_content, ir_program) =
+        build_v2_analysis_ir(content, &uri, env.deps.clone());
+    let stripped_deps = build_deps(Arc::new(InMemoryTypeRepository::new()));
+    let syntax_errors = analysis
+        .syntax_diagnostics(file_id)
+        .expect("syntax diagnostics")
+        .expect("syntax diagnostics snapshot");
+
+    let constructor_pos = position_at_marker(content, "Новый Массив(1, ");
+    let method_pos = position_at_marker(content, "МойМассив.Добавить(1, ");
+    let constructor_query = signature_help_query(content, constructor_pos.line, constructor_pos.character)
+        .expect("constructor query");
+    let constructor_call_offset = LineIndex::new(content)
+        .utf16_position_to_byte_offset(
+            content,
+            constructor_query.call_start_line,
+            constructor_query.call_start_character,
+        )
+        .min(u32::MAX as usize) as u32;
+    let constructor_fact = ir_program
+        .semantic_facts
+        .constructor_targets_by_span
+        .iter()
+        .find(|(span, target)| {
+            span.contains(constructor_call_offset) && target.type_name.eq_ignore_ascii_case("Массив")
+        });
+    assert!(
+        constructor_fact.is_some(),
+        "missing constructor semantic fact at offset {constructor_call_offset}; spans={:?}; syntax_errors={:?}",
+        ir_program
+            .semantic_facts
+            .constructor_targets_by_span
+            .keys()
+            .collect::<Vec<_>>(),
+        syntax_errors
+    );
+    assert!(
+        constructor_fact
+            .and_then(|(_, target)| target.signature.as_ref())
+            .is_some(),
+        "constructor semantic fact is missing serialized signature"
+    );
+    let method_query = signature_help_query(content, method_pos.line, method_pos.character)
+        .expect("method query");
+    let method_call_offset = LineIndex::new(content)
+        .utf16_position_to_byte_offset(
+            content,
+            method_query.call_start_line,
+            method_query.call_start_character,
+        )
+        .min(u32::MAX as usize) as u32;
+    let method_fact = ir_program
+        .semantic_facts
+        .call_method_targets_by_span
+        .iter()
+        .find(|(span, target)| {
+            [method_call_offset.saturating_sub(1), method_call_offset]
+                .into_iter()
+                .any(|offset| span.contains(offset))
+                && target.method_name.eq_ignore_ascii_case("Добавить")
+                && target.signature.is_some()
+        });
+    assert!(
+        method_fact.is_some(),
+        "missing method semantic fact at offset {method_call_offset}; spans={:?}",
+        ir_program
+            .semantic_facts
+            .call_method_targets_by_span
+            .keys()
+            .collect::<Vec<_>>()
+    );
+
+    let constructor = signature_help_handler::handle_signature_help_v2(
+        &analysis,
+        file_id,
+        file_content.clone(),
+        constructor_pos,
+        ir_program.clone(),
+        stripped_deps.clone(),
+        None,
+    )
+    .expect("constructor signature help from semantic facts");
+
+    let method = signature_help_handler::handle_signature_help_v2(
+        &analysis,
+        file_id,
+        file_content,
+        method_pos,
+        ir_program,
+        stripped_deps,
+        None,
+    )
+    .expect("method signature help from semantic facts");
+
+    let constructor_label = constructor
+        .signatures
+        .first()
+        .map(|sig| sig.label.as_str())
+        .unwrap_or("");
+    assert!(constructor_label.starts_with("Новый Массив("));
+    assert_eq!(constructor.active_parameter, Some(1));
+
+    let method_label = method
+        .signatures
+        .first()
+        .map(|sig| sig.label.as_str())
+        .unwrap_or("");
+    assert!(method_label.contains("Добавить("));
+    assert_eq!(method.active_parameter, Some(1));
+}
+
+#[tokio::test]
+async fn lsp_signature_help_uses_semantic_facts_for_local_function_with_empty_request_time_repository() {
+    let repository = Arc::new(InMemoryTypeRepository::new());
+    let deps = build_deps(repository);
+    let content = concat!(
+        "Функция Локальная(Аргумент, Доп = Неопределено)\n",
+        "    Возврат Аргумент;\n",
+        "КонецФункции\n",
+        "\n",
+        "Процедура Тест()\n",
+        "    Локальная(1, );\n",
+        "КонецПроцедуры\n"
+    );
+    let uri = Url::parse("file:///test_signature_help_local_empty_repo.bsl").expect("test uri");
+    let (analysis, file_id, file_content, ir_program) =
+        build_v2_analysis_ir(content, &uri, deps.clone());
+    let stripped_deps = build_deps(Arc::new(InMemoryTypeRepository::new()));
+
+    let local_pos = position_at_marker(content, "Локальная(1, ");
+    let local_query = signature_help_query(content, local_pos.line, local_pos.character)
+        .expect("local query");
+    let local_call_offset = LineIndex::new(content)
+        .utf16_position_to_byte_offset(
+            content,
+            local_query.call_start_line,
+            local_query.call_start_character,
+        )
+        .min(u32::MAX as usize) as u32;
+    let local_fact = ir_program
+        .semantic_facts
+        .call_method_targets_by_span
+        .iter()
+        .find(|(span, target)| {
+            span.contains(local_call_offset)
+                && target.method_name.eq_ignore_ascii_case("Локальная")
+                && target.signature.is_some()
+        });
+    assert!(
+        local_fact.is_some(),
+        "missing local callable semantic fact at offset {local_call_offset}; spans={:?}",
+        ir_program
+            .semantic_facts
+            .call_method_targets_by_span
+            .keys()
+            .collect::<Vec<_>>()
+    );
+
+    let local = signature_help_handler::handle_signature_help_v2(
+        &analysis,
+        file_id,
+        file_content,
+        local_pos,
+        ir_program,
+        stripped_deps,
+        None,
+    )
+    .expect("local signature help from semantic facts");
+
+    let local_label = local
+        .signatures
+        .first()
+        .map(|sig| sig.label.as_str())
+        .unwrap_or("");
+    assert!(local_label.contains("Локальная("), "label={local_label}");
+    assert!(local_label.contains("Аргумент"), "label={local_label}");
+    assert!(local_label.contains("Доп"), "label={local_label}");
+    assert_eq!(local.active_parameter, Some(1));
+}
+
+#[tokio::test]
+async fn lsp_signature_help_uses_semantic_facts_for_global_function_with_empty_request_time_repository() {
+    let repository = build_repository_with_array();
+    let global_signature = MethodSignature::new(
+        "ГлобальнаяФункция".to_string(),
+        None,
+        vec![
+            ParameterInfo {
+                name: "Первый".to_string(),
+                type_name: Some("Число".to_string()),
+                is_optional: false,
+                default_value: None,
+                description: None,
+            },
+            ParameterInfo {
+                name: "Второй".to_string(),
+                type_name: Some("Число".to_string()),
+                is_optional: true,
+                default_value: None,
+                description: None,
+            },
+        ],
+        Some("Булево".to_string()),
+        None,
+        None,
+        SignatureSource::Platform,
+        None,
+        Default::default(),
+    );
+    repository.add_global_function_signature("ГлобальнаяФункция", global_signature);
+    let deps = build_deps(repository);
+    let content = concat!(
+        "Процедура Тест()\n",
+        "    ГлобальнаяФункция(1, );\n",
+        "КонецПроцедуры\n"
+    );
+    let uri = Url::parse("file:///test_signature_help_global_empty_repo.bsl").expect("test uri");
+    let (analysis, file_id, file_content, ir_program) =
+        build_v2_analysis_ir(content, &uri, deps.clone());
+    let stripped_deps = build_deps(Arc::new(InMemoryTypeRepository::new()));
+
+    let global_pos = position_at_marker(content, "ГлобальнаяФункция(1, ");
+    let global_query = signature_help_query(content, global_pos.line, global_pos.character)
+        .expect("global query");
+    let global_call_offset = LineIndex::new(content)
+        .utf16_position_to_byte_offset(
+            content,
+            global_query.call_start_line,
+            global_query.call_start_character,
+        )
+        .min(u32::MAX as usize) as u32;
+    let global_fact = ir_program
+        .semantic_facts
+        .call_method_targets_by_span
+        .iter()
+        .find(|(span, target)| {
+            span.contains(global_call_offset)
+                && target.method_name.eq_ignore_ascii_case("ГлобальнаяФункция")
+                && target.signature.is_some()
+        });
+    assert!(
+        global_fact.is_some(),
+        "missing global callable semantic fact at offset {global_call_offset}; spans={:?}",
+        ir_program
+            .semantic_facts
+            .call_method_targets_by_span
+            .keys()
+            .collect::<Vec<_>>()
+    );
+
+    let global = signature_help_handler::handle_signature_help_v2(
+        &analysis,
+        file_id,
+        file_content,
+        global_pos,
+        ir_program,
+        stripped_deps,
+        None,
+    )
+    .expect("global signature help from semantic facts");
+
+    let global_label = global
+        .signatures
+        .first()
+        .map(|sig| sig.label.as_str())
+        .unwrap_or("");
+    assert!(
+        global_label.contains("ГлобальнаяФункция("),
+        "label={global_label}"
+    );
+    assert!(global_label.contains("Первый"), "label={global_label}");
+    assert!(global_label.contains("Второй"), "label={global_label}");
+    assert_eq!(global.active_parameter, Some(1));
 }
 
 #[tokio::test]

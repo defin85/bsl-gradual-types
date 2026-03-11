@@ -1,11 +1,4 @@
 {
   "isIncomplete": false,
-  "items": [
-    {
-      "insertText": "Добавить",
-      "insertTextFormat": null,
-      "kind": "METHOD",
-      "label": "Добавить"
-    }
-  ]
+  "items": []
 }

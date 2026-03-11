@@ -2,7 +2,7 @@
   "schema_version": "v1",
   "contract_version": "acceptance-report-v1",
   "change_id": "refactor-ir-canonical-semantic-pipeline",
-  "generated_at": "2026-03-11T16:15:00+03:00",
+  "generated_at": "2026-03-11T20:03:54+03:00",
   "evidence_basis": "checked_in_automated_assets",
   "human_matrix_ref": "openspec/changes/refactor-ir-canonical-semantic-pipeline/execution-matrix.md",
   "fixtures": [
@@ -15,7 +15,15 @@
       "kind": "steady_current_revision"
     },
     {
-      "id": "core_tools_fixture",
+      "id": "metadata_member_access",
+      "kind": "steady_current_revision"
+    },
+    {
+      "id": "config_symbol_definition",
+      "kind": "steady_current_revision"
+    },
+    {
+      "id": "signature_help_semantic_facts",
       "kind": "steady_current_revision"
     },
     {
@@ -50,12 +58,11 @@
   "operations": [
     "completion",
     "hover",
+    "signature_help",
     "definition",
     "type_at_position",
     "members",
-    "diagnostics",
-    "symbol_search",
-    "references"
+    "diagnostics"
   ],
   "consumers": [
     "runtime",
@@ -72,13 +79,15 @@
     "revision_integrity_preserved",
     "module_context_binding_preserved",
     "facet_identity_preserved",
-    "legacy_fallback_removed"
+    "legacy_fallback_removed",
+    "semantic_definition_anchor",
+    "semantic_signature_contract"
   ],
   "bundles": [
     {
       "id": "cross_consumer_semantic_equivalence",
       "verdict": "pass",
-      "checks_total": 12
+      "checks_total": 15
     },
     {
       "id": "no_adapter_local_semantic_truth",
@@ -203,28 +212,80 @@
     },
     {
       "bundle_id": "cross_consumer_semantic_equivalence",
-      "fixture_id": "core_tools_fixture",
-      "operation": "members",
+      "fixture_id": "metadata_member_access",
+      "operation": "completion",
       "consumer": "lsp",
       "verdict": "pass",
       "reason_code": "parity_matches_runtime_oracle",
       "source_asset": {
         "kind": "test",
-        "path": "backend/src/bin/lsp_server/server/core/tests.rs",
-        "selector": "p25_cross_interface_semantic_parity_lsp_web_mcp_core_tools"
+        "path": "backend/tests/metadata_completion_fixture_test.rs",
+        "selector": "metadata_completion_supports_documents_facets_and_tabular_sections"
       }
     },
     {
       "bundle_id": "cross_consumer_semantic_equivalence",
-      "fixture_id": "core_tools_fixture",
-      "operation": "definition",
-      "consumer": "mcp",
+      "fixture_id": "metadata_member_access",
+      "operation": "completion",
+      "consumer": "runtime",
       "verdict": "pass",
       "reason_code": "parity_matches_runtime_oracle",
       "source_asset": {
         "kind": "test",
-        "path": "backend/src/bin/lsp_server/server/core/tests.rs",
-        "selector": "p25_cross_interface_semantic_parity_lsp_web_mcp_core_tools"
+        "path": "backend/tests/m8_completion_matrix_golden_v2_test.rs",
+        "selector": "m8_completion_matrix_golden_v2"
+      }
+    },
+    {
+      "bundle_id": "cross_consumer_semantic_equivalence",
+      "fixture_id": "config_symbol_definition",
+      "operation": "definition",
+      "consumer": "lsp",
+      "verdict": "pass",
+      "reason_code": "semantic_definition_anchor",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/tests/goto_definition_common_module_test.rs",
+        "selector": "goto_definition_resolves_configuration_symbol_metadata_xml_from_semantic_facts_with_empty_consumer_repo"
+      }
+    },
+    {
+      "bundle_id": "cross_consumer_semantic_equivalence",
+      "fixture_id": "signature_help_semantic_facts",
+      "operation": "signature_help",
+      "consumer": "lsp",
+      "verdict": "pass",
+      "reason_code": "semantic_signature_contract",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/tests/lsp_intellisense_tests.rs",
+        "selector": "lsp_signature_help_uses_semantic_facts_with_empty_request_time_repository"
+      }
+    },
+    {
+      "bundle_id": "cross_consumer_semantic_equivalence",
+      "fixture_id": "signature_help_semantic_facts",
+      "operation": "signature_help",
+      "consumer": "lsp",
+      "verdict": "pass",
+      "reason_code": "semantic_signature_contract",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/tests/lsp_intellisense_tests.rs",
+        "selector": "lsp_signature_help_uses_semantic_facts_for_local_function_with_empty_request_time_repository"
+      }
+    },
+    {
+      "bundle_id": "cross_consumer_semantic_equivalence",
+      "fixture_id": "signature_help_semantic_facts",
+      "operation": "signature_help",
+      "consumer": "lsp",
+      "verdict": "pass",
+      "reason_code": "semantic_signature_contract",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/tests/lsp_intellisense_tests.rs",
+        "selector": "lsp_signature_help_uses_semantic_facts_for_global_function_with_empty_request_time_repository"
       }
     },
     {
@@ -256,6 +317,45 @@
     {
       "bundle_id": "no_adapter_local_semantic_truth",
       "fixture_id": "missing_canonical_artifacts",
+      "operation": "completion",
+      "consumer": "lsp",
+      "verdict": "pass",
+      "reason_code": "fail_closed_by_contract",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/src/bin/lsp_server/handlers/completion/tests.rs",
+        "selector": "completion_member_access_fails_closed_without_shared_owner_hint"
+      }
+    },
+    {
+      "bundle_id": "no_adapter_local_semantic_truth",
+      "fixture_id": "config_symbol_definition",
+      "operation": "definition",
+      "consumer": "lsp",
+      "verdict": "pass",
+      "reason_code": "semantic_definition_anchor",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/tests/goto_definition_common_module_test.rs",
+        "selector": "goto_definition_resolves_common_module_receiver_from_semantic_facts_with_empty_consumer_repo"
+      }
+    },
+    {
+      "bundle_id": "no_adapter_local_semantic_truth",
+      "fixture_id": "signature_help_semantic_facts",
+      "operation": "signature_help",
+      "consumer": "lsp",
+      "verdict": "pass",
+      "reason_code": "semantic_signature_contract",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/tests/lsp_intellisense_tests.rs",
+        "selector": "lsp_signature_help_uses_semantic_facts_with_empty_request_time_repository"
+      }
+    },
+    {
+      "bundle_id": "no_adapter_local_semantic_truth",
+      "fixture_id": "missing_canonical_artifacts",
       "operation": "hover",
       "consumer": "web",
       "verdict": "pass",
@@ -268,54 +368,28 @@
     },
     {
       "bundle_id": "no_adapter_local_semantic_truth",
-      "fixture_id": "missing_canonical_artifacts",
-      "operation": "hover",
-      "consumer": "lsp",
-      "verdict": "pass",
-      "reason_code": "fail_closed_by_contract",
-      "source_asset": {
-        "kind": "test",
-        "path": "backend/src/bin/lsp_server/server/core/tests.rs",
-        "selector": "p7_hover_cache_miss_emits_bounded_fail_closed_reason"
-      }
-    },
-    {
-      "bundle_id": "no_adapter_local_semantic_truth",
-      "fixture_id": "missing_canonical_artifacts",
-      "operation": "type_at_position",
-      "consumer": "mcp",
-      "verdict": "pass",
-      "reason_code": "fail_closed_by_contract",
-      "source_asset": {
-        "kind": "test",
-        "path": "bsl-agent/src/session/tests.rs",
-        "selector": "semantic_helpers_fail_closed_without_precomputed_type_index"
-      }
-    },
-    {
-      "bundle_id": "no_adapter_local_semantic_truth",
-      "fixture_id": "missing_canonical_artifacts",
+      "fixture_id": "semantic_artifact_missing_but_search_alive",
       "operation": "members",
       "consumer": "mcp",
       "verdict": "pass",
-      "reason_code": "fail_closed_by_contract",
+      "reason_code": "search_index_isolated",
       "source_asset": {
         "kind": "test",
         "path": "bsl-agent/src/session/tests.rs",
-        "selector": "semantic_helpers_fail_closed_without_precomputed_type_index"
+        "selector": "bsl_members_does_not_execute_parse_result_query_on_semantic_path"
       }
     },
     {
-      "bundle_id": "no_adapter_local_semantic_truth",
-      "fixture_id": "cli_inline_snapshot",
-      "operation": "diagnostics",
-      "consumer": "cli",
+      "bundle_id": "search_isolation_and_revision_integrity",
+      "fixture_id": "semantic_artifact_missing_but_search_alive",
+      "operation": "completion",
+      "consumer": "lsp",
       "verdict": "pass",
-      "reason_code": "shared_runtime_transport_wrapper",
+      "reason_code": "search_index_isolated",
       "source_asset": {
         "kind": "test",
-        "path": "cli/src/runtime.rs",
-        "selector": "prepare_cli_file_operation_uses_runtime_contract_for_diagnostics"
+        "path": "backend/src/bin/lsp_server/server/core/tests.rs",
+        "selector": "p7_member_access_completion_does_not_backfill_from_runtime_index_snapshot"
       }
     },
     {
@@ -328,78 +402,52 @@
       "source_asset": {
         "kind": "test",
         "path": "bsl-runtime/src/application/type_system/services/completion_service/tests.rs",
-        "selector": "completion_unknown_bare_receiver_member_access_ignores_polluted_index_snapshot"
-      }
-    },
-    {
-      "bundle_id": "search_isolation_and_revision_integrity",
-      "fixture_id": "semantic_artifact_missing_but_search_alive",
-      "operation": "symbol_search",
-      "consumer": "mcp",
-      "verdict": "pass",
-      "reason_code": "search_index_isolated",
-      "source_asset": {
-        "kind": "test",
-        "path": "bsl-agent/src/session/tests.rs",
-        "selector": "symbol_search_and_references_work_via_bounded_blocking_workers"
-      }
-    },
-    {
-      "bundle_id": "search_isolation_and_revision_integrity",
-      "fixture_id": "semantic_artifact_missing_but_search_alive",
-      "operation": "references",
-      "consumer": "mcp",
-      "verdict": "pass",
-      "reason_code": "search_index_isolated",
-      "source_asset": {
-        "kind": "test",
-        "path": "bsl-agent/src/session/tests.rs",
-        "selector": "symbol_search_and_references_work_via_bounded_blocking_workers"
+        "selector": "completion_non_member_semantic_path_ignores_polluted_index_snapshot"
       }
     },
     {
       "bundle_id": "search_isolation_and_revision_integrity",
       "fixture_id": "post_did_change_current_revision",
-      "operation": "completion",
-      "consumer": "lsp",
+      "operation": "type_at_position",
+      "consumer": "runtime",
       "verdict": "pass",
       "reason_code": "revision_integrity_preserved",
       "source_asset": {
         "kind": "test",
-        "path": "backend/src/bin/lsp_server/server/core/tests.rs",
-        "selector": "p7_large_churn_budget_timeout_returns_fail_closed_empty_response"
+        "path": "analysis-v2/src/lib/tests.rs",
+        "selector": "current_type_index_serve_only_ready_rejects_fallback_snapshot_artifact"
       }
     },
     {
       "bundle_id": "search_isolation_and_revision_integrity",
       "fixture_id": "post_did_change_current_revision",
-      "operation": "hover",
-      "consumer": "lsp",
+      "operation": "type_at_position",
+      "consumer": "runtime",
       "verdict": "pass",
       "reason_code": "revision_integrity_preserved",
       "source_asset": {
         "kind": "test",
-        "path": "backend/src/bin/lsp_server/server/core/tests.rs",
-        "selector": "p7_hover_cache_miss_on_map_index_access_does_not_use_legacy_word_fallback"
+        "path": "analysis-v2/src/lib/tests.rs",
+        "selector": "precompute_returns_superseded_when_expected_version_is_stale"
+      }
+    },
+    {
+      "bundle_id": "search_isolation_and_revision_integrity",
+      "fixture_id": "missing_canonical_artifacts",
+      "operation": "definition",
+      "consumer": "lsp",
+      "verdict": "pass",
+      "reason_code": "fail_closed_by_contract",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/tests/goto_definition_fail_closed_test.rs",
+        "selector": "goto_definition_fails_closed_without_exact_type_index_artifact"
       }
     },
     {
       "bundle_id": "module_context_and_facet_preservation",
       "fixture_id": "form_module_explicit_context",
       "operation": "type_at_position",
-      "consumer": "mcp",
-      "verdict": "pass",
-      "reason_code": "facet_identity_preserved",
-      "source_asset": {
-        "kind": "test",
-        "path": "bsl-agent/src/session/tests.rs",
-        "selector": "collect_type_at_position_preserves_available_facets_for_object_module_binding"
-      }
-    },
-    {
-      "bundle_id": "module_context_and_facet_preservation",
-      "fixture_id": "form_module_explicit_context",
-      "operation": "diagnostics",
       "consumer": "runtime",
       "verdict": "pass",
       "reason_code": "module_context_binding_preserved",
@@ -413,7 +461,7 @@
       "bundle_id": "module_context_and_facet_preservation",
       "fixture_id": "form_module_explicit_context",
       "operation": "completion",
-      "consumer": "runtime",
+      "consumer": "lsp",
       "verdict": "pass",
       "reason_code": "module_context_binding_preserved",
       "source_asset": {
@@ -425,7 +473,7 @@
     {
       "bundle_id": "module_context_and_facet_preservation",
       "fixture_id": "recordset_module_explicit_context",
-      "operation": "diagnostics",
+      "operation": "members",
       "consumer": "runtime",
       "verdict": "pass",
       "reason_code": "facet_identity_preserved",
@@ -433,6 +481,19 @@
         "kind": "test",
         "path": "backend/tests/form_module_object_unified_contract_test.rs",
         "selector": "recordset_module_resolves_system_members_and_manager_path_call"
+      }
+    },
+    {
+      "bundle_id": "module_context_and_facet_preservation",
+      "fixture_id": "recordset_module_explicit_context",
+      "operation": "type_at_position",
+      "consumer": "mcp",
+      "verdict": "pass",
+      "reason_code": "facet_identity_preserved",
+      "source_asset": {
+        "kind": "test",
+        "path": "bsl-agent/src/session/tests.rs",
+        "selector": "collect_type_at_position_preserves_available_facets_for_object_module_binding"
       }
     },
     {
@@ -448,10 +509,5 @@
         "selector": "form_module_bare_owner_member_name_stays_undeclared"
       }
     }
-  ],
-  "overall": {
-    "verdict": "pass",
-    "checks_total": 27,
-    "checks_failed": 0
-  }
+  ]
 }

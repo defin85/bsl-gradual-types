@@ -30,6 +30,10 @@ pub use services::completion_service::get_completion_with_semantic_program_snaps
 pub use services::completion_service::get_completion_with_semantic_program_snapshot_v2_with_trigger_hint;
 pub use services::completion_service::get_completion_with_semantic_program_snapshot_with_trigger_hint;
 pub use services::completion_service::{
+    completion_member_access_owner_type_hint_from_analysis,
+    completion_member_access_owner_type_hints_from_analysis,
+};
+pub use services::completion_service::{
     build_call_snippet, resolve_method_completion, resolve_type_details, CompletionResolveDetails,
 };
 pub use services::completion_service::{get_completion, CompletionContext, CompletionStats};

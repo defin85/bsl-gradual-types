@@ -47,7 +47,7 @@ fn default_resolved_params() -> Arc<OnceLock<Vec<(String, TypeResolution)>>> {
 ///     ContextRequirements::ServerOnly,
 /// );
 /// ```
-#[derive(Debug, Serialize, Deserialize)] // БЕЗ Clone - реализуем вручную!
+#[derive(Debug, PartialEq, Serialize, Deserialize)] // БЕЗ Clone - реализуем вручную!
 pub struct MethodSignature {
     pub name: String,
     pub owner_type: Option<String>, // None для глобальных функций

@@ -85,6 +85,7 @@ mod hover_facets_tests {
             generic_info: None,
             collection_item_type: None,
             module_paths: None,
+            metadata_path: None,
         };
 
         repo.load_types(vec![test_type]).unwrap();
@@ -427,6 +428,7 @@ mod hover_facets_tests {
             generic_info: None,
             collection_item_type: None,
             module_paths: None,
+            metadata_path: None,
         };
 
         repo.load_types(vec![test_type]).unwrap();

@@ -2,13 +2,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use bsl_line_index::LineIndex;
-use bsl_shared::domain::code_location::{CodeLocation, ModuleType};
 use bsl_shared::domain::repository::TypeRepository;
 use bsl_shared::domain::type_definition_location::TypeDefinitionLocation;
-use bsl_shared::domain::types::{
-    ConcreteType, FacetKind, MetadataKind, ResolutionResult, TypeResolution,
-};
-use bsl_shared::ir::{SemanticNodeKind, SemanticProgram, Span};
+use bsl_shared::domain::types::{ConcreteType, MetadataKind, ResolutionResult, TypeResolution};
+use bsl_shared::ir::{SemanticNode, SemanticNodeKind, SemanticProgram, Span};
 
 use crate::system::SystemCoordinator;
 
@@ -106,19 +103,12 @@ pub fn definition_exact_type_index_available_at_position(
     line: u32,
     character: u32,
 ) -> bool {
-    let Some(offset) = analysis
-        .utf16_position_to_byte_offset(file_id, line, character)
-        .ok()
-        .flatten()
-    else {
-        return true;
-    };
-    let offset = offset.min(u32::MAX as usize) as u32;
-    exact_type_index_available(analysis, file_id, offset, None)
+    let _ = (line, character);
+    exact_type_index_ready(analysis, file_id, None)
 }
 
 fn goto_definition_v2_with_source_opt(
-    current_file_path: &str,
+    _current_file_path: &str,
     current_file_text: Option<&str>,
     analysis: Option<&bsl_analysis_v2::AnalysisV2>,
     file_id: Option<bsl_analysis_v2::FileId>,
@@ -129,13 +119,14 @@ fn goto_definition_v2_with_source_opt(
     coordinator: Option<&SystemCoordinator>,
 ) -> Option<DefinitionTarget> {
     let repo = deps.repository.clone();
+    let strict_semantic_mode = analysis.is_some() && file_id.is_some();
 
     let text = current_file_text?;
 
     let index = LineIndex::new(text);
     let offset = index.utf16_position_to_byte_offset(text, line, character) as u32;
     if let (Some(analysis), Some(file_id)) = (analysis, file_id) {
-        if !exact_type_index_available(analysis, file_id, offset, coordinator) {
+        if !exact_type_index_ready(analysis, file_id, coordinator) {
             return None;
         }
     }
@@ -146,74 +137,24 @@ fn goto_definition_v2_with_source_opt(
         if let SemanticNodeKind::VariableAccess { name } = &node.kind {
             // If it's not a local variable, allow treating it as a global common module.
             if ir_program.resolve_variable(name, node.scope_id).is_none() {
+                if strict_semantic_mode {
+                    return semantic_definition_target_at_offset(ir_program.as_ref(), offset);
+                }
                 if let Some(target) = common_module_definition_target(repo.as_ref(), name) {
                     return Some(target);
                 }
             }
         }
 
-        if let SemanticNodeKind::MemberAccess {
-            object_name,
-            member_name,
-            access_kind,
-            ..
-        } = &node.kind
-        {
+        if let SemanticNodeKind::MemberAccess { access_kind, .. } = &node.kind {
             if access_kind.is_method() {
-                if let Some(owner_type) = semantic_receiver_type(
-                    ir_program.as_ref(),
-                    analysis,
-                    file_id,
-                    node,
-                    coordinator,
-                )
-                .as_ref()
-                .map(TypeResolution::type_name)
-                {
-                    if let Some(loc) =
-                        repo.find_method_definition_location(Some(&owner_type), member_name)
-                    {
-                        return definition_target_from_location(loc);
-                    }
-                }
-
-                if let Some(obj_name) = object_name.as_deref() {
-                    let common_module_owner = format!("ОбщиеМодули.{}", obj_name);
-                    if let Some(loc) = repo
-                        .find_method_definition_location(Some(&common_module_owner), member_name)
-                    {
-                        return definition_target_from_location(loc);
-                    }
-                }
-
-                if let Some(target) = current_module_method_definition_target(
-                    repo.as_ref(),
-                    current_file_path,
-                    member_name,
-                ) {
-                    return Some(target);
-                }
-
-                if let Some(span) =
-                    find_local_method_declaration_span(ir_program.as_ref(), member_name)
-                {
-                    return Some(DefinitionTarget {
-                        file_path: PathBuf::from(current_file_path),
-                        span: Some(span),
-                    });
-                }
+                return semantic_method_definition_target(ir_program.as_ref(), node, offset);
             }
         }
 
-        if let SemanticNodeKind::FunctionCall {
-            function_name,
-            object_name,
-            ..
-        } = &node.kind
-        {
+        if let SemanticNodeKind::FunctionCall { object_name, .. } = &node.kind {
             let receiver_type =
                 semantic_receiver_type(ir_program.as_ref(), analysis, file_id, node, coordinator);
-            let owner_type = receiver_type.as_ref().map(|value| value.type_name());
             let cursor_targets_receiver = receiver_span_for_node(ir_program.as_ref(), node)
                 .map(|span| span.contains(offset) || (offset > 0 && span.contains(offset - 1)))
                 .unwrap_or(false);
@@ -221,6 +162,10 @@ fn goto_definition_v2_with_source_opt(
             // Support "CommonModules.<Name>" namespace navigation in calls like "Модуль.Экспорт()":
             // go-to-definition on receiver should open the module file.
             if cursor_targets_receiver {
+                if strict_semantic_mode {
+                    return semantic_definition_target_at_offset(ir_program.as_ref(), offset);
+                }
+
                 if let Some(obj_name) = object_name.as_deref() {
                     // Avoid misrouting when a local variable shadows a common module name.
                     let is_local_var = ir_program
@@ -252,38 +197,15 @@ fn goto_definition_v2_with_source_opt(
                         }
                     }
                 }
-            } else if let Some(loc) =
-                repo.find_method_definition_location(owner_type.as_deref(), function_name)
-            {
-                return definition_target_from_location(loc);
-            } else if let Some(obj_name) = object_name.as_deref() {
-                // Common module calls may have Dynamic receiver type (e.g. during partial indexing);
-                // fall back to "ОбщиеМодули.<ModuleName>" when we have a receiver identifier.
-                let common_module_owner = format!("ОбщиеМодули.{}", obj_name);
-                if let Some(loc) =
-                    repo.find_method_definition_location(Some(&common_module_owner), function_name)
-                {
-                    return definition_target_from_location(loc);
-                }
+                return None;
             }
 
-            if let Some(target) = current_module_method_definition_target(
-                repo.as_ref(),
-                current_file_path,
-                function_name,
-            ) {
-                return Some(target);
-            }
-
-            if let Some(span) =
-                find_local_method_declaration_span(ir_program.as_ref(), function_name)
-            {
-                return Some(DefinitionTarget {
-                    file_path: PathBuf::from(current_file_path),
-                    span: Some(span),
-                });
-            }
+            return semantic_method_definition_target(ir_program.as_ref(), node, offset);
         }
+    }
+
+    if strict_semantic_mode {
+        return semantic_definition_target_at_offset(ir_program.as_ref(), offset);
     }
 
     let type_resolution = type_at_position?;
@@ -316,58 +238,6 @@ fn is_common_module_type(resolution: &TypeResolution) -> bool {
     }
 }
 
-fn current_module_method_definition_target(
-    repo: &dyn TypeRepository,
-    current_file_path: &str,
-    method_name: &str,
-) -> Option<DefinitionTarget> {
-    for owner_type in current_module_owner_type_candidates(current_file_path) {
-        if let Some(loc) = repo.find_method_definition_location(Some(&owner_type), method_name) {
-            return definition_target_from_location(loc);
-        }
-    }
-
-    None
-}
-
-fn current_module_owner_type_candidates(current_file_path: &str) -> Vec<String> {
-    let Ok(location) = CodeLocation::determine_from_path(std::path::Path::new(current_file_path))
-    else {
-        return Vec::new();
-    };
-
-    let Some(owner_type) = location.get_owner_type() else {
-        return Vec::new();
-    };
-
-    let Some((xml_kind, object_name)) = owner_type.split_once('.') else {
-        return vec![owner_type.to_string()];
-    };
-    let Some(kind) = MetadataKind::from_xml_tag(xml_kind) else {
-        return vec![owner_type.to_string()];
-    };
-
-    let facet = match location.module_type {
-        ModuleType::ObjectModule { .. } | ModuleType::RecordSetModule { .. } => {
-            Some(FacetKind::Object)
-        }
-        ModuleType::ManagerModule { .. } => Some(FacetKind::Manager),
-        ModuleType::FormModule { .. } => None,
-        ModuleType::CommonModule { .. } | ModuleType::Unknown => None,
-    };
-
-    let mut candidates = Vec::with_capacity(2);
-    if let Some(facet) = facet {
-        candidates.push(format!(
-            "{}.{}",
-            kind.faceted_type_prefix(&facet),
-            object_name
-        ));
-    }
-    candidates.push(owner_type.to_string());
-    candidates
-}
-
 fn semantic_type_at_offset(
     program: &SemanticProgram,
     analysis: Option<&bsl_analysis_v2::AnalysisV2>,
@@ -375,9 +245,7 @@ fn semantic_type_at_offset(
     offset: u32,
     coordinator: Option<&SystemCoordinator>,
 ) -> Option<TypeResolution> {
-    if let (Some(analysis), Some(file_id)) = (analysis, file_id) {
-        return serve_only_type_at_offset(analysis, file_id, offset, coordinator);
-    }
+    let _ = (analysis, file_id, coordinator);
     program
         .semantic_facts
         .type_at_byte_offset(offset)
@@ -416,10 +284,7 @@ fn semantic_receiver_type(
     node: &bsl_shared::ir::SemanticNode,
     coordinator: Option<&SystemCoordinator>,
 ) -> Option<TypeResolution> {
-    if let (Some(analysis), Some(file_id)) = (analysis, file_id) {
-        return receiver_span_for_node(program, node)
-            .and_then(|span| serve_only_type_in_span(analysis, file_id, span, coordinator));
-    }
+    let _ = (analysis, file_id, coordinator);
 
     let span_fallback = |span: Span| {
         semantic_type_at_offset(program, None, None, span.start, None)
@@ -448,72 +313,82 @@ fn semantic_receiver_type(
     }
 }
 
-fn serve_only_type_in_span(
+fn exact_type_index_ready(
     analysis: &bsl_analysis_v2::AnalysisV2,
     file_id: bsl_analysis_v2::FileId,
-    span: Span,
-    coordinator: Option<&SystemCoordinator>,
-) -> Option<TypeResolution> {
-    serve_only_type_at_offset(analysis, file_id, span.start, coordinator).or_else(|| {
-        span.end
-            .checked_sub(1)
-            .and_then(|offset| serve_only_type_at_offset(analysis, file_id, offset, coordinator))
-    })
-}
-
-fn serve_only_type_at_offset(
-    analysis: &bsl_analysis_v2::AnalysisV2,
-    file_id: bsl_analysis_v2::FileId,
-    byte_offset: u32,
-    coordinator: Option<&SystemCoordinator>,
-) -> Option<TypeResolution> {
-    let profiled = serve_only_profiled(analysis, file_id, byte_offset, coordinator)?;
-    profiled.resolution
-}
-
-fn exact_type_index_available(
-    analysis: &bsl_analysis_v2::AnalysisV2,
-    file_id: bsl_analysis_v2::FileId,
-    byte_offset: u32,
     coordinator: Option<&SystemCoordinator>,
 ) -> bool {
-    serve_only_profiled(analysis, file_id, byte_offset, coordinator).is_some_and(|profiled| {
-        profiled.serve_reason_code == bsl_analysis_v2::TypeIndexServeReasonCode::TypeIndexExactHit
-    })
-}
-
-fn serve_only_profiled(
-    analysis: &bsl_analysis_v2::AnalysisV2,
-    file_id: bsl_analysis_v2::FileId,
-    byte_offset: u32,
-    coordinator: Option<&SystemCoordinator>,
-) -> Option<bsl_analysis_v2::TypeAtByteOffsetProfiledResult> {
-    let profiled = analysis
-        .type_at_byte_offset_serve_only_profiled(file_id, byte_offset)
-        .ok()?;
+    let ready = analysis
+        .current_type_index_serve_only_ready(file_id)
+        .ok()
+        .unwrap_or(false);
     if let Some(coordinator) = coordinator {
-        coordinator.record_intellisense_v2_type_index_reason(profiled.serve_reason_code.as_str());
+        coordinator.record_intellisense_v2_type_index_reason(if ready {
+            bsl_analysis_v2::TypeIndexServeReasonCode::TypeIndexExactHit.as_str()
+        } else {
+            bsl_analysis_v2::TypeIndexServeReasonCode::TypeIndexFallbackUnavailable.as_str()
+        });
     }
-    Some(profiled)
+    ready
 }
 
-fn find_local_method_declaration_span(
+fn semantic_method_definition_target(
     ir_program: &SemanticProgram,
-    method_name: &str,
-) -> Option<Span> {
-    for node in &ir_program.nodes {
-        match &node.kind {
-            SemanticNodeKind::FunctionDeclaration { name, .. }
-            | SemanticNodeKind::ProcedureDeclaration { name, .. }
-                if name.eq_ignore_ascii_case(method_name) =>
-            {
-                return Some(node.span);
-            }
-            _ => {}
-        }
+    node: &SemanticNode,
+    byte_offset: u32,
+) -> Option<DefinitionTarget> {
+    let exact = match &node.kind {
+        SemanticNodeKind::MemberAccess { access_kind, .. } if access_kind.is_method() => ir_program
+            .semantic_facts
+            .member_method_targets_by_span
+            .get(&node.span),
+        SemanticNodeKind::FunctionCall { .. } => ir_program
+            .semantic_facts
+            .call_method_targets_by_span
+            .get(&node.span),
+        _ => None,
+    };
+    let target =
+        exact.or_else(|| semantic_method_definition_target_at_offset(ir_program, byte_offset))?;
+
+    target
+        .definition_location
+        .clone()
+        .and_then(definition_target_from_location)
+}
+
+fn semantic_method_definition_target_at_offset(
+    ir_program: &SemanticProgram,
+    byte_offset: u32,
+) -> Option<&bsl_shared::ir::SemanticMethodTarget> {
+    let call_target = ir_program
+        .semantic_facts
+        .call_method_targets_by_span
+        .iter()
+        .filter(|(span, target)| span.contains(byte_offset) && target.definition_location.is_some())
+        .min_by_key(|(span, _)| span.len())
+        .map(|(_, target)| target);
+    if call_target.is_some() {
+        return call_target;
     }
 
-    None
+    ir_program
+        .semantic_facts
+        .member_method_targets_by_span
+        .iter()
+        .filter(|(span, target)| span.contains(byte_offset) && target.definition_location.is_some())
+        .min_by_key(|(span, _)| span.len())
+        .map(|(_, target)| target)
+}
+
+fn semantic_definition_target_at_offset(
+    ir_program: &SemanticProgram,
+    byte_offset: u32,
+) -> Option<DefinitionTarget> {
+    ir_program
+        .semantic_facts
+        .definition_location_at_byte_offset(byte_offset)
+        .and_then(definition_target_from_location)
 }
 
 fn definition_target_from_location(

@@ -188,6 +188,7 @@ mod tests {
             generic_info: None,
             collection_item_type: None,
             module_paths: None,
+            metadata_path: None,
         };
 
         repo.load_types(vec![test_type]).unwrap();
@@ -225,6 +226,7 @@ mod tests {
             generic_info: None,
             collection_item_type: None,
             module_paths: None,
+            metadata_path: None,
         };
 
         repo.load_types(vec![test_type]).unwrap();
@@ -323,6 +325,7 @@ mod tests {
             generic_info: None,
             collection_item_type: None,
             module_paths: None,
+            metadata_path: None,
         }])
         .expect("load types");
 
@@ -408,6 +411,7 @@ mod tests {
             generic_info: None,
             collection_item_type: None,
             module_paths: None,
+            metadata_path: None,
         }])
         .expect("load types");
 
@@ -681,6 +685,7 @@ mod tests {
             generic_info: None,
             collection_item_type: None,
             module_paths: None,
+            metadata_path: None,
         };
         repo.load_types(vec![existing_catalog]).unwrap();
 
@@ -758,6 +763,7 @@ mod tests {
             generic_info: None,
             collection_item_type: None,
             module_paths: None,
+            metadata_path: None,
         };
 
         repo.load_types(vec![document]).unwrap();

@@ -7,6 +7,7 @@
 //! - `GenericInfo`, `InferenceMethodInfo`: Generic type metadata
 
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 use super::facets::FacetKind;
 use super::metadata::MetadataKind;
@@ -96,6 +97,9 @@ pub struct RawTypeData {
     /// Used for Go To Definition navigation to ObjectModule.bsl, ManagerModule.bsl, etc.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub module_paths: Option<crate::type_definition_location::ModulePaths>,
+    /// Canonical metadata XML path for configuration types.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata_path: Option<PathBuf>,
 }
 
 /// Raw method data from parser

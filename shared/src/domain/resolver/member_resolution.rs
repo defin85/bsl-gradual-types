@@ -45,21 +45,16 @@ impl<'a> MemberResolver<'a> {
         if member.contains('.') {
             // Пробуем склеить base.первая_часть_member и резолвить как тип
             if let Some((first_part, rest)) = member.split_once('.') {
-                let potential_type = format!("{}.{}", base, first_part);
-
-                // Проверяем, существует ли такой тип в репозитории
-                if let Some(raw_type) = self.repository.find_type(&potential_type) {
+                if let Some((owner_type, raw_type)) = self.resolve_nested_owner_type(base, first_part)
+                {
                     // Тип найден — проверяем, не табличная ли часть
                     if let Some(tabular_section) =
                         raw_type.tabular_sections.iter().find(|ts| ts.name == rest)
                     {
-                        return self.resolve_tabular_section_access(
-                            potential_type,
-                            tabular_section.clone(),
-                        );
+                        return self.resolve_tabular_section_access(owner_type, tabular_section.clone());
                     }
-                    // Иначе пробуем рекурсивно
-                    return self.resolve(&potential_type, rest);
+                    // Иначе пробуем рекурсивно уже от canonical owner type.
+                    return self.resolve(&owner_type, rest);
                 }
             }
         }
@@ -214,6 +209,23 @@ impl<'a> MemberResolver<'a> {
             MetadataKind::Register => vec![FacetKind::Manager, FacetKind::Object],
             MetadataKind::Unknown => vec![],
         }
+    }
+
+    fn resolve_nested_owner_type(
+        &self,
+        base: &str,
+        first_part: &str,
+    ) -> Option<(String, crate::domain::types::RawTypeData)> {
+        let direct_owner = format!("{}.{}", base, first_part);
+        if let Some(raw_type) = self.repository.find_type(&direct_owner) {
+            return Some((direct_owner, raw_type));
+        }
+
+        let (kind, _) = get_base_type_info(base)?;
+        let canonical_owner = format!("{}.{}", kind.to_prefix(), first_part);
+        self.repository
+            .find_type(&canonical_owner)
+            .map(|raw_type| (canonical_owner, raw_type))
     }
 
     /// Резолвит доступ к табличной части конфигурационного объекта

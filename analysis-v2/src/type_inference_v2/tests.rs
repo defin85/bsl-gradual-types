@@ -455,6 +455,140 @@ fn recovers_receiver_type_from_semantic_program_for_incomplete_bare_member_acces
 }
 
 #[test]
+fn extracts_parenthesized_choice_receiver_slices_with_partial_member_tail() {
+    let source = concat!(
+        "Процедура Тест()\n",
+        "    __tmp = (Выбор Когда Истина Тогда Новый TypeA Иначе Новый TypeB КонецВыбора). X;\n",
+        "КонецПроцедуры\n",
+    );
+    let dot_offset = source.find("). X").expect("choice dot") as usize + 1;
+    let slices = extract_incomplete_member_access_receiver_slices_at_dot_offset(source, dot_offset);
+    let texts: Vec<&str> = slices
+        .iter()
+        .map(|(span, _)| &source[span.start as usize..span.end as usize])
+        .collect();
+
+    assert_eq!(texts, vec!["Новый TypeA", "Новый TypeB"]);
+}
+
+#[test]
+fn parenthesized_choice_with_partial_member_tail_triggers_parser_recovery() {
+    let source = concat!(
+        "Процедура Тест()\n",
+        "    __tmp = (Выбор Когда Истина Тогда Новый TypeA Иначе Новый TypeB КонецВыбора). X;\n",
+        "КонецПроцедуры\n",
+    );
+    let parsed = bsl_syntax::parse(source, &ParseOptions::default()).expect("parse with recovery");
+
+    assert!(
+        parsed.has_errors(),
+        "one-line parenthesized choice completion fixture must go through parser recovery"
+    );
+}
+
+#[test]
+fn recovers_choice_branch_types_for_partial_member_tail() {
+    let source = concat!(
+        "Процедура Тест()\n",
+        "    __tmp = (Выбор Когда Истина Тогда Новый Массив() Иначе Новый Массив() КонецВыбора). X;\n",
+        "КонецПроцедуры\n",
+    );
+    let parsed = bsl_syntax::parse(source, &ParseOptions::default()).expect("parse with recovery");
+    let deps = deps_with_array_method();
+    let index = build_type_index_from_parse_result_with_path(&parsed, source, "test.bsl", deps);
+
+    let probes: Vec<u32> = source
+        .match_indices("Новый Массив()")
+        .map(|(idx, _)| (idx + "Новый Массив()".len() - 1) as u32)
+        .collect();
+    assert_eq!(
+        probes.len(),
+        2,
+        "fixture must contain two array constructor probes"
+    );
+
+    for probe in probes {
+        let resolved = index
+            .type_at_byte_offset(probe)
+            .expect("recovered branch type for choice receiver");
+        assert_eq!(resolved.type_name(), "Массив<Неопределено>");
+    }
+}
+
+#[test]
+fn manual_recovery_records_choice_branch_types_for_partial_member_tail() {
+    let source = concat!(
+        "Процедура Тест()\n",
+        "    __tmp = (Выбор Когда Истина Тогда Новый Массив() Иначе Новый Массив() КонецВыбора). X;\n",
+        "КонецПроцедуры\n",
+    );
+    let parsed = bsl_syntax::parse(source, &ParseOptions::default()).expect("parse with recovery");
+    let deps = deps_with_array_method();
+    let inferencer = TypeInferencer::new(deps);
+    let mut facts = SemanticFacts::default();
+    let env = TypeEnv::default();
+    inferencer.record_incomplete_member_access_recovery_entries(
+        RecoveryContext {
+            source_text: source,
+            syntax_errors: &parsed.syntax_errors,
+        },
+        bsl_shared::ir::Span::new(0, source.len() as u32),
+        &env,
+        &mut facts,
+    );
+
+    let probes: Vec<u32> = source
+        .match_indices("Новый Массив()")
+        .map(|(idx, _)| (idx + "Новый Массив()".len() - 1) as u32)
+        .collect();
+    assert_eq!(
+        probes.len(),
+        2,
+        "fixture must contain two array constructor probes"
+    );
+
+    for probe in probes {
+        let resolved = facts
+            .type_at_byte_offset(probe)
+            .expect("manual recovery branch type for choice receiver");
+        assert_eq!(resolved.type_name(), "Массив<Неопределено>");
+    }
+}
+
+#[test]
+fn incomplete_constructor_call_recovery_records_semantic_target() {
+    let source = concat!(
+        "Процедура Тест()\n",
+        "    Новый Массив(1, )\n",
+        "КонецПроцедуры\n",
+    );
+    let parsed = bsl_syntax::parse(source, &ParseOptions::default()).expect("parse with recovery");
+    assert!(
+        parsed.has_errors(),
+        "incomplete constructor fixture must go through parser recovery"
+    );
+
+    let deps = deps_with_array_method();
+    let program = ir_program(source, "test.bsl", deps);
+    let call_offset = source
+        .find("Новый Массив(")
+        .map(|idx| idx + "Новый Массив".len())
+        .expect("constructor call offset") as u32;
+
+    let target = program
+        .semantic_facts
+        .constructor_targets_by_span
+        .iter()
+        .find(|(span, target)| {
+            span.contains(call_offset) && target.type_name.eq_ignore_ascii_case("Массив")
+        });
+    assert!(
+        target.is_some(),
+        "incomplete constructor recovery must materialize constructor target"
+    );
+}
+
+#[test]
 fn resolves_common_module_method_return_type_from_signature_index() {
     let source = r#"Процедура Тест()
     x = ОбщийМодуль1.Ф1();

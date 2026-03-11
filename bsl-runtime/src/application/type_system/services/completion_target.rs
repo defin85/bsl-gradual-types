@@ -25,6 +25,12 @@ pub struct CompletionTarget {
     pub receiver: Option<ReceiverChain>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SourceSliceSpan {
+    pub start: u32,
+    pub end: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum ReceiverChainHead {
@@ -129,6 +135,27 @@ pub fn extract_member_access_receiver_expression(
 ) -> Option<Expression> {
     let receiver_text = extract_member_access_receiver_text(file_content, line, column)?;
     parse_expression_snippet(receiver_text)
+}
+
+pub fn extract_member_access_receiver_spans(
+    file_content: &str,
+    line: u32,
+    column: u32,
+) -> Option<Vec<SourceSliceSpan>> {
+    let receiver_text = extract_member_access_receiver_text(file_content, line, column)?;
+    let slices: Vec<&str> = if let Some(choice_text) = extract_choice_expression(receiver_text) {
+        extract_choice_result_expression_slices(choice_text)?
+    } else if let Some(parts) = extract_ternary_result_expression_slices(receiver_text) {
+        parts
+    } else {
+        vec![receiver_text]
+    };
+
+    let mut spans = Vec::with_capacity(slices.len());
+    for slice in slices {
+        spans.push(source_slice_span(file_content, slice)?);
+    }
+    Some(spans)
 }
 
 fn extract_member_access_receiver_text(file_content: &str, line: u32, column: u32) -> Option<&str> {
@@ -465,6 +492,79 @@ fn extract_choice_result_expression_slices(receiver_expr_text: &str) -> Option<V
     } else {
         Some(out)
     }
+}
+
+fn extract_ternary_result_expression_slices(receiver_expr_text: &str) -> Option<Vec<&str>> {
+    let trimmed = receiver_expr_text.trim();
+    if !trimmed.starts_with("?(") || !trimmed.ends_with(')') {
+        return None;
+    }
+
+    let inner = trimmed.get(2..trimmed.len().saturating_sub(1))?;
+    let parts = split_top_level_csv(inner);
+    if parts.len() != 3 {
+        return None;
+    }
+
+    let then_expr = parts.get(1)?.trim();
+    let else_expr = parts.get(2)?.trim();
+    if then_expr.is_empty() || else_expr.is_empty() {
+        return None;
+    }
+
+    Some(vec![then_expr, else_expr])
+}
+
+fn split_top_level_csv(text: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0usize;
+    let mut paren_depth: i32 = 0;
+    let mut bracket_depth: i32 = 0;
+    let mut in_string = false;
+
+    for (idx, ch) in text.char_indices() {
+        if in_string {
+            if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+
+        match ch {
+            '"' => in_string = true,
+            '(' => paren_depth += 1,
+            ')' => paren_depth -= 1,
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth -= 1,
+            ',' if paren_depth == 0 && bracket_depth == 0 => {
+                if let Some(part) = text.get(start..idx) {
+                    parts.push(part);
+                }
+                start = idx.saturating_add(ch.len_utf8());
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(part) = text.get(start..) {
+        parts.push(part);
+    }
+    parts
+}
+
+fn source_slice_span(source: &str, slice: &str) -> Option<SourceSliceSpan> {
+    let slice_start = slice.as_ptr() as usize;
+    let source_start = source.as_ptr() as usize;
+    let start = slice_start.checked_sub(source_start)?;
+    let end = start.checked_add(slice.len())?;
+    if end > source.len() {
+        return None;
+    }
+
+    Some(SourceSliceSpan {
+        start: start.min(u32::MAX as usize) as u32,
+        end: end.min(u32::MAX as usize) as u32,
+    })
 }
 
 fn collect_choice_keywords(

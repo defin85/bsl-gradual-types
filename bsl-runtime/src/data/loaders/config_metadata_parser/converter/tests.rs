@@ -26,6 +26,25 @@ fn test_convert_catalog_to_raw_type() {
 }
 
 #[test]
+fn test_convert_preserves_metadata_xml_path() {
+    use std::path::PathBuf;
+
+    let mut obj = UniversalMetadataObject::new(
+        "Document".to_string(),
+        "Док1".to_string(),
+        "12345678-1234-1234-1234-123456789012".to_string(),
+    );
+    obj.metadata_xml_path = Some(PathBuf::from("Documents/Док1.xml"));
+
+    let raw_type = obj.to_raw_type_data(None);
+
+    assert_eq!(
+        raw_type.metadata_path.as_deref(),
+        Some(PathBuf::from("Documents/Док1.xml").as_path())
+    );
+}
+
+#[test]
 fn test_convert_chart_of_accounts_predefined_items_to_manager_marker_properties() {
     let mut obj = UniversalMetadataObject::new(
         "ChartOfAccounts".to_string(),

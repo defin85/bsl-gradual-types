@@ -77,6 +77,9 @@ pub struct UniversalMetadataObject {
     /// Формы объекта метаданных (для справочников, документов и т.д.)
     pub forms: Vec<FormMetadata>,
 
+    /// Канонический путь к XML-файлу объекта метаданных
+    pub metadata_xml_path: Option<PathBuf>,
+
     /// Пути к модулям объекта (ObjectModule, ManagerModule, RecordSetModule)
     pub object_module_path: Option<PathBuf>,
     pub manager_module_path: Option<PathBuf>,
@@ -108,6 +111,7 @@ impl UniversalMetadataObject {
             execution_contexts: Vec::new(),
             common_module_properties: None,
             forms: Vec::new(),
+            metadata_xml_path: None,
             object_module_path: None,
             manager_module_path: None,
             record_set_module_path: None,

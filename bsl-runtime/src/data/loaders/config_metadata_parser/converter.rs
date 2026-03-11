@@ -100,6 +100,7 @@ impl UniversalMetadataObject {
             generic_info: None, // Конфигурационные типы не имеют Generic метаданных (пока)
             collection_item_type: None,
             module_paths, // Milestone 3.14: пути к модулям для Go To Definition
+            metadata_path: self.metadata_xml_path.clone(),
         }
     }
 
@@ -455,6 +456,7 @@ impl UniversalMetadataObject {
             generic_info: None,
             collection_item_type: None,
             module_paths: None,
+            metadata_path: None,
         }
     }
 
@@ -521,6 +523,7 @@ impl UniversalMetadataObject {
             generic_info: None,
             collection_item_type: None,
             module_paths: None,
+            metadata_path: None,
         }
     }
 
@@ -598,6 +601,7 @@ impl UniversalMetadataObject {
             generic_info: None,
             collection_item_type: None,
             module_paths: None,
+            metadata_path: None,
         }
     }
 }

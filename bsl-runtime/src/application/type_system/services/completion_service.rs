@@ -9,18 +9,16 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, Span};
 
-use bsl_shared::domain::metadata_constants::get_collection_kind;
 use bsl_shared::domain::resolver::TypeResolver;
-use bsl_shared::domain::signature_index::SignatureIndex;
-use bsl_shared::domain::types::{
-    ConcreteType, FacetKind, MetadataKind, ResolutionResult, SpecialType,
-};
+use bsl_shared::domain::get_collection_kind;
+use bsl_shared::domain::types::MetadataKind;
 use bsl_shared::domain::{CompletionItem, CompletionKind, TypeMetadataLookup, TypeResolution};
 use bsl_shared::ir::{ScopeId, ScopeKind, SemanticNodeKind, SemanticProgram};
 
 use super::super::extractors::symbol_extractor::{
     extract_word_at_position, is_identifier_char, utf16_to_byte_offset,
 };
+use super::completion_target::extract_member_access_receiver_spans;
 use super::completion_ranking::{rank_candidates_with_trace, RankingCandidate};
 use crate::system::keyword_index::DEFAULT_KEYWORDS;
 use crate::system::{
@@ -93,6 +91,7 @@ pub struct CompletionResult {
 
 pub(crate) struct CompletionAnalysisContext<'a> {
     pub ir_program: Option<Arc<SemanticProgram>>,
+    #[allow(dead_code)]
     pub resolver: &'a TypeResolver,
     pub file_path: &'a str,
     pub member_access_owner_type_hint: Option<TypeResolution>,
@@ -130,6 +129,122 @@ pub async fn get_completion(
         None,
     )
     .await
+}
+
+pub fn completion_member_access_owner_type_hints_from_analysis(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    file_content: &str,
+    line: u32,
+    column: u32,
+) -> Vec<TypeResolution> {
+    let Ok(exact_ready) = analysis.current_type_index_serve_only_ready(file_id) else {
+        return Vec::new();
+    };
+    if !exact_ready {
+        return Vec::new();
+    }
+
+    if let Ok(Some(ir_program)) = analysis.ir(file_id) {
+        let resolutions = completion_member_access_owner_type_hints_from_semantic_program(
+            file_content,
+            line,
+            column,
+            ir_program.as_ref(),
+        );
+        if !resolutions.is_empty() {
+            return resolutions;
+        }
+    }
+
+    let Some(receiver_spans) = extract_member_access_receiver_spans(file_content, line, column) else {
+        return Vec::new();
+    };
+
+    let mut resolutions = Vec::new();
+    for span in receiver_spans {
+        let mut probe_offsets = Vec::with_capacity(2);
+        if span.end > span.start {
+            probe_offsets.push(span.end.saturating_sub(1));
+        }
+        probe_offsets.push(span.start);
+
+        for offset in probe_offsets {
+            let Ok(profiled) = analysis.type_at_byte_offset_serve_only_profiled(file_id, offset) else {
+                continue;
+            };
+            let Some(resolution) = profiled
+                .resolution
+                .filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
+            else {
+                continue;
+            };
+            if !resolutions.contains(&resolution) {
+                resolutions.push(resolution);
+            }
+            break;
+        }
+    }
+
+    resolutions
+}
+
+pub fn completion_member_access_owner_type_hints_from_semantic_program(
+    file_content: &str,
+    line: u32,
+    column: u32,
+    ir_program: &SemanticProgram,
+) -> Vec<TypeResolution> {
+    let Some(receiver_spans) = extract_member_access_receiver_spans(file_content, line, column)
+    else {
+        return Vec::new();
+    };
+
+    let mut resolutions = Vec::new();
+    for span in receiver_spans {
+        let span = bsl_shared::ir::Span::new(span.start, span.end);
+        let resolution = ir_program
+            .semantic_facts
+            .type_resolution_for_span(span)
+            .or_else(|| {
+                ir_program
+                    .nodes
+                    .iter()
+                    .filter(|node| node.span.start <= span.start && node.span.end >= span.end)
+                    .min_by_key(|node| node.span.len())
+                    .and_then(|node| ir_program.semantic_facts.type_resolution_for_span(node.span))
+            });
+        let Some(resolution) = resolution.filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
+        else {
+            continue;
+        };
+        if !resolutions.contains(&resolution) {
+            resolutions.push(resolution);
+        }
+    }
+
+    resolutions
+}
+
+pub fn completion_member_access_owner_type_hint_from_analysis(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    file_content: &str,
+    line: u32,
+    column: u32,
+) -> Option<TypeResolution> {
+    let mut resolutions = completion_member_access_owner_type_hints_from_analysis(
+        analysis,
+        file_id,
+        file_content,
+        line,
+        column,
+    );
+    if resolutions.len() == 1 {
+        resolutions.pop()
+    } else {
+        None
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -386,69 +501,17 @@ pub(crate) async fn get_completion_with_analysis(
     let collect_started = Instant::now();
 
     if context.member_access {
-        if let Some(owner_hint) =
-            resolve_member_owner_type_sync(analysis, file_content, line, column, "")
+        // The shared member-access path may only use canonical owner hints or canonical
+        // IR-derived owner facts for the current revision. Type-name and text/metadata
+        // chain reconstruction must fail closed instead of synthesizing semantic truth.
+        for owner_hint in resolve_member_owner_types_sync(analysis, file_content, line, column, "")
         {
+            if let Some(kind) = get_collection_kind(&owner_hint.type_name()) {
+                add_metadata_items_from_lookup(metadata_lookup, kind, &mut candidates, 0);
+                continue;
+            }
             add_methods_from_resolution(metadata_lookup, &owner_hint, &mut candidates, 0);
             add_properties_from_resolution(metadata_lookup, &owner_hint, &mut candidates, 1);
-        } else if let Some(receiver_chain) =
-            extract_member_receiver_chain(file_content, line, column)
-        {
-            // Shared owner hints are now the only source of truth for per-instance
-            // schema/effects. Local fallback below is limited to metadata/context chains.
-            if receiver_chain.len() == 1 {
-                let base_name = receiver_chain[0].as_str();
-                if let Some(kind) = get_collection_kind(base_name) {
-                    add_metadata_items_from_lookup(metadata_lookup, kind, &mut candidates, 1);
-                } else if let Some(type_name) = resolve_type_name(base_name, metadata_lookup) {
-                    let resolution = analysis
-                        .map(|ctx| ctx.resolver.resolve_expression_sync(&type_name))
-                        .unwrap_or_else(|| TypeResolution::explicit(&type_name));
-                    add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
-                    add_properties_from_resolution(
-                        metadata_lookup,
-                        &resolution,
-                        &mut candidates,
-                        1,
-                    );
-                } else if let Some(resolution) =
-                    resolve_member_owner_type(analysis, file_content, line, column, base_name).await
-                {
-                    add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
-                    add_properties_from_resolution(
-                        metadata_lookup,
-                        &resolution,
-                        &mut candidates,
-                        1,
-                    );
-                }
-            } else if let Some(resolution) = resolve_member_chain_owner_type(
-                analysis,
-                file_content,
-                line,
-                column,
-                &receiver_chain,
-                &snapshot,
-                metadata_lookup,
-            )
-            .await
-            {
-                add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
-                add_properties_from_resolution(metadata_lookup, &resolution, &mut candidates, 1);
-            }
-        } else if let Some(base_name) = context.member_base.as_deref() {
-            if let Some(kind) = get_collection_kind(base_name) {
-                add_metadata_items_from_lookup(metadata_lookup, kind, &mut candidates, 1);
-            } else if let Some(type_name) = resolve_type_name(base_name, metadata_lookup) {
-                let resolution = TypeResolution::explicit(&type_name);
-                add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
-                add_properties_from_resolution(metadata_lookup, &resolution, &mut candidates, 1);
-            } else if let Some(resolution) =
-                resolve_member_owner_type(analysis, file_content, line, column, base_name).await
-            {
-                add_methods_from_resolution(metadata_lookup, &resolution, &mut candidates, 0);
-                add_properties_from_resolution(metadata_lookup, &resolution, &mut candidates, 1);
-            }
         }
     } else {
         collect_non_member_candidates(
@@ -584,15 +647,19 @@ fn collect_non_member_candidates(
 
     if can_collect_locals_from_ir {
         add_local_symbols_from_ir(analysis, file_content, line, column, candidates, 0);
-        add_symbols(snapshot, file_uri, candidates, 0, false);
+        add_module_routines_from_ir(analysis, file_content, line, column, candidates, 1);
+        add_global_functions_from_lookup(metadata_lookup, candidates, 1);
+        add_all_metadata_items_from_lookup(metadata_lookup, candidates, 2);
+        add_repository_types_from_lookup(metadata_lookup, candidates, 3);
+        add_default_keywords(candidates, 4);
     } else {
         // In fallback mode keep local candidates from the file-bound index.
         add_symbols(snapshot, file_uri, candidates, 0, true);
+        add_module_symbols(snapshot, candidates, 1);
+        add_all_metadata_items_from_lookup(metadata_lookup, candidates, 2);
+        add_types(snapshot, candidates, 3);
+        add_keywords(snapshot, candidates, 4);
     }
-    add_module_symbols(snapshot, candidates, 1);
-    add_all_metadata_items_from_lookup(metadata_lookup, candidates, 2);
-    add_types(snapshot, candidates, 3);
-    add_keywords(snapshot, candidates, 4);
 }
 
 #[path = "completion_service/context.rs"]

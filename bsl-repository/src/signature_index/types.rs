@@ -10,7 +10,7 @@ use bsl_types::types::ParameterInfo;
 use serde::{Deserialize, Serialize};
 
 /// Сигнатура конструктора
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConstructorSignature {
     /// Имя типа ("Массив", "ТаблицаЗначений")
     pub type_name: String,

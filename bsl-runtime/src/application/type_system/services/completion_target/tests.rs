@@ -139,3 +139,44 @@ fn member_access_receiver_chain_supports_new_expression_receiver() {
         vec!["Table".to_string()]
     );
 }
+
+#[test]
+fn member_access_receiver_spans_split_ternary_alternatives() {
+    let content = concat!(
+        "Procedure Test()\n",
+        "    ?(Истина, Новый TypeA, Новый TypeB).\n",
+        "EndProcedure\n",
+    );
+    let (line, dot_col) = utf16_position(content, "TypeB).");
+    let column = dot_col + "TypeB).".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+
+    let spans = extract_member_access_receiver_spans(content, line, column).expect("spans");
+    let texts: Vec<&str> = spans
+        .iter()
+        .map(|span| &content[span.start as usize..span.end as usize])
+        .collect();
+
+    assert_eq!(texts, vec!["Новый TypeA", "Новый TypeB"]);
+}
+
+#[test]
+fn member_access_receiver_spans_split_choice_alternatives() {
+    let content = concat!(
+        "Procedure Test()\n",
+        "    Выбор\n",
+        "        Когда Истина Тогда Новый TypeA\n",
+        "        Иначе Новый TypeB\n",
+        "    Конец.\n",
+        "EndProcedure\n",
+    );
+    let (line, dot_col) = utf16_position(content, "Конец.");
+    let column = dot_col + "Конец.".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+
+    let spans = extract_member_access_receiver_spans(content, line, column).expect("spans");
+    let texts: Vec<&str> = spans
+        .iter()
+        .map(|span| &content[span.start as usize..span.end as usize])
+        .collect();
+
+    assert_eq!(texts, vec!["Новый TypeA", "Новый TypeB"]);
+}

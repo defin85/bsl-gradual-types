@@ -39,6 +39,7 @@ fn create_repository_with_config() -> Arc<InMemoryTypeRepository> {
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     };
 
     // Добавляем ещё один для увеличения счётчика
@@ -58,6 +59,7 @@ fn create_repository_with_config() -> Arc<InMemoryTypeRepository> {
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     };
 
     // Загружаем типы через load_types()

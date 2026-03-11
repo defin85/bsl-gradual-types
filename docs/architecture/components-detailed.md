@@ -1,539 +1,311 @@
 # Components Detailed
 
-Детальное описание ключевых компонентов BSL Gradual Type System.
+Текущее описание production-компонентов BSL Gradual Type System после canonical semantic cutover.
 
-## 📚 Обзор
+Этот документ сознательно не повторяет milestone-era architecture с AST-based `TypeSystemFacade`
+и legacy fallback paths. Исторические детали остались в git history; ниже только то, что реально
+участвует в shipped runtime.
 
-**См. также:**
-- **[Type System Architecture](type_system_architecture.md)** — общая архитектура системы типов
-- **[Milestones History](milestones-history.md)** — история развития компонентов
+## Обзор слоёв
 
----
+```text
+SystemCoordinator / DepsBundleV2
+  -> AnalysisHostV2 / AnalysisV2
+  -> SemanticProgram + semantic_facts
+  -> IntellisenseV2Facade runtime
+  -> shared type-system services
+  -> LSP / Web / MCP / CLI adapters
+```
 
-## 🎯 System Layer (backend/src/system/)
+## 1. System Layer
 
 ### SystemCoordinator
 
-**Назначение:** Composition Root, управление жизненным циклом приложения
+**Назначение:** composition root и владелец shared runtime dependencies.
 
-**Структура:**
-```rust
-pub struct SystemCoordinator {
-    disk_cache: Arc<DiskCache>,
-    parser_coordinator: Arc<ParserCoordinator>,
-    observability: Arc<BasicObservability>,
-    analysis_host_v2: Arc<AnalysisHostV2>,
-}
-```
+Ключевые зоны:
 
-**Ответственность:**
-- Инициализация всех компонентов системы
-- Управление зависимостями (DI container)
-- Координация жизненного цикла сервисов
-- Предоставление единой точки входа
+- startup и загрузка конфигурации/платформенных данных;
+- observability;
+- index storage;
+- shared runtime facade для semantic операций.
 
-**Пример использования:**
-```rust
-let coordinator = SystemCoordinator::new();
-let engine = coordinator.analysis_engine();
-```
+Основные файлы:
 
----
+- [backend/src/system/mod.rs](../../backend/src/system/mod.rs)
+- [bsl-runtime/src/system/system_coordinator/coordinator/observability.rs](../../bsl-runtime/src/system/system_coordinator/coordinator/observability.rs)
 
-### DiskCache
+### DepsBundleV2
 
-**Назначение:** LRU-кэш для результатов анализа файлов
+**Назначение:** immutable bundle semantic dependencies для конкретного snapshot.
 
-**Структура:**
-```rust
-pub struct DiskCache {
-    cache: Arc<RwLock<LruCache<FileHash, CachedAnalysis>>>,
-    ttl: Duration,
-}
-```
+Содержит:
 
-**Ключевые методы:**
-- `get(file_hash: &FileHash) -> Option<CachedAnalysis>`
-- `insert(file_hash: FileHash, analysis: CachedAnalysis)`
-- `invalidate(file_hash: &FileHash)`
-- `clear()`
+- repository;
+- resolver;
+- signature index;
+- discovery/search index (`IndexSnapshot`);
+- `deps_id`, который участвует в exact artifact key.
 
-**Стратегия кэширования:**
-- LRU (Least Recently Used) с максимальным размером
-- TTL (Time To Live) для автоматической инвалидации
-- File hash для быстрого lookup
+Файл:
 
-**Файл:** [backend/src/system/disk_cache.rs](../../backend/src/system/disk_cache.rs)
+- [bsl-runtime/src/system/deps_bundle_v2.rs](../../bsl-runtime/src/system/deps_bundle_v2.rs)
 
----
+## 2. Canonical Semantic Core
 
-### ParserCoordinator
+### AnalysisHostV2 / AnalysisV2
 
-**Назначение:** TreeSitter (primary) + Regex (fallback), конвертация AST → IR
+**Назначение:** revision-bound analysis graph и public query surface над ним.
 
-**Структура:**
-```rust
-pub struct ParserCoordinator {
-    tree_sitter: TreeSitterAdapter,
-    regex_parser: RegexParser,
-    converter: AstToIrConverter,
-}
-```
+Что важно сейчас:
 
-**Реализует:** `Parser` trait из `shared/src/parsing/`
+- `ir(...)` строит canonical semantic snapshot;
+- exact type lookup и `serve_only` доступны только для current revision;
+- stale artifact не обслуживает semantic query;
+- flow-sensitive overlay строится поверх canonical base result.
 
-**Логика:**
-```text
-1. Попытка парсинга через TreeSitter
-2. Если ошибка → fallback на Regex parser
-3. Конвертация AST → IR (SemanticProgram)
-4. Возврат SemanticProgram
-```
+Основные файлы:
 
-**Файл:** [backend/src/system/parser_coordinator.rs](../../backend/src/system/parser_coordinator.rs)
-
----
-
-### BasicObservability
-
-**Назначение:** Структурированное логирование и базовые метрики
-
-**Функции:**
-- Логирование событий (INFO, WARN, ERROR, DEBUG)
-- Метрики производительности
-- Health endpoint для мониторинга
-- Трассировка запросов
-
-**Файл:** [backend/src/system/observability.rs](../../backend/src/system/observability.rs)
-
----
-
-## 🔧 Application Layer
-
-### AnalysisEngine (shared/src/engine/)
-
-**Назначение:** Чистый оркестратор анализа, работает с IR вместо AST
-
-**Структура:**
-```rust
-pub struct AnalysisEngine {
-    resolver: TypeResolver,
-    metadata_lookup: TypeMetadataLookup,
-}
-```
-
-**Ключевой метод:**
-```rust
-pub fn analyze_program(&self, program: &SemanticProgram)
-    -> Result<TypedProgram, AnalysisError>
-{
-    // 1. Обход SemanticNode дерева
-    // 2. Резолв типов через TypeResolver
-    // 3. Построение TypedProgram с аннотациями типов
-}
-```
-
-**Особенности:**
-- ✅ Не зависит от backend (находится в shared)
-- ✅ Не зависит от конкретного парсера (работает с IR)
-- ✅ Переиспользуется LSP, Web API, CLI
-
-**Файл:** [shared/src/engine/mod.rs](../../shared/src/engine/mod.rs)
-
----
-
-### TypeSystemFacade (backend/src/application/)
-
-**Назначение:** Высокоуровневый API для LSP/Web с кэшированием
-
-**Структура:**
-```rust
-pub struct TypeSystemFacade {
-    engine: AnalysisEngine,
-    disk_cache: Arc<DiskCache>,
-    parser: Arc<dyn Parser>,
-    converter: AstToIrConverter,
-}
-```
-
-**Ключевые методы:**
-
-#### get_hover_info_ir() — IR-based hover
-
-```rust
-pub fn get_hover_info_ir(&self, file: &str, line: u32, column: u32)
-    -> Result<HoverInfo>
-{
-    // 1. Парсим файл → SemanticProgram
-    let ir = self.parser.parse(source)?;
-
-    // 2. Inline Scope Analysis: find_variable_at_position
-    let (var_name, type_hint) = ir.find_variable_at_position(line, column)?;
-
-    // 3. Резолвим тип через TypeRepository
-    let type_metadata = self.repository.find_type(&type_hint.name)?;
-
-    // 4. Получаем методы/свойства
-    let methods = self.metadata_lookup.get_methods(&type_metadata)?;
-
-    // 5. Формируем hover text
-    Ok(HoverInfo { var_name, type_name, methods, certainty })
-}
-```
-
-#### get_hover_info() — AST-based fallback
-
-```rust
-pub fn get_hover_info(&self, file: &str, line: u32, column: u32)
-    -> Result<HoverInfo>
-{
-    // Старый метод для совместимости
-    // Использует find_node_at_position() с реальными Span
-}
-```
-
-**Файл:** [backend/src/application/type_system_service.rs](../../backend/src/application/type_system_service.rs)
-
----
-
-### AstToIrConverter (backend/src/application/)
-
-**Назначение:** Мост между tree-sitter AST и SemanticProgram
-
-**Процесс конвертации:**
-
-#### Двухпроходная конвертация
-
-**Проход 1: Сбор символов**
-```rust
-fn collect_symbols(&mut self, node: &tree_sitter::Node) {
-    // Обход AST и сбор всех определений переменных/функций
-    // Построение SymbolTable с иерархией scope
-}
-```
-
-**Проход 2: Конвертация узлов**
-```rust
-fn convert_node(&self, node: &tree_sitter::Node) -> SemanticNode {
-    match node.kind() {
-        "variable_declaration" => SemanticNode::Variable { ... },
-        "function_declaration" => SemanticNode::Function { ... },
-        "if_statement" => SemanticNode::IfStatement { ... },
-        // ... другие узлы
-    }
-}
-```
-
-**Особенности:**
-- Извлекает реальные Span из tree-sitter (Milestone 2.11)
-- Строит SymbolTable для Inline Scope Analysis (Milestone 2.9)
-- Упрощает сложное дерево tree-sitter → компактная SemanticNode структура
-
-**Файл:** [backend/src/application/ast_to_ir.rs](../../backend/src/application/ast_to_ir.rs)
-
----
-
-## 🌟 Semantic Layer (shared/src/ir/)
+- [analysis-v2/src/lib/analysis_api.rs](../../analysis-v2/src/lib/analysis_api.rs)
+- [analysis-v2/src/lib/snapshots.rs](../../analysis-v2/src/lib/snapshots.rs)
 
 ### SemanticProgram
 
-**Назначение:** Промежуточное представление программы, независимое от парсера
-
-**Структура:**
-```rust
-pub struct SemanticProgram {
-    pub nodes: Vec<SemanticNode>,       // Упрощённое дерево
-    pub symbol_table: SymbolTable,       // Иерархия областей видимости
-    pub source_map: SourceMap,           // Связь с исходным кодом
-}
-```
-
-**Ключевые методы:**
-
-#### find_variable_at_position()
-
-```rust
-pub fn find_variable_at_position(&self, line: u32, column: u32)
-    -> Option<(String, TypeHint)>
-{
-    // Поиск в scope hierarchy (снизу вверх)
-    // Используется в Inline Scope Analysis (Milestone 2.9)
-}
-```
-
-#### find_node_at_position()
-
-```rust
-pub fn find_node_at_position(&self, line: u32, column: u32)
-    -> Option<&SemanticNode>
-{
-    // Поиск узла по позиции курсора
-    // Используется в LSP hover (Milestone 2.11)
-}
-```
-
-**Файл:** [shared/src/ir/mod.rs](../../shared/src/ir/mod.rs)
-
----
-
-### SemanticNode
-
-**Назначение:** Упрощённый набор узлов вместо сложного tree-sitter AST
-
-**Enum:**
-```rust
-pub enum SemanticNode {
-    Variable {
-        name: String,
-        type_hint: Option<TypeHint>,
-        span: Span,
-    },
-    Function {
-        name: String,
-        params: Vec<Param>,
-        return_type: Option<TypeHint>,
-        body: Vec<SemanticNode>,
-        span: Span,
-    },
-    IfStatement {
-        condition: Box<Expr>,
-        then_branch: Vec<SemanticNode>,
-        else_branch: Option<Vec<SemanticNode>>,
-        span: Span,
-    },
-    // ... другие узлы (ForLoop, WhileLoop, Assignment, MethodCall, etc.)
-}
-```
-
-**Преимущества:**
-- ✅ Гораздо проще tree-sitter AST (~10 типов узлов vs ~50)
-- ✅ Содержит только семантически значимые узлы
-- ✅ Легко создавать вручную для тестов
-- ✅ Независим от синтаксических деталей
-
-**Файл:** [shared/src/ir/semantic_node.rs](../../shared/src/ir/semantic_node.rs)
-
----
-
-### SymbolTable
-
-**Назначение:** Иерархия областей видимости с символами
-
-**Структура:**
-```rust
-pub struct SymbolTable {
-    scopes: Vec<Scope>,          // Стек областей видимости
-    current_scope_id: ScopeId,   // Текущая область
-}
-
-pub struct Scope {
-    id: ScopeId,
-    parent: Option<ScopeId>,
-    symbols: HashMap<String, Symbol>,  // Имя → Символ
-}
-
-pub struct Symbol {
-    name: String,
-    type_hint: TypeHint,
-    kind: SymbolKind,  // Variable | Function | Parameter
-    span: Span,
-}
-```
+**Назначение:** canonical IR snapshot конкретной revision.
 
-**Использование:**
-- Inline Scope Analysis (Milestone 2.9)
-- Разрешение имён переменных
-- Обнаружение shadowing и конфликтов имён
+Содержит:
 
-**Файл:** [shared/src/ir/symbol_table.rs](../../shared/src/ir/symbol_table.rs)
+- semantic nodes;
+- symbol table;
+- CFG;
+- `semantic_facts`.
 
----
+Файлы:
 
-### Parser trait
+- [shared/src/ir/program.rs](../../shared/src/ir/program.rs)
+- [shared/src/ir/mod.rs](../../shared/src/ir/mod.rs)
 
-**Назначение:** Dependency Inversion для разных парсеров
+### SemanticFacts
 
-**Trait:**
-```rust
-pub trait Parser {
-    fn parse(&self, source: &str) -> Result<SemanticProgram, ParseError>;
-}
-```
+**Назначение:** canonical semantic payload, из которого consumers читают owner/member/type/definition truth.
 
-**Реализации:**
+После cutover хранит:
 
-#### ParserCoordinator (backend)
-- TreeSitter + Regex → IR
-- Полнофункциональный парсер (~15 MB с tree-sitter)
+- type facts по span/offset;
+- receiver/member hints для member access и calls;
+- definition anchors;
+- callable/signature facts;
+- additional recovery materialization для incomplete member access.
 
-#### LightweightParser (cli)
-- Упрощённый regex-based парсер (~2-3 MB)
-- Достаточно для базовых задач CLI
+Файл:
 
-**Преимущество:**
-- ✅ AnalysisEngine не зависит от конкретного парсера
-- ✅ Можно подменить парсер без изменения анализатора
-- ✅ Упрощает тестирование (mock parser)
+- [shared/src/ir/semantic_facts.rs](../../shared/src/ir/semantic_facts.rs)
 
-**Файл:** [shared/src/parsing/mod.rs](../../shared/src/parsing/mod.rs)
+### type_inference_v2
 
----
+**Назначение:** materialize canonical semantic facts из parse/IR topology.
 
-## 🧠 Domain Layer (shared/src/domain/)
+Критичные обязанности:
 
-### TypeResolver
+- typed bindings для module context (`ЭтотОбъект`, `Объект`);
+- facet-aware `TypeResolution`;
+- recovery support для incomplete member access;
+- serialization definition anchors, включая configuration XML path.
 
-**Назначение:** Центральная логика анализа типов
+Файлы:
 
-**Структура:**
-```rust
-pub struct TypeResolver {
-    repository: Arc<TypeRepository>,
-    facet_rules: FacetRules,
-}
-```
+- [analysis-v2/src/type_inference_v2.rs](../../analysis-v2/src/type_inference_v2.rs)
+- [analysis-v2/src/type_inference_v2/local_function_summaries.rs](../../analysis-v2/src/type_inference_v2/local_function_summaries.rs)
 
-**Ключевые методы:**
+## 3. Exact Semantic Artifact
 
-#### resolve_type()
+Этот слой часто исторически называется `type_index`/`serve_only`, но теперь это не отдельная truth,
+а exact current-revision projection того же canonical IR snapshot.
 
-```rust
-pub fn resolve_type(&self, hint: &TypeHint) -> TypeResolution {
-    match hint {
-        TypeHint::Primitive(name) => self.resolve_primitive(name),
-        TypeHint::Configuration(prefix, member) => self.resolve_member_access(prefix, member),
-        TypeHint::Inferred(expr) => self.infer_from_expression(expr),
-    }
-}
-```
+Он используется для:
 
-#### resolve_member_access()
+- fast `type-at-position`;
+- owner hints;
+- exact readiness checks;
+- fail-closed serve reason profiling.
 
-```rust
-pub fn resolve_member_access(&self, prefix: &str, member: &str) -> TypeResolution {
-    let type_name = format!("{}.{}", prefix, member);
+Правила:
 
-    // ✅ ИСПРАВЛЕНИЕ (2025-01-18): Честная оценка certainty
-    let has_metadata = self.repository.find_type(&type_name).is_some();
+- строится только из текущего IR snapshot;
+- не делает повторный inference из `parse_result.program`;
+- не использует stale artifact как substitute;
+- не является discovery/search index.
 
-    let (certainty, source) = if has_metadata {
-        (Certainty::Known, ResolutionSource::Static)
-    } else {
-        (Certainty::Inferred(0.5), ResolutionSource::Inferred)
-    };
+Основные файлы:
 
-    TypeResolution { certainty, result, source }
-}
-```
+- [analysis-v2/src/lib/snapshots.rs](../../analysis-v2/src/lib/snapshots.rs)
+- [analysis-v2/src/lib/analysis_api.rs](../../analysis-v2/src/lib/analysis_api.rs)
 
-**Особенности:**
-- Flow-sensitive анализ (планируется)
-- Фасетная система (Manager | Object | Reference)
-- Градуальная типизация (Known | Inferred | Unknown)
+## 4. Shared Runtime Facade
 
-**Файл:** [shared/src/domain/resolver.rs](../../shared/src/domain/resolver.rs)
+### IntellisenseV2Facade
 
----
+**Назначение:** единый runtime contract для LSP/Web/MCP/CLI.
 
-### TypeRepository
+Отвечает за:
 
-**Назначение:** Абстракция для работы с метаданными типов
+- preparation exact operation snapshot;
+- queue priority и bounded wait;
+- runtime observability stages;
+- fail-closed semantics на adapter boundary;
+- dispatch в shared semantic services.
 
-**Структура:**
-```rust
-pub struct TypeRepository {
-    types: HashMap<String, TypeMetadata>,
-    categories: HashMap<String, Vec<String>>,
-}
-```
+Файлы:
 
-**Данные:**
-- **3927 типов платформы** из Syntax Helper
-- **276 категорий** с правильными названиями
-- **6975 методов** объектов
-- **13357 свойств** объектов
-- **476 глобальных функций**
-- **712 системных перечислений**
+- [bsl-runtime/src/application/intellisense_v2/facade.rs](../../bsl-runtime/src/application/intellisense_v2/facade.rs)
+- [bsl-runtime/src/application/intellisense_v2/facade/runtime.rs](../../bsl-runtime/src/application/intellisense_v2/facade/runtime.rs)
+- [bsl-runtime/src/application/intellisense_v2/policy.rs](../../bsl-runtime/src/application/intellisense_v2/policy.rs)
 
-**Методы:**
-- `find_type(name: &str) -> Option<&TypeMetadata>`
-- `get_methods(type_name: &str) -> Vec<Method>`
-- `get_properties(type_name: &str) -> Vec<Property>`
-- `load_platform_types(path: &Path) -> Result<()>`
+### Queue priority
 
-**Файл:** [shared/src/domain/repository.rs](../../shared/src/domain/repository.rs)
+Фактический runtime priority сейчас такой:
 
----
+- `interactive`: `completion`, `hover`, `signatureHelp`, `definition`
+- `background`: `diagnostics`, `members`, `type_at_position`, `symbol_search`, `references`, и др.
 
-### TypeMetadataLookup
+Это важно для docs/perf interpretation: не все semantic операции считаются interactive в scheduler,
+но все они обязаны читать один и тот же canonical semantic contract.
 
-**Назначение:** Получение детальной информации о типах
+## 5. Shared Semantic Services
 
-**Функции:**
-- Получение методов с описаниями
-- Получение свойств с типами
-- Фильтрация по активному фасету
-- Поиск перегруженных методов
+### Completion Service
 
-**Использование:**
-```rust
-let methods = metadata_lookup.get_methods(&type_metadata)?;
-let properties = metadata_lookup.get_properties(&type_metadata)?;
-```
+**Назначение:** semantic completion без adapter-local truth.
 
-**Файл:** [shared/src/domain/metadata_lookup.rs](../../shared/src/domain/metadata_lookup.rs)
+Текущий contract:
 
----
+- syntax helpers извлекают только позицию/receiver slice;
+- owner/member truth приходит из shared hints или semantic facts;
+- non-member semantic path не использует discovery/search `IndexSnapshot`;
+- при miss current-revision facts completion работает fail-closed.
 
-## 🌐 Presentation Layer
+Файлы:
 
-### LSP Server (backend/src/presentation/lsp_server.rs)
+- [bsl-runtime/src/application/type_system/services/completion_service.rs](../../bsl-runtime/src/application/type_system/services/completion_service.rs)
+- [bsl-runtime/src/application/type_system/services/completion_service/context.rs](../../bsl-runtime/src/application/type_system/services/completion_service/context.rs)
+- [bsl-runtime/src/application/type_system/services/completion_service/member_resolution.rs](../../bsl-runtime/src/application/type_system/services/completion_service/member_resolution.rs)
+- [bsl-runtime/src/application/type_system/services/completion_service/scope_candidates.rs](../../bsl-runtime/src/application/type_system/services/completion_service/scope_candidates.rs)
 
-**Назначение:** Language Server Protocol для VSCode Extension
+### Hover Service
 
-**Поддерживаемые LSP возможности:**
-- `textDocument/hover` — информация о типах
-- `textDocument/completion` — автодополнение
-- `textDocument/definition` — переход к определению
-- `textDocument/diagnostics` — ошибки компиляции (планируется Milestone 2.18)
+**Назначение:** user-facing type/member hover поверх canonical facts.
 
-**Custom requests:**
-- `bsl/getSemanticHtml` — Semantic Tree Visualization (Milestone 2.16)
+Analyzed path читает `semantic_facts` и exact current-revision type lookup, а не request-time rescue
+из consumer-local repository state.
 
----
+Файл:
 
-### Web Server (backend/src/presentation/web_server.rs)
+- [bsl-runtime/src/application/type_system/services/hover_service.rs](../../bsl-runtime/src/application/type_system/services/hover_service.rs)
 
-**Назначение:** Axum web server для API endpoints
+### Definition Service
 
-**Endpoints:**
-- `GET /api/health` — health check
-- `GET /api/types?search=<query>` — поиск типов
-- `POST /api/analyze` — анализ кода
-- `GET /api/semantic/:file_path` — semantic visualization (Milestone 2.16)
+**Назначение:** canonical go-to-definition.
 
-**Интеграция:** Отдаёт статические WASM файлы frontend
+После закрытия `xgg.3` сервис:
 
----
+- читает definition anchors из `semantic_facts` на analyzed path;
+- использует canonical `TypeDefinitionLocation` для configuration/common-module/local targets;
+- не восстанавливает configuration XML path локально из consumer repo.
 
-### SemanticRoutes (backend/src/presentation/semantic_routes.rs)
+Файл:
 
-**Назначение:** HTTP endpoint для Semantic Tree Visualization
+- [bsl-runtime/src/application/type_system/services/definition_service.rs](../../bsl-runtime/src/application/type_system/services/definition_service.rs)
 
-**Endpoint:**
-```
-GET /api/semantic/:file_path?format=json|html&theme=dark|light&compact=false
-```
+### Signature Help Service
 
-**Статус:** ⚠️ MVP stub (заглушка для тестирования API контракта)
+**Назначение:** callable/signature lookup для LSP.
 
-**Файл:** [backend/src/presentation/semantic_routes.rs](../../backend/src/presentation/semantic_routes.rs)
+На analyzed path сигнатура берётся из semantic facts, materialized на IR build, а не из request-time
+repository rescue.
 
----
+Файл:
 
-## 🔗 Связанные документы
+- [bsl-runtime/src/application/type_system/services/signature_help_service.rs](../../bsl-runtime/src/application/type_system/services/signature_help_service.rs)
 
-- **[Type System Architecture](type_system_architecture.md)** — общая архитектура
-- **[Milestones History](milestones-history.md)** — история развития
-- **[ROADMAP_2025.md](../../ROADMAP_2025.md)** — актуальный план развития
-- **[Development Workflow](../guides/development-workflow.md)** — команды разработки
+## 6. Metadata and Repository Layer
+
+### TypeRepository / TypeMetadataLookup / SignatureIndex
+
+**Назначение:** каталог platform/config metadata для already-resolved types.
+
+Эти компоненты НЕ являются отдельным semantic pipeline. Их роль:
+
+- обогатить canonical owner/type документацией, методами и свойствами;
+- сопоставить facet-aware type с platform/config catalog;
+- выдать definition location там, где она уже выражена canonical fact'ом.
+
+Файлы:
+
+- [shared/src/domain/metadata_lookup/search.rs](../../shared/src/domain/metadata_lookup/search.rs)
+- [bsl-repository/src/signature_index/method.rs](../../bsl-repository/src/signature_index/method.rs)
+- [bsl-repository/src/signature_index/types.rs](../../bsl-repository/src/signature_index/types.rs)
+
+### Config Metadata Parser
+
+**Назначение:** загрузка configuration raw types и canonical metadata anchors.
+
+Недавнее изменение в этом слое:
+
+- XML path метаданных теперь сохраняется в `RawTypeData.metadata_path`;
+- definition path для configuration symbols может быть построен из canonical facts без consumer-local scan.
+
+Файлы:
+
+- [bsl-runtime/src/data/loaders/config_metadata_parser/parser.rs](../../bsl-runtime/src/data/loaders/config_metadata_parser/parser.rs)
+- [bsl-runtime/src/data/loaders/config_metadata_parser/types.rs](../../bsl-runtime/src/data/loaders/config_metadata_parser/types.rs)
+- [bsl-runtime/src/data/loaders/config_metadata_parser/converter.rs](../../bsl-runtime/src/data/loaders/config_metadata_parser/converter.rs)
+- [bsl-types/src/types/raw_data.rs](../../bsl-types/src/types/raw_data.rs)
+
+## 7. Adapter Layer
+
+Adapters теперь transport-only wrapper над shared runtime.
+
+### LSP
+
+- [backend/src/bin/lsp_server/handlers/completion.rs](../../backend/src/bin/lsp_server/handlers/completion.rs)
+- [backend/src/bin/lsp_server/handlers/signature_help.rs](../../backend/src/bin/lsp_server/handlers/signature_help.rs)
+- [backend/src/bin/lsp_server/handlers/definition.rs](../../backend/src/bin/lsp_server/handlers/definition.rs)
+- [backend/src/bin/lsp_server/server/language_server/helpers.rs](../../backend/src/bin/lsp_server/server/language_server/helpers.rs)
+
+### Web
+
+- [backend/src/presentation/web/handlers.rs](../../backend/src/presentation/web/handlers.rs)
+
+### MCP
+
+- [bsl-agent/src/session/manager_semantic_core.rs](../../bsl-agent/src/session/manager_semantic_core.rs)
+- [bsl-agent/src/session/manager_semantic_navigation.rs](../../bsl-agent/src/session/manager_semantic_navigation.rs)
+- [bsl-agent/src/session/helpers_semantic.rs](../../bsl-agent/src/session/helpers_semantic.rs)
+
+### CLI
+
+- [cli/src/main.rs](../../cli/src/main.rs)
+- [cli/src/runtime.rs](../../cli/src/runtime.rs)
+
+## 8. Observability and Contracts
+
+Shared observability contract фиксирует:
+
+- bounded fail-closed reason codes;
+- shared stage taxonomy;
+- anti-rescue counters для perf gates;
+- separate legacy/internal `type_index_reason_*` drilldown metrics.
+
+Основные артефакты:
+
+- [contracts/observability-completion-v2/v3/contract.json](../../contracts/observability-completion-v2/v3/contract.json)
+- [contracts/intellisense-perf-gate/v2/contract.json](../../contracts/intellisense-perf-gate/v2/contract.json)
+- [docs/guides/lsp-v2-latency-policy.md](../guides/lsp-v2-latency-policy.md)
+
+## 9. Representative Evidence
+
+Актуальная human-readable матрица и machine-readable validation assets:
+
+- [openspec/changes/refactor-ir-canonical-semantic-pipeline/execution-matrix.md](../../openspec/changes/refactor-ir-canonical-semantic-pipeline/execution-matrix.md)
+- [openspec/changes/refactor-ir-canonical-semantic-pipeline/validation/acceptance-report.json](../../openspec/changes/refactor-ir-canonical-semantic-pipeline/validation/acceptance-report.json)
+- [openspec/changes/refactor-ir-canonical-semantic-pipeline/validation/quality-gates.json](../../openspec/changes/refactor-ir-canonical-semantic-pipeline/validation/quality-gates.json)

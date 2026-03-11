@@ -3,12 +3,12 @@
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
 
-use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, FileId as V2FileId, SettingsId};
+use bsl_analysis_v2::{AnalysisHostV2, AnalysisV2, Change as ChangeV2, FileId as V2FileId, SettingsId};
 use bsl_backend::application::get_hover_info_with_semantic_program;
 use bsl_backend::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter};
 use bsl_backend::system::{build_deps_bundle_v2, DepsBundleV2, SystemCoordinator};
 use bsl_shared::domain::resolver::TypeResolver;
-use bsl_shared::domain::types::{ParseError, TypeDiagnostic};
+use bsl_shared::domain::types::{ParseError, TypeDiagnostic, TypeResolution};
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::formatting::DetailLevel;
 use bsl_shared::ir::SemanticProgram;
@@ -209,5 +209,21 @@ pub fn hover_for_code_with_config(
         hover_config,
         resolver.as_ref(),
         ir_program,
+    )
+}
+
+pub fn completion_owner_hint_for_position(
+    analysis: &AnalysisV2,
+    file_id: V2FileId,
+    file_content: &str,
+    line: u32,
+    column: u32,
+) -> Option<TypeResolution> {
+    bsl_backend::application::completion_member_access_owner_type_hint_from_analysis(
+        analysis,
+        file_id,
+        file_content,
+        line,
+        column,
     )
 }

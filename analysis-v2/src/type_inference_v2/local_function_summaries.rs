@@ -1,4 +1,5 @@
 use super::*;
+use bsl_shared::ir::Span;
 
 impl TypeInferencer {
     pub(super) fn infer_local_function_summaries(
@@ -10,6 +11,8 @@ impl TypeInferencer {
         struct Def<'a> {
             params: &'a [String],
             body: &'a [Statement],
+            span: Span,
+            is_function: bool,
         }
 
         fn collect_called_locals_in_expr(expr: &Expression, out: &mut BTreeSet<String>) {
@@ -392,11 +395,42 @@ impl TypeInferencer {
 
         let mut function_defs: Vec<(String, Def<'_>)> = Vec::new();
         for stmt in &program.statements {
-            if let Statement::FunctionDecl {
-                name, params, body, ..
-            } = stmt
-            {
-                function_defs.push((name.to_lowercase(), Def { params, body }));
+            match stmt {
+                Statement::FunctionDecl {
+                    name,
+                    params,
+                    body,
+                    span,
+                    ..
+                } => {
+                    function_defs.push((
+                        name.to_lowercase(),
+                        Def {
+                            params,
+                            body,
+                            span: *span,
+                            is_function: true,
+                        },
+                    ));
+                }
+                Statement::ProcedureDecl {
+                    name,
+                    params,
+                    body,
+                    span,
+                    ..
+                } => {
+                    function_defs.push((
+                        name.to_lowercase(),
+                        Def {
+                            params,
+                            body,
+                            span: *span,
+                            is_function: false,
+                        },
+                    ));
+                }
+                _ => {}
             }
         }
         if function_defs.is_empty() {
@@ -555,12 +589,15 @@ impl TypeInferencer {
 
                 // Snapshot: expose current return types to expression inference via env.local_function_summaries.
                 let mut snapshot: HashMap<String, LocalFunctionSummary> = HashMap::new();
-                for (idx, (name_lower, _def)) in function_defs.iter().enumerate() {
+                for (idx, (name_lower, def)) in function_defs.iter().enumerate() {
                     snapshot.insert(
                         name_lower.clone(),
                         LocalFunctionSummary {
                             return_type: states[idx].return_type(),
                             may_fallthrough: may_fallthrough[idx],
+                            params: def.params.to_vec(),
+                            declaration_span: def.span,
+                            is_function: def.is_function,
                         },
                     );
                 }
@@ -604,12 +641,15 @@ impl TypeInferencer {
         }
 
         let mut out: HashMap<String, LocalFunctionSummary> = HashMap::new();
-        for (idx, (name_lower, _def)) in function_defs.iter().enumerate() {
+        for (idx, (name_lower, def)) in function_defs.iter().enumerate() {
             out.insert(
                 name_lower.clone(),
                 LocalFunctionSummary {
                     return_type: states[idx].return_type(),
                     may_fallthrough: may_fallthrough[idx],
+                    params: def.params.to_vec(),
+                    declaration_span: def.span,
+                    is_function: def.is_function,
                 },
             );
         }

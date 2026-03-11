@@ -1352,6 +1352,26 @@ fn universal_collection_semantic_deps() -> Arc<SemanticDeps> {
     })
 }
 
+fn array_semantic_deps() -> Arc<SemanticDeps> {
+    let repository_impl = Arc::new(InMemoryTypeRepository::new());
+    repository_impl
+        .load_types(vec![bsl_shared::domain::types::RawTypeData {
+            name: "Массив".to_string(),
+            source: bsl_shared::domain::types::RawDataSource::Platform,
+            ..Default::default()
+        }])
+        .expect("load array type");
+
+    let repository =
+        repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+    Arc::new(SemanticDeps {
+        signature_index: SignatureIndex::new(),
+        resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
+        repository,
+        platform_signatures_loaded: true,
+    })
+}
+
 #[test]
 fn serve_only_exact_hit_matches_legacy_for_same_snapshot() {
     let mut host = AnalysisHostV2::default();
@@ -1577,6 +1597,110 @@ fn serve_only_matches_legacy_for_universal_collections_with_incomplete_member_ac
             "serve-only must match legacy resolution for incomplete member access on {label}"
         );
     }
+}
+
+#[test]
+fn serve_only_matches_legacy_for_incomplete_global_collection_member_access() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(212);
+    let text: Arc<str> = Arc::from(
+        "Процедура Тест()\n\
+             ДляCompletion = Документы.\n\
+             КонецПроцедуры",
+    );
+
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("deps-global-collection-incomplete"),
+        deps: default_semantic_deps(),
+    });
+    host.apply_change(Change::SetFileWithSnapshot {
+        file_id,
+        text: text.clone(),
+        version: 1,
+        path: Arc::from("serve-only-global-collection-incomplete.bsl"),
+        parse_snapshot: parse_snapshot_for_test(file_id, 1, text.as_ref(), Vec::new(), true, None),
+    });
+
+    let analysis = host.snapshot();
+    let probe = marker_tail_offset(text.as_ref(), "Документы");
+    let legacy = analysis
+        .type_at_byte_offset(file_id, probe)
+        .expect("legacy type lookup")
+        .expect("legacy type result");
+    let precompute = analysis
+        .precompute_type_index_for_file(file_id, Some(1), 0)
+        .expect("precompute global collection incomplete");
+    assert_eq!(
+        precompute.reason_code,
+        TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeExactStored
+    );
+
+    let serve_only = analysis
+        .type_at_byte_offset_serve_only_profiled(file_id, probe)
+        .expect("serve-only lookup");
+    assert_eq!(
+        serve_only.serve_reason_code,
+        TypeIndexServeReasonCode::TypeIndexExactHit,
+        "serve-only must stay exact for incomplete global collection member access"
+    );
+    assert_eq!(legacy.type_name(), "Документы");
+    assert_eq!(
+        serve_only.resolution,
+        Some(legacy),
+        "serve-only must match legacy resolution on incomplete global collection member access"
+    );
+}
+
+#[test]
+fn serve_only_matches_legacy_for_incomplete_parenthesized_new_member_access() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(213);
+    let text: Arc<str> = Arc::from(
+        "Процедура Тест()\n\
+             ДляCompletion = (Новый Массив()).\n\
+             КонецПроцедуры",
+    );
+
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("deps-parenthesized-new-incomplete"),
+        deps: array_semantic_deps(),
+    });
+    host.apply_change(Change::SetFileWithSnapshot {
+        file_id,
+        text: text.clone(),
+        version: 1,
+        path: Arc::from("serve-only-parenthesized-new-incomplete.bsl"),
+        parse_snapshot: parse_snapshot_for_test(file_id, 1, text.as_ref(), Vec::new(), true, None),
+    });
+
+    let analysis = host.snapshot();
+    let probe = marker_tail_offset(text.as_ref(), "Новый Массив()");
+    let legacy = analysis
+        .type_at_byte_offset(file_id, probe)
+        .expect("legacy type lookup")
+        .expect("legacy type result");
+    let precompute = analysis
+        .precompute_type_index_for_file(file_id, Some(1), 0)
+        .expect("precompute parenthesized new incomplete");
+    assert_eq!(
+        precompute.reason_code,
+        TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeExactStored
+    );
+
+    let serve_only = analysis
+        .type_at_byte_offset_serve_only_profiled(file_id, probe)
+        .expect("serve-only lookup");
+    assert_eq!(
+        serve_only.serve_reason_code,
+        TypeIndexServeReasonCode::TypeIndexExactHit,
+        "serve-only must stay exact for parenthesized incomplete member access"
+    );
+    assert_eq!(legacy.type_name(), "Массив<Неопределено>");
+    assert_eq!(
+        serve_only.resolution,
+        Some(legacy),
+        "serve-only must match legacy resolution on parenthesized incomplete member access"
+    );
 }
 
 #[test]

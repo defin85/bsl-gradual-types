@@ -1,9 +1,7 @@
 use std::sync::Arc;
 
-use bsl_shared::domain::repository::TypeRepository;
 use bsl_shared::domain::signature_index::{ConstructorSignature, MethodSignature};
-use bsl_shared::domain::types::TypeResolution;
-use bsl_shared::ir::{SemanticNode, SemanticNodeKind, SemanticProgram, Span};
+use bsl_shared::ir::{SemanticNode, SemanticNodeKind, SemanticProgram};
 
 use crate::system::LineIndex;
 use crate::system::SystemCoordinator;
@@ -56,34 +54,13 @@ pub fn get_signature_help_v2_with_analysis(
 ) -> Option<SignatureHelpData> {
     let call_context = signature_help_query(file_content, line, character)?;
     if let (Some(analysis), Some(file_id)) = (analysis, file_id) {
-        let probe_offset = LineIndex::new(file_content)
-            .utf16_position_to_byte_offset(file_content, line, character)
-            .min(u32::MAX as usize) as u32;
-        if !exact_type_index_available(analysis, file_id, probe_offset, coordinator) {
+        if !exact_type_index_ready(analysis, file_id, coordinator) {
             return None;
         }
     }
-    let receiver_type_hint = signature_receiver_type(
-        file_content,
-        &call_context,
-        ir_program.as_ref(),
-        analysis,
-        file_id,
-        coordinator,
-    );
-    if call_context.receiver_text.is_some()
-        && !call_context.is_constructor
-        && receiver_type_hint.is_none()
-    {
-        return None;
-    }
-
-    let signature_info = get_signature_for_function_with_repository(
-        &call_context.function_name,
-        receiver_type_hint.as_ref(),
-        call_context.is_constructor,
-        &deps.repository,
-    )?;
+    let _ = (analysis, file_id, deps, coordinator);
+    let signature_info =
+        signature_target_from_semantic_facts(file_content, &call_context, ir_program.as_ref())?;
 
     let active_param = calculate_active_parameter(file_content, &call_context, line, character);
     let (label, parameters) = match signature_info {
@@ -116,11 +93,7 @@ pub fn signature_help_exact_type_index_available_at_position(
     if signature_help_query(file_content, line, character).is_none() {
         return true;
     }
-
-    let probe_offset = LineIndex::new(file_content)
-        .utf16_position_to_byte_offset(file_content, line, character)
-        .min(u32::MAX as usize) as u32;
-    exact_type_index_available(analysis, file_id, probe_offset, None)
+    exact_type_index_ready(analysis, file_id, None)
 }
 
 pub fn signature_help_query(
@@ -451,29 +424,11 @@ fn is_identifier_char(c: char) -> bool {
         || c == '\u{0451}'
 }
 
-fn get_signature_for_function_with_repository(
-    function_name: &str,
-    receiver_type_hint: Option<&TypeResolution>,
-    is_constructor: bool,
-    repository: &Arc<dyn TypeRepository>,
-) -> Option<SignatureTarget> {
-    if is_constructor {
-        return repository
-            .find_constructor(function_name)
-            .map(SignatureTarget::Constructor);
-    }
-
-    let owner_type = receiver_type_hint.and_then(signature_owner_type_name);
-    repository
-        .find_method_signature(owner_type.as_deref(), function_name)
-        .map(SignatureTarget::Method)
-}
-
-fn signature_receiver_type_from_ir(
+fn signature_target_from_semantic_facts(
     file_content: &str,
     call_context: &SignatureHelpQuery,
     ir_program: &SemanticProgram,
-) -> Option<TypeResolution> {
+) -> Option<SignatureTarget> {
     let line_index = LineIndex::new(file_content);
     let call_start_offset = line_index
         .utf16_position_to_byte_offset(
@@ -482,214 +437,126 @@ fn signature_receiver_type_from_ir(
             call_context.call_start_character,
         )
         .min(u32::MAX as usize) as u32;
-    if let Some(node) = [
+    if let Some(target) = signature_target_from_fact_span(ir_program, call_start_offset) {
+        return Some(target);
+    }
+
+    let direct = [
         call_start_offset.saturating_sub(1),
         call_start_offset,
         call_start_offset.saturating_add(1),
     ]
     .into_iter()
-    .find_map(|offset| ir_program.find_node_at_byte_offset(offset))
-    {
-        if let Some(receiver) = semantic_receiver_type(ir_program, node) {
-            return Some(receiver);
-        }
+    .find_map(|offset| {
+        ir_program
+            .find_node_at_byte_offset(offset)
+            .and_then(|node| signature_target_for_node(ir_program, node))
+    });
+    if direct.is_some() {
+        return direct;
     }
 
-    let receiver_end_character = call_context.receiver_end_character?;
-    let byte_offset = line_index
-        .utf16_position_to_byte_offset(
-            file_content,
-            call_context.call_start_line,
-            receiver_end_character,
-        )
-        .min(u32::MAX as usize) as u32;
-    ir_program.semantic_facts.type_at_byte_offset(byte_offset)
+    ir_program
+        .nodes
+        .iter()
+        .filter(|node| node.span.contains(call_start_offset))
+        .min_by_key(|node| node.span.len())
+        .and_then(|node| signature_target_for_node(ir_program, node))
 }
 
-fn signature_receiver_type(
-    file_content: &str,
-    call_context: &SignatureHelpQuery,
+fn signature_target_from_fact_span(
     ir_program: &SemanticProgram,
-    analysis: Option<&bsl_analysis_v2::AnalysisV2>,
-    file_id: Option<bsl_analysis_v2::FileId>,
-    coordinator: Option<&SystemCoordinator>,
-) -> Option<TypeResolution> {
-    if let (Some(analysis), Some(file_id)) = (analysis, file_id) {
-        let line_index = LineIndex::new(file_content);
-        let call_start_offset = line_index
-            .utf16_position_to_byte_offset(
-                file_content,
-                call_context.call_start_line,
-                call_context.call_start_character,
-            )
-            .min(u32::MAX as usize) as u32;
-        if let Some(node) = [
-            call_start_offset.saturating_sub(1),
-            call_start_offset,
-            call_start_offset.saturating_add(1),
-        ]
-        .into_iter()
-        .find_map(|offset| ir_program.find_node_at_byte_offset(offset))
-        {
-            if let Some(receiver) = semantic_receiver_type_with_exact_index(
-                analysis,
-                file_id,
-                ir_program,
-                node,
-                coordinator,
-            ) {
-                return Some(receiver);
-            }
+    call_start_offset: u32,
+) -> Option<SignatureTarget> {
+    for offset in [
+        call_start_offset.saturating_sub(1),
+        call_start_offset,
+        call_start_offset.saturating_add(1),
+    ] {
+        let constructor = ir_program
+            .semantic_facts
+            .constructor_targets_by_span
+            .iter()
+            .filter(|(span, target)| span.contains(offset) && target.signature.is_some())
+            .min_by_key(|(span, _)| span.len())
+            .and_then(|(_, target)| target.signature.clone())
+            .map(SignatureTarget::Constructor);
+        if constructor.is_some() {
+            return constructor;
         }
 
-        let receiver_end_character = call_context.receiver_end_character?;
-        let byte_offset = line_index
-            .utf16_position_to_byte_offset(
-                file_content,
-                call_context.call_start_line,
-                receiver_end_character,
-            )
-            .min(u32::MAX as usize) as u32;
-        return serve_only_type_at_offset(analysis, file_id, byte_offset, coordinator);
+        let call_method = ir_program
+            .semantic_facts
+            .call_method_targets_by_span
+            .iter()
+            .filter(|(span, target)| span.contains(offset) && target.signature.is_some())
+            .min_by_key(|(span, _)| span.len())
+            .and_then(|(_, target)| target.signature.clone())
+            .map(SignatureTarget::Method);
+        if call_method.is_some() {
+            return call_method;
+        }
+
+        let member_method = ir_program
+            .semantic_facts
+            .member_method_targets_by_span
+            .iter()
+            .filter(|(span, target)| span.contains(offset) && target.signature.is_some())
+            .min_by_key(|(span, _)| span.len())
+            .and_then(|(_, target)| target.signature.clone())
+            .map(SignatureTarget::Method);
+        if member_method.is_some() {
+            return member_method;
+        }
     }
 
-    signature_receiver_type_from_ir(file_content, call_context, ir_program)
+    None
 }
 
-fn semantic_type_at_offset(program: &SemanticProgram, offset: u32) -> Option<TypeResolution> {
-    program
-        .semantic_facts
-        .type_at_byte_offset(offset)
-        .or_else(|| {
-            program
-                .find_node_at_byte_offset(offset)
-                .and_then(|node| program.semantic_facts.type_resolution_for_span(node.span))
-        })
-}
-
-fn receiver_span_for_node(program: &SemanticProgram, node: &SemanticNode) -> Option<Span> {
+fn signature_target_for_node(
+    ir_program: &SemanticProgram,
+    node: &SemanticNode,
+) -> Option<SignatureTarget> {
     match &node.kind {
-        SemanticNodeKind::MemberAccess {
-            object_node,
-            object_span,
-            ..
-        }
-        | SemanticNodeKind::FunctionCall {
-            object_node,
-            object_span,
-            ..
-        } => object_span.or_else(|| {
-            object_node.and_then(|idx| program.nodes.get(idx).map(|candidate| candidate.span))
-        }),
+        SemanticNodeKind::FunctionCall { .. } => ir_program
+            .semantic_facts
+            .call_method_targets_by_span
+            .get(&node.span)
+            .and_then(|target| target.signature.clone())
+            .map(SignatureTarget::Method),
+        SemanticNodeKind::MemberAccess { .. } => ir_program
+            .semantic_facts
+            .member_method_targets_by_span
+            .get(&node.span)
+            .and_then(|target| target.signature.clone())
+            .map(SignatureTarget::Method),
+        SemanticNodeKind::NewExpression { .. } => ir_program
+            .semantic_facts
+            .constructor_targets_by_span
+            .get(&node.span)
+            .and_then(|target| target.signature.clone())
+            .map(SignatureTarget::Constructor),
         _ => None,
     }
 }
 
-fn semantic_receiver_type(
-    program: &SemanticProgram,
-    node: &SemanticNode,
-) -> Option<TypeResolution> {
-    let span_fallback = |span: Span| {
-        semantic_type_at_offset(program, span.start)
-            .or_else(|| {
-                span.end
-                    .checked_sub(1)
-                    .and_then(|offset| semantic_type_at_offset(program, offset))
-            })
-            .or_else(|| program.semantic_facts.type_resolution_for_span(span))
-    };
-
-    match &node.kind {
-        SemanticNodeKind::MemberAccess { .. } => program
-            .semantic_facts
-            .member_access_object_type_by_span
-            .get(&node.span)
-            .cloned()
-            .or_else(|| receiver_span_for_node(program, node).and_then(span_fallback)),
-        SemanticNodeKind::FunctionCall { .. } => program
-            .semantic_facts
-            .call_receiver_type_by_span
-            .get(&node.span)
-            .cloned()
-            .or_else(|| receiver_span_for_node(program, node).and_then(span_fallback)),
-        _ => None,
-    }
-}
-
-fn semantic_receiver_type_with_exact_index(
+fn exact_type_index_ready(
     analysis: &bsl_analysis_v2::AnalysisV2,
     file_id: bsl_analysis_v2::FileId,
-    program: &SemanticProgram,
-    node: &SemanticNode,
-    coordinator: Option<&SystemCoordinator>,
-) -> Option<TypeResolution> {
-    receiver_span_for_node(program, node)
-        .and_then(|span| serve_only_type_in_span(analysis, file_id, span, coordinator))
-}
-
-fn serve_only_type_in_span(
-    analysis: &bsl_analysis_v2::AnalysisV2,
-    file_id: bsl_analysis_v2::FileId,
-    span: Span,
-    coordinator: Option<&SystemCoordinator>,
-) -> Option<TypeResolution> {
-    serve_only_type_at_offset(analysis, file_id, span.start, coordinator).or_else(|| {
-        span.end
-            .checked_sub(1)
-            .and_then(|offset| serve_only_type_at_offset(analysis, file_id, offset, coordinator))
-    })
-}
-
-fn serve_only_type_at_offset(
-    analysis: &bsl_analysis_v2::AnalysisV2,
-    file_id: bsl_analysis_v2::FileId,
-    byte_offset: u32,
-    coordinator: Option<&SystemCoordinator>,
-) -> Option<TypeResolution> {
-    let profiled = serve_only_profiled(analysis, file_id, byte_offset, coordinator)?;
-    profiled.resolution
-}
-
-fn exact_type_index_available(
-    analysis: &bsl_analysis_v2::AnalysisV2,
-    file_id: bsl_analysis_v2::FileId,
-    byte_offset: u32,
     coordinator: Option<&SystemCoordinator>,
 ) -> bool {
-    serve_only_profiled(analysis, file_id, byte_offset, coordinator).is_some_and(|profiled| {
-        profiled.serve_reason_code == bsl_analysis_v2::TypeIndexServeReasonCode::TypeIndexExactHit
-    })
-}
-
-fn serve_only_profiled(
-    analysis: &bsl_analysis_v2::AnalysisV2,
-    file_id: bsl_analysis_v2::FileId,
-    byte_offset: u32,
-    coordinator: Option<&SystemCoordinator>,
-) -> Option<bsl_analysis_v2::TypeAtByteOffsetProfiledResult> {
-    let profiled = analysis
-        .type_at_byte_offset_serve_only_profiled(file_id, byte_offset)
-        .ok()?;
+    let ready = analysis
+        .current_type_index_serve_only_ready(file_id)
+        .ok()
+        .unwrap_or(false);
     if let Some(coordinator) = coordinator {
-        coordinator.record_intellisense_v2_type_index_reason(profiled.serve_reason_code.as_str());
+        coordinator.record_intellisense_v2_type_index_reason(if ready {
+            bsl_analysis_v2::TypeIndexServeReasonCode::TypeIndexExactHit.as_str()
+        } else {
+            bsl_analysis_v2::TypeIndexServeReasonCode::TypeIndexFallbackUnavailable.as_str()
+        });
     }
-    Some(profiled)
-}
-
-fn signature_owner_type_name(resolution: &TypeResolution) -> Option<String> {
-    if resolution.is_unknown() || resolution.is_dynamic() {
-        return None;
-    }
-
-    let type_name = resolution.type_name();
-    let without_generic = type_name.split('<').next().unwrap_or(&type_name);
-    let without_union = without_generic.split('|').next().unwrap_or(without_generic);
-    let normalized = without_union.trim();
-    if normalized.is_empty() {
-        None
-    } else {
-        Some(normalized.to_string())
-    }
+    ready
 }
 
 enum SignatureTarget {

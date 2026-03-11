@@ -64,6 +64,7 @@ pub(super) fn add_properties_from_resolution(
     }
 }
 
+#[cfg(test)]
 pub(super) async fn resolve_member_owner_type(
     analysis: Option<&CompletionAnalysisContext<'_>>,
     _file_content: &str,
@@ -74,6 +75,7 @@ pub(super) async fn resolve_member_owner_type(
     resolve_member_owner_type_sync(analysis, _file_content, _line, _column, _base_name)
 }
 
+#[cfg(test)]
 pub(super) fn resolve_member_owner_type_sync(
     analysis: Option<&CompletionAnalysisContext<'_>>,
     file_content: &str,
@@ -89,166 +91,27 @@ pub(super) fn resolve_member_owner_type_sync(
         .or_else(|| resolve_member_access_owner_type_from_ir(analysis, file_content, line, column))
 }
 
-pub(super) fn resolve_property_access_type(
-    resolver: Option<&TypeResolver>,
-    metadata_lookup: &TypeMetadataLookup,
-    owner: &TypeResolution,
-    property_name: &str,
-) -> Option<TypeResolution> {
-    let owner_type_name = owner.type_name();
-    let lowered = property_name.to_lowercase();
-    let property = metadata_lookup
-        .get_properties(owner)
-        .into_iter()
-        .find(|item| item.name.to_lowercase() == lowered)?;
-    if property.prop_type.trim().is_empty() {
-        return None;
-    }
-
-    if let Some(resolver) = resolver {
-        if property
-            .prop_type
-            .trim_start()
-            .starts_with("ТабличнаяЧасть<")
-        {
-            if let ResolutionResult::Concrete(ConcreteType::Configuration(cfg)) = &owner.result {
-                let tabular_sections = metadata_lookup.get_tabular_sections(owner);
-                let lowered = property_name.to_lowercase();
-                if let Some(ts) = tabular_sections
-                    .iter()
-                    .find(|ts| ts.name.to_lowercase() == lowered)
-                {
-                    let parent_type = if cfg.name.contains('.') {
-                        cfg.name.clone()
-                    } else {
-                        format!("{}.{}", cfg.kind.to_prefix(), cfg.name)
-                    };
-                    let expr = format!("{}.{}", parent_type, ts.name);
-                    let resolved = resolver.resolve_expression_sync(&expr);
-                    if !resolved.is_unknown() {
-                        return Some(resolved);
-                    }
-                }
-            }
-        }
-    }
-
-    let resolved_type = substitute_type_name_if_needed(&property.prop_type, &owner_type_name);
-    Some(resolve_type_from_string(resolver, &resolved_type))
-}
-
-pub(super) fn resolve_method_call_return_type(
-    resolver: Option<&TypeResolver>,
-    metadata_lookup: &TypeMetadataLookup,
-    owner: &TypeResolution,
-    method_name: &str,
-) -> Option<TypeResolution> {
-    let owner_type_name = owner.type_name();
-
-    if matches!(owner.result, ResolutionResult::Generic(_)) {
-        if let ResolutionResult::Generic(generic) = &owner.result {
-            let base = generic.base_type.to_lowercase();
-            let method = method_name.to_lowercase();
-            if base == "табличнаячасть"
-                && matches!(
-                    method.as_str(),
-                    "добавить" | "вставить" | "получить" | "найти"
-                )
-            {
-                if let Some(concrete) = generic.type_params.first() {
-                    if !matches!(concrete, ConcreteType::Special(SpecialType::Undefined)) {
-                        if let Some(resolver) = resolver {
-                            return Some(resolve_concrete_type(resolver, concrete));
-                        }
-                    }
-                }
-            }
-        }
-
-        let lowered = method_name.to_lowercase();
-        let method = metadata_lookup
-            .get_methods(owner)
-            .into_iter()
-            .find(|item| item.name.to_lowercase() == lowered)?;
-        if method.return_type.trim().is_empty() {
-            return None;
-        }
-        let resolved_type = substitute_type_name_if_needed(&method.return_type, &owner_type_name);
-        return Some(resolve_type_from_string(resolver, &resolved_type));
-    }
-
-    let signature = metadata_lookup.find_method_signature_for_call(Some(owner), method_name);
-    if let Some(signature) = signature {
-        let return_type = signature.return_type.as_deref().unwrap_or("Неопределено");
-
-        if return_type == "T" {
-            if let ResolutionResult::Generic(generic) = &owner.result {
-                if let Some(concrete) = generic.type_params.first() {
-                    if !matches!(concrete, ConcreteType::Special(SpecialType::Undefined)) {
-                        if let Some(resolver) = resolver {
-                            return Some(resolve_concrete_type(resolver, concrete));
-                        }
-                    }
-                }
-            }
-        }
-
-        let resolved_type = substitute_type_name_if_needed(return_type, &owner_type_name);
-        return Some(resolve_type_from_string(resolver, &resolved_type));
-    }
-
-    let lowered = method_name.to_lowercase();
-    let method = metadata_lookup
-        .get_methods(owner)
-        .into_iter()
-        .find(|item| item.name.to_lowercase() == lowered)?;
-    if method.return_type.trim().is_empty() {
-        return None;
-    }
-
-    let resolved_type = substitute_type_name_if_needed(&method.return_type, &owner_type_name);
-    Some(resolve_type_from_string(resolver, &resolved_type))
-}
-
-pub(super) fn resolve_concrete_type(
-    resolver: &TypeResolver,
-    concrete: &ConcreteType,
-) -> TypeResolution {
-    let type_name = match concrete {
-        ConcreteType::Primitive(pt) => pt.display_name().to_string(),
-        ConcreteType::Platform(pt) => pt.name.clone(),
-        ConcreteType::Special(s) => s.display_name().to_string(),
-        ConcreteType::GlobalFunction(func) => func.name.clone(),
-        ConcreteType::TabularRow(row) => row.get_full_name(),
-        ConcreteType::Configuration(cfg) => {
-            if let Some(facet) = cfg.facet {
-                format!("{}.{}", cfg.kind.faceted_type_prefix(&facet), cfg.name)
-            } else {
-                format!("{}.{}", cfg.kind.to_prefix(), cfg.name)
-            }
-        }
+pub(super) fn resolve_member_owner_types_sync(
+    analysis: Option<&CompletionAnalysisContext<'_>>,
+    file_content: &str,
+    line: u32,
+    column: u32,
+    _base_name: &str,
+) -> Vec<TypeResolution> {
+    let Some(ctx) = analysis else {
+        return Vec::new();
     };
-    resolver.resolve_expression_sync(&type_name)
-}
 
-pub(super) fn substitute_type_name_if_needed(type_name: &str, owner_type: &str) -> String {
-    let Some(metadata_name) = SignatureIndex::extract_metadata_name(owner_type) else {
-        return type_name.to_string();
-    };
-    SignatureIndex::substitute_type_name(type_name, metadata_name)
-}
-
-pub(super) fn resolve_type_from_string(
-    resolver: Option<&TypeResolver>,
-    type_name: &str,
-) -> TypeResolution {
-    let type_name = type_name.trim();
-    if type_name.is_empty() {
-        return TypeResolution::unknown();
+    if let Some(owner_hint) = ctx
+        .member_access_owner_type_hint
+        .as_ref()
+        .filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
+        .cloned()
+    {
+        return vec![owner_hint];
     }
-    resolver
-        .map(|resolver| resolver.resolve_expression_sync(type_name))
-        .unwrap_or_else(|| TypeResolution::explicit(type_name))
+
+    resolve_member_access_owner_types_from_ir(analysis, file_content, line, column)
 }
 
 #[derive(Debug, Clone)]

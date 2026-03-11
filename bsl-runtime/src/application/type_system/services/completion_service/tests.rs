@@ -1299,7 +1299,7 @@ async fn completion_resolves_member_owner_from_ir_without_owner_hint() {
 }
 
 #[tokio::test]
-async fn completion_unknown_bare_receiver_member_access_stays_fail_closed() {
+async fn completion_unknown_bare_receiver_member_access_ignores_polluted_index_snapshot() {
     let repository = Arc::new(InMemoryTypeRepository::new());
     repository
         .load_types(vec![RawTypeData {
@@ -1329,6 +1329,32 @@ async fn completion_unknown_bare_receiver_member_access_stays_fail_closed() {
         IndexItemKind::Keyword,
         crate::system::IndexKind::Keyword,
     )]);
+    index.replace_symbols_for_uri(
+        "completion_unknown_receiver_member_access_test.bsl",
+        vec![IndexItem::new(
+            "ЛожныйСимволИзИндекса",
+            IndexItemKind::Symbol(SymbolKind::Function),
+            crate::system::IndexKind::Symbol,
+        )],
+    );
+    index.replace_modules_for_key(
+        "completion_unknown_receiver_member_access_test.bsl",
+        vec![IndexItem::new(
+            "ЛожныйМодульИзИндекса",
+            IndexItemKind::Symbol(SymbolKind::Procedure),
+            crate::system::IndexKind::Module,
+        )],
+    );
+    let mut polluted_snapshot = index.snapshot();
+    Arc::make_mut(&mut polluted_snapshot.type_index).insert(
+        "ЛожныйТипИзИндекса".to_string(),
+        Arc::new(IndexItem::new(
+            "ЛожныйТипИзИндекса",
+            IndexItemKind::Type(TypeKind::Generic),
+            crate::system::IndexKind::Type,
+        )),
+    );
+    index.replace_snapshot(polluted_snapshot);
     let content = concat!(
         "Процедура Тест()\n",
         "    ТаблЗнач = Новый ТаблицаЗначений;\n",
@@ -1398,6 +1424,26 @@ async fn completion_unknown_bare_receiver_member_access_stays_fail_closed() {
     assert!(
         !labels.contains(&"Количество".to_string()),
         "fail-closed result must not reconstruct semantic member candidates, labels: {:?}",
+        labels
+    );
+    assert!(
+        !labels.contains(&"ЛожныйСимволИзИндекса".to_string()),
+        "member-access semantic miss must not backfill from symbol_index, labels: {:?}",
+        labels
+    );
+    assert!(
+        !labels.contains(&"ЛожныйМодульИзИндекса".to_string()),
+        "member-access semantic miss must not backfill from module_index, labels: {:?}",
+        labels
+    );
+    assert!(
+        !labels.contains(&"ЛожныйТипИзИндекса".to_string()),
+        "member-access semantic miss must not backfill from type_index, labels: {:?}",
+        labels
+    );
+    assert!(
+        !labels.contains(&"Процедура".to_string()),
+        "member-access semantic miss must not degrade to keyword/index completion, labels: {:?}",
         labels
     );
 }

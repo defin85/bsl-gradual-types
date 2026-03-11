@@ -3683,6 +3683,129 @@ async fn p7_large_churn_budget_timeout_returns_fail_closed_empty_response() {
 }
 
 #[tokio::test]
+async fn p7_member_access_completion_does_not_backfill_from_runtime_index_snapshot() {
+    const FAIL_CLOSED_REASON_KEY: &str =
+        "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_completion_reason_missing_semantic_index";
+
+    fn make_index_snapshot(id: &str, type_name: &str) -> IndexSnapshot {
+        let mut snapshot = IndexSnapshot::empty(IndexSnapshotId::from_hash(id.to_string()));
+        Arc::make_mut(&mut snapshot.type_index).insert(
+            type_name.to_string(),
+            Arc::new(IndexItem::new(
+                type_name.to_string(),
+                IndexItemKind::Type(TypeKind::Generic),
+                IndexKind::Type,
+            )),
+        );
+        snapshot
+    }
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().unwrap() = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let fixture = "Процедура Тест()\n\
+ЛокМассив = Новый Массив;\n\
+ЛокМассив.\n\
+КонецПроцедуры\n";
+    let uri = Url::parse("file:///test_p7_completion_no_search_rescue.bsl").expect("uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: fixture.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    coordinator
+        .intellisense_index()
+        .replace_snapshot(make_index_snapshot("p7_completion_no_search_rescue", "SearchOnlyType"));
+    coordinator.intellisense_index().replace_symbols_for_uri(
+        uri.as_str(),
+        vec![IndexItem::new(
+            "SearchOnlySymbol".to_string(),
+            IndexItemKind::Symbol(bsl_backend::system::SymbolKind::Function),
+            IndexKind::Symbol,
+        )],
+    );
+    coordinator.intellisense_index().replace_modules_for_key(
+        "p7_completion_no_search_rescue_module",
+        vec![IndexItem::new(
+            "SearchOnlyModule".to_string(),
+            IndexItemKind::Symbol(bsl_backend::system::SymbolKind::Procedure),
+            IndexKind::Module,
+        )],
+    );
+
+    let server = server_holder
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("server must be captured");
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    server.cancel_type_index_precompute_v2(file_id).await;
+
+    let completion_position = find_utf16_position_after_marker(fixture, "ЛокМассив.");
+    let completion_labels = lsp_completion_labels_at(&mut service, &uri, completion_position).await;
+    assert!(
+        completion_labels.is_empty(),
+        "member-access cache miss must stay fail-closed when only runtime discovery/search index is populated, labels={completion_labels:?}"
+    );
+    assert!(
+        completion_labels
+            .iter()
+            .all(|label| label != "SearchOnlyType" && label != "SearchOnlySymbol" && label != "SearchOnlyModule"),
+        "member-access completion must not backfill from runtime discovery/search index, labels={completion_labels:?}"
+    );
+    let metrics = coordinator.observability_metrics();
+    let counters = metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    let fallback_unavailable_total = read_u64_metric(
+        counters.get("intellisense_v2_completion_fallback_unavailable_total"),
+    );
+    assert!(
+        fallback_unavailable_total > 0,
+        "member-access cache miss must record fallback_unavailable before public reason emission, counters={counters:?}"
+    );
+    let fail_closed_reason_total = read_u64_metric(counters.get(FAIL_CLOSED_REASON_KEY));
+    assert!(
+        fail_closed_reason_total > 0,
+        "member-access cache miss must emit missing_semantic_index bounded public reason metrics, counters={counters:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
 async fn p7_large_churn_budget_timeout_without_prior_completion_returns_fail_closed_empty_response()
 {
     const FILLER_LINES: usize = 2200;

@@ -208,6 +208,107 @@ fn build_metadata_lookup_v2(deps: &Arc<bsl_analysis_v2::SemanticDeps>) -> TypeMe
     TypeMetadataLookup::new(deps.repository.clone())
 }
 
+fn web_semantic_artifacts_unavailable(deps_bundle: &DepsBundleV2) -> bool {
+    deps_bundle.semantic_deps.repository.get_stats().total_types == 0
+}
+
+pub(super) enum WebHoverQueryOutcome {
+    Ready(Option<String>),
+    FailClosed(&'static str),
+}
+
+pub(super) fn record_web_interactive_fail_closed_reason(
+    coordinator: &SystemCoordinator,
+    operation: &str,
+    reason: &'static str,
+) {
+    coordinator.record_intellisense_v2_interactive_fail_closed_reason("web", operation, reason);
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolve_web_hover_query(
+    deps_bundle: &DepsBundleV2,
+    coordinator: &SystemCoordinator,
+    code: Arc<str>,
+    line: u32,
+    column: u32,
+    syntax_helper_path: Option<PathBuf>,
+    include_flow_sensitive: bool,
+    hover_config: Option<HoverFormatConfig>,
+) -> anyhow::Result<WebHoverQueryOutcome> {
+    if web_semantic_artifacts_unavailable(deps_bundle) {
+        return Ok(WebHoverQueryOutcome::FailClosed("unavailable_by_contract"));
+    }
+
+    let (context, prepared) = match prepare_ephemeral_web_operation(
+        deps_bundle,
+        coordinator,
+        SemanticOperation::Hover,
+        DetailLevel::Full,
+        include_flow_sensitive,
+        code,
+        Arc::from("hover_request.bsl"),
+    ) {
+        Ok(values) => values,
+        Err(_) => return Ok(WebHoverQueryOutcome::FailClosed("missing_canonical_ir")),
+    };
+    let analysis = prepared.snapshot.analysis;
+    record_type_index_reason_at_utf16_position(&analysis, V2FileId(1), line, column, coordinator);
+    let file_content = match analysis.file_text(V2FileId(1)) {
+        Ok(Some(file_content)) => file_content,
+        Ok(None) | Err(_) => return Ok(WebHoverQueryOutcome::FailClosed("unavailable_by_contract")),
+    };
+    let ir_program = match IntellisenseV2Facade::run_optional_query(
+        &context,
+        ObservabilityStage::IrQuery,
+        &analysis,
+        Some(coordinator),
+        |analysis| analysis.ir(V2FileId(1)),
+    ) {
+        Ok(Some(ir_program)) => ir_program,
+        Ok(None) | Err(_) => return Ok(WebHoverQueryOutcome::FailClosed("missing_canonical_ir")),
+    };
+
+    let deps = deps_bundle.semantic_deps.clone();
+    let resolver = deps_resolver(&deps);
+    let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
+    let hover_formatter = HoverFormatter::new(
+        HoverFormatConfig {
+            syntax_helper_path: syntax_helper_path.clone(),
+            output_format: HoverOutputFormat::Markdown,
+            ..Default::default()
+        },
+        metadata_lookup.clone(),
+    );
+    let exact_type_index_available =
+        bsl_runtime::application::type_system::hover_exact_type_index_available_at_position(
+            &analysis,
+            V2FileId(1),
+            file_content.as_ref(),
+            line,
+            column,
+            ir_program.as_ref(),
+        );
+    let hover = get_hover_info_with_semantic_program(
+        &analysis,
+        V2FileId(1),
+        file_content.as_ref(),
+        line,
+        column,
+        include_flow_sensitive,
+        &metadata_lookup,
+        &hover_formatter,
+        hover_config,
+        resolver.as_ref(),
+        ir_program,
+    );
+    if hover.is_none() && !exact_type_index_available {
+        return Ok(WebHoverQueryOutcome::FailClosed("missing_semantic_index"));
+    }
+
+    Ok(WebHoverQueryOutcome::Ready(hover))
+}
+
 /// Get system metrics
 pub async fn get_metrics(State(state): State<AppState>) -> impl IntoResponse {
     let deps_bundle = state.deps_bundle_v2.read().await.clone();
@@ -488,70 +589,26 @@ pub async fn get_hover(
     let column = req.column;
     let syntax_helper_path = state.syntax_helper_path.clone();
     let include_flow_sensitive = req.include_flow_sensitive;
+    let worker_coordinator = coordinator.clone();
 
-    let hover_result =
-        crate::application::spawn_bounded_blocking(move || -> anyhow::Result<Option<String>> {
-            let (context, prepared) = prepare_ephemeral_web_operation(
+    let hover_result = crate::application::spawn_bounded_blocking(
+        move || -> anyhow::Result<WebHoverQueryOutcome> {
+            resolve_web_hover_query(
                 deps_bundle.as_ref(),
-                coordinator.as_ref(),
-                SemanticOperation::Hover,
-                DetailLevel::Full,
-                include_flow_sensitive,
+                worker_coordinator.as_ref(),
                 Arc::from(code),
-                Arc::from("hover_request.bsl"),
-            )?;
-            let analysis = prepared.snapshot.analysis;
-            record_type_index_reason_at_utf16_position(
-                &analysis,
-                V2FileId(1),
                 line,
                 column,
-                coordinator.as_ref(),
-            );
-            let file_content = analysis
-                .file_text(V2FileId(1))
-                .map_err(|_| anyhow::anyhow!("file_text cancelled"))?
-                .ok_or_else(|| anyhow::anyhow!("file_text unavailable"))?;
-            let ir_program = IntellisenseV2Facade::run_optional_query(
-                &context,
-                ObservabilityStage::IrQuery,
-                &analysis,
-                Some(coordinator.as_ref()),
-                |analysis| analysis.ir(V2FileId(1)),
-            )
-            .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
-            .ok_or_else(|| anyhow::anyhow!("ir unavailable"))?;
-
-            let deps = deps_bundle.semantic_deps.clone();
-            let resolver = deps_resolver(&deps);
-            let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
-            let hover_formatter = HoverFormatter::new(
-                HoverFormatConfig {
-                    syntax_helper_path,
-                    output_format: HoverOutputFormat::Markdown,
-                    ..Default::default()
-                },
-                metadata_lookup.clone(),
-            );
-
-            Ok(get_hover_info_with_semantic_program(
-                &analysis,
-                V2FileId(1),
-                file_content.as_ref(),
-                line,
-                column,
+                syntax_helper_path,
                 include_flow_sensitive,
-                &metadata_lookup,
-                &hover_formatter,
                 None,
-                resolver.as_ref(),
-                ir_program,
-            ))
-        })
-        .await;
+            )
+        },
+    )
+    .await;
 
     match hover_result {
-        Ok(Ok(hover_text)) => {
+        Ok(Ok(WebHoverQueryOutcome::Ready(hover_text))) => {
             let duration_ms = start.elapsed().as_millis() as u64;
             let hover_text = hover_text.map(|value| normalize_user_facing_type_name(&value));
 
@@ -563,6 +620,17 @@ pub async fn get_hover(
             });
 
             Json(response).into_response()
+        }
+        Ok(Ok(WebHoverQueryOutcome::FailClosed(reason))) => {
+            record_web_interactive_fail_closed_reason(coordinator.as_ref(), "hover", reason);
+            let duration_ms = start.elapsed().as_millis() as u64;
+            Json(serde_json::json!({
+                "hover": serde_json::Value::Null,
+                "line": req.line,
+                "column": req.column,
+                "duration_ms": duration_ms
+            }))
+            .into_response()
         }
         Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),

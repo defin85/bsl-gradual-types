@@ -383,7 +383,6 @@ impl BslLanguageServer {
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
         }
         let mut completion_outcome: Option<&'static str> = None;
-        let mut completion_fail_closed_reason_override: Option<&'static str> = None;
         let mut observed_file_version_for_completion: Option<i32> = None;
         let mut member_access_observed = false;
         let mut cancel_event_emitted = false;
@@ -646,11 +645,6 @@ impl BslLanguageServer {
                                                 trigger_char_hint,
                                             )
                                             .then(|| {
-                                                let _ = analysis.precompute_type_index_for_file(
-                                                    file_id,
-                                                    Some(expected_version),
-                                                    0,
-                                                );
                                                 completion_member_access_owner_type_hint_at_position(
                                                     &analysis,
                                                     file_id,
@@ -903,8 +897,6 @@ impl BslLanguageServer {
                         self.coordinator
                             .record_intellisense_v2_completion_fallback_unavailable();
                         completion_outcome.get_or_insert("wait_not_ready");
-                        completion_fail_closed_reason_override
-                            .get_or_insert("unavailable_by_contract");
                         break 'completion_flow Some(completion_empty_response(false));
                     }
                     if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
@@ -1069,9 +1061,7 @@ impl BslLanguageServer {
         )
         .await;
 
-        if let Some(reason) = completion_fail_closed_reason_override
-            .or_else(|| completion_outcome.and_then(completion_public_fail_closed_reason))
-        {
+        if let Some(reason) = completion_outcome.and_then(completion_public_fail_closed_reason) {
             self.coordinator
                 .record_intellisense_v2_interactive_fail_closed_reason("lsp", "completion", reason);
         }

@@ -30,77 +30,33 @@ pub async fn get_enhanced_hover(
     let column = req.column;
     let syntax_helper_path = state.syntax_helper_path.clone();
     let include_flow_sensitive = req.include_flow_sensitive;
+    let worker_coordinator = coordinator.clone();
 
-    let hover_result =
-        crate::application::spawn_bounded_blocking(move || -> anyhow::Result<Option<String>> {
-            let (context, prepared) = prepare_ephemeral_web_operation(
-                deps_bundle.as_ref(),
-                coordinator.as_ref(),
-                SemanticOperation::Hover,
-                DetailLevel::Full,
-                include_flow_sensitive,
-                Arc::from(code),
-                Arc::from("hover_request.bsl"),
-            )?;
-            let analysis = prepared.snapshot.analysis;
-            record_type_index_reason_at_utf16_position(
-                &analysis,
-                V2FileId(1),
-                line,
-                column,
-                coordinator.as_ref(),
-            );
-            let file_content = analysis
-                .file_text(V2FileId(1))
-                .map_err(|_| anyhow::anyhow!("file_text cancelled"))?
-                .ok_or_else(|| anyhow::anyhow!("file_text unavailable"))?;
-            let ir_program = IntellisenseV2Facade::run_optional_query(
-                &context,
-                ObservabilityStage::IrQuery,
-                &analysis,
-                Some(coordinator.as_ref()),
-                |analysis| analysis.ir(V2FileId(1)),
-            )
-            .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
-            .ok_or_else(|| anyhow::anyhow!("ir unavailable"))?;
-
-            let deps = deps_bundle.semantic_deps.clone();
-            let resolver = deps_resolver(&deps);
-            let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
-            let hover_formatter = HoverFormatter::new(
-                HoverFormatConfig {
-                    syntax_helper_path: syntax_helper_path.clone(),
-                    output_format: HoverOutputFormat::Markdown,
-                    ..Default::default()
-                },
-                metadata_lookup.clone(),
-            );
-
+    let hover_result = crate::application::spawn_bounded_blocking(
+        move || -> anyhow::Result<WebHoverQueryOutcome> {
             let hover_config = HoverFormatConfig {
                 detail_level,
-                syntax_helper_path,
+                syntax_helper_path: syntax_helper_path.clone(),
                 output_format: HoverOutputFormat::Markdown,
                 ..Default::default()
             };
 
-            Ok(get_hover_info_with_semantic_program(
-                &analysis,
-                V2FileId(1),
-                file_content.as_ref(),
+            resolve_web_hover_query(
+                deps_bundle.as_ref(),
+                worker_coordinator.as_ref(),
+                Arc::from(code),
                 line,
                 column,
+                syntax_helper_path,
                 include_flow_sensitive,
-                &metadata_lookup,
-                &hover_formatter,
                 Some(hover_config),
-                resolver.as_ref(),
-                ir_program,
-            ))
-        })
-        .await;
+            )
+        },
+    )
+    .await;
 
     match hover_result {
-        Ok(Ok(hover_text)) => {
+        Ok(Ok(WebHoverQueryOutcome::Ready(hover_text))) => {
             let duration_ms = start.elapsed().as_millis();
 
             let hover_text_str = hover_text
@@ -119,6 +75,22 @@ pub async fn get_enhanced_hover(
             };
 
             Json(response).into_response()
+        }
+        Ok(Ok(WebHoverQueryOutcome::FailClosed(reason))) => {
+            record_web_interactive_fail_closed_reason(coordinator.as_ref(), "hover", reason);
+            let duration_ms = start.elapsed().as_millis();
+
+            Json(EnhancedHoverResponse {
+                hover_text: "No information available".to_string(),
+                variable_name: None,
+                variable_type: None,
+                type_hint: None,
+                found_in_scope: false,
+                line: req.line,
+                column: req.column,
+                duration_ms,
+            })
+            .into_response()
         }
         Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),

@@ -110,7 +110,6 @@ fn type_at_utf16_position(
     }
 }
 
-#[cfg(test)]
 fn member_access_owner_type_hint_at_position(
     analysis: &bsl_analysis_v2::AnalysisV2,
     file_id: bsl_analysis_v2::FileId,
@@ -122,7 +121,15 @@ fn member_access_owner_type_hint_at_position(
 ) -> Option<bsl_shared::domain::types::TypeResolution> {
     let line_text = file_content.lines().nth(line as usize)?;
     let cursor_byte = bsl_analysis_v2::utf16_to_byte_offset(line_text, character);
-    let line_prefix = line_text.get(..cursor_byte)?;
+    let line_prefix = match line_text
+        .get(cursor_byte..)
+        .and_then(|tail| tail.chars().next())
+    {
+        Some('.') => line_text
+            .get(..cursor_byte.saturating_add(1))
+            .unwrap_or(line_text),
+        _ => line_text.get(..cursor_byte)?,
+    };
     let dot_in_line = line_prefix.rfind('.')?;
     let receiver = line_prefix.get(..dot_in_line)?.trim_end();
     if receiver.is_empty() {
@@ -143,6 +150,31 @@ fn member_access_owner_type_hint_at_position(
     } else {
         serve_only_type_at_byte_offset_with_reason(analysis, file_id, offset, coordinator)
     }
+}
+
+fn has_member_access_receiver_at_position(
+    file_content: &str,
+    line: u32,
+    character: u32,
+) -> bool {
+    let Some(line_text) = file_content.lines().nth(line as usize) else {
+        return false;
+    };
+    let cursor_byte = bsl_analysis_v2::utf16_to_byte_offset(line_text, character);
+    let line_prefix = match line_text
+        .get(cursor_byte..)
+        .and_then(|tail| tail.chars().next())
+    {
+        Some('.') => line_text
+            .get(..cursor_byte.saturating_add(1))
+            .unwrap_or(line_text),
+        _ => line_text.get(..cursor_byte).unwrap_or(line_text),
+    };
+    line_prefix
+        .rfind('.')
+        .and_then(|dot_in_line| line_prefix.get(..dot_in_line))
+        .map(|receiver| !receiver.trim_end().is_empty())
+        .unwrap_or(false)
 }
 
 fn serve_only_type_at_byte_offset_with_reason(

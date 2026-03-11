@@ -27,7 +27,7 @@
 
 1. `shared/src/ir/semantic_facts.rs`, `shared/src/ir/program.rs`, `analysis-v2/src/ast_to_ir/converter.rs` и `analysis-v2/src/type_inference_v2.rs` теперь материализуют semantic facts в canonical IR и строят exact semantic index как projection того же snapshot без повторного inference по projected `Program`.
 2. `analysis-v2/src/lib/snapshots.rs` и `analysis-v2/src/lib/analysis_api.rs` обслуживают diagnostics и interactive queries из IR-derived facts текущей revision; stale parse snapshot больше не может подменять current text при semantic extraction.
-3. `bsl-agent/src/session/helpers_semantic.rs`, `bsl-agent/src/session/manager_semantic_navigation.rs`, `backend/src/presentation/web/handlers/semantic.rs` и `backend/src/presentation/web/handlers.rs` убрали adapter-local rescue/precompute и используют shared bounded type-index reason taxonomy на default path.
+3. `bsl-agent/src/session/helpers_semantic.rs`, `bsl-agent/src/session/manager_semantic_core.rs`, `bsl-agent/src/session/manager_semantic_navigation.rs`, `backend/src/presentation/web/handlers/semantic.rs` и `backend/src/presentation/web/handlers.rs` убрали adapter-local rescue/precompute и используют shared bounded type-index reason taxonomy на default path.
 4. `contracts/lsp-completion-v2/v2/`, `contracts/lsp-completion-timeline/v2/`, `contracts/observability-completion-v2/v2/`, `docs/guides/lsp-v2-latency-policy.md`, `backend/src/perf_gate_evaluator.rs` и `backend/src/bin/intellisense_perf/reporting.rs` выровнены под fail-closed cutover без stale/degraded contract drift.
 
 ## Validation status
@@ -41,6 +41,8 @@
 
 В этой сессии зафиксированы и прогнаны ключевые acceptance-доказательства:
 - `analysis-v2` tests подтверждают IR-derived materialization, current-text correctness и сохранение explicit/facet-aware semantics.
-- `bsl-agent` tests подтверждают receiver-hint parity для `definition` и shared type-index reason metrics для `type_at_position` / `members` / `definition`.
-- `backend` web/LSP acceptance tests подтверждают fail-closed observability, scale-aware perf gates и отсутствие adapter-local semantic rescue path.
+- `bsl-agent` tests подтверждают receiver-hint parity для `definition`, exact owner-hint wiring для `members` и shared type-index reason metrics для `type_at_position` / `members` / `definition` (`collect_members_uses_exact_owner_hint_on_default_path`, `bsl_members_does_not_execute_parse_result_query_on_semantic_path`).
+- `backend` web/LSP acceptance tests подтверждают fail-closed observability, scale-aware perf gates и отсутствие adapter-local semantic rescue path (`p7_member_access_completion_does_not_backfill_from_runtime_index_snapshot`, `p7_completion_owner_hint_type_lookup_is_serve_only_even_when_flow_sensitive_enabled`, `hover_endpoints_fail_closed_on_missing_canonical_artifacts`).
+- `bsl-runtime` completion-service tests подтверждают, что polluted discovery/search snapshot не backfill-ит semantic member-access miss (`completion_unknown_bare_receiver_member_access_ignores_polluted_index_snapshot`).
 - versioned contracts и perf-gate architecture checks подтверждают, что shipped operational surfaces соответствуют runtime cutover.
+- `openspec validate refactor-ir-canonical-semantic-pipeline --strict --no-interactive` проходит без замечаний.

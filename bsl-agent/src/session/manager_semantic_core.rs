@@ -779,6 +779,35 @@ fn collect_members(request: MembersRequest) -> Result<BslMembersResponse, rmcp::
         .clone()
         .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())));
     let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
+    let member_access_context =
+        has_member_access_receiver_at_position(text.as_str(), position.line, position.character);
+    let member_access_owner_type_hint = member_access_context
+        .then(|| {
+            member_access_owner_type_hint_at_position(
+                &analysis,
+                FileId(1),
+                text.as_str(),
+                position.line,
+                position.character,
+                flow_sensitive_enabled,
+                Some(coordinator.as_ref()),
+            )
+        })
+        .flatten()
+        .filter(|hint| !hint.is_unknown() && !hint.is_dynamic());
+    if member_access_context && member_access_owner_type_hint.is_none() {
+        coordinator.record_intellisense_v2_interactive_fail_closed_reason(
+            "agent",
+            "members",
+            "missing_semantic_index",
+        );
+        return Ok(BslMembersResponse {
+            analysis_revision,
+            flow_sensitive_enabled,
+            members: Vec::new(),
+            truncated: false,
+        });
+    }
 
     let result = completion_runtime
         .block_on(
@@ -792,7 +821,7 @@ fn collect_members(request: MembersRequest) -> Result<BslMembersResponse, rmcp::
                 abs_path.as_str(),
                 resolver.as_ref(),
                 program,
-                None,
+                member_access_owner_type_hint,
                 flow_sensitive_enabled,
             ),
         )

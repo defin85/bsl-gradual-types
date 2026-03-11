@@ -352,6 +352,96 @@ fn semantic_helpers_fail_closed_without_precomputed_type_index() {
     );
 }
 
+#[test]
+fn collect_members_uses_exact_owner_hint_on_default_path() {
+    use bsl_analysis_v2::{DepsSnapshotId, SemanticDeps};
+    use bsl_runtime::system::{IndexSnapshot, IndexSnapshotId, SystemCoordinator};
+    use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
+    use bsl_shared::domain::resolver::TypeResolver;
+    use bsl_shared::domain::signature_index::SignatureIndex;
+    use bsl_shared::domain::types::{
+        FacetKind, MetadataKind, RawDataSource, RawMethodData, RawPropertyData, RawTypeData,
+    };
+
+    const EXACT_HIT_REASON_KEY: &str =
+        "intellisense_v2_type_index_reason_total_reason_type_index_exact_hit";
+
+    let repository_impl = Arc::new(InMemoryTypeRepository::new());
+    repository_impl
+        .load_types(vec![RawTypeData {
+            name: "Документы.Док1".to_string(),
+            source: RawDataSource::Configuration,
+            methods: vec![RawMethodData {
+                name: "ПометитьУдаление".to_string(),
+                return_type: "Неопределено".to_string(),
+                ..Default::default()
+            }],
+            properties: vec![RawPropertyData {
+                name: "Ссылка".to_string(),
+                prop_type: "ДокументСсылка.Док1".to_string(),
+                ..Default::default()
+            }],
+            facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+            kind: Some(MetadataKind::Document),
+            ..Default::default()
+        }])
+        .expect("load types");
+
+    let repository = repository_impl.clone() as Arc<dyn TypeRepository>;
+    let resolver = Arc::new(TypeResolver::new(repository.clone()));
+    let deps = Arc::new(SemanticDeps {
+        repository,
+        signature_index: SignatureIndex::new(),
+        resolver: Some(resolver),
+        platform_signatures_loaded: true,
+    });
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let runtime = tokio::runtime::Runtime::new().expect("runtime");
+
+    let response = collect_members(MembersRequest {
+        analysis_revision: 1,
+        flow_sensitive_enabled: false,
+        deps_id: DepsSnapshotId::from_hash("mcp-members-fail-closed-no-owner-hint"),
+        deps,
+        index_snapshot: Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash(
+            "mcp-members-fail-closed-no-owner-hint",
+        ))),
+        coordinator: coordinator.clone(),
+        text: concat!(
+            "Процедура Тест()\n",
+            "    x = ЭтотОбъект;\n",
+            "    ЭтотОбъект.\n",
+            "КонецПроцедуры\n"
+        )
+        .to_string(),
+        version: 1,
+        abs_path: "Documents/Док1/Ext/ObjectModule.bsl".to_string(),
+        position: Position {
+            line: 2,
+            character: "    ЭтотОбъект."
+                .chars()
+                .map(|ch| ch.len_utf16())
+                .sum::<usize>() as u32,
+        },
+        limit: 50,
+        completion_runtime: runtime.handle().clone(),
+    })
+    .expect("collect_members");
+
+    assert!(
+        response.members.iter().any(|member| member.name == "ПометитьУдаление")
+            && response.members.iter().any(|member| member.name == "Ссылка"),
+        "MCP members must preserve expected object-facet members on default path: {:?}",
+        response.members
+    );
+    assert_eq!(response.analysis_revision, 1);
+    assert!(
+        counter_value(&coordinator.observability_metrics(), EXACT_HIT_REASON_KEY) > 0,
+        "MCP members default path must emit shared exact type-index reason via owner-hint lookup, metrics={}",
+        coordinator.observability_metrics()
+    );
+}
+
 #[tokio::test]
 async fn definition_without_target_does_not_emit_bounded_public_reason_metric() {
     let temp = tempfile::TempDir::new().expect("tempdir");

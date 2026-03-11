@@ -30,6 +30,35 @@ fn test_state() -> AppState {
     }
 }
 
+fn test_state_with_empty_deps_bundle() -> AppState {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    coordinator
+        .start_with_paths_blocking(None, None, None, None)
+        .expect("startup");
+
+    let empty_deps_coordinator = SystemCoordinator::new();
+    let empty_deps_bundle =
+        build_deps_bundle_v2(&empty_deps_coordinator, None, None).expect("empty deps bundle v2");
+    assert_eq!(
+        empty_deps_bundle.semantic_deps.repository.get_stats().total_types,
+        0,
+        "test precondition: empty deps snapshot must have no semantic types"
+    );
+
+    AppState {
+        deps_bundle_v2: Arc::new(tokio::sync::RwLock::new(Arc::new(empty_deps_bundle))),
+        system_coordinator: coordinator,
+        syntax_helper_path: None,
+        startup_inputs: Arc::new(tokio::sync::RwLock::new(EffectiveStartupInputs {
+            syntax_helper_path: None,
+            configuration_path: None,
+            platform_version: None,
+            cache_enabled: true,
+            strict_fingerprint: false,
+        })),
+    }
+}
+
 fn type_index_reason_total(metrics: &serde_json::Value) -> u64 {
     metrics
         .get("counters")
@@ -39,6 +68,24 @@ fn type_index_reason_total(metrics: &serde_json::Value) -> u64 {
                 .iter()
                 .filter(|(key, _)| {
                     key.starts_with("intellisense_v2_type_index_reason_total_reason_")
+                })
+                .map(|(_, value)| value.as_u64().unwrap_or(0))
+                .sum()
+        })
+        .unwrap_or(0)
+}
+
+fn interactive_fail_closed_hover_total(metrics: &serde_json::Value) -> u64 {
+    metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .map(|counters| {
+            counters
+                .iter()
+                .filter(|(key, _)| {
+                    key.starts_with(
+                        "intellisense_v2_fail_closed_reason_total_origin_web_operation_hover_reason_",
+                    )
                 })
                 .map(|(_, value)| value.as_u64().unwrap_or(0))
                 .sum()
@@ -212,5 +259,90 @@ async fn hover_endpoints_emit_type_index_reason_metrics() {
     assert!(
         after_enhanced_total > after_hover_total,
         "web enhanced hover must emit type-index reasons: before={after_hover_total}, after={after_enhanced_total}"
+    );
+}
+
+#[tokio::test]
+async fn hover_endpoints_fail_closed_on_missing_canonical_artifacts() {
+    let state = test_state_with_empty_deps_bundle();
+    let coordinator = state.system_coordinator.clone();
+    let app = create_router(state, "backend/static", true);
+    let code = "Процедура T()\n    Arr = Новый Массив;\n    ДляHover = Arr;\nКонецПроцедуры\n";
+    let baseline_total = interactive_fail_closed_hover_total(&coordinator.observability_metrics());
+
+    let hover_resp = app
+        .clone()
+        .oneshot(
+            Request::post("/api/hover")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(axum::body::Body::from(
+                    json!({
+                        "code": code,
+                        "line": 2,
+                        "column": 15
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        hover_resp.status().is_success(),
+        "web hover must fail closed instead of returning transport error on missing semantic deps: {}",
+        hover_resp.status()
+    );
+    let hover_body = axum::body::to_bytes(hover_resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let hover_json: serde_json::Value = serde_json::from_slice(&hover_body).expect("valid json");
+    assert!(
+        hover_json.get("hover").is_some(),
+        "hover fail-closed response must keep transport shape: {hover_json}"
+    );
+    assert!(
+        hover_json.get("hover").unwrap().is_null(),
+        "hover fail-closed response must return null semantic payload: {hover_json}"
+    );
+
+    let enhanced_resp = app
+        .oneshot(
+            Request::post("/api/hover/enhanced")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(axum::body::Body::from(
+                    json!({
+                        "code": code,
+                        "line": 2,
+                        "column": 15
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        enhanced_resp.status().is_success(),
+        "web enhanced hover must fail closed instead of returning transport error on missing semantic deps: {}",
+        enhanced_resp.status()
+    );
+    let enhanced_body = axum::body::to_bytes(enhanced_resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let enhanced_json: serde_json::Value =
+        serde_json::from_slice(&enhanced_body).expect("valid json");
+    assert_eq!(
+        enhanced_json
+            .get("hoverText")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default(),
+        "No information available",
+        "enhanced hover fail-closed response must keep public unavailable payload: {enhanced_json}"
+    );
+
+    let after_total = interactive_fail_closed_hover_total(&coordinator.observability_metrics());
+    assert!(
+        after_total >= baseline_total + 2,
+        "web hover and enhanced hover must emit shared fail-closed reasons on missing semantic deps: before={baseline_total}, after={after_total}"
     );
 }

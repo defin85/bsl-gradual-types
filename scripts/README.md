@@ -183,16 +183,17 @@ Representative matrix:
 
 ### `validate-v2-completion-gates.sh` - Acceptance gates для `refactor-ir-canonical-semantic-pipeline`
 
-**Назначение:** воспроизводимый fail-fast прогон checked-in completion acceptance gates
+**Назначение:** воспроизводимый fail-fast прогон checked-in readiness gates
 для `refactor-ir-canonical-semantic-pipeline`:
+- shipped cross-adapter smoke: LSP/runtime/web/MCP/CLI/module-context slices;
 - completion latency: `p95 <= 300ms`, `p99 <= 800ms`;
 - first-trigger success rate: `>= 99%`;
 - terminal-empty (`missing_canonical_ir`; legacy report key `terminal_empty_missing_ir_rate`) rate: `<= 0.5%`;
 - parity mismatch rate: `<= 1%`;
 - strict-валидация change через OpenSpec.
 
-**Честное ограничение:** скрипт валидирует только checked-in completion acceptance asset.
-Operation-aware perf cutover acceptance доказывается отдельным прогоном
+**Честное ограничение:** perf-артефакт внутри скрипта остаётся completion-specific.
+Operation-aware perf cutover acceptance по остальным операциям доказывается отдельным прогоном
 `./scripts/run-intellisense-perf.sh` в blocking mode.
 
 **Использование:**
@@ -343,7 +344,7 @@ uv run --with tiktoken python3 scripts/check-rust-file-llm-budget.py --report ar
 ```
 
 **Состав:**
-- `smoke`: unit‑тесты completion + golden + LSP интеграция.
+- `smoke`: completion/golden baseline + cross-adapter default-path selectors для LSP/runtime/web/MCP/CLI и module-context/facet slices.
 - `full`: smoke + интеграционные тесты, которые загружают fixture конфигурации (например, `examples/conf/conf_test`).
 
 ---

@@ -15,7 +15,10 @@ if ! command -v openspec >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "[gate] Running interactive acceptance test with artifact output..."
+echo "[gate] Running shipped cross-adapter smoke..."
+"${ROOT_DIR}/scripts/run-intellisense-tests.sh" smoke
+
+echo "[gate] Running interactive completion perf gate with artifact output..."
 BSL_V2_COMPLETION_GATE_REPORT="${GATE_REPORT}" \
   cargo test -p bsl-backend p27_interactive_completion_acceptance_gates_emit_artifact -- --nocapture
 
@@ -32,9 +35,14 @@ data = json.loads(report_path.read_text(encoding="utf-8"))
 thresholds = data.get("thresholds", {})
 results = data.get("results", {})
 lines = [
-    f"# {expected_change_id} completion acceptance gates",
+    f"# {expected_change_id} readiness gates",
     "",
-    "- coverage: completion-only checked-in acceptance asset",
+    "## Cross-adapter smoke",
+    "- command: `./scripts/run-intellisense-tests.sh smoke`",
+    "- pass: yes",
+    "",
+    "## Completion perf gate",
+    "- command: `cargo test -p bsl-backend p27_interactive_completion_acceptance_gates_emit_artifact -- --nocapture`",
     f"- pass: {'yes' if data.get('pass') else 'no'}",
     f"- iterations: {data.get('iterations', 0)}",
 ]

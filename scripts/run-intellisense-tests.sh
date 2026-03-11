@@ -24,6 +24,23 @@ report_m8() {
   fi
 }
 
+run_cross_adapter_smoke() {
+  # Default-path acceptance slices that exercise shipped runtime wiring across adapters.
+  cargo test -p bsl-backend --bin bsl-lsp-server p7_typed_structure_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics -- --nocapture
+  cargo test -p bsl-backend --bin bsl-lsp-server p7_typed_value_table_row_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics -- --nocapture
+  cargo test -p bsl-backend --test flow_sensitive_web_api_test hover_endpoints_emit_type_index_reason_metrics -- --nocapture
+  cargo test -p bsl-backend --test flow_sensitive_web_api_test hover_endpoints_fail_closed_on_missing_canonical_artifacts -- --nocapture
+  cargo test -p bsl-backend --test form_module_object_unified_contract_test diagnostics_hover_and_type_at_position_follow_unified_form_contract -- --nocapture
+  cargo test -p bsl-backend --test form_module_object_unified_contract_test completion_and_resolve_follow_unified_form_contract -- --nocapture
+  cargo test -p bsl-backend --test form_module_object_unified_contract_test recordset_module_resolves_system_members_and_manager_path_call -- --nocapture
+  cargo test -p bsl-cli --bin bsl-cli cli_inline_completion_uses_shared_runtime_snapshot -- --nocapture
+  cargo test -p bsl-cli --bin bsl-cli cli_inline_type_info_uses_shared_runtime_snapshot -- --nocapture
+  cargo test -p bsl-cli --bin bsl-cli cli_type_info_preserves_object_module_binding_facets -- --nocapture
+  cargo test -p bsl-cli --bin bsl-cli cli_file_diagnostics_use_shared_runtime_snapshot -- --nocapture
+  cargo test -p bsl-agent --test stdio_integration stdio_semantic_tools_happy_path_uses_current_revision_overlay -- --nocapture
+  cargo test -p bsl-agent --test stdio_integration stdio_definition_fail_closed_on_current_revision_unresolved_target -- --nocapture
+}
+
 run_smoke() {
   cargo test -p bsl-backend --lib completion_ranking
   cargo test -p bsl-backend --lib completion_service
@@ -32,6 +49,7 @@ run_smoke() {
   cargo test -p bsl-backend --test lsp_intellisense_tests
   cargo test -p bsl-backend --test m8_completion_matrix_golden_v2_test
   cargo test -p bsl-backend --test lsp_incremental_completion_test
+  run_cross_adapter_smoke
   report_m8
 }
 

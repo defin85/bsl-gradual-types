@@ -2,14 +2,15 @@
   "schema_version": "v1",
   "contract_version": "quality-gates-v1",
   "change_id": "refactor-ir-canonical-semantic-pipeline",
-  "generated_at": "2026-03-11T20:03:54+03:00",
+  "generated_at": "2026-03-11T22:24:00+03:00",
   "overall": {
     "verdict": "pass",
-    "gates_total": 6,
+    "gates_total": 7,
     "gates_failed": 0
   },
   "reason_codes": [
     "acceptance_bundle_complete",
+    "shipped_cross_adapter_smoke_passed",
     "contract_policy_passed",
     "bounded_reason_taxonomy_verified",
     "anti_rescue_perf_contract_verified",
@@ -24,6 +25,30 @@
       "artifacts": [
         "openspec/changes/refactor-ir-canonical-semantic-pipeline/validation/acceptance-report.json",
         "openspec/changes/refactor-ir-canonical-semantic-pipeline/execution-matrix.md"
+      ]
+    },
+    {
+      "id": "shipped_smoke_gate",
+      "verdict": "pass",
+      "reason_code": "shipped_cross_adapter_smoke_passed",
+      "commands": [
+        "./scripts/run-intellisense-tests.sh smoke"
+      ],
+      "artifacts": [
+        "scripts/run-intellisense-tests.sh",
+        "backend/src/bin/lsp_server/server/core/tests.rs::p7_typed_structure_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics",
+        "backend/src/bin/lsp_server/server/core/tests.rs::p7_typed_value_table_row_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics",
+        "backend/tests/flow_sensitive_web_api_test.rs::hover_endpoints_emit_type_index_reason_metrics",
+        "backend/tests/flow_sensitive_web_api_test.rs::hover_endpoints_fail_closed_on_missing_canonical_artifacts",
+        "backend/tests/form_module_object_unified_contract_test.rs::diagnostics_hover_and_type_at_position_follow_unified_form_contract",
+        "backend/tests/form_module_object_unified_contract_test.rs::completion_and_resolve_follow_unified_form_contract",
+        "backend/tests/form_module_object_unified_contract_test.rs::recordset_module_resolves_system_members_and_manager_path_call",
+        "cli/src/main.rs::cli_inline_completion_uses_shared_runtime_snapshot",
+        "cli/src/main.rs::cli_inline_type_info_uses_shared_runtime_snapshot",
+        "cli/src/main.rs::cli_type_info_preserves_object_module_binding_facets",
+        "cli/src/main.rs::cli_file_diagnostics_use_shared_runtime_snapshot",
+        "bsl-agent/tests/stdio_integration.rs::stdio_semantic_tools_happy_path_uses_current_revision_overlay",
+        "bsl-agent/tests/stdio_integration.rs::stdio_definition_fail_closed_on_current_revision_unresolved_target"
       ]
     },
     {

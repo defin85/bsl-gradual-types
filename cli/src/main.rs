@@ -460,7 +460,10 @@ fn inline_cli_expression(expression: &str) -> anyhow::Result<InlineCliExpression
     })
 }
 
-fn inline_cli_resolution_probe(expression: &str) -> anyhow::Result<(Arc<str>, Arc<str>, u32)> {
+fn inline_cli_resolution_probe_with_path(
+    expression: &str,
+    file_path: Arc<str>,
+) -> anyhow::Result<(Arc<str>, Arc<str>, u32)> {
     let expression = expression.trim();
     if expression.is_empty() {
         return Err(anyhow::anyhow!("CLI expression must not be empty"));
@@ -476,9 +479,16 @@ fn inline_cli_resolution_probe(expression: &str) -> anyhow::Result<(Arc<str>, Ar
 
     Ok((
         file_text,
-        Arc::<str>::from("/virtual/cli-inline-resolution.bsl"),
+        file_path,
         probe_offset,
     ))
+}
+
+fn inline_cli_resolution_probe(expression: &str) -> anyhow::Result<(Arc<str>, Arc<str>, u32)> {
+    inline_cli_resolution_probe_with_path(
+        expression,
+        Arc::<str>::from("/virtual/cli-inline-resolution.bsl"),
+    )
 }
 
 fn inline_cli_completion_expression(expression: &str) -> anyhow::Result<InlineCliExpression> {
@@ -620,6 +630,26 @@ async fn resolve_cli_expression_type(expression: &str) -> anyhow::Result<TypeRes
 }
 
 #[cfg(test)]
+async fn resolve_cli_expression_type_for_path(
+    expression: &str,
+    file_path: &str,
+) -> anyhow::Result<TypeResolution> {
+    let (file_text, file_path, probe_offset) =
+        inline_cli_resolution_probe_with_path(expression, Arc::<str>::from(file_path.to_string()))?;
+    let prepared = prepare_cli_text_operation(
+        file_text,
+        file_path,
+        SemanticOperation::TypeAtPosition,
+        DetailLevel::Full,
+    )
+    .await?;
+
+    prepared
+        .serve_only_type_at_byte_offset(probe_offset)?
+        .ok_or_else(|| anyhow::anyhow!("Тип '{}' не найден", expression.trim()))
+}
+
+#[cfg(test)]
 async fn collect_cli_file_diagnostics(
     path: &str,
     diagnostics_detail_level: DetailLevel,
@@ -650,6 +680,7 @@ async fn collect_cli_file_diagnostics(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bsl_shared::domain::types::FacetKind;
     use bsl_shared::formatting::user_facing_resolution_type_name;
     use tempfile::NamedTempFile;
 
@@ -674,6 +705,28 @@ mod tests {
             user_facing_resolution_type_name(&resolution).starts_with("Массив"),
             "expected shared runtime array resolution, got {:?}",
             resolution
+        );
+    }
+
+    #[tokio::test]
+    async fn cli_type_info_preserves_object_module_binding_facets() {
+        let resolution = resolve_cli_expression_type_for_path(
+            "Объект",
+            "Documents/Док1/Ext/ObjectModule.bsl",
+        )
+        .await
+        .expect("cli object module type info");
+
+        assert!(
+            user_facing_resolution_type_name(&resolution).contains("Док1"),
+            "expected object module binding to preserve configuration identity, got {:?}",
+            resolution
+        );
+        assert_eq!(resolution.active_facet, Some(FacetKind::Object));
+        assert!(
+            resolution.available_facets.contains(&FacetKind::Object),
+            "expected object facet to survive CLI shared runtime path, got {:?}",
+            resolution.available_facets
         );
     }
 

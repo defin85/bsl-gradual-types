@@ -2,7 +2,7 @@
   "schema_version": "v1",
   "contract_version": "acceptance-report-v1",
   "change_id": "refactor-ir-canonical-semantic-pipeline",
-  "generated_at": "2026-03-11T20:03:54+03:00",
+  "generated_at": "2026-03-11T22:24:00+03:00",
   "evidence_basis": "checked_in_automated_assets",
   "human_matrix_ref": "openspec/changes/refactor-ir-canonical-semantic-pipeline/execution-matrix.md",
   "fixtures": [
@@ -53,6 +53,14 @@
     {
       "id": "cli_inline_snapshot",
       "kind": "steady_current_revision"
+    },
+    {
+      "id": "cli_object_module_explicit_context",
+      "kind": "module_context_binding"
+    },
+    {
+      "id": "mcp_stdio_current_revision_overlay",
+      "kind": "steady_current_revision"
     }
   ],
   "operations": [
@@ -87,7 +95,7 @@
     {
       "id": "cross_consumer_semantic_equivalence",
       "verdict": "pass",
-      "checks_total": 15
+      "checks_total": 19
     },
     {
       "id": "no_adapter_local_semantic_truth",
@@ -102,7 +110,7 @@
     {
       "id": "module_context_and_facet_preservation",
       "verdict": "pass",
-      "checks_total": 5
+      "checks_total": 6
     }
   ],
   "checks": [
@@ -315,6 +323,58 @@
       }
     },
     {
+      "bundle_id": "cross_consumer_semantic_equivalence",
+      "fixture_id": "cli_inline_snapshot",
+      "operation": "diagnostics",
+      "consumer": "cli",
+      "verdict": "pass",
+      "reason_code": "shared_runtime_transport_wrapper",
+      "source_asset": {
+        "kind": "test",
+        "path": "cli/src/main.rs",
+        "selector": "cli_file_diagnostics_use_shared_runtime_snapshot"
+      }
+    },
+    {
+      "bundle_id": "cross_consumer_semantic_equivalence",
+      "fixture_id": "mcp_stdio_current_revision_overlay",
+      "operation": "type_at_position",
+      "consumer": "mcp",
+      "verdict": "pass",
+      "reason_code": "shared_runtime_transport_wrapper",
+      "source_asset": {
+        "kind": "test",
+        "path": "bsl-agent/tests/stdio_integration.rs",
+        "selector": "stdio_semantic_tools_happy_path_uses_current_revision_overlay"
+      }
+    },
+    {
+      "bundle_id": "cross_consumer_semantic_equivalence",
+      "fixture_id": "mcp_stdio_current_revision_overlay",
+      "operation": "members",
+      "consumer": "mcp",
+      "verdict": "pass",
+      "reason_code": "shared_runtime_transport_wrapper",
+      "source_asset": {
+        "kind": "test",
+        "path": "bsl-agent/tests/stdio_integration.rs",
+        "selector": "stdio_semantic_tools_happy_path_uses_current_revision_overlay"
+      }
+    },
+    {
+      "bundle_id": "cross_consumer_semantic_equivalence",
+      "fixture_id": "mcp_stdio_current_revision_overlay",
+      "operation": "definition",
+      "consumer": "mcp",
+      "verdict": "pass",
+      "reason_code": "shared_runtime_transport_wrapper",
+      "source_asset": {
+        "kind": "test",
+        "path": "bsl-agent/tests/stdio_integration.rs",
+        "selector": "stdio_semantic_tools_happy_path_uses_current_revision_overlay"
+      }
+    },
+    {
       "bundle_id": "no_adapter_local_semantic_truth",
       "fixture_id": "missing_canonical_artifacts",
       "operation": "completion",
@@ -494,6 +554,19 @@
         "kind": "test",
         "path": "bsl-agent/src/session/tests.rs",
         "selector": "collect_type_at_position_preserves_available_facets_for_object_module_binding"
+      }
+    },
+    {
+      "bundle_id": "module_context_and_facet_preservation",
+      "fixture_id": "cli_object_module_explicit_context",
+      "operation": "type_at_position",
+      "consumer": "cli",
+      "verdict": "pass",
+      "reason_code": "module_context_binding_preserved",
+      "source_asset": {
+        "kind": "test",
+        "path": "cli/src/main.rs",
+        "selector": "cli_type_info_preserves_object_module_binding_facets"
       }
     },
     {

@@ -224,7 +224,7 @@ async fn golden_completion_incomplete_flag() {
 }
 
 #[tokio::test]
-async fn golden_completion_member_access_falls_back_to_keywords() {
+async fn golden_completion_member_access_stays_empty_without_semantic_owner() {
     let snapshot = snapshot_completion("Строка.", 0, 7, None).await;
     intellisense_testkit::assert_snapshot("m8_completion_member_fallback_keywords.json", &snapshot);
 }

@@ -253,7 +253,7 @@ async fn m8_lsp_incremental_typing_triggers_completion_on_dot() {
 }
 
 #[tokio::test]
-async fn m8_lsp_edits_around_dot_do_not_break_completion() {
+async fn m8_lsp_edits_around_dot_fail_closed_without_poisoning_following_completion() {
     let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
     let index_snapshot = deps_bundle.index_snapshot.clone();
 
@@ -297,8 +297,8 @@ async fn m8_lsp_edits_around_dot_do_not_break_completion() {
     assert!(!response.had_error);
     let labels = completion_labels(response.response);
     assert!(
-        !labels.is_empty(),
-        "completion should not be empty on broken code"
+        labels.is_empty(),
+        "broken member-access edit without canonical owner must fail-closed instead of keeping stale completion, labels={labels:?}"
     );
 
     version = version.saturating_add(1);

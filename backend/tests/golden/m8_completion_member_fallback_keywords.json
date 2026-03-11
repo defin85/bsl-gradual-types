@@ -1,29 +1,4 @@
 {
   "isIncomplete": false,
-  "items": [
-    {
-      "insertText": "Перем",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Перем"
-    },
-    {
-      "insertText": "Процедура",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Процедура"
-    },
-    {
-      "insertText": "Старт",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Старт"
-    },
-    {
-      "insertText": "Функция",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Функция"
-    }
-  ]
+  "items": []
 }

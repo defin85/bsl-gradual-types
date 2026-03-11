@@ -1,0 +1,457 @@
+{
+  "schema_version": "v1",
+  "contract_version": "acceptance-report-v1",
+  "change_id": "refactor-ir-canonical-semantic-pipeline",
+  "generated_at": "2026-03-11T16:15:00+03:00",
+  "evidence_basis": "checked_in_automated_assets",
+  "human_matrix_ref": "openspec/changes/refactor-ir-canonical-semantic-pipeline/execution-matrix.md",
+  "fixtures": [
+    {
+      "id": "typed_structure_field",
+      "kind": "steady_current_revision"
+    },
+    {
+      "id": "typed_value_table_row",
+      "kind": "steady_current_revision"
+    },
+    {
+      "id": "core_tools_fixture",
+      "kind": "steady_current_revision"
+    },
+    {
+      "id": "missing_canonical_artifacts",
+      "kind": "fail_closed_missing_artifact"
+    },
+    {
+      "id": "semantic_artifact_missing_but_search_alive",
+      "kind": "search_isolation"
+    },
+    {
+      "id": "post_did_change_current_revision",
+      "kind": "post_didChange_current_revision"
+    },
+    {
+      "id": "form_module_explicit_context",
+      "kind": "module_context_binding"
+    },
+    {
+      "id": "recordset_module_explicit_context",
+      "kind": "facet_preservation"
+    },
+    {
+      "id": "bare_identifier_removed",
+      "kind": "module_context_binding"
+    },
+    {
+      "id": "cli_inline_snapshot",
+      "kind": "steady_current_revision"
+    }
+  ],
+  "operations": [
+    "completion",
+    "hover",
+    "definition",
+    "type_at_position",
+    "members",
+    "diagnostics",
+    "symbol_search",
+    "references"
+  ],
+  "consumers": [
+    "runtime",
+    "lsp",
+    "web",
+    "mcp",
+    "cli"
+  ],
+  "reason_codes": [
+    "parity_matches_runtime_oracle",
+    "shared_runtime_transport_wrapper",
+    "fail_closed_by_contract",
+    "search_index_isolated",
+    "revision_integrity_preserved",
+    "module_context_binding_preserved",
+    "facet_identity_preserved",
+    "legacy_fallback_removed"
+  ],
+  "bundles": [
+    {
+      "id": "cross_consumer_semantic_equivalence",
+      "verdict": "pass",
+      "checks_total": 12
+    },
+    {
+      "id": "no_adapter_local_semantic_truth",
+      "verdict": "pass",
+      "checks_total": 5
+    },
+    {
+      "id": "search_isolation_and_revision_integrity",
+      "verdict": "pass",
+      "checks_total": 5
+    },
+    {
+      "id": "module_context_and_facet_preservation",
+      "verdict": "pass",
+      "checks_total": 5
+    }
+  ],
+  "checks": [
+    {
+      "bundle_id": "cross_consumer_semantic_equivalence",
+      "fixture_id": "typed_structure_field",
+      "operation": "completion",
+      "consumer": "lsp",
+      "verdict": "pass",
+      "reason_code": "parity_matches_runtime_oracle",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/src/bin/lsp_server/server/core/tests.rs",
+        "selector": "p7_typed_structure_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics"
+      }
+    },
+    {
+      "bundle_id": "cross_consumer_semantic_equivalence",
+      "fixture_id": "typed_structure_field",
+      "operation": "hover",
+      "consumer": "web",
+      "verdict": "pass",
+      "reason_code": "parity_matches_runtime_oracle",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/src/bin/lsp_server/server/core/tests.rs",
+        "selector": "p7_typed_structure_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics"
+      }
+    },
+    {
+      "bundle_id": "cross_consumer_semantic_equivalence",
+      "fixture_id": "typed_structure_field",
+      "operation": "type_at_position",
+      "consumer": "mcp",
+      "verdict": "pass",
+      "reason_code": "parity_matches_runtime_oracle",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/src/bin/lsp_server/server/core/tests.rs",
+        "selector": "p7_typed_structure_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics"
+      }
+    },
+    {
+      "bundle_id": "cross_consumer_semantic_equivalence",
+      "fixture_id": "typed_structure_field",
+      "operation": "diagnostics",
+      "consumer": "runtime",
+      "verdict": "pass",
+      "reason_code": "parity_matches_runtime_oracle",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/src/bin/lsp_server/server/core/tests.rs",
+        "selector": "p7_typed_structure_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics"
+      }
+    },
+    {
+      "bundle_id": "cross_consumer_semantic_equivalence",
+      "fixture_id": "typed_value_table_row",
+      "operation": "completion",
+      "consumer": "lsp",
+      "verdict": "pass",
+      "reason_code": "parity_matches_runtime_oracle",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/src/bin/lsp_server/server/core/tests.rs",
+        "selector": "p7_typed_value_table_row_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics"
+      }
+    },
+    {
+      "bundle_id": "cross_consumer_semantic_equivalence",
+      "fixture_id": "typed_value_table_row",
+      "operation": "hover",
+      "consumer": "web",
+      "verdict": "pass",
+      "reason_code": "parity_matches_runtime_oracle",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/src/bin/lsp_server/server/core/tests.rs",
+        "selector": "p7_typed_value_table_row_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics"
+      }
+    },
+    {
+      "bundle_id": "cross_consumer_semantic_equivalence",
+      "fixture_id": "typed_value_table_row",
+      "operation": "type_at_position",
+      "consumer": "mcp",
+      "verdict": "pass",
+      "reason_code": "parity_matches_runtime_oracle",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/src/bin/lsp_server/server/core/tests.rs",
+        "selector": "p7_typed_value_table_row_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics"
+      }
+    },
+    {
+      "bundle_id": "cross_consumer_semantic_equivalence",
+      "fixture_id": "typed_value_table_row",
+      "operation": "diagnostics",
+      "consumer": "runtime",
+      "verdict": "pass",
+      "reason_code": "parity_matches_runtime_oracle",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/src/bin/lsp_server/server/core/tests.rs",
+        "selector": "p7_typed_value_table_row_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics"
+      }
+    },
+    {
+      "bundle_id": "cross_consumer_semantic_equivalence",
+      "fixture_id": "core_tools_fixture",
+      "operation": "members",
+      "consumer": "lsp",
+      "verdict": "pass",
+      "reason_code": "parity_matches_runtime_oracle",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/src/bin/lsp_server/server/core/tests.rs",
+        "selector": "p25_cross_interface_semantic_parity_lsp_web_mcp_core_tools"
+      }
+    },
+    {
+      "bundle_id": "cross_consumer_semantic_equivalence",
+      "fixture_id": "core_tools_fixture",
+      "operation": "definition",
+      "consumer": "mcp",
+      "verdict": "pass",
+      "reason_code": "parity_matches_runtime_oracle",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/src/bin/lsp_server/server/core/tests.rs",
+        "selector": "p25_cross_interface_semantic_parity_lsp_web_mcp_core_tools"
+      }
+    },
+    {
+      "bundle_id": "cross_consumer_semantic_equivalence",
+      "fixture_id": "cli_inline_snapshot",
+      "operation": "completion",
+      "consumer": "cli",
+      "verdict": "pass",
+      "reason_code": "shared_runtime_transport_wrapper",
+      "source_asset": {
+        "kind": "test",
+        "path": "cli/src/main.rs",
+        "selector": "cli_inline_completion_uses_shared_runtime_snapshot"
+      }
+    },
+    {
+      "bundle_id": "cross_consumer_semantic_equivalence",
+      "fixture_id": "cli_inline_snapshot",
+      "operation": "type_at_position",
+      "consumer": "cli",
+      "verdict": "pass",
+      "reason_code": "shared_runtime_transport_wrapper",
+      "source_asset": {
+        "kind": "test",
+        "path": "cli/src/main.rs",
+        "selector": "cli_inline_type_info_uses_shared_runtime_snapshot"
+      }
+    },
+    {
+      "bundle_id": "no_adapter_local_semantic_truth",
+      "fixture_id": "missing_canonical_artifacts",
+      "operation": "hover",
+      "consumer": "web",
+      "verdict": "pass",
+      "reason_code": "fail_closed_by_contract",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/tests/flow_sensitive_web_api_test.rs",
+        "selector": "hover_endpoints_fail_closed_on_missing_canonical_artifacts"
+      }
+    },
+    {
+      "bundle_id": "no_adapter_local_semantic_truth",
+      "fixture_id": "missing_canonical_artifacts",
+      "operation": "hover",
+      "consumer": "lsp",
+      "verdict": "pass",
+      "reason_code": "fail_closed_by_contract",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/src/bin/lsp_server/server/core/tests.rs",
+        "selector": "p7_hover_cache_miss_emits_bounded_fail_closed_reason"
+      }
+    },
+    {
+      "bundle_id": "no_adapter_local_semantic_truth",
+      "fixture_id": "missing_canonical_artifacts",
+      "operation": "type_at_position",
+      "consumer": "mcp",
+      "verdict": "pass",
+      "reason_code": "fail_closed_by_contract",
+      "source_asset": {
+        "kind": "test",
+        "path": "bsl-agent/src/session/tests.rs",
+        "selector": "semantic_helpers_fail_closed_without_precomputed_type_index"
+      }
+    },
+    {
+      "bundle_id": "no_adapter_local_semantic_truth",
+      "fixture_id": "missing_canonical_artifacts",
+      "operation": "members",
+      "consumer": "mcp",
+      "verdict": "pass",
+      "reason_code": "fail_closed_by_contract",
+      "source_asset": {
+        "kind": "test",
+        "path": "bsl-agent/src/session/tests.rs",
+        "selector": "semantic_helpers_fail_closed_without_precomputed_type_index"
+      }
+    },
+    {
+      "bundle_id": "no_adapter_local_semantic_truth",
+      "fixture_id": "cli_inline_snapshot",
+      "operation": "diagnostics",
+      "consumer": "cli",
+      "verdict": "pass",
+      "reason_code": "shared_runtime_transport_wrapper",
+      "source_asset": {
+        "kind": "test",
+        "path": "cli/src/runtime.rs",
+        "selector": "prepare_cli_file_operation_uses_runtime_contract_for_diagnostics"
+      }
+    },
+    {
+      "bundle_id": "search_isolation_and_revision_integrity",
+      "fixture_id": "semantic_artifact_missing_but_search_alive",
+      "operation": "completion",
+      "consumer": "runtime",
+      "verdict": "pass",
+      "reason_code": "search_index_isolated",
+      "source_asset": {
+        "kind": "test",
+        "path": "bsl-runtime/src/application/type_system/services/completion_service/tests.rs",
+        "selector": "completion_unknown_bare_receiver_member_access_ignores_polluted_index_snapshot"
+      }
+    },
+    {
+      "bundle_id": "search_isolation_and_revision_integrity",
+      "fixture_id": "semantic_artifact_missing_but_search_alive",
+      "operation": "symbol_search",
+      "consumer": "mcp",
+      "verdict": "pass",
+      "reason_code": "search_index_isolated",
+      "source_asset": {
+        "kind": "test",
+        "path": "bsl-agent/src/session/tests.rs",
+        "selector": "symbol_search_and_references_work_via_bounded_blocking_workers"
+      }
+    },
+    {
+      "bundle_id": "search_isolation_and_revision_integrity",
+      "fixture_id": "semantic_artifact_missing_but_search_alive",
+      "operation": "references",
+      "consumer": "mcp",
+      "verdict": "pass",
+      "reason_code": "search_index_isolated",
+      "source_asset": {
+        "kind": "test",
+        "path": "bsl-agent/src/session/tests.rs",
+        "selector": "symbol_search_and_references_work_via_bounded_blocking_workers"
+      }
+    },
+    {
+      "bundle_id": "search_isolation_and_revision_integrity",
+      "fixture_id": "post_did_change_current_revision",
+      "operation": "completion",
+      "consumer": "lsp",
+      "verdict": "pass",
+      "reason_code": "revision_integrity_preserved",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/src/bin/lsp_server/server/core/tests.rs",
+        "selector": "p7_large_churn_budget_timeout_returns_fail_closed_empty_response"
+      }
+    },
+    {
+      "bundle_id": "search_isolation_and_revision_integrity",
+      "fixture_id": "post_did_change_current_revision",
+      "operation": "hover",
+      "consumer": "lsp",
+      "verdict": "pass",
+      "reason_code": "revision_integrity_preserved",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/src/bin/lsp_server/server/core/tests.rs",
+        "selector": "p7_hover_cache_miss_on_map_index_access_does_not_use_legacy_word_fallback"
+      }
+    },
+    {
+      "bundle_id": "module_context_and_facet_preservation",
+      "fixture_id": "form_module_explicit_context",
+      "operation": "type_at_position",
+      "consumer": "mcp",
+      "verdict": "pass",
+      "reason_code": "facet_identity_preserved",
+      "source_asset": {
+        "kind": "test",
+        "path": "bsl-agent/src/session/tests.rs",
+        "selector": "collect_type_at_position_preserves_available_facets_for_object_module_binding"
+      }
+    },
+    {
+      "bundle_id": "module_context_and_facet_preservation",
+      "fixture_id": "form_module_explicit_context",
+      "operation": "diagnostics",
+      "consumer": "runtime",
+      "verdict": "pass",
+      "reason_code": "module_context_binding_preserved",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/tests/form_module_object_unified_contract_test.rs",
+        "selector": "diagnostics_hover_and_type_at_position_follow_unified_form_contract"
+      }
+    },
+    {
+      "bundle_id": "module_context_and_facet_preservation",
+      "fixture_id": "form_module_explicit_context",
+      "operation": "completion",
+      "consumer": "runtime",
+      "verdict": "pass",
+      "reason_code": "module_context_binding_preserved",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/tests/form_module_object_unified_contract_test.rs",
+        "selector": "completion_and_resolve_follow_unified_form_contract"
+      }
+    },
+    {
+      "bundle_id": "module_context_and_facet_preservation",
+      "fixture_id": "recordset_module_explicit_context",
+      "operation": "diagnostics",
+      "consumer": "runtime",
+      "verdict": "pass",
+      "reason_code": "facet_identity_preserved",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/tests/form_module_object_unified_contract_test.rs",
+        "selector": "recordset_module_resolves_system_members_and_manager_path_call"
+      }
+    },
+    {
+      "bundle_id": "module_context_and_facet_preservation",
+      "fixture_id": "bare_identifier_removed",
+      "operation": "diagnostics",
+      "consumer": "runtime",
+      "verdict": "pass",
+      "reason_code": "legacy_fallback_removed",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/tests/undeclared_variable_test.rs",
+        "selector": "form_module_bare_owner_member_name_stays_undeclared"
+      }
+    }
+  ],
+  "overall": {
+    "verdict": "pass",
+    "checks_total": 27,
+    "checks_failed": 0
+  }
+}

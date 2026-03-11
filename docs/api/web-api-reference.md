@@ -276,7 +276,8 @@ curl -X POST "http://127.0.0.1:3002/api/hover" \
   -d '{
     "code": "Функция Тест()\n    МассивДанных = Новый Массив();\n    Возврат МассивДанных;\nКонецФункции",
     "line": 2,
-    "column": 4
+    "column": 4,
+    "includeFlowSensitive": false
   }' | jq '.'
 ```
 
@@ -291,6 +292,19 @@ curl -X POST "http://127.0.0.1:3002/api/hover" \
 }
 ```
 
+#### Fail-closed ответ
+
+Если canonical semantic artifacts для текущего запроса недоступны, endpoint сохраняет transport envelope и отвечает `200 OK` с пустым semantic payload:
+
+```json
+{
+  "hover": null,
+  "line": 2,
+  "column": 15,
+  "duration_ms": 6
+}
+```
+
 #### Поля запроса
 
 | Поле | Тип | Обязательно | Описание |
@@ -298,12 +312,13 @@ curl -X POST "http://127.0.0.1:3002/api/hover" \
 | `code` | String | ✅ | BSL код для анализа |
 | `line` | Number | ✅ | Строка (0-based) |
 | `column` | Number | ✅ | Колонка (0-based) |
+| `includeFlowSensitive` | Boolean | ❌ | Включить flow-sensitive narrowing поверх canonical semantic path |
 
 #### Статус коды
 
-- `200 OK` — hover информация получена успешно
-- `400 Bad Request` — некорректный JSON или отсутствуют требуемые поля
-- `500 Internal Server Error` — ошибка парсинга или анализа кода
+- `200 OK` — запрос обработан; при fail-closed semantic miss поле `hover` возвращается как `null`
+- `400 Bad Request` — некорректный JSON, отсутствуют требуемые поля или передан legacy-ключ `include_flow_sensitive`
+- `500 Internal Server Error` — неожиданная внутренняя ошибка runtime/transport слоя
 
 ---
 

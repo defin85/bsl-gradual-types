@@ -301,41 +301,6 @@ pub async fn get_completion_with_semantic_program_snapshot_v2_with_trigger_hint(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn get_completion_with_semantic_hint_snapshot_with_trigger_hint(
-    file_content: &str,
-    line: u32,
-    column: u32,
-    file_uri: Option<&str>,
-    index_snapshot: &IndexSnapshot,
-    metadata_lookup: &TypeMetadataLookup,
-    file_path: &str,
-    resolver: &TypeResolver,
-    member_access_owner_type_hint: Option<TypeResolution>,
-    include_flow_sensitive: bool,
-    trigger_char_hint: Option<char>,
-) -> Result<CompletionResult> {
-    let analysis = CompletionAnalysisContext {
-        ir_program: None,
-        resolver,
-        file_path,
-        member_access_owner_type_hint,
-        include_flow_sensitive,
-    };
-
-    get_completion_with_analysis(
-        file_content,
-        line,
-        column,
-        file_uri,
-        index_snapshot,
-        metadata_lookup,
-        Some(&analysis),
-        trigger_char_hint,
-    )
-    .await
-}
-
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn get_completion_with_analysis(
     file_content: &str,
     line: u32,

@@ -13,15 +13,12 @@ use bsl_backend::application::type_system::{
 };
 use bsl_backend::application::CompletionStats;
 use bsl_backend::application::{
-    get_completion_with_semantic_hint_snapshot_with_trigger_hint,
     get_completion_with_semantic_program_snapshot_with_trigger_hint,
 };
 use bsl_backend::system::IndexSnapshot;
-use bsl_runtime::system::keyword_index::DEFAULT_KEYWORDS;
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::{MethodSignature, SignatureSource};
 use bsl_shared::domain::types::{MetadataKind, TypeResolution};
-use bsl_shared::domain::CompletionKind;
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::formatting::normalize_user_facing_type_name;
 use bsl_shared::ir::SemanticProgram;
@@ -79,37 +76,6 @@ pub struct CompletionResponseWithStats {
     #[allow(dead_code)]
     pub stats: Option<CompletionStats>,
     pub had_error: bool,
-}
-
-pub fn build_keyword_degraded_completion(snippet_support: bool) -> CompletionResponseWithStats {
-    const KEYWORD_FALLBACK_LIMIT: usize = 64;
-
-    let items: Vec<CompletionItem> = DEFAULT_KEYWORDS
-        .iter()
-        .take(KEYWORD_FALLBACK_LIMIT)
-        .map(|keyword| {
-            to_lsp_completion(
-                bsl_shared::domain::CompletionItem::new(
-                    (*keyword).to_string(),
-                    CompletionKind::Keyword,
-                ),
-                None,
-                None,
-                vec![],
-                snippet_support,
-                None,
-            )
-        })
-        .collect();
-
-    CompletionResponseWithStats {
-        response: CompletionResponse::List(CompletionList {
-            is_incomplete: true,
-            items,
-        }),
-        stats: None,
-        had_error: false,
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -272,76 +238,6 @@ fn completion_request_targets_member_access(
 
 fn is_completion_identifier_char(ch: char) -> bool {
     ch == '_' || ch.is_alphanumeric()
-}
-
-#[allow(clippy::too_many_arguments)]
-#[allow(dead_code)]
-pub async fn handle_completion_v2_degraded(
-    file_content: Arc<str>,
-    file_path: Arc<str>,
-    member_access_owner_type_hint: Option<TypeResolution>,
-    deps: Arc<bsl_analysis_v2::SemanticDeps>,
-    position: Position,
-    file_uri: &Url,
-    index_snapshot: &IndexSnapshot,
-    snippet_support: bool,
-    include_flow_sensitive: bool,
-    trigger_char_hint: Option<char>,
-) -> Option<CompletionResponseWithStats> {
-    let resolver = deps
-        .resolver
-        .clone()
-        .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())));
-    let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
-
-    let completion = get_completion_with_semantic_hint_snapshot_with_trigger_hint(
-        file_content.as_ref(),
-        position.line,
-        position.character,
-        Some(file_uri.as_str()),
-        index_snapshot,
-        &metadata_lookup,
-        file_path.as_ref(),
-        resolver.as_ref(),
-        member_access_owner_type_hint,
-        include_flow_sensitive,
-        trigger_char_hint,
-    )
-    .await;
-
-    match completion {
-        Ok(result) => {
-            if result.items.is_empty() {
-                return Some(build_keyword_degraded_completion(snippet_support));
-            }
-            let lsp_completions: Vec<CompletionItem> = result
-                .items
-                .into_iter()
-                .map(|candidate| {
-                    to_lsp_completion(
-                        candidate.item,
-                        candidate.owner_type,
-                        candidate.member_identity,
-                        candidate.origin_sources,
-                        snippet_support,
-                        Some(deps.as_ref()),
-                    )
-                })
-                .collect();
-            Some(CompletionResponseWithStats {
-                response: CompletionResponse::List(CompletionList {
-                    is_incomplete: true,
-                    items: lsp_completions,
-                }),
-                stats: Some(result.stats),
-                had_error: false,
-            })
-        }
-        Err(e) => {
-            error!("Failed to get degraded completions (v2): {}", e);
-            Some(build_keyword_degraded_completion(snippet_support))
-        }
-    }
 }
 
 pub async fn handle_completion_resolve(

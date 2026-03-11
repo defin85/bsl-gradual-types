@@ -7,6 +7,7 @@ use crate::domain::types::{
     Certainty, ConcreteType, ConfigurationType, FacetKind, GenericType, MetadataKind, PlatformType,
     RawAttributeData, RawDataSource, RawMethodData, RawParamData, RawPropertyData,
     RawTabularSectionData, RawTypeData, ResolutionMetadata, ResolutionResult, ResolutionSource,
+    SpecialType,
     StructuralMember, TabularRowType, TypeResolution, FORM_DATA_FORM_TYPE_NOTE_PREFIX,
     FORM_DATA_SEMANTICS_NOTE,
 };
@@ -744,6 +745,54 @@ fn test_get_methods_prefers_signature_index() {
 
     // Проверяем return_facet
     assert_eq!(method.return_facet, Some(FacetKind::Reference));
+}
+
+#[test]
+fn test_get_methods_for_generic_falls_back_to_signature_index_when_raw_type_missing() {
+    use crate::domain::signature_index::{ContextRequirements, MethodSignature, SignatureSource};
+    use crate::domain::types::ParameterInfo;
+
+    let repo = Arc::new(InMemoryTypeRepository::new());
+    repo.populate_signature_index(|index| {
+        let sig = MethodSignature::new(
+            "Добавить".to_string(),
+            Some("Массив".to_string()),
+            vec![ParameterInfo {
+                name: "Элемент".to_string(),
+                type_name: Some("Произвольный".to_string()),
+                is_optional: false,
+                default_value: None,
+                description: None,
+            }],
+            Some("Булево".to_string()),
+            None,
+            None,
+            SignatureSource::Platform,
+            None,
+            ContextRequirements::Universal,
+        );
+        index.add_platform_method(TypeId::new("Массив"), sig);
+    });
+
+    let lookup = TypeMetadataLookup::new(repo);
+    let resolution = TypeResolution {
+        certainty: Certainty::Known,
+        result: ResolutionResult::Generic(GenericType {
+            base_type: "Массив".to_string(),
+            type_params: vec![ConcreteType::Special(SpecialType::Undefined)],
+        }),
+        source: ResolutionSource::Inferred,
+        metadata: ResolutionMetadata::default(),
+        active_facet: None,
+        available_facets: vec![],
+    };
+
+    let methods = lookup.get_methods(&resolution);
+
+    assert!(
+        methods.iter().any(|method| method.name == "Добавить"),
+        "generic platform collections must inherit signature-index methods when raw type data is unavailable: {methods:#?}"
+    );
 }
 
 #[test]

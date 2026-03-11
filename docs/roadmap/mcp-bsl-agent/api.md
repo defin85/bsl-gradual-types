@@ -321,7 +321,8 @@ Input:
 {
   "session_id": "uuid",
   "file": { "doc": { "root_id": "hex", "path": "src/CommonModules/Foo/Module.bsl" }, "text": "optional" },
-  "position": { "line": 10, "character": 5 }
+  "position": { "line": 10, "character": 5 },
+  "include_flow_sensitive": false
 }
 ```
 
@@ -334,9 +335,27 @@ Output (job_result):
 ```json
 {
   "analysis_revision": 2,
-  "type": { "name": "Строка", "certainty": 1.0, "facet": "Object" },
+  "flow_sensitive_enabled": false,
+  "type_info": {
+    "name": "Строка",
+    "certainty": "known",
+    "active_facet": "Object",
+    "available_facets": ["Manager", "Object", "Reference"]
+  },
   "node": { "kind": "MemberAccess", "range": { "start": { "line": 10, "character": 0 }, "end": { "line": 10, "character": 20 } } },
-  "explain": { "reasons": [] }
+  "warnings": []
+}
+```
+
+Fail-closed job_result keeps the same envelope and returns `type_info: null` plus warning text when canonical artifacts for the current revision are unavailable:
+
+```json
+{
+  "analysis_revision": 2,
+  "flow_sensitive_enabled": false,
+  "type_info": null,
+  "node": null,
+  "warnings": ["IR not available"]
 }
 ```
 
@@ -350,7 +369,8 @@ Input:
   "session_id": "uuid",
   "file": { "doc": { "root_id": "hex", "path": "src/CommonModules/Foo/Module.bsl" }, "text": "optional" },
   "position": { "line": 10, "character": 12 },
-  "limit": 200
+  "limit": 200,
+  "include_flow_sensitive": false
 }
 ```
 
@@ -363,10 +383,26 @@ Output (job_result):
 ```json
 {
   "analysis_revision": 2,
-  "receiver": { "type": { "name": "ДокументОбъект.ЗаказПокупателя", "facet": "Object" } },
+  "flow_sensitive_enabled": false,
   "members": [
-    { "name": "Записать", "kind": "method", "signature": "Записать()", "return_type": "Булево", "deprecated": false }
+    {
+      "name": "Записать",
+      "kind": "method",
+      "detail": "Записать()",
+      "member_identity": "method:Документы.ЗаказПокупателя:Object:Записать"
+    }
   ],
+  "truncated": false
+}
+```
+
+Fail-closed job_result for the same public contract:
+
+```json
+{
+  "analysis_revision": 2,
+  "flow_sensitive_enabled": false,
+  "members": [],
   "truncated": false
 }
 ```
@@ -394,8 +430,21 @@ Output (job_result):
 ```json
 {
   "analysis_revision": 2,
-  "location": { "file": { "root_id": "hex", "path": "src/CommonModules/Foo/Module.bsl" }, "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 1 } } },
-  "snippet": { "text": "bounded snippet", "truncated": false }
+  "location": {
+    "file": { "root_id": "hex", "path": "src/CommonModules/Foo/Module.bsl" },
+    "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 1 } }
+  },
+  "snippet": null
+}
+```
+
+Fail-closed job_result keeps the response envelope and returns empty semantic payload:
+
+```json
+{
+  "analysis_revision": 2,
+  "location": null,
+  "snippet": null
 }
 ```
 

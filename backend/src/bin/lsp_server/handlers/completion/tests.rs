@@ -8,7 +8,9 @@ use bsl_shared::domain::repository::InMemoryTypeRepository;
 use bsl_shared::domain::signature_index::{
     ConstructorSignature, MethodSignature, SignatureIndex, SignatureSource,
 };
-use bsl_shared::domain::types::{ParameterInfo, RawDataSource, RawPropertyData, RawTypeData};
+use bsl_shared::domain::types::{
+    ParameterInfo, RawDataSource, RawMethodData, RawParamData, RawPropertyData, RawTypeData,
+};
 use bsl_shared::TypeRepository;
 use bsl_shared::TypeResolver;
 use tower_lsp::lsp_types::Url;
@@ -53,6 +55,27 @@ fn create_test_env() -> TestEnv {
     let raw_type = RawTypeData {
         name: "Массив".to_string(),
         source: RawDataSource::Platform,
+        methods: vec![RawMethodData {
+            name: "Добавить".to_string(),
+            english_name: "Add".to_string(),
+            return_type: "Булево".to_string(),
+            params: vec![
+                RawParamData {
+                    name: "Элемент".to_string(),
+                    param_type: "Число".to_string(),
+                    is_optional: false,
+                    default_value: None,
+                },
+                RawParamData {
+                    name: "Позиция".to_string(),
+                    param_type: "Число".to_string(),
+                    is_optional: true,
+                    default_value: None,
+                },
+            ],
+            description: Some("Добавляет элемент в массив".to_string()),
+            ..Default::default()
+        }],
         properties: vec![RawPropertyData {
             name: "Длина".to_string(),
             prop_type: "Число".to_string(),
@@ -475,6 +498,10 @@ async fn completion_member_access_fails_closed_without_shared_owner_hint() {
     .await
     .expect("completion");
 
+    assert!(
+        !response.had_error,
+        "fail-closed completion must not report an internal error"
+    );
     let items = extract_items(response.response);
     assert!(
         items.is_empty(),
@@ -483,20 +510,21 @@ async fn completion_member_access_fails_closed_without_shared_owner_hint() {
 }
 
 #[tokio::test]
-async fn m5_completion_v2_is_deterministic() {
+async fn m5_completion_authoritative_path_is_deterministic() {
     let content = read_fixture("m5_snippets_resolve.bsl");
-    let position = find_position(&content, "МойМассив");
+    let position = find_position(&content, "МойМассив.");
     let uri = Url::parse("file:///m5_snippets_resolve.bsl").expect("url");
     let env = create_test_env();
     let index = env.index.clone();
     let index_snapshot = index.snapshot();
     let deps = env.deps.clone();
 
-    let (file_content, file_path, _ir_program, owner_hint) =
+    let (file_content, file_path, ir_program, owner_hint) =
         build_v2_ir(&content, &uri, deps.clone(), position);
-    let v2 = handle_completion_v2_degraded(
+    let v2 = handle_completion_v2_with_trigger_hint(
         file_content.clone(),
         file_path.clone(),
+        ir_program.clone(),
         owner_hint.clone(),
         deps.clone(),
         position,
@@ -508,6 +536,10 @@ async fn m5_completion_v2_is_deterministic() {
     )
     .await
     .expect("completion v2");
+    assert!(
+        !v2.had_error,
+        "authoritative completion path must not degrade into an error response"
+    );
     let v2_items = extract_items(v2.response);
     assert!(
         v2_items.iter().any(|item| item.label == "Добавить"),
@@ -517,9 +549,10 @@ async fn m5_completion_v2_is_deterministic() {
     let v2_snapshot = completion_items_snapshot(&v2_items);
 
     // Determinism smoke: same input -> same output twice.
-    let v2_second = handle_completion_v2_degraded(
+    let v2_second = handle_completion_v2_with_trigger_hint(
         file_content,
         file_path,
+        ir_program,
         owner_hint,
         deps,
         position,
@@ -531,6 +564,10 @@ async fn m5_completion_v2_is_deterministic() {
     )
     .await
     .expect("completion v2 (second)");
+    assert!(
+        !v2_second.had_error,
+        "authoritative completion path must remain stable across repeated requests"
+    );
     let v2_second_items = extract_items(v2_second.response);
     let v2_second_snapshot = completion_items_snapshot(&v2_second_items);
     assert_eq!(v2_snapshot, v2_second_snapshot);
@@ -539,17 +576,18 @@ async fn m5_completion_v2_is_deterministic() {
 #[tokio::test]
 async fn m5_completion_resolve_snippets_snapshot() {
     let content = read_fixture("m5_snippets_resolve.bsl");
-    let position = find_position(&content, "МойМассив");
+    let position = find_position(&content, "МойМассив.");
     let uri = Url::parse("file:///m5_snippets_resolve.bsl").expect("url");
     let env = create_test_env();
     let index_snapshot = env.index.snapshot();
     let deps = env.deps;
 
-    let (file_content, file_path, _ir_program, owner_hint) =
+    let (file_content, file_path, ir_program, owner_hint) =
         build_v2_ir(&content, &uri, deps.clone(), position);
-    let response = handle_completion_v2_degraded(
+    let response = handle_completion_v2_with_trigger_hint(
         file_content,
         file_path,
+        ir_program,
         owner_hint,
         deps.clone(),
         position,
@@ -561,6 +599,10 @@ async fn m5_completion_resolve_snippets_snapshot() {
     )
     .await
     .expect("completion");
+    assert!(
+        !response.had_error,
+        "authoritative completion path must provide resolve candidates without degraded fallback"
+    );
 
     let items = match response.response {
         CompletionResponse::List(list) => list.items,

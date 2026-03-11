@@ -1,0 +1,93 @@
+{
+  "schema_version": "v1",
+  "contract_version": "quality-gates-v1",
+  "change_id": "refactor-ir-canonical-semantic-pipeline",
+  "generated_at": "2026-03-11T16:15:00+03:00",
+  "overall": {
+    "verdict": "pass",
+    "gates_total": 6,
+    "gates_failed": 0
+  },
+  "reason_codes": [
+    "acceptance_bundle_complete",
+    "contract_policy_passed",
+    "bounded_reason_taxonomy_verified",
+    "anti_rescue_perf_contract_verified",
+    "openspec_validate_passed",
+    "docs_match_shipped_contract"
+  ],
+  "gates": [
+    {
+      "id": "acceptance_gate",
+      "verdict": "pass",
+      "reason_code": "acceptance_bundle_complete",
+      "artifacts": [
+        "openspec/changes/refactor-ir-canonical-semantic-pipeline/validation/acceptance-report.json"
+      ]
+    },
+    {
+      "id": "contract_and_compatibility_gate",
+      "verdict": "pass",
+      "reason_code": "contract_policy_passed",
+      "commands": [
+        "python scripts/check-versioned-contracts.py",
+        "python scripts/check-contract-compatibility-diff.py --baseline-ref origin/master --candidate-root contracts --report openspec/changes/refactor-ir-canonical-semantic-pipeline/validation/contracts-compatibility-report.json --no-enforce"
+      ],
+      "artifacts": [
+        "openspec/changes/refactor-ir-canonical-semantic-pipeline/validation/contracts-compatibility-report.json",
+        "contracts/lsp-completion-v2/v2/contract.json",
+        "contracts/lsp-completion-timeline/v3/contract.json",
+        "contracts/observability-completion-v2/v3/contract.json",
+        "contracts/intellisense-perf-gate/v2/contract.json"
+      ]
+    },
+    {
+      "id": "observability_gate",
+      "verdict": "pass",
+      "reason_code": "bounded_reason_taxonomy_verified",
+      "artifacts": [
+        "contracts/observability-completion-v2/v3/contract.json",
+        "bsl-agent/src/session/tests.rs::type_at_position_members_and_definition_emit_shared_type_index_reason_metrics",
+        "backend/tests/flow_sensitive_web_api_test.rs::hover_endpoints_fail_closed_on_missing_canonical_artifacts",
+        "backend/src/bin/lsp_server/server/core/tests.rs::p7_hover_cache_miss_emits_bounded_fail_closed_reason"
+      ]
+    },
+    {
+      "id": "perf_and_anti_rescue_gate",
+      "verdict": "pass",
+      "reason_code": "anti_rescue_perf_contract_verified",
+      "artifacts": [
+        "contracts/intellisense-perf-gate/v2/contract.json",
+        "backend/tests/perf/reports/intellisense_small.json",
+        "backend/tests/perf/reports/intellisense_large.json",
+        "backend/tests/perf/reports/intellisense_churn.json",
+        "backend/src/bin/intellisense_perf/tests.rs"
+      ]
+    },
+    {
+      "id": "openspec_validate_gate",
+      "verdict": "pass",
+      "reason_code": "openspec_validate_passed",
+      "commands": [
+        "openspec validate refactor-ir-canonical-semantic-pipeline --strict --no-interactive"
+      ],
+      "artifacts": [
+        "openspec/changes/refactor-ir-canonical-semantic-pipeline/tasks.md",
+        "openspec/changes/refactor-ir-canonical-semantic-pipeline/specs/bsl-intellisense-v2/spec.md"
+      ]
+    },
+    {
+      "id": "docs_surface_sync",
+      "verdict": "pass",
+      "reason_code": "docs_match_shipped_contract",
+      "artifacts": [
+        "docs/api/web-api-reference.md",
+        "docs/roadmap/mcp-bsl-agent/api.md",
+        "backend/src/presentation/web/handlers.rs",
+        "backend/tests/flow_sensitive_web_api_test.rs",
+        "bsl-agent/src/types/mod.rs",
+        "bsl-agent/src/session/manager_semantic_core.rs"
+      ]
+    }
+  ]
+}

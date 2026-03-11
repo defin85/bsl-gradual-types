@@ -5,7 +5,9 @@
 
 mod args;
 mod formatters;
+mod runtime;
 
+use anyhow::Context;
 use clap::Parser;
 use colored::*;
 use std::collections::HashMap;
@@ -14,15 +16,16 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use args::{CacheCommand, CliArgs, CliOutputFormat, Commands};
-use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, FileId as V2FileId, SettingsId};
-use bsl_shared::formatting::DetailLevel;
-use formatters::CliFormatter;
-
-use bsl_backend::application::type_system::web_api_service;
-use bsl_backend::system::{build_deps_bundle_v2, SystemCoordinator};
-use bsl_shared::domain::types::{DiagnosticSeverity, TypeResolution};
+use bsl_backend::application::{
+    get_completion_with_semantic_program_snapshot_with_trigger_hint, SemanticOperation,
+};
+use bsl_shared::domain::types::{DiagnosticSeverity, ResolutionResult, TypeResolution};
+use bsl_shared::domain::CompletionItem;
 use bsl_shared::engine::CliAnalysisResult;
+use bsl_shared::formatting::DetailLevel;
 use bsl_shared::ir::SemanticNodeKind;
+use formatters::CliFormatter;
+use runtime::{prepare_cli_file_operation, prepare_cli_text_operation, CliPreparedFileOperation};
 
 #[tokio::main]
 async fn main() {
@@ -110,16 +113,10 @@ async fn check_command(
 ) -> anyhow::Result<()> {
     println!("{} {}", "🔍 Проверка типов:".blue().bold(), path.cyan());
 
-    let (analysis, file_id) = build_analysis_v2_for_path(path, DetailLevel::Full).await?;
-
-    let syntax = analysis
-        .syntax_diagnostics(file_id)
-        .map_err(|_| anyhow::anyhow!("v2 syntax diagnostics cancelled"))?
-        .unwrap_or_default();
-    let semantic = analysis
-        .semantic_diagnostics(file_id)
-        .map_err(|_| anyhow::anyhow!("v2 semantic diagnostics cancelled"))?
-        .unwrap_or_default();
+    let prepared =
+        prepare_cli_file_operation(path, SemanticOperation::Diagnostics, DetailLevel::Full).await?;
+    let syntax = prepared.syntax_diagnostics()?;
+    let semantic = prepared.semantic_diagnostics(false)?;
 
     // Подсчет ошибок и предупреждений (v2 diagnostics)
     let mut errors = syntax.len();
@@ -192,14 +189,7 @@ async fn complete_command(
         expression.cyan()
     );
 
-    // v2-only: используем deps bundle (SemanticDeps snapshot) вместо legacy фасада системы типов.
-    let coordinator = SystemCoordinator::new();
-    coordinator.start().await?;
-
-    let deps_bundle = build_deps_bundle_v2(&coordinator, None, None)?;
-    let deps = deps_bundle.semantic_deps;
-
-    let completions = web_api_service::get_type_completions(deps.as_ref(), expression).await?;
+    let completions = collect_cli_completion_items(expression).await?;
 
     let output = CliFormatter::format_completions(&completions, format, limit);
     println!("{}", output);
@@ -215,16 +205,7 @@ async fn info_command(expression: &str, format: &CliOutputFormat) -> anyhow::Res
         expression.cyan()
     );
 
-    // v2-only: используем deps bundle (SemanticDeps snapshot) вместо legacy фасада системы типов.
-    let coordinator = SystemCoordinator::new();
-    coordinator.start().await?;
-
-    let deps_bundle = build_deps_bundle_v2(&coordinator, None, None)?;
-    let deps = deps_bundle.semantic_deps;
-
-    let resolution = web_api_service::get_type_details(deps.as_ref(), expression)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("Тип '{}' не найден", expression))?;
+    let resolution = resolve_cli_expression_type(expression).await?;
 
     let output = CliFormatter::format_type_info(expression, &resolution, format);
     println!("{}", output);
@@ -242,52 +223,25 @@ async fn analyze_ir_command(
 ) -> anyhow::Result<()> {
     println!("{} {}", "🎯 IR-based анализ:".green().bold(), path.cyan());
 
-    // 1. Создаем координатор
-    let coordinator = SystemCoordinator::new();
-    coordinator.start().await?;
+    let prepared =
+        prepare_cli_file_operation(path, SemanticOperation::TypeAtPosition, DetailLevel::Full)
+            .await?;
 
-    let deps_bundle = build_deps_bundle_v2(&coordinator, None, None)?;
-
-    // 2. Читаем файл
-    let content = std::fs::read_to_string(path)?;
-
-    // 3. Парсинг → IR через v2 (salsa)
     println!("📝 Парсинг → IR...");
 
-    let file_id = V2FileId(1);
-    let mut host = AnalysisHostV2::default();
-    host.apply_change(ChangeV2::SetDepsSnapshot {
-        deps_id: deps_bundle.deps_id.clone(),
-        deps: deps_bundle.semantic_deps.clone(),
-    });
-    host.apply_change(ChangeV2::SetSettingsSnapshot {
-        settings_id: SettingsId::from_hash("cli"),
-        diagnostics_detail_level: DetailLevel::Full,
-    });
-    host.apply_change(ChangeV2::SetFile {
-        file_id,
-        text: Arc::from(content),
-        version: 0,
-        path: Arc::from(path.to_string()),
-    });
-
-    let analysis = host.analysis();
-
     let parse_start = Instant::now();
-    analysis
-        .parse_result(file_id)
+    prepared
+        .analysis()
+        .parse_result(prepared.file_id)
         .map_err(|_| anyhow::anyhow!("v2 parse_result cancelled"))?
         .ok_or_else(|| anyhow::anyhow!("v2 parse_result unavailable"))?;
     let parse_duration_ms = parse_start.elapsed().as_millis();
 
     let analysis_start = Instant::now();
-    let ir = analysis
-        .ir(file_id)
-        .map_err(|_| anyhow::anyhow!("v2 ir cancelled"))?
-        .ok_or_else(|| anyhow::anyhow!("v2 ir unavailable"))?;
+    let ir = prepared.ir_program()?;
     let analysis_duration_ms = analysis_start.elapsed().as_millis();
 
-    let type_resolutions = collect_ir_type_resolutions(&analysis, file_id, &ir)?;
+    let type_resolutions = collect_ir_type_resolutions(&prepared, &ir)?;
 
     // 4. Вывод результатов
     println!("\n{}", "✅ Результаты анализа:".green().bold());
@@ -374,13 +328,12 @@ async fn analyze_ir_command(
 }
 
 fn collect_ir_type_resolutions(
-    analysis: &bsl_analysis_v2::AnalysisV2,
-    file_id: V2FileId,
+    prepared: &CliPreparedFileOperation,
     ir: &bsl_shared::ir::SemanticProgram,
 ) -> anyhow::Result<HashMap<usize, TypeResolution>> {
     let mut resolutions = HashMap::new();
     for (idx, node) in ir.nodes.iter().enumerate() {
-        let Some(resolution) = type_at_span(analysis, file_id, node.span)? else {
+        let Some(resolution) = type_at_span(prepared, node.span)? else {
             continue;
         };
         resolutions.insert(idx, resolution);
@@ -408,55 +361,19 @@ async fn cache_command(config_path: &str, action: CacheCommand) -> anyhow::Resul
     Ok(())
 }
 
-fn compute_settings_id_v2(diagnostics_detail_level: DetailLevel) -> SettingsId {
-    SettingsId::from_hash(format!(
-        "cli;schema={};diagnostics.detail_level={:?}",
-        bsl_analysis_v2::SETTINGS_SCHEMA_VERSION,
-        diagnostics_detail_level
-    ))
-}
-
-async fn build_analysis_v2_for_path(
-    path: &str,
-    diagnostics_detail_level: DetailLevel,
-) -> anyhow::Result<(bsl_analysis_v2::AnalysisV2, V2FileId)> {
-    let coordinator = SystemCoordinator::new();
-    coordinator.start().await?;
-
-    let deps_bundle = build_deps_bundle_v2(&coordinator, None, None)?;
-    let content = std::fs::read_to_string(path)?;
-
-    let file_id = V2FileId(1);
-    let mut host = AnalysisHostV2::default();
-    host.apply_change(ChangeV2::SetDepsSnapshot {
-        deps_id: deps_bundle.deps_id.clone(),
-        deps: deps_bundle.semantic_deps.clone(),
-    });
-    host.apply_change(ChangeV2::SetSettingsSnapshot {
-        settings_id: compute_settings_id_v2(diagnostics_detail_level),
-        diagnostics_detail_level,
-    });
-    host.apply_change(ChangeV2::SetFile {
-        file_id,
-        text: Arc::from(content),
-        version: 0,
-        path: Arc::from(path.to_string()),
-    });
-
-    Ok((host.analysis(), file_id))
-}
-
 async fn analyze_file_v2(
     path: &str,
     diagnostics_detail_level: DetailLevel,
 ) -> anyhow::Result<CliAnalysisResult> {
     let start_time = std::time::Instant::now();
 
-    let (analysis, file_id) = build_analysis_v2_for_path(path, diagnostics_detail_level).await?;
-    let ir = analysis
-        .ir(file_id)
-        .map_err(|_| anyhow::anyhow!("v2 ir cancelled"))?
-        .ok_or_else(|| anyhow::anyhow!("v2 ir unavailable"))?;
+    let prepared = prepare_cli_file_operation(
+        path,
+        SemanticOperation::TypeAtPosition,
+        diagnostics_detail_level,
+    )
+    .await?;
+    let ir = prepared.ir_program()?;
 
     let mut vars: HashMap<String, TypeResolution> = HashMap::new();
     for node in &ir.nodes {
@@ -471,9 +388,8 @@ async fn analyze_file_v2(
                 vars.entry(name.clone()).or_insert(resolution);
             }
             SemanticNodeKind::Assignment { variable, .. } => {
-                if let Some(resolution) = analysis
-                    .type_at_byte_offset(file_id, node.span.start)
-                    .map_err(|_| anyhow::anyhow!("v2 type_at_byte_offset cancelled"))?
+                if let Some(resolution) =
+                    prepared.serve_only_type_at_byte_offset(node.span.start)?
                 {
                     vars.insert(variable.clone(), resolution);
                 }
@@ -493,21 +409,301 @@ async fn analyze_file_v2(
 }
 
 fn type_at_span(
-    analysis: &bsl_analysis_v2::AnalysisV2,
-    file_id: V2FileId,
+    prepared: &CliPreparedFileOperation,
     span: bsl_shared::ir::Span,
 ) -> anyhow::Result<Option<TypeResolution>> {
     if !span.is_empty() {
         let end_inclusive = span.end.saturating_sub(1);
-        if let Some(found) = analysis
-            .type_at_byte_offset(file_id, end_inclusive)
-            .map_err(|_| anyhow::anyhow!("v2 type_at_byte_offset cancelled"))?
-        {
+        if let Some(found) = prepared.serve_only_type_at_byte_offset(end_inclusive)? {
             return Ok(Some(found));
         }
     }
 
-    analysis
-        .type_at_byte_offset(file_id, span.start)
-        .map_err(|_| anyhow::anyhow!("v2 type_at_byte_offset cancelled"))
+    prepared.serve_only_type_at_byte_offset(span.start)
+}
+
+#[derive(Debug)]
+#[cfg(test)]
+struct CliDiagnosticsSummary {
+    syntax_messages: Vec<String>,
+    semantic_messages: Vec<String>,
+}
+
+struct InlineCliExpression {
+    file_text: Arc<str>,
+    file_path: Arc<str>,
+    line: u32,
+    cursor_column: u32,
+    owner_probe_offset: Option<u32>,
+}
+
+fn inline_cli_expression(expression: &str) -> anyhow::Result<InlineCliExpression> {
+    let expression = expression.trim();
+    if expression.is_empty() {
+        return Err(anyhow::anyhow!("CLI expression must not be empty"));
+    }
+
+    let expression_line = format!("    {expression}");
+    let cursor_column =
+        bsl_analysis_v2::byte_offset_to_utf16(&expression_line, expression_line.len())
+            .min(u32::MAX);
+    let file_text = Arc::<str>::from(format!(
+        "Процедура Test()\n{expression_line}\nКонецПроцедуры\n"
+    ));
+
+    Ok(InlineCliExpression {
+        file_text,
+        file_path: Arc::<str>::from("/virtual/cli-inline-expression.bsl"),
+        line: 1,
+        cursor_column,
+        owner_probe_offset: None,
+    })
+}
+
+fn inline_cli_resolution_probe(expression: &str) -> anyhow::Result<(Arc<str>, Arc<str>, u32)> {
+    let expression = expression.trim();
+    if expression.is_empty() {
+        return Err(anyhow::anyhow!("CLI expression must not be empty"));
+    }
+
+    let file_text = Arc::<str>::from(format!(
+        "Процедура Test()\n    Arr = {expression};\n    ForType = Arr;\nКонецПроцедуры\n"
+    ));
+    let probe_offset = file_text
+        .rfind("Arr")
+        .ok_or_else(|| anyhow::anyhow!("resolution probe marker missing"))?
+        .min(u32::MAX as usize) as u32;
+
+    Ok((
+        file_text,
+        Arc::<str>::from("/virtual/cli-inline-resolution.bsl"),
+        probe_offset,
+    ))
+}
+
+fn inline_cli_completion_expression(expression: &str) -> anyhow::Result<InlineCliExpression> {
+    let expression = expression.trim();
+    if !expression_targets_member_access(expression) {
+        return inline_cli_expression(expression);
+    }
+
+    let dot_pos = expression
+        .rfind('.')
+        .ok_or_else(|| anyhow::anyhow!("member access expression is missing dot"))?;
+    let receiver = expression[..dot_pos].trim_end();
+    let suffix = expression[dot_pos + 1..].trim_start();
+    if receiver.is_empty() {
+        return Err(anyhow::anyhow!(
+            "member access expression receiver must not be empty"
+        ));
+    }
+
+    let completion_line = format!("    ForCompletion.{suffix}");
+    let cursor_column =
+        bsl_analysis_v2::byte_offset_to_utf16(&completion_line, completion_line.len());
+    let file_text = Arc::<str>::from(format!(
+        "Процедура Test()\n    Arr = {receiver};\n    ForCompletion = Arr;\n{completion_line}\nКонецПроцедуры\n"
+    ));
+    let owner_probe_offset = file_text
+        .rfind("ForCompletion")
+        .ok_or_else(|| anyhow::anyhow!("member access owner probe missing"))?
+        .min(u32::MAX as usize) as u32;
+
+    Ok(InlineCliExpression {
+        file_text,
+        file_path: Arc::<str>::from("/virtual/cli-inline-completion.bsl"),
+        line: 3,
+        cursor_column,
+        owner_probe_offset: Some(owner_probe_offset),
+    })
+}
+
+fn expression_targets_member_access(expression: &str) -> bool {
+    let trimmed = expression.trim_end();
+    let Some(dot_pos) = trimmed.rfind('.') else {
+        return false;
+    };
+    let after_dot = trimmed[dot_pos + 1..].trim_start();
+    after_dot.is_empty()
+        || after_dot
+            .chars()
+            .all(|ch| ch == '_' || ch.is_alphanumeric())
+}
+
+fn normalize_completion_owner_hint(
+    metadata_lookup: &bsl_shared::domain::TypeMetadataLookup,
+    owner_hint: TypeResolution,
+) -> TypeResolution {
+    let has_members = !metadata_lookup.get_methods(&owner_hint).is_empty()
+        || !metadata_lookup.get_properties(&owner_hint).is_empty();
+    if has_members {
+        return owner_hint;
+    }
+
+    if let ResolutionResult::Generic(generic) = &owner_hint.result {
+        let base_owner = TypeResolution::explicit(&generic.base_type);
+        let base_has_members = !metadata_lookup.get_methods(&base_owner).is_empty()
+            || !metadata_lookup.get_properties(&base_owner).is_empty();
+        if base_has_members {
+            return base_owner;
+        }
+    }
+
+    owner_hint
+}
+
+async fn collect_cli_completion_items(expression: &str) -> anyhow::Result<Vec<CompletionItem>> {
+    let inline = inline_cli_completion_expression(expression)?;
+    let prepared = prepare_cli_text_operation(
+        inline.file_text.clone(),
+        inline.file_path.clone(),
+        SemanticOperation::Completion,
+        DetailLevel::Full,
+    )
+    .await?;
+    let ir_program = prepared.ir_program()?;
+    let trigger_char_hint = expression.trim_end().chars().last().filter(|ch| *ch == '.');
+
+    let member_access_request = expression_targets_member_access(expression);
+    let owner_hint = inline
+        .owner_probe_offset
+        .map(|offset| {
+            prepared
+                .analysis()
+                .type_at_byte_offset(prepared.file_id, offset)
+                .map_err(|_| anyhow::anyhow!("cli completion owner hint query cancelled"))
+        })
+        .transpose()?
+        .flatten()
+        .filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
+        .map(|hint| normalize_completion_owner_hint(&prepared.metadata_lookup, hint));
+    if member_access_request && owner_hint.is_none() {
+        return Ok(Vec::new());
+    }
+    let completions = get_completion_with_semantic_program_snapshot_with_trigger_hint(
+        inline.file_text.as_ref(),
+        inline.line,
+        inline.cursor_column,
+        None,
+        prepared.index_snapshot(),
+        &prepared.metadata_lookup,
+        inline.file_path.as_ref(),
+        prepared.resolver.as_ref(),
+        ir_program,
+        owner_hint,
+        false,
+        trigger_char_hint,
+    )
+    .await
+    .context("cli shared-runtime completion query failed")?;
+
+    Ok(completions
+        .items
+        .into_iter()
+        .map(|candidate| candidate.item)
+        .collect())
+}
+
+async fn resolve_cli_expression_type(expression: &str) -> anyhow::Result<TypeResolution> {
+    let (file_text, file_path, probe_offset) = inline_cli_resolution_probe(expression)?;
+    let prepared = prepare_cli_text_operation(
+        file_text,
+        file_path,
+        SemanticOperation::TypeAtPosition,
+        DetailLevel::Full,
+    )
+    .await?;
+
+    prepared
+        .serve_only_type_at_byte_offset(probe_offset)?
+        .ok_or_else(|| anyhow::anyhow!("Тип '{}' не найден", expression.trim()))
+}
+
+#[cfg(test)]
+async fn collect_cli_file_diagnostics(
+    path: &str,
+    diagnostics_detail_level: DetailLevel,
+) -> anyhow::Result<CliDiagnosticsSummary> {
+    let prepared = prepare_cli_file_operation(
+        path,
+        SemanticOperation::Diagnostics,
+        diagnostics_detail_level,
+    )
+    .await?;
+    let syntax_messages = prepared
+        .syntax_diagnostics()?
+        .iter()
+        .map(|diag| diag.message.clone())
+        .collect();
+    let semantic_messages = prepared
+        .semantic_diagnostics(false)?
+        .iter()
+        .map(|diag| diag.message.clone())
+        .collect();
+
+    Ok(CliDiagnosticsSummary {
+        syntax_messages,
+        semantic_messages,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bsl_shared::formatting::user_facing_resolution_type_name;
+    use tempfile::NamedTempFile;
+
+    #[tokio::test]
+    async fn cli_inline_completion_uses_shared_runtime_snapshot() {
+        let completions = collect_cli_completion_items("Новый Массив.")
+            .await
+            .expect("cli completions");
+        let labels: Vec<_> = completions.into_iter().map(|item| item.label).collect();
+        assert!(
+            labels.iter().any(|label| label == "Добавить"),
+            "expected canonical completion items, got {labels:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn cli_inline_type_info_uses_shared_runtime_snapshot() {
+        let resolution = resolve_cli_expression_type("Новый Массив")
+            .await
+            .expect("cli type info");
+        assert!(
+            user_facing_resolution_type_name(&resolution).starts_with("Массив"),
+            "expected shared runtime array resolution, got {:?}",
+            resolution
+        );
+    }
+
+    #[tokio::test]
+    async fn cli_file_diagnostics_use_shared_runtime_snapshot() {
+        let file = NamedTempFile::new().expect("temp file");
+        std::fs::write(
+            file.path(),
+            "Процедура Тест()\n    x = 1;\n    x.UnknownMethod();\nКонецПроцедуры\n",
+        )
+        .expect("write fixture");
+
+        let result = collect_cli_file_diagnostics(
+            file.path().to_str().expect("fixture path"),
+            DetailLevel::Full,
+        )
+        .await
+        .expect("cli diagnostics");
+
+        assert_eq!(
+            result.syntax_messages.len(),
+            0,
+            "unexpected syntax: {result:#?}"
+        );
+        assert!(
+            result
+                .semantic_messages
+                .iter()
+                .any(|message| message.contains("UnknownMethod")),
+            "expected semantic diagnostics from shared runtime, got {result:#?}"
+        );
+    }
 }

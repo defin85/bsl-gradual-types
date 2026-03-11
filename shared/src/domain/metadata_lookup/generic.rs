@@ -23,10 +23,22 @@ impl TypeMetadataLookup {
 
         // 1. Получаем методы базового типа (например, "ТабличнаяЧасть")
         let base_raw = self.repository.find_type(&generic_type.base_type);
-        let base_methods = base_raw
-            .as_ref()
-            .map(|raw| raw.methods.clone())
-            .unwrap_or_default();
+        let base_methods = {
+            let signature_methods = self
+                .repository
+                .get_methods_from_signature_index(&generic_type.base_type);
+            if !signature_methods.is_empty() {
+                signature_methods
+                    .into_iter()
+                    .map(Self::method_signature_to_raw)
+                    .collect()
+            } else {
+                base_raw
+                    .as_ref()
+                    .map(|raw| raw.methods.clone())
+                    .unwrap_or_default()
+            }
+        };
         let collection_item_type = base_raw
             .as_ref()
             .and_then(|raw| raw.collection_item_type.clone());

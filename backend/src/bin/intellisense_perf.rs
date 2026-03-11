@@ -1,7 +1,7 @@
 //! IntelliSense performance harness for completion latency regression checks.
 
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -29,9 +29,8 @@ mod reporting;
 mod run_helpers;
 
 use reporting::{
-    build_metrics, build_missing_required_metric_comparison, build_provenance_failure_comparison,
-    compare_reports, contract_version_from_contract, missing_resource_metric_keys, read_json_value,
-    write_report, write_summary,
+    build_coverage, build_provenance_failure_comparison, build_results, compare_reports,
+    contract_version_from_contract, read_json_value, write_report, write_summary,
 };
 use run_helpers::*;
 
@@ -50,8 +49,8 @@ static GLOBAL_ALLOCATOR: CountingAllocator = CountingAllocator;
 fn evaluate_intellisense_perf_profile_for_harness(
     contract: &serde_json::Value,
     profile: &str,
-    current: PerfGateSample,
-    baseline: Option<PerfGateSample>,
+    current: &[PerfGateSample],
+    baseline: Option<&[PerfGateSample]>,
     thresholds: PerfGateThresholds,
 ) -> serde_json::Value {
     bsl_backend::perf_gate_evaluator::evaluate_intellisense_perf_profile(
@@ -198,13 +197,69 @@ struct Scenario {
     cases: Vec<ScenarioCase>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct ScenarioCase {
     file: PathBuf,
     marker: String,
     #[allow(dead_code)]
     #[serde(default)]
     label: Option<String>,
+    operation: PerfOperation,
+    fixture_family: PerfFixtureFamily,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+enum PerfOperation {
+    Completion,
+    Hover,
+    Definition,
+    TypeAtPosition,
+    Members,
+}
+
+impl PerfOperation {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Completion => "completion",
+            Self::Hover => "hover",
+            Self::Definition => "definition",
+            Self::TypeAtPosition => "type_at_position",
+            Self::Members => "members",
+        }
+    }
+
+    fn semantic_operation(self) -> bsl_backend::application::SemanticOperation {
+        match self {
+            Self::Completion => bsl_backend::application::SemanticOperation::Completion,
+            Self::Hover => bsl_backend::application::SemanticOperation::Hover,
+            Self::Definition => bsl_backend::application::SemanticOperation::Definition,
+            Self::TypeAtPosition => bsl_backend::application::SemanticOperation::TypeAtPosition,
+            Self::Members => bsl_backend::application::SemanticOperation::Members,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+enum PerfFixtureFamily {
+    SteadyMemberChain,
+    PostDidChangeCurrentRevision,
+    ObjectModuleExplicitContext,
+    RecordsetModuleExplicitContext,
+    IncompleteSyntaxMemberAccess,
+}
+
+impl PerfFixtureFamily {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::SteadyMemberChain => "steady_member_chain",
+            Self::PostDidChangeCurrentRevision => "post_did_change_current_revision",
+            Self::ObjectModuleExplicitContext => "object_module_explicit_context",
+            Self::RecordsetModuleExplicitContext => "recordset_module_explicit_context",
+            Self::IncompleteSyntaxMemberAccess => "incomplete_syntax_member_access",
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone, Copy)]
@@ -219,18 +274,21 @@ fn default_churn_every() -> usize {
     1
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct PreparedCase {
     file_id: V2FileId,
     file_uri: String,
     content: Arc<str>,
     line: u32,
     column: u32,
+    operation: PerfOperation,
+    fixture_family: PerfFixtureFamily,
 }
 
 #[derive(Debug, Clone)]
 struct ChurnPlan {
     every: usize,
+    trigger_case_index: usize,
     target_file_uri: String,
     target_file_path: Arc<str>,
     target_file_ids: Vec<V2FileId>,
@@ -253,14 +311,15 @@ impl ChurnRuntimeState {
         }
     }
 
-    fn should_apply(&self, iteration: usize) -> bool {
-        iteration.is_multiple_of(self.plan.every)
+    fn should_apply(&self, iteration: usize, case_index: usize) -> bool {
+        iteration.is_multiple_of(self.plan.every) && case_index == self.plan.trigger_case_index
     }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct PerfReport {
     scenario: String,
+    profile: String,
     cases: usize,
     iterations: usize,
     warmup: usize,
@@ -270,9 +329,13 @@ struct PerfReport {
     provenance: Option<PerfReportProvenance>,
     #[serde(default = "unknown_contract_version")]
     contract_version: String,
-    metrics: PerfMetrics,
+    coverage: PerfCoverage,
+    results: Vec<PerfResultEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     thresholds: Option<PerfThresholds>,
+    verdict: String,
+    reason_codes: Vec<String>,
+    pass: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     comparison: Option<PerfComparison>,
 }
@@ -297,36 +360,63 @@ struct PerfReportProvenance {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct PerfMetrics {
-    total_requests: usize,
     count: usize,
     p50_ms: f64,
     p95_ms: f64,
     p99_ms: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct PerfCoverage {
+    operation_coverage_mode: String,
+    reported_operations: Vec<String>,
+    reported_fixture_families: Vec<String>,
+    reported_matrix_entries: usize,
+    authoritative_for_cutover_acceptance: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct PerfResultEntry {
+    fixture_family: PerfFixtureFamily,
+    operation: PerfOperation,
+    cases: usize,
+    total_requests: usize,
+    fail_closed_total: usize,
+    fail_closed_rate: f64,
     error_rate: f64,
     incomplete_rate: f64,
-    allocations_per_completion: f64,
-    allocated_bytes_per_completion: f64,
-    lock_wait_ms_per_completion: f64,
-    lock_contention_events_per_completion: f64,
+    metrics: PerfResultMetrics,
+    anti_rescue: PerfAntiRescueCounts,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct PerfResultMetrics {
+    total_duration_ms: PerfMetrics,
+    wait_for_file_version_ms: PerfMetrics,
+    snapshot_preparation_ms: PerfMetrics,
+    ir_query_ms: PerfMetrics,
+    allocations_per_request: f64,
+    allocated_bytes_per_request: f64,
+    lock_wait_ms_per_request: f64,
+    lock_contention_events_per_request: f64,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+struct PerfAntiRescueCounts {
+    stale_fallback_total: u64,
+    stale_served_total: u64,
+    degraded_substitute_total: u64,
+    search_backed_substitute_total: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct PerfComparison {
-    baseline_p95_ms: f64,
-    baseline_p99_ms: f64,
-    ratio_p95: f64,
-    ratio_p99: f64,
-    threshold_p95: f64,
-    threshold_p99: f64,
-    threshold_resource: f64,
-    max_error_rate: f64,
-    max_incomplete_rate: f64,
-    error_rate: f64,
-    incomplete_rate: f64,
     contract_version: String,
     verdict: String,
     reason_codes: Vec<String>,
     pass: bool,
+    #[serde(default)]
+    entries: Vec<serde_json::Value>,
 }
 
 fn resolve_expected_change_id_from_sources(
@@ -357,6 +447,13 @@ fn requires_authoritative_evidence_context(
     blocking_mode || (baseline_present && !update_baseline)
 }
 
+fn should_compare_against_existing_baseline(
+    baseline_present: bool,
+    update_baseline: bool,
+) -> bool {
+    baseline_present && !update_baseline
+}
+
 fn now_unix_millis_string() -> String {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -377,15 +474,26 @@ struct PerfThresholds {
     max_incomplete_rate: f64,
 }
 
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct ResultGroupKey {
+    fixture_family: PerfFixtureFamily,
+    operation: PerfOperation,
+}
+
+#[derive(Default, Clone)]
 struct MeasuredResults {
-    durations_ms: Vec<f64>,
+    total_duration_ms: Vec<f64>,
+    wait_for_file_version_ms: Vec<f64>,
+    snapshot_preparation_ms: Vec<f64>,
+    ir_query_ms: Vec<f64>,
     errors: usize,
+    fail_closed: usize,
     incomplete: usize,
     allocation_count_total: u64,
     allocated_bytes_total: u64,
     lock_wait_ms_total: f64,
     lock_contention_events_total: u64,
+    anti_rescue: PerfAntiRescueCounts,
 }
 
 #[tokio::main]
@@ -428,6 +536,7 @@ async fn main() -> Result<()> {
         .or(scenario.platform_version.as_deref());
 
     let prepared = prepare_cases(&scenario.cases, &workspace_root)?;
+    let case_counts = build_case_group_counts(&prepared);
     let coordinator = Arc::new(SystemCoordinator::new());
     coordinator
         .start_with_paths_blocking(
@@ -466,19 +575,12 @@ async fn main() -> Result<()> {
         diagnostics_detail_level: settings.diagnostics_detail_level,
     });
 
-    for case in &prepared {
-        host.apply_change(ChangeV2::SetFile {
-            file_id: case.file_id,
-            text: case.content.clone(),
-            version: 0,
-            path: Arc::from(case.file_uri.clone()),
-        });
-    }
     let facade = bsl_backend::application::IntellisenseV2Facade::new(
         host,
         deps_bundle.index_snapshot.clone(),
         Some(coordinator.clone()),
     );
+    prime_runtime_files(&facade, &prepared).await;
 
     let mut churn_state = build_churn_state(&scenario, &prepared)?;
     let mut content_by_file = build_content_by_file_map(&prepared);
@@ -490,12 +592,12 @@ async fn main() -> Result<()> {
         coordinator: coordinator.as_ref(),
         metadata_lookup: &metadata_lookup,
         resolver: resolver.as_ref(),
-        cases: &prepared,
     };
 
     if args.warmup > 0 {
         run_iterations(
             &iteration_context,
+            &prepared,
             args.warmup,
             &mut churn_state,
             &mut content_by_file,
@@ -505,27 +607,20 @@ async fn main() -> Result<()> {
         .await?;
     }
 
-    let mut measured = MeasuredResults::default();
+    let mut measured = HashMap::<ResultGroupKey, MeasuredResults>::new();
     run_iterations(
         &iteration_context,
+        &prepared,
         args.iterations,
         &mut churn_state,
         &mut content_by_file,
         &mut version_by_file,
-        Some(OutputTargets {
-            durations: &mut measured.durations_ms,
-            errors: &mut measured.errors,
-            incomplete: &mut measured.incomplete,
-            allocation_count_total: &mut measured.allocation_count_total,
-            allocated_bytes_total: &mut measured.allocated_bytes_total,
-            lock_wait_ms_total: &mut measured.lock_wait_ms_total,
-            lock_contention_events_total: &mut measured.lock_contention_events_total,
-        }),
+        Some(&mut measured),
     )
     .await?;
 
-    let total_requests = prepared.len() * args.iterations;
-    let metrics = build_metrics(total_requests, &measured);
+    let results = build_results(&contract, args.iterations, &case_counts, &measured);
+    let coverage = build_coverage(&contract, &results);
     let thresholds = PerfThresholds {
         max_error_rate: args.max_error_rate,
         max_incomplete_rate: args.max_incomplete_rate,
@@ -540,6 +635,7 @@ async fn main() -> Result<()> {
     };
     let mut report = PerfReport {
         scenario: scenario.name.clone(),
+        profile: scenario.name.clone(),
         cases: prepared.len(),
         iterations: args.iterations,
         warmup: args.warmup,
@@ -552,8 +648,12 @@ async fn main() -> Result<()> {
             contract_version: Some(contract_version_from_contract(&contract)),
         }),
         contract_version: contract_version_from_contract(&contract),
-        metrics,
+        coverage,
+        results,
         thresholds: Some(thresholds.clone()),
+        verdict: "pass".to_string(),
+        reason_codes: Vec::new(),
+        pass: true,
         comparison: None,
     };
     let provenance_validation_error = {
@@ -566,9 +666,6 @@ async fn main() -> Result<()> {
     } else {
         None
     };
-
-    let rate_pass = report.metrics.error_rate <= args.max_error_rate
-        && report.metrics.incomplete_rate <= args.max_incomplete_rate;
 
     let comparison = if let Some(baseline_path) = args.baseline.as_ref() {
         if let Some(reason_code) = cutover_authority_validation_error.as_ref() {
@@ -583,47 +680,18 @@ async fn main() -> Result<()> {
                 reason_code,
                 gate_thresholds,
             ))
-        } else if baseline_path.exists() {
+        } else if should_compare_against_existing_baseline(baseline_path.exists(), args.update_baseline)
+        {
             let baseline_raw = read_json_value(baseline_path)?;
-            let current_raw =
-                serde_json::to_value(&report).context("failed to serialize current report")?;
-            let mut missing_fields = Vec::new();
-            missing_fields.extend(
-                missing_resource_metric_keys(&current_raw)
-                    .into_iter()
-                    .map(|field| format!("current.metrics.{field}")),
-            );
-            missing_fields.extend(
-                missing_resource_metric_keys(&baseline_raw)
-                    .into_iter()
-                    .map(|field| format!("baseline.metrics.{field}")),
-            );
-
-            if !missing_fields.is_empty() {
-                eprintln!(
-                    "missing_required_metric_field: {}",
-                    missing_fields.join(", ")
-                );
-                Some(build_missing_required_metric_comparison(
-                    &contract,
-                    &report,
-                    gate_thresholds.latency_ratio_p95_max,
-                    gate_thresholds.latency_ratio_p99_max,
-                    gate_thresholds.resource_ratio_max,
-                    gate_thresholds.max_error_rate,
-                    gate_thresholds.max_incomplete_rate,
-                ))
-            } else {
-                let baseline: PerfReport =
-                    serde_json::from_value(baseline_raw).context("Invalid baseline JSON")?;
-                Some(compare_reports(
-                    &contract,
-                    &scenario.name,
-                    &report,
-                    &baseline,
-                    gate_thresholds,
-                ))
-            }
+            let baseline: PerfReport =
+                serde_json::from_value(baseline_raw).context("Invalid baseline JSON")?;
+            Some(compare_reports(
+                &contract,
+                &scenario.name,
+                &report,
+                &baseline,
+                gate_thresholds,
+            ))
         } else if args.update_baseline {
             None
         } else {
@@ -633,6 +701,11 @@ async fn main() -> Result<()> {
         None
     };
     report.comparison = comparison.clone();
+    if let Some(comparison) = &comparison {
+        report.verdict = comparison.verdict.clone();
+        report.reason_codes = comparison.reason_codes.clone();
+        report.pass = comparison.pass;
+    }
 
     if let Some(output_path) = args.output.as_ref() {
         write_report(output_path, &report)?;
@@ -654,17 +727,9 @@ async fn main() -> Result<()> {
     if let Some(comparison) = comparison {
         if !comparison.pass {
             bail!(
-                "Regression detected: verdict={}, reason_codes={:?}, ratio_p95={:.3} (<= {:.2}), ratio_p99={:.3} (<= {:.2}), error_rate={:.3} (<= {:.3}), incomplete_rate={:.3} (<= {:.3})",
+                "Regression detected: verdict={}, reason_codes={:?}",
                 comparison.verdict,
                 comparison.reason_codes,
-                comparison.ratio_p95,
-                comparison.threshold_p95,
-                comparison.ratio_p99,
-                comparison.threshold_p99,
-                comparison.error_rate,
-                comparison.max_error_rate,
-                comparison.incomplete_rate,
-                comparison.max_incomplete_rate
             );
         }
     } else if let Some(reason_code) = cutover_authority_validation_error {
@@ -676,14 +741,6 @@ async fn main() -> Result<()> {
         bail!(
             "Perf report provenance validation failed: reason_code={}",
             reason_code
-        );
-    } else if !rate_pass {
-        bail!(
-            "Rates exceeded: error_rate={:.3} (<= {:.3}), incomplete_rate={:.3} (<= {:.3})",
-            report.metrics.error_rate,
-            args.max_error_rate,
-            report.metrics.incomplete_rate,
-            args.max_incomplete_rate
         );
     }
 

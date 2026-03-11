@@ -1,40 +1,1008 @@
 {
   "scenario": "large",
-  "cases": 5,
-  "iterations": 5,
-  "warmup": 1,
-  "metrics": {
-    "total_requests": 25,
-    "count": 25,
-    "p50_ms": 5.368428,
-    "p95_ms": 6.05757,
-    "p99_ms": 6.093472,
-    "error_rate": 0.0,
-    "incomplete_rate": 0.0,
-    "allocations_per_completion": 17533.0,
-    "allocated_bytes_per_completion": 3678428.0,
-    "lock_wait_ms_per_completion": 0.0400182,
-    "lock_contention_events_per_completion": 1.0
+  "profile": "large",
+  "cases": 21,
+  "iterations": 200,
+  "warmup": 20,
+  "provenance": {
+    "generated_at": "1773214716743",
+    "profile": "large",
+    "schema_version": 1,
+    "contract_version": "v2"
   },
+  "contract_version": "v2",
+  "coverage": {
+    "operation_coverage_mode": "representative_matrix",
+    "reported_operations": [
+      "completion",
+      "definition",
+      "hover",
+      "members",
+      "type_at_position"
+    ],
+    "reported_fixture_families": [
+      "incomplete_syntax_member_access",
+      "object_module_explicit_context",
+      "post_did_change_current_revision",
+      "recordset_module_explicit_context",
+      "steady_member_chain"
+    ],
+    "reported_matrix_entries": 21,
+    "authoritative_for_cutover_acceptance": true
+  },
+  "results": [
+    {
+      "fixture_family": "steady_member_chain",
+      "operation": "completion",
+      "cases": 1,
+      "total_requests": 200,
+      "fail_closed_total": 0,
+      "fail_closed_rate": 0.0,
+      "error_rate": 0.0,
+      "incomplete_rate": 0.0,
+      "metrics": {
+        "total_duration_ms": {
+          "count": 200,
+          "p50_ms": 0.344917,
+          "p95_ms": 0.5183260000000001,
+          "p99_ms": 0.60833
+        },
+        "wait_for_file_version_ms": {
+          "count": 200,
+          "p50_ms": 0.077904,
+          "p95_ms": 0.129207,
+          "p99_ms": 0.146207
+        },
+        "snapshot_preparation_ms": {
+          "count": 200,
+          "p50_ms": 0.058703,
+          "p95_ms": 0.116206,
+          "p99_ms": 0.140407
+        },
+        "ir_query_ms": {
+          "count": 200,
+          "p50_ms": 0.027601,
+          "p95_ms": 0.045502,
+          "p99_ms": 0.053302
+        },
+        "allocations_per_request": 235.065,
+        "allocated_bytes_per_request": 16729.48,
+        "lock_wait_ms_per_request": 0.030115474999999992,
+        "lock_contention_events_per_request": 1.0
+      },
+      "anti_rescue": {
+        "stale_fallback_total": 0,
+        "stale_served_total": 0,
+        "degraded_substitute_total": 0,
+        "search_backed_substitute_total": 0
+      }
+    },
+    {
+      "fixture_family": "steady_member_chain",
+      "operation": "hover",
+      "cases": 1,
+      "total_requests": 200,
+      "fail_closed_total": 200,
+      "fail_closed_rate": 1.0,
+      "error_rate": 0.0,
+      "incomplete_rate": 0.0,
+      "metrics": {
+        "total_duration_ms": {
+          "count": 200,
+          "p50_ms": 0.319916,
+          "p95_ms": 0.439921,
+          "p99_ms": 0.5047240000000001
+        },
+        "wait_for_file_version_ms": {
+          "count": 200,
+          "p50_ms": 0.064903,
+          "p95_ms": 0.113205,
+          "p99_ms": 0.141007
+        },
+        "snapshot_preparation_ms": {
+          "count": 200,
+          "p50_ms": 0.058502000000000005,
+          "p95_ms": 0.103506,
+          "p99_ms": 0.12460600000000001
+        },
+        "ir_query_ms": {
+          "count": 200,
+          "p50_ms": 0.050603,
+          "p95_ms": 0.082704,
+          "p99_ms": 0.097304
+        },
+        "allocations_per_request": 199.15,
+        "allocated_bytes_per_request": 60940.6,
+        "lock_wait_ms_per_request": 0.056022785,
+        "lock_contention_events_per_request": 1.0
+      },
+      "anti_rescue": {
+        "stale_fallback_total": 0,
+        "stale_served_total": 0,
+        "degraded_substitute_total": 0,
+        "search_backed_substitute_total": 0
+      }
+    },
+    {
+      "fixture_family": "steady_member_chain",
+      "operation": "definition",
+      "cases": 1,
+      "total_requests": 200,
+      "fail_closed_total": 200,
+      "fail_closed_rate": 1.0,
+      "error_rate": 0.0,
+      "incomplete_rate": 0.0,
+      "metrics": {
+        "total_duration_ms": {
+          "count": 200,
+          "p50_ms": 0.227411,
+          "p95_ms": 0.373619,
+          "p99_ms": 0.426721
+        },
+        "wait_for_file_version_ms": {
+          "count": 200,
+          "p50_ms": 0.06140299999999999,
+          "p95_ms": 0.108405,
+          "p99_ms": 0.129606
+        },
+        "snapshot_preparation_ms": {
+          "count": 200,
+          "p50_ms": 0.058803,
+          "p95_ms": 0.101605,
+          "p99_ms": 0.13210699999999997
+        },
+        "ir_query_ms": {
+          "count": 200,
+          "p50_ms": 0.047302000000000004,
+          "p95_ms": 0.08140399999999999,
+          "p99_ms": 0.08920399999999999
+        },
+        "allocations_per_request": 147.16,
+        "allocated_bytes_per_request": 13235.56,
+        "lock_wait_ms_per_request": 0.053560084999999986,
+        "lock_contention_events_per_request": 1.0
+      },
+      "anti_rescue": {
+        "stale_fallback_total": 0,
+        "stale_served_total": 0,
+        "degraded_substitute_total": 0,
+        "search_backed_substitute_total": 0
+      }
+    },
+    {
+      "fixture_family": "steady_member_chain",
+      "operation": "type_at_position",
+      "cases": 1,
+      "total_requests": 200,
+      "fail_closed_total": 200,
+      "fail_closed_rate": 1.0,
+      "error_rate": 0.0,
+      "incomplete_rate": 0.0,
+      "metrics": {
+        "total_duration_ms": {
+          "count": 200,
+          "p50_ms": 4.369013,
+          "p95_ms": 4.49092,
+          "p99_ms": 4.593725
+        },
+        "wait_for_file_version_ms": {
+          "count": 200,
+          "p50_ms": 2.058101,
+          "p95_ms": 2.122204,
+          "p99_ms": 2.131205
+        },
+        "snapshot_preparation_ms": {
+          "count": 200,
+          "p50_ms": 2.153206,
+          "p95_ms": 2.218808,
+          "p99_ms": 2.306213
+        },
+        "ir_query_ms": {
+          "count": 200,
+          "p50_ms": 0.08020300000000001,
+          "p95_ms": 0.14060599999999998,
+          "p99_ms": 0.157408
+        },
+        "allocations_per_request": 134.13,
+        "allocated_bytes_per_request": 11924.36,
+        "lock_wait_ms_per_request": 0.08856529999999992,
+        "lock_contention_events_per_request": 1.0
+      },
+      "anti_rescue": {
+        "stale_fallback_total": 0,
+        "stale_served_total": 0,
+        "degraded_substitute_total": 0,
+        "search_backed_substitute_total": 0
+      }
+    },
+    {
+      "fixture_family": "steady_member_chain",
+      "operation": "members",
+      "cases": 1,
+      "total_requests": 200,
+      "fail_closed_total": 0,
+      "fail_closed_rate": 0.0,
+      "error_rate": 0.0,
+      "incomplete_rate": 0.0,
+      "metrics": {
+        "total_duration_ms": {
+          "count": 200,
+          "p50_ms": 4.49352,
+          "p95_ms": 4.676729,
+          "p99_ms": 4.876038
+        },
+        "wait_for_file_version_ms": {
+          "count": 200,
+          "p50_ms": 1.9880980000000001,
+          "p95_ms": 2.072401,
+          "p99_ms": 2.115904
+        },
+        "snapshot_preparation_ms": {
+          "count": 200,
+          "p50_ms": 2.147305,
+          "p95_ms": 2.209308,
+          "p99_ms": 2.24521
+        },
+        "ir_query_ms": {
+          "count": 200,
+          "p50_ms": 0.038502,
+          "p95_ms": 0.06590299999999999,
+          "p99_ms": 0.086204
+        },
+        "allocations_per_request": 234.085,
+        "allocated_bytes_per_request": 15394.16,
+        "lock_wait_ms_per_request": 0.04298456500000001,
+        "lock_contention_events_per_request": 1.0
+      },
+      "anti_rescue": {
+        "stale_fallback_total": 0,
+        "stale_served_total": 0,
+        "degraded_substitute_total": 0,
+        "search_backed_substitute_total": 0
+      }
+    },
+    {
+      "fixture_family": "post_did_change_current_revision",
+      "operation": "completion",
+      "cases": 1,
+      "total_requests": 200,
+      "fail_closed_total": 0,
+      "fail_closed_rate": 0.0,
+      "error_rate": 0.0,
+      "incomplete_rate": 0.0,
+      "metrics": {
+        "total_duration_ms": {
+          "count": 200,
+          "p50_ms": 1.491873,
+          "p95_ms": 2.013498,
+          "p99_ms": 2.474721
+        },
+        "wait_for_file_version_ms": {
+          "count": 200,
+          "p50_ms": 0.369318,
+          "p95_ms": 0.48282400000000003,
+          "p99_ms": 0.644131
+        },
+        "snapshot_preparation_ms": {
+          "count": 200,
+          "p50_ms": 0.071804,
+          "p95_ms": 0.134606,
+          "p99_ms": 0.192009
+        },
+        "ir_query_ms": {
+          "count": 200,
+          "p50_ms": 0.038801999999999996,
+          "p95_ms": 0.06960400000000001,
+          "p99_ms": 0.09640399999999999
+        },
+        "allocations_per_request": 798.225,
+        "allocated_bytes_per_request": 92767.08,
+        "lock_wait_ms_per_request": 0.043837585,
+        "lock_contention_events_per_request": 1.0
+      },
+      "anti_rescue": {
+        "stale_fallback_total": 0,
+        "stale_served_total": 0,
+        "degraded_substitute_total": 0,
+        "search_backed_substitute_total": 0
+      }
+    },
+    {
+      "fixture_family": "post_did_change_current_revision",
+      "operation": "hover",
+      "cases": 1,
+      "total_requests": 200,
+      "fail_closed_total": 200,
+      "fail_closed_rate": 1.0,
+      "error_rate": 0.0,
+      "incomplete_rate": 0.0,
+      "metrics": {
+        "total_duration_ms": {
+          "count": 200,
+          "p50_ms": 0.996149,
+          "p95_ms": 1.350166,
+          "p99_ms": 1.6809830000000001
+        },
+        "wait_for_file_version_ms": {
+          "count": 200,
+          "p50_ms": 0.105905,
+          "p95_ms": 0.15210700000000002,
+          "p99_ms": 0.182409
+        },
+        "snapshot_preparation_ms": {
+          "count": 200,
+          "p50_ms": 0.064003,
+          "p95_ms": 0.110206,
+          "p99_ms": 0.168809
+        },
+        "ir_query_ms": {
+          "count": 200,
+          "p50_ms": 0.660033,
+          "p95_ms": 0.900944,
+          "p99_ms": 1.155857
+        },
+        "allocations_per_request": 652.065,
+        "allocated_bytes_per_request": 125291.48,
+        "lock_wait_ms_per_request": 0.6936279350000001,
+        "lock_contention_events_per_request": 1.0
+      },
+      "anti_rescue": {
+        "stale_fallback_total": 0,
+        "stale_served_total": 0,
+        "degraded_substitute_total": 0,
+        "search_backed_substitute_total": 0
+      }
+    },
+    {
+      "fixture_family": "post_did_change_current_revision",
+      "operation": "definition",
+      "cases": 1,
+      "total_requests": 200,
+      "fail_closed_total": 200,
+      "fail_closed_rate": 1.0,
+      "error_rate": 0.0,
+      "incomplete_rate": 0.0,
+      "metrics": {
+        "total_duration_ms": {
+          "count": 200,
+          "p50_ms": 0.880943,
+          "p95_ms": 1.191759,
+          "p99_ms": 1.63298
+        },
+        "wait_for_file_version_ms": {
+          "count": 200,
+          "p50_ms": 0.101405,
+          "p95_ms": 0.154608,
+          "p99_ms": 0.18880899999999998
+        },
+        "snapshot_preparation_ms": {
+          "count": 200,
+          "p50_ms": 0.06250299999999999,
+          "p95_ms": 0.11400500000000001,
+          "p99_ms": 0.165808
+        },
+        "ir_query_ms": {
+          "count": 200,
+          "p50_ms": 0.637531,
+          "p95_ms": 0.82724,
+          "p99_ms": 1.193658
+        },
+        "allocations_per_request": 600.09,
+        "allocated_bytes_per_request": 73209.12,
+        "lock_wait_ms_per_request": 0.6664886150000002,
+        "lock_contention_events_per_request": 1.0
+      },
+      "anti_rescue": {
+        "stale_fallback_total": 0,
+        "stale_served_total": 0,
+        "degraded_substitute_total": 0,
+        "search_backed_substitute_total": 0
+      }
+    },
+    {
+      "fixture_family": "post_did_change_current_revision",
+      "operation": "type_at_position",
+      "cases": 1,
+      "total_requests": 200,
+      "fail_closed_total": 200,
+      "fail_closed_rate": 1.0,
+      "error_rate": 0.0,
+      "incomplete_rate": 0.0,
+      "metrics": {
+        "total_duration_ms": {
+          "count": 200,
+          "p50_ms": 4.430516,
+          "p95_ms": 4.743931,
+          "p99_ms": 5.11615
+        },
+        "wait_for_file_version_ms": {
+          "count": 200,
+          "p50_ms": 1.449471,
+          "p95_ms": 1.537475,
+          "p99_ms": 1.558676
+        },
+        "snapshot_preparation_ms": {
+          "count": 200,
+          "p50_ms": 2.155905,
+          "p95_ms": 2.2268079999999997,
+          "p99_ms": 2.265511
+        },
+        "ir_query_ms": {
+          "count": 200,
+          "p50_ms": 0.7275349999999999,
+          "p95_ms": 1.074152,
+          "p99_ms": 1.3115640000000002
+        },
+        "allocations_per_request": 587.105,
+        "allocated_bytes_per_request": 72164.16,
+        "lock_wait_ms_per_request": 0.7731277950000002,
+        "lock_contention_events_per_request": 1.0
+      },
+      "anti_rescue": {
+        "stale_fallback_total": 0,
+        "stale_served_total": 0,
+        "degraded_substitute_total": 0,
+        "search_backed_substitute_total": 0
+      }
+    },
+    {
+      "fixture_family": "post_did_change_current_revision",
+      "operation": "members",
+      "cases": 1,
+      "total_requests": 200,
+      "fail_closed_total": 0,
+      "fail_closed_rate": 0.0,
+      "error_rate": 0.0,
+      "incomplete_rate": 0.0,
+      "metrics": {
+        "total_duration_ms": {
+          "count": 200,
+          "p50_ms": 4.47772,
+          "p95_ms": 4.790835,
+          "p99_ms": 5.483669
+        },
+        "wait_for_file_version_ms": {
+          "count": 200,
+          "p50_ms": 1.327665,
+          "p95_ms": 1.4516710000000002,
+          "p99_ms": 1.4902730000000002
+        },
+        "snapshot_preparation_ms": {
+          "count": 200,
+          "p50_ms": 2.146705,
+          "p95_ms": 2.2232089999999998,
+          "p99_ms": 2.314513
+        },
+        "ir_query_ms": {
+          "count": 200,
+          "p50_ms": 0.044601999999999996,
+          "p95_ms": 0.074604,
+          "p99_ms": 0.10750499999999999
+        },
+        "allocations_per_request": 706.065,
+        "allocated_bytes_per_request": 82692.0,
+        "lock_wait_ms_per_request": 0.04892692499999999,
+        "lock_contention_events_per_request": 1.0
+      },
+      "anti_rescue": {
+        "stale_fallback_total": 0,
+        "stale_served_total": 0,
+        "degraded_substitute_total": 0,
+        "search_backed_substitute_total": 0
+      }
+    },
+    {
+      "fixture_family": "object_module_explicit_context",
+      "operation": "completion",
+      "cases": 1,
+      "total_requests": 200,
+      "fail_closed_total": 0,
+      "fail_closed_rate": 0.0,
+      "error_rate": 0.0,
+      "incomplete_rate": 0.0,
+      "metrics": {
+        "total_duration_ms": {
+          "count": 200,
+          "p50_ms": 0.44802200000000003,
+          "p95_ms": 0.661532,
+          "p99_ms": 1.197058
+        },
+        "wait_for_file_version_ms": {
+          "count": 200,
+          "p50_ms": 0.111806,
+          "p95_ms": 0.164908,
+          "p99_ms": 0.698034
+        },
+        "snapshot_preparation_ms": {
+          "count": 200,
+          "p50_ms": 0.068103,
+          "p95_ms": 0.122206,
+          "p99_ms": 0.152307
+        },
+        "ir_query_ms": {
+          "count": 200,
+          "p50_ms": 0.030601,
+          "p95_ms": 0.054302,
+          "p99_ms": 0.067004
+        },
+        "allocations_per_request": 226.09,
+        "allocated_bytes_per_request": 17214.28,
+        "lock_wait_ms_per_request": 0.033625659999999995,
+        "lock_contention_events_per_request": 1.0
+      },
+      "anti_rescue": {
+        "stale_fallback_total": 0,
+        "stale_served_total": 0,
+        "degraded_substitute_total": 0,
+        "search_backed_substitute_total": 0
+      }
+    },
+    {
+      "fixture_family": "object_module_explicit_context",
+      "operation": "hover",
+      "cases": 1,
+      "total_requests": 200,
+      "fail_closed_total": 200,
+      "fail_closed_rate": 1.0,
+      "error_rate": 0.0,
+      "incomplete_rate": 0.0,
+      "metrics": {
+        "total_duration_ms": {
+          "count": 200,
+          "p50_ms": 0.330816,
+          "p95_ms": 0.496424,
+          "p99_ms": 0.599129
+        },
+        "wait_for_file_version_ms": {
+          "count": 200,
+          "p50_ms": 0.07670400000000001,
+          "p95_ms": 0.122306,
+          "p99_ms": 0.139906
+        },
+        "snapshot_preparation_ms": {
+          "count": 200,
+          "p50_ms": 0.061603,
+          "p95_ms": 0.112606,
+          "p99_ms": 0.135507
+        },
+        "ir_query_ms": {
+          "count": 200,
+          "p50_ms": 0.053003,
+          "p95_ms": 0.088505,
+          "p99_ms": 0.121506
+        },
+        "allocations_per_request": 198.065,
+        "allocated_bytes_per_request": 58260.48,
+        "lock_wait_ms_per_request": 0.06012797,
+        "lock_contention_events_per_request": 1.0
+      },
+      "anti_rescue": {
+        "stale_fallback_total": 0,
+        "stale_served_total": 0,
+        "degraded_substitute_total": 0,
+        "search_backed_substitute_total": 0
+      }
+    },
+    {
+      "fixture_family": "object_module_explicit_context",
+      "operation": "definition",
+      "cases": 1,
+      "total_requests": 200,
+      "fail_closed_total": 200,
+      "fail_closed_rate": 1.0,
+      "error_rate": 0.0,
+      "incomplete_rate": 0.0,
+      "metrics": {
+        "total_duration_ms": {
+          "count": 200,
+          "p50_ms": 0.231211,
+          "p95_ms": 0.359417,
+          "p99_ms": 0.39692
+        },
+        "wait_for_file_version_ms": {
+          "count": 200,
+          "p50_ms": 0.061603,
+          "p95_ms": 0.107205,
+          "p99_ms": 0.125606
+        },
+        "snapshot_preparation_ms": {
+          "count": 200,
+          "p50_ms": 0.058703,
+          "p95_ms": 0.099105,
+          "p99_ms": 0.13880699999999999
+        },
+        "ir_query_ms": {
+          "count": 200,
+          "p50_ms": 0.049102,
+          "p95_ms": 0.082204,
+          "p99_ms": 0.093704
+        },
+        "allocations_per_request": 147.065,
+        "allocated_bytes_per_request": 12638.48,
+        "lock_wait_ms_per_request": 0.055364145,
+        "lock_contention_events_per_request": 1.0
+      },
+      "anti_rescue": {
+        "stale_fallback_total": 0,
+        "stale_served_total": 0,
+        "degraded_substitute_total": 0,
+        "search_backed_substitute_total": 0
+      }
+    },
+    {
+      "fixture_family": "object_module_explicit_context",
+      "operation": "type_at_position",
+      "cases": 1,
+      "total_requests": 200,
+      "fail_closed_total": 200,
+      "fail_closed_rate": 1.0,
+      "error_rate": 0.0,
+      "incomplete_rate": 0.0,
+      "metrics": {
+        "total_duration_ms": {
+          "count": 200,
+          "p50_ms": 4.374814000000001,
+          "p95_ms": 4.49172,
+          "p99_ms": 4.613725
+        },
+        "wait_for_file_version_ms": {
+          "count": 200,
+          "p50_ms": 2.063001,
+          "p95_ms": 2.124803,
+          "p99_ms": 2.137905
+        },
+        "snapshot_preparation_ms": {
+          "count": 200,
+          "p50_ms": 2.155806,
+          "p95_ms": 2.213008,
+          "p99_ms": 2.233409
+        },
+        "ir_query_ms": {
+          "count": 200,
+          "p50_ms": 0.081204,
+          "p95_ms": 0.146207,
+          "p99_ms": 0.17510900000000001
+        },
+        "allocations_per_request": 134.065,
+        "allocated_bytes_per_request": 11603.48,
+        "lock_wait_ms_per_request": 0.08939539999999996,
+        "lock_contention_events_per_request": 1.0
+      },
+      "anti_rescue": {
+        "stale_fallback_total": 0,
+        "stale_served_total": 0,
+        "degraded_substitute_total": 0,
+        "search_backed_substitute_total": 0
+      }
+    },
+    {
+      "fixture_family": "object_module_explicit_context",
+      "operation": "members",
+      "cases": 1,
+      "total_requests": 200,
+      "fail_closed_total": 0,
+      "fail_closed_rate": 0.0,
+      "error_rate": 0.0,
+      "incomplete_rate": 0.0,
+      "metrics": {
+        "total_duration_ms": {
+          "count": 200,
+          "p50_ms": 4.504321,
+          "p95_ms": 4.736132,
+          "p99_ms": 4.92884
+        },
+        "wait_for_file_version_ms": {
+          "count": 200,
+          "p50_ms": 1.9899980000000002,
+          "p95_ms": 2.0783020000000003,
+          "p99_ms": 2.097702
+        },
+        "snapshot_preparation_ms": {
+          "count": 200,
+          "p50_ms": 2.145205,
+          "p95_ms": 2.206708,
+          "p99_ms": 2.2272089999999998
+        },
+        "ir_query_ms": {
+          "count": 200,
+          "p50_ms": 0.039001999999999995,
+          "p95_ms": 0.07420299999999999,
+          "p99_ms": 0.08870399999999999
+        },
+        "allocations_per_request": 225.07,
+        "allocated_bytes_per_request": 15527.44,
+        "lock_wait_ms_per_request": 0.042975155,
+        "lock_contention_events_per_request": 1.0
+      },
+      "anti_rescue": {
+        "stale_fallback_total": 0,
+        "stale_served_total": 0,
+        "degraded_substitute_total": 0,
+        "search_backed_substitute_total": 0
+      }
+    },
+    {
+      "fixture_family": "recordset_module_explicit_context",
+      "operation": "completion",
+      "cases": 1,
+      "total_requests": 200,
+      "fail_closed_total": 0,
+      "fail_closed_rate": 0.0,
+      "error_rate": 0.0,
+      "incomplete_rate": 0.0,
+      "metrics": {
+        "total_duration_ms": {
+          "count": 200,
+          "p50_ms": 0.493025,
+          "p95_ms": 0.654532,
+          "p99_ms": 0.899744
+        },
+        "wait_for_file_version_ms": {
+          "count": 200,
+          "p50_ms": 0.104405,
+          "p95_ms": 0.156608,
+          "p99_ms": 0.172608
+        },
+        "snapshot_preparation_ms": {
+          "count": 200,
+          "p50_ms": 0.066603,
+          "p95_ms": 0.11580599999999999,
+          "p99_ms": 0.174009
+        },
+        "ir_query_ms": {
+          "count": 200,
+          "p50_ms": 0.031702,
+          "p95_ms": 0.048702,
+          "p99_ms": 0.081204
+        },
+        "allocations_per_request": 272.09,
+        "allocated_bytes_per_request": 25673.96,
+        "lock_wait_ms_per_request": 0.03413164500000001,
+        "lock_contention_events_per_request": 1.0
+      },
+      "anti_rescue": {
+        "stale_fallback_total": 0,
+        "stale_served_total": 0,
+        "degraded_substitute_total": 0,
+        "search_backed_substitute_total": 0
+      }
+    },
+    {
+      "fixture_family": "recordset_module_explicit_context",
+      "operation": "hover",
+      "cases": 1,
+      "total_requests": 200,
+      "fail_closed_total": 200,
+      "fail_closed_rate": 1.0,
+      "error_rate": 0.0,
+      "incomplete_rate": 0.0,
+      "metrics": {
+        "total_duration_ms": {
+          "count": 200,
+          "p50_ms": 0.346617,
+          "p95_ms": 0.449922,
+          "p99_ms": 0.532126
+        },
+        "wait_for_file_version_ms": {
+          "count": 200,
+          "p50_ms": 0.090504,
+          "p95_ms": 0.124406,
+          "p99_ms": 0.15140800000000001
+        },
+        "snapshot_preparation_ms": {
+          "count": 200,
+          "p50_ms": 0.059803,
+          "p95_ms": 0.108805,
+          "p99_ms": 0.12820600000000001
+        },
+        "ir_query_ms": {
+          "count": 200,
+          "p50_ms": 0.053303,
+          "p95_ms": 0.080004,
+          "p99_ms": 0.089904
+        },
+        "allocations_per_request": 199.11,
+        "allocated_bytes_per_request": 60873.8,
+        "lock_wait_ms_per_request": 0.058262350000000025,
+        "lock_contention_events_per_request": 1.0
+      },
+      "anti_rescue": {
+        "stale_fallback_total": 0,
+        "stale_served_total": 0,
+        "degraded_substitute_total": 0,
+        "search_backed_substitute_total": 0
+      }
+    },
+    {
+      "fixture_family": "recordset_module_explicit_context",
+      "operation": "definition",
+      "cases": 1,
+      "total_requests": 200,
+      "fail_closed_total": 200,
+      "fail_closed_rate": 1.0,
+      "error_rate": 0.0,
+      "incomplete_rate": 0.0,
+      "metrics": {
+        "total_duration_ms": {
+          "count": 200,
+          "p50_ms": 0.224411,
+          "p95_ms": 0.345717,
+          "p99_ms": 0.439321
+        },
+        "wait_for_file_version_ms": {
+          "count": 200,
+          "p50_ms": 0.059203000000000006,
+          "p95_ms": 0.111205,
+          "p99_ms": 0.127107
+        },
+        "snapshot_preparation_ms": {
+          "count": 200,
+          "p50_ms": 0.058203,
+          "p95_ms": 0.101705,
+          "p99_ms": 0.13000699999999998
+        },
+        "ir_query_ms": {
+          "count": 200,
+          "p50_ms": 0.047503000000000004,
+          "p95_ms": 0.07670400000000001,
+          "p99_ms": 0.10030499999999999
+        },
+        "allocations_per_request": 147.06,
+        "allocated_bytes_per_request": 12644.52,
+        "lock_wait_ms_per_request": 0.05416164999999999,
+        "lock_contention_events_per_request": 1.0
+      },
+      "anti_rescue": {
+        "stale_fallback_total": 0,
+        "stale_served_total": 0,
+        "degraded_substitute_total": 0,
+        "search_backed_substitute_total": 0
+      }
+    },
+    {
+      "fixture_family": "recordset_module_explicit_context",
+      "operation": "type_at_position",
+      "cases": 1,
+      "total_requests": 200,
+      "fail_closed_total": 200,
+      "fail_closed_rate": 1.0,
+      "error_rate": 0.0,
+      "incomplete_rate": 0.0,
+      "metrics": {
+        "total_duration_ms": {
+          "count": 200,
+          "p50_ms": 4.374814000000001,
+          "p95_ms": 4.49442,
+          "p99_ms": 4.528621
+        },
+        "wait_for_file_version_ms": {
+          "count": 200,
+          "p50_ms": 2.070301,
+          "p95_ms": 2.121704,
+          "p99_ms": 2.134205
+        },
+        "snapshot_preparation_ms": {
+          "count": 200,
+          "p50_ms": 2.151106,
+          "p95_ms": 2.202908,
+          "p99_ms": 2.2194089999999997
+        },
+        "ir_query_ms": {
+          "count": 200,
+          "p50_ms": 0.076504,
+          "p95_ms": 0.135506,
+          "p99_ms": 0.163008
+        },
+        "allocations_per_request": 134.065,
+        "allocated_bytes_per_request": 11619.48,
+        "lock_wait_ms_per_request": 0.08557117999999996,
+        "lock_contention_events_per_request": 1.0
+      },
+      "anti_rescue": {
+        "stale_fallback_total": 0,
+        "stale_served_total": 0,
+        "degraded_substitute_total": 0,
+        "search_backed_substitute_total": 0
+      }
+    },
+    {
+      "fixture_family": "recordset_module_explicit_context",
+      "operation": "members",
+      "cases": 1,
+      "total_requests": 200,
+      "fail_closed_total": 0,
+      "fail_closed_rate": 0.0,
+      "error_rate": 0.0,
+      "incomplete_rate": 0.0,
+      "metrics": {
+        "total_duration_ms": {
+          "count": 200,
+          "p50_ms": 4.552122,
+          "p95_ms": 4.764832999999999,
+          "p99_ms": 4.8951389999999995
+        },
+        "wait_for_file_version_ms": {
+          "count": 200,
+          "p50_ms": 1.9912979999999998,
+          "p95_ms": 2.0718020000000004,
+          "p99_ms": 2.102303
+        },
+        "snapshot_preparation_ms": {
+          "count": 200,
+          "p50_ms": 2.1450050000000003,
+          "p95_ms": 2.215308,
+          "p99_ms": 2.262111
+        },
+        "ir_query_ms": {
+          "count": 200,
+          "p50_ms": 0.039101,
+          "p95_ms": 0.061502999999999995,
+          "p99_ms": 0.101305
+        },
+        "allocations_per_request": 271.06,
+        "allocated_bytes_per_request": 24151.52,
+        "lock_wait_ms_per_request": 0.04243705000000001,
+        "lock_contention_events_per_request": 1.0
+      },
+      "anti_rescue": {
+        "stale_fallback_total": 0,
+        "stale_served_total": 0,
+        "degraded_substitute_total": 0,
+        "search_backed_substitute_total": 0
+      }
+    },
+    {
+      "fixture_family": "incomplete_syntax_member_access",
+      "operation": "completion",
+      "cases": 1,
+      "total_requests": 200,
+      "fail_closed_total": 0,
+      "fail_closed_rate": 0.0,
+      "error_rate": 0.0,
+      "incomplete_rate": 0.0,
+      "metrics": {
+        "total_duration_ms": {
+          "count": 200,
+          "p50_ms": 0.433921,
+          "p95_ms": 0.60663,
+          "p99_ms": 0.6712330000000001
+        },
+        "wait_for_file_version_ms": {
+          "count": 200,
+          "p50_ms": 0.103505,
+          "p95_ms": 0.16120800000000002,
+          "p99_ms": 0.176009
+        },
+        "snapshot_preparation_ms": {
+          "count": 200,
+          "p50_ms": 0.067103,
+          "p95_ms": 0.116205,
+          "p99_ms": 0.154008
+        },
+        "ir_query_ms": {
+          "count": 200,
+          "p50_ms": 0.031501999999999995,
+          "p95_ms": 0.049102,
+          "p99_ms": 0.067003
+        },
+        "allocations_per_request": 231.095,
+        "allocated_bytes_per_request": 16477.0,
+        "lock_wait_ms_per_request": 0.03373957500000001,
+        "lock_contention_events_per_request": 1.0
+      },
+      "anti_rescue": {
+        "stale_fallback_total": 0,
+        "stale_served_total": 0,
+        "degraded_substitute_total": 0,
+        "search_backed_substitute_total": 0
+      }
+    }
+  ],
   "thresholds": {
     "max_error_rate": 0.0,
     "max_incomplete_rate": 0.0
   },
-  "comparison": {
-    "baseline_p95_ms": 5.683097,
-    "baseline_p99_ms": 5.694697000000001,
-    "ratio_p95": 1.065892417461817,
-    "ratio_p99": 1.0700256747637318,
-    "threshold_p95": 50.0,
-    "threshold_p99": 50.0,
-    "threshold_resource": 50.0,
-    "max_error_rate": 0.0,
-    "max_incomplete_rate": 0.0,
-    "error_rate": 0.0,
-    "incomplete_rate": 0.0,
-    "contract_version": "v2",
-    "verdict": "pass",
-    "reason_codes": [],
-    "pass": true
-  }
+  "verdict": "pass",
+  "reason_codes": [],
+  "pass": true
 }

@@ -150,3 +150,26 @@ Legacy/internal note:
 - `intellisense_v2_parse_result_query_cancel_rate > 0.20` (чрезмерные cancellations в parse-stage).
 - `intellisense_v2_runtime_queue_wait_interactive_ms.p95 > 500ms` (interactive starvation risk).
 - `completion_incomplete_rate > 0.30` или `completion_error_rate > 0.05`.
+
+## Representative Perf Gate
+
+Authoritative checked-in perf gate для cutover acceptance теперь строится через
+`contracts/intellisense-perf-gate/v2/` и `scripts/run-intellisense-perf.sh`.
+
+Representative matrix:
+
+- operations: `completion`, `hover`, `definition`, `type_at_position`, `members`
+- fixture families: `steady_member_chain`, `post_did_change_current_revision`,
+  `object_module_explicit_context`, `recordset_module_explicit_context`,
+  `incomplete_syntax_member_access`
+
+Cutover perf evidence считается valid только если:
+
+- report покрывает весь representative matrix;
+- `coverage.authoritative_for_cutover_acceptance = true`;
+- anti-rescue counters (`stale_fallback_total`, `stale_served_total`,
+  `degraded_substitute_total`, `search_backed_substitute_total`) остаются нулевыми;
+- baseline/provenance проходят blocking verification;
+- ratio-based regression checks используют checked-in `relative_ratio_baseline_floors`
+  для `sub-ms` latency и `near-zero` lock-wait metrics, чтобы blocking verdict не
+  зависел от measurement jitter при сохранении абсолютных ceilings и fail-closed budgets.

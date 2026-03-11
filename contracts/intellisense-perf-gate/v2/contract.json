@@ -12,66 +12,342 @@
       "large",
       "churn"
     ],
-    "required_latency_metrics": [
-      "completion_duration_ms",
-      "intellisense_v2_wait_for_file_version_completion_ms",
-      "intellisense_v2_snapshot_completion_ms",
-      "intellisense_v2_ir_query_completion_ms"
+    "required_operation_matrix": {
+      "steady_member_chain": [
+        "completion",
+        "hover",
+        "definition",
+        "type_at_position",
+        "members"
+      ],
+      "post_did_change_current_revision": [
+        "completion",
+        "hover",
+        "definition",
+        "type_at_position",
+        "members"
+      ],
+      "object_module_explicit_context": [
+        "completion",
+        "hover",
+        "definition",
+        "type_at_position",
+        "members"
+      ],
+      "recordset_module_explicit_context": [
+        "completion",
+        "hover",
+        "definition",
+        "type_at_position",
+        "members"
+      ],
+      "incomplete_syntax_member_access": [
+        "completion"
+      ]
+    },
+    "required_latency_metric_families": [
+      "total_duration_ms",
+      "wait_for_file_version_ms",
+      "snapshot_preparation_ms",
+      "ir_query_ms"
     ],
-    "required_resource_metrics": [
-      "allocations_per_completion",
-      "allocated_bytes_per_completion",
-      "lock_wait_ms_per_completion",
-      "lock_contention_events_per_completion"
+    "required_resource_metric_families": [
+      "allocations_per_request",
+      "allocated_bytes_per_request",
+      "lock_wait_ms_per_request",
+      "lock_contention_events_per_request"
     ]
   },
   "coverage": {
-    "operation_coverage_mode": "completion_only",
+    "operation_coverage_mode": "representative_matrix",
     "reported_operations": [
-      "completion"
-    ],
-    "missing_representative_operations": [
+      "completion",
       "hover",
       "definition",
       "type_at_position",
       "members"
     ],
-    "authoritative_for_cutover_acceptance": false
+    "reported_fixture_families": [
+      "steady_member_chain",
+      "post_did_change_current_revision",
+      "object_module_explicit_context",
+      "recordset_module_explicit_context",
+      "incomplete_syntax_member_access"
+    ],
+    "authoritative_for_cutover_acceptance": true
   },
   "baseline": {
     "absolute_latency_ceilings_ms": {
       "small": {
-        "p95": 300,
-        "p99": 600
+        "default": {
+          "completion": {
+            "total_duration_ms": { "p95": 300, "p99": 600 },
+            "wait_for_file_version_ms": { "p95": 300, "p99": 600 },
+            "snapshot_preparation_ms": { "p95": 300, "p99": 600 },
+            "ir_query_ms": { "p95": 300, "p99": 600 }
+          },
+          "hover": {
+            "total_duration_ms": { "p95": 300, "p99": 600 },
+            "wait_for_file_version_ms": { "p95": 300, "p99": 600 },
+            "snapshot_preparation_ms": { "p95": 300, "p99": 600 },
+            "ir_query_ms": { "p95": 300, "p99": 600 }
+          },
+          "definition": {
+            "total_duration_ms": { "p95": 300, "p99": 600 },
+            "wait_for_file_version_ms": { "p95": 300, "p99": 600 },
+            "snapshot_preparation_ms": { "p95": 300, "p99": 600 },
+            "ir_query_ms": { "p95": 300, "p99": 600 }
+          },
+          "type_at_position": {
+            "total_duration_ms": { "p95": 300, "p99": 600 },
+            "wait_for_file_version_ms": { "p95": 300, "p99": 600 },
+            "snapshot_preparation_ms": { "p95": 300, "p99": 600 },
+            "ir_query_ms": { "p95": 300, "p99": 600 }
+          },
+          "members": {
+            "total_duration_ms": { "p95": 300, "p99": 600 },
+            "wait_for_file_version_ms": { "p95": 300, "p99": 600 },
+            "snapshot_preparation_ms": { "p95": 300, "p99": 600 },
+            "ir_query_ms": { "p95": 300, "p99": 600 }
+          }
+        },
+        "incomplete_syntax_member_access": {
+          "completion": {
+            "total_duration_ms": { "p95": 300, "p99": 600 },
+            "wait_for_file_version_ms": { "p95": 300, "p99": 600 },
+            "snapshot_preparation_ms": { "p95": 300, "p99": 600 },
+            "ir_query_ms": { "p95": 300, "p99": 600 }
+          }
+        }
       },
       "large": {
-        "p95": 1500,
-        "p99": 3000
+        "default": {
+          "completion": {
+            "total_duration_ms": { "p95": 1500, "p99": 3000 },
+            "wait_for_file_version_ms": { "p95": 1500, "p99": 3000 },
+            "snapshot_preparation_ms": { "p95": 1500, "p99": 3000 },
+            "ir_query_ms": { "p95": 1500, "p99": 3000 }
+          },
+          "hover": {
+            "total_duration_ms": { "p95": 1500, "p99": 3000 },
+            "wait_for_file_version_ms": { "p95": 1500, "p99": 3000 },
+            "snapshot_preparation_ms": { "p95": 1500, "p99": 3000 },
+            "ir_query_ms": { "p95": 1500, "p99": 3000 }
+          },
+          "definition": {
+            "total_duration_ms": { "p95": 1500, "p99": 3000 },
+            "wait_for_file_version_ms": { "p95": 1500, "p99": 3000 },
+            "snapshot_preparation_ms": { "p95": 1500, "p99": 3000 },
+            "ir_query_ms": { "p95": 1500, "p99": 3000 }
+          },
+          "type_at_position": {
+            "total_duration_ms": { "p95": 1500, "p99": 3000 },
+            "wait_for_file_version_ms": { "p95": 1500, "p99": 3000 },
+            "snapshot_preparation_ms": { "p95": 1500, "p99": 3000 },
+            "ir_query_ms": { "p95": 1500, "p99": 3000 }
+          },
+          "members": {
+            "total_duration_ms": { "p95": 1500, "p99": 3000 },
+            "wait_for_file_version_ms": { "p95": 1500, "p99": 3000 },
+            "snapshot_preparation_ms": { "p95": 1500, "p99": 3000 },
+            "ir_query_ms": { "p95": 1500, "p99": 3000 }
+          }
+        },
+        "incomplete_syntax_member_access": {
+          "completion": {
+            "total_duration_ms": { "p95": 1500, "p99": 3000 },
+            "wait_for_file_version_ms": { "p95": 1500, "p99": 3000 },
+            "snapshot_preparation_ms": { "p95": 1500, "p99": 3000 },
+            "ir_query_ms": { "p95": 1500, "p99": 3000 }
+          }
+        }
       },
       "churn": {
-        "p95": 1800,
-        "p99": 3500
+        "default": {
+          "completion": {
+            "total_duration_ms": { "p95": 1800, "p99": 3500 },
+            "wait_for_file_version_ms": { "p95": 1800, "p99": 3500 },
+            "snapshot_preparation_ms": { "p95": 1800, "p99": 3500 },
+            "ir_query_ms": { "p95": 1800, "p99": 3500 }
+          },
+          "hover": {
+            "total_duration_ms": { "p95": 1800, "p99": 3500 },
+            "wait_for_file_version_ms": { "p95": 1800, "p99": 3500 },
+            "snapshot_preparation_ms": { "p95": 1800, "p99": 3500 },
+            "ir_query_ms": { "p95": 1800, "p99": 3500 }
+          },
+          "definition": {
+            "total_duration_ms": { "p95": 1800, "p99": 3500 },
+            "wait_for_file_version_ms": { "p95": 1800, "p99": 3500 },
+            "snapshot_preparation_ms": { "p95": 1800, "p99": 3500 },
+            "ir_query_ms": { "p95": 1800, "p99": 3500 }
+          },
+          "type_at_position": {
+            "total_duration_ms": { "p95": 1800, "p99": 3500 },
+            "wait_for_file_version_ms": { "p95": 1800, "p99": 3500 },
+            "snapshot_preparation_ms": { "p95": 1800, "p99": 3500 },
+            "ir_query_ms": { "p95": 1800, "p99": 3500 }
+          },
+          "members": {
+            "total_duration_ms": { "p95": 1800, "p99": 3500 },
+            "wait_for_file_version_ms": { "p95": 1800, "p99": 3500 },
+            "snapshot_preparation_ms": { "p95": 1800, "p99": 3500 },
+            "ir_query_ms": { "p95": 1800, "p99": 3500 }
+          }
+        },
+        "incomplete_syntax_member_access": {
+          "completion": {
+            "total_duration_ms": { "p95": 1800, "p99": 3500 },
+            "wait_for_file_version_ms": { "p95": 1800, "p99": 3500 },
+            "snapshot_preparation_ms": { "p95": 1800, "p99": 3500 },
+            "ir_query_ms": { "p95": 1800, "p99": 3500 }
+          }
+        }
       }
     },
     "resource_budget_ceilings": {
       "small": {
-        "allocations_per_completion": 2000000,
-        "allocated_bytes_per_completion": 200000000,
-        "lock_wait_ms_per_completion": 5000,
-        "lock_contention_events_per_completion": 5000
+        "default": {
+          "completion": {
+            "allocations_per_request": 2000000,
+            "allocated_bytes_per_request": 200000000,
+            "lock_wait_ms_per_request": 5000,
+            "lock_contention_events_per_request": 5000
+          },
+          "hover": {
+            "allocations_per_request": 2000000,
+            "allocated_bytes_per_request": 200000000,
+            "lock_wait_ms_per_request": 5000,
+            "lock_contention_events_per_request": 5000
+          },
+          "definition": {
+            "allocations_per_request": 2000000,
+            "allocated_bytes_per_request": 200000000,
+            "lock_wait_ms_per_request": 5000,
+            "lock_contention_events_per_request": 5000
+          },
+          "type_at_position": {
+            "allocations_per_request": 2000000,
+            "allocated_bytes_per_request": 200000000,
+            "lock_wait_ms_per_request": 5000,
+            "lock_contention_events_per_request": 5000
+          },
+          "members": {
+            "allocations_per_request": 2000000,
+            "allocated_bytes_per_request": 200000000,
+            "lock_wait_ms_per_request": 5000,
+            "lock_contention_events_per_request": 5000
+          }
+        },
+        "incomplete_syntax_member_access": {
+          "completion": {
+            "allocations_per_request": 2000000,
+            "allocated_bytes_per_request": 200000000,
+            "lock_wait_ms_per_request": 5000,
+            "lock_contention_events_per_request": 5000
+          }
+        }
       },
       "large": {
-        "allocations_per_completion": 5000000,
-        "allocated_bytes_per_completion": 500000000,
-        "lock_wait_ms_per_completion": 10000,
-        "lock_contention_events_per_completion": 10000
+        "default": {
+          "completion": {
+            "allocations_per_request": 5000000,
+            "allocated_bytes_per_request": 500000000,
+            "lock_wait_ms_per_request": 10000,
+            "lock_contention_events_per_request": 10000
+          },
+          "hover": {
+            "allocations_per_request": 5000000,
+            "allocated_bytes_per_request": 500000000,
+            "lock_wait_ms_per_request": 10000,
+            "lock_contention_events_per_request": 10000
+          },
+          "definition": {
+            "allocations_per_request": 5000000,
+            "allocated_bytes_per_request": 500000000,
+            "lock_wait_ms_per_request": 10000,
+            "lock_contention_events_per_request": 10000
+          },
+          "type_at_position": {
+            "allocations_per_request": 5000000,
+            "allocated_bytes_per_request": 500000000,
+            "lock_wait_ms_per_request": 10000,
+            "lock_contention_events_per_request": 10000
+          },
+          "members": {
+            "allocations_per_request": 5000000,
+            "allocated_bytes_per_request": 500000000,
+            "lock_wait_ms_per_request": 10000,
+            "lock_contention_events_per_request": 10000
+          }
+        },
+        "incomplete_syntax_member_access": {
+          "completion": {
+            "allocations_per_request": 5000000,
+            "allocated_bytes_per_request": 500000000,
+            "lock_wait_ms_per_request": 10000,
+            "lock_contention_events_per_request": 10000
+          }
+        }
       },
       "churn": {
-        "allocations_per_completion": 6000000,
-        "allocated_bytes_per_completion": 600000000,
-        "lock_wait_ms_per_completion": 15000,
-        "lock_contention_events_per_completion": 15000
+        "default": {
+          "completion": {
+            "allocations_per_request": 6000000,
+            "allocated_bytes_per_request": 600000000,
+            "lock_wait_ms_per_request": 15000,
+            "lock_contention_events_per_request": 15000
+          },
+          "hover": {
+            "allocations_per_request": 6000000,
+            "allocated_bytes_per_request": 600000000,
+            "lock_wait_ms_per_request": 15000,
+            "lock_contention_events_per_request": 15000
+          },
+          "definition": {
+            "allocations_per_request": 6000000,
+            "allocated_bytes_per_request": 600000000,
+            "lock_wait_ms_per_request": 15000,
+            "lock_contention_events_per_request": 15000
+          },
+          "type_at_position": {
+            "allocations_per_request": 6000000,
+            "allocated_bytes_per_request": 600000000,
+            "lock_wait_ms_per_request": 15000,
+            "lock_contention_events_per_request": 15000
+          },
+          "members": {
+            "allocations_per_request": 6000000,
+            "allocated_bytes_per_request": 600000000,
+            "lock_wait_ms_per_request": 15000,
+            "lock_contention_events_per_request": 15000
+          }
+        },
+        "incomplete_syntax_member_access": {
+          "completion": {
+            "allocations_per_request": 6000000,
+            "allocated_bytes_per_request": 600000000,
+            "lock_wait_ms_per_request": 15000,
+            "lock_contention_events_per_request": 15000
+          }
+        }
       }
+    },
+    "relative_ratio_baseline_floors": {
+      "total_duration_ms": 6,
+      "wait_for_file_version_ms": 3,
+      "snapshot_preparation_ms": 3,
+      "ir_query_ms": 3,
+      "allocations_per_request": 100,
+      "allocated_bytes_per_request": 8192,
+      "lock_wait_ms_per_request": 1,
+      "lock_contention_events_per_request": 1
+    },
+    "anti_rescue_budget_ceilings": {
+      "stale_fallback_total": 0,
+      "stale_served_total": 0,
+      "degraded_substitute_total": 0,
+      "search_backed_substitute_total": 0
     },
     "bootstrap_policy": {
       "required_profiles": [
@@ -86,9 +362,11 @@
   "report": {
     "required_fields": [
       "contract_version",
+      "profile",
+      "coverage",
+      "results",
       "verdict",
-      "reason_codes",
-      "profiles"
+      "reason_codes"
     ],
     "optional_provenance_fields": [
       "change_id",
@@ -109,12 +387,14 @@
   "evaluator": {
     "reason_codes": [
       "missing_required_metric_field",
+      "missing_required_matrix_coverage",
       "unsupported_contract_version",
       "latency_relative_ratio_exceeded",
       "latency_absolute_ceiling_exceeded",
       "allocation_budget_exceeded",
       "lock_wait_budget_exceeded",
       "lock_contention_budget_exceeded",
+      "anti_rescue_budget_exceeded",
       "protected_acceptance_asset_modified",
       "change_criticality_missing_or_unknown",
       "test_first_evidence_missing_or_invalid",

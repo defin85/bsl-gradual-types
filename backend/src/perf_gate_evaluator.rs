@@ -487,16 +487,28 @@ pub fn evaluate_scale_aware_gate(
     }))
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct PerfGateSample {
-    pub p95_ms: f64,
-    pub p99_ms: f64,
+    pub fixture_family: String,
+    pub operation: String,
+    pub total_duration_p95_ms: f64,
+    pub total_duration_p99_ms: f64,
+    pub wait_for_file_version_p95_ms: f64,
+    pub wait_for_file_version_p99_ms: f64,
+    pub snapshot_preparation_p95_ms: f64,
+    pub snapshot_preparation_p99_ms: f64,
+    pub ir_query_p95_ms: f64,
+    pub ir_query_p99_ms: f64,
     pub error_rate: f64,
     pub incomplete_rate: f64,
-    pub allocations_per_completion: f64,
-    pub allocated_bytes_per_completion: f64,
-    pub lock_wait_ms_per_completion: f64,
-    pub lock_contention_events_per_completion: f64,
+    pub allocations_per_request: f64,
+    pub allocated_bytes_per_request: f64,
+    pub lock_wait_ms_per_request: f64,
+    pub lock_contention_events_per_request: f64,
+    pub stale_fallback_total: u64,
+    pub stale_served_total: u64,
+    pub degraded_substitute_total: u64,
+    pub search_backed_substitute_total: u64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -531,14 +543,130 @@ fn read_contract_string_vec(contract: &Value, path: &[&str]) -> Option<Vec<Strin
     )
 }
 
+fn read_contract_f64(contract: &Value, path: &[&str]) -> Option<f64> {
+    let mut cursor = contract;
+    for segment in path {
+        cursor = cursor.get(*segment)?;
+    }
+    cursor.as_f64().or_else(|| cursor.as_u64().map(|value| value as f64))
+}
+
+fn read_required_operation_matrix(contract: &Value) -> BTreeSet<(String, String)> {
+    let mut pairs = BTreeSet::new();
+    let Some(matrix) = contract
+        .get("input")
+        .and_then(|value| value.get("required_operation_matrix"))
+        .and_then(Value::as_object)
+    else {
+        return pairs;
+    };
+
+    for (fixture_family, operations) in matrix {
+        let Some(operations) = operations.as_array() else {
+            continue;
+        };
+        for operation in operations.iter().filter_map(Value::as_str) {
+            pairs.insert((fixture_family.clone(), operation.to_string()));
+        }
+    }
+
+    pairs
+}
+
+fn read_latency_ceiling(
+    contract: &Value,
+    profile: &str,
+    fixture_family: &str,
+    operation: &str,
+    metric_family: &str,
+    percentile: &str,
+) -> Option<f64> {
+    read_contract_f64(
+        contract,
+        &[
+            "baseline",
+            "absolute_latency_ceilings_ms",
+            profile,
+            fixture_family,
+            operation,
+            metric_family,
+            percentile,
+        ],
+    )
+    .or_else(|| {
+        read_contract_f64(
+            contract,
+            &[
+                "baseline",
+                "absolute_latency_ceilings_ms",
+                profile,
+                "default",
+                operation,
+                metric_family,
+                percentile,
+            ],
+        )
+    })
+}
+
+fn read_resource_budget(
+    contract: &Value,
+    profile: &str,
+    fixture_family: &str,
+    operation: &str,
+    metric_name: &str,
+) -> Option<f64> {
+    read_contract_f64(
+        contract,
+        &[
+            "baseline",
+            "resource_budget_ceilings",
+            profile,
+            fixture_family,
+            operation,
+            metric_name,
+        ],
+    )
+    .or_else(|| {
+        read_contract_f64(
+            contract,
+            &[
+                "baseline",
+                "resource_budget_ceilings",
+                profile,
+                "default",
+                operation,
+                metric_name,
+            ],
+        )
+    })
+}
+
+fn read_relative_ratio_baseline_floor(contract: &Value, metric_name: &str) -> Option<f64> {
+    read_contract_f64(
+        contract,
+        &["baseline", "relative_ratio_baseline_floors", metric_name],
+    )
+}
+
+fn sample_by_key<'a>(
+    samples: &'a [PerfGateSample],
+    fixture_family: &str,
+    operation: &str,
+) -> Option<&'a PerfGateSample> {
+    samples.iter().find(|sample| {
+        sample.fixture_family == fixture_family && sample.operation == operation
+    })
+}
+
 pub fn evaluate_intellisense_perf_profile(
     contract: &Value,
     profile: &str,
-    current: PerfGateSample,
-    baseline: Option<PerfGateSample>,
+    current: &[PerfGateSample],
+    baseline: Option<&[PerfGateSample]>,
     thresholds: PerfGateThresholds,
 ) -> Value {
-    let mut reason_codes = BTreeSet::new();
+    let mut top_level_reason_codes = BTreeSet::new();
 
     let contract_version = match (
         contract.get("surface").and_then(|v| v.as_str()),
@@ -546,7 +674,7 @@ pub fn evaluate_intellisense_perf_profile(
     ) {
         (Some("intellisense-perf-gate"), Some(2)) => "v2".to_string(),
         _ => {
-            reason_codes.insert("unsupported_contract_version".to_string());
+            top_level_reason_codes.insert("unsupported_contract_version".to_string());
             "unknown".to_string()
         }
     };
@@ -554,168 +682,262 @@ pub fn evaluate_intellisense_perf_profile(
     let required_profiles =
         read_contract_string_vec(contract, &["input", "required_profiles"]).unwrap_or_default();
     if !required_profiles.iter().any(|item| item == profile) {
-        reason_codes.insert("missing_required_metric_field".to_string());
+        top_level_reason_codes.insert("missing_required_metric_field".to_string());
     }
 
-    if !current.allocations_per_completion.is_finite()
-        || !current.allocated_bytes_per_completion.is_finite()
-        || !current.lock_wait_ms_per_completion.is_finite()
-        || !current.lock_contention_events_per_completion.is_finite()
+    let required_matrix = read_required_operation_matrix(contract);
+    let current_matrix = current
+        .iter()
+        .map(|sample| (sample.fixture_family.clone(), sample.operation.clone()))
+        .collect::<BTreeSet<_>>();
+    if required_matrix
+        .iter()
+        .any(|pair| !current_matrix.contains(pair))
     {
-        reason_codes.insert("missing_required_metric_field".to_string());
+        top_level_reason_codes.insert("missing_required_matrix_coverage".to_string());
     }
-
-    if current.error_rate > thresholds.max_error_rate
-        || current.incomplete_rate > thresholds.max_incomplete_rate
-    {
-        reason_codes.insert("missing_required_metric_field".to_string());
-    }
-
-    let ceiling_p95 = read_contract_u64(
-        contract,
-        &["baseline", "absolute_latency_ceilings_ms", profile, "p95"],
-    )
-    .map(|v| v as f64);
-    let ceiling_p99 = read_contract_u64(
-        contract,
-        &["baseline", "absolute_latency_ceilings_ms", profile, "p99"],
-    )
-    .map(|v| v as f64);
-
-    if let Some(p95) = ceiling_p95 {
-        if current.p95_ms > p95 {
-            reason_codes.insert("latency_absolute_ceiling_exceeded".to_string());
-        }
-    } else if thresholds.blocking_mode {
-        reason_codes.insert("initial_budget_not_fixed".to_string());
-    }
-    if let Some(p99) = ceiling_p99 {
-        if current.p99_ms > p99 {
-            reason_codes.insert("latency_absolute_ceiling_exceeded".to_string());
-        }
-    } else if thresholds.blocking_mode {
-        reason_codes.insert("initial_budget_not_fixed".to_string());
-    }
-
-    let budget_allocations = read_contract_u64(
-        contract,
-        &[
-            "baseline",
-            "resource_budget_ceilings",
-            profile,
-            "allocations_per_completion",
-        ],
-    )
-    .map(|v| v as f64);
-    let budget_allocated_bytes = read_contract_u64(
-        contract,
-        &[
-            "baseline",
-            "resource_budget_ceilings",
-            profile,
-            "allocated_bytes_per_completion",
-        ],
-    )
-    .map(|v| v as f64);
-    let budget_lock_wait = read_contract_u64(
-        contract,
-        &[
-            "baseline",
-            "resource_budget_ceilings",
-            profile,
-            "lock_wait_ms_per_completion",
-        ],
-    )
-    .map(|v| v as f64);
-    let budget_lock_contention = read_contract_u64(
-        contract,
-        &[
-            "baseline",
-            "resource_budget_ceilings",
-            profile,
-            "lock_contention_events_per_completion",
-        ],
-    )
-    .map(|v| v as f64);
-
-    if let Some(max_allocations) = budget_allocations {
-        if current.allocations_per_completion > max_allocations {
-            reason_codes.insert("allocation_budget_exceeded".to_string());
-        }
-    } else if thresholds.blocking_mode {
-        reason_codes.insert("initial_budget_not_fixed".to_string());
-    }
-    if let Some(max_allocated_bytes) = budget_allocated_bytes {
-        if current.allocated_bytes_per_completion > max_allocated_bytes {
-            reason_codes.insert("allocation_budget_exceeded".to_string());
-        }
-    } else if thresholds.blocking_mode {
-        reason_codes.insert("initial_budget_not_fixed".to_string());
-    }
-    if let Some(max_lock_wait_ms) = budget_lock_wait {
-        if current.lock_wait_ms_per_completion > max_lock_wait_ms {
-            reason_codes.insert("lock_wait_budget_exceeded".to_string());
-        }
-    } else if thresholds.blocking_mode {
-        reason_codes.insert("initial_budget_not_fixed".to_string());
-    }
-    if let Some(max_lock_contention_events) = budget_lock_contention {
-        if current.lock_contention_events_per_completion > max_lock_contention_events {
-            reason_codes.insert("lock_contention_budget_exceeded".to_string());
-        }
-    } else if thresholds.blocking_mode {
-        reason_codes.insert("initial_budget_not_fixed".to_string());
-    }
-
-    let mut ratio_p95 = None;
-    let mut ratio_p99 = None;
-    if let Some(base) = baseline {
-        if base.p95_ms > 0.0 && base.p99_ms > 0.0 {
-            let p95_ratio = current.p95_ms / base.p95_ms.max(0.000_001);
-            let p99_ratio = current.p99_ms / base.p99_ms.max(0.000_001);
-            ratio_p95 = Some(p95_ratio);
-            ratio_p99 = Some(p99_ratio);
-            if p95_ratio > thresholds.latency_ratio_p95_max
-                || p99_ratio > thresholds.latency_ratio_p99_max
+    if thresholds.blocking_mode {
+        if let Some(baseline_samples) = baseline {
+            let baseline_matrix = baseline_samples
+                .iter()
+                .map(|sample| (sample.fixture_family.clone(), sample.operation.clone()))
+                .collect::<BTreeSet<_>>();
+            if required_matrix
+                .iter()
+                .any(|pair| !baseline_matrix.contains(pair))
             {
-                reason_codes.insert("latency_relative_ratio_exceeded".to_string());
+                top_level_reason_codes.insert("missing_required_matrix_coverage".to_string());
             }
-        } else if thresholds.blocking_mode {
-            reason_codes.insert("initial_budget_not_fixed".to_string());
+        } else {
+            top_level_reason_codes.insert("initial_budget_not_fixed".to_string());
         }
-
-        let has_resource_baseline = base.allocations_per_completion > 0.0
-            && base.allocated_bytes_per_completion > 0.0
-            && base.lock_wait_ms_per_completion > 0.0
-            && base.lock_contention_events_per_completion > 0.0;
-        if has_resource_baseline {
-            let allocation_ratio =
-                current.allocations_per_completion / base.allocations_per_completion.max(0.000_001);
-            let allocated_bytes_ratio = current.allocated_bytes_per_completion
-                / base.allocated_bytes_per_completion.max(0.000_001);
-            let lock_wait_ratio = current.lock_wait_ms_per_completion
-                / base.lock_wait_ms_per_completion.max(0.000_001);
-            let lock_contention_ratio = current.lock_contention_events_per_completion
-                / base.lock_contention_events_per_completion.max(0.000_001);
-            if allocation_ratio > thresholds.resource_ratio_max
-                || allocated_bytes_ratio > thresholds.resource_ratio_max
-            {
-                reason_codes.insert("allocation_budget_exceeded".to_string());
-            }
-            if lock_wait_ratio > thresholds.resource_ratio_max {
-                reason_codes.insert("lock_wait_budget_exceeded".to_string());
-            }
-            if lock_contention_ratio > thresholds.resource_ratio_max {
-                reason_codes.insert("lock_contention_budget_exceeded".to_string());
-            }
-        } else if thresholds.blocking_mode {
-            reason_codes.insert("initial_budget_not_fixed".to_string());
-        }
-    } else if thresholds.blocking_mode {
-        reason_codes.insert("initial_budget_not_fixed".to_string());
     }
 
-    let reason_codes_vec: Vec<String> = reason_codes.into_iter().collect();
+    let anti_rescue_budget_stale_fallback = read_contract_u64(
+        contract,
+        &["baseline", "anti_rescue_budget_ceilings", "stale_fallback_total"],
+    )
+    .unwrap_or(0);
+    let anti_rescue_budget_stale_served = read_contract_u64(
+        contract,
+        &["baseline", "anti_rescue_budget_ceilings", "stale_served_total"],
+    )
+    .unwrap_or(0);
+    let anti_rescue_budget_degraded = read_contract_u64(
+        contract,
+        &["baseline", "anti_rescue_budget_ceilings", "degraded_substitute_total"],
+    )
+    .unwrap_or(0);
+    let anti_rescue_budget_search = read_contract_u64(
+        contract,
+        &[
+            "baseline",
+            "anti_rescue_budget_ceilings",
+            "search_backed_substitute_total",
+        ],
+    )
+    .unwrap_or(0);
+
+    let mut entries = Vec::new();
+    for (fixture_family, operation) in &required_matrix {
+        let Some(current_entry) = sample_by_key(current, fixture_family, operation) else {
+            continue;
+        };
+        let baseline_entry = baseline.and_then(|samples| sample_by_key(samples, fixture_family, operation));
+        let mut entry_reason_codes = BTreeSet::new();
+        let mut latency = serde_json::Map::new();
+        let mut resource = serde_json::Map::new();
+
+        if !current_entry.allocations_per_request.is_finite()
+            || !current_entry.allocated_bytes_per_request.is_finite()
+            || !current_entry.lock_wait_ms_per_request.is_finite()
+            || !current_entry.lock_contention_events_per_request.is_finite()
+        {
+            entry_reason_codes.insert("missing_required_metric_field".to_string());
+        }
+        if current_entry.error_rate > thresholds.max_error_rate
+            || current_entry.incomplete_rate > thresholds.max_incomplete_rate
+        {
+            entry_reason_codes.insert("missing_required_metric_field".to_string());
+        }
+
+        let latency_fields = [
+            (
+                "total_duration_ms",
+                current_entry.total_duration_p95_ms,
+                current_entry.total_duration_p99_ms,
+                baseline_entry.map(|entry| entry.total_duration_p95_ms),
+                baseline_entry.map(|entry| entry.total_duration_p99_ms),
+            ),
+            (
+                "wait_for_file_version_ms",
+                current_entry.wait_for_file_version_p95_ms,
+                current_entry.wait_for_file_version_p99_ms,
+                baseline_entry.map(|entry| entry.wait_for_file_version_p95_ms),
+                baseline_entry.map(|entry| entry.wait_for_file_version_p99_ms),
+            ),
+            (
+                "snapshot_preparation_ms",
+                current_entry.snapshot_preparation_p95_ms,
+                current_entry.snapshot_preparation_p99_ms,
+                baseline_entry.map(|entry| entry.snapshot_preparation_p95_ms),
+                baseline_entry.map(|entry| entry.snapshot_preparation_p99_ms),
+            ),
+            (
+                "ir_query_ms",
+                current_entry.ir_query_p95_ms,
+                current_entry.ir_query_p99_ms,
+                baseline_entry.map(|entry| entry.ir_query_p95_ms),
+                baseline_entry.map(|entry| entry.ir_query_p99_ms),
+            ),
+        ];
+
+        for (metric_family, current_p95, current_p99, baseline_p95, baseline_p99) in latency_fields {
+            let ceiling_p95 =
+                read_latency_ceiling(contract, profile, fixture_family, operation, metric_family, "p95");
+            let ceiling_p99 =
+                read_latency_ceiling(contract, profile, fixture_family, operation, metric_family, "p99");
+            let ratio_baseline_floor =
+                read_relative_ratio_baseline_floor(contract, metric_family).unwrap_or(0.0);
+            if let Some(max_p95) = ceiling_p95 {
+                if current_p95 > max_p95 {
+                    entry_reason_codes.insert("latency_absolute_ceiling_exceeded".to_string());
+                }
+            } else if thresholds.blocking_mode {
+                entry_reason_codes.insert("initial_budget_not_fixed".to_string());
+            }
+            if let Some(max_p99) = ceiling_p99 {
+                if current_p99 > max_p99 {
+                    entry_reason_codes.insert("latency_absolute_ceiling_exceeded".to_string());
+                }
+            } else if thresholds.blocking_mode {
+                entry_reason_codes.insert("initial_budget_not_fixed".to_string());
+            }
+
+            let ratio_p95 = baseline_p95
+                .map(|baseline| current_p95 / baseline.max(ratio_baseline_floor).max(0.000_001));
+            let ratio_p99 = baseline_p99
+                .map(|baseline| current_p99 / baseline.max(ratio_baseline_floor).max(0.000_001));
+            if let (Some(ratio_p95), Some(ratio_p99)) = (ratio_p95, ratio_p99) {
+                if ratio_p95 > thresholds.latency_ratio_p95_max
+                    || ratio_p99 > thresholds.latency_ratio_p99_max
+                {
+                    entry_reason_codes.insert("latency_relative_ratio_exceeded".to_string());
+                }
+            } else if thresholds.blocking_mode {
+                entry_reason_codes.insert("initial_budget_not_fixed".to_string());
+            }
+
+            latency.insert(
+                metric_family.to_string(),
+                serde_json::json!({
+                    "current_p95_ms": current_p95,
+                    "current_p99_ms": current_p99,
+                    "baseline_p95_ms": baseline_p95,
+                    "baseline_p99_ms": baseline_p99,
+                    "ratio_baseline_floor_ms": ratio_baseline_floor,
+                    "ratio_p95": ratio_p95,
+                    "ratio_p99": ratio_p99,
+                    "ceiling_p95_ms": ceiling_p95,
+                    "ceiling_p99_ms": ceiling_p99,
+                }),
+            );
+        }
+
+        let resource_fields = [
+            (
+                "allocations_per_request",
+                current_entry.allocations_per_request,
+                baseline_entry.map(|entry| entry.allocations_per_request),
+                "allocation_budget_exceeded",
+            ),
+            (
+                "allocated_bytes_per_request",
+                current_entry.allocated_bytes_per_request,
+                baseline_entry.map(|entry| entry.allocated_bytes_per_request),
+                "allocation_budget_exceeded",
+            ),
+            (
+                "lock_wait_ms_per_request",
+                current_entry.lock_wait_ms_per_request,
+                baseline_entry.map(|entry| entry.lock_wait_ms_per_request),
+                "lock_wait_budget_exceeded",
+            ),
+            (
+                "lock_contention_events_per_request",
+                current_entry.lock_contention_events_per_request,
+                baseline_entry.map(|entry| entry.lock_contention_events_per_request),
+                "lock_contention_budget_exceeded",
+            ),
+        ];
+
+        for (metric_name, current_value, baseline_value, reason_code) in resource_fields {
+            let ceiling = read_resource_budget(contract, profile, fixture_family, operation, metric_name);
+            let ratio_baseline_floor =
+                read_relative_ratio_baseline_floor(contract, metric_name).unwrap_or(0.0);
+            if let Some(max_value) = ceiling {
+                if current_value > max_value {
+                    entry_reason_codes.insert(reason_code.to_string());
+                }
+            } else if thresholds.blocking_mode {
+                entry_reason_codes.insert("initial_budget_not_fixed".to_string());
+            }
+
+            let ratio = baseline_value
+                .map(|baseline| current_value / baseline.max(ratio_baseline_floor).max(0.000_001));
+            if let Some(ratio) = ratio {
+                if ratio > thresholds.resource_ratio_max {
+                    entry_reason_codes.insert(reason_code.to_string());
+                }
+            } else if thresholds.blocking_mode {
+                entry_reason_codes.insert("initial_budget_not_fixed".to_string());
+            }
+
+            resource.insert(
+                metric_name.to_string(),
+                serde_json::json!({
+                    "current": current_value,
+                    "baseline": baseline_value,
+                    "ratio_baseline_floor": ratio_baseline_floor,
+                    "ratio": ratio,
+                    "ceiling": ceiling,
+                }),
+            );
+        }
+
+        if current_entry.stale_fallback_total > anti_rescue_budget_stale_fallback
+            || current_entry.stale_served_total > anti_rescue_budget_stale_served
+            || current_entry.degraded_substitute_total > anti_rescue_budget_degraded
+            || current_entry.search_backed_substitute_total > anti_rescue_budget_search
+        {
+            entry_reason_codes.insert("anti_rescue_budget_exceeded".to_string());
+        }
+
+        top_level_reason_codes.extend(entry_reason_codes.iter().cloned());
+        let entry_reason_codes = entry_reason_codes.into_iter().collect::<Vec<_>>();
+        let pass = entry_reason_codes.is_empty();
+        entries.push(serde_json::json!({
+            "fixture_family": fixture_family,
+            "operation": operation,
+            "verdict": if pass { "pass" } else { "fail" },
+            "reason_codes": entry_reason_codes,
+            "pass": pass,
+            "latency": latency,
+            "resource": resource,
+            "rates": {
+                "error_rate": current_entry.error_rate,
+                "incomplete_rate": current_entry.incomplete_rate,
+            },
+            "anti_rescue": {
+                "stale_fallback_total": current_entry.stale_fallback_total,
+                "stale_served_total": current_entry.stale_served_total,
+                "degraded_substitute_total": current_entry.degraded_substitute_total,
+                "search_backed_substitute_total": current_entry.search_backed_substitute_total,
+            }
+        }));
+    }
+
+    let reason_codes_vec: Vec<String> = top_level_reason_codes.into_iter().collect();
     let verdict = if reason_codes_vec.is_empty() {
         "pass"
     } else {
@@ -724,32 +946,10 @@ pub fn evaluate_intellisense_perf_profile(
 
     serde_json::json!({
         "contract_version": contract_version,
+        "profile": profile,
         "verdict": verdict,
         "reason_codes": reason_codes_vec,
-        "profiles": {
-            profile: {
-                "metrics": {
-                    "latency": {
-                        "p95_ms": current.p95_ms,
-                        "p99_ms": current.p99_ms,
-                        "ratio_p95": ratio_p95,
-                        "ratio_p99": ratio_p99,
-                        "absolute_ceiling_p95_ms": ceiling_p95,
-                        "absolute_ceiling_p99_ms": ceiling_p99
-                    },
-                    "resource": {
-                        "allocations_per_completion": current.allocations_per_completion,
-                        "allocated_bytes_per_completion": current.allocated_bytes_per_completion,
-                        "lock_wait_ms_per_completion": current.lock_wait_ms_per_completion,
-                        "lock_contention_events_per_completion": current.lock_contention_events_per_completion
-                    }
-                },
-                "rates": {
-                    "error_rate": current.error_rate,
-                    "incomplete_rate": current.incomplete_rate
-                }
-            }
-        },
+        "entries": entries,
         "thresholds": {
             "latency_ratio_p95_max": thresholds.latency_ratio_p95_max,
             "latency_ratio_p99_max": thresholds.latency_ratio_p99_max,

@@ -134,8 +134,9 @@ cargo build --release --bin bsl-lsp-server
 
 ### `run-intellisense-perf.sh` - Perf suite для IntelliSense
 
-**Назначение:** регрессионные замеры completion perf-gate (latency + resource budgets)
-на профилях `small`, `large`, `churn`.
+**Назначение:** authoritative регрессионные замеры canonical semantic perf-gate
+(operation-aware latency + resource budgets + anti-rescue guardrails) на профилях
+`small`, `large`, `churn`.
 
 **Использование:**
 ```bash
@@ -152,22 +153,31 @@ UPDATE_BASELINE=1 ./scripts/run-intellisense-perf.sh
 BSL_V2_PERF_GATE_BLOCKING=1 ./scripts/run-intellisense-perf.sh
 ```
 
-**CI-параметры (репрезентативный быстрый прогон small/large/churn):**
+Authoritative checked-in run использует script defaults:
+- `PERF_WARMUP=20`
+- `PERF_ITERATIONS=200`
+
+**Небольшой smoke/debug sample, не для cutover verdict:**
 ```bash
-BSL_V2_PERF_GATE_BLOCKING=1 PERF_WARMUP=1 PERF_ITERATIONS=5 THRESHOLD_P95=50 THRESHOLD_P99=50 THRESHOLD_RESOURCE=50 PERF_PROFILES="small large churn" ./scripts/run-intellisense-perf.sh
+PERF_WARMUP=1 PERF_ITERATIONS=5 THRESHOLD_P95=50 THRESHOLD_P99=50 THRESHOLD_RESOURCE=50 PERF_PROFILES="small large churn" ./scripts/run-intellisense-perf.sh
 ```
 
+Representative matrix:
+- operations: `completion`, `hover`, `definition`, `type_at_position`, `members`
+- fixture families: `steady_member_chain`, `post_did_change_current_revision`,
+  `object_module_explicit_context`, `recordset_module_explicit_context`,
+  `incomplete_syntax_member_access`
+
 `intellisense_churn` использует детерминированный `didChange`-churn (`every=1`), поэтому профиль устойчиво отличается от `large` по latency/resource.
+`target_case` задаёт границу, перед которой churn применяется к `post_did_change_current_revision` fixture, не загрязняя `steady_*` measurements.
+Для sub-millisecond latency и near-zero lock wait blocking gate использует checked-in `relative_ratio_baseline_floors`, чтобы отличать настоящий regression от measurement jitter; absolute ceilings и anti-rescue budgets при этом остаются обязательными.
 
 **Вывод:**
 - Baselines: `backend/tests/perf/baselines/`
 - Отчёты: `backend/tests/perf/reports/`
 
-**Ограничение текущего checked-in path:** этот harness по-прежнему собирает
-completion-centric baseline. `contracts/intellisense-perf-gate/v2/` теперь явно
-фиксирует этот факт и помечает отсутствие representative coverage для `hover`,
-`definition`, `type_at_position`, `members`. Не считай эти артефакты доказательством
-full cutover perf coverage.
+При `BSL_V2_PERF_GATE_BLOCKING=1` и валидном `CHANGE_ID`/`OPENSPEC_CHANGE_ID`
+этот script является checked-in authoritative perf gate для cutover acceptance.
 
 ---
 
@@ -182,8 +192,8 @@ full cutover perf coverage.
 - strict-валидация change через OpenSpec.
 
 **Честное ограничение:** скрипт валидирует только checked-in completion acceptance asset.
-Он не доказывает operation-aware perf/acceptance coverage для `hover`, `definition`,
-`type_at_position`, `members`.
+Operation-aware perf cutover acceptance доказывается отдельным прогоном
+`./scripts/run-intellisense-perf.sh` в blocking mode.
 
 **Использование:**
 ```bash

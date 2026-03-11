@@ -1,20 +1,156 @@
 {
   "name": "small",
+  "churn": {
+    "every": 1,
+    "target_case": 5
+  },
   "cases": [
     {
-      "file": "examples/test_lsp.bsl",
-      "marker": "Arr.Add",
-      "label": "arr_add"
+      "file": "backend/tests/perf/fixtures/steady_member_chain.bsl",
+      "marker": "ДляCompletion = Массив.",
+      "label": "steady_completion",
+      "operation": "completion",
+      "fixture_family": "steady_member_chain"
     },
     {
-      "file": "examples/test_lsp.bsl",
-      "marker": "Arr.Count",
-      "label": "arr_count"
+      "file": "backend/tests/perf/fixtures/steady_member_chain.bsl",
+      "marker": "ДляHover = Массив.Количество",
+      "label": "steady_hover",
+      "operation": "hover",
+      "fixture_family": "steady_member_chain"
     },
     {
-      "file": "examples/test_lsp.bsl",
-      "marker": "Arr.Clear",
-      "label": "arr_clear"
+      "file": "backend/tests/perf/fixtures/steady_member_chain.bsl",
+      "marker": "ДляDefinition = ЛокальныйМетод",
+      "label": "steady_definition",
+      "operation": "definition",
+      "fixture_family": "steady_member_chain"
+    },
+    {
+      "file": "backend/tests/perf/fixtures/steady_member_chain.bsl",
+      "marker": "ДляType = Массив",
+      "label": "steady_type_at_position",
+      "operation": "type_at_position",
+      "fixture_family": "steady_member_chain"
+    },
+    {
+      "file": "backend/tests/perf/fixtures/steady_member_chain.bsl",
+      "marker": "ДляMembers = Массив.",
+      "label": "steady_members",
+      "operation": "members",
+      "fixture_family": "steady_member_chain"
+    },
+    {
+      "file": "backend/tests/perf/fixtures/post_did_change_current_revision.bsl",
+      "marker": "ДляCompletion = Массив.",
+      "label": "post_did_change_completion",
+      "operation": "completion",
+      "fixture_family": "post_did_change_current_revision"
+    },
+    {
+      "file": "backend/tests/perf/fixtures/post_did_change_current_revision.bsl",
+      "marker": "ДляHover = Массив.Количество",
+      "label": "post_did_change_hover",
+      "operation": "hover",
+      "fixture_family": "post_did_change_current_revision"
+    },
+    {
+      "file": "backend/tests/perf/fixtures/post_did_change_current_revision.bsl",
+      "marker": "ДляDefinition = ЛокальныйМетод",
+      "label": "post_did_change_definition",
+      "operation": "definition",
+      "fixture_family": "post_did_change_current_revision"
+    },
+    {
+      "file": "backend/tests/perf/fixtures/post_did_change_current_revision.bsl",
+      "marker": "ДляType = Массив",
+      "label": "post_did_change_type_at_position",
+      "operation": "type_at_position",
+      "fixture_family": "post_did_change_current_revision"
+    },
+    {
+      "file": "backend/tests/perf/fixtures/post_did_change_current_revision.bsl",
+      "marker": "ДляMembers = Массив.",
+      "label": "post_did_change_members",
+      "operation": "members",
+      "fixture_family": "post_did_change_current_revision"
+    },
+    {
+      "file": "backend/tests/perf/fixtures/Catalogs/Организации/Ext/ObjectModule.bsl",
+      "marker": "ДляCompletion = Объект.",
+      "label": "object_module_completion",
+      "operation": "completion",
+      "fixture_family": "object_module_explicit_context"
+    },
+    {
+      "file": "backend/tests/perf/fixtures/Catalogs/Организации/Ext/ObjectModule.bsl",
+      "marker": "ДляHover = ЭтотОбъект.Код",
+      "label": "object_module_hover",
+      "operation": "hover",
+      "fixture_family": "object_module_explicit_context"
+    },
+    {
+      "file": "backend/tests/perf/fixtures/Catalogs/Организации/Ext/ObjectModule.bsl",
+      "marker": "ДляDefinition = ЭтотОбъект.ЛокальныйМетод",
+      "label": "object_module_definition",
+      "operation": "definition",
+      "fixture_family": "object_module_explicit_context"
+    },
+    {
+      "file": "backend/tests/perf/fixtures/Catalogs/Организации/Ext/ObjectModule.bsl",
+      "marker": "ДляType = Объект",
+      "label": "object_module_type_at_position",
+      "operation": "type_at_position",
+      "fixture_family": "object_module_explicit_context"
+    },
+    {
+      "file": "backend/tests/perf/fixtures/Catalogs/Организации/Ext/ObjectModule.bsl",
+      "marker": "ДляMembers = ЭтотОбъект.",
+      "label": "object_module_members",
+      "operation": "members",
+      "fixture_family": "object_module_explicit_context"
+    },
+    {
+      "file": "backend/tests/perf/fixtures/InformationRegisters/Регистр1/Ext/RecordSetModule.bsl",
+      "marker": "ДляCompletion = Объект.",
+      "label": "recordset_module_completion",
+      "operation": "completion",
+      "fixture_family": "recordset_module_explicit_context"
+    },
+    {
+      "file": "backend/tests/perf/fixtures/InformationRegisters/Регистр1/Ext/RecordSetModule.bsl",
+      "marker": "ДляHover = ЭтотОбъект.ОбменДанными",
+      "label": "recordset_module_hover",
+      "operation": "hover",
+      "fixture_family": "recordset_module_explicit_context"
+    },
+    {
+      "file": "backend/tests/perf/fixtures/InformationRegisters/Регистр1/Ext/RecordSetModule.bsl",
+      "marker": "ДляDefinition = ЭтотОбъект.ЛокальныйМетод",
+      "label": "recordset_module_definition",
+      "operation": "definition",
+      "fixture_family": "recordset_module_explicit_context"
+    },
+    {
+      "file": "backend/tests/perf/fixtures/InformationRegisters/Регистр1/Ext/RecordSetModule.bsl",
+      "marker": "ДляType = Объект",
+      "label": "recordset_module_type_at_position",
+      "operation": "type_at_position",
+      "fixture_family": "recordset_module_explicit_context"
+    },
+    {
+      "file": "backend/tests/perf/fixtures/InformationRegisters/Регистр1/Ext/RecordSetModule.bsl",
+      "marker": "ДляMembers = ЭтотОбъект.",
+      "label": "recordset_module_members",
+      "operation": "members",
+      "fixture_family": "recordset_module_explicit_context"
+    },
+    {
+      "file": "backend/tests/perf/fixtures/incomplete_syntax_member_access.bsl",
+      "marker": "ДляCompletion = Массив.",
+      "label": "incomplete_completion",
+      "operation": "completion",
+      "fixture_family": "incomplete_syntax_member_access"
     }
   ]
 }

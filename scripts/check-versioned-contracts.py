@@ -159,15 +159,73 @@ REQUIRED_V1_PERF_GATE_REASON_CODES = {
     "perf_gate_architecture_violation",
 }
 
-REQUIRED_V2_PERF_GATE_REPORTED_OPERATIONS = {
+REQUIRED_V2_PERF_GATE_OPERATIONS = {
     "completion",
-}
-
-REQUIRED_V2_PERF_GATE_MISSING_OPERATIONS = {
     "hover",
     "definition",
     "type_at_position",
     "members",
+}
+
+REQUIRED_V2_PERF_GATE_FIXTURE_FAMILIES = {
+    "steady_member_chain",
+    "post_did_change_current_revision",
+    "object_module_explicit_context",
+    "recordset_module_explicit_context",
+    "incomplete_syntax_member_access",
+}
+
+REQUIRED_V2_PERF_GATE_OPERATION_MATRIX = {
+    "steady_member_chain": REQUIRED_V2_PERF_GATE_OPERATIONS,
+    "post_did_change_current_revision": REQUIRED_V2_PERF_GATE_OPERATIONS,
+    "object_module_explicit_context": REQUIRED_V2_PERF_GATE_OPERATIONS,
+    "recordset_module_explicit_context": REQUIRED_V2_PERF_GATE_OPERATIONS,
+    "incomplete_syntax_member_access": {"completion"},
+}
+
+REQUIRED_V2_PERF_GATE_LATENCY_METRIC_FAMILIES = {
+    "total_duration_ms",
+    "wait_for_file_version_ms",
+    "snapshot_preparation_ms",
+    "ir_query_ms",
+}
+
+REQUIRED_V2_PERF_GATE_RESOURCE_METRIC_FAMILIES = {
+    "allocations_per_request",
+    "allocated_bytes_per_request",
+    "lock_wait_ms_per_request",
+    "lock_contention_events_per_request",
+}
+
+REQUIRED_V2_PERF_GATE_RATIO_BASELINE_FLOORS = {
+    "total_duration_ms": 6,
+    "wait_for_file_version_ms": 3,
+    "snapshot_preparation_ms": 3,
+    "ir_query_ms": 3,
+    "allocations_per_request": 100,
+    "allocated_bytes_per_request": 8192,
+    "lock_wait_ms_per_request": 1,
+    "lock_contention_events_per_request": 1,
+}
+
+REQUIRED_V2_PERF_GATE_REPORT_FIELDS = {
+    "contract_version",
+    "profile",
+    "coverage",
+    "results",
+    "verdict",
+    "reason_codes",
+}
+
+REQUIRED_V2_PERF_GATE_REASON_CODES = REQUIRED_V1_PERF_GATE_REASON_CODES | {
+    "missing_required_matrix_coverage",
+    "anti_rescue_budget_exceeded",
+    "provenance_missing_for_authoritative_run",
+    "provenance_mismatch_expected_change_id",
+    "provenance_invalid",
+    "provenance_non_authoritative_cutover_evidence",
+    "parity_evidence_insufficient",
+    "parity_drift_threshold_exceeded",
 }
 
 
@@ -450,63 +508,14 @@ def validate_surface_contract(surface_dir: Path) -> None:
             input_obj = contract.get("input")
             ensure(isinstance(input_obj, dict), f"{contract_path}: input must be object")
             required_profiles = set(input_obj.get("required_profiles", []))
-            required_latency_metrics = set(input_obj.get("required_latency_metrics", []))
-            required_resource_metrics = set(input_obj.get("required_resource_metrics", []))
 
             ensure(
                 REQUIRED_V1_PERF_GATE_PROFILES.issubset(required_profiles),
                 f"{contract_path}: required_profiles must include {sorted(REQUIRED_V1_PERF_GATE_PROFILES)}",
             )
-            ensure(
-                REQUIRED_V1_PERF_GATE_LATENCY_METRICS.issubset(required_latency_metrics),
-                f"{contract_path}: required_latency_metrics must include {sorted(REQUIRED_V1_PERF_GATE_LATENCY_METRICS)}",
-            )
-            ensure(
-                REQUIRED_V1_PERF_GATE_RESOURCE_METRICS.issubset(required_resource_metrics),
-                f"{contract_path}: required_resource_metrics must include {sorted(REQUIRED_V1_PERF_GATE_RESOURCE_METRICS)}",
-            )
 
             baseline = contract.get("baseline")
             ensure(isinstance(baseline, dict), f"{contract_path}: baseline must be object")
-            ceilings = baseline.get("absolute_latency_ceilings_ms")
-            ensure(
-                isinstance(ceilings, dict),
-                f"{contract_path}: baseline.absolute_latency_ceilings_ms must be object",
-            )
-            for profile in sorted(REQUIRED_V1_PERF_GATE_PROFILES):
-                profile_ceiling = ceilings.get(profile)
-                ensure(
-                    isinstance(profile_ceiling, dict),
-                    f"{contract_path}: missing ceiling for profile {profile!r}",
-                )
-                p95 = profile_ceiling.get("p95")
-                p99 = profile_ceiling.get("p99")
-                ensure(
-                    isinstance(p95, int) and p95 > 0,
-                    f"{contract_path}: {profile}.p95 must be positive integer",
-                )
-                ensure(
-                    isinstance(p99, int) and p99 > 0,
-                    f"{contract_path}: {profile}.p99 must be positive integer",
-                )
-
-            resource_ceilings = baseline.get("resource_budget_ceilings")
-            ensure(
-                isinstance(resource_ceilings, dict),
-                f"{contract_path}: baseline.resource_budget_ceilings must be object",
-            )
-            for profile in sorted(REQUIRED_V1_PERF_GATE_PROFILES):
-                profile_budget = resource_ceilings.get(profile)
-                ensure(
-                    isinstance(profile_budget, dict),
-                    f"{contract_path}: missing resource budget for profile {profile!r}",
-                )
-                for key in sorted(REQUIRED_V1_PERF_GATE_RESOURCE_METRICS):
-                    value = profile_budget.get(key)
-                    ensure(
-                        isinstance(value, int) and value > 0,
-                        f"{contract_path}: {profile}.{key} must be positive integer",
-                    )
 
             bootstrap_policy = baseline.get("bootstrap_policy")
             ensure(
@@ -532,42 +541,271 @@ def validate_surface_contract(surface_dir: Path) -> None:
             ensure(isinstance(report, dict), f"{contract_path}: report must be object")
             required_report_fields = set(report.get("required_fields", []))
             ensure(
-                {"contract_version", "verdict", "reason_codes", "profiles"}.issubset(
-                    required_report_fields
-                ),
-                f"{contract_path}: report.required_fields must include contract_version/verdict/reason_codes/profiles",
+                {"contract_version", "verdict", "reason_codes"}.issubset(required_report_fields),
+                f"{contract_path}: report.required_fields must include contract_version/verdict/reason_codes",
             )
 
             evaluator = contract.get("evaluator")
             ensure(isinstance(evaluator, dict), f"{contract_path}: evaluator must be object")
             reason_codes = set(evaluator.get("reason_codes", []))
-            ensure(
-                REQUIRED_V1_PERF_GATE_REASON_CODES.issubset(reason_codes),
-                f"{contract_path}: evaluator.reason_codes must include {sorted(REQUIRED_V1_PERF_GATE_REASON_CODES)}",
-            )
+
+            if major == 1:
+                required_latency_metrics = set(input_obj.get("required_latency_metrics", []))
+                required_resource_metrics = set(input_obj.get("required_resource_metrics", []))
+                ensure(
+                    REQUIRED_V1_PERF_GATE_LATENCY_METRICS.issubset(required_latency_metrics),
+                    f"{contract_path}: required_latency_metrics must include {sorted(REQUIRED_V1_PERF_GATE_LATENCY_METRICS)}",
+                )
+                ensure(
+                    REQUIRED_V1_PERF_GATE_RESOURCE_METRICS.issubset(required_resource_metrics),
+                    f"{contract_path}: required_resource_metrics must include {sorted(REQUIRED_V1_PERF_GATE_RESOURCE_METRICS)}",
+                )
+
+                ceilings = baseline.get("absolute_latency_ceilings_ms")
+                ensure(
+                    isinstance(ceilings, dict),
+                    f"{contract_path}: baseline.absolute_latency_ceilings_ms must be object",
+                )
+                for profile in sorted(REQUIRED_V1_PERF_GATE_PROFILES):
+                    profile_ceiling = ceilings.get(profile)
+                    ensure(
+                        isinstance(profile_ceiling, dict),
+                        f"{contract_path}: missing ceiling for profile {profile!r}",
+                    )
+                    p95 = profile_ceiling.get("p95")
+                    p99 = profile_ceiling.get("p99")
+                    ensure(
+                        isinstance(p95, int) and p95 > 0,
+                        f"{contract_path}: {profile}.p95 must be positive integer",
+                    )
+                    ensure(
+                        isinstance(p99, int) and p99 > 0,
+                        f"{contract_path}: {profile}.p99 must be positive integer",
+                    )
+
+                resource_ceilings = baseline.get("resource_budget_ceilings")
+                ensure(
+                    isinstance(resource_ceilings, dict),
+                    f"{contract_path}: baseline.resource_budget_ceilings must be object",
+                )
+                for profile in sorted(REQUIRED_V1_PERF_GATE_PROFILES):
+                    profile_budget = resource_ceilings.get(profile)
+                    ensure(
+                        isinstance(profile_budget, dict),
+                        f"{contract_path}: missing resource budget for profile {profile!r}",
+                    )
+                    for key in sorted(REQUIRED_V1_PERF_GATE_RESOURCE_METRICS):
+                        value = profile_budget.get(key)
+                        ensure(
+                            isinstance(value, int) and value > 0,
+                            f"{contract_path}: {profile}.{key} must be positive integer",
+                        )
+
+                ensure(
+                    REQUIRED_V1_PERF_GATE_REASON_CODES.issubset(reason_codes),
+                    f"{contract_path}: evaluator.reason_codes must include {sorted(REQUIRED_V1_PERF_GATE_REASON_CODES)}",
+                )
 
             if major == 2:
+                operation_matrix = input_obj.get("required_operation_matrix")
+                ensure(
+                    isinstance(operation_matrix, dict),
+                    f"{contract_path}: input.required_operation_matrix must be object",
+                )
+                ensure(
+                    set(operation_matrix.keys()) == set(REQUIRED_V2_PERF_GATE_OPERATION_MATRIX.keys()),
+                    f"{contract_path}: input.required_operation_matrix keys must equal {sorted(REQUIRED_V2_PERF_GATE_OPERATION_MATRIX.keys())}",
+                )
+                for fixture_family, expected_operations in REQUIRED_V2_PERF_GATE_OPERATION_MATRIX.items():
+                    actual_operations = set(operation_matrix.get(fixture_family, []))
+                    ensure(
+                        actual_operations == expected_operations,
+                        f"{contract_path}: input.required_operation_matrix[{fixture_family!r}] must equal {sorted(expected_operations)}",
+                    )
+
+                latency_families = set(input_obj.get("required_latency_metric_families", []))
+                resource_families = set(input_obj.get("required_resource_metric_families", []))
+                ensure(
+                    latency_families == REQUIRED_V2_PERF_GATE_LATENCY_METRIC_FAMILIES,
+                    f"{contract_path}: input.required_latency_metric_families must equal {sorted(REQUIRED_V2_PERF_GATE_LATENCY_METRIC_FAMILIES)}",
+                )
+                ensure(
+                    resource_families == REQUIRED_V2_PERF_GATE_RESOURCE_METRIC_FAMILIES,
+                    f"{contract_path}: input.required_resource_metric_families must equal {sorted(REQUIRED_V2_PERF_GATE_RESOURCE_METRIC_FAMILIES)}",
+                )
+
                 coverage = contract.get("coverage")
                 ensure(isinstance(coverage, dict), f"{contract_path}: coverage must be object")
                 reported_operations = set(coverage.get("reported_operations", []))
-                missing_operations = set(
-                    coverage.get("missing_representative_operations", [])
+                reported_fixture_families = set(
+                    coverage.get("reported_fixture_families", [])
                 )
                 ensure(
-                    coverage.get("operation_coverage_mode") == "completion_only",
-                    f"{contract_path}: coverage.operation_coverage_mode must be 'completion_only'",
+                    coverage.get("operation_coverage_mode") == "representative_matrix",
+                    f"{contract_path}: coverage.operation_coverage_mode must be 'representative_matrix'",
                 )
                 ensure(
-                    reported_operations == REQUIRED_V2_PERF_GATE_REPORTED_OPERATIONS,
-                    f"{contract_path}: coverage.reported_operations must equal {sorted(REQUIRED_V2_PERF_GATE_REPORTED_OPERATIONS)}",
+                    reported_operations == REQUIRED_V2_PERF_GATE_OPERATIONS,
+                    f"{contract_path}: coverage.reported_operations must equal {sorted(REQUIRED_V2_PERF_GATE_OPERATIONS)}",
                 )
                 ensure(
-                    missing_operations == REQUIRED_V2_PERF_GATE_MISSING_OPERATIONS,
-                    f"{contract_path}: coverage.missing_representative_operations must equal {sorted(REQUIRED_V2_PERF_GATE_MISSING_OPERATIONS)}",
+                    reported_fixture_families == REQUIRED_V2_PERF_GATE_FIXTURE_FAMILIES,
+                    f"{contract_path}: coverage.reported_fixture_families must equal {sorted(REQUIRED_V2_PERF_GATE_FIXTURE_FAMILIES)}",
                 )
                 ensure(
-                    coverage.get("authoritative_for_cutover_acceptance") is False,
-                    f"{contract_path}: coverage.authoritative_for_cutover_acceptance must be false",
+                    coverage.get("authoritative_for_cutover_acceptance") is True,
+                    f"{contract_path}: coverage.authoritative_for_cutover_acceptance must be true",
+                )
+
+                ceilings = baseline.get("absolute_latency_ceilings_ms")
+                ensure(
+                    isinstance(ceilings, dict),
+                    f"{contract_path}: baseline.absolute_latency_ceilings_ms must be object",
+                )
+                resource_ceilings = baseline.get("resource_budget_ceilings")
+                ensure(
+                    isinstance(resource_ceilings, dict),
+                    f"{contract_path}: baseline.resource_budget_ceilings must be object",
+                )
+                for profile in sorted(REQUIRED_V1_PERF_GATE_PROFILES):
+                    profile_latency = ceilings.get(profile)
+                    profile_resource = resource_ceilings.get(profile)
+                    ensure(
+                        isinstance(profile_latency, dict),
+                        f"{contract_path}: missing latency budget for profile {profile!r}",
+                    )
+                    ensure(
+                        isinstance(profile_resource, dict),
+                        f"{contract_path}: missing resource budget for profile {profile!r}",
+                    )
+                    default_latency = profile_latency.get("default")
+                    default_resource = profile_resource.get("default")
+                    ensure(
+                        isinstance(default_latency, dict),
+                        f"{contract_path}: {profile}.default latency budget must be object",
+                    )
+                    ensure(
+                        isinstance(default_resource, dict),
+                        f"{contract_path}: {profile}.default resource budget must be object",
+                    )
+                    incomplete_latency = profile_latency.get("incomplete_syntax_member_access")
+                    incomplete_resource = profile_resource.get("incomplete_syntax_member_access")
+                    ensure(
+                        isinstance(incomplete_latency, dict),
+                        f"{contract_path}: {profile}.incomplete_syntax_member_access latency budget must be object",
+                    )
+                    ensure(
+                        isinstance(incomplete_resource, dict),
+                        f"{contract_path}: {profile}.incomplete_syntax_member_access resource budget must be object",
+                    )
+                    for operation in sorted(REQUIRED_V2_PERF_GATE_OPERATIONS):
+                        latency_budget = default_latency.get(operation)
+                        resource_budget = default_resource.get(operation)
+                        ensure(
+                            isinstance(latency_budget, dict),
+                            f"{contract_path}: {profile}.default.{operation} latency budget must be object",
+                        )
+                        ensure(
+                            isinstance(resource_budget, dict),
+                            f"{contract_path}: {profile}.default.{operation} resource budget must be object",
+                        )
+                        for metric_family in sorted(REQUIRED_V2_PERF_GATE_LATENCY_METRIC_FAMILIES):
+                            metric_budget = latency_budget.get(metric_family)
+                            ensure(
+                                isinstance(metric_budget, dict),
+                                f"{contract_path}: {profile}.default.{operation}.{metric_family} latency budget must be object",
+                            )
+                            ensure(
+                                isinstance(metric_budget.get("p95"), int) and metric_budget["p95"] > 0,
+                                f"{contract_path}: {profile}.default.{operation}.{metric_family}.p95 must be positive integer",
+                            )
+                            ensure(
+                                isinstance(metric_budget.get("p99"), int) and metric_budget["p99"] > 0,
+                                f"{contract_path}: {profile}.default.{operation}.{metric_family}.p99 must be positive integer",
+                            )
+                        for metric_name in sorted(REQUIRED_V2_PERF_GATE_RESOURCE_METRIC_FAMILIES):
+                            value = resource_budget.get(metric_name)
+                            ensure(
+                                isinstance(value, int) and value > 0,
+                                f"{contract_path}: {profile}.default.{operation}.{metric_name} must be positive integer",
+                            )
+                    incomplete_completion_latency = incomplete_latency.get("completion")
+                    incomplete_completion_resource = incomplete_resource.get("completion")
+                    ensure(
+                        isinstance(incomplete_completion_latency, dict),
+                        f"{contract_path}: {profile}.incomplete_syntax_member_access.completion latency budget must be object",
+                    )
+                    ensure(
+                        isinstance(incomplete_completion_resource, dict),
+                        f"{contract_path}: {profile}.incomplete_syntax_member_access.completion resource budget must be object",
+                    )
+                    for metric_family in sorted(REQUIRED_V2_PERF_GATE_LATENCY_METRIC_FAMILIES):
+                        metric_budget = incomplete_completion_latency.get(metric_family)
+                        ensure(
+                            isinstance(metric_budget, dict),
+                            f"{contract_path}: {profile}.incomplete_syntax_member_access.completion.{metric_family} latency budget must be object",
+                        )
+                        ensure(
+                            isinstance(metric_budget.get("p95"), int) and metric_budget["p95"] > 0,
+                            f"{contract_path}: {profile}.incomplete_syntax_member_access.completion.{metric_family}.p95 must be positive integer",
+                        )
+                        ensure(
+                            isinstance(metric_budget.get("p99"), int) and metric_budget["p99"] > 0,
+                            f"{contract_path}: {profile}.incomplete_syntax_member_access.completion.{metric_family}.p99 must be positive integer",
+                        )
+                    for metric_name in sorted(REQUIRED_V2_PERF_GATE_RESOURCE_METRIC_FAMILIES):
+                        value = incomplete_completion_resource.get(metric_name)
+                        ensure(
+                            isinstance(value, int) and value > 0,
+                            f"{contract_path}: {profile}.incomplete_syntax_member_access.completion.{metric_name} must be positive integer",
+                        )
+
+                ratio_baseline_floors = baseline.get("relative_ratio_baseline_floors")
+                ensure(
+                    isinstance(ratio_baseline_floors, dict),
+                    f"{contract_path}: baseline.relative_ratio_baseline_floors must be object",
+                )
+                ensure(
+                    set(ratio_baseline_floors.keys())
+                    == set(REQUIRED_V2_PERF_GATE_RATIO_BASELINE_FLOORS.keys()),
+                    f"{contract_path}: baseline.relative_ratio_baseline_floors keys must equal {sorted(REQUIRED_V2_PERF_GATE_RATIO_BASELINE_FLOORS.keys())}",
+                )
+                for metric_name, expected_floor in (
+                    REQUIRED_V2_PERF_GATE_RATIO_BASELINE_FLOORS.items()
+                ):
+                    actual_floor = ratio_baseline_floors.get(metric_name)
+                    ensure(
+                        isinstance(actual_floor, (int, float)) and actual_floor > 0,
+                        f"{contract_path}: baseline.relative_ratio_baseline_floors.{metric_name} must be positive number",
+                    )
+                    ensure(
+                        float(actual_floor) == float(expected_floor),
+                        f"{contract_path}: baseline.relative_ratio_baseline_floors.{metric_name} must equal {expected_floor}",
+                    )
+
+                anti_rescue_budget = baseline.get("anti_rescue_budget_ceilings")
+                ensure(
+                    isinstance(anti_rescue_budget, dict),
+                    f"{contract_path}: baseline.anti_rescue_budget_ceilings must be object",
+                )
+                for key in [
+                    "stale_fallback_total",
+                    "stale_served_total",
+                    "degraded_substitute_total",
+                    "search_backed_substitute_total",
+                ]:
+                    ensure(
+                        anti_rescue_budget.get(key) == 0,
+                        f"{contract_path}: baseline.anti_rescue_budget_ceilings.{key} must equal 0",
+                    )
+
+                ensure(
+                    REQUIRED_V2_PERF_GATE_REPORT_FIELDS.issubset(required_report_fields),
+                    f"{contract_path}: report.required_fields must include {sorted(REQUIRED_V2_PERF_GATE_REPORT_FIELDS)}",
+                )
+                ensure(
+                    REQUIRED_V2_PERF_GATE_REASON_CODES.issubset(reason_codes),
+                    f"{contract_path}: evaluator.reason_codes must include {sorted(REQUIRED_V2_PERF_GATE_REASON_CODES)}",
                 )
 
         if surface_dir.name == "lsp-completion-timeline" and major == 3:

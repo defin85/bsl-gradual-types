@@ -50,8 +50,9 @@
       "additionalProperties": false,
       "required": [
         "required_profiles",
-        "required_latency_metrics",
-        "required_resource_metrics"
+        "required_operation_matrix",
+        "required_latency_metric_families",
+        "required_resource_metric_families"
       ],
       "properties": {
         "required_profiles": {
@@ -67,31 +68,116 @@
             ]
           }
         },
-        "required_latency_metrics": {
+        "required_operation_matrix": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "steady_member_chain",
+            "post_did_change_current_revision",
+            "object_module_explicit_context",
+            "recordset_module_explicit_context",
+            "incomplete_syntax_member_access"
+          ],
+          "properties": {
+            "steady_member_chain": {
+              "type": "array",
+              "minItems": 5,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "completion",
+                  "hover",
+                  "definition",
+                  "type_at_position",
+                  "members"
+                ]
+              }
+            },
+            "post_did_change_current_revision": {
+              "type": "array",
+              "minItems": 5,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "completion",
+                  "hover",
+                  "definition",
+                  "type_at_position",
+                  "members"
+                ]
+              }
+            },
+            "object_module_explicit_context": {
+              "type": "array",
+              "minItems": 5,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "completion",
+                  "hover",
+                  "definition",
+                  "type_at_position",
+                  "members"
+                ]
+              }
+            },
+            "recordset_module_explicit_context": {
+              "type": "array",
+              "minItems": 5,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "completion",
+                  "hover",
+                  "definition",
+                  "type_at_position",
+                  "members"
+                ]
+              }
+            },
+            "incomplete_syntax_member_access": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "completion"
+                ]
+              }
+            }
+          }
+        },
+        "required_latency_metric_families": {
           "type": "array",
           "minItems": 4,
           "uniqueItems": true,
           "items": {
             "type": "string",
             "enum": [
-              "completion_duration_ms",
-              "intellisense_v2_wait_for_file_version_completion_ms",
-              "intellisense_v2_snapshot_completion_ms",
-              "intellisense_v2_ir_query_completion_ms"
+              "total_duration_ms",
+              "wait_for_file_version_ms",
+              "snapshot_preparation_ms",
+              "ir_query_ms"
             ]
           }
         },
-        "required_resource_metrics": {
+        "required_resource_metric_families": {
           "type": "array",
           "minItems": 4,
           "uniqueItems": true,
           "items": {
             "type": "string",
             "enum": [
-              "allocations_per_completion",
-              "allocated_bytes_per_completion",
-              "lock_wait_ms_per_completion",
-              "lock_contention_events_per_completion"
+              "allocations_per_request",
+              "allocated_bytes_per_request",
+              "lock_wait_ms_per_request",
+              "lock_contention_events_per_request"
             ]
           }
         }
@@ -103,33 +189,22 @@
       "required": [
         "operation_coverage_mode",
         "reported_operations",
-        "missing_representative_operations",
+        "reported_fixture_families",
         "authoritative_for_cutover_acceptance"
       ],
       "properties": {
         "operation_coverage_mode": {
           "type": "string",
-          "const": "completion_only"
+          "const": "representative_matrix"
         },
         "reported_operations": {
           "type": "array",
-          "minItems": 1,
-          "maxItems": 1,
+          "minItems": 5,
           "uniqueItems": true,
           "items": {
             "type": "string",
             "enum": [
-              "completion"
-            ]
-          }
-        },
-        "missing_representative_operations": {
-          "type": "array",
-          "minItems": 4,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "enum": [
+              "completion",
               "hover",
               "definition",
               "type_at_position",
@@ -137,9 +212,24 @@
             ]
           }
         },
+        "reported_fixture_families": {
+          "type": "array",
+          "minItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "steady_member_chain",
+              "post_did_change_current_revision",
+              "object_module_explicit_context",
+              "recordset_module_explicit_context",
+              "incomplete_syntax_member_access"
+            ]
+          }
+        },
         "authoritative_for_cutover_acceptance": {
           "type": "boolean",
-          "const": false
+          "const": true
         }
       }
     },
@@ -149,6 +239,8 @@
       "required": [
         "absolute_latency_ceilings_ms",
         "resource_budget_ceilings",
+        "relative_ratio_baseline_floors",
+        "anti_rescue_budget_ceilings",
         "bootstrap_policy"
       ],
       "properties": {
@@ -162,13 +254,13 @@
           ],
           "properties": {
             "small": {
-              "$ref": "#/$defs/ceilingPair"
+              "$ref": "#/$defs/profileLatencyBudget"
             },
             "large": {
-              "$ref": "#/$defs/ceilingPair"
+              "$ref": "#/$defs/profileLatencyBudget"
             },
             "churn": {
-              "$ref": "#/$defs/ceilingPair"
+              "$ref": "#/$defs/profileLatencyBudget"
             }
           }
         },
@@ -182,13 +274,89 @@
           ],
           "properties": {
             "small": {
-              "$ref": "#/$defs/resourceBudget"
+              "$ref": "#/$defs/profileResourceBudget"
             },
             "large": {
-              "$ref": "#/$defs/resourceBudget"
+              "$ref": "#/$defs/profileResourceBudget"
             },
             "churn": {
-              "$ref": "#/$defs/resourceBudget"
+              "$ref": "#/$defs/profileResourceBudget"
+            }
+          }
+        },
+        "relative_ratio_baseline_floors": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "total_duration_ms",
+            "wait_for_file_version_ms",
+            "snapshot_preparation_ms",
+            "ir_query_ms",
+            "allocations_per_request",
+            "allocated_bytes_per_request",
+            "lock_wait_ms_per_request",
+            "lock_contention_events_per_request"
+          ],
+          "properties": {
+            "total_duration_ms": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "wait_for_file_version_ms": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "snapshot_preparation_ms": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "ir_query_ms": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "allocations_per_request": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "allocated_bytes_per_request": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "lock_wait_ms_per_request": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "lock_contention_events_per_request": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          }
+        },
+        "anti_rescue_budget_ceilings": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "stale_fallback_total",
+            "stale_served_total",
+            "degraded_substitute_total",
+            "search_backed_substitute_total"
+          ],
+          "properties": {
+            "stale_fallback_total": {
+              "type": "integer",
+              "const": 0
+            },
+            "stale_served_total": {
+              "type": "integer",
+              "const": 0
+            },
+            "degraded_substitute_total": {
+              "type": "integer",
+              "const": 0
+            },
+            "search_backed_substitute_total": {
+              "type": "integer",
+              "const": 0
             }
           }
         },
@@ -207,15 +375,17 @@
       "properties": {
         "required_fields": {
           "type": "array",
-          "minItems": 4,
+          "minItems": 6,
           "uniqueItems": true,
           "items": {
             "type": "string",
             "enum": [
               "contract_version",
+              "profile",
+              "coverage",
+              "results",
               "verdict",
-              "reason_codes",
-              "profiles"
+              "reason_codes"
             ]
           }
         },
@@ -270,18 +440,20 @@
       "properties": {
         "reason_codes": {
           "type": "array",
-          "minItems": 18,
+          "minItems": 20,
           "uniqueItems": true,
           "items": {
             "type": "string",
             "enum": [
               "missing_required_metric_field",
+              "missing_required_matrix_coverage",
               "unsupported_contract_version",
               "latency_relative_ratio_exceeded",
               "latency_absolute_ceiling_exceeded",
               "allocation_budget_exceeded",
               "lock_wait_budget_exceeded",
               "lock_contention_budget_exceeded",
+              "anti_rescue_budget_exceeded",
               "protected_acceptance_asset_modified",
               "change_criticality_missing_or_unknown",
               "test_first_evidence_missing_or_invalid",
@@ -300,6 +472,38 @@
     }
   },
   "$defs": {
+    "profileLatencyBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "default",
+        "incomplete_syntax_member_access"
+      ],
+      "properties": {
+        "default": {
+          "type": "object"
+        },
+        "incomplete_syntax_member_access": {
+          "type": "object"
+        }
+      }
+    },
+    "profileResourceBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "default",
+        "incomplete_syntax_member_access"
+      ],
+      "properties": {
+        "default": {
+          "type": "object"
+        },
+        "incomplete_syntax_member_access": {
+          "type": "object"
+        }
+      }
+    },
     "ceilingPair": {
       "type": "object",
       "additionalProperties": false,
@@ -313,34 +517,6 @@
           "minimum": 1
         },
         "p99": {
-          "type": "integer",
-          "minimum": 1
-        }
-      }
-    },
-    "resourceBudget": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "allocations_per_completion",
-        "allocated_bytes_per_completion",
-        "lock_wait_ms_per_completion",
-        "lock_contention_events_per_completion"
-      ],
-      "properties": {
-        "allocations_per_completion": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "allocated_bytes_per_completion": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "lock_wait_ms_per_completion": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "lock_contention_events_per_completion": {
           "type": "integer",
           "minimum": 1
         }

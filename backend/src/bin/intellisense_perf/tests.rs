@@ -1,8 +1,84 @@
 use super::*;
 use crate::reporting::is_report_contract_version_compatible;
-use bsl_shared::TypeRepository;
 use serde_json::json;
+use std::fs;
 use std::sync::Arc;
+use std::time::Duration;
+use tempfile::tempdir;
+
+fn minimal_coverage() -> PerfCoverage {
+    PerfCoverage {
+        operation_coverage_mode: "representative_matrix".to_string(),
+        reported_operations: vec!["completion".to_string()],
+        reported_fixture_families: vec!["steady_member_chain".to_string()],
+        reported_matrix_entries: 1,
+        authoritative_for_cutover_acceptance: false,
+    }
+}
+
+fn minimal_results() -> Vec<PerfResultEntry> {
+    vec![PerfResultEntry {
+        fixture_family: PerfFixtureFamily::SteadyMemberChain,
+        operation: PerfOperation::Completion,
+        cases: 1,
+        total_requests: 1,
+        fail_closed_total: 0,
+        fail_closed_rate: 0.0,
+        error_rate: 0.0,
+        incomplete_rate: 0.0,
+        metrics: PerfResultMetrics {
+            total_duration_ms: PerfMetrics {
+                count: 1,
+                p50_ms: 1.0,
+                p95_ms: 2.0,
+                p99_ms: 3.0,
+            },
+            wait_for_file_version_ms: PerfMetrics {
+                count: 1,
+                p50_ms: 0.0,
+                p95_ms: 0.0,
+                p99_ms: 0.0,
+            },
+            snapshot_preparation_ms: PerfMetrics {
+                count: 1,
+                p50_ms: 0.0,
+                p95_ms: 0.0,
+                p99_ms: 0.0,
+            },
+            ir_query_ms: PerfMetrics {
+                count: 1,
+                p50_ms: 0.0,
+                p95_ms: 0.0,
+                p99_ms: 0.0,
+            },
+            allocations_per_request: 10.0,
+            allocated_bytes_per_request: 20.0,
+            lock_wait_ms_per_request: 1.0,
+            lock_contention_events_per_request: 1.0,
+        },
+        anti_rescue: PerfAntiRescueCounts::default(),
+    }]
+}
+
+fn minimal_report(contract_version: &str) -> PerfReport {
+    PerfReport {
+        scenario: "small".to_string(),
+        profile: "small".to_string(),
+        cases: 1,
+        iterations: 1,
+        warmup: 0,
+        change_id: None,
+        provenance: None,
+        contract_version: contract_version.to_string(),
+        coverage: minimal_coverage(),
+        results: minimal_results(),
+        thresholds: None,
+        verdict: "pass".to_string(),
+        reason_codes: Vec::new(),
+        pass: true,
+        comparison: None,
+    }
+}
 
 #[test]
 fn build_churned_content_switches_marker_without_growth() {
@@ -32,6 +108,8 @@ fn build_churn_state_uses_target_case_file_for_all_matching_ids() {
             content: Arc::from("A"),
             line: 0,
             column: 0,
+            operation: PerfOperation::Completion,
+            fixture_family: PerfFixtureFamily::SteadyMemberChain,
         },
         PreparedCase {
             file_id: V2FileId(2),
@@ -39,6 +117,8 @@ fn build_churn_state_uses_target_case_file_for_all_matching_ids() {
             content: Arc::from("A"),
             line: 0,
             column: 1,
+            operation: PerfOperation::Completion,
+            fixture_family: PerfFixtureFamily::SteadyMemberChain,
         },
     ];
     let scenario = Scenario {
@@ -57,82 +137,58 @@ fn build_churn_state_uses_target_case_file_for_all_matching_ids() {
         .expect("churn state")
         .expect("churn enabled");
     assert_eq!(state.plan.every, 2);
+    assert_eq!(state.plan.trigger_case_index, 1);
     assert_eq!(state.plan.target_file_ids, vec![V2FileId(1), V2FileId(2)]);
 }
 
 #[test]
-fn missing_resource_metric_keys_reports_absent_fields() {
-    let report = json!({
-        "metrics": {
-            "allocations_per_completion": 10.0,
-            "allocated_bytes_per_completion": 20.0
-        }
-    });
-
-    let missing = missing_resource_metric_keys(&report);
-    assert_eq!(
-        missing,
-        vec![
-            "lock_wait_ms_per_completion",
-            "lock_contention_events_per_completion"
-        ]
-    );
-}
-
-#[test]
-fn missing_resource_metric_keys_accepts_complete_numeric_metrics() {
-    let report = json!({
-        "metrics": {
-            "allocations_per_completion": 10.0,
-            "allocated_bytes_per_completion": 20,
-            "lock_wait_ms_per_completion": 1.5,
-            "lock_contention_events_per_completion": 2
-        }
-    });
-
-    let missing = missing_resource_metric_keys(&report);
-    assert!(missing.is_empty());
-}
-
-#[test]
-fn missing_required_metric_comparison_is_fail_closed() {
-    let contract = json!({
-        "surface": "intellisense-perf-gate",
-        "major_version": 2
-    });
-    let report = PerfReport {
-        scenario: "small".to_string(),
-        cases: 1,
-        iterations: 1,
-        warmup: 0,
-        change_id: None,
-        provenance: None,
-        contract_version: "v2".to_string(),
-        metrics: PerfMetrics {
-            total_requests: 1,
-            count: 1,
-            p50_ms: 1.0,
-            p95_ms: 2.0,
-            p99_ms: 3.0,
-            error_rate: 0.0,
-            incomplete_rate: 0.0,
-            allocations_per_completion: 10.0,
-            allocated_bytes_per_completion: 20.0,
-            lock_wait_ms_per_completion: 1.0,
-            lock_contention_events_per_completion: 1.0,
-        },
-        thresholds: None,
-        comparison: None,
+fn churn_state_only_applies_at_configured_case_boundary() {
+    let plan = ChurnPlan {
+        every: 2,
+        trigger_case_index: 3,
+        target_file_uri: "/tmp/test.bsl".to_string(),
+        target_file_path: Arc::from("/tmp/test.bsl"),
+        target_file_ids: vec![V2FileId(1)],
+        base_content: Arc::from("Процедура Тест()\nКонецПроцедуры\n"),
     };
+    let state = ChurnRuntimeState::new(plan);
 
-    let comparison =
-        build_missing_required_metric_comparison(&contract, &report, 1.10, 1.15, 1.20, 0.0, 0.0);
+    assert!(!state.should_apply(0, 0));
+    assert!(!state.should_apply(0, 2));
+    assert!(state.should_apply(0, 3));
+    assert!(!state.should_apply(0, 4));
 
-    assert_eq!(comparison.verdict, "fail");
-    assert!(!comparison.pass);
+    assert!(!state.should_apply(1, 3));
+    assert!(state.should_apply(2, 3));
+}
+
+#[test]
+fn read_scenario_parses_operation_and_fixture_family() {
+    let dir = tempdir().expect("tempdir");
+    let scenario_path = dir.path().join("scenario.json");
+    fs::write(
+        &scenario_path,
+        r#"{
+  "name": "small",
+  "cases": [
+    {
+      "file": "examples/test_lsp.bsl",
+      "marker": "Arr.Add",
+      "label": "steady_hover",
+      "operation": "hover",
+      "fixture_family": "steady_member_chain"
+    }
+  ]
+}"#,
+    )
+    .expect("write scenario");
+
+    let scenario = read_scenario(&scenario_path).expect("read scenario");
+    assert_eq!(scenario.cases.len(), 1);
+    assert_eq!(scenario.cases[0].operation, PerfOperation::Hover);
     assert_eq!(
-        comparison.reason_codes,
-        vec!["missing_required_metric_field".to_string()]
+        scenario.cases[0].fixture_family,
+        PerfFixtureFamily::SteadyMemberChain
     );
 }
 
@@ -148,68 +204,10 @@ fn report_contract_version_compatibility_allows_unknown_baseline_only() {
 fn compare_reports_fails_with_unsupported_contract_version() {
     let contract = json!({
         "surface": "intellisense-perf-gate",
-        "major_version": 2,
-        "input": {
-            "required_profiles": ["small", "large", "churn"]
-        },
-        "baseline": {
-            "absolute_latency_ceilings_ms": {
-                "small": {"p95": 300, "p99": 600},
-                "large": {"p95": 1500, "p99": 3000},
-                "churn": {"p95": 1800, "p99": 3500}
-            },
-            "resource_budget_ceilings": {
-                "small": {
-                    "allocations_per_completion": 2000000,
-                    "allocated_bytes_per_completion": 200000000,
-                    "lock_wait_ms_per_completion": 5000,
-                    "lock_contention_events_per_completion": 5000
-                },
-                "large": {
-                    "allocations_per_completion": 5000000,
-                    "allocated_bytes_per_completion": 500000000,
-                    "lock_wait_ms_per_completion": 10000,
-                    "lock_contention_events_per_completion": 10000
-                },
-                "churn": {
-                    "allocations_per_completion": 6000000,
-                    "allocated_bytes_per_completion": 600000000,
-                    "lock_wait_ms_per_completion": 15000,
-                    "lock_contention_events_per_completion": 15000
-                }
-            }
-        }
+        "major_version": 2
     });
-
-    let current = PerfReport {
-        scenario: "small".to_string(),
-        cases: 1,
-        iterations: 1,
-        warmup: 0,
-        change_id: None,
-        provenance: None,
-        contract_version: "v2".to_string(),
-        metrics: PerfMetrics {
-            total_requests: 1,
-            count: 1,
-            p50_ms: 1.0,
-            p95_ms: 2.0,
-            p99_ms: 3.0,
-            error_rate: 0.0,
-            incomplete_rate: 0.0,
-            allocations_per_completion: 10.0,
-            allocated_bytes_per_completion: 20.0,
-            lock_wait_ms_per_completion: 1.0,
-            lock_contention_events_per_completion: 1.0,
-        },
-        thresholds: None,
-        comparison: None,
-    };
-    let baseline = PerfReport {
-        contract_version: "v1".to_string(),
-        ..current.clone()
-    };
-
+    let current = minimal_report("v2");
+    let baseline = minimal_report("v1");
     let thresholds = PerfGateThresholds {
         latency_ratio_p95_max: 1.10,
         latency_ratio_p99_max: 1.15,
@@ -218,6 +216,7 @@ fn compare_reports_fails_with_unsupported_contract_version() {
         max_incomplete_rate: 0.0,
         blocking_mode: true,
     };
+
     let comparison = compare_reports(&contract, "small", &current, &baseline, thresholds);
     assert_eq!(comparison.verdict, "fail");
     assert!(!comparison.pass);
@@ -248,31 +247,15 @@ fn cutover_context_requires_authoritative_change_id_unless_updating_baseline() {
 }
 
 #[test]
+fn update_baseline_skips_existing_baseline_comparison() {
+    assert!(should_compare_against_existing_baseline(true, false));
+    assert!(!should_compare_against_existing_baseline(true, true));
+    assert!(!should_compare_against_existing_baseline(false, false));
+}
+
+#[test]
 fn provenance_failure_comparison_is_fail_closed() {
-    let report = PerfReport {
-        scenario: "small".to_string(),
-        cases: 1,
-        iterations: 1,
-        warmup: 0,
-        change_id: Some("refactor-v2-contract-first-hardening".to_string()),
-        provenance: None,
-        contract_version: "v1".to_string(),
-        metrics: PerfMetrics {
-            total_requests: 1,
-            count: 1,
-            p50_ms: 1.0,
-            p95_ms: 2.0,
-            p99_ms: 3.0,
-            error_rate: 0.0,
-            incomplete_rate: 0.0,
-            allocations_per_completion: 10.0,
-            allocated_bytes_per_completion: 20.0,
-            lock_wait_ms_per_completion: 1.0,
-            lock_contention_events_per_completion: 1.0,
-        },
-        thresholds: None,
-        comparison: None,
-    };
+    let report = minimal_report("v2");
     let thresholds = PerfGateThresholds {
         latency_ratio_p95_max: 1.10,
         latency_ratio_p99_max: 1.15,
@@ -295,135 +278,108 @@ fn provenance_failure_comparison_is_fail_closed() {
     );
 }
 
+#[test]
+fn perf_operation_maps_to_shared_runtime_semantic_operation_ids() {
+    assert_eq!(
+        PerfOperation::Completion.semantic_operation().as_str(),
+        "completion"
+    );
+    assert_eq!(PerfOperation::Hover.semantic_operation().as_str(), "hover");
+    assert_eq!(
+        PerfOperation::Definition.semantic_operation().as_str(),
+        "definition"
+    );
+    assert_eq!(
+        PerfOperation::TypeAtPosition.semantic_operation().as_str(),
+        "type_at_position"
+    );
+    assert_eq!(PerfOperation::Members.semantic_operation().as_str(), "members");
+}
+
 #[tokio::test]
-async fn run_iterations_uses_shared_runtime_preparation_for_completion_cases() {
-    let repository_impl = Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
-    repository_impl
-        .load_types(vec![bsl_shared::domain::types::RawTypeData {
-            name: "Массив".to_string(),
-            source: bsl_shared::domain::types::RawDataSource::Platform,
-            methods: vec![bsl_shared::domain::types::RawMethodData {
-                name: "Добавить".to_string(),
-                return_type: "Булево".to_string(),
-                ..Default::default()
-            }],
-            ..Default::default()
-        }])
-        .expect("load types");
-    let repository =
-        repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
-    let resolver = Arc::new(bsl_shared::domain::resolver::TypeResolver::new(
-        repository.clone(),
-    ));
-    let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
-        signature_index: repository.get_signature_index_clone(),
-        resolver: Some(resolver.clone()),
-        repository: repository.clone(),
-        platform_signatures_loaded: false,
-    });
-    let metadata_lookup = TypeMetadataLookup::new(repository.clone());
-    let index_snapshot =
-        Arc::new(bsl_backend::system::IntellisenseIndexStore::new("cfg", "platform").snapshot());
+async fn prime_runtime_files_unblocks_non_timeout_operations_without_churn() {
+    let workspace_root = workspace_root();
+    let prepared = prepare_cases(
+        &[
+            ScenarioCase {
+                file: PathBuf::from("backend/tests/perf/fixtures/steady_member_chain.bsl"),
+                marker: "ДляType = Массив".to_string(),
+                label: Some("type_probe".to_string()),
+                operation: PerfOperation::TypeAtPosition,
+                fixture_family: PerfFixtureFamily::SteadyMemberChain,
+            },
+            ScenarioCase {
+                file: PathBuf::from("backend/tests/perf/fixtures/steady_member_chain.bsl"),
+                marker: "ДляMembers = Массив.".to_string(),
+                label: Some("members_probe".to_string()),
+                operation: PerfOperation::Members,
+                fixture_family: PerfFixtureFamily::SteadyMemberChain,
+            },
+        ],
+        &workspace_root,
+    )
+    .expect("prepare cases");
     let coordinator = Arc::new(SystemCoordinator::new());
+    coordinator
+        .start_with_paths_blocking(None, None, None, None)
+        .expect("start system coordinator");
+    let deps_bundle =
+        build_deps_bundle_v2(&coordinator, None, None).expect("build_deps_bundle_v2");
     let settings = bsl_backend::application::ExecutionSettings {
-        settings_id: SettingsId::from_hash("perf-runtime-test"),
+        settings_id: SettingsId::from_hash("intellisense-perf-test"),
         diagnostics_detail_level: DetailLevel::Full,
     };
-    let deps_id = bsl_analysis_v2::DepsSnapshotId::from_hash("perf-runtime-test");
-    let file_id = V2FileId(1);
-    let file_uri = "/tmp/intellisense_perf_runtime_test.bsl".to_string();
-    let content: Arc<str> = Arc::from(
-        concat!(
-            "Процедура Тест()\n",
-            "    МойМассив = Новый Массив;\n",
-            "    МойМассив.\n",
-            "КонецПроцедуры\n"
-        )
-        .to_string(),
-    );
-
     let mut host = AnalysisHostV2::default();
     host.apply_change(ChangeV2::SetDepsSnapshot {
-        deps_id: deps_id.clone(),
-        deps: deps.clone(),
+        deps_id: deps_bundle.deps_id.clone(),
+        deps: deps_bundle.semantic_deps.clone(),
     });
     host.apply_change(ChangeV2::SetSettingsSnapshot {
         settings_id: settings.settings_id.clone(),
         diagnostics_detail_level: settings.diagnostics_detail_level,
     });
-    host.apply_change(ChangeV2::SetFile {
-        file_id,
-        text: content.clone(),
-        version: 0,
-        path: Arc::from(file_uri.clone()),
-    });
-
     let facade = bsl_backend::application::IntellisenseV2Facade::new(
         host,
-        index_snapshot,
+        deps_bundle.index_snapshot.clone(),
         Some(coordinator.clone()),
     );
-    let case = PreparedCase {
-        file_id,
-        file_uri: file_uri.clone(),
-        content: content.clone(),
-        line: 2,
-        column: "    МойМассив."
-            .chars()
-            .map(|ch| ch.len_utf16())
-            .sum::<usize>() as u32,
-    };
-    let cases = vec![case];
+    prime_runtime_files(&facade, &prepared).await;
+
+    for case in &prepared {
+        let state = tokio::time::timeout(
+            Duration::from_secs(2),
+            facade.file_revision_state(case.file_id),
+        )
+        .await
+        .expect("file revision state must not hang")
+        .expect("file revision state must exist");
+        assert_eq!(state.version, 0);
+    }
+
+    let mut content_by_file = build_content_by_file_map(&prepared);
+    let version_by_file = build_file_version_map(&prepared);
+    let resolver = deps_bundle
+        .semantic_deps
+        .resolver
+        .clone()
+        .unwrap_or_else(|| Arc::new(TypeResolver::new(deps_bundle.semantic_deps.repository.clone())));
+    let metadata_lookup = TypeMetadataLookup::new(deps_bundle.semantic_deps.repository.clone());
     let context = IterationContext {
         facade: &facade,
-        deps_id: &deps_id,
+        deps_id: &deps_bundle.deps_id,
         settings,
         coordinator: coordinator.as_ref(),
         metadata_lookup: &metadata_lookup,
         resolver: resolver.as_ref(),
-        cases: &cases,
     };
-    let mut content_by_file = build_content_by_file_map(&cases);
-    let mut version_by_file = build_file_version_map(&cases);
-    let mut churn_state = None;
-    let mut durations = Vec::new();
-    let mut errors = 0usize;
-    let mut incomplete = 0usize;
-    let mut allocation_count_total = 0u64;
-    let mut allocated_bytes_total = 0u64;
-    let mut lock_wait_ms_total = 0.0;
-    let mut lock_contention_events_total = 0u64;
 
-    run_iterations(
-        &context,
-        1,
-        &mut churn_state,
-        &mut content_by_file,
-        &mut version_by_file,
-        Some(OutputTargets {
-            durations: &mut durations,
-            errors: &mut errors,
-            incomplete: &mut incomplete,
-            allocation_count_total: &mut allocation_count_total,
-            allocated_bytes_total: &mut allocated_bytes_total,
-            lock_wait_ms_total: &mut lock_wait_ms_total,
-            lock_contention_events_total: &mut lock_contention_events_total,
-        }),
-    )
-    .await
-    .expect("run_iterations");
-
-    assert_eq!(
-        errors, 0,
-        "shared runtime completion iteration must not error"
-    );
-    assert_eq!(
-        incomplete, 0,
-        "shared runtime completion iteration must stay complete"
-    );
-    assert_eq!(
-        durations.len(),
-        1,
-        "expected one measured completion iteration"
-    );
+    for case in &prepared {
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            execute_case_iteration(&context, case, &mut content_by_file, &version_by_file),
+        )
+        .await
+        .expect("operation must not hang")
+        .expect("operation measurement");
+    }
 }

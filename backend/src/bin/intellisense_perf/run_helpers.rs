@@ -1,5 +1,11 @@
 use super::*;
 
+use bsl_backend::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter};
+use bsl_runtime::application::type_system::{
+    definition_exact_type_index_available_at_position, get_hover_info_with_semantic_program,
+    goto_definition_v2_with_source_and_analysis, hover_exact_type_index_available_at_position,
+};
+
 pub(super) fn read_scenario(path: &Path) -> Result<Scenario> {
     let data = fs::read_to_string(path)
         .with_context(|| format!("Failed to read scenario file: {}", path.to_string_lossy()))?;
@@ -66,10 +72,42 @@ pub(super) fn prepare_cases(cases: &[ScenarioCase], base_dir: &Path) -> Result<V
             content: Arc::from(content),
             line,
             column,
+            operation: case.operation,
+            fixture_family: case.fixture_family,
         });
     }
 
     Ok(prepared)
+}
+
+pub(super) async fn prime_runtime_files(
+    facade: &bsl_backend::application::IntellisenseV2Facade,
+    cases: &[PreparedCase],
+) {
+    let changes = cases
+        .iter()
+        .map(|case| ChangeV2::SetFile {
+            file_id: case.file_id,
+            text: case.content.clone(),
+            version: 0,
+            path: Arc::from(case.file_uri.clone()),
+        })
+        .collect::<Vec<_>>();
+    facade.apply_changes(changes);
+    let _ = facade.snapshot().await;
+}
+
+pub(super) fn build_case_group_counts(cases: &[PreparedCase]) -> HashMap<ResultGroupKey, usize> {
+    let mut counts = HashMap::new();
+    for case in cases {
+        *counts
+            .entry(ResultGroupKey {
+                fixture_family: case.fixture_family,
+                operation: case.operation,
+            })
+            .or_insert(0) += 1;
+    }
+    counts
 }
 
 fn find_position(content: &str, marker: &str) -> Option<(u32, u32)> {
@@ -88,103 +126,162 @@ pub(super) struct IterationContext<'a> {
     pub(super) coordinator: &'a SystemCoordinator,
     pub(super) metadata_lookup: &'a TypeMetadataLookup,
     pub(super) resolver: &'a TypeResolver,
-    pub(super) cases: &'a [PreparedCase],
+}
+
+#[derive(Debug)]
+pub(super) struct CaseExecutionMeasurement {
+    pub(super) total_duration_ms: f64,
+    pub(super) wait_for_file_version_ms: f64,
+    pub(super) snapshot_preparation_ms: f64,
+    pub(super) ir_query_ms: f64,
+    pub(super) incomplete: bool,
+    pub(super) fail_closed: bool,
+    pub(super) allocation_count: u64,
+    pub(super) allocated_bytes: u64,
+    pub(super) lock_wait_ms: f64,
+    pub(super) lock_contention_events: u64,
+    pub(super) anti_rescue: PerfAntiRescueCounts,
 }
 
 pub(super) async fn run_iterations(
     context: &IterationContext<'_>,
+    cases: &[PreparedCase],
     iterations: usize,
     churn_state: &mut Option<ChurnRuntimeState>,
     content_by_file: &mut HashMap<String, Arc<str>>,
     version_by_file: &mut HashMap<String, i32>,
-    mut output: Option<OutputTargets<'_>>,
+    mut output: Option<&mut HashMap<ResultGroupKey, MeasuredResults>>,
 ) -> Result<()> {
     for iteration in 0..iterations {
-        maybe_apply_churn(
-            context.facade,
-            churn_state,
-            content_by_file,
-            version_by_file,
-            iteration,
-        )?;
-        for case in context.cases {
-            let started = Instant::now();
-            let alloc_before = allocation_snapshot();
-            let mut ir_elapsed_ms = 0.0;
-            let expected_version = version_by_file
-                .get(case.file_uri.as_str())
-                .copied()
-                .unwrap_or(0);
-            let execution = bsl_backend::application::ExecutionContext {
-                origin: bsl_backend::application::ObservabilityOrigin::Runtime,
-                operation: bsl_backend::application::SemanticOperation::Completion,
-                completion_mode: Some("perf_harness"),
-                completion_large_churn_active: false,
-                file_id: case.file_id,
-                min_file_version: Some(expected_version),
-                expected_deps_id: Some(context.deps_id.clone()),
-                flow_sensitive: false,
-                settings: context.settings.clone(),
-                cancellation: bsl_backend::application::CancellationPolicy::Ignore,
-            };
-            let result = async {
-                let prepared = context
-                    .facade
-                    .prepare_stateful_operation(&execution, Some(context.coordinator))
-                    .await
-                    .map_err(|outcome| {
-                        anyhow::anyhow!(
-                            "prepare_stateful_operation failed: {}",
-                            outcome.as_str()
-                        )
-                    })?;
-                let analysis = prepared.snapshot.analysis;
-                let case_content = analysis
-                    .file_text(case.file_id)
-                    .ok()
-                    .flatten()
-                    .or_else(|| content_by_file.get(case.file_uri.as_str()).cloned())
-                    .unwrap_or_else(|| case.content.clone());
-                let file_path = analysis
-                    .file_path(case.file_id)
-                    .ok()
-                    .flatten()
-                    .unwrap_or_else(|| Arc::from(case.file_uri.clone()));
-                let _deps = analysis.deps_data().ok().context("deps unavailable")?;
+        for (case_index, case) in cases.iter().enumerate() {
+            maybe_apply_churn(
+                context.facade,
+                churn_state,
+                content_by_file,
+                version_by_file,
+                iteration,
+                case_index,
+            )?;
+            let measurement =
+                execute_case_iteration(context, case, content_by_file, version_by_file).await;
+            if let Some(groups) = output.as_mut() {
+                let entry = groups
+                    .entry(ResultGroupKey {
+                        fixture_family: case.fixture_family,
+                        operation: case.operation,
+                    })
+                    .or_default();
+                let Ok(measurement) = measurement else {
+                    entry.errors += 1;
+                    continue;
+                };
+                entry.total_duration_ms.push(measurement.total_duration_ms);
+                entry
+                    .wait_for_file_version_ms
+                    .push(measurement.wait_for_file_version_ms);
+                entry
+                    .snapshot_preparation_ms
+                    .push(measurement.snapshot_preparation_ms);
+                entry.ir_query_ms.push(measurement.ir_query_ms);
+                if measurement.incomplete {
+                    entry.incomplete += 1;
+                }
+                if measurement.fail_closed {
+                    entry.fail_closed += 1;
+                }
+                entry.allocation_count_total += measurement.allocation_count;
+                entry.allocated_bytes_total += measurement.allocated_bytes;
+                entry.lock_wait_ms_total += measurement.lock_wait_ms;
+                entry.lock_contention_events_total += measurement.lock_contention_events;
+                entry.anti_rescue.stale_fallback_total +=
+                    measurement.anti_rescue.stale_fallback_total;
+                entry.anti_rescue.stale_served_total +=
+                    measurement.anti_rescue.stale_served_total;
+                entry.anti_rescue.degraded_substitute_total +=
+                    measurement.anti_rescue.degraded_substitute_total;
+                entry.anti_rescue.search_backed_substitute_total +=
+                    measurement.anti_rescue.search_backed_substitute_total;
+            }
+        }
+    }
+    Ok(())
+}
 
-                let member_access_owner_type_hint =
-                    if completion_request_targets_member_access(
-                        case_content.as_ref(),
-                        case.line,
-                        case.column,
-                    ) {
-                        let _ = analysis.precompute_type_index_for_file(
-                            case.file_id,
-                            Some(expected_version),
-                            0,
-                        );
-                        completion_owner_hint_at_position(
-                            &analysis,
-                            case.file_id,
-                            case_content.as_ref(),
-                            case.line,
-                            case.column,
-                        )
-                    } else {
-                        None
-                    };
+pub(super) async fn execute_case_iteration(
+    context: &IterationContext<'_>,
+    case: &PreparedCase,
+    content_by_file: &mut HashMap<String, Arc<str>>,
+    version_by_file: &HashMap<String, i32>,
+) -> Result<CaseExecutionMeasurement> {
+    let started = Instant::now();
+    let alloc_before = allocation_snapshot();
+    let expected_version = version_by_file
+        .get(case.file_uri.as_str())
+        .copied()
+        .unwrap_or(0);
+    let execution = bsl_backend::application::ExecutionContext {
+        origin: bsl_backend::application::ObservabilityOrigin::Runtime,
+        operation: case.operation.semantic_operation(),
+        completion_mode: matches!(case.operation, PerfOperation::Completion | PerfOperation::Members)
+            .then_some("perf_harness"),
+        completion_large_churn_active: false,
+        file_id: case.file_id,
+        min_file_version: Some(expected_version),
+        expected_deps_id: Some(context.deps_id.clone()),
+        flow_sensitive: false,
+        settings: context.settings.clone(),
+        cancellation: bsl_backend::application::CancellationPolicy::Ignore,
+    };
+    let prepared = context
+        .facade
+        .prepare_stateful_operation(&execution, Some(context.coordinator))
+        .await
+        .map_err(|outcome| anyhow::anyhow!("prepare_stateful_operation failed: {}", outcome.as_str()))?;
+    let analysis = prepared.snapshot.analysis;
+    let case_content = analysis
+        .file_text(case.file_id)
+        .ok()
+        .flatten()
+        .or_else(|| content_by_file.get(case.file_uri.as_str()).cloned())
+        .unwrap_or_else(|| case.content.clone());
+    let file_path = analysis
+        .file_path(case.file_id)
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| Arc::from(case.file_uri.clone()));
+    let deps = analysis.deps_data().ok().context("deps unavailable")?;
 
-                let ir_started = Instant::now();
-                let ir_program = bsl_backend::application::IntellisenseV2Facade::run_ir_query_singleflight(
-                    &execution,
-                    &analysis,
-                    Some(context.coordinator),
-                    case.file_id,
-                )
-                .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
-                .context("ir unavailable")?;
-                ir_elapsed_ms = ir_started.elapsed().as_secs_f64() * 1000.0;
+    let member_access_owner_type_hint =
+        if matches!(case.operation, PerfOperation::Completion | PerfOperation::Members)
+            && completion_request_targets_member_access(case_content.as_ref(), case.line, case.column)
+        {
+            let _ =
+                analysis.precompute_type_index_for_file(case.file_id, Some(expected_version), 0);
+            completion_owner_hint_at_position(
+                &analysis,
+                case.file_id,
+                case_content.as_ref(),
+                case.line,
+                case.column,
+            )
+        } else {
+            None
+        };
 
+    let ir_started = Instant::now();
+    let ir_program = bsl_backend::application::IntellisenseV2Facade::run_ir_query_singleflight(
+        &execution,
+        &analysis,
+        Some(context.coordinator),
+        case.file_id,
+    )
+    .map_err(|_| anyhow::anyhow!("ir query cancelled"))?
+    .context("ir unavailable")?;
+    let ir_query_ms = ir_started.elapsed().as_secs_f64() * 1000.0;
+
+    let outcome = match case.operation {
+        PerfOperation::Completion | PerfOperation::Members => {
+            let response =
                 bsl_backend::application::get_completion_with_semantic_program_snapshot_v2_with_trigger_hint(
                     case_content.as_ref(),
                     case.line,
@@ -199,35 +296,92 @@ pub(super) async fn run_iterations(
                     false,
                     None,
                 )
-                .await
-            }
-            .await;
-            let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
-            let alloc_after = allocation_snapshot();
-            let alloc_delta = alloc_after.count.saturating_sub(alloc_before.count);
-            let bytes_delta = alloc_after.bytes.saturating_sub(alloc_before.bytes);
-            let lock_contention_event = if ir_elapsed_ms > 0.0 { 1_u64 } else { 0_u64 };
-
-            if let Some(targets) = output.as_mut() {
-                match result {
-                    Ok(response) => {
-                        targets.durations.push(elapsed_ms);
-                        if response.is_incomplete {
-                            *targets.incomplete += 1;
-                        }
-                    }
-                    Err(_) => {
-                        *targets.errors += 1;
-                    }
-                }
-                *targets.allocation_count_total += alloc_delta;
-                *targets.allocated_bytes_total += bytes_delta;
-                *targets.lock_wait_ms_total += ir_elapsed_ms;
-                *targets.lock_contention_events_total += lock_contention_event;
-            }
+                .await?;
+            (response.is_incomplete, false)
         }
-    }
-    Ok(())
+        PerfOperation::Hover => {
+            let hover_formatter =
+                HoverFormatter::new(HoverFormatConfig::default(), context.metadata_lookup.clone());
+            let hover = get_hover_info_with_semantic_program(
+                &analysis,
+                case.file_id,
+                case_content.as_ref(),
+                case.line,
+                case.column,
+                false,
+                context.metadata_lookup,
+                &hover_formatter,
+                None,
+                context.resolver,
+                ir_program.clone(),
+            );
+            let fail_closed = hover.is_none()
+                && !hover_exact_type_index_available_at_position(
+                    &analysis,
+                    case.file_id,
+                    case_content.as_ref(),
+                    case.line,
+                    case.column,
+                    ir_program.as_ref(),
+                );
+            (false, fail_closed)
+        }
+        PerfOperation::Definition => {
+            let definition = goto_definition_v2_with_source_and_analysis(
+                file_path.as_ref(),
+                case_content.as_ref(),
+                &analysis,
+                case.file_id,
+                ir_program,
+                deps,
+                case.line,
+                case.column,
+                Some(context.coordinator),
+            );
+            let fail_closed = definition.is_none()
+                && !definition_exact_type_index_available_at_position(
+                    &analysis,
+                    case.file_id,
+                    case.line,
+                    case.column,
+                );
+            (false, fail_closed)
+        }
+        PerfOperation::TypeAtPosition => {
+            let type_resolution = type_at_position(
+                &analysis,
+                case.file_id,
+                case.line,
+                case.column,
+            );
+            (false, type_resolution.is_none())
+        }
+    };
+
+    let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let alloc_after = allocation_snapshot();
+    let alloc_delta = alloc_after.count.saturating_sub(alloc_before.count);
+    let bytes_delta = alloc_after.bytes.saturating_sub(alloc_before.bytes);
+
+    Ok(CaseExecutionMeasurement {
+        total_duration_ms: elapsed_ms,
+        wait_for_file_version_ms: prepared
+            .wait_elapsed
+            .map(|elapsed| elapsed.as_secs_f64() * 1000.0)
+            .unwrap_or(0.0),
+        snapshot_preparation_ms: prepared.snapshot_elapsed.as_secs_f64() * 1000.0,
+        ir_query_ms,
+        incomplete: outcome.0,
+        fail_closed: outcome.1,
+        allocation_count: alloc_delta,
+        allocated_bytes: bytes_delta,
+        lock_wait_ms: ir_query_ms,
+        lock_contention_events: u64::from(ir_query_ms > 0.0),
+        anti_rescue: PerfAntiRescueCounts {
+            stale_served_total: u64::from(prepared.stale_served),
+            ..PerfAntiRescueCounts::default()
+        },
+    })
 }
 
 pub(super) fn build_content_by_file_map(cases: &[PreparedCase]) -> HashMap<String, Arc<str>> {
@@ -282,6 +436,7 @@ pub(super) fn build_churn_state(
 
     let plan = ChurnPlan {
         every: churn.every,
+        trigger_case_index: target_case,
         target_file_uri,
         target_file_path,
         target_file_ids,
@@ -296,11 +451,12 @@ fn maybe_apply_churn(
     content_by_file: &mut HashMap<String, Arc<str>>,
     version_by_file: &mut HashMap<String, i32>,
     iteration: usize,
+    case_index: usize,
 ) -> Result<()> {
     let Some(state) = churn_state.as_mut() else {
         return Ok(());
     };
-    if !state.should_apply(iteration) {
+    if !state.should_apply(iteration, case_index) {
         return Ok(());
     }
 
@@ -336,16 +492,6 @@ pub(super) fn build_churned_content(base_content: &str, revision: u64) -> String
     content.push_str(marker);
     content.push('\n');
     content
-}
-
-pub(super) struct OutputTargets<'a> {
-    pub(super) durations: &'a mut Vec<f64>,
-    pub(super) errors: &'a mut usize,
-    pub(super) incomplete: &'a mut usize,
-    pub(super) allocation_count_total: &'a mut u64,
-    pub(super) allocated_bytes_total: &'a mut u64,
-    pub(super) lock_wait_ms_total: &'a mut f64,
-    pub(super) lock_contention_events_total: &'a mut u64,
 }
 
 fn completion_request_targets_member_access(text: &str, line: u32, column: u32) -> bool {
@@ -407,4 +553,17 @@ fn completion_owner_hint_at_position(
     profiled
         .resolution
         .filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
+}
+
+fn type_at_position(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    line: u32,
+    column: u32,
+) -> Option<bsl_shared::domain::types::TypeResolution> {
+    let offset = analysis
+        .utf16_position_to_byte_offset(file_id, line, column)
+        .ok()
+        .flatten()? as u32;
+    analysis.type_at_byte_offset_serve_only(file_id, offset).ok().flatten()
 }

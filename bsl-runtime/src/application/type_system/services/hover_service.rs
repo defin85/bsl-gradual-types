@@ -33,6 +33,16 @@ pub fn get_hover_info_with_semantic_program(
     resolver: &TypeResolver,
     ir_program: std::sync::Arc<SemanticProgram>,
 ) -> Option<String> {
+    if !hover_exact_type_index_available_at_position(
+        analysis,
+        file_id,
+        file_content,
+        line,
+        column,
+        ir_program.as_ref(),
+    ) {
+        return None;
+    }
     compute_hover_info_from_ir(
         ir_program.as_ref(),
         analysis,
@@ -60,7 +70,7 @@ pub fn hover_exact_type_index_available_at_position(
     analysis
         .current_type_index_serve_only_ready(file_id)
         .ok()
-        .unwrap_or(true)
+        .unwrap_or(false)
 }
 
 #[allow(clippy::too_many_arguments)]

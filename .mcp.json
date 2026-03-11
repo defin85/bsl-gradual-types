@@ -9,6 +9,13 @@
         "rust-analyzer"
       ]
     },
+    "bsl-agent": {
+      "command": "C:\\1CProject\\bsl-gradual-types\\target\\release\\bsl-agent.exe",
+      "env": {
+        "RUST_LOG": "bsl_agent=info",
+        "BSL_AGENT_HTTP_ADDR": "127.0.0.1:0"
+      }
+    },
     "sourcebot": {
       "type": "stdio",
       "command": "npx",

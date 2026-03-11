@@ -136,6 +136,8 @@ If your MCP client can call tools but cannot run shell commands, use the MCP too
 
 ## Example Codex MCP config (stdio)
 
+The checked-in repository [`.mcp.json`](../.mcp.json) now includes a Windows `bsl-agent` preset that points at the release binary and enables the read-only HTTP UI on an auto-port. Adjust `command` and env overrides to match your local machine.
+
 ```toml
 [mcp_servers.bsl_agent]
 command = "/home/egor/code/bsl-gradual-types/target/release/bsl-agent"
@@ -146,6 +148,8 @@ env = {
   BSL_AGENT_HTTP_ADDR = "127.0.0.1:0",
 }
 ```
+
+If your MCP client supports `cwd`, point it at the target project root to keep the default log file under `<project>/.bsl-agent/mcp.log`; otherwise use `BSL_AGENT_LOG_DIR`.
 
 With this config the stable default log path is:
 

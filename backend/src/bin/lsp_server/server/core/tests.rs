@@ -3770,7 +3770,7 @@ async fn p7_member_access_completion_does_not_backfill_from_runtime_index_snapsh
         .clone()
         .expect("server must be captured");
     let file_id = server.get_or_create_file_id_v2(&uri).await;
-    server.cancel_type_index_precompute_v2(file_id).await;
+    force_current_revision_without_exact_type_index(&server, file_id, &uri, fixture, 2).await;
 
     let completion_position = find_utf16_position_after_marker(fixture, "ЛокМассив.");
     let completion_labels = lsp_completion_labels_at(&mut service, &uri, completion_position).await;
@@ -4035,7 +4035,7 @@ async fn p7_hover_cache_miss_emits_bounded_fail_closed_reason() {
         .clone()
         .expect("server must be captured");
     let file_id = server.get_or_create_file_id_v2(&uri).await;
-    server.cancel_type_index_precompute_v2(file_id).await;
+    force_current_revision_without_exact_type_index(&server, file_id, &uri, fixture, 2).await;
 
     let fallback_reason_total = |coordinator: &Arc<SystemCoordinator>| -> u64 {
         let metrics = coordinator.observability_metrics();
@@ -4072,6 +4072,13 @@ async fn p7_hover_cache_miss_emits_bounded_fail_closed_reason() {
     assert!(
         hover_response.is_some(),
         "hover should return response envelope"
+    );
+    let hover_value = serde_json::to_value(&hover_response).expect("serialize response");
+    let hover_result = hover_value.get("result").cloned().expect("result field");
+    let hover: Option<Hover> = serde_json::from_value(hover_result).expect("parse hover");
+    assert!(
+        hover.is_none(),
+        "hover cache miss must stay fail-closed and return empty semantic payload: {hover_value:?}"
     );
     let after_hover = fallback_reason_total(&coordinator);
     assert!(
@@ -10469,6 +10476,41 @@ async fn wait_for_type_index_precompute_completion(
         );
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
     }
+}
+
+async fn force_current_revision_without_exact_type_index(
+    server: &BslLanguageServer,
+    file_id: bsl_analysis_v2::FileId,
+    uri: &Url,
+    content: &str,
+    version: i32,
+) {
+    let path = uri
+        .to_file_path()
+        .ok()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|| uri.to_string());
+    server.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
+        file_id,
+        text: Arc::from(content.to_string()),
+        version,
+        path: Arc::from(path),
+    }]);
+    {
+        let mut versions = server.latest_received_file_versions_v2.write().await;
+        versions.insert(file_id, version);
+    }
+    server.cancel_type_index_precompute_v2(file_id).await;
+    let exact_ready = server
+        .analysis_v2
+        .snapshot()
+        .await
+        .current_type_index_serve_only_ready(file_id)
+        .expect("current_type_index_serve_only_ready");
+    assert!(
+        !exact_ready,
+        "test setup must create current-revision semantic-index miss"
+    );
 }
 
 fn message_has_unknown_member(message: &str, member_name: &str) -> bool {

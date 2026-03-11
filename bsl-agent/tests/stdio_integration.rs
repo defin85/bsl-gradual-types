@@ -2,10 +2,11 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use bsl_agent::types::{
-    BslDiagnosticsResponse, BslSymbolSearchResponse, BuildInfoResponse, ContextExpandResponse,
-    ContextPackResponse, JobStartResponse, JobStateDto, JobStatusResponse, UiUrlResponse,
-    WorkspaceDocumentsSetResponse, WorkspaceGetSettingsResponse, WorkspaceListResponse,
-    WorkspaceOpenResponse, WorkspaceStatusResponse, WorkspaceUpdateSettingsResponse,
+    BslDefinitionResponse, BslDiagnosticsResponse, BslMembersResponse, BslSymbolSearchResponse,
+    BslTypeAtPositionResponse, BuildInfoResponse, ContextExpandResponse, ContextPackResponse,
+    JobStartResponse, JobStateDto, JobStatusResponse, UiUrlResponse, WorkspaceDocumentsSetResponse,
+    WorkspaceGetSettingsResponse, WorkspaceListResponse, WorkspaceOpenResponse,
+    WorkspaceStatusResponse, WorkspaceUpdateSettingsResponse,
 };
 use bsl_shared::api::dtos::TypeDto;
 use bsl_shared::api::dtos::{AnalysisResultDto, MetricsDto, SnapshotMetaDto};
@@ -81,6 +82,16 @@ async fn call_tool<T: DeserializeOwned>(
 
     let value = extract_json_text(result);
     serde_json::from_value(value).expect("decode result")
+}
+
+async fn run_job_and_collect_result<T: DeserializeOwned>(
+    service: &RunningService<RoleClient, ()>,
+    name: &'static str,
+    args: serde_json::Value,
+) -> T {
+    let start: JobStartResponse = call_tool(service, name, args).await;
+    wait_job_succeeded(service, &start.job_id).await;
+    call_tool(service, "job_result", json!({ "job_id": &start.job_id })).await
 }
 
 async fn call_tool_expect_invalid_params(
@@ -266,6 +277,64 @@ fn write_semantic_progress_fixture(root: &Path, file_count: usize) {
 
         std::fs::write(&module_path, source).expect("write semantic fixture");
     }
+}
+
+fn utf16_len(text: &str) -> u32 {
+    text.chars().map(|ch| ch.len_utf16() as u32).sum::<u32>()
+}
+
+fn utf16_position_for_marker(text: &str, marker: &str, extra_utf16: u32) -> serde_json::Value {
+    let marker_start = text.find(marker).expect("marker");
+    let prefix = &text[..marker_start];
+    let line = prefix.bytes().filter(|byte| *byte == b'\n').count() as u32;
+    let line_start = prefix.rfind('\n').map(|idx| idx + 1).unwrap_or(0);
+    let character = utf16_len(&prefix[line_start..]) + extra_utf16;
+    json!({
+        "line": line,
+        "character": character,
+    })
+}
+
+fn write_minimal_document_object_module_fixture(
+    root: &Path,
+    module_rel_path: &str,
+    module_code: &str,
+) {
+    let module_path = root.join(module_rel_path);
+    std::fs::create_dir_all(module_path.parent().expect("module parent"))
+        .expect("mkdir object module");
+    std::fs::create_dir_all(root.join("Documents")).expect("mkdir documents");
+    std::fs::write(
+        root.join("Configuration.xml"),
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses">
+  <Configuration uuid="00000000-0000-0000-0000-000000000000">
+    <Properties>
+      <Name>TestConfig</Name>
+      <CompatibilityMode>Version8_3_25</CompatibilityMode>
+    </Properties>
+    <ChildObjects>
+      <Document>Док1</Document>
+    </ChildObjects>
+  </Configuration>
+</MetaDataObject>
+"#,
+    )
+    .expect("write Configuration.xml");
+    std::fs::write(
+        root.join("Documents/Док1.xml"),
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses">
+  <Document uuid="00000000-0000-0000-0000-000000000001">
+    <Properties>
+      <Name>Док1</Name>
+    </Properties>
+  </Document>
+</MetaDataObject>
+"#,
+    )
+    .expect("write document xml");
+    std::fs::write(&module_path, module_code).expect("write object module");
 }
 
 fn assert_running_progress_is_non_decorative(
@@ -1096,6 +1165,220 @@ async fn stdio_type_get_returns_properties_and_tabular_sections_for_conf_type() 
         dto.methods_count.is_some(),
         "expected methodsCount to be present when include_methods=false"
     );
+
+    let _close: serde_json::Value = call_tool(
+        &service,
+        "workspace_close",
+        json!({ "session_id": &session_id }),
+    )
+    .await;
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_semantic_tools_happy_path_uses_current_revision_overlay() {
+    const MODULE_REL_PATH: &str = "Documents/Док1/Ext/ObjectModule.bsl";
+
+    let service = spawn_agent(&[]).await;
+    let temp_root = tempfile::TempDir::new().expect("tempdir");
+    let module_code = concat!(
+        "Процедура МойМетод() Экспорт\n",
+        "КонецПроцедуры\n",
+        "\n",
+        "Процедура ТестTransport()\n",
+        "    ЭтотОбъект.МойМетод();\n",
+        "    ЭтотОбъект.\n",
+        "КонецПроцедуры\n"
+    );
+
+    write_minimal_document_object_module_fixture(temp_root.path(), MODULE_REL_PATH, module_code);
+
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [temp_root.path().to_string_lossy()],
+            "configuration_path": temp_root.path().to_string_lossy(),
+            "platform_version": "8.3.25",
+        }),
+    )
+    .await;
+    let session_id = open.session_id.clone();
+    let root_id = open.roots[0].root_id.clone();
+    let _status = wait_workspace_ready(&service, &open).await;
+
+    let set: WorkspaceDocumentsSetResponse = call_tool(
+        &service,
+        "workspace_documents_set",
+        json!({
+            "session_id": &session_id,
+            "files": [
+                {
+                    "doc": { "root_id": &root_id, "path": MODULE_REL_PATH },
+                    "text": module_code,
+                    "version": 1
+                }
+            ],
+            "mark_hot": true
+        }),
+    )
+    .await;
+    assert!(set.analysis_revision > 0, "expected overlay revision bump");
+
+    let type_result: BslTypeAtPositionResponse = run_job_and_collect_result(
+        &service,
+        "bsl_type_at_position_start",
+        json!({
+            "session_id": &session_id,
+            "file": { "doc": { "root_id": &root_id, "path": MODULE_REL_PATH } },
+            "position": utf16_position_for_marker(
+                module_code,
+                "    ЭтотОбъект.МойМетод();",
+                utf16_len("    "),
+            ),
+            "include_flow_sensitive": false
+        }),
+    )
+    .await;
+    assert_eq!(type_result.analysis_revision, set.analysis_revision);
+    assert!(
+        type_result.warnings.is_empty(),
+        "type_at_position warnings: {:?}",
+        type_result.warnings
+    );
+    let type_info = type_result.type_info.expect("type_at_position type_info");
+    assert!(
+        type_info.name.contains("Док1"),
+        "expected object module type name, got {:?}",
+        type_info
+    );
+    assert_eq!(type_info.active_facet.as_deref(), Some("Object"));
+
+    let members_result: BslMembersResponse = run_job_and_collect_result(
+        &service,
+        "bsl_members_start",
+        json!({
+            "session_id": &session_id,
+            "file": { "doc": { "root_id": &root_id, "path": MODULE_REL_PATH } },
+            "position": utf16_position_for_marker(
+                module_code,
+                "    ЭтотОбъект.\n",
+                utf16_len("    ЭтотОбъект."),
+            ),
+            "limit": 50,
+            "include_flow_sensitive": false
+        }),
+    )
+    .await;
+    assert_eq!(members_result.analysis_revision, set.analysis_revision);
+    assert!(
+        !members_result.truncated,
+        "members response must stay complete"
+    );
+    assert!(
+        members_result
+            .members
+            .iter()
+            .any(|member| member.name == "Ссылка" && member.kind == "property"),
+        "expected object facet members on default path, got {:?}",
+        members_result.members
+    );
+
+    let definition_result: BslDefinitionResponse = run_job_and_collect_result(
+        &service,
+        "bsl_definition_start",
+        json!({
+            "session_id": &session_id,
+            "file": { "doc": { "root_id": &root_id, "path": MODULE_REL_PATH } },
+            "position": utf16_position_for_marker(
+                module_code,
+                "    ЭтотОбъект.МойМетод();",
+                utf16_len("    ЭтотОбъект."),
+            )
+        }),
+    )
+    .await;
+    assert_eq!(definition_result.analysis_revision, set.analysis_revision);
+    let location = definition_result.location.expect("definition location");
+    assert_eq!(location.file.path, MODULE_REL_PATH);
+    assert_eq!(location.range.start.line, 0);
+
+    let _close: serde_json::Value = call_tool(
+        &service,
+        "workspace_close",
+        json!({ "session_id": &session_id }),
+    )
+    .await;
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_definition_fail_closed_on_current_revision_unresolved_target() {
+    const MODULE_REL_PATH: &str = "Documents/Док1/Ext/ObjectModule.bsl";
+
+    let service = spawn_agent(&[]).await;
+    let temp_root = tempfile::TempDir::new().expect("tempdir");
+    let module_code = concat!(
+        "Процедура Тест()\n",
+        "    ЭтотОбъект.Несуществующий();\n",
+        "КонецПроцедуры\n"
+    );
+
+    write_minimal_document_object_module_fixture(temp_root.path(), MODULE_REL_PATH, module_code);
+
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [temp_root.path().to_string_lossy()],
+            "configuration_path": temp_root.path().to_string_lossy(),
+            "platform_version": "8.3.25",
+        }),
+    )
+    .await;
+    let session_id = open.session_id.clone();
+    let root_id = open.roots[0].root_id.clone();
+    let _status = wait_workspace_ready(&service, &open).await;
+
+    let set: WorkspaceDocumentsSetResponse = call_tool(
+        &service,
+        "workspace_documents_set",
+        json!({
+            "session_id": &session_id,
+            "files": [
+                {
+                    "doc": { "root_id": &root_id, "path": MODULE_REL_PATH },
+                    "text": module_code,
+                    "version": 1
+                }
+            ],
+            "mark_hot": true
+        }),
+    )
+    .await;
+    assert!(set.analysis_revision > 0, "expected overlay revision bump");
+
+    let definition_result: BslDefinitionResponse = run_job_and_collect_result(
+        &service,
+        "bsl_definition_start",
+        json!({
+            "session_id": &session_id,
+            "file": { "doc": { "root_id": &root_id, "path": MODULE_REL_PATH } },
+            "position": utf16_position_for_marker(
+                module_code,
+                "    ЭтотОбъект.Несуществующий();",
+                utf16_len("    ЭтотОбъект."),
+            )
+        }),
+    )
+    .await;
+    assert_eq!(definition_result.analysis_revision, set.analysis_revision);
+    assert!(
+        definition_result.location.is_none(),
+        "unresolved target must stay fail-closed on current revision, got {:?}",
+        definition_result.location
+    );
+    assert!(definition_result.snippet.is_none());
 
     let _close: serde_json::Value = call_tool(
         &service,

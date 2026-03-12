@@ -50,6 +50,8 @@
         "cli/src/main.rs::cli_type_info_preserves_object_module_binding_facets",
         "cli/src/main.rs::cli_file_diagnostics_use_shared_runtime_snapshot",
         "bsl-agent/tests/stdio_integration.rs::stdio_semantic_tools_happy_path_uses_current_revision_overlay",
+        "bsl-agent/tests/stdio_integration.rs::stdio_members_fail_closed_on_current_revision_missing_owner_hint",
+        "bsl-agent/tests/stdio_integration.rs::stdio_type_at_position_returns_empty_on_current_revision_without_semantic_surface",
         "bsl-agent/tests/stdio_integration.rs::stdio_definition_fail_closed_on_current_revision_unresolved_target"
       ]
     },

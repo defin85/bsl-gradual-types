@@ -404,14 +404,13 @@ fn semantic_helpers_fail_closed_without_precomputed_type_index() {
         .map(|ch| ch.len_utf16())
         .sum::<usize>() as u32;
     assert!(
-        member_access_owner_type_hint_at_position(
+        bsl_runtime::application::completion_member_access_owner_type_hint_from_analysis_with_flow_sensitive(
             &analysis,
             bsl_analysis_v2::FileId(1),
             content,
             2,
             member_column,
             false,
-            None,
         )
         .is_none(),
         "member-access helper must fail closed without exact type_index artifact"

@@ -39,6 +39,8 @@ run_cross_adapter_smoke() {
   cargo test -p bsl-cli --bin bsl-cli cli_type_info_preserves_object_module_binding_facets -- --nocapture
   cargo test -p bsl-cli --bin bsl-cli cli_file_diagnostics_use_shared_runtime_snapshot -- --nocapture
   cargo test -p bsl-agent --test stdio_integration stdio_semantic_tools_happy_path_uses_current_revision_overlay -- --nocapture
+  cargo test -p bsl-agent --test stdio_integration stdio_members_fail_closed_on_current_revision_missing_owner_hint -- --nocapture
+  cargo test -p bsl-agent --test stdio_integration stdio_type_at_position_returns_empty_on_current_revision_without_semantic_surface -- --nocapture
   cargo test -p bsl-agent --test stdio_integration stdio_definition_fail_closed_on_current_revision_unresolved_target -- --nocapture
 }
 

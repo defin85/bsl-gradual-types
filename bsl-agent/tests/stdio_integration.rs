@@ -1313,6 +1313,172 @@ async fn stdio_semantic_tools_happy_path_uses_current_revision_overlay() {
 }
 
 #[tokio::test]
+async fn stdio_members_fail_closed_on_current_revision_missing_owner_hint() {
+    const MODULE_REL_PATH: &str = "src/CommonModules/Foo/Module.bsl";
+
+    let service = spawn_agent(&[]).await;
+    let temp_root = tempfile::TempDir::new().expect("tempdir");
+    let module_code = concat!(
+        "Процедура Тест()\n",
+        "    Несуществующий.\n",
+        "КонецПроцедуры\n"
+    );
+
+    let module_path = temp_root.path().join(MODULE_REL_PATH);
+    std::fs::create_dir_all(module_path.parent().expect("module parent"))
+        .expect("mkdir module parent");
+    std::fs::write(&module_path, module_code).expect("write Module.bsl");
+
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [temp_root.path().to_string_lossy()],
+        }),
+    )
+    .await;
+    let session_id = open.session_id.clone();
+    let root_id = open.roots[0].root_id.clone();
+    let _status = wait_workspace_ready(&service, &open).await;
+
+    let set: WorkspaceDocumentsSetResponse = call_tool(
+        &service,
+        "workspace_documents_set",
+        json!({
+            "session_id": &session_id,
+            "files": [
+                {
+                    "doc": { "root_id": &root_id, "path": MODULE_REL_PATH },
+                    "text": module_code,
+                    "version": 1
+                }
+            ],
+            "mark_hot": true
+        }),
+    )
+    .await;
+    assert!(set.analysis_revision > 0, "expected overlay revision bump");
+
+    let members_result: BslMembersResponse = run_job_and_collect_result(
+        &service,
+        "bsl_members_start",
+        json!({
+            "session_id": &session_id,
+            "file": { "doc": { "root_id": &root_id, "path": MODULE_REL_PATH } },
+            "position": utf16_position_for_marker(
+                module_code,
+                "    Несуществующий.\n",
+                utf16_len("    Несуществующий."),
+            ),
+            "limit": 50,
+            "include_flow_sensitive": false
+        }),
+    )
+    .await;
+    assert_eq!(members_result.analysis_revision, set.analysis_revision);
+    assert!(
+        members_result.members.is_empty(),
+        "members without canonical owner hint must stay fail-closed, got {:?}",
+        members_result.members
+    );
+    assert!(
+        !members_result.truncated,
+        "fail-closed MCP members result must not be truncated"
+    );
+
+    let _close: serde_json::Value = call_tool(
+        &service,
+        "workspace_close",
+        json!({ "session_id": &session_id }),
+    )
+    .await;
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_type_at_position_returns_empty_on_current_revision_without_semantic_surface() {
+    const MODULE_REL_PATH: &str = "src/CommonModules/Foo/Module.bsl";
+
+    let service = spawn_agent(&[]).await;
+    let temp_root = tempfile::TempDir::new().expect("tempdir");
+    let module_code = concat!(
+        "Процедура Тест()\n",
+        "    Значение = 1;\n",
+        "КонецПроцедуры\n"
+    );
+
+    let module_path = temp_root.path().join(MODULE_REL_PATH);
+    std::fs::create_dir_all(module_path.parent().expect("module parent"))
+        .expect("mkdir module parent");
+    std::fs::write(&module_path, module_code).expect("write Module.bsl");
+
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [temp_root.path().to_string_lossy()],
+        }),
+    )
+    .await;
+    let session_id = open.session_id.clone();
+    let root_id = open.roots[0].root_id.clone();
+    let _status = wait_workspace_ready(&service, &open).await;
+
+    let set: WorkspaceDocumentsSetResponse = call_tool(
+        &service,
+        "workspace_documents_set",
+        json!({
+            "session_id": &session_id,
+            "files": [
+                {
+                    "doc": { "root_id": &root_id, "path": MODULE_REL_PATH },
+                    "text": module_code,
+                    "version": 1
+                }
+            ],
+            "mark_hot": true
+        }),
+    )
+    .await;
+    assert!(set.analysis_revision > 0, "expected overlay revision bump");
+
+    let type_result: BslTypeAtPositionResponse = run_job_and_collect_result(
+        &service,
+        "bsl_type_at_position_start",
+        json!({
+            "session_id": &session_id,
+            "file": { "doc": { "root_id": &root_id, "path": MODULE_REL_PATH } },
+            "position": utf16_position_for_marker(
+                module_code,
+                "    Значение = 1;\n",
+                utf16_len(""),
+            ),
+            "include_flow_sensitive": false
+        }),
+    )
+    .await;
+    assert_eq!(type_result.analysis_revision, set.analysis_revision);
+    assert!(
+        type_result.type_info.is_none(),
+        "position without semantic surface must stay empty, got {:?}",
+        type_result.type_info
+    );
+    assert!(
+        type_result.warnings.is_empty(),
+        "empty MCP type-at-position response must not synthesize transport warnings: {:?}",
+        type_result.warnings
+    );
+
+    let _close: serde_json::Value = call_tool(
+        &service,
+        "workspace_close",
+        json!({ "session_id": &session_id }),
+    )
+    .await;
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
 async fn stdio_definition_fail_closed_on_current_revision_unresolved_target() {
     const MODULE_REL_PATH: &str = "Documents/Док1/Ext/ObjectModule.bsl";
 

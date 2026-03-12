@@ -131,12 +131,13 @@ pub async fn get_completion(
     .await
 }
 
-pub fn completion_member_access_owner_type_hints_from_analysis(
+fn completion_member_access_owner_type_hints_from_analysis_internal(
     analysis: &bsl_analysis_v2::AnalysisV2,
     file_id: bsl_analysis_v2::FileId,
     file_content: &str,
     line: u32,
     column: u32,
+    include_flow_sensitive: bool,
 ) -> Vec<TypeResolution> {
     let Ok(exact_ready) = analysis.current_type_index_serve_only_ready(file_id) else {
         return Vec::new();
@@ -171,13 +172,19 @@ pub fn completion_member_access_owner_type_hints_from_analysis(
         probe_offsets.push(span.start);
 
         for offset in probe_offsets {
-            let Ok(profiled) = analysis.type_at_byte_offset_serve_only_profiled(file_id, offset)
-            else {
-                continue;
+            let resolution = if include_flow_sensitive {
+                analysis
+                    .flow_type_at_byte_offset(file_id, offset)
+                    .ok()
+                    .flatten()
+            } else {
+                analysis
+                    .type_at_byte_offset_serve_only_profiled(file_id, offset)
+                    .ok()
+                    .and_then(|profiled| profiled.resolution)
             };
-            let Some(resolution) = profiled
-                .resolution
-                .filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
+            let Some(resolution) =
+                resolution.filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
             else {
                 continue;
             };
@@ -189,6 +196,23 @@ pub fn completion_member_access_owner_type_hints_from_analysis(
     }
 
     resolutions
+}
+
+pub fn completion_member_access_owner_type_hints_from_analysis(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    file_content: &str,
+    line: u32,
+    column: u32,
+) -> Vec<TypeResolution> {
+    completion_member_access_owner_type_hints_from_analysis_internal(
+        analysis,
+        file_id,
+        file_content,
+        line,
+        column,
+        false,
+    )
 }
 
 pub fn completion_member_access_owner_type_hints_from_semantic_program(
@@ -207,12 +231,36 @@ pub fn completion_member_access_owner_type_hint_from_analysis(
     line: u32,
     column: u32,
 ) -> Option<TypeResolution> {
-    let mut resolutions = completion_member_access_owner_type_hints_from_analysis(
+    let mut resolutions = completion_member_access_owner_type_hints_from_analysis_internal(
         analysis,
         file_id,
         file_content,
         line,
         column,
+        false,
+    );
+    if resolutions.len() == 1 {
+        resolutions.pop()
+    } else {
+        None
+    }
+}
+
+pub fn completion_member_access_owner_type_hint_from_analysis_with_flow_sensitive(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    file_content: &str,
+    line: u32,
+    column: u32,
+    include_flow_sensitive: bool,
+) -> Option<TypeResolution> {
+    let mut resolutions = completion_member_access_owner_type_hints_from_analysis_internal(
+        analysis,
+        file_id,
+        file_content,
+        line,
+        column,
+        include_flow_sensitive,
     );
     if resolutions.len() == 1 {
         resolutions.pop()

@@ -790,7 +790,6 @@ fn collect_members(request: MembersRequest) -> Result<BslMembersResponse, rmcp::
                 position.line,
                 position.character,
                 flow_sensitive_enabled,
-                Some(coordinator.as_ref()),
             )
         })
         .flatten()

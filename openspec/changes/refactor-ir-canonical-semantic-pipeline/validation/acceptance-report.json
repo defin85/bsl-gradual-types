@@ -271,7 +271,7 @@
       "source_asset": {
         "kind": "test",
         "path": "backend/tests/lsp_intellisense_tests.rs",
-        "selector": "lsp_signature_help_uses_semantic_facts_with_empty_request_time_repository"
+        "selector": "lsp_signature_help_keeps_method_semantic_facts_with_empty_request_time_repository"
       }
     },
     {
@@ -414,7 +414,7 @@
       "source_asset": {
         "kind": "test",
         "path": "backend/tests/lsp_intellisense_tests.rs",
-        "selector": "lsp_signature_help_uses_semantic_facts_with_empty_request_time_repository"
+        "selector": "lsp_signature_help_keeps_method_semantic_facts_with_empty_request_time_repository"
       }
     },
     {
@@ -441,6 +441,32 @@
         "kind": "test",
         "path": "bsl-agent/src/session/tests.rs",
         "selector": "bsl_members_does_not_execute_parse_result_query_on_semantic_path"
+      }
+    },
+    {
+      "bundle_id": "no_adapter_local_semantic_truth",
+      "fixture_id": "current_revision_transport_fail_closed",
+      "operation": "members",
+      "consumer": "mcp",
+      "verdict": "pass",
+      "reason_code": "fail_closed_by_contract",
+      "source_asset": {
+        "kind": "test",
+        "path": "bsl-agent/tests/stdio_integration.rs",
+        "selector": "stdio_members_fail_closed_on_current_revision_missing_owner_hint"
+      }
+    },
+    {
+      "bundle_id": "no_adapter_local_semantic_truth",
+      "fixture_id": "current_revision_transport_empty_surface",
+      "operation": "type_at_position",
+      "consumer": "mcp",
+      "verdict": "pass",
+      "reason_code": "fail_closed_by_contract",
+      "source_asset": {
+        "kind": "test",
+        "path": "bsl-agent/tests/stdio_integration.rs",
+        "selector": "stdio_type_at_position_returns_empty_on_current_revision_without_semantic_surface"
       }
     },
     {

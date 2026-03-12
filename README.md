@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-1.70+-brightgreen.svg)](https://www.rust-lang.org/)
 
-GitHub Actions сейчас использует workflow `CI` как default fail-closed path для OpenSpec governance gate по затронутым `openspec/changes/<id>`. Локальные `cargo fmt`, `cargo clippy` и `cargo test` перед PR по-прежнему обязательны (см. `CONTRIBUTING.md`).
+GitHub Actions сейчас использует workflow `CI` как active readiness path: для релевантных изменений он прогоняет OpenSpec governance gate, shipped IntelliSense smoke и blocking perf gate. Локальные `cargo fmt`, `cargo clippy` и `cargo test` перед PR по-прежнему обязательны (см. `CONTRIBUTING.md`).
 
 ## 📋 Обзор
 

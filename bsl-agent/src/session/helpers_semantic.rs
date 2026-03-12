@@ -117,46 +117,18 @@ fn member_access_owner_type_hint_at_position(
     line: u32,
     character: u32,
     include_flow_sensitive: bool,
-    coordinator: Option<&bsl_runtime::system::SystemCoordinator>,
 ) -> Option<bsl_shared::domain::types::TypeResolution> {
-    let line_text = file_content.lines().nth(line as usize)?;
-    let cursor_byte = bsl_analysis_v2::utf16_to_byte_offset(line_text, character);
-    let line_prefix = match line_text
-        .get(cursor_byte..)
-        .and_then(|tail| tail.chars().next())
-    {
-        Some('.') => line_text
-            .get(..cursor_byte.saturating_add(1))
-            .unwrap_or(line_text),
-        _ => line_text.get(..cursor_byte)?,
-    };
-    let dot_in_line = line_prefix.rfind('.')?;
-    let receiver = line_prefix.get(..dot_in_line)?.trim_end();
-    if receiver.is_empty() {
-        return None;
-    }
-    let probe_utf16 = bsl_analysis_v2::byte_offset_to_utf16(line_text, receiver.len());
-    let offset = analysis
-        .utf16_position_to_byte_offset(file_id, line, probe_utf16)
-        .ok()
-        .flatten()?
-        .saturating_sub(1);
-    let offset = offset.min(u32::MAX as usize) as u32;
-    if include_flow_sensitive {
-        analysis
-            .flow_type_at_byte_offset(file_id, offset)
-            .ok()
-            .flatten()
-    } else {
-        serve_only_type_at_byte_offset_with_reason(analysis, file_id, offset, coordinator)
-    }
+    bsl_runtime::application::completion_member_access_owner_type_hint_from_analysis_with_flow_sensitive(
+        analysis,
+        file_id,
+        file_content,
+        line,
+        character,
+        include_flow_sensitive,
+    )
 }
 
-fn has_member_access_receiver_at_position(
-    file_content: &str,
-    line: u32,
-    character: u32,
-) -> bool {
+fn has_member_access_receiver_at_position(file_content: &str, line: u32, character: u32) -> bool {
     let Some(line_text) = file_content.lines().nth(line as usize) else {
         return false;
     };

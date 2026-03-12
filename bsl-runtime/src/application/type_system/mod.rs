@@ -34,6 +34,7 @@ pub use services::completion_service::{
 };
 pub use services::completion_service::{
     completion_member_access_owner_type_hint_from_analysis,
+    completion_member_access_owner_type_hint_from_analysis_with_flow_sensitive,
     completion_member_access_owner_type_hints_from_analysis,
 };
 pub use services::completion_service::{get_completion, CompletionContext, CompletionStats};

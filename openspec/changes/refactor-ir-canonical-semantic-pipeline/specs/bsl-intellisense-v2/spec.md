@@ -39,7 +39,9 @@ Syntax extraction для неполного кода MAY использоват�
 ### Requirement: v2 pipeline является единственным источником истины для вывода типов (MUST)
 Система MUST использовать canonical IR как единственный semantic source of truth для IDE-функций (`completion`, `hover`, `signatureHelp`, `definition`, `diagnostics`, `type-at-position`).
 
-`derived semantic index` MUST быть единственным fast query артефактом для интерактивных semantic запросов и MUST строиться только из canonical IR snapshot.
+`derived semantic index` MUST быть единственным fast query артефактом для latency-critical interactive point-queries (`completion`, `hover`, `signatureHelp`, `definition`, `type-at-position`) и MUST строиться только из canonical IR snapshot.
+
+`diagnostics` MAY использовать direct canonical IR/CFG batch path того же current-revision snapshot, но MUST NOT вводить отдельный semantic source of truth, stale substitute или adapter-local semantic reconstruction.
 
 Legacy-пути вывода типов MUST быть удалены (не поддерживаются), включая parse-result-based semantic inference paths, которые существуют параллельно canonical IR.
 
@@ -48,6 +50,12 @@ Legacy-пути вывода типов MUST быть удалены (не по�
 - **WHEN** IDE запрашивает hover и completion в одной и той же позиции/контексте
 - **THEN** ответы опираются на один canonical IR snapshot и derived semantic index той же revision
 - **AND** не используют альтернативные semantic inference пути вне canonical IR contract
+
+#### Scenario: Diagnostics используют тот же canonical snapshot без отдельного point-query gate
+- **GIVEN** пользователь работает в IDE с `.bsl` файлом
+- **WHEN** система публикует semantic diagnostics для current revision
+- **THEN** diagnostics читают semantic truth только из canonical IR/CFG path того же snapshot/revision
+- **AND** не используют отдельный parse-result-based semantic pipeline, stale snapshot или search-backed substitute
 
 ## ADDED Requirements
 
@@ -68,11 +76,17 @@ Canonical IR MUST содержать или однозначно порожда�
 - не выполнять самостоятельный semantic inference;
 - не читать `parse_result.program` как самостоятельный semantic source of truth.
 
-#### Scenario: Один canonical IR snapshot даёт один semantic index для всех consumers
+#### Scenario: Один canonical IR snapshot даёт один semantic index для всех point-query consumers
 - **GIVEN** построен canonical IR snapshot конкретной revision
 - **WHEN** система материализует derived semantic index для interactive queries
 - **THEN** индекс является projection того же snapshot
-- **AND** все consumers читают semantic facts из одного и того же IR-derived contract
+- **AND** все point-query consumers читают semantic facts из одного и того же IR-derived contract
+
+#### Scenario: Batch diagnostics читают тот же canonical snapshot без отдельной semantic truth
+- **GIVEN** построен canonical IR snapshot конкретной revision
+- **WHEN** система выполняет semantic diagnostics для этого файла
+- **THEN** diagnostics используют тот же snapshot/revision как canonical semantic source of truth
+- **AND** direct IR/CFG batch path не считается отдельным semantic pipeline
 
 #### Scenario: Derived semantic index не переизобретает semantic truth
 - **GIVEN** canonical IR snapshot уже содержит owner/member/type truth для позиции
@@ -118,6 +132,12 @@ Discovery/search read-model MAY сосуществовать в том же runt
 - **THEN** сервер отвечает fail-closed для текущей revision
 - **AND** не строит semantic payload из discovery/search read-model
 
+#### Scenario: Search index не подменяет canonical batch diagnostics
+- **GIVEN** discovery/search index доступен, но semantic diagnostics выполняются для current revision
+- **WHEN** система публикует diagnostics
+- **THEN** diagnostics читают semantic truth только из canonical IR/CFG path текущей revision
+- **AND** search/discovery read-model не используется как semantic substitute
+
 ### Requirement: Adapter surfaces не реконструируют semantic truth локально (MUST)
 LSP/Web/MCP/CLI surfaces MUST использовать shared semantic runtime contract как единственный semantic read path.
 
@@ -161,6 +181,20 @@ Observability MAY фиксировать bounded reason-code недоступн�
 - **WHEN** IDE запрашивает `hover`, `type-at-position` или `definition`
 - **THEN** сервер отвечает fail-closed для текущей revision
 - **AND** не возвращает semantic payload, вычисленный для предыдущей revision, как будто он относится к текущему коду
+
+### Requirement: Canonical diagnostics публикуются только для current revision snapshot (MUST)
+Semantic diagnostics MUST использовать только canonical IR/CFG path текущей revision.
+
+Diagnostics MUST NOT:
+- публиковать semantic payload предыдущей revision как будто он относится к текущему коду;
+- использовать discovery/search read-model как semantic source;
+- materialize-ить отдельный parse-result-based semantic substitute, если canonical snapshot текущей revision недоступен.
+
+#### Scenario: Diagnostics не публикуют stale semantic snapshot после didChange
+- **GIVEN** пользователь быстро меняет документ и previous revision уже неактуальна
+- **WHEN** система публикует diagnostics
+- **THEN** surface публикует diagnostics только для current revision или пропускает superseded run согласно surface contract
+- **AND** не делает jump-back к semantic payload предыдущей revision
 
 ### Requirement: Fail-closed observability использует bounded reason codes (MUST)
 Когда interactive semantic запрос завершается fail-closed, observability MUST фиксировать bounded low-cardinality reason code для текущей revision.

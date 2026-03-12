@@ -1,7 +1,7 @@
 ## 1. Contract
 - [x] 1.1 Зафиксировать, что canonical IR является единственным semantic source of truth для v2.
-- [x] 1.2 Зафиксировать, что `derived semantic index` является единственным fast query артефактом и строится только из IR snapshot текущей revision.
-- [x] 1.3 Зафиксировать fail-closed policy для недоступности canonical semantic артефактов вместо stale/degraded/keyword fallback и запрет на маскировку stale ответа под current-revision semantics.
+- [x] 1.2 Зафиксировать, что `derived semantic index` является единственным fast query артефактом для latency-critical point-queries и строится только из IR snapshot текущей revision.
+- [x] 1.3 Зафиксировать fail-closed policy для latency-critical point-queries и current-revision contract для `diagnostics`: diagnostics читают только canonical IR/CFG path того же snapshot и не используют stale/degraded/search-backed substitute.
 - [x] 1.4 Зафиксировать удаление applied-owner bare identifier fallback как части semantic contract.
 - [x] 1.5 Зафиксировать, что `parse_result` и другие syntax helpers могут использоваться только для syntax/position extraction, но не как самостоятельный semantic source.
 - [x] 1.6 Зафиксировать, что semantic `derived semantic index` отделён от discovery/search read-model (`IndexSnapshot` и эквиваленты) и search index MUST NOT быть semantic source для interactive queries.
@@ -10,7 +10,7 @@
 
 ## 2. Design
 - [x] 2.1 Описать минимальные расширения canonical IR, достаточные для owner/member/type/definition queries без parallel semantic inference path.
-- [x] 2.2 Описать состав `derived semantic index` и contract его построения из одного IR snapshot/revision.
+- [x] 2.2 Описать состав `derived semantic index` и contract его построения из одного IR snapshot/revision для point-query surfaces, плюс допустимый direct IR/CFG batch path для `diagnostics`.
 - [x] 2.3 Описать big-bang cutover для `LSP`, `Web`, `MCP`, `CLI` без long-lived dual runtime behavior в merge state.
 - [x] 2.4 Описать contract/version impact для `contracts/**`, observability reason taxonomy, adapter boundaries, acceptance и perf expectations после удаления degraded paths и stale-as-current substitute behavior.
 - [x] 2.5 Описать координацию или supersede-plan для связанных pending MCP/index changes.
@@ -22,16 +22,21 @@
 - [x] 3.1 Подготовить execution matrix `Requirement -> Code Area -> Test Class`.
 - [x] 3.2 Зафиксировать acceptance набор, который доказывает:
   - [x] exact cross-consumer semantic equivalence
-  - [x] отсутствие adapter-local semantic truth
+  - [ ] отсутствие adapter-local semantic truth
   - [x] отсутствие semantic answers из discovery/search index
   - [x] fail-closed behavior при miss canonical IR/index
-  - [x] отсутствие stale semantic ответа, замаскированного под current revision
+  - [ ] отсутствие stale semantic ответа, замаскированного под current revision, для всех point-query surfaces beyond completion
   - [x] removal of bare-identifier fallback semantics
   - [x] сохранение canonical explicit module-context semantics для `ЭтотОбъект` / `Объект` в `ObjectModule` / `RecordSetModule`
   - [x] сохранение facet-aware member/property semantics без flattening `active_facet` / `available_facets`
 - [x] 3.3 Зафиксировать набор quality gates для cutover: tests, contracts, bounded fail-closed reason codes, representative latency budgets и observability/perf checks.
 - [x] 3.4 Зафиксировать, что latency regressions не могут закрываться через возврат stale/degraded/search-backed semantic substitute.
 - [x] 3.5 Прогнать `openspec validate refactor-ir-canonical-semantic-pipeline --strict --no-interactive`.
+
+## 4. Runtime Alignment Follow-ups
+- [ ] 4.1 Убрать или перенести в shared runtime adapter-local semantic shaping в `cli complete` (`normalize_completion_owner_hint`), чтобы owner/member contract не расходился между CLI и LSP/MCP.
+- [ ] 4.2 Добавить явные executable current-revision stale tests для point-query surfaces beyond completion: как минимум `hover`, `definition`, `type-at-position`, а также MCP `bsl_type_at_position` / `bsl_definition`.
+- [ ] 4.3 Регенерировать human/machine-readable validation bundle (`execution-matrix.md`, `validation/*.json`) после закрытия пунктов 4.1-4.2 под уточнённый split `point-query exact index` vs `diagnostics direct IR/CFG`.
 
 ## Dependencies / Parallelism
 - [x] D1 Пункты 1.1-1.8 блокируют весь design/spec cutover.

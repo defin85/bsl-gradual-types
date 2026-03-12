@@ -20,7 +20,7 @@
 
 ## What Changes
 
-- Переопределить архитектуру `bsl-intellisense-v2` как `IR -> derived semantic index -> interactive queries`.
+- Переопределить архитектуру `bsl-intellisense-v2` как `canonical IR snapshot -> {derived semantic index для latency-critical point-queries, direct IR/CFG batch path для diagnostics}`.
 - Зафиксировать, что semantic truth может происходить только из canonical IR snapshot текущей revision.
 - Зафиксировать, что `derived semantic index` строится только из IR snapshot и не выполняет самостоятельный semantic inference.
 - Зафиксировать, что canonical semantic core сохраняет facet-aware identity конфигурационных типов (`active_facet` / `available_facets` или семантически эквивалентное представление), а derived semantic index MUST NOT сплющивать её в plain type names, если это меняет owner/member/property semantics.
@@ -30,7 +30,8 @@
   - stale/degraded/keyword semantic fallback paths;
   - non-IR semantic fast paths, которые материализуют truth вне canonical IR;
   - applied-owner bare identifier fallback для `ObjectModule` / `RecordSetModule`.
-- Зафиксировать fail-closed contract для `completion`, `hover`, `signatureHelp`, `definition`, `type-at-position`, `members`, `diagnostics` и MCP/Web adapter surfaces.
+- Зафиксировать, что `derived semantic index` обязателен для latency-critical point-queries (`completion`, `hover`, `signatureHelp`, `definition`, `type-at-position`, `members`), а `diagnostics` MAY использовать direct IR/CFG batch path того же current-revision canonical snapshot без отдельного exact point-query gate.
+- Зафиксировать fail-closed contract для latency-critical point-queries и current-revision contract для `diagnostics`: diagnostics MUST читать тот же canonical snapshot/revision и MUST NOT использовать stale/search-backed/adapter-local semantic substitute.
 - Зафиксировать, что система MUST NOT возвращать semantic truth от другой revision под видом exact/current-revision ответа; при недоступности current-revision canonical artifacts ответ остаётся fail-closed.
 - Зафиксировать, что adapters (`LSP`, `Web`, `MCP`, `CLI`) не materialize-ят semantic truth локально и используют shared runtime contract как единственный semantic read path.
 - Зафиксировать explicit quality gates для cutover: bounded low-cardinality fail-closed observability reason codes, representative latency acceptance budgets и запрет на perf-rescue через alternate semantic path.

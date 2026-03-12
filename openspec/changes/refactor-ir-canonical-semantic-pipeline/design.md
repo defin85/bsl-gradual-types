@@ -186,7 +186,8 @@ Payload является semantic read-model; envelope хранит только
 - `diagnostic hint views`:
   - могут публиковаться как thin denormalized views поверх тех же payload tables;
   - включают текущие категории наподобие `assignment_value_type`, `call_receiver_type`, `call_arg_types`, `member_access_object_type`;
-  - не образуют отдельный semantic artifact и не вычисляются независимо от общего index payload.
+  - остаются optional optimization layer для batch diagnostics;
+  - не образуют отдельный semantic artifact и не вычисляются независимо от canonical IR snapshot.
 
 Запрещённый состав payload:
 - отдельный `parse_result`-derived semantic table;
@@ -253,7 +254,7 @@ Build MUST NOT:
 
 ### 2d. Query contract и переход от текущих artifacts
 
-`derived semantic index` должен обслуживать query surfaces без повторной materialization semantic truth:
+`derived semantic index` должен обслуживать point-query surfaces без повторной materialization semantic truth:
 - `type-at-position`:
   - exact base type приходит из `position surface index` + `expression type table`;
   - flow-sensitive overlay затем работает поверх этого base result.
@@ -265,7 +266,9 @@ Build MUST NOT:
 - `definition`:
   - binding/member/type navigation читает `binding lookup table` + `definition anchor table`, а не request-time reconstruction через `receiver_type_hint`.
 - `semantic diagnostics`:
-  - используют `diagnostic hint views` как projection от того же artifact, а не отдельные per-visitor semantic hints.
+  - используют canonical IR/CFG batch path того же snapshot/revision;
+  - MAY читать `diagnostic hint views` как thin projection от того же snapshot, если это помогает latency/allocations;
+  - MUST NOT зависеть от отдельного exact point-query gate и MUST NOT вводить отдельную semantic truth.
 
 Следствия для текущей реализации:
 - нынешний `TypeIndexArtifact` является transitional названием и должен эволюционировать в artifact,
@@ -274,7 +277,7 @@ Build MUST NOT:
 - on-demand `type_index(...)` compute path допустим только как temporary implementation scaffold;
 - merge-state contract остаётся exact-precomputed/read-only для semantic queries текущей revision.
 
-### 3. Interactive queries используют только canonical IR или derived semantic index
+### 3. Point-queries и diagnostics используют один canonical snapshot, но разные read paths
 
 Целевой read path:
 - `completion`: syntax extraction допустима, semantic candidate truth только из canonical IR + derived semantic index;
@@ -282,7 +285,7 @@ Build MUST NOT:
 - `signatureHelp`: receiver truth только из derived semantic index;
 - `definition`: receiver/type hints только из derived semantic index;
 - `type-at-position`: base type из derived semantic index, flow-sensitive overlay из canonical IR/CFG;
-- `semantic diagnostics`: canonical IR + derived semantic index;
+- `semantic diagnostics`: canonical IR/CFG batch path того же snapshot/revision; optional `diagnostic hint views` допускаются только как projection от того же snapshot;
 - `MCP` / `Web`: thin adapters над тем же shared runtime contract.
 
 Adapters (`LSP`, `Web`, `MCP`, `CLI`) не создают semantic truth локально:
@@ -291,12 +294,19 @@ Adapters (`LSP`, `Web`, `MCP`, `CLI`) не создают semantic truth лок�
 - недопустимы adapter-local caches, которые переживают revision switch и затем маскируются под current-revision semantic truth;
 - при miss canonical artifacts adapter обязан оставаться fail-closed, а не materialize-ить substitute.
 
+Следствие для consumer classes:
+- latency-critical point-queries обязаны проходить через exact current-revision derived semantic index;
+- batch diagnostics обязаны читать тот же canonical snapshot/revision, но не обязаны проходить через exact point-query gate;
+- ни один из consumer classes не имеет права использовать stale/search-backed/adapter-local semantic substitute.
+
 ### 4. Flow-sensitive анализ остаётся IR-based overlay, но опирается на тот же base contract
 
 Flow-sensitive режим не создаёт отдельную semantic truth.
 
-Базовый unresolved/resolved type для позиции обязан приходить из derived semantic index текущего IR snapshot.
+Для point-queries базовый unresolved/resolved type для позиции обязан приходить из derived semantic index текущего IR snapshot.
 Flow-sensitive logic добавляет narrowing/null-safety поверх того же base contract через canonical IR/CFG.
+
+Для diagnostics flow-sensitive rules работают как часть того же canonical IR/CFG batch path и не требуют отдельного point-query artifact gate.
 
 ### 5. Degraded/stale/keyword semantic fallback paths удаляются
 

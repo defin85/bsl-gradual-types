@@ -6,7 +6,9 @@ mod support;
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
 
-use bsl_analysis_v2::{AnalysisHostV2, AnalysisV2, Change as ChangeV2, FileId as V2FileId, SettingsId};
+use bsl_analysis_v2::{
+    AnalysisHostV2, AnalysisV2, Change as ChangeV2, FileId as V2FileId, SettingsId,
+};
 use bsl_backend::application::get_completion_with_semantic_program_snapshot_v2;
 use bsl_backend::system::DepsBundleV2;
 use bsl_shared::domain::resolver::TypeResolver;
@@ -211,7 +213,8 @@ async fn m8_completion_matrix_golden_v2() {
         );
         let (line, column) =
             intellisense_testkit::find_marker_position(&content, case.typed_prefix);
-        let (analysis, ir_program) = build_analysis_and_ir(deps_bundle.as_ref(), file_path, &content);
+        let (analysis, ir_program) =
+            build_analysis_and_ir(deps_bundle.as_ref(), file_path, &content);
         if case.id == "m8_stdlib_parens_receiver" {
             assert!(
                 analysis
@@ -228,7 +231,10 @@ async fn m8_completion_matrix_golden_v2() {
                 .type_at_byte_offset_serve_only_profiled(V2FileId(1), probe)
                 .expect("parens serve-only lookup");
             assert_eq!(
-                profiled.resolution.as_ref().map(bsl_shared::domain::TypeResolution::type_name),
+                profiled
+                    .resolution
+                    .as_ref()
+                    .map(bsl_shared::domain::TypeResolution::type_name),
                 Some("Массив<Неопределено>".to_string()),
                 "{} must materialize exact owner type before completion",
                 case.id
@@ -246,7 +252,12 @@ async fn m8_completion_matrix_golden_v2() {
                 .match_indices("Новый Массив()")
                 .map(|(idx, _)| (idx + "Новый Массив()".len() - 1) as u32)
                 .collect();
-            assert_eq!(probes.len(), 2, "{} must contain two branch probes", case.id);
+            assert_eq!(
+                probes.len(),
+                2,
+                "{} must contain two branch probes",
+                case.id
+            );
             for probe in probes {
                 let profiled = analysis
                     .type_at_byte_offset_serve_only_profiled(V2FileId(1), probe)
@@ -262,23 +273,34 @@ async fn m8_completion_matrix_golden_v2() {
                 );
             }
         }
-        let owner_hint =
-            support::completion_owner_hint_for_position(&analysis, V2FileId(1), &content, line, column);
+        let owner_hint = support::completion_owner_hint_for_position(
+            &analysis,
+            V2FileId(1),
+            &content,
+            line,
+            column,
+        );
         match case.id {
             "m8_metadata_documents" => assert_eq!(
-                owner_hint.as_ref().map(bsl_shared::domain::TypeResolution::type_name),
+                owner_hint
+                    .as_ref()
+                    .map(bsl_shared::domain::TypeResolution::type_name),
                 Some("Документы".to_string()),
                 "{} must surface canonical owner hint before completion",
                 case.id
             ),
             "m8_stdlib_parens_receiver" => assert_eq!(
-                owner_hint.as_ref().map(bsl_shared::domain::TypeResolution::type_name),
+                owner_hint
+                    .as_ref()
+                    .map(bsl_shared::domain::TypeResolution::type_name),
                 Some("Массив<Неопределено>".to_string()),
                 "{} must surface canonical owner hint before completion",
                 case.id
             ),
             "m8_stdlib_choice_receiver" => assert_eq!(
-                owner_hint.as_ref().map(bsl_shared::domain::TypeResolution::type_name),
+                owner_hint
+                    .as_ref()
+                    .map(bsl_shared::domain::TypeResolution::type_name),
                 Some("Массив<Неопределено>".to_string()),
                 "{} must surface canonical owner hint before completion",
                 case.id

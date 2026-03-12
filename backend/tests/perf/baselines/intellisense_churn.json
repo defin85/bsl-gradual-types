@@ -4,8 +4,10 @@
   "cases": 21,
   "iterations": 200,
   "warmup": 20,
+  "change_id": "refactor-ir-canonical-semantic-pipeline",
   "provenance": {
-    "generated_at": "1773214727961",
+    "change_id": "refactor-ir-canonical-semantic-pipeline",
+    "generated_at": "1773304718397",
     "profile": "churn",
     "schema_version": 1,
     "contract_version": "v2"
@@ -43,31 +45,31 @@
       "metrics": {
         "total_duration_ms": {
           "count": 200,
-          "p50_ms": 0.339016,
-          "p95_ms": 0.503224,
-          "p99_ms": 0.650832
+          "p50_ms": 0.48024199999999995,
+          "p95_ms": 0.940683,
+          "p99_ms": 2.222978
         },
         "wait_for_file_version_ms": {
           "count": 200,
-          "p50_ms": 0.073103,
-          "p95_ms": 0.12380599999999999,
-          "p99_ms": 0.16040800000000002
+          "p50_ms": 0.095017,
+          "p95_ms": 0.187416,
+          "p99_ms": 0.494484
         },
         "snapshot_preparation_ms": {
           "count": 200,
-          "p50_ms": 0.059403,
-          "p95_ms": 0.106406,
-          "p99_ms": 0.120906
+          "p50_ms": 0.069206,
+          "p95_ms": 0.184016,
+          "p99_ms": 0.348459
         },
         "ir_query_ms": {
           "count": 200,
-          "p50_ms": 0.027702,
-          "p95_ms": 0.044402,
-          "p99_ms": 0.054203
+          "p50_ms": 0.028405,
+          "p95_ms": 0.06600600000000001,
+          "p99_ms": 0.201574
         },
-        "allocations_per_request": 235.065,
-        "allocated_bytes_per_request": 16729.48,
-        "lock_wait_ms_per_request": 0.030007980000000035,
+        "allocations_per_request": 282.065,
+        "allocated_bytes_per_request": 22469.48,
+        "lock_wait_ms_per_request": 0.03967919000000001,
         "lock_contention_events_per_request": 1.0
       },
       "anti_rescue": {
@@ -82,38 +84,38 @@
       "operation": "hover",
       "cases": 1,
       "total_requests": 200,
-      "fail_closed_total": 200,
-      "fail_closed_rate": 1.0,
+      "fail_closed_total": 0,
+      "fail_closed_rate": 0.0,
       "error_rate": 0.0,
       "incomplete_rate": 0.0,
       "metrics": {
         "total_duration_ms": {
           "count": 200,
-          "p50_ms": 0.308915,
-          "p95_ms": 0.45702299999999996,
-          "p99_ms": 0.588329
+          "p50_ms": 0.306652,
+          "p95_ms": 0.5136350000000001,
+          "p99_ms": 1.033169
         },
         "wait_for_file_version_ms": {
           "count": 200,
-          "p50_ms": 0.062002999999999996,
-          "p95_ms": 0.11680600000000001,
-          "p99_ms": 0.15120699999999998
+          "p50_ms": 0.09321499999999999,
+          "p95_ms": 0.151913,
+          "p99_ms": 0.330856
         },
         "snapshot_preparation_ms": {
           "count": 200,
-          "p50_ms": 0.057803,
-          "p95_ms": 0.103105,
-          "p99_ms": 0.138107
+          "p50_ms": 0.07450699999999999,
+          "p95_ms": 0.143013,
+          "p99_ms": 0.295763
         },
         "ir_query_ms": {
           "count": 200,
-          "p50_ms": 0.050303,
-          "p95_ms": 0.072704,
-          "p99_ms": 0.090904
+          "p50_ms": 0.049304,
+          "p95_ms": 0.08638900000000001,
+          "p99_ms": 0.287526
         },
-        "allocations_per_request": 199.15,
-        "allocated_bytes_per_request": 60940.6,
-        "lock_wait_ms_per_request": 0.05497618999999999,
+        "allocations_per_request": 172.15,
+        "allocated_bytes_per_request": 26324.6,
+        "lock_wait_ms_per_request": 0.06063863000000002,
         "lock_contention_events_per_request": 1.0
       },
       "anti_rescue": {
@@ -128,38 +130,38 @@
       "operation": "definition",
       "cases": 1,
       "total_requests": 200,
-      "fail_closed_total": 200,
-      "fail_closed_rate": 1.0,
+      "fail_closed_total": 0,
+      "fail_closed_rate": 0.0,
       "error_rate": 0.0,
       "incomplete_rate": 0.0,
       "metrics": {
         "total_duration_ms": {
           "count": 200,
-          "p50_ms": 0.221511,
-          "p95_ms": 0.367218,
-          "p99_ms": 0.443522
+          "p50_ms": 0.24122100000000002,
+          "p95_ms": 0.393034,
+          "p99_ms": 1.727552
         },
         "wait_for_file_version_ms": {
           "count": 200,
-          "p50_ms": 0.058703,
-          "p95_ms": 0.117406,
-          "p99_ms": 0.143007
+          "p50_ms": 0.061311,
+          "p95_ms": 0.10951,
+          "p99_ms": 0.34923099999999996
         },
         "snapshot_preparation_ms": {
           "count": 200,
-          "p50_ms": 0.057502,
-          "p95_ms": 0.097905,
-          "p99_ms": 0.125106
+          "p50_ms": 0.07040700000000001,
+          "p95_ms": 0.134483,
+          "p99_ms": 0.46254100000000004
         },
         "ir_query_ms": {
           "count": 200,
-          "p50_ms": 0.046801999999999996,
-          "p95_ms": 0.079004,
-          "p99_ms": 0.099605
+          "p50_ms": 0.049109,
+          "p95_ms": 0.08100700000000001,
+          "p99_ms": 0.31566
         },
-        "allocations_per_request": 147.16,
-        "allocated_bytes_per_request": 13235.56,
-        "lock_wait_ms_per_request": 0.05333163499999997,
+        "allocations_per_request": 153.16,
+        "allocated_bytes_per_request": 13706.56,
+        "lock_wait_ms_per_request": 0.059412755000000005,
         "lock_contention_events_per_request": 1.0
       },
       "anti_rescue": {
@@ -174,38 +176,38 @@
       "operation": "type_at_position",
       "cases": 1,
       "total_requests": 200,
-      "fail_closed_total": 200,
-      "fail_closed_rate": 1.0,
+      "fail_closed_total": 0,
+      "fail_closed_rate": 0.0,
       "error_rate": 0.0,
       "incomplete_rate": 0.0,
       "metrics": {
         "total_duration_ms": {
           "count": 200,
-          "p50_ms": 4.3768139999999995,
-          "p95_ms": 4.5239210000000005,
-          "p99_ms": 4.634427
+          "p50_ms": 4.397087,
+          "p95_ms": 4.5900799999999995,
+          "p99_ms": 5.232761
         },
         "wait_for_file_version_ms": {
           "count": 200,
-          "p50_ms": 2.0661009999999997,
-          "p95_ms": 2.125103,
-          "p99_ms": 2.175507
+          "p50_ms": 2.058239,
+          "p95_ms": 2.15609,
+          "p99_ms": 2.323205
         },
         "snapshot_preparation_ms": {
           "count": 200,
-          "p50_ms": 2.155505,
-          "p95_ms": 2.213008,
-          "p99_ms": 2.232209
+          "p50_ms": 2.192993,
+          "p95_ms": 2.3038030000000003,
+          "p99_ms": 2.5983709999999998
         },
         "ir_query_ms": {
           "count": 200,
-          "p50_ms": 0.08010400000000001,
-          "p95_ms": 0.149608,
-          "p99_ms": 0.18310900000000002
+          "p50_ms": 0.07030700000000001,
+          "p95_ms": 0.15301299999999998,
+          "p99_ms": 0.276124
         },
-        "allocations_per_request": 134.13,
-        "allocated_bytes_per_request": 11924.36,
-        "lock_wait_ms_per_request": 0.08917036500000003,
+        "allocations_per_request": 138.13,
+        "allocated_bytes_per_request": 12217.36,
+        "lock_wait_ms_per_request": 0.08425029999999996,
         "lock_contention_events_per_request": 1.0
       },
       "anti_rescue": {
@@ -227,31 +229,31 @@
       "metrics": {
         "total_duration_ms": {
           "count": 200,
-          "p50_ms": 4.489319,
-          "p95_ms": 4.672528,
-          "p99_ms": 4.847436999999999
+          "p50_ms": 4.651009,
+          "p95_ms": 4.96537,
+          "p99_ms": 5.801987
         },
         "wait_for_file_version_ms": {
           "count": 200,
-          "p50_ms": 1.9956980000000002,
-          "p95_ms": 2.078101,
-          "p99_ms": 2.100703
+          "p50_ms": 2.0016399999999996,
+          "p95_ms": 2.095634,
+          "p99_ms": 2.126562
         },
         "snapshot_preparation_ms": {
           "count": 200,
-          "p50_ms": 2.144405,
-          "p95_ms": 2.209908,
-          "p99_ms": 2.25761
+          "p50_ms": 2.182092,
+          "p95_ms": 2.298191,
+          "p99_ms": 2.5035830000000003
         },
         "ir_query_ms": {
           "count": 200,
-          "p50_ms": 0.038402000000000006,
-          "p95_ms": 0.068403,
-          "p99_ms": 0.092904
+          "p50_ms": 0.042608,
+          "p95_ms": 0.085189,
+          "p99_ms": 0.225871
         },
-        "allocations_per_request": 234.085,
-        "allocated_bytes_per_request": 15394.16,
-        "lock_wait_ms_per_request": 0.04244598499999998,
+        "allocations_per_request": 294.085,
+        "allocated_bytes_per_request": 21621.16,
+        "lock_wait_ms_per_request": 0.050171030000000005,
         "lock_contention_events_per_request": 1.0
       },
       "anti_rescue": {
@@ -273,31 +275,31 @@
       "metrics": {
         "total_duration_ms": {
           "count": 200,
-          "p50_ms": 1.487672,
-          "p95_ms": 1.910293,
-          "p99_ms": 2.108103
+          "p50_ms": 2.216777,
+          "p95_ms": 3.924745,
+          "p99_ms": 6.124224
         },
         "wait_for_file_version_ms": {
           "count": 200,
-          "p50_ms": 0.36781800000000003,
-          "p95_ms": 0.472124,
-          "p99_ms": 0.548227
+          "p50_ms": 0.41167,
+          "p95_ms": 0.690861,
+          "p99_ms": 1.168552
         },
         "snapshot_preparation_ms": {
           "count": 200,
-          "p50_ms": 0.071104,
-          "p95_ms": 0.12490600000000002,
-          "p99_ms": 0.176509
+          "p50_ms": 0.093588,
+          "p95_ms": 0.183816,
+          "p99_ms": 0.337429
         },
         "ir_query_ms": {
           "count": 200,
-          "p50_ms": 0.039702,
-          "p95_ms": 0.063804,
-          "p99_ms": 0.07360399999999999
+          "p50_ms": 0.039307,
+          "p95_ms": 0.11031,
+          "p99_ms": 0.20183399999999999
         },
-        "allocations_per_request": 798.225,
-        "allocated_bytes_per_request": 92767.08,
-        "lock_wait_ms_per_request": 0.042882645000000004,
+        "allocations_per_request": 1518.215,
+        "allocated_bytes_per_request": 204352.8,
+        "lock_wait_ms_per_request": 0.04833550499999997,
         "lock_contention_events_per_request": 1.0
       },
       "anti_rescue": {
@@ -312,38 +314,38 @@
       "operation": "hover",
       "cases": 1,
       "total_requests": 200,
-      "fail_closed_total": 200,
-      "fail_closed_rate": 1.0,
+      "fail_closed_total": 0,
+      "fail_closed_rate": 0.0,
       "error_rate": 0.0,
       "incomplete_rate": 0.0,
       "metrics": {
         "total_duration_ms": {
           "count": 200,
-          "p50_ms": 0.9981490000000001,
-          "p95_ms": 1.254861,
-          "p99_ms": 1.5856780000000001
+          "p50_ms": 1.541135,
+          "p95_ms": 4.035986,
+          "p99_ms": 5.145248
         },
         "wait_for_file_version_ms": {
           "count": 200,
-          "p50_ms": 0.104505,
-          "p95_ms": 0.15170799999999998,
-          "p99_ms": 0.17540899999999998
+          "p50_ms": 0.115185,
+          "p95_ms": 2.042579,
+          "p99_ms": 2.3623
         },
         "snapshot_preparation_ms": {
           "count": 200,
-          "p50_ms": 0.063003,
-          "p95_ms": 0.116206,
-          "p99_ms": 0.133906
+          "p50_ms": 1.288919,
+          "p95_ms": 2.181724,
+          "p99_ms": 3.242951
         },
         "ir_query_ms": {
           "count": 200,
-          "p50_ms": 0.661032,
-          "p95_ms": 0.846841,
-          "p99_ms": 1.02025
+          "p50_ms": 0.030202999999999997,
+          "p95_ms": 0.06220599999999999,
+          "p99_ms": 0.08871599999999999
         },
-        "allocations_per_request": 652.065,
-        "allocated_bytes_per_request": 125291.48,
-        "lock_wait_ms_per_request": 0.6900441750000005,
+        "allocations_per_request": 1349.095,
+        "allocated_bytes_per_request": 202721.84,
+        "lock_wait_ms_per_request": 0.035070725,
         "lock_contention_events_per_request": 1.0
       },
       "anti_rescue": {
@@ -358,38 +360,38 @@
       "operation": "definition",
       "cases": 1,
       "total_requests": 200,
-      "fail_closed_total": 200,
-      "fail_closed_rate": 1.0,
+      "fail_closed_total": 0,
+      "fail_closed_rate": 0.0,
       "error_rate": 0.0,
       "incomplete_rate": 0.0,
       "metrics": {
         "total_duration_ms": {
           "count": 200,
-          "p50_ms": 0.8905430000000001,
-          "p95_ms": 1.148556,
-          "p99_ms": 1.3938679999999999
+          "p50_ms": 1.441718,
+          "p95_ms": 3.0470129999999997,
+          "p99_ms": 3.5837149999999998
         },
         "wait_for_file_version_ms": {
           "count": 200,
-          "p50_ms": 0.099905,
-          "p95_ms": 0.14430700000000002,
-          "p99_ms": 0.168708
+          "p50_ms": 0.105818,
+          "p95_ms": 1.425119,
+          "p99_ms": 2.0843540000000003
         },
         "snapshot_preparation_ms": {
           "count": 200,
-          "p50_ms": 0.064003,
-          "p95_ms": 0.12120600000000001,
-          "p99_ms": 0.132007
+          "p50_ms": 1.24561,
+          "p95_ms": 2.0216439999999998,
+          "p99_ms": 2.597171
         },
         "ir_query_ms": {
           "count": 200,
-          "p50_ms": 0.638731,
-          "p95_ms": 0.836641,
-          "p99_ms": 0.9777469999999999
+          "p50_ms": 0.029005,
+          "p95_ms": 0.057805,
+          "p99_ms": 0.133523
         },
-        "allocations_per_request": 600.09,
-        "allocated_bytes_per_request": 73209.12,
-        "lock_wait_ms_per_request": 0.66427043,
+        "allocations_per_request": 1324.09,
+        "allocated_bytes_per_request": 188632.12,
+        "lock_wait_ms_per_request": 0.03381283,
         "lock_contention_events_per_request": 1.0
       },
       "anti_rescue": {
@@ -404,38 +406,38 @@
       "operation": "type_at_position",
       "cases": 1,
       "total_requests": 200,
-      "fail_closed_total": 200,
-      "fail_closed_rate": 1.0,
+      "fail_closed_total": 0,
+      "fail_closed_rate": 0.0,
       "error_rate": 0.0,
       "incomplete_rate": 0.0,
       "metrics": {
         "total_duration_ms": {
           "count": 200,
-          "p50_ms": 4.4024149999999995,
-          "p95_ms": 4.70623,
-          "p99_ms": 5.008744
+          "p50_ms": 4.422289,
+          "p95_ms": 4.955643,
+          "p99_ms": 5.765307
         },
         "wait_for_file_version_ms": {
           "count": 200,
-          "p50_ms": 1.44607,
-          "p95_ms": 1.525074,
-          "p99_ms": 1.543175
+          "p50_ms": 0.910985,
+          "p95_ms": 1.031691,
+          "p99_ms": 1.082284
         },
         "snapshot_preparation_ms": {
           "count": 200,
-          "p50_ms": 2.152805,
-          "p95_ms": 2.222308,
-          "p99_ms": 2.248109
+          "p50_ms": 3.4087,
+          "p95_ms": 4.0303889999999996,
+          "p99_ms": 4.8727290000000005
         },
         "ir_query_ms": {
           "count": 200,
-          "p50_ms": 0.717535,
-          "p95_ms": 1.081553,
-          "p99_ms": 1.382168
+          "p50_ms": 0.032403,
+          "p95_ms": 0.064392,
+          "p99_ms": 0.133512
         },
-        "allocations_per_request": 587.105,
-        "allocated_bytes_per_request": 72164.16,
-        "lock_wait_ms_per_request": 0.7665469,
+        "allocations_per_request": 1315.105,
+        "allocated_bytes_per_request": 187720.16,
+        "lock_wait_ms_per_request": 0.03786765499999998,
         "lock_contention_events_per_request": 1.0
       },
       "anti_rescue": {
@@ -457,31 +459,31 @@
       "metrics": {
         "total_duration_ms": {
           "count": 200,
-          "p50_ms": 4.488019,
-          "p95_ms": 4.747032,
-          "p99_ms": 4.904140000000001
+          "p50_ms": 4.566976,
+          "p95_ms": 5.280598,
+          "p99_ms": 6.271466
         },
         "wait_for_file_version_ms": {
           "count": 200,
-          "p50_ms": 1.338665,
-          "p95_ms": 1.457871,
-          "p99_ms": 1.4911729999999999
+          "p50_ms": 0.8165969999999999,
+          "p95_ms": 0.9646849999999999,
+          "p99_ms": 1.02509
         },
         "snapshot_preparation_ms": {
           "count": 200,
-          "p50_ms": 2.149504,
-          "p95_ms": 2.204107,
-          "p99_ms": 2.26341
+          "p50_ms": 3.406399,
+          "p95_ms": 4.130675999999999,
+          "p99_ms": 4.762719000000001
         },
         "ir_query_ms": {
           "count": 200,
-          "p50_ms": 0.044703,
-          "p95_ms": 0.078904,
-          "p99_ms": 0.092204
+          "p50_ms": 0.034096,
+          "p95_ms": 0.065606,
+          "p99_ms": 0.126211
         },
-        "allocations_per_request": 706.065,
-        "allocated_bytes_per_request": 82692.0,
-        "lock_wait_ms_per_request": 0.049645420000000016,
+        "allocations_per_request": 1462.06,
+        "allocated_bytes_per_request": 196464.52,
+        "lock_wait_ms_per_request": 0.040087885,
         "lock_contention_events_per_request": 1.0
       },
       "anti_rescue": {
@@ -503,31 +505,31 @@
       "metrics": {
         "total_duration_ms": {
           "count": 200,
-          "p50_ms": 0.430721,
-          "p95_ms": 0.595529,
-          "p99_ms": 0.700734
+          "p50_ms": 0.5598489999999999,
+          "p95_ms": 2.371809,
+          "p99_ms": 2.925357
         },
         "wait_for_file_version_ms": {
           "count": 200,
-          "p50_ms": 0.110505,
-          "p95_ms": 0.152008,
-          "p99_ms": 0.177508
+          "p50_ms": 0.11682,
+          "p95_ms": 1.570001,
+          "p99_ms": 2.143889
         },
         "snapshot_preparation_ms": {
           "count": 200,
-          "p50_ms": 0.06590299999999999,
-          "p95_ms": 0.110705,
-          "p99_ms": 0.141207
+          "p50_ms": 0.076707,
+          "p95_ms": 0.14951299999999998,
+          "p99_ms": 0.363862
         },
         "ir_query_ms": {
           "count": 200,
-          "p50_ms": 0.030801,
-          "p95_ms": 0.047502,
-          "p99_ms": 0.06360299999999999
+          "p50_ms": 0.030103,
+          "p95_ms": 0.068806,
+          "p99_ms": 0.100517
         },
-        "allocations_per_request": 226.09,
-        "allocated_bytes_per_request": 17214.28,
-        "lock_wait_ms_per_request": 0.033026570000000005,
+        "allocations_per_request": 274.09,
+        "allocated_bytes_per_request": 23039.28,
+        "lock_wait_ms_per_request": 0.036221689999999994,
         "lock_contention_events_per_request": 1.0
       },
       "anti_rescue": {
@@ -542,38 +544,38 @@
       "operation": "hover",
       "cases": 1,
       "total_requests": 200,
-      "fail_closed_total": 200,
-      "fail_closed_rate": 1.0,
+      "fail_closed_total": 0,
+      "fail_closed_rate": 0.0,
       "error_rate": 0.0,
       "incomplete_rate": 0.0,
       "metrics": {
         "total_duration_ms": {
           "count": 200,
-          "p50_ms": 0.322716,
-          "p95_ms": 0.459223,
-          "p99_ms": 0.514325
+          "p50_ms": 0.316928,
+          "p95_ms": 0.471781,
+          "p99_ms": 0.663459
         },
         "wait_for_file_version_ms": {
           "count": 200,
-          "p50_ms": 0.06900400000000001,
-          "p95_ms": 0.121406,
-          "p99_ms": 0.148608
+          "p50_ms": 0.09701699999999999,
+          "p95_ms": 0.149413,
+          "p99_ms": 0.255023
         },
         "snapshot_preparation_ms": {
           "count": 200,
-          "p50_ms": 0.059503,
-          "p95_ms": 0.104906,
-          "p99_ms": 0.11680600000000001
+          "p50_ms": 0.072712,
+          "p95_ms": 0.13342299999999999,
+          "p99_ms": 0.154014
         },
         "ir_query_ms": {
           "count": 200,
-          "p50_ms": 0.051902,
-          "p95_ms": 0.083004,
-          "p99_ms": 0.095505
+          "p50_ms": 0.052493,
+          "p95_ms": 0.081807,
+          "p99_ms": 0.110119
         },
-        "allocations_per_request": 198.065,
-        "allocated_bytes_per_request": 58260.48,
-        "lock_wait_ms_per_request": 0.057697799999999945,
+        "allocations_per_request": 171.065,
+        "allocated_bytes_per_request": 25296.48,
+        "lock_wait_ms_per_request": 0.05859362,
         "lock_contention_events_per_request": 1.0
       },
       "anti_rescue": {
@@ -588,38 +590,38 @@
       "operation": "definition",
       "cases": 1,
       "total_requests": 200,
-      "fail_closed_total": 200,
-      "fail_closed_rate": 1.0,
+      "fail_closed_total": 0,
+      "fail_closed_rate": 0.0,
       "error_rate": 0.0,
       "incomplete_rate": 0.0,
       "metrics": {
         "total_duration_ms": {
           "count": 200,
-          "p50_ms": 0.235012,
-          "p95_ms": 0.353117,
-          "p99_ms": 0.37601799999999996
+          "p50_ms": 0.23392000000000002,
+          "p95_ms": 0.380733,
+          "p99_ms": 0.5174449999999999
         },
         "wait_for_file_version_ms": {
           "count": 200,
-          "p50_ms": 0.060603000000000004,
-          "p95_ms": 0.110706,
-          "p99_ms": 0.14670699999999998
+          "p50_ms": 0.059805000000000004,
+          "p95_ms": 0.11852,
+          "p99_ms": 0.154726
         },
         "snapshot_preparation_ms": {
           "count": 200,
-          "p50_ms": 0.058903000000000004,
-          "p95_ms": 0.096205,
-          "p99_ms": 0.124807
+          "p50_ms": 0.068106,
+          "p95_ms": 0.12282100000000001,
+          "p99_ms": 0.18951600000000002
         },
         "ir_query_ms": {
           "count": 200,
-          "p50_ms": 0.049203000000000004,
-          "p95_ms": 0.07630400000000001,
-          "p99_ms": 0.08920499999999999
+          "p50_ms": 0.048505,
+          "p95_ms": 0.081514,
+          "p99_ms": 0.11660999999999999
         },
-        "allocations_per_request": 147.065,
-        "allocated_bytes_per_request": 12638.48,
-        "lock_wait_ms_per_request": 0.05509773000000001,
+        "allocations_per_request": 153.065,
+        "allocated_bytes_per_request": 13054.48,
+        "lock_wait_ms_per_request": 0.054781129999999977,
         "lock_contention_events_per_request": 1.0
       },
       "anti_rescue": {
@@ -634,38 +636,38 @@
       "operation": "type_at_position",
       "cases": 1,
       "total_requests": 200,
-      "fail_closed_total": 200,
-      "fail_closed_rate": 1.0,
+      "fail_closed_total": 0,
+      "fail_closed_rate": 0.0,
       "error_rate": 0.0,
       "incomplete_rate": 0.0,
       "metrics": {
         "total_duration_ms": {
           "count": 200,
-          "p50_ms": 4.376513,
-          "p95_ms": 4.5163210000000005,
-          "p99_ms": 4.693529
+          "p50_ms": 4.3926870000000005,
+          "p95_ms": 4.5716209999999995,
+          "p99_ms": 4.716815
         },
         "wait_for_file_version_ms": {
           "count": 200,
-          "p50_ms": 2.065401,
-          "p95_ms": 2.121004,
-          "p99_ms": 2.1479049999999997
+          "p50_ms": 2.067751,
+          "p95_ms": 2.1568669999999996,
+          "p99_ms": 2.213476
         },
         "snapshot_preparation_ms": {
           "count": 200,
-          "p50_ms": 2.1582049999999997,
-          "p95_ms": 2.228809,
-          "p99_ms": 2.264211
+          "p50_ms": 2.187622,
+          "p95_ms": 2.275001,
+          "p99_ms": 2.38241
         },
         "ir_query_ms": {
           "count": 200,
-          "p50_ms": 0.076003,
-          "p95_ms": 0.146508,
-          "p99_ms": 0.18821
+          "p50_ms": 0.069606,
+          "p95_ms": 0.127322,
+          "p99_ms": 0.204718
         },
-        "allocations_per_request": 134.065,
-        "allocated_bytes_per_request": 11603.48,
-        "lock_wait_ms_per_request": 0.087746295,
+        "allocations_per_request": 138.065,
+        "allocated_bytes_per_request": 11707.48,
+        "lock_wait_ms_per_request": 0.07712730500000001,
         "lock_contention_events_per_request": 1.0
       },
       "anti_rescue": {
@@ -687,31 +689,31 @@
       "metrics": {
         "total_duration_ms": {
           "count": 200,
-          "p50_ms": 4.513821,
-          "p95_ms": 4.7609319999999995,
-          "p99_ms": 4.8595369999999996
+          "p50_ms": 4.630508,
+          "p95_ms": 4.878329,
+          "p99_ms": 5.367812
         },
         "wait_for_file_version_ms": {
           "count": 200,
-          "p50_ms": 1.9900970000000002,
-          "p95_ms": 2.065601,
-          "p99_ms": 2.096003
+          "p50_ms": 1.993847,
+          "p95_ms": 2.086284,
+          "p99_ms": 2.115786
         },
         "snapshot_preparation_ms": {
           "count": 200,
-          "p50_ms": 2.155005,
-          "p95_ms": 2.2155080000000003,
-          "p99_ms": 2.344315
+          "p50_ms": 2.1725920000000003,
+          "p95_ms": 2.268213,
+          "p99_ms": 2.324795
         },
         "ir_query_ms": {
           "count": 200,
-          "p50_ms": 0.038501,
-          "p95_ms": 0.06940299999999999,
-          "p99_ms": 0.08780400000000001
+          "p50_ms": 0.038104,
+          "p95_ms": 0.074012,
+          "p99_ms": 0.119811
         },
-        "allocations_per_request": 225.07,
-        "allocated_bytes_per_request": 15527.44,
-        "lock_wait_ms_per_request": 0.04277109500000002,
+        "allocations_per_request": 286.07,
+        "allocated_bytes_per_request": 22071.44,
+        "lock_wait_ms_per_request": 0.042539095000000006,
         "lock_contention_events_per_request": 1.0
       },
       "anti_rescue": {
@@ -733,31 +735,31 @@
       "metrics": {
         "total_duration_ms": {
           "count": 200,
-          "p50_ms": 0.491824,
-          "p95_ms": 0.670032,
-          "p99_ms": 0.81724
+          "p50_ms": 0.583499,
+          "p95_ms": 0.865777,
+          "p99_ms": 1.672288
         },
         "wait_for_file_version_ms": {
           "count": 200,
-          "p50_ms": 0.106106,
-          "p95_ms": 0.159908,
-          "p99_ms": 0.17690899999999998
+          "p50_ms": 0.108418,
+          "p95_ms": 0.174115,
+          "p99_ms": 0.329356
         },
         "snapshot_preparation_ms": {
           "count": 200,
-          "p50_ms": 0.065303,
-          "p95_ms": 0.116106,
-          "p99_ms": 0.142407
+          "p50_ms": 0.073212,
+          "p95_ms": 0.134123,
+          "p99_ms": 0.29134899999999997
         },
         "ir_query_ms": {
           "count": 200,
-          "p50_ms": 0.031101,
-          "p95_ms": 0.046102,
-          "p99_ms": 0.063303
+          "p50_ms": 0.029996,
+          "p95_ms": 0.060705,
+          "p99_ms": 0.119821
         },
-        "allocations_per_request": 272.09,
-        "allocated_bytes_per_request": 25673.96,
-        "lock_wait_ms_per_request": 0.03320861499999998,
+        "allocations_per_request": 320.09,
+        "allocated_bytes_per_request": 31612.96,
+        "lock_wait_ms_per_request": 0.035355405,
         "lock_contention_events_per_request": 1.0
       },
       "anti_rescue": {
@@ -772,38 +774,38 @@
       "operation": "hover",
       "cases": 1,
       "total_requests": 200,
-      "fail_closed_total": 200,
-      "fail_closed_rate": 1.0,
+      "fail_closed_total": 0,
+      "fail_closed_rate": 0.0,
       "error_rate": 0.0,
       "incomplete_rate": 0.0,
       "metrics": {
         "total_duration_ms": {
           "count": 200,
-          "p50_ms": 0.342216,
-          "p95_ms": 0.49592400000000003,
-          "p99_ms": 0.589829
+          "p50_ms": 0.323028,
+          "p95_ms": 0.496784,
+          "p99_ms": 0.929782
         },
         "wait_for_file_version_ms": {
           "count": 200,
-          "p50_ms": 0.09130400000000001,
-          "p95_ms": 0.128106,
-          "p99_ms": 0.139507
+          "p50_ms": 0.096809,
+          "p95_ms": 0.143482,
+          "p99_ms": 0.218019
         },
         "snapshot_preparation_ms": {
           "count": 200,
-          "p50_ms": 0.060703,
-          "p95_ms": 0.109305,
-          "p99_ms": 0.153307
+          "p50_ms": 0.073006,
+          "p95_ms": 0.132084,
+          "p99_ms": 0.24702200000000002
         },
         "ir_query_ms": {
           "count": 200,
-          "p50_ms": 0.053603000000000005,
-          "p95_ms": 0.082304,
-          "p99_ms": 0.10230500000000001
+          "p50_ms": 0.052604,
+          "p95_ms": 0.089689,
+          "p99_ms": 0.239221
         },
-        "allocations_per_request": 199.11,
-        "allocated_bytes_per_request": 60873.8,
-        "lock_wait_ms_per_request": 0.05850735,
+        "allocations_per_request": 177.11,
+        "allocated_bytes_per_request": 26796.8,
+        "lock_wait_ms_per_request": 0.062003475,
         "lock_contention_events_per_request": 1.0
       },
       "anti_rescue": {
@@ -818,38 +820,38 @@
       "operation": "definition",
       "cases": 1,
       "total_requests": 200,
-      "fail_closed_total": 200,
-      "fail_closed_rate": 1.0,
+      "fail_closed_total": 0,
+      "fail_closed_rate": 0.0,
       "error_rate": 0.0,
       "incomplete_rate": 0.0,
       "metrics": {
         "total_duration_ms": {
           "count": 200,
-          "p50_ms": 0.224711,
-          "p95_ms": 0.388719,
-          "p99_ms": 0.464323
+          "p50_ms": 0.237221,
+          "p95_ms": 0.396935,
+          "p99_ms": 0.700861
         },
         "wait_for_file_version_ms": {
           "count": 200,
-          "p50_ms": 0.061502999999999995,
-          "p95_ms": 0.113305,
-          "p99_ms": 0.133406
+          "p50_ms": 0.059505,
+          "p95_ms": 0.11472,
+          "p99_ms": 0.258822
         },
         "snapshot_preparation_ms": {
           "count": 200,
-          "p50_ms": 0.057902999999999996,
-          "p95_ms": 0.107905,
-          "p99_ms": 0.136206
+          "p50_ms": 0.069306,
+          "p95_ms": 0.140624,
+          "p99_ms": 0.27916399999999997
         },
         "ir_query_ms": {
           "count": 200,
-          "p50_ms": 0.048202999999999996,
-          "p95_ms": 0.08790400000000001,
-          "p99_ms": 0.101605
+          "p50_ms": 0.048104,
+          "p95_ms": 0.076706,
+          "p99_ms": 0.142424
         },
-        "allocations_per_request": 147.06,
-        "allocated_bytes_per_request": 12644.52,
-        "lock_wait_ms_per_request": 0.05628826500000002,
+        "allocations_per_request": 153.06,
+        "allocated_bytes_per_request": 13060.52,
+        "lock_wait_ms_per_request": 0.055809460000000026,
         "lock_contention_events_per_request": 1.0
       },
       "anti_rescue": {
@@ -864,38 +866,38 @@
       "operation": "type_at_position",
       "cases": 1,
       "total_requests": 200,
-      "fail_closed_total": 200,
-      "fail_closed_rate": 1.0,
+      "fail_closed_total": 0,
+      "fail_closed_rate": 0.0,
       "error_rate": 0.0,
       "incomplete_rate": 0.0,
       "metrics": {
         "total_duration_ms": {
           "count": 200,
-          "p50_ms": 4.373513,
-          "p95_ms": 4.4987200000000005,
-          "p99_ms": 4.679928
+          "p50_ms": 4.384444,
+          "p95_ms": 4.508597,
+          "p99_ms": 4.6316880000000005
         },
         "wait_for_file_version_ms": {
           "count": 200,
-          "p50_ms": 2.060901,
-          "p95_ms": 2.128104,
-          "p99_ms": 2.165306
+          "p50_ms": 2.067482,
+          "p95_ms": 2.154366,
+          "p99_ms": 2.203094
         },
         "snapshot_preparation_ms": {
           "count": 200,
-          "p50_ms": 2.1591050000000003,
-          "p95_ms": 2.220908,
-          "p99_ms": 2.2476100000000003
+          "p50_ms": 2.178892,
+          "p95_ms": 2.254699,
+          "p99_ms": 2.347907
         },
         "ir_query_ms": {
           "count": 200,
-          "p50_ms": 0.079003,
-          "p95_ms": 0.145507,
-          "p99_ms": 0.21121
+          "p50_ms": 0.066906,
+          "p95_ms": 0.12542099999999998,
+          "p99_ms": 0.17633
         },
-        "allocations_per_request": 134.065,
-        "allocated_bytes_per_request": 11619.48,
-        "lock_wait_ms_per_request": 0.08851282000000003,
+        "allocations_per_request": 138.065,
+        "allocated_bytes_per_request": 11716.48,
+        "lock_wait_ms_per_request": 0.07566351500000003,
         "lock_contention_events_per_request": 1.0
       },
       "anti_rescue": {
@@ -917,31 +919,31 @@
       "metrics": {
         "total_duration_ms": {
           "count": 200,
-          "p50_ms": 4.567023,
-          "p95_ms": 4.768433,
-          "p99_ms": 4.879538
+          "p50_ms": 4.702814,
+          "p95_ms": 5.101049,
+          "p99_ms": 5.4890039999999996
         },
         "wait_for_file_version_ms": {
           "count": 200,
-          "p50_ms": 2.000098,
-          "p95_ms": 2.0707009999999997,
-          "p99_ms": 2.0846020000000003
+          "p50_ms": 2.002546,
+          "p95_ms": 2.1096320000000004,
+          "p99_ms": 2.1868220000000003
         },
         "snapshot_preparation_ms": {
           "count": 200,
-          "p50_ms": 2.145705,
-          "p95_ms": 2.214808,
-          "p99_ms": 2.250009
+          "p50_ms": 2.186293,
+          "p95_ms": 2.3038920000000003,
+          "p99_ms": 2.463788
         },
         "ir_query_ms": {
           "count": 200,
-          "p50_ms": 0.038102000000000004,
-          "p95_ms": 0.068603,
-          "p99_ms": 0.090605
+          "p50_ms": 0.038704,
+          "p95_ms": 0.08320799999999999,
+          "p99_ms": 0.19261699999999998
         },
-        "allocations_per_request": 271.06,
-        "allocated_bytes_per_request": 24151.52,
-        "lock_wait_ms_per_request": 0.042890559999999994,
+        "allocations_per_request": 332.06,
+        "allocated_bytes_per_request": 30809.52,
+        "lock_wait_ms_per_request": 0.046904830000000015,
         "lock_contention_events_per_request": 1.0
       },
       "anti_rescue": {
@@ -963,31 +965,31 @@
       "metrics": {
         "total_duration_ms": {
           "count": 200,
-          "p50_ms": 0.43062100000000003,
-          "p95_ms": 0.634831,
-          "p99_ms": 0.868642
+          "p50_ms": 0.495985,
+          "p95_ms": 1.027275,
+          "p99_ms": 2.3791979999999997
         },
         "wait_for_file_version_ms": {
           "count": 200,
-          "p50_ms": 0.108706,
-          "p95_ms": 0.151007,
-          "p99_ms": 0.16630799999999998
+          "p50_ms": 0.109686,
+          "p95_ms": 0.175515,
+          "p99_ms": 0.36213199999999995
         },
         "snapshot_preparation_ms": {
           "count": 200,
-          "p50_ms": 0.06360299999999999,
-          "p95_ms": 0.12620599999999998,
-          "p99_ms": 0.165308
+          "p50_ms": 0.080507,
+          "p95_ms": 0.221537,
+          "p99_ms": 0.590225
         },
         "ir_query_ms": {
           "count": 200,
-          "p50_ms": 0.031802,
-          "p95_ms": 0.061203,
-          "p99_ms": 0.073804
+          "p50_ms": 0.030903,
+          "p95_ms": 0.065206,
+          "p99_ms": 0.258023
         },
-        "allocations_per_request": 231.095,
-        "allocated_bytes_per_request": 16477.0,
-        "lock_wait_ms_per_request": 0.03501175500000001,
+        "allocations_per_request": 267.095,
+        "allocated_bytes_per_request": 21143.0,
+        "lock_wait_ms_per_request": 0.04159233999999997,
         "lock_contention_events_per_request": 1.0
       },
       "anti_rescue": {

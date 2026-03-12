@@ -3746,7 +3746,10 @@ async fn p7_member_access_completion_does_not_backfill_from_runtime_index_snapsh
 
     coordinator
         .intellisense_index()
-        .replace_snapshot(make_index_snapshot("p7_completion_no_search_rescue", "SearchOnlyType"));
+        .replace_snapshot(make_index_snapshot(
+            "p7_completion_no_search_rescue",
+            "SearchOnlyType",
+        ));
     coordinator.intellisense_index().replace_symbols_for_uri(
         uri.as_str(),
         vec![IndexItem::new(
@@ -3789,9 +3792,8 @@ async fn p7_member_access_completion_does_not_backfill_from_runtime_index_snapsh
         .get("counters")
         .and_then(|value| value.as_object())
         .expect("metrics.counters object");
-    let fallback_unavailable_total = read_u64_metric(
-        counters.get("intellisense_v2_completion_fallback_unavailable_total"),
-    );
+    let fallback_unavailable_total =
+        read_u64_metric(counters.get("intellisense_v2_completion_fallback_unavailable_total"));
     assert!(
         fallback_unavailable_total > 0,
         "member-access cache miss must record fallback_unavailable before public reason emission, counters={counters:?}"
@@ -3800,6 +3802,191 @@ async fn p7_member_access_completion_does_not_backfill_from_runtime_index_snapsh
     assert!(
         fail_closed_reason_total > 0,
         "member-access cache miss must emit missing_semantic_index bounded public reason metrics, counters={counters:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p7_hover_and_definition_do_not_backfill_from_runtime_index_snapshot() {
+    const HOVER_REASON_KEY: &str =
+        "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_hover_reason_missing_semantic_index";
+    const DEFINITION_REASON_KEY: &str =
+        "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_definition_reason_missing_semantic_index";
+
+    fn make_index_snapshot(id: &str, type_name: &str) -> IndexSnapshot {
+        let mut snapshot = IndexSnapshot::empty(IndexSnapshotId::from_hash(id.to_string()));
+        Arc::make_mut(&mut snapshot.type_index).insert(
+            type_name.to_string(),
+            Arc::new(IndexItem::new(
+                type_name.to_string(),
+                IndexItemKind::Type(TypeKind::Generic),
+                IndexKind::Type,
+            )),
+        );
+        snapshot
+    }
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().unwrap() = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let fixture = "Процедура МойМетод() Экспорт\n\
+КонецПроцедуры\n\
+\n\
+Процедура Тест()\n\
+    ЭтотОбъект.МойМетод();\n\
+КонецПроцедуры\n";
+    let uri = Url::parse("file:///test_p7_hover_definition_no_search_rescue.bsl").expect("uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: fixture.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    coordinator
+        .intellisense_index()
+        .replace_snapshot(make_index_snapshot(
+            "p7_hover_definition_no_search_rescue",
+            "SearchOnlyType",
+        ));
+    coordinator.intellisense_index().replace_symbols_for_uri(
+        uri.as_str(),
+        vec![IndexItem::new(
+            "SearchOnlyMethod".to_string(),
+            IndexItemKind::Symbol(bsl_backend::system::SymbolKind::Procedure),
+            IndexKind::Symbol,
+        )],
+    );
+    coordinator.intellisense_index().replace_modules_for_key(
+        "p7_hover_definition_no_search_rescue_module",
+        vec![IndexItem::new(
+            "SearchOnlyModule".to_string(),
+            IndexItemKind::Symbol(bsl_backend::system::SymbolKind::Procedure),
+            IndexKind::Module,
+        )],
+    );
+
+    let server = server_holder
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("server must be captured");
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    force_current_revision_without_exact_type_index(&server, file_id, &uri, fixture, 2).await;
+
+    let member_position = find_utf16_position_after_marker(fixture, "ЭтотОбъект.МойМетод");
+
+    let hover_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/hover")
+                .id(12012)
+                .params(
+                    serde_json::to_value(HoverParams {
+                        text_document_position_params: TextDocumentPositionParams {
+                            text_document: TextDocumentIdentifier { uri: uri.clone() },
+                            position: member_position,
+                        },
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                    })
+                    .expect("HoverParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("hover request")
+        .expect("hover response");
+    let hover_value = serde_json::to_value(&hover_response).expect("serialize hover response");
+    let hover_result = hover_value
+        .get("result")
+        .cloned()
+        .expect("hover result field");
+    let hover: Option<Hover> = serde_json::from_value(hover_result).expect("parse hover result");
+    assert!(
+        hover.is_none(),
+        "hover must stay fail-closed when only runtime discovery/search index is populated: {hover_value:?}"
+    );
+
+    let definition_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/definition")
+                .id(12013)
+                .params(
+                    serde_json::to_value(GotoDefinitionParams {
+                        text_document_position_params: TextDocumentPositionParams {
+                            text_document: TextDocumentIdentifier { uri: uri.clone() },
+                            position: member_position,
+                        },
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                        partial_result_params: PartialResultParams::default(),
+                    })
+                    .expect("GotoDefinitionParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("definition request")
+        .expect("definition response");
+    let definition_value =
+        serde_json::to_value(&definition_response).expect("serialize definition response");
+    let definition_result = definition_value
+        .get("result")
+        .cloned()
+        .expect("definition result field");
+    let definition: Option<GotoDefinitionResponse> =
+        serde_json::from_value(definition_result).expect("parse definition result");
+    assert!(
+        normalize_lsp_definition(definition).is_empty(),
+        "definition must stay fail-closed when only runtime discovery/search index is populated: {definition_value:?}"
+    );
+
+    let metrics = coordinator.observability_metrics();
+    let counters = metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    assert!(
+        read_u64_metric(counters.get(HOVER_REASON_KEY)) > 0,
+        "hover cache miss must emit missing_semantic_index bounded public reason metrics, counters={counters:?}"
+    );
+    assert!(
+        read_u64_metric(counters.get(DEFINITION_REASON_KEY)) > 0,
+        "definition cache miss must emit missing_semantic_index bounded public reason metrics, counters={counters:?}"
     );
 
     drain_task.abort();
@@ -10490,12 +10677,14 @@ async fn force_current_revision_without_exact_type_index(
         .ok()
         .map(|path| path.to_string_lossy().into_owned())
         .unwrap_or_else(|| uri.to_string());
-    server.analysis_v2.apply_changes(vec![bsl_analysis_v2::Change::SetFile {
-        file_id,
-        text: Arc::from(content.to_string()),
-        version,
-        path: Arc::from(path),
-    }]);
+    server
+        .analysis_v2
+        .apply_changes(vec![bsl_analysis_v2::Change::SetFile {
+            file_id,
+            text: Arc::from(content.to_string()),
+            version,
+            path: Arc::from(path),
+        }]);
     {
         let mut versions = server.latest_received_file_versions_v2.write().await;
         versions.insert(file_id, version);

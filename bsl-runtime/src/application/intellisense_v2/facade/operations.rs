@@ -1,7 +1,7 @@
 use super::*;
 
 impl IntellisenseV2Facade {
-    fn ephemeral_operation_requires_exact_type_index(operation: SemanticOperation) -> bool {
+    fn operation_requires_exact_type_index(operation: SemanticOperation) -> bool {
         matches!(
             operation,
             SemanticOperation::Hover
@@ -92,18 +92,17 @@ impl IntellisenseV2Facade {
         let (analysis, index_snapshot, deps_id) = self
             .snapshot_with_deps_with_priority(context.origin, queue_priority)
             .await;
-        let snapshot_elapsed = snapshot_started.elapsed();
-        if let Some(coordinator) = observability {
-            coordinator.record_intellisense_v2_snapshot_latency_with_origin_and_mode(
-                context.origin.as_str(),
-                context.operation.as_str(),
-                context.completion_mode,
-                snapshot_elapsed,
-            );
-        }
 
         if let Some(expected_deps_id) = context.expected_deps_id.as_ref() {
             if expected_deps_id != &deps_id {
+                if let Some(coordinator) = observability {
+                    coordinator.record_intellisense_v2_snapshot_latency_with_origin_and_mode(
+                        context.origin.as_str(),
+                        context.operation.as_str(),
+                        context.completion_mode,
+                        snapshot_started.elapsed(),
+                    );
+                }
                 return Err(SemanticOutcome::MissingDeps);
             }
         }
@@ -130,15 +129,86 @@ impl IntellisenseV2Facade {
                         }
                         let _ = knobs;
                         record_completion_fallback_unavailable();
+                        if let Some(coordinator) = observability {
+                            coordinator.record_intellisense_v2_snapshot_latency_with_origin_and_mode(
+                                context.origin.as_str(),
+                                context.operation.as_str(),
+                                context.completion_mode,
+                                snapshot_started.elapsed(),
+                            );
+                        }
                         return Err(SemanticOutcome::StaleVersion);
                     }
                 } else {
                     record_completion_fallback_unavailable();
+                    if let Some(coordinator) = observability {
+                        coordinator.record_intellisense_v2_snapshot_latency_with_origin_and_mode(
+                            context.origin.as_str(),
+                            context.operation.as_str(),
+                            context.completion_mode,
+                            snapshot_started.elapsed(),
+                        );
+                    }
                     return Err(SemanticOutcome::StaleVersion);
                 }
             } else if observed_file_version.is_some_and(|version| version < min_file_version) {
+                if let Some(coordinator) = observability {
+                    coordinator.record_intellisense_v2_snapshot_latency_with_origin_and_mode(
+                        context.origin.as_str(),
+                        context.operation.as_str(),
+                        context.completion_mode,
+                        snapshot_started.elapsed(),
+                    );
+                }
                 return Err(SemanticOutcome::StaleVersion);
             }
+        }
+
+        if Self::operation_requires_exact_type_index(context.operation) {
+            if let Some(file_version) = observed_file_version {
+                let exact_ready = analysis
+                    .current_type_index_serve_only_ready(context.file_id)
+                    .ok()
+                    .unwrap_or(false);
+                if !exact_ready {
+                    let precompute_started = Instant::now();
+                    if let Ok(precompute) =
+                        analysis.precompute_type_index_for_file(context.file_id, Some(file_version), 0)
+                    {
+                        if let Some(coordinator) = observability {
+                            coordinator
+                                .record_intellisense_v2_type_index_reason(precompute.reason_code.as_str());
+                            if precompute.stats.evicted_per_file_window_total > 0 {
+                                coordinator.record_intellisense_v2_type_index_reason(
+                                    bsl_analysis_v2::TypeIndexArtifactReasonCode::TypeIndexArtifactEvictedPerFileWindow
+                                        .as_str(),
+                                );
+                            }
+                            if precompute.stats.evicted_global_guard_total > 0 {
+                                coordinator.record_intellisense_v2_type_index_reason(
+                                    bsl_analysis_v2::TypeIndexArtifactReasonCode::TypeIndexArtifactEvictedGlobalGuard
+                                        .as_str(),
+                                );
+                            }
+                            coordinator.record_intellisense_v2_runtime_exec_latency_with_origin(
+                                context.origin.as_str(),
+                                "type_index_precompute",
+                                precompute_started.elapsed(),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        let snapshot_elapsed = snapshot_started.elapsed();
+        if let Some(coordinator) = observability {
+            coordinator.record_intellisense_v2_snapshot_latency_with_origin_and_mode(
+                context.origin.as_str(),
+                context.operation.as_str(),
+                context.completion_mode,
+                snapshot_elapsed,
+            );
         }
 
         Ok(PreparedOperationSnapshot {
@@ -192,7 +262,7 @@ impl IntellisenseV2Facade {
             }
         }
 
-        if Self::ephemeral_operation_requires_exact_type_index(context.operation) {
+        if Self::operation_requires_exact_type_index(context.operation) {
             let _ = snapshot.analysis.precompute_type_index_for_file(
                 context.file_id,
                 Some(file_version),

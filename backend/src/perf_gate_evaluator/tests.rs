@@ -149,10 +149,48 @@ fn contract_fixture() -> Value {
                     }
                 }
             },
+            "fail_closed_budget_ceilings": {
+                "small": {
+                    "default": {
+                        "completion": fail_closed_budget(0, 0.0),
+                        "hover": fail_closed_budget(0, 0.0),
+                        "definition": fail_closed_budget(0, 0.0),
+                        "type_at_position": fail_closed_budget(0, 0.0),
+                        "members": fail_closed_budget(0, 0.0)
+                    },
+                    "incomplete_syntax_member_access": {
+                        "completion": fail_closed_budget(0, 0.0)
+                    }
+                },
+                "large": {
+                    "default": {
+                        "completion": fail_closed_budget(0, 0.0),
+                        "hover": fail_closed_budget(0, 0.0),
+                        "definition": fail_closed_budget(0, 0.0),
+                        "type_at_position": fail_closed_budget(0, 0.0),
+                        "members": fail_closed_budget(0, 0.0)
+                    },
+                    "incomplete_syntax_member_access": {
+                        "completion": fail_closed_budget(0, 0.0)
+                    }
+                },
+                "churn": {
+                    "default": {
+                        "completion": fail_closed_budget(0, 0.0),
+                        "hover": fail_closed_budget(0, 0.0),
+                        "definition": fail_closed_budget(0, 0.0),
+                        "type_at_position": fail_closed_budget(0, 0.0),
+                        "members": fail_closed_budget(0, 0.0)
+                    },
+                    "incomplete_syntax_member_access": {
+                        "completion": fail_closed_budget(0, 0.0)
+                    }
+                }
+            },
             "relative_ratio_baseline_floors": {
                 "total_duration_ms": 6,
                 "wait_for_file_version_ms": 3,
-                "snapshot_preparation_ms": 3,
+                "snapshot_preparation_ms": 5,
                 "ir_query_ms": 3,
                 "allocations_per_request": 100,
                 "allocated_bytes_per_request": 8192,
@@ -195,7 +233,8 @@ fn contract_fixture() -> Value {
                 "allocation_budget_exceeded",
                 "lock_wait_budget_exceeded",
                 "lock_contention_budget_exceeded",
-                "anti_rescue_budget_exceeded"
+                "anti_rescue_budget_exceeded",
+                "fail_closed_budget_exceeded"
             ]
         }
     })
@@ -210,17 +249,19 @@ fn latency_budget(p95: u64, p99: u64) -> Value {
     })
 }
 
-fn resource_budget(
-    allocations: u64,
-    bytes: u64,
-    lock_wait: u64,
-    lock_contention: u64,
-) -> Value {
+fn resource_budget(allocations: u64, bytes: u64, lock_wait: u64, lock_contention: u64) -> Value {
     json!({
         "allocations_per_request": allocations,
         "allocated_bytes_per_request": bytes,
         "lock_wait_ms_per_request": lock_wait,
         "lock_contention_events_per_request": lock_contention
+    })
+}
+
+fn fail_closed_budget(total: u64, rate: f64) -> Value {
+    json!({
+        "fail_closed_total": total,
+        "fail_closed_rate": rate
     })
 }
 
@@ -236,6 +277,8 @@ fn sample(fixture_family: &str, operation: &str, p95_ms: f64, p99_ms: f64) -> Pe
         snapshot_preparation_p99_ms: 1.0,
         ir_query_p95_ms: 1.0,
         ir_query_p99_ms: 1.0,
+        fail_closed_total: 0,
+        fail_closed_rate: 0.0,
         error_rate: 0.0,
         incomplete_rate: 0.0,
         allocations_per_request: 1000.0,
@@ -256,22 +299,82 @@ fn required_matrix_samples(p95_ms: f64, p99_ms: f64) -> Vec<PerfGateSample> {
         sample("steady_member_chain", "definition", p95_ms, p99_ms),
         sample("steady_member_chain", "type_at_position", p95_ms, p99_ms),
         sample("steady_member_chain", "members", p95_ms, p99_ms),
-        sample("post_did_change_current_revision", "completion", p95_ms, p99_ms),
+        sample(
+            "post_did_change_current_revision",
+            "completion",
+            p95_ms,
+            p99_ms,
+        ),
         sample("post_did_change_current_revision", "hover", p95_ms, p99_ms),
-        sample("post_did_change_current_revision", "definition", p95_ms, p99_ms),
-        sample("post_did_change_current_revision", "type_at_position", p95_ms, p99_ms),
-        sample("post_did_change_current_revision", "members", p95_ms, p99_ms),
-        sample("object_module_explicit_context", "completion", p95_ms, p99_ms),
+        sample(
+            "post_did_change_current_revision",
+            "definition",
+            p95_ms,
+            p99_ms,
+        ),
+        sample(
+            "post_did_change_current_revision",
+            "type_at_position",
+            p95_ms,
+            p99_ms,
+        ),
+        sample(
+            "post_did_change_current_revision",
+            "members",
+            p95_ms,
+            p99_ms,
+        ),
+        sample(
+            "object_module_explicit_context",
+            "completion",
+            p95_ms,
+            p99_ms,
+        ),
         sample("object_module_explicit_context", "hover", p95_ms, p99_ms),
-        sample("object_module_explicit_context", "definition", p95_ms, p99_ms),
-        sample("object_module_explicit_context", "type_at_position", p95_ms, p99_ms),
+        sample(
+            "object_module_explicit_context",
+            "definition",
+            p95_ms,
+            p99_ms,
+        ),
+        sample(
+            "object_module_explicit_context",
+            "type_at_position",
+            p95_ms,
+            p99_ms,
+        ),
         sample("object_module_explicit_context", "members", p95_ms, p99_ms),
-        sample("recordset_module_explicit_context", "completion", p95_ms, p99_ms),
+        sample(
+            "recordset_module_explicit_context",
+            "completion",
+            p95_ms,
+            p99_ms,
+        ),
         sample("recordset_module_explicit_context", "hover", p95_ms, p99_ms),
-        sample("recordset_module_explicit_context", "definition", p95_ms, p99_ms),
-        sample("recordset_module_explicit_context", "type_at_position", p95_ms, p99_ms),
-        sample("recordset_module_explicit_context", "members", p95_ms, p99_ms),
-        sample("incomplete_syntax_member_access", "completion", p95_ms, p99_ms),
+        sample(
+            "recordset_module_explicit_context",
+            "definition",
+            p95_ms,
+            p99_ms,
+        ),
+        sample(
+            "recordset_module_explicit_context",
+            "type_at_position",
+            p95_ms,
+            p99_ms,
+        ),
+        sample(
+            "recordset_module_explicit_context",
+            "members",
+            p95_ms,
+            p99_ms,
+        ),
+        sample(
+            "incomplete_syntax_member_access",
+            "completion",
+            p95_ms,
+            p99_ms,
+        ),
     ]
 }
 
@@ -308,22 +411,62 @@ fn perf_gate_passes_when_metrics_are_within_thresholds() {
             sample("steady_member_chain", "definition", 100.0, 120.0),
             sample("steady_member_chain", "type_at_position", 100.0, 120.0),
             sample("steady_member_chain", "members", 100.0, 120.0),
-            sample("post_did_change_current_revision", "completion", 100.0, 120.0),
+            sample(
+                "post_did_change_current_revision",
+                "completion",
+                100.0,
+                120.0,
+            ),
             sample("post_did_change_current_revision", "hover", 100.0, 120.0),
-            sample("post_did_change_current_revision", "definition", 100.0, 120.0),
-            sample("post_did_change_current_revision", "type_at_position", 100.0, 120.0),
+            sample(
+                "post_did_change_current_revision",
+                "definition",
+                100.0,
+                120.0,
+            ),
+            sample(
+                "post_did_change_current_revision",
+                "type_at_position",
+                100.0,
+                120.0,
+            ),
             sample("post_did_change_current_revision", "members", 100.0, 120.0),
             sample("object_module_explicit_context", "completion", 100.0, 120.0),
             sample("object_module_explicit_context", "hover", 100.0, 120.0),
             sample("object_module_explicit_context", "definition", 100.0, 120.0),
-            sample("object_module_explicit_context", "type_at_position", 100.0, 120.0),
+            sample(
+                "object_module_explicit_context",
+                "type_at_position",
+                100.0,
+                120.0,
+            ),
             sample("object_module_explicit_context", "members", 100.0, 120.0),
-            sample("recordset_module_explicit_context", "completion", 100.0, 120.0),
+            sample(
+                "recordset_module_explicit_context",
+                "completion",
+                100.0,
+                120.0,
+            ),
             sample("recordset_module_explicit_context", "hover", 100.0, 120.0),
-            sample("recordset_module_explicit_context", "definition", 100.0, 120.0),
-            sample("recordset_module_explicit_context", "type_at_position", 100.0, 120.0),
+            sample(
+                "recordset_module_explicit_context",
+                "definition",
+                100.0,
+                120.0,
+            ),
+            sample(
+                "recordset_module_explicit_context",
+                "type_at_position",
+                100.0,
+                120.0,
+            ),
             sample("recordset_module_explicit_context", "members", 100.0, 120.0),
-            sample("incomplete_syntax_member_access", "completion", 100.0, 120.0),
+            sample(
+                "incomplete_syntax_member_access",
+                "completion",
+                100.0,
+                120.0,
+            ),
         ],
         Some(&[
             sample("steady_member_chain", "completion", 100.0, 120.0),
@@ -331,22 +474,62 @@ fn perf_gate_passes_when_metrics_are_within_thresholds() {
             sample("steady_member_chain", "definition", 100.0, 120.0),
             sample("steady_member_chain", "type_at_position", 100.0, 120.0),
             sample("steady_member_chain", "members", 100.0, 120.0),
-            sample("post_did_change_current_revision", "completion", 100.0, 120.0),
+            sample(
+                "post_did_change_current_revision",
+                "completion",
+                100.0,
+                120.0,
+            ),
             sample("post_did_change_current_revision", "hover", 100.0, 120.0),
-            sample("post_did_change_current_revision", "definition", 100.0, 120.0),
-            sample("post_did_change_current_revision", "type_at_position", 100.0, 120.0),
+            sample(
+                "post_did_change_current_revision",
+                "definition",
+                100.0,
+                120.0,
+            ),
+            sample(
+                "post_did_change_current_revision",
+                "type_at_position",
+                100.0,
+                120.0,
+            ),
             sample("post_did_change_current_revision", "members", 100.0, 120.0),
             sample("object_module_explicit_context", "completion", 100.0, 120.0),
             sample("object_module_explicit_context", "hover", 100.0, 120.0),
             sample("object_module_explicit_context", "definition", 100.0, 120.0),
-            sample("object_module_explicit_context", "type_at_position", 100.0, 120.0),
+            sample(
+                "object_module_explicit_context",
+                "type_at_position",
+                100.0,
+                120.0,
+            ),
             sample("object_module_explicit_context", "members", 100.0, 120.0),
-            sample("recordset_module_explicit_context", "completion", 100.0, 120.0),
+            sample(
+                "recordset_module_explicit_context",
+                "completion",
+                100.0,
+                120.0,
+            ),
             sample("recordset_module_explicit_context", "hover", 100.0, 120.0),
-            sample("recordset_module_explicit_context", "definition", 100.0, 120.0),
-            sample("recordset_module_explicit_context", "type_at_position", 100.0, 120.0),
+            sample(
+                "recordset_module_explicit_context",
+                "definition",
+                100.0,
+                120.0,
+            ),
+            sample(
+                "recordset_module_explicit_context",
+                "type_at_position",
+                100.0,
+                120.0,
+            ),
             sample("recordset_module_explicit_context", "members", 100.0, 120.0),
-            sample("incomplete_syntax_member_access", "completion", 100.0, 120.0),
+            sample(
+                "incomplete_syntax_member_access",
+                "completion",
+                100.0,
+                120.0,
+            ),
         ]),
         thresholds(false),
     );
@@ -467,6 +650,37 @@ fn perf_gate_fails_when_anti_rescue_counts_are_non_zero() {
 }
 
 #[test]
+fn perf_gate_fails_when_required_matrix_entry_is_hidden_fail_closed() {
+    let mut current = required_matrix_samples(100.0, 120.0);
+    let baseline = required_matrix_samples(100.0, 120.0);
+    let hover_entry = sample_mut(&mut current, "steady_member_chain", "hover");
+    hover_entry.fail_closed_total = 200;
+    hover_entry.fail_closed_rate = 1.0;
+
+    let evaluation = evaluate_intellisense_perf_profile(
+        &contract_fixture(),
+        "small",
+        &current,
+        Some(&baseline),
+        thresholds(true),
+    );
+
+    let reason_codes = evaluation
+        .get("reason_codes")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(
+        evaluation.get("verdict").and_then(Value::as_str),
+        Some("fail")
+    );
+    assert!(reason_codes
+        .iter()
+        .filter_map(Value::as_str)
+        .any(|code| code == "fail_closed_budget_exceeded"));
+}
+
+#[test]
 fn perf_gate_uses_ratio_baseline_floors_for_sub_floor_jitter() {
     let mut current = required_matrix_samples(100.0, 120.0);
     let mut baseline = required_matrix_samples(100.0, 120.0);
@@ -560,6 +774,64 @@ fn perf_gate_still_fails_when_floor_adjusted_ratio_is_exceeded() {
         .iter()
         .filter_map(Value::as_str)
         .any(|code| code == "lock_wait_budget_exceeded"));
+}
+
+#[test]
+fn perf_gate_reports_but_does_not_block_on_p99_only_tail_jitter() {
+    let mut current = required_matrix_samples(100.0, 120.0);
+    let mut baseline = required_matrix_samples(100.0, 120.0);
+
+    let baseline_entry = sample_mut(&mut baseline, "post_did_change_current_revision", "hover");
+    baseline_entry.total_duration_p95_ms = 5.0;
+    baseline_entry.total_duration_p99_ms = 5.5;
+    baseline_entry.snapshot_preparation_p95_ms = 4.6;
+    baseline_entry.snapshot_preparation_p99_ms = 4.8;
+
+    let current_entry = sample_mut(&mut current, "post_did_change_current_revision", "hover");
+    current_entry.total_duration_p95_ms = 5.1;
+    current_entry.total_duration_p99_ms = 7.2;
+    current_entry.snapshot_preparation_p95_ms = 4.9;
+    current_entry.snapshot_preparation_p99_ms = 6.3;
+
+    let evaluation = evaluate_intellisense_perf_profile(
+        &contract_fixture(),
+        "churn",
+        &current,
+        Some(&baseline),
+        thresholds(true),
+    );
+
+    assert_eq!(
+        evaluation.get("verdict").and_then(Value::as_str),
+        Some("pass")
+    );
+    let entry = evaluation
+        .get("entries")
+        .and_then(Value::as_array)
+        .and_then(|entries| {
+            entries.iter().find(|entry| {
+                entry.get("fixture_family").and_then(Value::as_str)
+                    == Some("post_did_change_current_revision")
+                    && entry.get("operation").and_then(Value::as_str) == Some("hover")
+            })
+        })
+        .expect("hover entry");
+    assert!(
+        entry.get("latency")
+            .and_then(|value| value.get("total_duration_ms"))
+            .and_then(|value| value.get("ratio_p99"))
+            .and_then(Value::as_f64)
+            .is_some_and(|ratio| ratio > 1.15)
+    );
+    let reason_codes = evaluation
+        .get("reason_codes")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    assert!(!reason_codes
+        .iter()
+        .filter_map(Value::as_str)
+        .any(|code| code == "latency_relative_ratio_exceeded"));
 }
 
 #[test]

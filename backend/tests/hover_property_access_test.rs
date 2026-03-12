@@ -77,7 +77,8 @@ async fn test_hover_on_property_name_works_with_empty_request_time_repository() 
 
     let empty_repository: Arc<dyn TypeRepository> = Arc::new(InMemoryTypeRepository::new());
     let metadata_lookup = TypeMetadataLookup::new(empty_repository.clone());
-    let hover_formatter = HoverFormatter::new(HoverFormatConfig::default(), metadata_lookup.clone());
+    let hover_formatter =
+        HoverFormatter::new(HoverFormatConfig::default(), metadata_lookup.clone());
     let resolver = TypeResolver::new(empty_repository);
 
     let hover = get_hover_info_with_semantic_program(

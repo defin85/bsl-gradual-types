@@ -30,9 +30,9 @@ fn ir_program(
         deps.resolver.clone(),
     )
     .expect("convert to ir");
-    super::materialize_semantic_facts_with_recovery_with_path_profiled(
+    super::materialize_semantic_facts_with_path_profiled(
         &mut program,
-        &parsed,
+        &parsed.program,
         source,
         file_path,
         deps,
@@ -455,6 +455,83 @@ fn recovers_receiver_type_from_semantic_program_for_incomplete_bare_member_acces
 }
 
 #[test]
+fn canonical_semantic_program_materializes_parenthesized_incomplete_receiver_from_source_text() {
+    let source = concat!(
+        "Процедура Тест()\n",
+        "    ДляCompletion = (Новый Массив()).\n",
+        "КонецПроцедуры\n",
+    );
+    let file_path = "test.bsl";
+    let deps = deps_with_array_method();
+    let ir_program = ir_program(source, file_path, deps.clone());
+    let ir_index = build_type_index_from_semantic_program_with_path(&ir_program, file_path, deps);
+
+    let probe = source
+        .find("Новый Массив()")
+        .map(|idx| idx + "Новый Массив()".len() - 1)
+        .expect("parenthesized receiver probe") as u32;
+    let resolved = ir_index
+        .type_at_byte_offset(probe)
+        .expect("type at parenthesized incomplete receiver");
+
+    assert_eq!(
+        resolved.type_name(),
+        "Массив<Неопределено>",
+        "canonical semantic facts must preserve exact owner type for parenthesized incomplete member access"
+    );
+}
+
+#[test]
+fn canonical_semantic_program_does_not_materialize_bare_incomplete_receiver_from_source_text() {
+    let source = concat!(
+        "Процедура Тест()\n",
+        "    ЛокМассив = Новый Массив;\n",
+        "    ЛокМассив.\n",
+        "КонецПроцедуры\n",
+    );
+    let file_path = "test.bsl";
+    let deps = deps_with_array_method();
+    let ir_program = ir_program(source, file_path, deps.clone());
+    let ir_index = build_type_index_from_semantic_program_with_path(&ir_program, file_path, deps);
+
+    let probe = source
+        .match_indices("ЛокМассив")
+        .nth(1)
+        .map(|(idx, marker)| idx + marker.len() - 1)
+        .expect("second local receiver occurrence") as u32;
+
+    assert_eq!(
+        ir_index.type_at_byte_offset(probe),
+        None,
+        "source-text completion extraction must not reintroduce bare identifier fallback into canonical semantic facts"
+    );
+}
+
+#[test]
+fn canonical_semantic_program_materializes_object_module_incomplete_binding_from_source_text() {
+    let source = concat!(
+        "Процедура Тест()\n",
+        "    ЭтотОбъект.\n",
+        "КонецПроцедуры\n",
+    );
+    let file_path = "Documents/Док1/Ext/ObjectModule.bsl";
+    let deps = deps_with_form_attribute_to_value_signature();
+    let ir_program = ir_program(source, file_path, deps.clone());
+    let ir_index = build_type_index_from_semantic_program_with_path(&ir_program, file_path, deps);
+
+    let probe = source
+        .find("ЭтотОбъект")
+        .map(|idx| idx + "ЭтотОбъект".len() - 1)
+        .expect("object module receiver probe") as u32;
+    let resolved = ir_index
+        .type_at_byte_offset(probe)
+        .expect("type at object module incomplete receiver");
+
+    assert_eq!(resolved.type_name(), "ДокументОбъект.Док1");
+    assert_eq!(resolved.active_facet, Some(FacetKind::Object));
+}
+
+#[test]
 fn extracts_parenthesized_choice_receiver_slices_with_partial_member_tail() {
     let source = concat!(
         "Процедура Тест()\n",
@@ -556,7 +633,7 @@ fn manual_recovery_records_choice_branch_types_for_partial_member_tail() {
 }
 
 #[test]
-fn incomplete_constructor_call_recovery_records_semantic_target() {
+fn incomplete_constructor_call_does_not_materialize_recovery_target_in_canonical_ir() {
     let source = concat!(
         "Процедура Тест()\n",
         "    Новый Массив(1, )\n",
@@ -583,8 +660,8 @@ fn incomplete_constructor_call_recovery_records_semantic_target() {
             span.contains(call_offset) && target.type_name.eq_ignore_ascii_case("Массив")
         });
     assert!(
-        target.is_some(),
-        "incomplete constructor recovery must materialize constructor target"
+        target.is_none(),
+        "canonical IR must not synthesize constructor target from parse recovery for incomplete constructor call"
     );
 }
 

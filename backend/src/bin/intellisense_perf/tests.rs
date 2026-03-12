@@ -80,6 +80,71 @@ fn minimal_report(contract_version: &str) -> PerfReport {
     }
 }
 
+fn minimal_perf_gate_contract() -> serde_json::Value {
+    json!({
+        "surface": "intellisense-perf-gate",
+        "major_version": 2,
+        "input": {
+            "required_profiles": ["small"],
+            "required_operation_matrix": {
+                "steady_member_chain": ["completion"]
+            }
+        },
+        "baseline": {
+            "absolute_latency_ceilings_ms": {
+                "small": {
+                    "default": {
+                        "completion": {
+                            "total_duration_ms": { "p95": 300, "p99": 600 },
+                            "wait_for_file_version_ms": { "p95": 300, "p99": 600 },
+                            "snapshot_preparation_ms": { "p95": 300, "p99": 600 },
+                            "ir_query_ms": { "p95": 300, "p99": 600 }
+                        }
+                    }
+                }
+            },
+            "resource_budget_ceilings": {
+                "small": {
+                    "default": {
+                        "completion": {
+                            "allocations_per_request": 2000000,
+                            "allocated_bytes_per_request": 200000000,
+                            "lock_wait_ms_per_request": 5000,
+                            "lock_contention_events_per_request": 5000
+                        }
+                    }
+                }
+            },
+            "fail_closed_budget_ceilings": {
+                "small": {
+                    "default": {
+                        "completion": {
+                            "fail_closed_total": 0,
+                            "fail_closed_rate": 0.0
+                        }
+                    }
+                }
+            },
+            "relative_ratio_baseline_floors": {
+                "total_duration_ms": 6,
+                "wait_for_file_version_ms": 3,
+                "snapshot_preparation_ms": 5,
+                "ir_query_ms": 3,
+                "allocations_per_request": 100,
+                "allocated_bytes_per_request": 8192,
+                "lock_wait_ms_per_request": 1,
+                "lock_contention_events_per_request": 1
+            },
+            "anti_rescue_budget_ceilings": {
+                "stale_fallback_total": 0,
+                "stale_served_total": 0,
+                "degraded_substitute_total": 0,
+                "search_backed_substitute_total": 0
+            }
+        }
+    })
+}
+
 #[test]
 fn build_churned_content_switches_marker_without_growth() {
     let base = "Процедура Тест()\nКонецПроцедуры";
@@ -227,6 +292,38 @@ fn compare_reports_fails_with_unsupported_contract_version() {
 }
 
 #[test]
+fn compare_reports_propagates_fail_closed_budgets_into_comparison() {
+    let contract = minimal_perf_gate_contract();
+    let mut current = minimal_report("v2");
+    current.results[0].fail_closed_total = 1;
+    current.results[0].fail_closed_rate = 1.0;
+    let baseline = minimal_report("v2");
+    let thresholds = PerfGateThresholds {
+        latency_ratio_p95_max: 1.10,
+        latency_ratio_p99_max: 1.15,
+        resource_ratio_max: 1.20,
+        max_error_rate: 0.0,
+        max_incomplete_rate: 0.0,
+        blocking_mode: true,
+    };
+
+    let comparison = compare_reports(&contract, "small", &current, &baseline, thresholds);
+    assert_eq!(comparison.verdict, "fail");
+    assert!(!comparison.pass);
+    assert!(comparison
+        .reason_codes
+        .iter()
+        .any(|code| code == "fail_closed_budget_exceeded"));
+    assert_eq!(
+        comparison.entries[0]
+            .get("fail_closed")
+            .and_then(|value| value.get("current_rate"))
+            .and_then(serde_json::Value::as_f64),
+        Some(1.0)
+    );
+}
+
+#[test]
 fn resolve_expected_change_id_prefers_cli_over_env() {
     let from_cli =
         resolve_expected_change_id_from_sources(Some("cli-change-id"), Some("env-change-id"));
@@ -293,7 +390,10 @@ fn perf_operation_maps_to_shared_runtime_semantic_operation_ids() {
         PerfOperation::TypeAtPosition.semantic_operation().as_str(),
         "type_at_position"
     );
-    assert_eq!(PerfOperation::Members.semantic_operation().as_str(), "members");
+    assert_eq!(
+        PerfOperation::Members.semantic_operation().as_str(),
+        "members"
+    );
 }
 
 #[tokio::test]
@@ -323,8 +423,7 @@ async fn prime_runtime_files_unblocks_non_timeout_operations_without_churn() {
     coordinator
         .start_with_paths_blocking(None, None, None, None)
         .expect("start system coordinator");
-    let deps_bundle =
-        build_deps_bundle_v2(&coordinator, None, None).expect("build_deps_bundle_v2");
+    let deps_bundle = build_deps_bundle_v2(&coordinator, None, None).expect("build_deps_bundle_v2");
     let settings = bsl_backend::application::ExecutionSettings {
         settings_id: SettingsId::from_hash("intellisense-perf-test"),
         diagnostics_detail_level: DetailLevel::Full,
@@ -362,7 +461,11 @@ async fn prime_runtime_files_unblocks_non_timeout_operations_without_churn() {
         .semantic_deps
         .resolver
         .clone()
-        .unwrap_or_else(|| Arc::new(TypeResolver::new(deps_bundle.semantic_deps.repository.clone())));
+        .unwrap_or_else(|| {
+            Arc::new(TypeResolver::new(
+                deps_bundle.semantic_deps.repository.clone(),
+            ))
+        });
     let metadata_lookup = TypeMetadataLookup::new(deps_bundle.semantic_deps.repository.clone());
     let context = IterationContext {
         facade: &facade,
@@ -381,5 +484,141 @@ async fn prime_runtime_files_unblocks_non_timeout_operations_without_churn() {
         .await
         .expect("operation must not hang")
         .expect("operation measurement");
+    }
+}
+
+#[tokio::test]
+async fn shared_stateful_perf_operations_warm_exact_type_index_for_representative_matrix() {
+    let workspace_root = workspace_root();
+    let prepared = prepare_cases(
+        &[
+            ScenarioCase {
+                file: PathBuf::from("backend/tests/perf/fixtures/steady_member_chain.bsl"),
+                marker: "ДляHover = Массив.Количество".to_string(),
+                label: Some("steady_hover".to_string()),
+                operation: PerfOperation::Hover,
+                fixture_family: PerfFixtureFamily::SteadyMemberChain,
+            },
+            ScenarioCase {
+                file: PathBuf::from("backend/tests/perf/fixtures/steady_member_chain.bsl"),
+                marker: "ДляDefinition = ЛокальныйМетод".to_string(),
+                label: Some("steady_definition".to_string()),
+                operation: PerfOperation::Definition,
+                fixture_family: PerfFixtureFamily::SteadyMemberChain,
+            },
+            ScenarioCase {
+                file: PathBuf::from("backend/tests/perf/fixtures/steady_member_chain.bsl"),
+                marker: "ДляType = Массив".to_string(),
+                label: Some("steady_type".to_string()),
+                operation: PerfOperation::TypeAtPosition,
+                fixture_family: PerfFixtureFamily::SteadyMemberChain,
+            },
+            ScenarioCase {
+                file: PathBuf::from("backend/tests/perf/fixtures/Catalogs/Организации/Ext/ObjectModule.bsl"),
+                marker: "ДляHover = ЭтотОбъект.Код".to_string(),
+                label: Some("object_hover".to_string()),
+                operation: PerfOperation::Hover,
+                fixture_family: PerfFixtureFamily::ObjectModuleExplicitContext,
+            },
+            ScenarioCase {
+                file: PathBuf::from("backend/tests/perf/fixtures/Catalogs/Организации/Ext/ObjectModule.bsl"),
+                marker: "ДляDefinition = ЭтотОбъект.ЛокальныйМетод".to_string(),
+                label: Some("object_definition".to_string()),
+                operation: PerfOperation::Definition,
+                fixture_family: PerfFixtureFamily::ObjectModuleExplicitContext,
+            },
+            ScenarioCase {
+                file: PathBuf::from("backend/tests/perf/fixtures/Catalogs/Организации/Ext/ObjectModule.bsl"),
+                marker: "ДляType = Объект".to_string(),
+                label: Some("object_type".to_string()),
+                operation: PerfOperation::TypeAtPosition,
+                fixture_family: PerfFixtureFamily::ObjectModuleExplicitContext,
+            },
+            ScenarioCase {
+                file: PathBuf::from("backend/tests/perf/fixtures/InformationRegisters/Регистр1/Ext/RecordSetModule.bsl"),
+                marker: "ДляHover = ЭтотОбъект.ОбменДанными".to_string(),
+                label: Some("recordset_hover".to_string()),
+                operation: PerfOperation::Hover,
+                fixture_family: PerfFixtureFamily::RecordsetModuleExplicitContext,
+            },
+            ScenarioCase {
+                file: PathBuf::from("backend/tests/perf/fixtures/InformationRegisters/Регистр1/Ext/RecordSetModule.bsl"),
+                marker: "ДляDefinition = ЭтотОбъект.ЛокальныйМетод".to_string(),
+                label: Some("recordset_definition".to_string()),
+                operation: PerfOperation::Definition,
+                fixture_family: PerfFixtureFamily::RecordsetModuleExplicitContext,
+            },
+            ScenarioCase {
+                file: PathBuf::from("backend/tests/perf/fixtures/InformationRegisters/Регистр1/Ext/RecordSetModule.bsl"),
+                marker: "ДляType = Объект".to_string(),
+                label: Some("recordset_type".to_string()),
+                operation: PerfOperation::TypeAtPosition,
+                fixture_family: PerfFixtureFamily::RecordsetModuleExplicitContext,
+            },
+        ],
+        &workspace_root,
+    )
+    .expect("prepare cases");
+    let coordinator = Arc::new(SystemCoordinator::new());
+    coordinator
+        .start_with_paths_blocking(None, None, None, None)
+        .expect("start system coordinator");
+    let deps_bundle = build_deps_bundle_v2(&coordinator, None, None).expect("build_deps_bundle_v2");
+    let settings = bsl_backend::application::ExecutionSettings {
+        settings_id: SettingsId::from_hash("intellisense-perf-exact-ready"),
+        diagnostics_detail_level: DetailLevel::Full,
+    };
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(ChangeV2::SetDepsSnapshot {
+        deps_id: deps_bundle.deps_id.clone(),
+        deps: deps_bundle.semantic_deps.clone(),
+    });
+    host.apply_change(ChangeV2::SetSettingsSnapshot {
+        settings_id: settings.settings_id.clone(),
+        diagnostics_detail_level: settings.diagnostics_detail_level,
+    });
+    let facade = bsl_backend::application::IntellisenseV2Facade::new(
+        host,
+        deps_bundle.index_snapshot.clone(),
+        Some(coordinator.clone()),
+    );
+    prime_runtime_files(&facade, &prepared).await;
+
+    let mut content_by_file = build_content_by_file_map(&prepared);
+    let version_by_file = build_file_version_map(&prepared);
+    let resolver = deps_bundle
+        .semantic_deps
+        .resolver
+        .clone()
+        .unwrap_or_else(|| {
+            Arc::new(TypeResolver::new(
+                deps_bundle.semantic_deps.repository.clone(),
+            ))
+        });
+    let metadata_lookup = TypeMetadataLookup::new(deps_bundle.semantic_deps.repository.clone());
+    let context = IterationContext {
+        facade: &facade,
+        deps_id: &deps_bundle.deps_id,
+        settings,
+        coordinator: coordinator.as_ref(),
+        metadata_lookup: &metadata_lookup,
+        resolver: resolver.as_ref(),
+    };
+
+    for case in &prepared {
+        let measurement = tokio::time::timeout(
+            Duration::from_secs(2),
+            execute_case_iteration(&context, case, &mut content_by_file, &version_by_file),
+        )
+        .await
+        .expect("operation must not hang")
+        .expect("operation measurement");
+
+        assert!(
+            !measurement.fail_closed,
+            "representative {} {:?} case must not stay fail-closed after shared stateful prepare",
+            case.file_uri,
+            case.operation
+        );
     }
 }

@@ -333,10 +333,102 @@
         }
       }
     },
+    "fail_closed_budget_ceilings": {
+      "small": {
+        "default": {
+          "completion": {
+            "fail_closed_total": 0,
+            "fail_closed_rate": 0.0
+          },
+          "hover": {
+            "fail_closed_total": 0,
+            "fail_closed_rate": 0.0
+          },
+          "definition": {
+            "fail_closed_total": 0,
+            "fail_closed_rate": 0.0
+          },
+          "type_at_position": {
+            "fail_closed_total": 0,
+            "fail_closed_rate": 0.0
+          },
+          "members": {
+            "fail_closed_total": 0,
+            "fail_closed_rate": 0.0
+          }
+        },
+        "incomplete_syntax_member_access": {
+          "completion": {
+            "fail_closed_total": 0,
+            "fail_closed_rate": 0.0
+          }
+        }
+      },
+      "large": {
+        "default": {
+          "completion": {
+            "fail_closed_total": 0,
+            "fail_closed_rate": 0.0
+          },
+          "hover": {
+            "fail_closed_total": 0,
+            "fail_closed_rate": 0.0
+          },
+          "definition": {
+            "fail_closed_total": 0,
+            "fail_closed_rate": 0.0
+          },
+          "type_at_position": {
+            "fail_closed_total": 0,
+            "fail_closed_rate": 0.0
+          },
+          "members": {
+            "fail_closed_total": 0,
+            "fail_closed_rate": 0.0
+          }
+        },
+        "incomplete_syntax_member_access": {
+          "completion": {
+            "fail_closed_total": 0,
+            "fail_closed_rate": 0.0
+          }
+        }
+      },
+      "churn": {
+        "default": {
+          "completion": {
+            "fail_closed_total": 0,
+            "fail_closed_rate": 0.0
+          },
+          "hover": {
+            "fail_closed_total": 0,
+            "fail_closed_rate": 0.0
+          },
+          "definition": {
+            "fail_closed_total": 0,
+            "fail_closed_rate": 0.0
+          },
+          "type_at_position": {
+            "fail_closed_total": 0,
+            "fail_closed_rate": 0.0
+          },
+          "members": {
+            "fail_closed_total": 0,
+            "fail_closed_rate": 0.0
+          }
+        },
+        "incomplete_syntax_member_access": {
+          "completion": {
+            "fail_closed_total": 0,
+            "fail_closed_rate": 0.0
+          }
+        }
+      }
+    },
     "relative_ratio_baseline_floors": {
       "total_duration_ms": 6,
       "wait_for_file_version_ms": 3,
-      "snapshot_preparation_ms": 3,
+      "snapshot_preparation_ms": 5,
       "ir_query_ms": 3,
       "allocations_per_request": 100,
       "allocated_bytes_per_request": 8192,
@@ -395,6 +487,7 @@
       "lock_wait_budget_exceeded",
       "lock_contention_budget_exceeded",
       "anti_rescue_budget_exceeded",
+      "fail_closed_budget_exceeded",
       "protected_acceptance_asset_modified",
       "change_criticality_missing_or_unknown",
       "test_first_evidence_missing_or_invalid",

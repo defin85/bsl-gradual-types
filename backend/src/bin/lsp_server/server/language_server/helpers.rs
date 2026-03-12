@@ -214,13 +214,14 @@ pub(super) fn completion_member_access_owner_type_hint_at_position(
         }
         return None;
     };
-    let resolution = bsl_runtime::application::completion_member_access_owner_type_hint_from_analysis(
-        analysis,
-        file_id,
-        file_content,
-        position.line,
-        position.character,
-    );
+    let resolution =
+        bsl_runtime::application::completion_member_access_owner_type_hint_from_analysis(
+            analysis,
+            file_id,
+            file_content,
+            position.line,
+            position.character,
+        );
 
     if let Some(coordinator) = coordinator {
         coordinator.record_intellisense_v2_completion_owner_hint_lookup_path("direct");

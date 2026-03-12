@@ -9,8 +9,8 @@ use bsl_backend::application::get_completion_with_semantic_program_snapshot_v2;
 use bsl_backend::system::DepsBundleV2;
 use bsl_shared::domain::types::FacetKind;
 use bsl_shared::domain::types::MetadataKind;
-use bsl_shared::domain::TypeResolution;
 use bsl_shared::domain::TypeMetadataLookup;
+use bsl_shared::domain::TypeResolution;
 use bsl_shared::formatting::DetailLevel;
 
 mod support;
@@ -85,11 +85,7 @@ async fn metadata_completion_supports_documents_facets_and_tabular_sections() {
     analysis
         .precompute_type_index_for_file(file_id, None, 0)
         .expect("type index precompute");
-    let ir_program = analysis
-        .ir(file_id)
-        .ok()
-        .flatten()
-        .expect("ir");
+    let ir_program = analysis.ir(file_id).ok().flatten().expect("ir");
 
     let file_uri = Some("file:///m5_metadata_completion_fixture.bsl");
     let index_snapshot = deps_bundle.index_snapshot.as_ref();

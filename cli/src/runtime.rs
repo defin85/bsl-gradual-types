@@ -120,15 +120,7 @@ pub(crate) fn cli_settings_id(diagnostics_detail_level: DetailLevel) -> Settings
 }
 
 fn cli_operation_requires_exact_type_index(operation: SemanticOperation) -> bool {
-    matches!(
-        operation,
-        SemanticOperation::Completion
-            | SemanticOperation::Hover
-            | SemanticOperation::Members
-            | SemanticOperation::TypeAtPosition
-            | SemanticOperation::SignatureHelp
-            | SemanticOperation::Definition
-    )
+    matches!(operation, SemanticOperation::Completion)
 }
 
 fn detect_cli_syntax_helper_path() -> Option<PathBuf> {

@@ -99,7 +99,8 @@ fn compute_hover_info_from_ir(
     let node_at_position =
         byte_offset.and_then(|offset| ir_program.find_node_at_byte_offset(offset));
     let word_under_cursor = extract_word_at_position(file_content, line, column);
-    let mut type_at_cursor = byte_offset.and_then(|offset| semantic_type_at_offset(ir_program, offset));
+    let mut type_at_cursor =
+        byte_offset.and_then(|offset| semantic_type_at_offset(ir_program, offset));
     if type_at_cursor.is_none() {
         if let Some(offset) = byte_offset {
             if let Some(identifier_span) =
@@ -190,20 +191,14 @@ fn compute_hover_info_from_ir(
         if let Some(offset) = byte_offset {
             if let Some(node) = control_node_at_position(ir_program, offset) {
                 if control_hover_requested(node, word) {
-                    return format_control_flow_hover(
-                        file_content,
-                        line,
-                        column,
-                        ir_program,
-                        node,
-                    )
-                    .or_else(|| {
-                        Some(format_semantic_node_info(
-                            node,
-                            file_content,
-                            metadata_lookup,
-                        ))
-                    });
+                    return format_control_flow_hover(file_content, line, column, ir_program, node)
+                        .or_else(|| {
+                            Some(format_semantic_node_info(
+                                node,
+                                file_content,
+                                metadata_lookup,
+                            ))
+                        });
                 }
             }
         }
@@ -260,10 +255,7 @@ fn compute_hover_info_from_ir(
     None
 }
 
-fn semantic_type_at_span(
-    program: &SemanticProgram,
-    span: Span,
-) -> Option<TypeResolution> {
+fn semantic_type_at_span(program: &SemanticProgram, span: Span) -> Option<TypeResolution> {
     program
         .semantic_facts
         .type_resolution_for_span(span)
@@ -505,7 +497,8 @@ fn format_control_flow_hover(
     };
 
     let probe_abs = line_start.checked_add(probe_in_line.try_into().ok()?)?;
-    let actual_type = semantic_type_at_offset(ir_program, probe_abs).unwrap_or_else(TypeResolution::unknown);
+    let actual_type =
+        semantic_type_at_offset(ir_program, probe_abs).unwrap_or_else(TypeResolution::unknown);
 
     let mut out = String::new();
     out.push_str(&title);

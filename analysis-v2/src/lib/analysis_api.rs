@@ -197,6 +197,41 @@ impl AnalysisV2 {
         }
     }
 
+    fn fallback_wrapped_tail_probe(source_text: &str, byte_offset: u32) -> Option<u32> {
+        let bytes = source_text.as_bytes();
+        if bytes.is_empty() {
+            return None;
+        }
+
+        let mut idx = (byte_offset as usize).min(bytes.len().saturating_sub(1));
+        let mut skipped = false;
+        while let Some(byte) = bytes.get(idx).copied() {
+            let is_wrapper_tail = matches!(byte, b')' | b'(' | b']' | b'[')
+                || byte.is_ascii_whitespace();
+            if !is_wrapper_tail {
+                break;
+            }
+            skipped = true;
+            if idx == 0 {
+                return None;
+            }
+            idx = idx.saturating_sub(1);
+        }
+
+        skipped.then_some(idx.min(u32::MAX as usize) as u32)
+    }
+
+    fn resolve_type_index_at_offset(
+        source_text: &str,
+        index: &type_inference_v2::TypeIndex,
+        byte_offset: u32,
+    ) -> Option<TypeResolution> {
+        index.type_at_byte_offset(byte_offset).or_else(|| {
+            Self::fallback_wrapped_tail_probe(source_text, byte_offset)
+                .and_then(|fallback| index.type_at_byte_offset(fallback))
+        })
+    }
+
     pub fn type_at_byte_offset_serve_only(
         &self,
         file_id: FileId,
@@ -245,7 +280,9 @@ impl AnalysisV2 {
             return Ok(Self::type_at_byte_offset_profiled_empty(reason_code));
         };
         let scan_started = Instant::now();
-        let resolution = artifact.type_index.type_at_byte_offset(byte_offset);
+        let source_text = file.text(&self.db);
+        let resolution =
+            Self::resolve_type_index_at_offset(source_text.as_ref(), artifact.type_index.as_ref(), byte_offset);
         let index_scan_ms = scan_started.elapsed().as_millis();
         let total_ms = lookup_started.elapsed().as_millis();
         Ok(TypeAtByteOffsetProfiledResult {
@@ -670,7 +707,8 @@ impl AnalysisV2 {
             clip_to_index_fetch(index_build_profile.visit_statements_ms);
 
         let index_scan_started = Instant::now();
-        let resolution = index.type_at_byte_offset(byte_offset);
+        let source_text = file.text(&self.db);
+        let resolution = Self::resolve_type_index_at_offset(source_text.as_ref(), index.as_ref(), byte_offset);
         let index_scan_ms = index_scan_started.elapsed().as_millis();
         let total_ms = started.elapsed().as_millis();
 

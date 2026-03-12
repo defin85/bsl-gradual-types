@@ -2,7 +2,7 @@
   "schema_version": "v1",
   "contract_version": "quality-gates-v1",
   "change_id": "refactor-ir-canonical-semantic-pipeline",
-  "generated_at": "2026-03-11T22:24:00+03:00",
+  "generated_at": "2026-03-12T11:57:39+03:00",
   "overall": {
     "verdict": "pass",
     "gates_total": 7,

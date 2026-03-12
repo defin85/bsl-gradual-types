@@ -447,10 +447,7 @@ fn requires_authoritative_evidence_context(
     blocking_mode || (baseline_present && !update_baseline)
 }
 
-fn should_compare_against_existing_baseline(
-    baseline_present: bool,
-    update_baseline: bool,
-) -> bool {
+fn should_compare_against_existing_baseline(baseline_present: bool, update_baseline: bool) -> bool {
     baseline_present && !update_baseline
 }
 
@@ -680,8 +677,10 @@ async fn main() -> Result<()> {
                 reason_code,
                 gate_thresholds,
             ))
-        } else if should_compare_against_existing_baseline(baseline_path.exists(), args.update_baseline)
-        {
+        } else if should_compare_against_existing_baseline(
+            baseline_path.exists(),
+            args.update_baseline,
+        ) {
             let baseline_raw = read_json_value(baseline_path)?;
             let baseline: PerfReport =
                 serde_json::from_value(baseline_raw).context("Invalid baseline JSON")?;

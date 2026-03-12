@@ -9,8 +9,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, Span};
 
-use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::get_collection_kind;
+use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::types::MetadataKind;
 use bsl_shared::domain::{CompletionItem, CompletionKind, TypeMetadataLookup, TypeResolution};
 use bsl_shared::ir::{ScopeId, ScopeKind, SemanticNodeKind, SemanticProgram};
@@ -18,8 +18,8 @@ use bsl_shared::ir::{ScopeId, ScopeKind, SemanticNodeKind, SemanticProgram};
 use super::super::extractors::symbol_extractor::{
     extract_word_at_position, is_identifier_char, utf16_to_byte_offset,
 };
-use super::completion_target::extract_member_access_receiver_spans;
 use super::completion_ranking::{rank_candidates_with_trace, RankingCandidate};
+use super::completion_target::extract_member_access_receiver_spans;
 use crate::system::keyword_index::DEFAULT_KEYWORDS;
 use crate::system::{
     IndexItemKind, IndexSnapshot, IntellisenseIndexStore, LineIndex, SymbolKind, SymbolScope,
@@ -157,7 +157,8 @@ pub fn completion_member_access_owner_type_hints_from_analysis(
         }
     }
 
-    let Some(receiver_spans) = extract_member_access_receiver_spans(file_content, line, column) else {
+    let Some(receiver_spans) = extract_member_access_receiver_spans(file_content, line, column)
+    else {
         return Vec::new();
     };
 
@@ -170,7 +171,8 @@ pub fn completion_member_access_owner_type_hints_from_analysis(
         probe_offsets.push(span.start);
 
         for offset in probe_offsets {
-            let Ok(profiled) = analysis.type_at_byte_offset_serve_only_profiled(file_id, offset) else {
+            let Ok(profiled) = analysis.type_at_byte_offset_serve_only_profiled(file_id, offset)
+            else {
                 continue;
             };
             let Some(resolution) = profiled
@@ -195,35 +197,7 @@ pub fn completion_member_access_owner_type_hints_from_semantic_program(
     column: u32,
     ir_program: &SemanticProgram,
 ) -> Vec<TypeResolution> {
-    let Some(receiver_spans) = extract_member_access_receiver_spans(file_content, line, column)
-    else {
-        return Vec::new();
-    };
-
-    let mut resolutions = Vec::new();
-    for span in receiver_spans {
-        let span = bsl_shared::ir::Span::new(span.start, span.end);
-        let resolution = ir_program
-            .semantic_facts
-            .type_resolution_for_span(span)
-            .or_else(|| {
-                ir_program
-                    .nodes
-                    .iter()
-                    .filter(|node| node.span.start <= span.start && node.span.end >= span.end)
-                    .min_by_key(|node| node.span.len())
-                    .and_then(|node| ir_program.semantic_facts.type_resolution_for_span(node.span))
-            });
-        let Some(resolution) = resolution.filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
-        else {
-            continue;
-        };
-        if !resolutions.contains(&resolution) {
-            resolutions.push(resolution);
-        }
-    }
-
-    resolutions
+    resolve_member_access_owner_types_from_program(ir_program, file_content, line, column)
 }
 
 pub fn completion_member_access_owner_type_hint_from_analysis(

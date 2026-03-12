@@ -13,8 +13,14 @@
   - resource metric families: `allocations_per_request`, `allocated_bytes_per_request`,
     `lock_wait_ms_per_request`, `lock_contention_events_per_request`
 - Adds machine-readable operation matrix coverage and anti-rescue zero-budget guardrails.
+- Adds per-operation zero-budget `fail_closed_total` / `fail_closed_rate` ceilings for the
+  representative matrix so mandatory `hover` / `definition` / `type_at_position` paths cannot
+  pass cutover acceptance while silently returning fail-closed responses.
 - Adds checked-in `relative_ratio_baseline_floors` so authoritative blocking runs stay
   sensitive to real regressions while ignoring sub-floor latency jitter on canonical fast paths.
+- Clarifies that authoritative relative-ratio blocking is keyed off `p95`; `p99` remains
+  reported and protected by absolute ceilings, while `snapshot_preparation_ms` uses a `5ms`
+  ratio floor to avoid false regressions from low-millisecond churn jitter.
 - Declares the checked-in `v2` contract as `representative_matrix` and
   `authoritative_for_cutover_acceptance = true`.
 

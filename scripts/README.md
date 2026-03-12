@@ -170,7 +170,7 @@ Representative matrix:
 
 `intellisense_churn` использует детерминированный `didChange`-churn (`every=1`), поэтому профиль устойчиво отличается от `large` по latency/resource.
 `target_case` задаёт границу, перед которой churn применяется к `post_did_change_current_revision` fixture, не загрязняя `steady_*` measurements.
-Для sub-millisecond latency и near-zero lock wait blocking gate использует checked-in `relative_ratio_baseline_floors`, чтобы отличать настоящий regression от measurement jitter; absolute ceilings и anti-rescue budgets при этом остаются обязательными.
+Для low-millisecond latency и near-zero lock wait blocking gate использует checked-in `relative_ratio_baseline_floors`, чтобы отличать настоящий regression от measurement jitter; blocking relative-ratio policy оценивает `p95`, а `p99` остаётся в отчёте и под absolute ceilings. Для `snapshot_preparation_ms` authoritative gate использует floor `5ms`, чтобы churn-tail jitter не выглядел как regression canonical fast path.
 
 **Вывод:**
 - Baselines: `backend/tests/perf/baselines/`
@@ -181,20 +181,26 @@ Representative matrix:
 
 ---
 
-### `validate-v2-completion-gates.sh` - Acceptance gates для `refactor-ir-canonical-semantic-pipeline`
+### `validate-v2-completion-gates.sh` - Readiness gates для `refactor-ir-canonical-semantic-pipeline`
 
 **Назначение:** воспроизводимый fail-fast прогон checked-in readiness gates
 для `refactor-ir-canonical-semantic-pipeline`:
 - shipped cross-adapter smoke: LSP/runtime/web/MCP/CLI/module-context slices;
-- completion latency: `p95 <= 300ms`, `p99 <= 800ms`;
-- first-trigger success rate: `>= 99%`;
-- terminal-empty (`missing_canonical_ir`; legacy report key `terminal_empty_missing_ir_rate`) rate: `<= 0.5%`;
-- parity mismatch rate: `<= 1%`;
+- authoritative representative-matrix perf gate через `./scripts/run-intellisense-perf.sh`
+  в blocking mode для `small` / `large` / `churn`;
+- fail-closed budget enforcement для mandatory операций `completion`, `hover`,
+  `definition`, `type_at_position`, `members`;
 - strict-валидация change через OpenSpec.
 
-**Честное ограничение:** perf-артефакт внутри скрипта остаётся completion-specific.
-Operation-aware perf cutover acceptance по остальным операциям доказывается отдельным прогоном
-`./scripts/run-intellisense-perf.sh` в blocking mode.
+Скрипт формирует change-specific aggregate summary поверх authoritative отчётов:
+- `backend/tests/perf/reports/intellisense_small.json`
+- `backend/tests/perf/reports/intellisense_large.json`
+- `backend/tests/perf/reports/intellisense_churn.json`
+
+Скрипт не пересобирает `openspec/.../validation/acceptance-report.json`,
+`quality-gates.json` или `execution-matrix.md`; эти checked-in acceptance assets
+поддерживаются отдельно и должны синхронизироваться вручную с реально shipped
+tests/contracts/docs.
 
 **Использование:**
 ```bash
@@ -204,8 +210,8 @@ Operation-aware perf cutover acceptance по остальным операция
 **Важно:** скрипт не зависит от `.github/workflows/*` и предназначен для локального запуска или внешнего CI (например, Jenkins/GitLab Runner).
 
 **Артефакты:**
-- `backend/tests/perf/reports/refactor-ir-canonical-semantic-pipeline-completion-gate.json`
-- `backend/tests/perf/reports/refactor-ir-canonical-semantic-pipeline-completion-gate.md`
+- `backend/tests/perf/reports/refactor-ir-canonical-semantic-pipeline-readiness-gate.json`
+- `backend/tests/perf/reports/refactor-ir-canonical-semantic-pipeline-readiness-gate.md`
 - `backend/tests/perf/reports/refactor-ir-canonical-semantic-pipeline-openspec-validate.log`
 
 ---

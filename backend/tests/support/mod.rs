@@ -3,7 +3,9 @@
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
 
-use bsl_analysis_v2::{AnalysisHostV2, AnalysisV2, Change as ChangeV2, FileId as V2FileId, SettingsId};
+use bsl_analysis_v2::{
+    AnalysisHostV2, AnalysisV2, Change as ChangeV2, FileId as V2FileId, SettingsId,
+};
 use bsl_backend::application::get_hover_info_with_semantic_program;
 use bsl_backend::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter};
 use bsl_backend::system::{build_deps_bundle_v2, DepsBundleV2, SystemCoordinator};

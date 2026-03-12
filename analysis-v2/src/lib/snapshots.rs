@@ -316,7 +316,10 @@ pub fn semantic_diagnostics_flow_sensitive(
 
     let mut diagnostics = (*base).clone();
     cancellation_checkpoint(db);
-    diagnostics.extend(flow_sensitive_null_safety_diagnostics(&program, resolver.as_ref()));
+    diagnostics.extend(flow_sensitive_null_safety_diagnostics(
+        &program,
+        resolver.as_ref(),
+    ));
     diagnostics.sort_by(|a, b| {
         let severity_key = |severity: DiagnosticSeverity| match severity {
             DiagnosticSeverity::Error => 0_u8,
@@ -520,7 +523,8 @@ fn semantic_type_hints_from_program(program: &SemanticProgram) -> SemanticTypeHi
         object_node: Option<usize>,
         object_span: Option<bsl_shared::ir::Span>,
     ) -> Option<bsl_shared::ir::Span> {
-        object_span.or_else(|| object_node.and_then(|idx| program.nodes.get(idx).map(|node| node.span)))
+        object_span
+            .or_else(|| object_node.and_then(|idx| program.nodes.get(idx).map(|node| node.span)))
     }
 
     let mut hints = SemanticTypeHints::default();
@@ -528,7 +532,8 @@ fn semantic_type_hints_from_program(program: &SemanticProgram) -> SemanticTypeHi
     for node in &program.nodes {
         match &node.kind {
             SemanticNodeKind::Assignment { value_span, .. } => {
-                if let Some(resolution) = program.semantic_facts.type_resolution_for_span(*value_span)
+                if let Some(resolution) =
+                    program.semantic_facts.type_resolution_for_span(*value_span)
                 {
                     hints
                         .assignment_value_type_by_span
@@ -548,7 +553,8 @@ fn semantic_type_hints_from_program(program: &SemanticProgram) -> SemanticTypeHi
                 hints.call_arg_types_by_span.insert(node.span, arg_types);
 
                 if let Some(span) = receiver_span(program, *object_node, *object_span) {
-                    if let Some(receiver_type) = program.semantic_facts.type_resolution_for_span(span)
+                    if let Some(receiver_type) =
+                        program.semantic_facts.type_resolution_for_span(span)
                     {
                         hints
                             .call_receiver_type_by_span
@@ -562,7 +568,8 @@ fn semantic_type_hints_from_program(program: &SemanticProgram) -> SemanticTypeHi
                 ..
             } => {
                 if let Some(span) = receiver_span(program, *object_node, *object_span) {
-                    if let Some(receiver_type) = program.semantic_facts.type_resolution_for_span(span)
+                    if let Some(receiver_type) =
+                        program.semantic_facts.type_resolution_for_span(span)
                     {
                         hints
                             .member_access_object_type_by_span
@@ -643,9 +650,9 @@ fn build_ir_from_parsed(
         deps_data.resolver.clone(),
     ) {
         Ok(mut program) => {
-            type_inference_v2::materialize_semantic_facts_with_recovery_with_path_profiled(
+            type_inference_v2::materialize_semantic_facts_with_path_profiled(
                 &mut program,
-                parsed.as_ref(),
+                &parsed.program,
                 source,
                 file_path,
                 deps_data,

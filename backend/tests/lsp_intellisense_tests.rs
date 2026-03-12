@@ -430,7 +430,7 @@ async fn lsp_signature_help_returns_method_and_constructor() {
 }
 
 #[tokio::test]
-async fn lsp_signature_help_uses_semantic_facts_with_empty_request_time_repository() {
+async fn lsp_signature_help_keeps_method_semantic_facts_with_empty_request_time_repository() {
     let env = build_env();
     let content = r#"Процедура Тест()
     Новый Массив(1, )
@@ -441,15 +441,11 @@ async fn lsp_signature_help_uses_semantic_facts_with_empty_request_time_reposito
     let (analysis, file_id, file_content, ir_program) =
         build_v2_analysis_ir(content, &uri, env.deps.clone());
     let stripped_deps = build_deps(Arc::new(InMemoryTypeRepository::new()));
-    let syntax_errors = analysis
-        .syntax_diagnostics(file_id)
-        .expect("syntax diagnostics")
-        .expect("syntax diagnostics snapshot");
-
     let constructor_pos = position_at_marker(content, "Новый Массив(1, ");
     let method_pos = position_at_marker(content, "МойМассив.Добавить(1, ");
-    let constructor_query = signature_help_query(content, constructor_pos.line, constructor_pos.character)
-        .expect("constructor query");
+    let constructor_query =
+        signature_help_query(content, constructor_pos.line, constructor_pos.character)
+            .expect("constructor query");
     let constructor_call_offset = LineIndex::new(content)
         .utf16_position_to_byte_offset(
             content,
@@ -462,26 +458,20 @@ async fn lsp_signature_help_uses_semantic_facts_with_empty_request_time_reposito
         .constructor_targets_by_span
         .iter()
         .find(|(span, target)| {
-            span.contains(constructor_call_offset) && target.type_name.eq_ignore_ascii_case("Массив")
+            span.contains(constructor_call_offset)
+                && target.type_name.eq_ignore_ascii_case("Массив")
         });
     assert!(
-        constructor_fact.is_some(),
-        "missing constructor semantic fact at offset {constructor_call_offset}; spans={:?}; syntax_errors={:?}",
+        constructor_fact.is_none(),
+        "canonical IR must not materialize constructor semantic fact from incomplete recovery; offset={constructor_call_offset}; spans={:?}",
         ir_program
             .semantic_facts
             .constructor_targets_by_span
             .keys()
-            .collect::<Vec<_>>(),
-        syntax_errors
+            .collect::<Vec<_>>()
     );
-    assert!(
-        constructor_fact
-            .and_then(|(_, target)| target.signature.as_ref())
-            .is_some(),
-        "constructor semantic fact is missing serialized signature"
-    );
-    let method_query = signature_help_query(content, method_pos.line, method_pos.character)
-        .expect("method query");
+    let method_query =
+        signature_help_query(content, method_pos.line, method_pos.character).expect("method query");
     let method_call_offset = LineIndex::new(content)
         .utf16_position_to_byte_offset(
             content,
@@ -518,8 +508,11 @@ async fn lsp_signature_help_uses_semantic_facts_with_empty_request_time_reposito
         ir_program.clone(),
         stripped_deps.clone(),
         None,
-    )
-    .expect("constructor signature help from semantic facts");
+    );
+    assert!(
+        constructor.is_none(),
+        "without request-time deps, incomplete constructor signature help must stay unavailable because canonical IR no longer synthesizes recovery target"
+    );
 
     let method = signature_help_handler::handle_signature_help_v2(
         &analysis,
@@ -532,14 +525,6 @@ async fn lsp_signature_help_uses_semantic_facts_with_empty_request_time_reposito
     )
     .expect("method signature help from semantic facts");
 
-    let constructor_label = constructor
-        .signatures
-        .first()
-        .map(|sig| sig.label.as_str())
-        .unwrap_or("");
-    assert!(constructor_label.starts_with("Новый Массив("));
-    assert_eq!(constructor.active_parameter, Some(1));
-
     let method_label = method
         .signatures
         .first()
@@ -550,7 +535,8 @@ async fn lsp_signature_help_uses_semantic_facts_with_empty_request_time_reposito
 }
 
 #[tokio::test]
-async fn lsp_signature_help_uses_semantic_facts_for_local_function_with_empty_request_time_repository() {
+async fn lsp_signature_help_uses_semantic_facts_for_local_function_with_empty_request_time_repository(
+) {
     let repository = Arc::new(InMemoryTypeRepository::new());
     let deps = build_deps(repository);
     let content = concat!(
@@ -568,8 +554,8 @@ async fn lsp_signature_help_uses_semantic_facts_for_local_function_with_empty_re
     let stripped_deps = build_deps(Arc::new(InMemoryTypeRepository::new()));
 
     let local_pos = position_at_marker(content, "Локальная(1, ");
-    let local_query = signature_help_query(content, local_pos.line, local_pos.character)
-        .expect("local query");
+    let local_query =
+        signature_help_query(content, local_pos.line, local_pos.character).expect("local query");
     let local_call_offset = LineIndex::new(content)
         .utf16_position_to_byte_offset(
             content,
@@ -619,7 +605,8 @@ async fn lsp_signature_help_uses_semantic_facts_for_local_function_with_empty_re
 }
 
 #[tokio::test]
-async fn lsp_signature_help_uses_semantic_facts_for_global_function_with_empty_request_time_repository() {
+async fn lsp_signature_help_uses_semantic_facts_for_global_function_with_empty_request_time_repository(
+) {
     let repository = build_repository_with_array();
     let global_signature = MethodSignature::new(
         "ГлобальнаяФункция".to_string(),
@@ -660,8 +647,8 @@ async fn lsp_signature_help_uses_semantic_facts_for_global_function_with_empty_r
     let stripped_deps = build_deps(Arc::new(InMemoryTypeRepository::new()));
 
     let global_pos = position_at_marker(content, "ГлобальнаяФункция(1, ");
-    let global_query = signature_help_query(content, global_pos.line, global_pos.character)
-        .expect("global query");
+    let global_query =
+        signature_help_query(content, global_pos.line, global_pos.character).expect("global query");
     let global_call_offset = LineIndex::new(content)
         .utf16_position_to_byte_offset(
             content,

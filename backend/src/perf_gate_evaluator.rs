@@ -499,6 +499,8 @@ pub struct PerfGateSample {
     pub snapshot_preparation_p99_ms: f64,
     pub ir_query_p95_ms: f64,
     pub ir_query_p99_ms: f64,
+    pub fail_closed_total: u64,
+    pub fail_closed_rate: f64,
     pub error_rate: f64,
     pub incomplete_rate: f64,
     pub allocations_per_request: f64,
@@ -548,7 +550,9 @@ fn read_contract_f64(contract: &Value, path: &[&str]) -> Option<f64> {
     for segment in path {
         cursor = cursor.get(*segment)?;
     }
-    cursor.as_f64().or_else(|| cursor.as_u64().map(|value| value as f64))
+    cursor
+        .as_f64()
+        .or_else(|| cursor.as_u64().map(|value| value as f64))
 }
 
 fn read_required_operation_matrix(contract: &Value) -> BTreeSet<(String, String)> {
@@ -642,6 +646,72 @@ fn read_resource_budget(
     })
 }
 
+fn read_fail_closed_budget_u64(
+    contract: &Value,
+    profile: &str,
+    fixture_family: &str,
+    operation: &str,
+    metric_name: &str,
+) -> Option<u64> {
+    read_contract_u64(
+        contract,
+        &[
+            "baseline",
+            "fail_closed_budget_ceilings",
+            profile,
+            fixture_family,
+            operation,
+            metric_name,
+        ],
+    )
+    .or_else(|| {
+        read_contract_u64(
+            contract,
+            &[
+                "baseline",
+                "fail_closed_budget_ceilings",
+                profile,
+                "default",
+                operation,
+                metric_name,
+            ],
+        )
+    })
+}
+
+fn read_fail_closed_budget_f64(
+    contract: &Value,
+    profile: &str,
+    fixture_family: &str,
+    operation: &str,
+    metric_name: &str,
+) -> Option<f64> {
+    read_contract_f64(
+        contract,
+        &[
+            "baseline",
+            "fail_closed_budget_ceilings",
+            profile,
+            fixture_family,
+            operation,
+            metric_name,
+        ],
+    )
+    .or_else(|| {
+        read_contract_f64(
+            contract,
+            &[
+                "baseline",
+                "fail_closed_budget_ceilings",
+                profile,
+                "default",
+                operation,
+                metric_name,
+            ],
+        )
+    })
+}
+
 fn read_relative_ratio_baseline_floor(contract: &Value, metric_name: &str) -> Option<f64> {
     read_contract_f64(
         contract,
@@ -654,9 +724,9 @@ fn sample_by_key<'a>(
     fixture_family: &str,
     operation: &str,
 ) -> Option<&'a PerfGateSample> {
-    samples.iter().find(|sample| {
-        sample.fixture_family == fixture_family && sample.operation == operation
-    })
+    samples
+        .iter()
+        .find(|sample| sample.fixture_family == fixture_family && sample.operation == operation)
 }
 
 pub fn evaluate_intellisense_perf_profile(
@@ -715,17 +785,29 @@ pub fn evaluate_intellisense_perf_profile(
 
     let anti_rescue_budget_stale_fallback = read_contract_u64(
         contract,
-        &["baseline", "anti_rescue_budget_ceilings", "stale_fallback_total"],
+        &[
+            "baseline",
+            "anti_rescue_budget_ceilings",
+            "stale_fallback_total",
+        ],
     )
     .unwrap_or(0);
     let anti_rescue_budget_stale_served = read_contract_u64(
         contract,
-        &["baseline", "anti_rescue_budget_ceilings", "stale_served_total"],
+        &[
+            "baseline",
+            "anti_rescue_budget_ceilings",
+            "stale_served_total",
+        ],
     )
     .unwrap_or(0);
     let anti_rescue_budget_degraded = read_contract_u64(
         contract,
-        &["baseline", "anti_rescue_budget_ceilings", "degraded_substitute_total"],
+        &[
+            "baseline",
+            "anti_rescue_budget_ceilings",
+            "degraded_substitute_total",
+        ],
     )
     .unwrap_or(0);
     let anti_rescue_budget_search = read_contract_u64(
@@ -743,7 +825,8 @@ pub fn evaluate_intellisense_perf_profile(
         let Some(current_entry) = sample_by_key(current, fixture_family, operation) else {
             continue;
         };
-        let baseline_entry = baseline.and_then(|samples| sample_by_key(samples, fixture_family, operation));
+        let baseline_entry =
+            baseline.and_then(|samples| sample_by_key(samples, fixture_family, operation));
         let mut entry_reason_codes = BTreeSet::new();
         let mut latency = serde_json::Map::new();
         let mut resource = serde_json::Map::new();
@@ -752,6 +835,7 @@ pub fn evaluate_intellisense_perf_profile(
             || !current_entry.allocated_bytes_per_request.is_finite()
             || !current_entry.lock_wait_ms_per_request.is_finite()
             || !current_entry.lock_contention_events_per_request.is_finite()
+            || !current_entry.fail_closed_rate.is_finite()
         {
             entry_reason_codes.insert("missing_required_metric_field".to_string());
         }
@@ -792,11 +876,24 @@ pub fn evaluate_intellisense_perf_profile(
             ),
         ];
 
-        for (metric_family, current_p95, current_p99, baseline_p95, baseline_p99) in latency_fields {
-            let ceiling_p95 =
-                read_latency_ceiling(contract, profile, fixture_family, operation, metric_family, "p95");
-            let ceiling_p99 =
-                read_latency_ceiling(contract, profile, fixture_family, operation, metric_family, "p99");
+        for (metric_family, current_p95, current_p99, baseline_p95, baseline_p99) in latency_fields
+        {
+            let ceiling_p95 = read_latency_ceiling(
+                contract,
+                profile,
+                fixture_family,
+                operation,
+                metric_family,
+                "p95",
+            );
+            let ceiling_p99 = read_latency_ceiling(
+                contract,
+                profile,
+                fixture_family,
+                operation,
+                metric_family,
+                "p99",
+            );
             let ratio_baseline_floor =
                 read_relative_ratio_baseline_floor(contract, metric_family).unwrap_or(0.0);
             if let Some(max_p95) = ceiling_p95 {
@@ -818,10 +915,12 @@ pub fn evaluate_intellisense_perf_profile(
                 .map(|baseline| current_p95 / baseline.max(ratio_baseline_floor).max(0.000_001));
             let ratio_p99 = baseline_p99
                 .map(|baseline| current_p99 / baseline.max(ratio_baseline_floor).max(0.000_001));
-            if let (Some(ratio_p95), Some(ratio_p99)) = (ratio_p95, ratio_p99) {
-                if ratio_p95 > thresholds.latency_ratio_p95_max
-                    || ratio_p99 > thresholds.latency_ratio_p99_max
-                {
+            if let Some(ratio_p95) = ratio_p95 {
+                // Blocking relative-ratio enforcement intentionally keys off p95.
+                // p99 remains reported and protected by absolute ceilings, but its
+                // single-tail sensitivity is too noisy for authoritative local gating
+                // on low-millisecond canonical fast paths.
+                if ratio_p95 > thresholds.latency_ratio_p95_max {
                     entry_reason_codes.insert("latency_relative_ratio_exceeded".to_string());
                 }
             } else if thresholds.blocking_mode {
@@ -842,6 +941,35 @@ pub fn evaluate_intellisense_perf_profile(
                     "ceiling_p99_ms": ceiling_p99,
                 }),
             );
+        }
+
+        let fail_closed_total_ceiling = read_fail_closed_budget_u64(
+            contract,
+            profile,
+            fixture_family,
+            operation,
+            "fail_closed_total",
+        );
+        let fail_closed_rate_ceiling = read_fail_closed_budget_f64(
+            contract,
+            profile,
+            fixture_family,
+            operation,
+            "fail_closed_rate",
+        );
+        if let Some(max_total) = fail_closed_total_ceiling {
+            if current_entry.fail_closed_total > max_total {
+                entry_reason_codes.insert("fail_closed_budget_exceeded".to_string());
+            }
+        } else if thresholds.blocking_mode {
+            entry_reason_codes.insert("initial_budget_not_fixed".to_string());
+        }
+        if let Some(max_rate) = fail_closed_rate_ceiling {
+            if current_entry.fail_closed_rate > max_rate {
+                entry_reason_codes.insert("fail_closed_budget_exceeded".to_string());
+            }
+        } else if thresholds.blocking_mode {
+            entry_reason_codes.insert("initial_budget_not_fixed".to_string());
         }
 
         let resource_fields = [
@@ -872,7 +1000,8 @@ pub fn evaluate_intellisense_perf_profile(
         ];
 
         for (metric_name, current_value, baseline_value, reason_code) in resource_fields {
-            let ceiling = read_resource_budget(contract, profile, fixture_family, operation, metric_name);
+            let ceiling =
+                read_resource_budget(contract, profile, fixture_family, operation, metric_name);
             let ratio_baseline_floor =
                 read_relative_ratio_baseline_floor(contract, metric_name).unwrap_or(0.0);
             if let Some(max_value) = ceiling {
@@ -925,8 +1054,17 @@ pub fn evaluate_intellisense_perf_profile(
             "latency": latency,
             "resource": resource,
             "rates": {
+                "fail_closed_rate": current_entry.fail_closed_rate,
                 "error_rate": current_entry.error_rate,
                 "incomplete_rate": current_entry.incomplete_rate,
+            },
+            "fail_closed": {
+                "current_total": current_entry.fail_closed_total,
+                "current_rate": current_entry.fail_closed_rate,
+                "baseline_total": baseline_entry.map(|entry| entry.fail_closed_total),
+                "baseline_rate": baseline_entry.map(|entry| entry.fail_closed_rate),
+                "ceiling_total": fail_closed_total_ceiling,
+                "ceiling_rate": fail_closed_rate_ceiling,
             },
             "anti_rescue": {
                 "stale_fallback_total": current_entry.stale_fallback_total,

@@ -6,8 +6,8 @@
 //! - Проверки загрузки конфигурации
 
 use super::TypeMetadataLookup;
-use crate::domain::types::RawDataSource;
 use crate::domain::types::MetadataKind;
+use crate::domain::types::RawDataSource;
 use crate::utils::string_utils::levenshtein_distance;
 
 impl TypeMetadataLookup {

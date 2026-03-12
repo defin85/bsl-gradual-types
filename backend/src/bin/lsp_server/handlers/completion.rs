@@ -8,13 +8,11 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 use tracing::error;
 
+use bsl_backend::application::get_completion_with_semantic_program_snapshot_with_trigger_hint;
 use bsl_backend::application::type_system::{
     build_call_snippet, resolve_method_completion, resolve_type_details,
 };
 use bsl_backend::application::CompletionStats;
-use bsl_backend::application::{
-    get_completion_with_semantic_program_snapshot_with_trigger_hint,
-};
 use bsl_backend::system::IndexSnapshot;
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::{MethodSignature, SignatureSource};

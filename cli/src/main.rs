@@ -17,6 +17,7 @@ use std::time::Instant;
 
 use args::{CacheCommand, CliArgs, CliOutputFormat, Commands};
 use bsl_backend::application::{
+    completion_member_access_owner_type_hint_from_analysis,
     get_completion_with_semantic_program_snapshot_with_trigger_hint, SemanticOperation,
 };
 use bsl_shared::domain::types::{DiagnosticSeverity, ResolutionResult, TypeResolution};
@@ -434,7 +435,6 @@ struct InlineCliExpression {
     file_path: Arc<str>,
     line: u32,
     cursor_column: u32,
-    owner_probe_offset: Option<u32>,
 }
 
 fn inline_cli_expression(expression: &str) -> anyhow::Result<InlineCliExpression> {
@@ -456,7 +456,6 @@ fn inline_cli_expression(expression: &str) -> anyhow::Result<InlineCliExpression
         file_path: Arc::<str>::from("/virtual/cli-inline-expression.bsl"),
         line: 1,
         cursor_column,
-        owner_probe_offset: None,
     })
 }
 
@@ -477,11 +476,7 @@ fn inline_cli_resolution_probe_with_path(
         .ok_or_else(|| anyhow::anyhow!("resolution probe marker missing"))?
         .min(u32::MAX as usize) as u32;
 
-    Ok((
-        file_text,
-        file_path,
-        probe_offset,
-    ))
+    Ok((file_text, file_path, probe_offset))
 }
 
 fn inline_cli_resolution_probe(expression: &str) -> anyhow::Result<(Arc<str>, Arc<str>, u32)> {
@@ -514,17 +509,11 @@ fn inline_cli_completion_expression(expression: &str) -> anyhow::Result<InlineCl
     let file_text = Arc::<str>::from(format!(
         "Процедура Test()\n    Arr = {receiver};\n    ForCompletion = Arr;\n{completion_line}\nКонецПроцедуры\n"
     ));
-    let owner_probe_offset = file_text
-        .rfind("ForCompletion")
-        .ok_or_else(|| anyhow::anyhow!("member access owner probe missing"))?
-        .min(u32::MAX as usize) as u32;
-
     Ok(InlineCliExpression {
         file_text,
         file_path: Arc::<str>::from("/virtual/cli-inline-completion.bsl"),
         line: 3,
         cursor_column,
-        owner_probe_offset: Some(owner_probe_offset),
     })
 }
 
@@ -575,15 +564,16 @@ async fn collect_cli_completion_items(expression: &str) -> anyhow::Result<Vec<Co
     let trigger_char_hint = expression.trim_end().chars().last().filter(|ch| *ch == '.');
 
     let member_access_request = expression_targets_member_access(expression);
-    let owner_hint = inline
-        .owner_probe_offset
-        .map(|offset| {
-            prepared
-                .analysis()
-                .type_at_byte_offset(prepared.file_id, offset)
-                .map_err(|_| anyhow::anyhow!("cli completion owner hint query cancelled"))
+    let owner_hint = member_access_request
+        .then(|| {
+            completion_member_access_owner_type_hint_from_analysis(
+                prepared.analysis(),
+                prepared.file_id,
+                inline.file_text.as_ref(),
+                inline.line,
+                inline.cursor_column,
+            )
         })
-        .transpose()?
         .flatten()
         .filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
         .map(|hint| normalize_completion_owner_hint(&prepared.metadata_lookup, hint));
@@ -710,12 +700,10 @@ mod tests {
 
     #[tokio::test]
     async fn cli_type_info_preserves_object_module_binding_facets() {
-        let resolution = resolve_cli_expression_type_for_path(
-            "Объект",
-            "Documents/Док1/Ext/ObjectModule.bsl",
-        )
-        .await
-        .expect("cli object module type info");
+        let resolution =
+            resolve_cli_expression_type_for_path("Объект", "Documents/Док1/Ext/ObjectModule.bsl")
+                .await
+                .expect("cli object module type info");
 
         assert!(
             user_facing_resolution_type_name(&resolution).contains("Док1"),

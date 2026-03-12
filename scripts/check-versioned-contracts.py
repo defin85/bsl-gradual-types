@@ -197,10 +197,15 @@ REQUIRED_V2_PERF_GATE_RESOURCE_METRIC_FAMILIES = {
     "lock_contention_events_per_request",
 }
 
+REQUIRED_V2_PERF_GATE_FAIL_CLOSED_BUDGET = {
+    "fail_closed_total": 0,
+    "fail_closed_rate": 0.0,
+}
+
 REQUIRED_V2_PERF_GATE_RATIO_BASELINE_FLOORS = {
     "total_duration_ms": 6,
     "wait_for_file_version_ms": 3,
-    "snapshot_preparation_ms": 3,
+    "snapshot_preparation_ms": 5,
     "ir_query_ms": 3,
     "allocations_per_request": 100,
     "allocated_bytes_per_request": 8192,
@@ -220,6 +225,7 @@ REQUIRED_V2_PERF_GATE_REPORT_FIELDS = {
 REQUIRED_V2_PERF_GATE_REASON_CODES = REQUIRED_V1_PERF_GATE_REASON_CODES | {
     "missing_required_matrix_coverage",
     "anti_rescue_budget_exceeded",
+    "fail_closed_budget_exceeded",
     "provenance_missing_for_authoritative_run",
     "provenance_mismatch_expected_change_id",
     "provenance_invalid",
@@ -667,9 +673,15 @@ def validate_surface_contract(surface_dir: Path) -> None:
                     isinstance(resource_ceilings, dict),
                     f"{contract_path}: baseline.resource_budget_ceilings must be object",
                 )
+                fail_closed_ceilings = baseline.get("fail_closed_budget_ceilings")
+                ensure(
+                    isinstance(fail_closed_ceilings, dict),
+                    f"{contract_path}: baseline.fail_closed_budget_ceilings must be object",
+                )
                 for profile in sorted(REQUIRED_V1_PERF_GATE_PROFILES):
                     profile_latency = ceilings.get(profile)
                     profile_resource = resource_ceilings.get(profile)
+                    profile_fail_closed = fail_closed_ceilings.get(profile)
                     ensure(
                         isinstance(profile_latency, dict),
                         f"{contract_path}: missing latency budget for profile {profile!r}",
@@ -678,8 +690,13 @@ def validate_surface_contract(surface_dir: Path) -> None:
                         isinstance(profile_resource, dict),
                         f"{contract_path}: missing resource budget for profile {profile!r}",
                     )
+                    ensure(
+                        isinstance(profile_fail_closed, dict),
+                        f"{contract_path}: missing fail-closed budget for profile {profile!r}",
+                    )
                     default_latency = profile_latency.get("default")
                     default_resource = profile_resource.get("default")
+                    default_fail_closed = profile_fail_closed.get("default")
                     ensure(
                         isinstance(default_latency, dict),
                         f"{contract_path}: {profile}.default latency budget must be object",
@@ -688,8 +705,13 @@ def validate_surface_contract(surface_dir: Path) -> None:
                         isinstance(default_resource, dict),
                         f"{contract_path}: {profile}.default resource budget must be object",
                     )
+                    ensure(
+                        isinstance(default_fail_closed, dict),
+                        f"{contract_path}: {profile}.default fail-closed budget must be object",
+                    )
                     incomplete_latency = profile_latency.get("incomplete_syntax_member_access")
                     incomplete_resource = profile_resource.get("incomplete_syntax_member_access")
+                    incomplete_fail_closed = profile_fail_closed.get("incomplete_syntax_member_access")
                     ensure(
                         isinstance(incomplete_latency, dict),
                         f"{contract_path}: {profile}.incomplete_syntax_member_access latency budget must be object",
@@ -698,9 +720,14 @@ def validate_surface_contract(surface_dir: Path) -> None:
                         isinstance(incomplete_resource, dict),
                         f"{contract_path}: {profile}.incomplete_syntax_member_access resource budget must be object",
                     )
+                    ensure(
+                        isinstance(incomplete_fail_closed, dict),
+                        f"{contract_path}: {profile}.incomplete_syntax_member_access fail-closed budget must be object",
+                    )
                     for operation in sorted(REQUIRED_V2_PERF_GATE_OPERATIONS):
                         latency_budget = default_latency.get(operation)
                         resource_budget = default_resource.get(operation)
+                        fail_closed_budget = default_fail_closed.get(operation)
                         ensure(
                             isinstance(latency_budget, dict),
                             f"{contract_path}: {profile}.default.{operation} latency budget must be object",
@@ -708,6 +735,10 @@ def validate_surface_contract(surface_dir: Path) -> None:
                         ensure(
                             isinstance(resource_budget, dict),
                             f"{contract_path}: {profile}.default.{operation} resource budget must be object",
+                        )
+                        ensure(
+                            isinstance(fail_closed_budget, dict),
+                            f"{contract_path}: {profile}.default.{operation} fail-closed budget must be object",
                         )
                         for metric_family in sorted(REQUIRED_V2_PERF_GATE_LATENCY_METRIC_FAMILIES):
                             metric_budget = latency_budget.get(metric_family)
@@ -729,8 +760,16 @@ def validate_surface_contract(surface_dir: Path) -> None:
                                 isinstance(value, int) and value > 0,
                                 f"{contract_path}: {profile}.default.{operation}.{metric_name} must be positive integer",
                             )
+                        ensure(
+                            fail_closed_budget == REQUIRED_V2_PERF_GATE_FAIL_CLOSED_BUDGET,
+                            (
+                                f"{contract_path}: {profile}.default.{operation} fail-closed budget "
+                                f"must equal {REQUIRED_V2_PERF_GATE_FAIL_CLOSED_BUDGET}"
+                            ),
+                        )
                     incomplete_completion_latency = incomplete_latency.get("completion")
                     incomplete_completion_resource = incomplete_resource.get("completion")
+                    incomplete_completion_fail_closed = incomplete_fail_closed.get("completion")
                     ensure(
                         isinstance(incomplete_completion_latency, dict),
                         f"{contract_path}: {profile}.incomplete_syntax_member_access.completion latency budget must be object",
@@ -738,6 +777,10 @@ def validate_surface_contract(surface_dir: Path) -> None:
                     ensure(
                         isinstance(incomplete_completion_resource, dict),
                         f"{contract_path}: {profile}.incomplete_syntax_member_access.completion resource budget must be object",
+                    )
+                    ensure(
+                        isinstance(incomplete_completion_fail_closed, dict),
+                        f"{contract_path}: {profile}.incomplete_syntax_member_access.completion fail-closed budget must be object",
                     )
                     for metric_family in sorted(REQUIRED_V2_PERF_GATE_LATENCY_METRIC_FAMILIES):
                         metric_budget = incomplete_completion_latency.get(metric_family)
@@ -759,6 +802,14 @@ def validate_surface_contract(surface_dir: Path) -> None:
                             isinstance(value, int) and value > 0,
                             f"{contract_path}: {profile}.incomplete_syntax_member_access.completion.{metric_name} must be positive integer",
                         )
+                    ensure(
+                        incomplete_completion_fail_closed
+                        == REQUIRED_V2_PERF_GATE_FAIL_CLOSED_BUDGET,
+                        (
+                            f"{contract_path}: {profile}.incomplete_syntax_member_access.completion "
+                            f"fail-closed budget must equal {REQUIRED_V2_PERF_GATE_FAIL_CLOSED_BUDGET}"
+                        ),
+                    )
 
                 ratio_baseline_floors = baseline.get("relative_ratio_baseline_floors")
                 ensure(

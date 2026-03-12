@@ -1159,7 +1159,9 @@ async fn completion_non_member_semantic_path_ignores_polluted_index_snapshot() {
         labels
     );
     assert!(
-        !labels.iter().any(|label| label == "КанонГлобалИзModuleIndex"),
+        !labels
+            .iter()
+            .any(|label| label == "КанонГлобалИзModuleIndex"),
         "labels: {:?}",
         labels
     );
@@ -1555,11 +1557,7 @@ async fn completion_member_access_does_not_reconstruct_type_name_without_canonic
     let resolver = Arc::new(TypeResolver::new(repo.clone()));
     let metadata_lookup = TypeMetadataLookup::new(repo.clone());
     let index = IntellisenseIndexStore::new("cfg", "platform");
-    let content = concat!(
-        "Процедура Тест()\n",
-        "    TypeA.\n",
-        "КонецПроцедуры\n"
-    );
+    let content = concat!("Процедура Тест()\n", "    TypeA.\n", "КонецПроцедуры\n");
     let line = 1;
     let line_text = "    TypeA.";
     let column = line_text.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
@@ -2842,10 +2840,9 @@ async fn completion_supports_member_access_after_ternary_expression() {
                 .ir_program
                 .as_ref()
                 .and_then(|program| {
-                    program.semantic_facts.type_resolution_for_span(bsl_shared::ir::Span::new(
-                        span.start,
-                        span.end,
-                    ))
+                    program
+                        .semantic_facts
+                        .type_resolution_for_span(bsl_shared::ir::Span::new(span.start, span.end))
                 })
                 .map(|value| value.type_name());
             let indexed = analysis
@@ -2856,8 +2853,7 @@ async fn completion_supports_member_access_after_ternary_expression() {
             (text, resolution.or(indexed))
         })
         .collect();
-    let owner_types =
-        resolve_member_access_owner_types_from_ir(Some(&ctx), content, line, column);
+    let owner_types = resolve_member_access_owner_types_from_ir(Some(&ctx), content, line, column);
     assert_eq!(
         owner_types
             .iter()
@@ -2978,10 +2974,9 @@ async fn completion_supports_member_access_after_choice_expression() {
                 .ir_program
                 .as_ref()
                 .and_then(|program| {
-                    program.semantic_facts.type_resolution_for_span(bsl_shared::ir::Span::new(
-                        span.start,
-                        span.end,
-                    ))
+                    program
+                        .semantic_facts
+                        .type_resolution_for_span(bsl_shared::ir::Span::new(span.start, span.end))
                 })
                 .map(|value| value.type_name());
             let indexed = analysis
@@ -2992,8 +2987,7 @@ async fn completion_supports_member_access_after_choice_expression() {
             (text, resolution.or(indexed))
         })
         .collect();
-    let owner_types =
-        resolve_member_access_owner_types_from_ir(Some(&ctx), content, line, column);
+    let owner_types = resolve_member_access_owner_types_from_ir(Some(&ctx), content, line, column);
     assert_eq!(
         owner_types
             .iter()

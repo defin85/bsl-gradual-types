@@ -1704,6 +1704,60 @@ fn serve_only_matches_legacy_for_incomplete_parenthesized_new_member_access() {
 }
 
 #[test]
+fn incomplete_bare_member_access_does_not_materialize_type_truth_from_parse_recovery() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(214);
+    let text: Arc<str> = Arc::from(
+        "Процедура Тест()\n\
+             ЛокМассив = Новый Массив;\n\
+             ЛокМассив.\n\
+             КонецПроцедуры",
+    );
+
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("deps-bare-incomplete-member-access"),
+        deps: array_semantic_deps(),
+    });
+    host.apply_change(Change::SetFileWithSnapshot {
+        file_id,
+        text: text.clone(),
+        version: 1,
+        path: Arc::from("serve-only-bare-incomplete-member-access.bsl"),
+        parse_snapshot: parse_snapshot_for_test(file_id, 1, text.as_ref(), Vec::new(), true, None),
+    });
+
+    let analysis = host.snapshot();
+    let precompute = analysis
+        .precompute_type_index_for_file(file_id, Some(1), 0)
+        .expect("precompute bare incomplete member access");
+    assert_eq!(
+        precompute.reason_code,
+        TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeExactStored
+    );
+
+    let probe = text
+        .match_indices("ЛокМассив")
+        .nth(1)
+        .map(|(idx, marker)| idx + marker.len() - 1)
+        .expect("second ЛокМассив occurrence")
+        .min(u32::MAX as usize) as u32;
+    assert_eq!(
+        analysis.type_at_byte_offset(file_id, probe).expect("type lookup"),
+        None,
+        "default type-at-position path must not recover bare incomplete receiver type from syntax recovery"
+    );
+
+    let serve_only = analysis
+        .type_at_byte_offset_serve_only_profiled(file_id, probe)
+        .expect("serve-only lookup");
+    assert_eq!(
+        serve_only.resolution,
+        None,
+        "canonical derived index must not synthesize bare incomplete receiver type from parse recovery"
+    );
+}
+
+#[test]
 fn serve_only_matches_legacy_for_short_map_index_incomplete_member_access() {
     let mut host = AnalysisHostV2::default();
     let file_id = FileId(210);

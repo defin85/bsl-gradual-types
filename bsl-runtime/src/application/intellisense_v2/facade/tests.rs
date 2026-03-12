@@ -487,6 +487,143 @@ fn prepare_ephemeral_operation_warms_exact_type_index_only_for_shared_interactiv
     );
 }
 
+#[tokio::test]
+async fn prepare_stateful_operation_warms_exact_type_index_only_for_shared_interactive_queries() {
+    let deps_id = DepsSnapshotId::from_hash("deps_prepared_stateful_exact_type_index");
+    let settings = ExecutionSettings {
+        settings_id: SettingsId::from_hash("settings_prepared_stateful_exact_type_index"),
+        diagnostics_detail_level: DetailLevel::Full,
+    };
+    let file_id = FileId(19);
+    let file_text: Arc<str> = Arc::from(
+        "Procedure Test()\n\
+             arr = Новый Массив;\n\
+             result = arr;\n\
+             EndProcedure",
+    );
+    let probe = file_text
+        .find("result = arr;")
+        .map(|idx| idx as u32 + "result = ".len() as u32)
+        .expect("probe for stateful exact type index");
+
+    for operation in [
+        SemanticOperation::Hover,
+        SemanticOperation::Members,
+        SemanticOperation::TypeAtPosition,
+        SemanticOperation::SignatureHelp,
+        SemanticOperation::Definition,
+    ] {
+        let mut host = AnalysisHostV2::default();
+        host.apply_change(Change::SetDepsSnapshot {
+            deps_id: deps_id.clone(),
+            deps: make_deps(),
+        });
+        host.apply_change(Change::SetSettingsSnapshot {
+            settings_id: settings.settings_id.clone(),
+            diagnostics_detail_level: settings.diagnostics_detail_level,
+        });
+        let runtime = IntellisenseV2Facade::new(
+            host,
+            make_index_snapshot("index_prepared_stateful_exact_type_index"),
+            None,
+        );
+        runtime.apply_changes(vec![Change::SetFile {
+            file_id,
+            text: file_text.clone(),
+            version: 3,
+            path: Arc::from("<prepared-stateful-exact-type-index>"),
+        }]);
+        let _ = runtime.snapshot().await;
+
+        let context = ExecutionContext {
+            origin: ObservabilityOrigin::Runtime,
+            operation,
+            completion_mode: None,
+            completion_large_churn_active: false,
+            file_id,
+            min_file_version: Some(3),
+            expected_deps_id: Some(deps_id.clone()),
+            flow_sensitive: false,
+            settings: settings.clone(),
+            cancellation: CancellationPolicy::Ignore,
+        };
+
+        let prepared = runtime
+            .prepare_stateful_operation(&context, None)
+            .await
+            .expect("prepare_stateful_operation");
+
+        let resolution = prepared
+            .snapshot
+            .analysis
+            .type_at_byte_offset_serve_only(file_id, probe)
+            .expect("serve-only lookup after shared stateful prepare");
+        let type_name = resolution
+            .as_ref()
+            .map(|value| value.type_name())
+            .unwrap_or_default();
+        assert!(
+            type_name.starts_with("Массив"),
+            "shared stateful prepare must warm exact type index for {}; got={type_name:?}",
+            operation.as_str()
+        );
+
+        runtime.shutdown_for_test().await;
+    }
+
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: deps_id.clone(),
+        deps: make_deps(),
+    });
+    host.apply_change(Change::SetSettingsSnapshot {
+        settings_id: settings.settings_id.clone(),
+        diagnostics_detail_level: settings.diagnostics_detail_level,
+    });
+    let runtime = IntellisenseV2Facade::new(
+        host,
+        make_index_snapshot("index_prepared_stateful_exact_type_index_diagnostics"),
+        None,
+    );
+    runtime.apply_changes(vec![Change::SetFile {
+        file_id,
+        text: file_text.clone(),
+        version: 3,
+        path: Arc::from("<prepared-stateful-exact-type-index-diagnostics>"),
+    }]);
+    let _ = runtime.snapshot().await;
+
+    let diagnostics_context = ExecutionContext {
+        origin: ObservabilityOrigin::Runtime,
+        operation: SemanticOperation::Diagnostics,
+        completion_mode: None,
+        completion_large_churn_active: false,
+        file_id,
+        min_file_version: Some(3),
+        expected_deps_id: Some(deps_id),
+        flow_sensitive: false,
+        settings,
+        cancellation: CancellationPolicy::Ignore,
+    };
+
+    let diagnostics_prepared = runtime
+        .prepare_stateful_operation(&diagnostics_context, None)
+        .await
+        .expect("prepare_stateful_operation for diagnostics");
+
+    assert!(
+        diagnostics_prepared
+            .snapshot
+            .analysis
+            .type_at_byte_offset_serve_only(file_id, probe)
+            .expect("serve-only lookup after diagnostics stateful prepare")
+            .is_none(),
+        "stateful diagnostics prepare must not warm exact type index implicitly"
+    );
+
+    runtime.shutdown_for_test().await;
+}
+
 #[test]
 fn semantic_operation_contract_values_are_stable() {
     assert_eq!(SemanticOperation::Completion.as_str(), "completion");

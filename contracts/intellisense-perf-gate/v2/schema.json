@@ -239,6 +239,7 @@
       "required": [
         "absolute_latency_ceilings_ms",
         "resource_budget_ceilings",
+        "fail_closed_budget_ceilings",
         "relative_ratio_baseline_floors",
         "anti_rescue_budget_ceilings",
         "bootstrap_policy"
@@ -281,6 +282,26 @@
             },
             "churn": {
               "$ref": "#/$defs/profileResourceBudget"
+            }
+          }
+        },
+        "fail_closed_budget_ceilings": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "small",
+            "large",
+            "churn"
+          ],
+          "properties": {
+            "small": {
+              "$ref": "#/$defs/profileFailClosedBudget"
+            },
+            "large": {
+              "$ref": "#/$defs/profileFailClosedBudget"
+            },
+            "churn": {
+              "$ref": "#/$defs/profileFailClosedBudget"
             }
           }
         },
@@ -454,6 +475,7 @@
               "lock_wait_budget_exceeded",
               "lock_contention_budget_exceeded",
               "anti_rescue_budget_exceeded",
+              "fail_closed_budget_exceeded",
               "protected_acceptance_asset_modified",
               "change_criticality_missing_or_unknown",
               "test_first_evidence_missing_or_invalid",
@@ -489,6 +511,22 @@
       }
     },
     "profileResourceBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "default",
+        "incomplete_syntax_member_access"
+      ],
+      "properties": {
+        "default": {
+          "type": "object"
+        },
+        "incomplete_syntax_member_access": {
+          "type": "object"
+        }
+      }
+    },
+    "profileFailClosedBudget": {
       "type": "object",
       "additionalProperties": false,
       "required": [

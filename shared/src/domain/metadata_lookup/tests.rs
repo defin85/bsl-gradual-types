@@ -7,8 +7,7 @@ use crate::domain::types::{
     Certainty, ConcreteType, ConfigurationType, FacetKind, GenericType, MetadataKind, PlatformType,
     RawAttributeData, RawDataSource, RawMethodData, RawParamData, RawPropertyData,
     RawTabularSectionData, RawTypeData, ResolutionMetadata, ResolutionResult, ResolutionSource,
-    SpecialType,
-    StructuralMember, TabularRowType, TypeResolution, FORM_DATA_FORM_TYPE_NOTE_PREFIX,
+    SpecialType, StructuralMember, TabularRowType, TypeResolution, FORM_DATA_FORM_TYPE_NOTE_PREFIX,
     FORM_DATA_SEMANTICS_NOTE,
 };
 use std::sync::Arc;

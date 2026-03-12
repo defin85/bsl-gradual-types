@@ -256,7 +256,9 @@ pub(super) fn resolve_web_hover_query(
     record_type_index_reason_at_utf16_position(&analysis, V2FileId(1), line, column, coordinator);
     let file_content = match analysis.file_text(V2FileId(1)) {
         Ok(Some(file_content)) => file_content,
-        Ok(None) | Err(_) => return Ok(WebHoverQueryOutcome::FailClosed("unavailable_by_contract")),
+        Ok(None) | Err(_) => {
+            return Ok(WebHoverQueryOutcome::FailClosed("unavailable_by_contract"))
+        }
     };
     let ir_program = match IntellisenseV2Facade::run_optional_query(
         &context,

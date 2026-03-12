@@ -45,13 +45,15 @@ impl<'a> MemberResolver<'a> {
         if member.contains('.') {
             // Пробуем склеить base.первая_часть_member и резолвить как тип
             if let Some((first_part, rest)) = member.split_once('.') {
-                if let Some((owner_type, raw_type)) = self.resolve_nested_owner_type(base, first_part)
+                if let Some((owner_type, raw_type)) =
+                    self.resolve_nested_owner_type(base, first_part)
                 {
                     // Тип найден — проверяем, не табличная ли часть
                     if let Some(tabular_section) =
                         raw_type.tabular_sections.iter().find(|ts| ts.name == rest)
                     {
-                        return self.resolve_tabular_section_access(owner_type, tabular_section.clone());
+                        return self
+                            .resolve_tabular_section_access(owner_type, tabular_section.clone());
                     }
                     // Иначе пробуем рекурсивно уже от canonical owner type.
                     return self.resolve(&owner_type, rest);

@@ -164,7 +164,10 @@ fn test_resolve_tabular_section_via_object_facet() {
                 assert_eq!(row_type.get_full_name(), "СтрокаРаботы");
                 assert_eq!(row_type.get_attribute_name(0), Some("ВидРаботы"));
             }
-            other => panic!("Expected TabularRow in Generic type_params, got {:?}", other),
+            other => panic!(
+                "Expected TabularRow in Generic type_params, got {:?}",
+                other
+            ),
         }
     }
 }

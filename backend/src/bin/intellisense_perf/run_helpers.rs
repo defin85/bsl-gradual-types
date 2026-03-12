@@ -195,8 +195,7 @@ pub(super) async fn run_iterations(
                 entry.lock_contention_events_total += measurement.lock_contention_events;
                 entry.anti_rescue.stale_fallback_total +=
                     measurement.anti_rescue.stale_fallback_total;
-                entry.anti_rescue.stale_served_total +=
-                    measurement.anti_rescue.stale_served_total;
+                entry.anti_rescue.stale_served_total += measurement.anti_rescue.stale_served_total;
                 entry.anti_rescue.degraded_substitute_total +=
                     measurement.anti_rescue.degraded_substitute_total;
                 entry.anti_rescue.search_backed_substitute_total +=
@@ -222,8 +221,11 @@ pub(super) async fn execute_case_iteration(
     let execution = bsl_backend::application::ExecutionContext {
         origin: bsl_backend::application::ObservabilityOrigin::Runtime,
         operation: case.operation.semantic_operation(),
-        completion_mode: matches!(case.operation, PerfOperation::Completion | PerfOperation::Members)
-            .then_some("perf_harness"),
+        completion_mode: matches!(
+            case.operation,
+            PerfOperation::Completion | PerfOperation::Members
+        )
+        .then_some("perf_harness"),
         completion_large_churn_active: false,
         file_id: case.file_id,
         min_file_version: Some(expected_version),
@@ -236,7 +238,9 @@ pub(super) async fn execute_case_iteration(
         .facade
         .prepare_stateful_operation(&execution, Some(context.coordinator))
         .await
-        .map_err(|outcome| anyhow::anyhow!("prepare_stateful_operation failed: {}", outcome.as_str()))?;
+        .map_err(|outcome| {
+            anyhow::anyhow!("prepare_stateful_operation failed: {}", outcome.as_str())
+        })?;
     let analysis = prepared.snapshot.analysis;
     let case_content = analysis
         .file_text(case.file_id)
@@ -251,22 +255,25 @@ pub(super) async fn execute_case_iteration(
         .unwrap_or_else(|| Arc::from(case.file_uri.clone()));
     let deps = analysis.deps_data().ok().context("deps unavailable")?;
 
-    let member_access_owner_type_hint =
-        if matches!(case.operation, PerfOperation::Completion | PerfOperation::Members)
-            && completion_request_targets_member_access(case_content.as_ref(), case.line, case.column)
-        {
-            let _ =
-                analysis.precompute_type_index_for_file(case.file_id, Some(expected_version), 0);
-            completion_owner_hint_at_position(
-                &analysis,
-                case.file_id,
-                case_content.as_ref(),
-                case.line,
-                case.column,
-            )
-        } else {
-            None
-        };
+    let member_access_owner_type_hint = if matches!(
+        case.operation,
+        PerfOperation::Completion | PerfOperation::Members
+    ) && completion_request_targets_member_access(
+        case_content.as_ref(),
+        case.line,
+        case.column,
+    ) {
+        let _ = analysis.precompute_type_index_for_file(case.file_id, Some(expected_version), 0);
+        completion_owner_hint_at_position(
+            &analysis,
+            case.file_id,
+            case_content.as_ref(),
+            case.line,
+            case.column,
+        )
+    } else {
+        None
+    };
 
     let ir_started = Instant::now();
     let ir_program = bsl_backend::application::IntellisenseV2Facade::run_ir_query_singleflight(
@@ -300,8 +307,10 @@ pub(super) async fn execute_case_iteration(
             (response.is_incomplete, false)
         }
         PerfOperation::Hover => {
-            let hover_formatter =
-                HoverFormatter::new(HoverFormatConfig::default(), context.metadata_lookup.clone());
+            let hover_formatter = HoverFormatter::new(
+                HoverFormatConfig::default(),
+                context.metadata_lookup.clone(),
+            );
             let hover = get_hover_info_with_semantic_program(
                 &analysis,
                 case.file_id,
@@ -348,12 +357,7 @@ pub(super) async fn execute_case_iteration(
             (false, fail_closed)
         }
         PerfOperation::TypeAtPosition => {
-            let type_resolution = type_at_position(
-                &analysis,
-                case.file_id,
-                case.line,
-                case.column,
-            );
+            let type_resolution = type_at_position(&analysis, case.file_id, case.line, case.column);
             (false, type_resolution.is_none())
         }
     };
@@ -549,5 +553,8 @@ fn type_at_position(
         .utf16_position_to_byte_offset(file_id, line, column)
         .ok()
         .flatten()? as u32;
-    analysis.type_at_byte_offset_serve_only(file_id, offset).ok().flatten()
+    analysis
+        .type_at_byte_offset_serve_only(file_id, offset)
+        .ok()
+        .flatten()
 }

@@ -72,7 +72,8 @@ pub(super) fn build_results(
                     allocated_bytes_per_request: measured.allocated_bytes_total as f64
                         / total_requests_f,
                     lock_wait_ms_per_request: measured.lock_wait_ms_total / total_requests_f,
-                    lock_contention_events_per_request: measured.lock_contention_events_total as f64
+                    lock_contention_events_per_request: measured.lock_contention_events_total
+                        as f64
                         / total_requests_f,
                 },
                 anti_rescue: measured.anti_rescue,
@@ -222,6 +223,8 @@ fn report_samples(results: &[PerfResultEntry]) -> Vec<PerfGateSample> {
             snapshot_preparation_p99_ms: entry.metrics.snapshot_preparation_ms.p99_ms,
             ir_query_p95_ms: entry.metrics.ir_query_ms.p95_ms,
             ir_query_p99_ms: entry.metrics.ir_query_ms.p99_ms,
+            fail_closed_total: entry.fail_closed_total as u64,
+            fail_closed_rate: entry.fail_closed_rate,
             error_rate: entry.error_rate,
             incomplete_rate: entry.incomplete_rate,
             allocations_per_request: entry.metrics.allocations_per_request,
@@ -351,7 +354,10 @@ pub(super) fn write_summary(path: &Path, report: &PerfReport) -> Result<()> {
     }
     if let Some(comparison) = &report.comparison {
         lines.push(String::new());
-        lines.push(format!("- comparison_contract_version: {}", comparison.contract_version));
+        lines.push(format!(
+            "- comparison_contract_version: {}",
+            comparison.contract_version
+        ));
         lines.push(format!("- comparison_verdict: {}", comparison.verdict));
         lines.push(format!(
             "- comparison_reason_codes: {}",

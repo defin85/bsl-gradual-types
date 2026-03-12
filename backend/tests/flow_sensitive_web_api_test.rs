@@ -40,7 +40,11 @@ fn test_state_with_empty_deps_bundle() -> AppState {
     let empty_deps_bundle =
         build_deps_bundle_v2(&empty_deps_coordinator, None, None).expect("empty deps bundle v2");
     assert_eq!(
-        empty_deps_bundle.semantic_deps.repository.get_stats().total_types,
+        empty_deps_bundle
+            .semantic_deps
+            .repository
+            .get_stats()
+            .total_types,
         0,
         "test precondition: empty deps snapshot must have no semantic types"
     );

@@ -157,7 +157,7 @@ impl TypeInferencer {
 
     #[cfg(test)]
     fn build_index_profiled(&self, program: &Program, file_path: &str) -> TypeIndexBuildProfiled {
-        let profiled = self.build_facts_internal(program, file_path, None);
+        let profiled = self.build_facts_internal(program, file_path, None, None);
         TypeIndexBuildProfiled {
             index: TypeIndex::from_semantic_facts(&profiled.facts),
             profile: profiled.profile,
@@ -174,6 +174,7 @@ impl TypeInferencer {
         let profiled = self.build_facts_internal(
             &parsed.program,
             file_path,
+            Some(source_text),
             Some(RecoveryContext {
                 source_text,
                 syntax_errors: &parsed.syntax_errors,
@@ -202,6 +203,7 @@ impl TypeInferencer {
         &self,
         program: &Program,
         file_path: &str,
+        source_text: Option<&str>,
         recovery: Option<RecoveryContext<'_>>,
     ) -> SemanticFactsBuildProfiled {
         let started = Instant::now();
@@ -243,6 +245,14 @@ impl TypeInferencer {
                         &env,
                         &mut facts,
                     );
+                    if let Some(source_text) = source_text {
+                        self.record_source_incomplete_member_access_entries(
+                            source_text,
+                            *span,
+                            &fn_env,
+                            &mut facts,
+                        );
+                    }
                     if let Some(recovery) = recovery {
                         self.record_incomplete_member_access_recovery_entries(
                             recovery, *span, &fn_env, &mut facts,
@@ -254,6 +264,14 @@ impl TypeInferencer {
                 }
                 _ => self.visit_statement(stmt, &mut env, &mut facts),
             }
+        }
+        if let Some(source_text) = source_text {
+            self.record_source_incomplete_member_access_entries(
+                source_text,
+                bsl_shared::ir::Span::new(0, source_text.len() as u32),
+                &env,
+                &mut facts,
+            );
         }
         if let Some(recovery) = recovery {
             self.record_incomplete_member_access_recovery_entries(
@@ -333,27 +351,13 @@ impl TypeInferencer {
         }
 
         for dot_offset in dot_offsets {
-            for (receiver_span, receiver_expr_text) in
-                extract_incomplete_member_access_receiver_slices_at_dot_offset(
-                    recovery.source_text,
-                    dot_offset,
-                )
-            {
-                let Some(receiver_expr) = parse_recovery_expression_snippet(receiver_expr_text)
-                else {
-                    continue;
-                };
-
-                let mut scratch_env = env.clone();
-                let mut scratch_facts = SemanticFacts::default();
-                let resolution =
-                    self.infer_expr(&receiver_expr, &mut scratch_env, &mut scratch_facts);
-                if resolution.is_unknown() || resolution.is_dynamic() {
-                    continue;
-                }
-
-                self.record(receiver_span, resolution, facts);
-            }
+            self.record_incomplete_member_access_receiver_entries_at_dot_offset(
+                recovery.source_text,
+                dot_offset,
+                env,
+                facts,
+                false,
+            );
 
             let Some((member_span, member_expr_text)) =
                 extract_incomplete_member_access_target_slice_at_dot_offset(
@@ -377,6 +381,82 @@ impl TypeInferencer {
 
             self.record(member_span, resolution.clone(), facts);
             self.record_definition_location(member_span, &resolution, facts);
+        }
+    }
+
+    fn record_source_incomplete_member_access_entries(
+        &self,
+        source_text: &str,
+        container_span: bsl_shared::ir::Span,
+        env: &TypeEnv,
+        facts: &mut SemanticFacts,
+    ) {
+        for dot_offset in
+            incomplete_member_access_dot_offsets_within_span(source_text, container_span)
+        {
+            self.record_incomplete_member_access_receiver_entries_at_dot_offset(
+                source_text,
+                dot_offset,
+                env,
+                facts,
+                true,
+            );
+        }
+    }
+
+    fn record_incomplete_member_access_receiver_entries_at_dot_offset(
+        &self,
+        source_text: &str,
+        dot_offset: usize,
+        env: &TypeEnv,
+        facts: &mut SemanticFacts,
+        skip_identifier_receivers: bool,
+    ) {
+        for (receiver_span, receiver_expr_text) in
+            extract_incomplete_member_access_receiver_slices_at_dot_offset(source_text, dot_offset)
+        {
+            if facts.type_resolution_for_span(receiver_span).is_some() {
+                continue;
+            }
+
+            let Some(receiver_expr) = parse_recovery_expression_snippet(receiver_expr_text) else {
+                continue;
+            };
+            if skip_identifier_receivers {
+                if let Expression::Identifier { name, .. } = &receiver_expr {
+                    if !self.allow_source_recovered_identifier_receiver(name, env) {
+                        continue;
+                    }
+                }
+            }
+
+            let mut scratch_env = env.clone();
+            let mut scratch_facts = SemanticFacts::default();
+            let resolution = self.infer_expr(&receiver_expr, &mut scratch_env, &mut scratch_facts);
+            if resolution.is_unknown() || resolution.is_dynamic() {
+                continue;
+            }
+
+            self.record(receiver_span, resolution, facts);
+        }
+    }
+
+    fn allow_source_recovered_identifier_receiver(&self, name: &str, env: &TypeEnv) -> bool {
+        if is_global_collection(name).is_some() {
+            return true;
+        }
+
+        let name_lower = name.to_lowercase();
+        match env.module_type {
+            Some(ModuleType::FormModule { .. }) => {
+                FORM_CONTEXT_BOUND_SYMBOL_KEYS.contains(&name_lower.as_str())
+            }
+            Some(ModuleType::ManagerModule { .. })
+            | Some(ModuleType::ObjectModule { .. })
+            | Some(ModuleType::RecordSetModule { .. }) => {
+                matches!(name_lower.as_str(), "этотобъект" | "объект")
+            }
+            _ => false,
         }
     }
 
@@ -2153,16 +2233,6 @@ fn recovery_call_identifier_char(ch: char) -> bool {
     ch.is_alphanumeric() || ch == '_' || ('А'..='я').contains(&ch) || ch == 'Ё' || ch == 'ё'
 }
 
-fn extract_incomplete_member_access_receiver_slices(
-    source_text: &str,
-    error_span: bsl_shared::ir::Span,
-) -> Vec<(bsl_shared::ir::Span, &str)> {
-    let Some(dot_offset) = find_incomplete_member_access_dot_offset(source_text, error_span) else {
-        return Vec::new();
-    };
-    extract_incomplete_member_access_receiver_slices_at_dot_offset(source_text, dot_offset)
-}
-
 fn extract_incomplete_member_access_receiver_slices_at_dot_offset(
     source_text: &str,
     dot_offset: usize,
@@ -2905,6 +2975,24 @@ pub(crate) fn build_type_index_from_semantic_program_with_path_profiled(
     TypeInferencer::new(deps).build_index_from_semantic_program_profiled(program, file_path, None)
 }
 
+pub(crate) fn materialize_semantic_facts_with_path_profiled(
+    program: &mut SemanticProgram,
+    parsed_program: &Program,
+    source_text: &str,
+    file_path: &str,
+    deps: Arc<SemanticDeps>,
+) -> TypeIndexBuildProfile {
+    let profiled = TypeInferencer::new(deps).build_facts_internal(
+        parsed_program,
+        file_path,
+        Some(source_text),
+        None,
+    );
+    program.semantic_facts = profiled.facts;
+    profiled.profile
+}
+
+#[cfg(test)]
 pub(crate) fn materialize_semantic_facts_with_recovery_with_path_profiled(
     program: &mut SemanticProgram,
     parsed: &bsl_syntax::ast::ParseResult,
@@ -2915,6 +3003,7 @@ pub(crate) fn materialize_semantic_facts_with_recovery_with_path_profiled(
     let profiled = TypeInferencer::new(deps).build_facts_internal(
         &parsed.program,
         file_path,
+        Some(source_text),
         Some(RecoveryContext {
             source_text,
             syntax_errors: &parsed.syntax_errors,

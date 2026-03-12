@@ -933,6 +933,153 @@ async fn bsl_members_does_not_execute_parse_result_query_on_semantic_path() {
 }
 
 #[tokio::test]
+async fn semantic_mcp_tools_do_not_backfill_from_polluted_search_index_on_default_path() {
+    use bsl_runtime::system::{
+        IndexItem, IndexItemKind, IndexKind, IndexSnapshot, IndexSnapshotId, TypeKind,
+    };
+    use uuid::Uuid;
+
+    fn utf16_len(value: &str) -> u32 {
+        value.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32
+    }
+
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let job_manager = Arc::new(JobManager::new());
+    let manager = Arc::new(SessionManager::new());
+    let open = manager
+        .open(
+            WorkspaceOpenParams {
+                roots: vec![temp.path().to_string_lossy().to_string()],
+                platform_docs_archive: None,
+                platform_version: None,
+                configuration_path: None,
+                mode: None,
+            },
+            Arc::clone(&job_manager),
+        )
+        .await
+        .expect("open");
+    wait_startup(job_manager.as_ref(), &open).await;
+
+    let session_uuid = Uuid::parse_str(&open.session_id).expect("session uuid");
+    {
+        let mut sessions = manager.sessions.write().await;
+        let session = sessions.get_mut(&session_uuid).expect("session");
+        let startup = session.startup.as_mut().expect("ready startup");
+        let mut polluted_snapshot =
+            IndexSnapshot::empty(IndexSnapshotId::from_hash("mcp-search-only-snapshot"));
+        Arc::make_mut(&mut polluted_snapshot.type_index).insert(
+            "SearchOnlyType".to_string(),
+            Arc::new(IndexItem::new(
+                "SearchOnlyType".to_string(),
+                IndexItemKind::Type(TypeKind::Generic),
+                IndexKind::Type,
+            )),
+        );
+        startup.deps_bundle_v2.index_snapshot = Arc::new(polluted_snapshot);
+    }
+
+    let root_id = open.roots[0].root_id.clone();
+    let content = concat!(
+        "Procedure Test()\n",
+        "    Значение = 1;\n",
+        "    Несуществующий.\n",
+        "    Несуществующий();\n",
+        "EndProcedure\n"
+    );
+    let file = FileRef {
+        doc: DocumentRef::Canonical(CanonicalDocumentRef {
+            root_id,
+            path: "src/CommonModules/Foo/Module.bsl".to_string(),
+        }),
+        text: Some(content.to_string()),
+        version: Some(1),
+    };
+    manager
+        .documents_set(
+            &open.session_id,
+            &[WorkspaceDocumentsSetFile::File(file.clone())],
+            true,
+        )
+        .await
+        .expect("documents_set");
+
+    let members = manager
+        .bsl_members(BslMembersParams {
+            session_id: open.session_id.clone(),
+            file: FileRef {
+                doc: file.doc.clone(),
+                text: None,
+                version: None,
+            },
+            position: Position {
+                line: 2,
+                character: utf16_len("    Несуществующий."),
+            },
+            limit: 50,
+            include_flow_sensitive: false,
+        })
+        .await
+        .expect("bsl_members");
+    assert!(
+        members.members.is_empty(),
+        "MCP members must stay fail-closed when only polluted search index is available: {:?}",
+        members.members
+    );
+    assert!(!members.truncated);
+
+    let type_info = manager
+        .bsl_type_at_position(BslTypeAtPositionParams {
+            session_id: open.session_id.clone(),
+            file: FileRef {
+                doc: file.doc.clone(),
+                text: None,
+                version: None,
+            },
+            position: Position {
+                line: 1,
+                character: utf16_len(""),
+            },
+            include_flow_sensitive: false,
+        })
+        .await
+        .expect("bsl_type_at_position");
+    assert!(
+        type_info.type_info.is_none(),
+        "MCP type_at_position must not rescue from polluted search index: {:?}",
+        type_info.type_info
+    );
+    assert!(
+        type_info.warnings.is_empty(),
+        "MCP type_at_position must keep empty transport warnings on fail-closed search isolation: {:?}",
+        type_info.warnings
+    );
+
+    let definition = manager
+        .bsl_definition(BslDefinitionParams {
+            session_id: open.session_id.clone(),
+            symbol_id: None,
+            file: Some(FileRef {
+                doc: file.doc,
+                text: None,
+                version: None,
+            }),
+            position: Some(Position {
+                line: 3,
+                character: utf16_len("    "),
+            }),
+        })
+        .await
+        .expect("bsl_definition");
+    assert!(
+        definition.location.is_none(),
+        "MCP definition must stay fail-closed when only polluted search index is available: {:?}",
+        definition.location
+    );
+    assert!(definition.snippet.is_none());
+}
+
+#[tokio::test]
 async fn documents_set_and_clear_bump_revision_only_on_change() {
     let temp = tempfile::TempDir::new().expect("tempdir");
 

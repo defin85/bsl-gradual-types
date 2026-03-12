@@ -670,6 +670,9 @@ async fn collect_cli_file_diagnostics(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bsl_backend::system::{
+        IndexItem, IndexItemKind, IndexKind, IndexSnapshot, IndexSnapshotId, TypeKind,
+    };
     use bsl_shared::domain::types::FacetKind;
     use bsl_shared::formatting::user_facing_resolution_type_name;
     use tempfile::NamedTempFile;
@@ -683,6 +686,70 @@ mod tests {
         assert!(
             labels.iter().any(|label| label == "Добавить"),
             "expected canonical completion items, got {labels:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn cli_inline_completion_does_not_backfill_from_polluted_search_index() {
+        let inline = inline_cli_completion_expression("Несуществующий.").expect("inline expr");
+        let mut prepared = prepare_cli_text_operation(
+            inline.file_text.clone(),
+            inline.file_path.clone(),
+            SemanticOperation::Completion,
+            DetailLevel::Full,
+        )
+        .await
+        .expect("prepare cli completion");
+        let ir_program = prepared.ir_program().expect("ir program");
+
+        let mut polluted_snapshot =
+            IndexSnapshot::empty(IndexSnapshotId::from_hash("cli-search-only-snapshot"));
+        Arc::make_mut(&mut polluted_snapshot.type_index).insert(
+            "SearchOnlyType".to_string(),
+            Arc::new(IndexItem::new(
+                "SearchOnlyType".to_string(),
+                IndexItemKind::Type(TypeKind::Generic),
+                IndexKind::Type,
+            )),
+        );
+        prepared.prepared.index_snapshot = Arc::new(polluted_snapshot);
+
+        let owner_hint = completion_member_access_owner_type_hint_from_analysis(
+            prepared.analysis(),
+            prepared.file_id,
+            inline.file_text.as_ref(),
+            inline.line,
+            inline.cursor_column,
+        );
+        assert!(
+            owner_hint.is_none(),
+            "test precondition: canonical CLI owner hint must be absent for unresolved receiver"
+        );
+
+        let completions = get_completion_with_semantic_program_snapshot_with_trigger_hint(
+            inline.file_text.as_ref(),
+            inline.line,
+            inline.cursor_column,
+            None,
+            prepared.index_snapshot(),
+            &prepared.metadata_lookup,
+            inline.file_path.as_ref(),
+            prepared.resolver.as_ref(),
+            ir_program,
+            None,
+            false,
+            Some('.'),
+        )
+        .await
+        .expect("cli completion query");
+        let labels: Vec<_> = completions
+            .items
+            .into_iter()
+            .map(|candidate| candidate.item.label)
+            .collect();
+        assert!(
+            labels.is_empty(),
+            "CLI completion must stay fail-closed when only polluted search index is available, labels={labels:?}"
         );
     }
 

@@ -2,7 +2,10 @@
 
 use axum::http::{header, Request, StatusCode};
 use bsl_backend::presentation::web::{create_router, AppState};
-use bsl_backend::system::{build_deps_bundle_v2, EffectiveStartupInputs, SystemCoordinator};
+use bsl_backend::system::{
+    build_deps_bundle_v2, EffectiveStartupInputs, IndexItem, IndexItemKind, IndexKind,
+    IndexSnapshot, IndexSnapshotId, SystemCoordinator, TypeKind,
+};
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -117,6 +120,60 @@ fn test_state_with_empty_deps_bundle() -> AppState {
             .total_types,
         0,
         "test precondition: empty deps snapshot must have no semantic types"
+    );
+
+    AppState {
+        deps_bundle_v2: Arc::new(tokio::sync::RwLock::new(Arc::new(empty_deps_bundle))),
+        system_coordinator: coordinator,
+        syntax_helper_path: None,
+        startup_inputs: Arc::new(tokio::sync::RwLock::new(EffectiveStartupInputs {
+            syntax_helper_path: None,
+            configuration_path: None,
+            platform_version: None,
+            cache_enabled: true,
+            strict_fingerprint: false,
+        })),
+    }
+}
+
+fn test_state_with_empty_deps_bundle_and_polluted_search_index() -> AppState {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    coordinator
+        .start_with_paths_blocking(None, None, None, None)
+        .expect("startup");
+
+    let empty_deps_coordinator = SystemCoordinator::new();
+    let mut polluted_snapshot =
+        IndexSnapshot::empty(IndexSnapshotId::from_hash("web-hover-search-only-snapshot"));
+    Arc::make_mut(&mut polluted_snapshot.type_index).insert(
+        "SearchOnlyType".to_string(),
+        Arc::new(IndexItem::new(
+            "SearchOnlyType".to_string(),
+            IndexItemKind::Type(TypeKind::Generic),
+            IndexKind::Type,
+        )),
+    );
+    empty_deps_coordinator
+        .intellisense_index()
+        .replace_snapshot(polluted_snapshot);
+
+    let empty_deps_bundle =
+        build_deps_bundle_v2(&empty_deps_coordinator, None, None).expect("empty deps bundle v2");
+    assert_eq!(
+        empty_deps_bundle
+            .semantic_deps
+            .repository
+            .get_stats()
+            .total_types,
+        0,
+        "test precondition: empty deps snapshot must have no semantic types"
+    );
+    assert!(
+        empty_deps_bundle
+            .index_snapshot
+            .type_index
+            .contains_key("SearchOnlyType"),
+        "test precondition: polluted search snapshot must stay visible to web adapter"
     );
 
     AppState {
@@ -418,6 +475,88 @@ async fn hover_endpoints_fail_closed_on_missing_canonical_artifacts() {
     assert!(
         after_total >= baseline_total + 2,
         "web hover and enhanced hover must emit shared fail-closed reasons on missing semantic deps: before={baseline_total}, after={after_total}"
+    );
+}
+
+#[tokio::test]
+async fn hover_endpoints_do_not_backfill_from_polluted_search_index() {
+    let state = test_state_with_empty_deps_bundle_and_polluted_search_index();
+    let coordinator = state.system_coordinator.clone();
+    let app = create_router(state, "backend/static", true);
+    let code = "Процедура T()\n    SearchOnly.\nКонецПроцедуры\n";
+    let baseline_total = interactive_fail_closed_hover_total(&coordinator.observability_metrics());
+
+    let hover_resp = app
+        .clone()
+        .oneshot(
+            Request::post("/api/hover")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(axum::body::Body::from(
+                    json!({
+                        "code": code,
+                        "line": 1,
+                        "column": 12
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(hover_resp.status().is_success());
+    let hover_body = axum::body::to_bytes(hover_resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let hover_json: serde_json::Value = serde_json::from_slice(&hover_body).expect("valid json");
+    assert_eq!(
+        hover_json.get("hover"),
+        Some(&serde_json::Value::Null),
+        "web hover must stay fail-closed when only polluted search index is available: {hover_json}"
+    );
+    assert!(
+        !String::from_utf8_lossy(&hover_body).contains("SearchOnlyType"),
+        "web hover must not leak polluted search/index payload: {hover_json}"
+    );
+
+    let enhanced_resp = app
+        .oneshot(
+            Request::post("/api/hover/enhanced")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(axum::body::Body::from(
+                    json!({
+                        "code": code,
+                        "line": 1,
+                        "column": 12
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(enhanced_resp.status().is_success());
+    let enhanced_body = axum::body::to_bytes(enhanced_resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let enhanced_json: serde_json::Value =
+        serde_json::from_slice(&enhanced_body).expect("valid json");
+    assert_eq!(
+        enhanced_json
+            .get("hoverText")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default(),
+        "No information available",
+        "web enhanced hover must keep fail-closed payload when only polluted search index is available: {enhanced_json}"
+    );
+    assert!(
+        !String::from_utf8_lossy(&enhanced_body).contains("SearchOnlyType"),
+        "web enhanced hover must not leak polluted search/index payload: {enhanced_json}"
+    );
+
+    let after_total = interactive_fail_closed_hover_total(&coordinator.observability_metrics());
+    assert!(
+        after_total >= baseline_total + 2,
+        "web hover endpoints must emit shared fail-closed reasons instead of search rescue: before={baseline_total}, after={after_total}"
     );
 }
 

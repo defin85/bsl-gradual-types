@@ -99,17 +99,17 @@
     {
       "id": "cross_consumer_semantic_equivalence",
       "verdict": "pass",
-      "checks_total": 19
+      "checks_total": 20
     },
     {
       "id": "no_adapter_local_semantic_truth",
       "verdict": "pass",
-      "checks_total": 5
+      "checks_total": 9
     },
     {
       "id": "search_isolation_and_revision_integrity",
       "verdict": "pass",
-      "checks_total": 5
+      "checks_total": 7
     },
     {
       "id": "module_context_and_facet_preservation",
@@ -440,7 +440,33 @@
       "source_asset": {
         "kind": "test",
         "path": "bsl-agent/src/session/tests.rs",
-        "selector": "bsl_members_does_not_execute_parse_result_query_on_semantic_path"
+        "selector": "semantic_mcp_tools_do_not_backfill_from_polluted_search_index_on_default_path"
+      }
+    },
+    {
+      "bundle_id": "no_adapter_local_semantic_truth",
+      "fixture_id": "semantic_artifact_missing_but_search_alive",
+      "operation": "type_at_position",
+      "consumer": "mcp",
+      "verdict": "pass",
+      "reason_code": "search_index_isolated",
+      "source_asset": {
+        "kind": "test",
+        "path": "bsl-agent/src/session/tests.rs",
+        "selector": "semantic_mcp_tools_do_not_backfill_from_polluted_search_index_on_default_path"
+      }
+    },
+    {
+      "bundle_id": "no_adapter_local_semantic_truth",
+      "fixture_id": "semantic_artifact_missing_but_search_alive",
+      "operation": "definition",
+      "consumer": "mcp",
+      "verdict": "pass",
+      "reason_code": "search_index_isolated",
+      "source_asset": {
+        "kind": "test",
+        "path": "bsl-agent/src/session/tests.rs",
+        "selector": "semantic_mcp_tools_do_not_backfill_from_polluted_search_index_on_default_path"
       }
     },
     {
@@ -493,6 +519,32 @@
         "kind": "test",
         "path": "bsl-runtime/src/application/type_system/services/completion_service/tests.rs",
         "selector": "completion_non_member_semantic_path_ignores_polluted_index_snapshot"
+      }
+    },
+    {
+      "bundle_id": "search_isolation_and_revision_integrity",
+      "fixture_id": "semantic_artifact_missing_but_search_alive",
+      "operation": "hover",
+      "consumer": "web",
+      "verdict": "pass",
+      "reason_code": "search_index_isolated",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/tests/flow_sensitive_web_api_test.rs",
+        "selector": "hover_endpoints_do_not_backfill_from_polluted_search_index"
+      }
+    },
+    {
+      "bundle_id": "search_isolation_and_revision_integrity",
+      "fixture_id": "semantic_artifact_missing_but_search_alive",
+      "operation": "completion",
+      "consumer": "cli",
+      "verdict": "pass",
+      "reason_code": "search_index_isolated",
+      "source_asset": {
+        "kind": "test",
+        "path": "cli/src/main.rs",
+        "selector": "cli_inline_completion_does_not_backfill_from_polluted_search_index"
       }
     },
     {

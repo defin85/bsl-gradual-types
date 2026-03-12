@@ -376,7 +376,8 @@ async fn lsp_completion_resolve_respects_snippet_support() {
 }
 
 #[tokio::test]
-async fn lsp_signature_help_returns_method_and_constructor() {
+async fn lsp_signature_help_keeps_method_semantic_facts_and_fail_closes_constructor_without_canonical_fact(
+) {
     let env = build_env();
     let content = r#"Процедура Тест()
     Новый Массив(1, )
@@ -398,9 +399,7 @@ async fn lsp_signature_help_returns_method_and_constructor() {
         ir_program.clone(),
         env.deps.clone(),
         None,
-    )
-    .expect("constructor signature help");
-
+    );
     let method = signature_help_handler::handle_signature_help_v2(
         &analysis,
         file_id,
@@ -412,13 +411,10 @@ async fn lsp_signature_help_returns_method_and_constructor() {
     )
     .expect("method signature help");
 
-    let constructor_label = constructor
-        .signatures
-        .first()
-        .map(|sig| sig.label.as_str())
-        .unwrap_or("");
-    assert!(constructor_label.starts_with("Новый Массив("));
-    assert_eq!(constructor.active_parameter, Some(1));
+    assert!(
+        constructor.is_none(),
+        "constructor signature help must stay fail-closed when canonical semantic facts are absent"
+    );
 
     let method_label = method
         .signatures

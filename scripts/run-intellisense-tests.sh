@@ -30,6 +30,7 @@ run_cross_adapter_smoke() {
   cargo test -p bsl-backend --bin bsl-lsp-server p7_typed_value_table_row_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics -- --nocapture
   cargo test -p bsl-backend --test flow_sensitive_web_api_test hover_endpoints_emit_type_index_reason_metrics -- --nocapture
   cargo test -p bsl-backend --test flow_sensitive_web_api_test hover_endpoints_fail_closed_on_missing_canonical_artifacts -- --nocapture
+  cargo test -p bsl-backend --test flow_sensitive_web_api_test file_path_for_module_context_bindings -- --nocapture
   cargo test -p bsl-backend --test form_module_object_unified_contract_test diagnostics_hover_and_type_at_position_follow_unified_form_contract -- --nocapture
   cargo test -p bsl-backend --test form_module_object_unified_contract_test completion_and_resolve_follow_unified_form_contract -- --nocapture
   cargo test -p bsl-backend --test form_module_object_unified_contract_test recordset_module_resolves_system_members_and_manager_path_call -- --nocapture

@@ -20,6 +20,7 @@ pub async fn get_diagnostics_debug(
     let deps_bundle = state.deps_bundle_v2.read().await.clone();
     let coordinator = state.system_coordinator.clone();
     let code = payload.code.clone();
+    let file_path = inline_web_path(payload.file_path.as_deref(), "<debug_validation>");
     let include_flow_sensitive = payload.include_flow_sensitive;
 
     let diagnostics_result =
@@ -39,7 +40,7 @@ pub async fn get_diagnostics_debug(
                 DetailLevel::Full,
                 include_flow_sensitive,
                 code_arc.clone(),
-                Arc::from("<debug_validation>"),
+                file_path,
             )?;
             let analysis = prepared.snapshot.analysis;
             let syntax = IntellisenseV2Facade::run_optional_query(

@@ -26,6 +26,7 @@ pub async fn get_enhanced_hover(
     let deps_bundle = state.deps_bundle_v2.read().await.clone();
     let coordinator = state.system_coordinator.clone();
     let code = req.code.clone();
+    let file_path = inline_web_path(req.file_path.as_deref(), "hover_request.bsl");
     let line = req.line;
     let column = req.column;
     let syntax_helper_path = state.syntax_helper_path.clone();
@@ -45,6 +46,7 @@ pub async fn get_enhanced_hover(
                 deps_bundle.as_ref(),
                 worker_coordinator.as_ref(),
                 Arc::from(code),
+                file_path,
                 line,
                 column,
                 syntax_helper_path,

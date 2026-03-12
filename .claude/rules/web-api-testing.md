@@ -65,7 +65,7 @@ with codecs.open('test_api.json', 'w', 'utf-8') as f:
 python3 -c "
 import json, codecs
 with codecs.open('test_api.json', 'w', 'utf-8') as f:
-    json.dump({'code': 'ТЗ = Новый ТаблицаЗначений;', 'line': 0, 'column': 10}, f, ensure_ascii=False)
+    json.dump({'code': 'Процедура Тест()\\n    x = Объект;\\nКонецПроцедуры', 'line': 1, 'column': 8, 'filePath': 'Documents/Док1/Ext/ObjectModule.bsl'}, f, ensure_ascii=False)
 " && curl -s -X POST http://localhost:3002/api/hover/enhanced \
   -H "Content-Type: application/json" -d @test_api.json | python3 -m json.tool
 
@@ -117,12 +117,12 @@ with codecs.open('test_api.json', 'w', 'utf-8') as f:
 
 ### /api/diagnostics
 ```json
-{"code": "Процедура Тест()\n    x = 1;\nКонецПроцедуры"}
+{"code": "Процедура Тест()\n    Объект.НесуществующийМетод();\nКонецПроцедуры", "filePath": "Documents/Док1/Ext/ObjectModule.bsl"}
 ```
 
 ### /api/hover/enhanced
 ```json
-{"code": "ТЗ = Новый ТаблицаЗначений;", "line": 0, "column": 10}
+{"code": "Процедура Тест()\n    x = Объект;\nКонецПроцедуры", "line": 1, "column": 8, "filePath": "Documents/Док1/Ext/ObjectModule.bsl"}
 ```
 
 ### /api/semantic-tree

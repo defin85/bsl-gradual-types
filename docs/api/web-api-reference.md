@@ -277,6 +277,7 @@ curl -X POST "http://127.0.0.1:3002/api/hover" \
     "code": "Функция Тест()\n    МассивДанных = Новый Массив();\n    Возврат МассивДанных;\nКонецФункции",
     "line": 2,
     "column": 4,
+    "filePath": "Documents/Док1/Ext/ObjectModule.bsl",
     "includeFlowSensitive": false
   }' | jq '.'
 ```
@@ -312,7 +313,10 @@ curl -X POST "http://127.0.0.1:3002/api/hover" \
 | `code` | String | ✅ | BSL код для анализа |
 | `line` | Number | ✅ | Строка (0-based) |
 | `column` | Number | ✅ | Колонка (0-based) |
+| `filePath` | String | ❌ | Реальный путь модуля для module-context semantics (`Объект`, `ЭтотОбъект`, form/object/recordset bindings) |
 | `includeFlowSensitive` | Boolean | ❌ | Включить flow-sensitive narrowing поверх canonical semantic path |
+
+Для inline-фрагментов из реальных модулей 1С передавай `filePath`. Без него Web API анализирует код как synthetic inline path, и explicit module-context bindings могут остаться unresolved.
 
 #### Статус коды
 
@@ -605,7 +609,8 @@ curl -X POST "http://127.0.0.1:3002/api/hover/enhanced" \
   -d '{
     "code": "Функция Тест()\n    ТЗ = Новый ТаблицаЗначений();\nКонецФункции",
     "line": 2,
-    "column": 4
+    "column": 4,
+    "filePath": "Documents/Док1/Ext/ObjectModule.bsl"
   }' | jq '.'
 ```
 
@@ -624,6 +629,8 @@ curl -X POST "http://127.0.0.1:3002/api/hover/enhanced" \
 }
 ```
 
+`/api/hover/enhanced` принимает тот же optional `filePath`, что и `/api/hover`. Для `ObjectModule` / `RecordSetModule` / form modules его нужно передавать, чтобы сохранить canonical module-context semantics.
+
 ---
 
 ### 7. Diagnostics with Error Separation (NEW)
@@ -640,7 +647,8 @@ curl -X POST "http://127.0.0.1:3002/api/hover/enhanced" \
 curl -X POST "http://127.0.0.1:3002/api/diagnostics" \
   -H "Content-Type: application/json" \
   -d '{
-    "code": "Функция Тест()\n    массив.НесуществующийМетод();\nКонецФункции"
+    "code": "Функция Тест()\n    Объект.НесуществующийМетод();\nКонецФункции",
+    "filePath": "Documents/Док1/Ext/ObjectModule.bsl"
   }' | jq '.'
 ```
 
@@ -661,6 +669,16 @@ curl -X POST "http://127.0.0.1:3002/api/diagnostics" \
   "durationMs": 35
 }
 ```
+
+#### Поля запроса
+
+| Поле | Тип | Обязательно | Описание |
+|------|-----|-------------|----------|
+| `code` | String | ✅ | BSL код для анализа |
+| `filePath` | String | ❌ | Реальный путь модуля для module-context semantics и metadata-backed diagnostics |
+| `includeFlowSensitive` | Boolean | ❌ | Включить flow-sensitive narrowing поверх canonical semantic path |
+
+Для `diagnostics`, `validate` и `diagnostics/debug` `filePath` работает одинаково: если код относится к реальному модулю, передавай path в camelCase, чтобы explicit bindings (`Объект`, `ЭтотОбъект`) резолвились в owner type текущего модуля.
 
 ---
 

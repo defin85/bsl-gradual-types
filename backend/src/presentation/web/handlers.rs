@@ -68,6 +68,8 @@ pub struct HoverRequest {
     pub code: String,
     pub line: u32,
     pub column: u32,
+    #[serde(default, rename = "filePath")]
+    pub file_path: Option<String>,
     #[serde(default = "default_detail_level")]
     pub detail_level: String,
     /// Enable flow-sensitive analysis (opt-in). Default: false.
@@ -80,6 +82,13 @@ pub struct HoverRequest {
 
 fn default_detail_level() -> String {
     "detailed".to_string()
+}
+
+pub(super) fn inline_web_path(file_path: Option<&str>, fallback: &'static str) -> Arc<str> {
+    file_path
+        .filter(|value| !value.trim().is_empty())
+        .map(Arc::<str>::from)
+        .unwrap_or_else(|| Arc::from(fallback))
 }
 
 #[derive(Clone)]
@@ -230,6 +239,7 @@ pub(super) fn resolve_web_hover_query(
     deps_bundle: &DepsBundleV2,
     coordinator: &SystemCoordinator,
     code: Arc<str>,
+    file_path: Arc<str>,
     line: u32,
     column: u32,
     syntax_helper_path: Option<PathBuf>,
@@ -247,7 +257,7 @@ pub(super) fn resolve_web_hover_query(
         DetailLevel::Full,
         include_flow_sensitive,
         code,
-        Arc::from("hover_request.bsl"),
+        file_path,
     ) {
         Ok(values) => values,
         Err(_) => return Ok(WebHoverQueryOutcome::FailClosed("missing_canonical_ir")),
@@ -498,6 +508,7 @@ pub async fn validate_code(
     let deps_bundle = state.deps_bundle_v2.read().await.clone();
     let coordinator = state.system_coordinator.clone();
     let code = payload.code.clone();
+    let file_path = inline_web_path(payload.file_path.as_deref(), "<semantic_validation>");
     let include_flow_sensitive = payload.include_flow_sensitive;
     let validation_result = crate::application::spawn_bounded_blocking(
         move || -> anyhow::Result<Vec<ValidationErrorDto>> {
@@ -510,7 +521,7 @@ pub async fn validate_code(
                 DetailLevel::Full,
                 include_flow_sensitive,
                 code_arc.clone(),
-                Arc::from("<semantic_validation>"),
+                file_path,
             )?;
             let analysis = prepared.snapshot.analysis;
             let diagnostics = if include_flow_sensitive {
@@ -587,6 +598,7 @@ pub async fn get_hover(
     let deps_bundle = state.deps_bundle_v2.read().await.clone();
     let coordinator = state.system_coordinator.clone();
     let code = req.code.clone();
+    let file_path = inline_web_path(req.file_path.as_deref(), "hover_request.bsl");
     let line = req.line;
     let column = req.column;
     let syntax_helper_path = state.syntax_helper_path.clone();
@@ -599,6 +611,7 @@ pub async fn get_hover(
                 deps_bundle.as_ref(),
                 worker_coordinator.as_ref(),
                 Arc::from(code),
+                file_path,
                 line,
                 column,
                 syntax_helper_path,
@@ -661,6 +674,7 @@ pub async fn get_diagnostics(
     let deps_bundle = state.deps_bundle_v2.read().await.clone();
     let coordinator = state.system_coordinator.clone();
     let code = payload.code.clone();
+    let file_path = inline_web_path(payload.file_path.as_deref(), "<semantic_validation>");
     let include_flow_sensitive = payload.include_flow_sensitive;
 
     let diagnostics_result = crate::application::spawn_bounded_blocking(
@@ -674,7 +688,7 @@ pub async fn get_diagnostics(
                 DetailLevel::Full,
                 include_flow_sensitive,
                 code_arc.clone(),
-                Arc::from("<semantic_validation>"),
+                file_path,
             )?;
             let analysis = prepared.snapshot.analysis;
             let syntax = IntellisenseV2Facade::run_optional_query(

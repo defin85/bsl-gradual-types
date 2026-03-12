@@ -1,7 +1,7 @@
 {
   "constructor": {
-    "activeParameter": 1,
-    "label": "Новый Массив([Размер: Число])"
+    "activeParameter": null,
+    "label": null
   },
   "method": {
     "activeParameter": 1,

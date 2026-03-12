@@ -4530,6 +4530,116 @@ async fn p7_legitimate_empty_interactive_results_do_not_emit_fail_closed_reasons
 }
 
 #[tokio::test]
+async fn p7_constructor_signature_help_without_canonical_fact_stays_empty_without_fail_closed_reason(
+) {
+    const SIGNATURE_REASON_KEY: &str =
+        "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_signature_help_reason_missing_semantic_index";
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().unwrap() = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .as_ref()
+        .cloned()
+        .expect("server instance");
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let fixture = "Процедура Тест()\n\
+    Новый Массив(1, )\n\
+КонецПроцедуры\n";
+    let uri = Url::parse("file:///test_p7_constructor_signature_help_without_canonical_fact.bsl")
+        .expect("uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: fixture.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let metric_total = |metric_key: &str| -> u64 {
+        let metrics = coordinator.observability_metrics();
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        read_u64_metric(counters.get(metric_key))
+    };
+
+    let before_signature = metric_total(SIGNATURE_REASON_KEY);
+    let signature_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/signatureHelp")
+                .id(9114)
+                .params(
+                    serde_json::to_value(tower_lsp::lsp_types::SignatureHelpParams {
+                        text_document_position_params: TextDocumentPositionParams {
+                            text_document: TextDocumentIdentifier { uri: uri.clone() },
+                            position: find_utf16_position_after_marker(fixture, "Новый Массив("),
+                        },
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                        context: None,
+                    })
+                    .expect("SignatureHelpParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("signatureHelp request")
+        .expect("signatureHelp response");
+    let signature_value =
+        serde_json::to_value(&signature_response).expect("serialize signatureHelp response");
+    let signature_result = signature_value
+        .get("result")
+        .cloned()
+        .expect("signatureHelp result field");
+    let signature_help: Option<tower_lsp::lsp_types::SignatureHelp> =
+        serde_json::from_value(signature_result).expect("parse signatureHelp result");
+    assert!(
+        signature_help.is_none(),
+        "constructor signatureHelp without canonical fact must stay empty on the default LSP path: {signature_value:?}"
+    );
+    let after_signature = metric_total(SIGNATURE_REASON_KEY);
+    assert_eq!(
+        after_signature, before_signature,
+        "constructor signatureHelp without canonical fact must remain a legitimate empty result"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
 async fn p7_map_index_access_exact_cross_consumer_acceptance_uses_snapshot_owner_without_manual_hint(
 ) {
     let completion_fixture = "Процедура Тест()\n\

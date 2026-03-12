@@ -2,7 +2,7 @@
   "schema_version": "v1",
   "contract_version": "quality-gates-v1",
   "change_id": "refactor-ir-canonical-semantic-pipeline",
-  "generated_at": "2026-03-12T11:57:39+03:00",
+  "generated_at": "2026-03-12T14:05:31+03:00",
   "overall": {
     "verdict": "pass",
     "gates_total": 7,
@@ -40,6 +40,8 @@
         "backend/src/bin/lsp_server/server/core/tests.rs::p7_typed_value_table_row_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics",
         "backend/tests/flow_sensitive_web_api_test.rs::hover_endpoints_emit_type_index_reason_metrics",
         "backend/tests/flow_sensitive_web_api_test.rs::hover_endpoints_fail_closed_on_missing_canonical_artifacts",
+        "backend/tests/flow_sensitive_web_api_test.rs::hover_endpoints_use_file_path_for_module_context_bindings",
+        "backend/tests/flow_sensitive_web_api_test.rs::diagnostics_and_validate_use_file_path_for_module_context_bindings",
         "backend/tests/form_module_object_unified_contract_test.rs::diagnostics_hover_and_type_at_position_follow_unified_form_contract",
         "backend/tests/form_module_object_unified_contract_test.rs::completion_and_resolve_follow_unified_form_contract",
         "backend/tests/form_module_object_unified_contract_test.rs::recordset_module_resolves_system_members_and_manager_path_call",

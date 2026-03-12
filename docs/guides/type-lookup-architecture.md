@@ -138,7 +138,7 @@ Interactive semantic consumers на analyzed path читают `semantic_facts` 
 Это означает:
 
 - `hover` читает type/member truth из canonical facts;
-- `signatureHelp` использует serialized callable/receiver facts вместо request-time repository rescue;
+- `signatureHelp` использует serialized callable/receiver facts и остаётся fail-closed, если canonical facts для позиции отсутствуют;
 - `definition` получает `TypeDefinitionLocation` из canonical facts, включая configuration XML path.
 
 ## Роль metadata/repository слоя

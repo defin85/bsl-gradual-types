@@ -45,7 +45,10 @@ fn find_position(content: &str, marker: &str) -> Position {
 
 fn assert_snapshot(name: &str, value: &serde_json::Value) {
     let path = golden_path(name);
-    let json = serde_json::to_string_pretty(value).expect("snapshot json");
+    let json = format!(
+        "{}\n",
+        serde_json::to_string_pretty(value).expect("snapshot json")
+    );
     if std::env::var("UPDATE_GOLDEN").ok().as_deref() == Some("1") {
         fs::create_dir_all(path.parent().expect("golden dir")).expect("create golden dir");
         fs::write(&path, json).expect("write golden");
@@ -168,8 +171,7 @@ async fn m5_signature_help_snapshot() {
         ir_program.clone(),
         deps.clone(),
         None,
-    )
-    .expect("constructor signature help (v2)");
+    );
 
     let method_pos = find_position(&content, "МойМассив.Добавить(1, ");
     let method_v2 = handle_signature_help_v2(
@@ -185,8 +187,10 @@ async fn m5_signature_help_snapshot() {
 
     let snapshot = serde_json::json!({
         "constructor": {
-            "label": constructor_v2.signatures.first().map(|sig| sig.label.clone()),
-            "activeParameter": constructor_v2.active_parameter,
+            "label": constructor_v2
+                .as_ref()
+                .and_then(|help| help.signatures.first().map(|sig| sig.label.clone())),
+            "activeParameter": constructor_v2.as_ref().and_then(|help| help.active_parameter),
         },
         "method": {
             "label": method_v2.signatures.first().map(|sig| sig.label.clone()),

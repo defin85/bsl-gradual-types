@@ -28,7 +28,7 @@ pub fn get_signature_help_v2(
     line: u32,
     character: u32,
     ir_program: Arc<SemanticProgram>,
-    deps: Arc<bsl_analysis_v2::SemanticDeps>,
+    _deps: Arc<bsl_analysis_v2::SemanticDeps>,
 ) -> Option<SignatureHelpData> {
     get_signature_help_v2_with_analysis(
         file_content,
@@ -37,7 +37,7 @@ pub fn get_signature_help_v2(
         None,
         None,
         ir_program,
-        deps,
+        _deps,
         None,
     )
 }
@@ -49,7 +49,7 @@ pub fn get_signature_help_v2_with_analysis(
     analysis: Option<&bsl_analysis_v2::AnalysisV2>,
     file_id: Option<bsl_analysis_v2::FileId>,
     ir_program: Arc<SemanticProgram>,
-    deps: Arc<bsl_analysis_v2::SemanticDeps>,
+    _deps: Arc<bsl_analysis_v2::SemanticDeps>,
     coordinator: Option<&SystemCoordinator>,
 ) -> Option<SignatureHelpData> {
     let call_context = signature_help_query(file_content, line, character)?;
@@ -60,8 +60,7 @@ pub fn get_signature_help_v2_with_analysis(
     }
     let _ = (analysis, file_id, coordinator);
     let signature_info =
-        signature_target_from_semantic_facts(file_content, &call_context, ir_program.as_ref())
-            .or_else(|| constructor_signature_from_query(&call_context, deps.as_ref()))?;
+        signature_target_from_semantic_facts(file_content, &call_context, ir_program.as_ref())?;
 
     let active_param = calculate_active_parameter(file_content, &call_context, line, character);
     let (label, parameters) = match signature_info {
@@ -463,20 +462,6 @@ fn signature_target_from_semantic_facts(
         .filter(|node| node.span.contains(call_start_offset))
         .min_by_key(|node| node.span.len())
         .and_then(|node| signature_target_for_node(ir_program, node))
-}
-
-fn constructor_signature_from_query(
-    call_context: &SignatureHelpQuery,
-    deps: &bsl_analysis_v2::SemanticDeps,
-) -> Option<SignatureTarget> {
-    call_context
-        .is_constructor
-        .then(|| {
-            deps.repository
-                .find_constructor(call_context.function_name.as_str())
-        })
-        .flatten()
-        .map(SignatureTarget::Constructor)
 }
 
 fn signature_target_from_fact_span(

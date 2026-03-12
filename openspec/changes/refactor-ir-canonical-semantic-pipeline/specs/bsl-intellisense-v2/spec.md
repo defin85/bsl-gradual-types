@@ -177,9 +177,10 @@ Observability MAY фиксировать bounded reason-code недоступн�
 - **AND** не materialize-ит semantic ответ из альтернативного non-IR path
 
 #### Scenario: После didChange stale semantic payload не маскируется под current revision
-- **GIVEN** пользователь только что изменил документ и current revision ещё не имеет canonical IR или derived semantic index
+- **GIVEN** пользователь только что изменил документ и semantic значение в запрошенной позиции изменилось или исчезло в current revision
 - **WHEN** IDE запрашивает `hover`, `type-at-position` или `definition`
-- **THEN** сервер отвечает fail-closed для текущей revision
+- **THEN** сервер отвечает exact current-revision semantic результатом или fail-closed результатом для текущей revision согласно surface contract
+- **AND** MAY вернуть explicit current-revision unresolved/empty state, если именно он является точным semantic ответом для нового кода
 - **AND** не возвращает semantic payload, вычисленный для предыдущей revision, как будто он относится к текущему коду
 
 ### Requirement: Canonical diagnostics публикуются только для current revision snapshot (MUST)

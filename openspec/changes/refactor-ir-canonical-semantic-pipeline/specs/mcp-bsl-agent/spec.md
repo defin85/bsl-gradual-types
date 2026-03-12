@@ -64,9 +64,10 @@ MCP MUST NOT использовать discovery/search index как latency/perf
 - **AND** не materialize-ит members из alternate non-IR semantic path
 
 #### Scenario: MCP не возвращает stale semantic ответ как current revision result
-- **GIVEN** active session только что получила новую revision, а canonical IR или derived semantic index для неё ещё недоступны
+- **GIVEN** active session только что получила новую revision и semantic значение в запрошенной позиции изменилось или исчезло в текущем snapshot
 - **WHEN** клиент вызывает `bsl_type_at_position_start` или `bsl_definition_start`
-- **THEN** сервер отвечает fail-closed для текущей revision
+- **THEN** сервер отвечает exact current-revision semantic результатом или fail-closed результатом согласно MCP contract
+- **AND** MAY вернуть explicit current-revision unresolved/empty state, если именно он является точным semantic ответом для нового snapshot
 - **AND** не возвращает semantic payload от предыдущей revision как будто он относится к текущему snapshot
 
 ### Requirement: MCP fail-closed observability использует shared bounded taxonomy (MUST)

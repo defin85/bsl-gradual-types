@@ -20,7 +20,7 @@ use bsl_backend::application::{
     completion_member_access_owner_type_hint_from_analysis,
     get_completion_with_semantic_program_snapshot_with_trigger_hint, SemanticOperation,
 };
-use bsl_shared::domain::types::{DiagnosticSeverity, ResolutionResult, TypeResolution};
+use bsl_shared::domain::types::{DiagnosticSeverity, TypeResolution};
 use bsl_shared::domain::CompletionItem;
 use bsl_shared::engine::CliAnalysisResult;
 use bsl_shared::formatting::DetailLevel;
@@ -529,26 +529,24 @@ fn expression_targets_member_access(expression: &str) -> bool {
             .all(|ch| ch == '_' || ch.is_alphanumeric())
 }
 
-fn normalize_completion_owner_hint(
-    metadata_lookup: &bsl_shared::domain::TypeMetadataLookup,
-    owner_hint: TypeResolution,
-) -> TypeResolution {
-    let has_members = !metadata_lookup.get_methods(&owner_hint).is_empty()
-        || !metadata_lookup.get_properties(&owner_hint).is_empty();
-    if has_members {
-        return owner_hint;
-    }
-
-    if let ResolutionResult::Generic(generic) = &owner_hint.result {
-        let base_owner = TypeResolution::explicit(&generic.base_type);
-        let base_has_members = !metadata_lookup.get_methods(&base_owner).is_empty()
-            || !metadata_lookup.get_properties(&base_owner).is_empty();
-        if base_has_members {
-            return base_owner;
-        }
-    }
-
-    owner_hint
+fn cli_completion_owner_hint(
+    expression: &str,
+    inline: &InlineCliExpression,
+    prepared: &CliPreparedFileOperation,
+) -> Option<TypeResolution> {
+    let member_access_request = expression_targets_member_access(expression);
+    member_access_request
+        .then(|| {
+            completion_member_access_owner_type_hint_from_analysis(
+                prepared.analysis(),
+                prepared.file_id,
+                inline.file_text.as_ref(),
+                inline.line,
+                inline.cursor_column,
+            )
+        })
+        .flatten()
+        .filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
 }
 
 async fn collect_cli_completion_items(expression: &str) -> anyhow::Result<Vec<CompletionItem>> {
@@ -563,20 +561,7 @@ async fn collect_cli_completion_items(expression: &str) -> anyhow::Result<Vec<Co
     let ir_program = prepared.ir_program()?;
     let trigger_char_hint = expression.trim_end().chars().last().filter(|ch| *ch == '.');
 
-    let member_access_request = expression_targets_member_access(expression);
-    let owner_hint = member_access_request
-        .then(|| {
-            completion_member_access_owner_type_hint_from_analysis(
-                prepared.analysis(),
-                prepared.file_id,
-                inline.file_text.as_ref(),
-                inline.line,
-                inline.cursor_column,
-            )
-        })
-        .flatten()
-        .filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
-        .map(|hint| normalize_completion_owner_hint(&prepared.metadata_lookup, hint));
+    let owner_hint = cli_completion_owner_hint(expression, &inline, &prepared);
     let completions = get_completion_with_semantic_program_snapshot_with_trigger_hint(
         inline.file_text.as_ref(),
         inline.line,
@@ -683,6 +668,41 @@ mod tests {
         assert!(
             labels.iter().any(|label| label == "Добавить"),
             "expected canonical completion items, got {labels:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn cli_inline_completion_preserves_canonical_generic_owner_hint() {
+        let expression = "(Новый Массив()).";
+        let completion_line = "    ДляCompletion = (Новый Массив()).";
+        let file_text = Arc::<str>::from(format!(
+            "Процедура Test()\n{completion_line}\nКонецПроцедуры\n"
+        ));
+        let file_path = Arc::<str>::from("/virtual/cli-inline-completion-parenthesized.bsl");
+        let cursor_column =
+            bsl_analysis_v2::byte_offset_to_utf16(completion_line, completion_line.len())
+                .min(u32::MAX);
+        let inline = InlineCliExpression {
+            file_text: file_text.clone(),
+            file_path: file_path.clone(),
+            line: 1,
+            cursor_column,
+        };
+        let prepared = prepare_cli_text_operation(
+            file_text.clone(),
+            file_path,
+            SemanticOperation::Completion,
+            DetailLevel::Full,
+        )
+        .await
+        .expect("prepare cli completion");
+        let owner_hint =
+            cli_completion_owner_hint(expression, &inline, &prepared).expect("owner hint");
+
+        assert_eq!(
+            owner_hint.type_name(),
+            "Массив<Неопределено>",
+            "CLI must preserve the canonical generic owner hint instead of adapter-local collapsing"
         );
     }
 

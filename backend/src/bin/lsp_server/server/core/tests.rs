@@ -5356,6 +5356,146 @@ async fn p7_typed_value_table_row_revision_switch_does_not_leak_stale_structural
 }
 
 #[tokio::test]
+async fn p7_hover_and_type_at_position_revision_switch_do_not_report_stale_typed_structure_member(
+) {
+    let fixture_v1 = "Процедура Тест()\n\
+    S = Новый Структура;\n\
+    S.Вставить(\"Идентификатор\", \"A-01\");\n\
+    ДляHover = S.Идентификатор;\n\
+КонецПроцедуры\n";
+    let fixture_v2 = "Процедура Тест()\n\
+    S = Новый Структура;\n\
+    ДляHover = S.Идентификатор;\n\
+КонецПроцедуры\n";
+
+    let (mut service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        fixture_v1,
+        "file:///test_p7_hover_type_revision_switch_structure.bsl",
+    )
+    .await;
+
+    let v1_position =
+        find_utf16_position_at_marker_tail(fixture_v1, "ДляHover = S.Идентификатор");
+    let v1_hover_text = lsp_hover_text_optional_at(&mut service, &uri, v1_position)
+        .await
+        .expect("v1 hover text");
+    assert!(
+        v1_hover_text.contains("Идентификатор") && v1_hover_text.contains("Строка"),
+        "v1 hover must expose the exact typed structure field before revision switch, hover={v1_hover_text}"
+    );
+    let v1_type_name =
+        snapshot_type_name_at_marker_optional(&server, file_id, fixture_v1, "ДляHover = S.Идентификатор")
+            .await
+            .expect("v1 type_at_position");
+    assert_eq!(
+        v1_type_name, "Строка",
+        "v1 type_at_position must expose the exact typed structure field before revision switch"
+    );
+
+    replace_lsp_fixture_and_wait(&mut service, &server, &uri, file_id, 2, fixture_v2).await;
+
+    let v2_position =
+        find_utf16_position_at_marker_tail(fixture_v2, "ДляHover = S.Идентификатор");
+    let v2_hover_text = lsp_hover_text_optional_at(&mut service, &uri, v2_position).await;
+    if let Some(text) = &v2_hover_text {
+        assert!(
+            !text.contains("Строка"),
+            "LSP hover must not leak stale previous-revision field type after revision switch, hover={text}"
+        );
+        assert!(
+            text.contains("Неопределено") || text.contains("Тип не распознан системой"),
+            "non-empty LSP hover after revision switch must describe the current unresolved state instead of stale field semantics, hover={text}"
+        );
+    }
+
+    let v2_type_name =
+        snapshot_type_name_at_marker_optional(&server, file_id, fixture_v2, "ДляHover = S.Идентификатор")
+            .await;
+    assert_ne!(
+        v2_type_name.as_deref(),
+        Some("Строка"),
+        "runtime type_at_position must not leak stale previous-revision field type after revision switch, type={v2_type_name:?}"
+    );
+
+    let web_hover_text = web_hover_text_for_code(fixture_v2, v2_position).await;
+    assert!(
+        !web_hover_text.contains("Строка"),
+        "Web hover must not leak stale previous-revision field type after revision switch, hover={web_hover_text}"
+    );
+    assert!(
+        web_hover_text.is_empty()
+            || web_hover_text.contains("Неопределено")
+            || web_hover_text.contains("Тип не распознан системой"),
+        "non-empty Web hover after revision switch must describe the current unresolved state instead of stale field semantics, hover={web_hover_text}"
+    );
+
+    let diagnostics = snapshot_semantic_diagnostic_messages(&server, file_id).await;
+    assert!(
+        diagnostics
+            .iter()
+            .any(|message| message_has_unknown_member(message, "Идентификатор")),
+        "revision-switched typed structure access must produce unknown-member diagnostics, diagnostics={diagnostics:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p7_definition_revision_switch_does_not_return_stale_previous_revision_location_across_lsp_and_mcp(
+) {
+    let fixture_v1 = "Процедура Целевой()\n\
+КонецПроцедуры\n\
+\n\
+Процедура Тест()\n\
+    Целевой();\n\
+КонецПроцедуры\n";
+    let fixture_v2 = "Процедура Тест()\n\
+    Целевой();\n\
+КонецПроцедуры\n";
+
+    let (mut service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        fixture_v1,
+        "file:///test_p7_definition_revision_switch_removed_local_target.bsl",
+    )
+    .await;
+
+    let v1_position = find_utf16_position_after_marker(fixture_v1, "Процедура Тест()\nЦелевой");
+    let v1_lsp_definition = lsp_definition_points_at(&mut service, &uri, v1_position).await;
+    assert!(
+        !v1_lsp_definition.is_empty(),
+        "v1 definition must resolve before revision switch, definition={v1_lsp_definition:?}"
+    );
+    let v1_mcp_definition = mcp_definition_points_at_code(fixture_v1, v1_position).await;
+    assert!(
+        !v1_mcp_definition.is_empty(),
+        "v1 MCP definition must resolve before revision switch, definition={v1_mcp_definition:?}"
+    );
+
+    replace_lsp_fixture_and_wait(&mut service, &server, &uri, file_id, 2, fixture_v2).await;
+
+    let v2_position = find_utf16_position_after_marker(fixture_v2, "Процедура Тест()\nЦелевой");
+    let v2_lsp_definition = lsp_definition_points_at(&mut service, &uri, v2_position).await;
+    assert!(
+        v2_lsp_definition.is_empty(),
+        "LSP definition must not leak stale previous-revision target location after revision switch, definition={v2_lsp_definition:?}"
+    );
+
+    let v2_mcp_definition = mcp_definition_points_at_code(fixture_v2, v2_position).await;
+    assert!(
+        v2_mcp_definition.is_empty(),
+        "MCP definition must not leak stale previous-revision target location for the current code, definition={v2_mcp_definition:?}"
+    );
+
+    let diagnostics = snapshot_semantic_diagnostic_messages(&server, file_id).await;
+    assert!(
+        !diagnostics.is_empty(),
+        "removed local target must surface current-revision diagnostics instead of silently reusing stale semantics"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
 async fn p7_completion_owner_hint_type_lookup_is_serve_only_even_when_flow_sensitive_enabled() {
     let coordinator = Arc::new(SystemCoordinator::new());
 
@@ -10449,6 +10589,16 @@ async fn lsp_hover_text_at(
     uri: &Url,
     position: Position,
 ) -> String {
+    lsp_hover_text_optional_at(service, uri, position)
+        .await
+        .expect("hover text")
+}
+
+async fn lsp_hover_text_optional_at(
+    service: &mut LspService<BslLanguageServer>,
+    uri: &Url,
+    position: Position,
+) -> Option<String> {
     let hover_response = service
         .ready()
         .await
@@ -10478,7 +10628,47 @@ async fn lsp_hover_text_at(
         .expect("hover result field");
     let hover: Option<Hover> = serde_json::from_value(hover_result).expect("parse hover result");
 
-    extract_hover_text(hover.expect("hover result present")).expect("hover text")
+    hover.and_then(extract_hover_text)
+}
+
+async fn lsp_definition_points_at(
+    service: &mut LspService<BslLanguageServer>,
+    uri: &Url,
+    position: Position,
+) -> Vec<NormalizedPoint> {
+    let definition_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/definition")
+                .id(12003)
+                .params(
+                    serde_json::to_value(GotoDefinitionParams {
+                        text_document_position_params: TextDocumentPositionParams {
+                            text_document: TextDocumentIdentifier { uri: uri.clone() },
+                            position,
+                        },
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                        partial_result_params: PartialResultParams::default(),
+                    })
+                    .expect("GotoDefinitionParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("definition request")
+        .expect("definition response");
+    let definition_value =
+        serde_json::to_value(&definition_response).expect("serialize definition response");
+    let definition_result = definition_value
+        .get("result")
+        .cloned()
+        .expect("definition result field");
+    let definition: Option<GotoDefinitionResponse> =
+        serde_json::from_value(definition_result).expect("parse definition result");
+
+    normalize_lsp_definition(definition)
 }
 
 async fn snapshot_type_name_at_marker(
@@ -10487,19 +10677,20 @@ async fn snapshot_type_name_at_marker(
     fixture: &str,
     marker: &str,
 ) -> String {
-    let position = find_utf16_position_at_marker_tail(fixture, marker);
-    let analysis = server.analysis_v2.snapshot().await;
-    let byte_offset = analysis
-        .utf16_position_to_byte_offset(file_id, position.line, position.character)
-        .ok()
-        .flatten()
-        .expect("utf16_position_to_byte_offset");
-    let resolution = analysis
-        .type_at_byte_offset(file_id, byte_offset.min(u32::MAX as usize) as u32)
-        .expect("type_at_byte_offset query")
-        .expect("type_at_byte_offset result");
+    snapshot_type_name_at_marker_optional(server, file_id, fixture, marker)
+        .await
+        .expect("type_at_position result")
+}
 
-    bsl_shared::formatting::user_facing_resolution_type_name(&resolution)
+async fn snapshot_type_name_at_marker_optional(
+    server: &BslLanguageServer,
+    file_id: bsl_analysis_v2::FileId,
+    fixture: &str,
+    marker: &str,
+) -> Option<String> {
+    snapshot_type_resolution_at_marker_optional(server, file_id, fixture, marker)
+        .await
+        .map(|resolution| bsl_shared::formatting::user_facing_resolution_type_name(&resolution))
 }
 
 async fn snapshot_type_resolution_at_marker(
@@ -10508,6 +10699,17 @@ async fn snapshot_type_resolution_at_marker(
     fixture: &str,
     marker: &str,
 ) -> bsl_shared::domain::types::TypeResolution {
+    snapshot_type_resolution_at_marker_optional(server, file_id, fixture, marker)
+        .await
+        .expect("type_at_byte_offset result")
+}
+
+async fn snapshot_type_resolution_at_marker_optional(
+    server: &BslLanguageServer,
+    file_id: bsl_analysis_v2::FileId,
+    fixture: &str,
+    marker: &str,
+) -> Option<bsl_shared::domain::types::TypeResolution> {
     let position = find_utf16_position_at_marker_tail(fixture, marker);
     let analysis = server.analysis_v2.snapshot().await;
     let byte_offset = analysis
@@ -10519,7 +10721,6 @@ async fn snapshot_type_resolution_at_marker(
     analysis
         .type_at_byte_offset(file_id, byte_offset.min(u32::MAX as usize) as u32)
         .expect("type_at_byte_offset query")
-        .expect("type_at_byte_offset result")
 }
 
 async fn mcp_member_entries_at_code(code: &str, position: Position) -> Vec<NormalizedMemberEntry> {
@@ -10565,6 +10766,12 @@ async fn mcp_member_entries_at_code(code: &str, position: Position) -> Vec<Norma
 }
 
 async fn mcp_type_name_at_code(code: &str, position: Position) -> String {
+    mcp_type_name_optional_at_code(code, position)
+        .await
+        .expect("mcp type_at_position type_info")
+}
+
+async fn mcp_type_name_optional_at_code(code: &str, position: Position) -> Option<String> {
     let temp = tempfile::TempDir::new().expect("tempdir");
     let module_path = temp.path().join("Module.bsl");
     std::fs::write(&module_path, code).expect("write module");
@@ -10602,10 +10809,48 @@ async fn mcp_type_name_at_code(code: &str, position: Position) -> String {
         .await
         .expect("mcp type_at_position");
 
-    response
-        .type_info
-        .map(|info| info.name)
-        .expect("mcp type_at_position type_info")
+    response.type_info.map(|info| info.name)
+}
+
+async fn mcp_definition_points_at_code(code: &str, position: Position) -> Vec<NormalizedPoint> {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let module_path = temp.path().join("Module.bsl");
+    std::fs::write(&module_path, code).expect("write module");
+    let manager = Arc::new(SessionManager::new());
+    let job_manager = Arc::new(JobManager::new());
+    let open = manager
+        .open(
+            WorkspaceOpenParams {
+                roots: vec![temp.path().to_string_lossy().to_string()],
+                platform_docs_archive: None,
+                platform_version: None,
+                configuration_path: None,
+                mode: None,
+            },
+            job_manager.clone(),
+        )
+        .await
+        .expect("mcp workspace open");
+    wait_mcp_startup(job_manager.as_ref(), open.startup_job_id.as_deref()).await;
+
+    let response = manager
+        .bsl_definition(BslDefinitionParams {
+            session_id: open.session_id,
+            symbol_id: None,
+            file: Some(McpFileRef {
+                doc: McpDocumentRef::Path(module_path.to_string_lossy().to_string()),
+                text: None,
+                version: None,
+            }),
+            position: Some(McpPosition {
+                line: position.line,
+                character: position.character,
+            }),
+        })
+        .await
+        .expect("mcp definition");
+
+    normalize_mcp_definition(response.location.as_ref())
 }
 
 async fn web_hover_text_for_code(code: &str, position: Position) -> String {

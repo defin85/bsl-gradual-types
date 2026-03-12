@@ -1556,6 +1556,281 @@ async fn stdio_definition_fail_closed_on_current_revision_unresolved_target() {
 }
 
 #[tokio::test]
+async fn stdio_type_at_position_revision_switch_does_not_return_stale_previous_revision_type() {
+    const MODULE_REL_PATH: &str = "src/CommonModules/Foo/Module.bsl";
+
+    let service = spawn_agent(&[]).await;
+    let temp_root = tempfile::TempDir::new().expect("tempdir");
+    let module_code_v1 = concat!(
+        "Процедура Тест()\n",
+        "    S = Новый Структура;\n",
+        "    S.Вставить(\"Идентификатор\", \"A-01\");\n",
+        "    ДляТипа = S.Идентификатор;\n",
+        "КонецПроцедуры\n"
+    );
+    let module_code_v2 = concat!(
+        "Процедура Тест()\n",
+        "    S = Новый Структура;\n",
+        "    ДляТипа = S.Идентификатор;\n",
+        "КонецПроцедуры\n"
+    );
+
+    let module_path = temp_root.path().join(MODULE_REL_PATH);
+    std::fs::create_dir_all(module_path.parent().expect("module parent"))
+        .expect("mkdir module parent");
+    std::fs::write(&module_path, module_code_v1).expect("write Module.bsl");
+
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [temp_root.path().to_string_lossy()],
+        }),
+    )
+    .await;
+    let session_id = open.session_id.clone();
+    let root_id = open.roots[0].root_id.clone();
+    let _status = wait_workspace_ready(&service, &open).await;
+
+    let set_v1: WorkspaceDocumentsSetResponse = call_tool(
+        &service,
+        "workspace_documents_set",
+        json!({
+            "session_id": &session_id,
+            "files": [
+                {
+                    "doc": { "root_id": &root_id, "path": MODULE_REL_PATH },
+                    "text": module_code_v1,
+                    "version": 1
+                }
+            ],
+            "mark_hot": true
+        }),
+    )
+    .await;
+    assert!(set_v1.analysis_revision > 0, "expected overlay revision bump");
+
+    let v1_type_result: BslTypeAtPositionResponse = run_job_and_collect_result(
+        &service,
+        "bsl_type_at_position_start",
+        json!({
+            "session_id": &session_id,
+            "file": { "doc": { "root_id": &root_id, "path": MODULE_REL_PATH } },
+            "position": utf16_position_for_marker(
+                module_code_v1,
+                "    ДляТипа = S.Идентификатор;\n",
+                utf16_len("    ДляТипа = S.Идентификатор"),
+            ),
+            "include_flow_sensitive": false
+        }),
+    )
+    .await;
+    assert_eq!(v1_type_result.analysis_revision, set_v1.analysis_revision);
+    assert_eq!(
+        v1_type_result
+            .type_info
+            .as_ref()
+            .map(|type_info| type_info.name.as_str()),
+        Some("Строка"),
+        "v1 current revision must expose the exact type before revision switch"
+    );
+
+    let set_v2: WorkspaceDocumentsSetResponse = call_tool(
+        &service,
+        "workspace_documents_set",
+        json!({
+            "session_id": &session_id,
+            "files": [
+                {
+                    "doc": { "root_id": &root_id, "path": MODULE_REL_PATH },
+                    "text": module_code_v2,
+                    "version": 2
+                }
+            ],
+            "mark_hot": true
+        }),
+    )
+    .await;
+    assert!(
+        set_v2.analysis_revision > set_v1.analysis_revision,
+        "expected revision bump after overlay update"
+    );
+
+    let v2_type_result: BslTypeAtPositionResponse = run_job_and_collect_result(
+        &service,
+        "bsl_type_at_position_start",
+        json!({
+            "session_id": &session_id,
+            "file": { "doc": { "root_id": &root_id, "path": MODULE_REL_PATH } },
+            "position": utf16_position_for_marker(
+                module_code_v2,
+                "    ДляТипа = S.Идентификатор;\n",
+                utf16_len("    ДляТипа = S.Идентификатор"),
+            ),
+            "include_flow_sensitive": false
+        }),
+    )
+    .await;
+    assert_eq!(v2_type_result.analysis_revision, set_v2.analysis_revision);
+    assert!(
+        v2_type_result
+            .type_info
+            .as_ref()
+            .map(|type_info| type_info.name.as_str())
+            != Some("Строка"),
+        "current revision must not return stale previous-revision type info: {:?}",
+        v2_type_result.type_info
+    );
+    if let Some(type_info) = &v2_type_result.type_info {
+        assert_eq!(
+            type_info.name, "Dynamic",
+            "non-empty current-revision type response must describe the unresolved current state instead of the stale previous-revision type"
+        );
+    }
+    assert!(
+        v2_type_result.warnings.is_empty(),
+        "current-revision type_at_position must not synthesize transport warnings: {:?}",
+        v2_type_result.warnings
+    );
+
+    let _close: serde_json::Value = call_tool(
+        &service,
+        "workspace_close",
+        json!({ "session_id": &session_id }),
+    )
+    .await;
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
+async fn stdio_definition_revision_switch_does_not_return_stale_previous_revision_location() {
+    const MODULE_REL_PATH: &str = "src/CommonModules/Foo/Module.bsl";
+
+    let service = spawn_agent(&[]).await;
+    let temp_root = tempfile::TempDir::new().expect("tempdir");
+    let module_code_v1 = concat!(
+        "Процедура Целевой()\n",
+        "КонецПроцедуры\n",
+        "\n",
+        "Процедура Тест()\n",
+        "    Целевой();\n",
+        "КонецПроцедуры\n"
+    );
+    let module_code_v2 = concat!(
+        "Процедура Тест()\n",
+        "    Целевой();\n",
+        "КонецПроцедуры\n"
+    );
+
+    let module_path = temp_root.path().join(MODULE_REL_PATH);
+    std::fs::create_dir_all(module_path.parent().expect("module parent"))
+        .expect("mkdir module parent");
+    std::fs::write(&module_path, module_code_v1).expect("write Module.bsl");
+
+    let open: WorkspaceOpenResponse = call_tool(
+        &service,
+        "workspace_open",
+        json!({
+            "roots": [temp_root.path().to_string_lossy()],
+        }),
+    )
+    .await;
+    let session_id = open.session_id.clone();
+    let root_id = open.roots[0].root_id.clone();
+    let _status = wait_workspace_ready(&service, &open).await;
+
+    let set_v1: WorkspaceDocumentsSetResponse = call_tool(
+        &service,
+        "workspace_documents_set",
+        json!({
+            "session_id": &session_id,
+            "files": [
+                {
+                    "doc": { "root_id": &root_id, "path": MODULE_REL_PATH },
+                    "text": module_code_v1,
+                    "version": 1
+                }
+            ],
+            "mark_hot": true
+        }),
+    )
+    .await;
+    assert!(set_v1.analysis_revision > 0, "expected overlay revision bump");
+
+    let v1_definition_result: BslDefinitionResponse = run_job_and_collect_result(
+        &service,
+        "bsl_definition_start",
+        json!({
+            "session_id": &session_id,
+            "file": { "doc": { "root_id": &root_id, "path": MODULE_REL_PATH } },
+            "position": utf16_position_for_marker(
+                module_code_v1,
+                "    Целевой();\n",
+                utf16_len("    Целевой"),
+            )
+        }),
+    )
+    .await;
+    assert_eq!(v1_definition_result.analysis_revision, set_v1.analysis_revision);
+    assert!(
+        v1_definition_result.location.is_some(),
+        "v1 current revision must resolve definition before revision switch, got {:?}",
+        v1_definition_result.location
+    );
+
+    let set_v2: WorkspaceDocumentsSetResponse = call_tool(
+        &service,
+        "workspace_documents_set",
+        json!({
+            "session_id": &session_id,
+            "files": [
+                {
+                    "doc": { "root_id": &root_id, "path": MODULE_REL_PATH },
+                    "text": module_code_v2,
+                    "version": 2
+                }
+            ],
+            "mark_hot": true
+        }),
+    )
+    .await;
+    assert!(
+        set_v2.analysis_revision > set_v1.analysis_revision,
+        "expected revision bump after overlay update"
+    );
+
+    let v2_definition_result: BslDefinitionResponse = run_job_and_collect_result(
+        &service,
+        "bsl_definition_start",
+        json!({
+            "session_id": &session_id,
+            "file": { "doc": { "root_id": &root_id, "path": MODULE_REL_PATH } },
+            "position": utf16_position_for_marker(
+                module_code_v2,
+                "    Целевой();\n",
+                utf16_len("    Целевой"),
+            )
+        }),
+    )
+    .await;
+    assert_eq!(v2_definition_result.analysis_revision, set_v2.analysis_revision);
+    assert!(
+        v2_definition_result.location.is_none(),
+        "current revision must fail closed instead of returning stale previous-revision definition: {:?}",
+        v2_definition_result.location
+    );
+    assert!(v2_definition_result.snippet.is_none());
+
+    let _close: serde_json::Value = call_tool(
+        &service,
+        "workspace_close",
+        json!({ "session_id": &session_id }),
+    )
+    .await;
+    let _ = service.cancel().await;
+}
+
+#[tokio::test]
 async fn stdio_ui_url_disabled_returns_not_enabled() {
     let service = spawn_agent(&[]).await;
     let resp: UiUrlResponse = call_tool(&service, "ui_url", json!({})).await;

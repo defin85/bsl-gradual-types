@@ -22,10 +22,10 @@
 - [x] 3.1 Подготовить execution matrix `Requirement -> Code Area -> Test Class`.
 - [x] 3.2 Зафиксировать acceptance набор, который доказывает:
   - [x] exact cross-consumer semantic equivalence
-  - [ ] отсутствие adapter-local semantic truth
+  - [x] отсутствие adapter-local semantic truth
   - [x] отсутствие semantic answers из discovery/search index
   - [x] fail-closed behavior при miss canonical IR/index
-  - [ ] отсутствие stale semantic ответа, замаскированного под current revision, для всех point-query surfaces beyond completion
+  - [x] отсутствие stale semantic ответа, замаскированного под current revision, для всех point-query surfaces beyond completion
   - [x] removal of bare-identifier fallback semantics
   - [x] сохранение canonical explicit module-context semantics для `ЭтотОбъект` / `Объект` в `ObjectModule` / `RecordSetModule`
   - [x] сохранение facet-aware member/property semantics без flattening `active_facet` / `available_facets`
@@ -34,9 +34,9 @@
 - [x] 3.5 Прогнать `openspec validate refactor-ir-canonical-semantic-pipeline --strict --no-interactive`.
 
 ## 4. Runtime Alignment Follow-ups
-- [ ] 4.1 Убрать или перенести в shared runtime adapter-local semantic shaping в `cli complete` (`normalize_completion_owner_hint`), чтобы owner/member contract не расходился между CLI и LSP/MCP.
-- [ ] 4.2 Добавить явные executable current-revision stale tests для point-query surfaces beyond completion: как минимум `hover`, `definition`, `type-at-position`, а также MCP `bsl_type_at_position` / `bsl_definition`.
-- [ ] 4.3 Регенерировать human/machine-readable validation bundle (`execution-matrix.md`, `validation/*.json`) после закрытия пунктов 4.1-4.2 под уточнённый split `point-query exact index` vs `diagnostics direct IR/CFG`.
+- [x] 4.1 Убрать или перенести в shared runtime adapter-local semantic shaping в `cli complete` (`normalize_completion_owner_hint`), чтобы owner/member contract не расходился между CLI и LSP/MCP.
+- [x] 4.2 Добавить явные executable current-revision stale tests для point-query surfaces beyond completion: как минимум `hover`, `definition`, `type-at-position`, а также MCP `bsl_type_at_position` / `bsl_definition`.
+- [x] 4.3 Регенерировать human/machine-readable validation bundle (`execution-matrix.md`, `validation/*.json`) после закрытия пунктов 4.1-4.2 под уточнённый split `point-query exact index` vs `diagnostics direct IR/CFG`.
 
 ## Dependencies / Parallelism
 - [x] D1 Пункты 1.1-1.8 блокируют весь design/spec cutover.

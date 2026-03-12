@@ -2,7 +2,7 @@
   "schema_version": "v1",
   "contract_version": "acceptance-report-v1",
   "change_id": "refactor-ir-canonical-semantic-pipeline",
-  "generated_at": "2026-03-12T21:05:00+03:00",
+  "generated_at": "2026-03-12T23:55:00+03:00",
   "evidence_basis": "checked_in_automated_assets",
   "human_matrix_ref": "openspec/changes/refactor-ir-canonical-semantic-pipeline/execution-matrix.md",
   "fixtures": [
@@ -123,7 +123,7 @@
     {
       "id": "module_context_and_facet_preservation",
       "verdict": "pass",
-      "checks_total": 8
+      "checks_total": 9
     }
   ],
   "checks": [
@@ -775,6 +775,19 @@
         "kind": "test",
         "path": "backend/tests/flow_sensitive_web_api_test.rs",
         "selector": "diagnostics_and_validate_use_file_path_for_module_context_bindings"
+      }
+    },
+    {
+      "bundle_id": "module_context_and_facet_preservation",
+      "fixture_id": "cli_object_module_explicit_context",
+      "operation": "completion",
+      "consumer": "cli",
+      "verdict": "pass",
+      "reason_code": "module_context_binding_preserved",
+      "source_asset": {
+        "kind": "test",
+        "path": "cli/src/main.rs",
+        "selector": "cli_inline_completion_preserves_object_module_binding_facets"
       }
     },
     {

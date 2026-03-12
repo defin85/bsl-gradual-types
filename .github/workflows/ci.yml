@@ -23,6 +23,8 @@ on:
       - "scripts/check-versioned-contracts.py"
       - "scripts/check-openspec-change-governance.py"
       - "scripts/check-protected-assets-gate.py"
+      - "scripts/test-intellisense-smoke-gate.py"
+      - "scripts/test-intellisense-readiness-assets.py"
   push:
     branches:
       - master
@@ -46,6 +48,8 @@ on:
       - "scripts/check-versioned-contracts.py"
       - "scripts/check-openspec-change-governance.py"
       - "scripts/check-protected-assets-gate.py"
+      - "scripts/test-intellisense-smoke-gate.py"
+      - "scripts/test-intellisense-readiness-assets.py"
 
 permissions: read-all
 
@@ -122,6 +126,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Validate IntelliSense smoke contract
+        run: python3 -m unittest scripts/test-intellisense-smoke-gate.py
+      - name: Validate IntelliSense readiness asset sync
+        run: python3 -m unittest scripts/test-intellisense-readiness-assets.py
       - name: Run IntelliSense smoke gate
         run: ./scripts/run-intellisense-tests.sh smoke
 

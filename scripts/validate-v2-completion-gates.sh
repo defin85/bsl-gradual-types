@@ -17,6 +17,9 @@ if ! command -v openspec >/dev/null 2>&1; then
 fi
 
 echo "[gate] Running shipped cross-adapter smoke..."
+python3 -m unittest \
+  scripts/test-intellisense-smoke-gate.py \
+  scripts/test-intellisense-readiness-assets.py
 "${ROOT_DIR}/scripts/run-intellisense-tests.sh" smoke
 
 echo "[gate] Running authoritative representative-matrix perf gate..."

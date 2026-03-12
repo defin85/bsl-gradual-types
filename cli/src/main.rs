@@ -56,10 +56,14 @@ async fn main() {
         Commands::Check { path, strict } => {
             check_command(&path, &args.format, args.verbose, strict).await
         }
-        Commands::Complete { expression, limit } => {
-            complete_command(&expression, &args.format, limit).await
+        Commands::Complete {
+            expression,
+            path,
+            limit,
+        } => complete_command(&expression, path.as_deref(), &args.format, limit).await,
+        Commands::Info { expression, path } => {
+            info_command(&expression, path.as_deref(), &args.format).await
         }
-        Commands::Info { expression } => info_command(&expression, &args.format).await,
         Commands::AnalyzeIr {
             path,
             show_ir,
@@ -181,6 +185,7 @@ async fn check_command(
 /// Команда автодополнения
 async fn complete_command(
     expression: &str,
+    file_path: Option<&str>,
     format: &CliOutputFormat,
     limit: usize,
 ) -> anyhow::Result<()> {
@@ -190,7 +195,7 @@ async fn complete_command(
         expression.cyan()
     );
 
-    let completions = collect_cli_completion_items(expression).await?;
+    let completions = collect_cli_completion_items(expression, file_path).await?;
 
     let output = CliFormatter::format_completions(&completions, format, limit);
     println!("{}", output);
@@ -199,14 +204,18 @@ async fn complete_command(
 }
 
 /// Команда получения информации о типе
-async fn info_command(expression: &str, format: &CliOutputFormat) -> anyhow::Result<()> {
+async fn info_command(
+    expression: &str,
+    file_path: Option<&str>,
+    format: &CliOutputFormat,
+) -> anyhow::Result<()> {
     println!(
         "{} {}",
         "ℹ️  Информация о типе:".blue().bold(),
         expression.cyan()
     );
 
-    let resolution = resolve_cli_expression_type(expression).await?;
+    let resolution = resolve_cli_expression_type(expression, file_path).await?;
 
     let output = CliFormatter::format_type_info(expression, &resolution, format);
     println!("{}", output);
@@ -437,7 +446,18 @@ struct InlineCliExpression {
     cursor_column: u32,
 }
 
-fn inline_cli_expression(expression: &str) -> anyhow::Result<InlineCliExpression> {
+fn inline_cli_file_path(file_path: Option<&str>, default_path: &str) -> Arc<str> {
+    file_path
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(|path| Arc::<str>::from(path.to_string()))
+        .unwrap_or_else(|| Arc::<str>::from(default_path.to_string()))
+}
+
+fn inline_cli_expression(
+    expression: &str,
+    file_path: Option<&str>,
+) -> anyhow::Result<InlineCliExpression> {
     let expression = expression.trim();
     if expression.is_empty() {
         return Err(anyhow::anyhow!("CLI expression must not be empty"));
@@ -453,15 +473,15 @@ fn inline_cli_expression(expression: &str) -> anyhow::Result<InlineCliExpression
 
     Ok(InlineCliExpression {
         file_text,
-        file_path: Arc::<str>::from("/virtual/cli-inline-expression.bsl"),
+        file_path: inline_cli_file_path(file_path, "/virtual/cli-inline-expression.bsl"),
         line: 1,
         cursor_column,
     })
 }
 
-fn inline_cli_resolution_probe_with_path(
+fn inline_cli_resolution_probe(
     expression: &str,
-    file_path: Arc<str>,
+    file_path: Option<&str>,
 ) -> anyhow::Result<(Arc<str>, Arc<str>, u32)> {
     let expression = expression.trim();
     if expression.is_empty() {
@@ -476,32 +496,28 @@ fn inline_cli_resolution_probe_with_path(
         .ok_or_else(|| anyhow::anyhow!("resolution probe marker missing"))?
         .min(u32::MAX as usize) as u32;
 
-    Ok((file_text, file_path, probe_offset))
+    Ok((
+        file_text,
+        inline_cli_file_path(file_path, "/virtual/cli-inline-resolution.bsl"),
+        probe_offset,
+    ))
 }
 
-fn inline_cli_resolution_probe(expression: &str) -> anyhow::Result<(Arc<str>, Arc<str>, u32)> {
-    inline_cli_resolution_probe_with_path(
-        expression,
-        Arc::<str>::from("/virtual/cli-inline-resolution.bsl"),
-    )
-}
-
-fn inline_cli_completion_expression(expression: &str) -> anyhow::Result<InlineCliExpression> {
+fn inline_cli_completion_expression(
+    expression: &str,
+    file_path: Option<&str>,
+) -> anyhow::Result<InlineCliExpression> {
     let expression = expression.trim();
     if !expression_targets_member_access(expression) {
-        return inline_cli_expression(expression);
+        return inline_cli_expression(expression, file_path);
     }
 
+    let receiver = member_access_receiver_expression(expression)
+        .ok_or_else(|| anyhow::anyhow!("member access expression receiver must not be empty"))?;
     let dot_pos = expression
         .rfind('.')
         .ok_or_else(|| anyhow::anyhow!("member access expression is missing dot"))?;
-    let receiver = expression[..dot_pos].trim_end();
     let suffix = expression[dot_pos + 1..].trim_start();
-    if receiver.is_empty() {
-        return Err(anyhow::anyhow!(
-            "member access expression receiver must not be empty"
-        ));
-    }
 
     let completion_line = format!("    ForCompletion.{suffix}");
     let cursor_column =
@@ -511,7 +527,7 @@ fn inline_cli_completion_expression(expression: &str) -> anyhow::Result<InlineCl
     ));
     Ok(InlineCliExpression {
         file_text,
-        file_path: Arc::<str>::from("/virtual/cli-inline-completion.bsl"),
+        file_path: inline_cli_file_path(file_path, "/virtual/cli-inline-completion.bsl"),
         line: 3,
         cursor_column,
     })
@@ -527,6 +543,13 @@ fn expression_targets_member_access(expression: &str) -> bool {
         || after_dot
             .chars()
             .all(|ch| ch == '_' || ch.is_alphanumeric())
+}
+
+fn member_access_receiver_expression(expression: &str) -> Option<&str> {
+    let trimmed = expression.trim_end();
+    let dot_pos = trimmed.rfind('.')?;
+    let receiver = trimmed[..dot_pos].trim_end();
+    (!receiver.is_empty()).then_some(receiver)
 }
 
 fn cli_completion_owner_hint(
@@ -549,8 +572,22 @@ fn cli_completion_owner_hint(
         .filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
 }
 
-async fn collect_cli_completion_items(expression: &str) -> anyhow::Result<Vec<CompletionItem>> {
-    let inline = inline_cli_completion_expression(expression)?;
+async fn cli_exact_member_access_owner_hint(
+    expression: &str,
+    file_path: Option<&str>,
+) -> Option<TypeResolution> {
+    let receiver = member_access_receiver_expression(expression)?;
+    resolve_cli_expression_type(receiver, file_path)
+        .await
+        .ok()
+        .filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
+}
+
+async fn collect_cli_completion_items(
+    expression: &str,
+    file_path: Option<&str>,
+) -> anyhow::Result<Vec<CompletionItem>> {
+    let inline = inline_cli_completion_expression(expression, file_path)?;
     let prepared = prepare_cli_text_operation(
         inline.file_text.clone(),
         inline.file_path.clone(),
@@ -561,7 +598,9 @@ async fn collect_cli_completion_items(expression: &str) -> anyhow::Result<Vec<Co
     let ir_program = prepared.ir_program()?;
     let trigger_char_hint = expression.trim_end().chars().last().filter(|ch| *ch == '.');
 
-    let owner_hint = cli_completion_owner_hint(expression, &inline, &prepared);
+    let owner_hint = cli_exact_member_access_owner_hint(expression, file_path)
+        .await
+        .or_else(|| cli_completion_owner_hint(expression, &inline, &prepared));
     let completions = get_completion_with_semantic_program_snapshot_with_trigger_hint(
         inline.file_text.as_ref(),
         inline.line,
@@ -586,28 +625,11 @@ async fn collect_cli_completion_items(expression: &str) -> anyhow::Result<Vec<Co
         .collect())
 }
 
-async fn resolve_cli_expression_type(expression: &str) -> anyhow::Result<TypeResolution> {
-    let (file_text, file_path, probe_offset) = inline_cli_resolution_probe(expression)?;
-    let prepared = prepare_cli_text_operation(
-        file_text,
-        file_path,
-        SemanticOperation::TypeAtPosition,
-        DetailLevel::Full,
-    )
-    .await?;
-
-    prepared
-        .serve_only_type_at_byte_offset(probe_offset)?
-        .ok_or_else(|| anyhow::anyhow!("Тип '{}' не найден", expression.trim()))
-}
-
-#[cfg(test)]
-async fn resolve_cli_expression_type_for_path(
+async fn resolve_cli_expression_type(
     expression: &str,
-    file_path: &str,
+    file_path: Option<&str>,
 ) -> anyhow::Result<TypeResolution> {
-    let (file_text, file_path, probe_offset) =
-        inline_cli_resolution_probe_with_path(expression, Arc::<str>::from(file_path.to_string()))?;
+    let (file_text, file_path, probe_offset) = inline_cli_resolution_probe(expression, file_path)?;
     let prepared = prepare_cli_text_operation(
         file_text,
         file_path,
@@ -661,7 +683,7 @@ mod tests {
 
     #[tokio::test]
     async fn cli_inline_completion_uses_shared_runtime_snapshot() {
-        let completions = collect_cli_completion_items("Новый Массив.")
+        let completions = collect_cli_completion_items("Новый Массив.", None)
             .await
             .expect("cli completions");
         let labels: Vec<_> = completions.into_iter().map(|item| item.label).collect();
@@ -708,7 +730,8 @@ mod tests {
 
     #[tokio::test]
     async fn cli_inline_completion_does_not_backfill_from_polluted_search_index() {
-        let inline = inline_cli_completion_expression("Несуществующий.").expect("inline expr");
+        let inline =
+            inline_cli_completion_expression("Несуществующий.", None).expect("inline expr");
         let mut prepared = prepare_cli_text_operation(
             inline.file_text.clone(),
             inline.file_path.clone(),
@@ -772,7 +795,7 @@ mod tests {
 
     #[tokio::test]
     async fn cli_inline_type_info_uses_shared_runtime_snapshot() {
-        let resolution = resolve_cli_expression_type("Новый Массив")
+        let resolution = resolve_cli_expression_type("Новый Массив", None)
             .await
             .expect("cli type info");
         assert!(
@@ -783,11 +806,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cli_inline_completion_preserves_object_module_binding_facets() {
+        let without_path = collect_cli_completion_items("Объект.", None)
+            .await
+            .expect("cli completion without module path");
+        let without_path_labels: Vec<_> = without_path.into_iter().map(|item| item.label).collect();
+        assert!(
+            without_path_labels.is_empty(),
+            "synthetic inline completion must stay unresolved for object-module-only binding without --path, labels={without_path_labels:?}"
+        );
+
+        let completions = collect_cli_completion_items(
+            "Объект.",
+            Some("Documents/Док1/Ext/ObjectModule.bsl"),
+        )
+        .await
+        .expect("cli object module completions");
+        let labels: Vec<_> = completions.into_iter().map(|item| item.label).collect();
+
+        assert!(
+            labels.iter().any(|label| label == "Записать"),
+            "CLI completion must honor public --path module context for object-module bindings, labels={labels:?}"
+        );
+        assert!(
+            labels.iter().any(|label| label == "ЭтоНовый"),
+            "CLI completion must expose object-module members on the public --path path, labels={labels:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn cli_type_info_preserves_object_module_binding_facets() {
-        let resolution =
-            resolve_cli_expression_type_for_path("Объект", "Documents/Док1/Ext/ObjectModule.bsl")
-                .await
-                .expect("cli object module type info");
+        let resolution = resolve_cli_expression_type(
+            "Объект",
+            Some("Documents/Док1/Ext/ObjectModule.bsl"),
+        )
+        .await
+        .expect("cli object module type info");
 
         assert!(
             user_facing_resolution_type_name(&resolution).contains("Док1"),

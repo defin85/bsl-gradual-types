@@ -185,7 +185,11 @@ Representative matrix:
 
 **Назначение:** воспроизводимый fail-fast прогон checked-in readiness gates
 для `refactor-ir-canonical-semantic-pipeline`:
-- shipped cross-adapter smoke: LSP/runtime/web/MCP/CLI/module-context slices;
+- contract-sync guards (`scripts/test-intellisense-smoke-gate.py`,
+  `scripts/test-intellisense-readiness-assets.py`) проверяют, что
+  `quality-gates.json`, CI и default smoke path описывают один и тот же shipped
+  selector set;
+- shipped cross-adapter smoke: LSP/runtime/web/MCP/CLI/module-context slices, включая current-revision stale proofs beyond completion и regression на removal of bare-identifier fallback;
 - authoritative representative-matrix perf gate через `./scripts/run-intellisense-perf.sh`
   в blocking mode для `small` / `large` / `churn`;
 - fail-closed budget enforcement для mandatory операций `completion`, `hover`,
@@ -350,7 +354,7 @@ uv run --with tiktoken python3 scripts/check-rust-file-llm-budget.py --report ar
 ```
 
 **Состав:**
-- `smoke`: completion/golden baseline + cross-adapter default-path selectors для LSP/runtime/web/MCP/CLI, включая anti-rescue invariants (no polluted-search backfill, no MCP parse-result semantic bypass) и module-context/facet slices.
+- `smoke`: completion/golden baseline + cross-adapter default-path selectors для LSP/runtime/web/MCP/CLI, включая anti-rescue invariants (no polluted-search backfill, no MCP parse-result semantic bypass), current-revision stale proofs для `hover` / `definition` / `type_at_position`, exact-index representative slices для `hover` / `signatureHelp` / `definition` и path-aware module-context/facet slices для Web и CLI.
 - `full`: smoke + интеграционные тесты, которые загружают fixture конфигурации (например, `examples/conf/conf_test`).
 
 ---

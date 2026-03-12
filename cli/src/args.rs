@@ -55,6 +55,10 @@ pub enum Commands {
         /// Expression to complete
         expression: String,
 
+        /// Real module path for module-context semantics in inline queries
+        #[arg(long)]
+        path: Option<String>,
+
         /// Maximum number of completions
         #[arg(short, long, default_value = "10")]
         limit: usize,
@@ -64,6 +68,10 @@ pub enum Commands {
     Info {
         /// Expression to get info for
         expression: String,
+
+        /// Real module path for module-context semantics in inline queries
+        #[arg(long)]
+        path: Option<String>,
     },
 
     /// Milestone 2.8: Analyze file using IR-based flow (Parser → IR → Type Analysis)
@@ -107,4 +115,41 @@ pub enum CliOutputFormat {
     Table,
     Json,
     Plain,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn complete_accepts_optional_path_for_module_context_semantics() {
+        let parsed = CliArgs::try_parse_from([
+            "bsl-cli",
+            "complete",
+            "Объект.",
+            "--path",
+            "Documents/Док1/Ext/ObjectModule.bsl",
+        ]);
+
+        assert!(
+            parsed.is_ok(),
+            "public CLI completion must accept a real module path for canonical module-context semantics: {parsed:?}"
+        );
+    }
+
+    #[test]
+    fn info_accepts_optional_path_for_module_context_semantics() {
+        let parsed = CliArgs::try_parse_from([
+            "bsl-cli",
+            "info",
+            "Объект",
+            "--path",
+            "Documents/Док1/Ext/ObjectModule.bsl",
+        ]);
+
+        assert!(
+            parsed.is_ok(),
+            "public CLI type info must accept a real module path for canonical module-context semantics: {parsed:?}"
+        );
+    }
 }

@@ -9,6 +9,7 @@ use bsl_shared::domain::types::{
 };
 use bsl_shared::TypeRepository;
 use bsl_syntax::ParseOptions;
+use std::path::Path;
 
 fn parse(code: &str) -> Program {
     let parsed = bsl_syntax::parse(code, &ParseOptions::default()).expect("parse ok");
@@ -375,6 +376,73 @@ fn builds_type_index_from_semantic_program_for_simple_assignment_and_method_call
         ir_index.type_at_byte_offset(method_call_offset),
         legacy_index.type_at_byte_offset(method_call_offset),
         "IR-backed builder must preserve method-call return type inference contract"
+    );
+    assert_eq!(
+        ir_index.assignment_value_type_at_byte_offset(array_ident_offset),
+        legacy_index.assignment_value_type_at_byte_offset(array_ident_offset),
+        "IR-backed builder must preserve assignment value hint projection"
+    );
+    assert_eq!(
+        ir_index.call_arg_types_at_byte_offset(method_call_offset),
+        legacy_index.call_arg_types_at_byte_offset(method_call_offset),
+        "IR-backed builder must preserve call arg hint projection"
+    );
+}
+
+#[test]
+fn semantic_program_index_materializes_configuration_symbol_exact_span_and_definition_anchor() {
+    let repository_impl = Arc::new(InMemoryTypeRepository::new());
+    repository_impl
+        .load_types(vec![RawTypeData {
+            name: "Документы.Док1".to_string(),
+            source: RawDataSource::Configuration,
+            facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+            kind: Some(MetadataKind::Document),
+            metadata_path: Some("Documents/Док1.xml".into()),
+            ..Default::default()
+        }])
+        .expect("load config document type");
+    let repository =
+        repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+    let resolver = Arc::new(TypeResolver::new(repository.clone()));
+    let deps = Arc::new(SemanticDeps {
+        repository,
+        signature_index: SignatureIndex::new(),
+        resolver: Some(resolver),
+        platform_signatures_loaded: true,
+    });
+
+    let source = concat!(
+        "Процедура Тест()\n",
+        "    Результат = Документы.Док1;\n",
+        "КонецПроцедуры\n",
+    );
+    let parsed = bsl_syntax::parse(source, &ParseOptions::default()).expect("parse ok");
+    assert!(
+        parsed.syntax_errors.is_empty(),
+        "complete configuration symbol fixture must parse without syntax recovery, errors={:?}",
+        parsed.syntax_errors
+    );
+    let Statement::ProcedureDecl { body, .. } = &parsed.program.statements[0] else {
+        panic!("expected procedure declaration");
+    };
+    assert_eq!(body.len(), 1, "expected assignment inside procedure body");
+    let file_path = "inline.bsl";
+    let ir_program = ir_program(source, file_path, deps.clone());
+    let ir_index = build_type_index_from_semantic_program_with_path(&ir_program, file_path, deps);
+
+    let member_offset = source.rfind("Док1").expect("document member") as u32;
+    let resolved = ir_index
+        .type_at_byte_offset(member_offset)
+        .expect("type at configuration symbol member");
+    assert_eq!(resolved.type_name(), "ДокументМенеджер.Док1");
+
+    let definition = ir_index
+        .definition_location_at_byte_offset(member_offset)
+        .expect("definition anchor at configuration symbol member");
+    assert_eq!(
+        definition.primary_path().expect("metadata xml path"),
+        Path::new("Documents/Док1.xml")
     );
 }
 

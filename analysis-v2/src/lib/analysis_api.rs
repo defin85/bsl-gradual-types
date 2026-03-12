@@ -366,6 +366,26 @@ impl AnalysisV2 {
             .and_then(|index| index.definition_location_for_span(span)))
     }
 
+    pub fn assignment_value_type_for_span_serve_only(
+        &self,
+        file_id: FileId,
+        span: Span,
+    ) -> Cancellable<Option<TypeResolution>> {
+        Ok(self
+            .current_type_index_exact(file_id)?
+            .and_then(|index| index.assignment_value_type_for_span(span)))
+    }
+
+    pub fn assignment_value_type_at_byte_offset_serve_only(
+        &self,
+        file_id: FileId,
+        byte_offset: u32,
+    ) -> Cancellable<Option<TypeResolution>> {
+        Ok(self
+            .current_type_index_exact(file_id)?
+            .and_then(|index| index.assignment_value_type_at_byte_offset(byte_offset)))
+    }
+
     pub fn call_receiver_type_for_span_serve_only(
         &self,
         file_id: FileId,
@@ -384,6 +404,26 @@ impl AnalysisV2 {
         Ok(self
             .current_type_index_exact(file_id)?
             .and_then(|index| index.call_receiver_type_at_byte_offset(byte_offset)))
+    }
+
+    pub fn call_arg_types_for_span_serve_only(
+        &self,
+        file_id: FileId,
+        span: Span,
+    ) -> Cancellable<Option<Vec<TypeResolution>>> {
+        Ok(self
+            .current_type_index_exact(file_id)?
+            .and_then(|index| index.call_arg_types_for_span(span)))
+    }
+
+    pub fn call_arg_types_at_byte_offset_serve_only(
+        &self,
+        file_id: FileId,
+        byte_offset: u32,
+    ) -> Cancellable<Option<Vec<TypeResolution>>> {
+        Ok(self
+            .current_type_index_exact(file_id)?
+            .and_then(|index| index.call_arg_types_at_byte_offset(byte_offset)))
     }
 
     pub fn member_access_object_type_for_span_serve_only(

@@ -693,7 +693,7 @@ fn goto_definition_resolves_configuration_symbol_metadata_xml_from_exact_semanti
         root.join("Documents").join("Док1.xml").as_path()
     );
 
-    let source = "Процедура Тест()\n    Знач = Документы.Док1;\nКонецПроцедуры\n";
+    let source = "Процедура Тест()\n    Результат = Документы.Док1;\nКонецПроцедуры\n";
     let (analysis, file_id, ir) = build_analysis_ir_for_source(
         source,
         "inline.bsl",

@@ -36,7 +36,9 @@ use crate::SemanticDeps;
 pub(crate) struct TypeIndex {
     entries: Vec<SemanticTypeEntry>,
     definition_locations_by_span: HashMap<Span, TypeDefinitionLocation>,
+    assignment_value_type_by_span: HashMap<Span, TypeResolution>,
     call_receiver_type_by_span: HashMap<Span, TypeResolution>,
+    call_arg_types_by_span: HashMap<Span, Vec<TypeResolution>>,
     member_access_object_type_by_span: HashMap<Span, TypeResolution>,
     call_method_targets_by_span: HashMap<Span, SemanticMethodTarget>,
     member_method_targets_by_span: HashMap<Span, SemanticMethodTarget>,
@@ -71,7 +73,9 @@ impl TypeIndex {
         Self {
             entries: facts.type_entries.clone(),
             definition_locations_by_span: facts.definition_locations_by_span.clone(),
+            assignment_value_type_by_span: facts.assignment_value_type_by_span.clone(),
             call_receiver_type_by_span: facts.call_receiver_type_by_span.clone(),
+            call_arg_types_by_span: facts.call_arg_types_by_span.clone(),
             member_access_object_type_by_span: facts.member_access_object_type_by_span.clone(),
             call_method_targets_by_span: facts.call_method_targets_by_span.clone(),
             member_method_targets_by_span: facts.member_method_targets_by_span.clone(),
@@ -136,12 +140,37 @@ impl TypeIndex {
             .or_else(|| self.definition_location_at_byte_offset(span.start))
     }
 
+    pub(crate) fn assignment_value_type_for_span(&self, span: Span) -> Option<TypeResolution> {
+        self.assignment_value_type_by_span.get(&span).cloned()
+    }
+
+    pub(crate) fn assignment_value_type_at_byte_offset(
+        &self,
+        byte_offset: u32,
+    ) -> Option<TypeResolution> {
+        self.closest_fact_by_offset(&self.assignment_value_type_by_span, byte_offset)
+    }
+
     pub(crate) fn call_receiver_type_for_span(&self, span: Span) -> Option<TypeResolution> {
         self.call_receiver_type_by_span.get(&span).cloned()
     }
 
-    pub(crate) fn call_receiver_type_at_byte_offset(&self, byte_offset: u32) -> Option<TypeResolution> {
+    pub(crate) fn call_receiver_type_at_byte_offset(
+        &self,
+        byte_offset: u32,
+    ) -> Option<TypeResolution> {
         self.closest_fact_by_offset(&self.call_receiver_type_by_span, byte_offset)
+    }
+
+    pub(crate) fn call_arg_types_for_span(&self, span: Span) -> Option<Vec<TypeResolution>> {
+        self.call_arg_types_by_span.get(&span).cloned()
+    }
+
+    pub(crate) fn call_arg_types_at_byte_offset(
+        &self,
+        byte_offset: u32,
+    ) -> Option<Vec<TypeResolution>> {
+        self.closest_fact_by_offset(&self.call_arg_types_by_span, byte_offset)
     }
 
     pub(crate) fn member_access_object_type_for_span(&self, span: Span) -> Option<TypeResolution> {

@@ -531,6 +531,43 @@ async fn lsp_signature_help_keeps_method_semantic_facts_with_empty_request_time_
 }
 
 #[tokio::test]
+async fn lsp_signature_help_uses_exact_semantic_index_when_runtime_ir_facts_are_missing() {
+    let env = build_env();
+    let content = r#"Процедура Тест()
+    МойМассив = Новый Массив
+    МойМассив.Добавить(1, )
+КонецПроцедуры"#;
+    let uri = Url::parse("file:///test_signature_help_v2_exact_index.bsl").expect("test uri");
+    let (analysis, file_id, file_content, ir_program) =
+        build_v2_analysis_ir(content, &uri, env.deps.clone());
+    let stripped_deps = build_deps(Arc::new(InMemoryTypeRepository::new()));
+    let method_pos = position_at_marker(content, "МойМассив.Добавить(1, ");
+
+    let mut poisoned_program = ir_program.as_ref().clone();
+    poisoned_program.semantic_facts = Default::default();
+    let poisoned_ir = Arc::new(poisoned_program);
+
+    let method = signature_help_handler::handle_signature_help_v2(
+        &analysis,
+        file_id,
+        file_content,
+        method_pos,
+        poisoned_ir,
+        stripped_deps,
+        None,
+    )
+    .expect("method signature help from exact semantic index");
+
+    let method_label = method
+        .signatures
+        .first()
+        .map(|sig| sig.label.as_str())
+        .unwrap_or("");
+    assert!(method_label.contains("Добавить("), "label={method_label}");
+    assert_eq!(method.active_parameter, Some(1));
+}
+
+#[tokio::test]
 async fn lsp_signature_help_uses_semantic_facts_for_local_function_with_empty_request_time_repository(
 ) {
     let repository = Arc::new(InMemoryTypeRepository::new());
@@ -588,6 +625,53 @@ async fn lsp_signature_help_uses_semantic_facts_for_local_function_with_empty_re
         None,
     )
     .expect("local signature help from semantic facts");
+
+    let local_label = local
+        .signatures
+        .first()
+        .map(|sig| sig.label.as_str())
+        .unwrap_or("");
+    assert!(local_label.contains("Локальная("), "label={local_label}");
+    assert!(local_label.contains("Аргумент"), "label={local_label}");
+    assert!(local_label.contains("Доп"), "label={local_label}");
+    assert_eq!(local.active_parameter, Some(1));
+}
+
+#[tokio::test]
+async fn lsp_signature_help_uses_exact_semantic_index_for_local_function_when_runtime_ir_facts_are_missing(
+) {
+    let repository = Arc::new(InMemoryTypeRepository::new());
+    let deps = build_deps(repository);
+    let content = concat!(
+        "Функция Локальная(Аргумент, Доп = Неопределено)\n",
+        "    Возврат Аргумент;\n",
+        "КонецФункции\n",
+        "\n",
+        "Процедура Тест()\n",
+        "    Локальная(1, );\n",
+        "КонецПроцедуры\n"
+    );
+    let uri =
+        Url::parse("file:///test_signature_help_local_exact_index.bsl").expect("test uri");
+    let (analysis, file_id, file_content, ir_program) =
+        build_v2_analysis_ir(content, &uri, deps.clone());
+    let stripped_deps = build_deps(Arc::new(InMemoryTypeRepository::new()));
+    let local_pos = position_at_marker(content, "Локальная(1, ");
+
+    let mut poisoned_program = ir_program.as_ref().clone();
+    poisoned_program.semantic_facts = Default::default();
+    let poisoned_ir = Arc::new(poisoned_program);
+
+    let local = signature_help_handler::handle_signature_help_v2(
+        &analysis,
+        file_id,
+        file_content,
+        local_pos,
+        poisoned_ir,
+        stripped_deps,
+        None,
+    )
+    .expect("local signature help from exact semantic index");
 
     let local_label = local
         .signatures
@@ -681,6 +765,79 @@ async fn lsp_signature_help_uses_semantic_facts_for_global_function_with_empty_r
         None,
     )
     .expect("global signature help from semantic facts");
+
+    let global_label = global
+        .signatures
+        .first()
+        .map(|sig| sig.label.as_str())
+        .unwrap_or("");
+    assert!(
+        global_label.contains("ГлобальнаяФункция("),
+        "label={global_label}"
+    );
+    assert!(global_label.contains("Первый"), "label={global_label}");
+    assert!(global_label.contains("Второй"), "label={global_label}");
+    assert_eq!(global.active_parameter, Some(1));
+}
+
+#[tokio::test]
+async fn lsp_signature_help_uses_exact_semantic_index_for_global_function_when_runtime_ir_facts_are_missing(
+) {
+    let repository = build_repository_with_array();
+    let global_signature = MethodSignature::new(
+        "ГлобальнаяФункция".to_string(),
+        None,
+        vec![
+            ParameterInfo {
+                name: "Первый".to_string(),
+                type_name: Some("Число".to_string()),
+                is_optional: false,
+                default_value: None,
+                description: None,
+            },
+            ParameterInfo {
+                name: "Второй".to_string(),
+                type_name: Some("Число".to_string()),
+                is_optional: true,
+                default_value: None,
+                description: None,
+            },
+        ],
+        Some("Булево".to_string()),
+        None,
+        None,
+        SignatureSource::Platform,
+        None,
+        Default::default(),
+    );
+    repository.add_global_function_signature("ГлобальнаяФункция", global_signature);
+    let deps = build_deps(repository);
+    let content = concat!(
+        "Процедура Тест()\n",
+        "    ГлобальнаяФункция(1, );\n",
+        "КонецПроцедуры\n"
+    );
+    let uri =
+        Url::parse("file:///test_signature_help_global_exact_index.bsl").expect("test uri");
+    let (analysis, file_id, file_content, ir_program) =
+        build_v2_analysis_ir(content, &uri, deps.clone());
+    let stripped_deps = build_deps(Arc::new(InMemoryTypeRepository::new()));
+    let global_pos = position_at_marker(content, "ГлобальнаяФункция(1, ");
+
+    let mut poisoned_program = ir_program.as_ref().clone();
+    poisoned_program.semantic_facts = Default::default();
+    let poisoned_ir = Arc::new(poisoned_program);
+
+    let global = signature_help_handler::handle_signature_help_v2(
+        &analysis,
+        file_id,
+        file_content,
+        global_pos,
+        poisoned_ir,
+        stripped_deps,
+        None,
+    )
+    .expect("global signature help from exact semantic index");
 
     let global_label = global
         .signatures

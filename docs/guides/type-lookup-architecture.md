@@ -17,8 +17,8 @@
 ```text
 source text
   -> parse_result (syntax-only extraction, incremental parse state)
-  -> SemanticProgram + semantic_facts
-  -> exact current-revision semantic artifact
+  -> SemanticProgram (canonical IR + semantic_facts)
+  -> derived exact semantic index
   -> shared runtime queries
   -> LSP / Web / MCP / CLI transport
 ```
@@ -28,7 +28,7 @@ source text
 1. `SemanticProgram` и `semantic_facts`
    - canonical IR, где materialize-ятся типы выражений, receiver/member facts,
      binding facts и definition anchors;
-2. exact semantic artifact (`type_at_byte_offset_serve_only`, owner hints, derived lookups)
+2. derived exact semantic index (`type_at_byte_offset_serve_only`, owner hints, derived lookups)
    - revision-bound projection того же IR snapshot;
    - доступен только для exact current revision;
    - на miss/stale работает fail-closed.
@@ -129,7 +129,7 @@ Completion использует syntax-aware extraction только для по
 
 ### 3. Hover / definition / signatureHelp
 
-Interactive semantic consumers на analyzed path читают `semantic_facts` напрямую:
+Interactive semantic consumers на analyzed path читают derived exact semantic index того же canonical IR snapshot и используют IR только для node/formatting context:
 
 - [bsl-runtime/src/application/type_system/services/hover_service.rs](../../bsl-runtime/src/application/type_system/services/hover_service.rs)
 - [bsl-runtime/src/application/type_system/services/definition_service.rs](../../bsl-runtime/src/application/type_system/services/definition_service.rs)
@@ -137,9 +137,9 @@ Interactive semantic consumers на analyzed path читают `semantic_facts` 
 
 Это означает:
 
-- `hover` читает type/member truth из canonical facts;
-- `signatureHelp` использует serialized callable/receiver facts и остаётся fail-closed, если canonical facts для позиции отсутствуют;
-- `definition` получает `TypeDefinitionLocation` из canonical facts, включая configuration XML path.
+- `hover` читает type/member truth из exact semantic index и не зависит от runtime `semantic_facts`;
+- `signatureHelp` использует callable/receiver targets из exact semantic index и остаётся fail-closed, если exact artifact для позиции отсутствует;
+- `definition` получает `TypeDefinitionLocation` и receiver/method targets из exact semantic index, включая configuration XML path.
 
 ## Роль metadata/repository слоя
 

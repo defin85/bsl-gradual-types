@@ -2,10 +2,22 @@
   "isIncomplete": false,
   "items": [
     {
+      "insertText": "Продолжить",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Продолжить"
+    },
+    {
       "insertText": "Процедура",
       "insertTextFormat": null,
       "kind": "KEYWORD",
       "label": "Процедура"
+    },
+    {
+      "insertText": "КонецПроцедуры",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "КонецПроцедуры"
     }
   ]
 }

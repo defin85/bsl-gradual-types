@@ -315,6 +315,157 @@ impl AnalysisV2 {
             .is_some_and(|artifact| !artifact.parse_snapshot_meta.serve_only_blocked))
     }
 
+    fn current_type_index_exact(
+        &self,
+        file_id: FileId,
+    ) -> Cancellable<Option<Arc<type_inference_v2::TypeIndex>>> {
+        let Some(&file) = self.files.get(&file_id) else {
+            return Ok(None);
+        };
+
+        let file_version = file.version(&self.db);
+        let key = self.make_type_index_artifact_key(file_id, file_version);
+        let cache = self
+            .derived_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        Ok(cache
+            .get_type_index_exact(&key)
+            .filter(|artifact| !artifact.parse_snapshot_meta.serve_only_blocked)
+            .map(|artifact| artifact.type_index.clone()))
+    }
+
+    pub fn type_for_span_serve_only(
+        &self,
+        file_id: FileId,
+        span: Span,
+    ) -> Cancellable<Option<TypeResolution>> {
+        Ok(self
+            .current_type_index_exact(file_id)?
+            .and_then(|index| index.type_resolution_for_span(span)))
+    }
+
+    pub fn definition_location_at_byte_offset_serve_only(
+        &self,
+        file_id: FileId,
+        byte_offset: u32,
+    ) -> Cancellable<Option<TypeDefinitionLocation>> {
+        Ok(self
+            .current_type_index_exact(file_id)?
+            .and_then(|index| index.definition_location_at_byte_offset(byte_offset)))
+    }
+
+    pub fn definition_location_for_span_serve_only(
+        &self,
+        file_id: FileId,
+        span: Span,
+    ) -> Cancellable<Option<TypeDefinitionLocation>> {
+        Ok(self
+            .current_type_index_exact(file_id)?
+            .and_then(|index| index.definition_location_for_span(span)))
+    }
+
+    pub fn call_receiver_type_for_span_serve_only(
+        &self,
+        file_id: FileId,
+        span: Span,
+    ) -> Cancellable<Option<TypeResolution>> {
+        Ok(self
+            .current_type_index_exact(file_id)?
+            .and_then(|index| index.call_receiver_type_for_span(span)))
+    }
+
+    pub fn call_receiver_type_at_byte_offset_serve_only(
+        &self,
+        file_id: FileId,
+        byte_offset: u32,
+    ) -> Cancellable<Option<TypeResolution>> {
+        Ok(self
+            .current_type_index_exact(file_id)?
+            .and_then(|index| index.call_receiver_type_at_byte_offset(byte_offset)))
+    }
+
+    pub fn member_access_object_type_for_span_serve_only(
+        &self,
+        file_id: FileId,
+        span: Span,
+    ) -> Cancellable<Option<TypeResolution>> {
+        Ok(self
+            .current_type_index_exact(file_id)?
+            .and_then(|index| index.member_access_object_type_for_span(span)))
+    }
+
+    pub fn member_access_object_type_at_byte_offset_serve_only(
+        &self,
+        file_id: FileId,
+        byte_offset: u32,
+    ) -> Cancellable<Option<TypeResolution>> {
+        Ok(self
+            .current_type_index_exact(file_id)?
+            .and_then(|index| index.member_access_object_type_at_byte_offset(byte_offset)))
+    }
+
+    pub fn call_method_target_for_span_serve_only(
+        &self,
+        file_id: FileId,
+        span: Span,
+    ) -> Cancellable<Option<SemanticMethodTarget>> {
+        Ok(self
+            .current_type_index_exact(file_id)?
+            .and_then(|index| index.call_method_target_for_span(span)))
+    }
+
+    pub fn call_method_target_at_byte_offset_serve_only(
+        &self,
+        file_id: FileId,
+        byte_offset: u32,
+    ) -> Cancellable<Option<SemanticMethodTarget>> {
+        Ok(self
+            .current_type_index_exact(file_id)?
+            .and_then(|index| index.call_method_target_at_byte_offset(byte_offset)))
+    }
+
+    pub fn member_method_target_for_span_serve_only(
+        &self,
+        file_id: FileId,
+        span: Span,
+    ) -> Cancellable<Option<SemanticMethodTarget>> {
+        Ok(self
+            .current_type_index_exact(file_id)?
+            .and_then(|index| index.member_method_target_for_span(span)))
+    }
+
+    pub fn member_method_target_at_byte_offset_serve_only(
+        &self,
+        file_id: FileId,
+        byte_offset: u32,
+    ) -> Cancellable<Option<SemanticMethodTarget>> {
+        Ok(self
+            .current_type_index_exact(file_id)?
+            .and_then(|index| index.member_method_target_at_byte_offset(byte_offset)))
+    }
+
+    pub fn constructor_target_for_span_serve_only(
+        &self,
+        file_id: FileId,
+        span: Span,
+    ) -> Cancellable<Option<SemanticConstructorTarget>> {
+        Ok(self
+            .current_type_index_exact(file_id)?
+            .and_then(|index| index.constructor_target_for_span(span)))
+    }
+
+    pub fn constructor_target_at_byte_offset_serve_only(
+        &self,
+        file_id: FileId,
+        byte_offset: u32,
+    ) -> Cancellable<Option<SemanticConstructorTarget>> {
+        Ok(self
+            .current_type_index_exact(file_id)?
+            .and_then(|index| index.constructor_target_at_byte_offset(byte_offset)))
+    }
+
     pub fn file_text(&self, file_id: FileId) -> Cancellable<Option<Arc<str>>> {
         let Some(&file) = self.files.get(&file_id) else {
             return Ok(None);

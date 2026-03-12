@@ -2,13 +2,19 @@
 
 mod intellisense_testkit;
 
-use bsl_backend::application::get_completion;
+use bsl_analysis_v2::{
+    AnalysisHostV2, Change as ChangeV2, DepsSnapshotId, FileId as V2FileId, SettingsId,
+};
+use bsl_backend::application::get_completion_with_semantic_program_snapshot_with_trigger_hint;
 use bsl_backend::system::{
     IndexItem, IndexItemKind, IndexKind, IntellisenseIndexStore, SymbolKind, SymbolScope, TypeKind,
 };
+use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
 use bsl_shared::domain::repository::InMemoryTypeRepository;
+use bsl_shared::domain::signature_index::SignatureIndex;
 use bsl_shared::domain::types::{RawDataSource, RawMethodData, RawTypeData};
+use bsl_shared::formatting::DetailLevel;
 use bsl_shared::TypeRepository;
 use std::sync::Arc;
 
@@ -60,7 +66,7 @@ fn function_item(name: &str, scope: Option<SymbolScope>) -> IndexItem {
     item
 }
 
-fn build_lookup() -> TypeMetadataLookup {
+fn build_lookup_and_deps() -> (TypeMetadataLookup, Arc<bsl_analysis_v2::SemanticDeps>) {
     let repository = Arc::new(InMemoryTypeRepository::new());
     repository
         .load_types(vec![
@@ -81,7 +87,81 @@ fn build_lookup() -> TypeMetadataLookup {
             },
         ])
         .expect("load types");
-    TypeMetadataLookup::new(repository)
+    let lookup = TypeMetadataLookup::new(repository.clone());
+    let deps_repo = repository as Arc<dyn TypeRepository>;
+    let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+        repository: deps_repo.clone(),
+        signature_index: SignatureIndex::new(),
+        resolver: Some(Arc::new(TypeResolver::new(deps_repo))),
+        platform_signatures_loaded: false,
+    });
+    (lookup, deps)
+}
+
+async fn completion_with_shared_snapshot(
+    content: &str,
+    line: u32,
+    column: u32,
+    file_uri: Option<&str>,
+    index: &IntellisenseIndexStore,
+    lookup: &TypeMetadataLookup,
+    deps: Arc<bsl_analysis_v2::SemanticDeps>,
+) -> (Vec<bsl_shared::domain::CompletionItem>, bool) {
+    let mut host = AnalysisHostV2::default();
+    let file_id = V2FileId(1);
+    let file_path = file_uri.unwrap_or("inline.bsl").to_string();
+    host.apply_change(ChangeV2::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("golden-completion-shared-snapshot"),
+        deps: deps.clone(),
+    });
+    host.apply_change(ChangeV2::SetSettingsSnapshot {
+        settings_id: SettingsId::from_hash("golden-completion-shared-snapshot"),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+    host.apply_change(ChangeV2::SetFile {
+        file_id,
+        text: Arc::from(content.to_string()),
+        version: 0,
+        path: Arc::from(file_path),
+    });
+
+    let analysis = host.analysis();
+    analysis
+        .precompute_type_index_for_file(file_id, Some(0), 0)
+        .expect("precompute exact type index");
+    let ir_program = analysis.ir(file_id).ok().flatten().expect("ir");
+    let resolved_file_path = analysis
+        .file_path(file_id)
+        .ok()
+        .flatten()
+        .expect("file path");
+    let resolver = deps
+        .resolver
+        .clone()
+        .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())));
+    let index_snapshot = index.snapshot();
+
+    let result = get_completion_with_semantic_program_snapshot_with_trigger_hint(
+        content,
+        line,
+        column,
+        file_uri,
+        &index_snapshot,
+        lookup,
+        resolved_file_path.as_ref(),
+        resolver.as_ref(),
+        ir_program,
+        None,
+        false,
+        None,
+    )
+    .await
+    .expect("completion ok");
+
+    (
+        result.items.into_iter().map(|candidate| candidate.item).collect(),
+        result.is_incomplete,
+    )
 }
 
 async fn snapshot_completion(
@@ -91,12 +171,11 @@ async fn snapshot_completion(
     file_uri: Option<&str>,
 ) -> serde_json::Value {
     let index = build_index();
-    let lookup = build_lookup();
-    let result = get_completion(content, line, column, file_uri, &index, &lookup)
-        .await
-        .expect("completion ok");
-    let items = result.items.into_iter().map(|c| c.item).collect::<Vec<_>>();
-    intellisense_testkit::completion_snapshot_domain(&items, result.is_incomplete)
+    let (lookup, deps) = build_lookup_and_deps();
+    let (items, is_incomplete) =
+        completion_with_shared_snapshot(content, line, column, file_uri, &index, &lookup, deps)
+            .await;
+    intellisense_testkit::completion_snapshot_domain(&items, is_incomplete)
 }
 
 #[tokio::test]
@@ -135,19 +214,18 @@ async fn golden_completion_dedup_sources() {
         vec![function_item("Дубль", Some(SymbolScope::Local))],
     );
 
-    let lookup = build_lookup();
-    let result = get_completion(
+    let (lookup, deps) = build_lookup_and_deps();
+    let (items, is_incomplete) = completion_with_shared_snapshot(
         "Дуб",
         0,
         3,
         Some("file:///m8_minimal_completion.bsl"),
         &index,
         &lookup,
+        deps,
     )
-    .await
-    .expect("completion ok");
-    let items = result.items.into_iter().map(|c| c.item).collect::<Vec<_>>();
-    let snapshot = intellisense_testkit::completion_snapshot_domain(&items, result.is_incomplete);
+    .await;
+    let snapshot = intellisense_testkit::completion_snapshot_domain(&items, is_incomplete);
 
     intellisense_testkit::assert_snapshot("m8_completion_dedup_sources.json", &snapshot);
 }
@@ -163,19 +241,18 @@ async fn golden_completion_ordering_stable() {
         ],
     );
 
-    let lookup = build_lookup();
-    let result = get_completion(
+    let (lookup, deps) = build_lookup_and_deps();
+    let (items, is_incomplete) = completion_with_shared_snapshot(
         "Аб",
         0,
         2,
         Some("file:///m8_minimal_completion.bsl"),
         &index,
         &lookup,
+        deps,
     )
-    .await
-    .expect("completion ok");
-    let items = result.items.into_iter().map(|c| c.item).collect::<Vec<_>>();
-    let snapshot = intellisense_testkit::completion_snapshot_domain(&items, result.is_incomplete);
+    .await;
+    let snapshot = intellisense_testkit::completion_snapshot_domain(&items, is_incomplete);
 
     intellisense_testkit::assert_snapshot("m8_completion_ordering.json", &snapshot);
 }
@@ -213,12 +290,10 @@ async fn golden_completion_incomplete_flag() {
         .collect();
     index.set_keywords(keywords);
 
-    let lookup = build_lookup();
-    let result = get_completion("", 0, 0, None, &index, &lookup)
-        .await
-        .expect("completion ok");
-    let items = result.items.into_iter().map(|c| c.item).collect::<Vec<_>>();
-    let snapshot = intellisense_testkit::completion_snapshot_domain(&items, result.is_incomplete);
+    let (lookup, deps) = build_lookup_and_deps();
+    let (items, is_incomplete) =
+        completion_with_shared_snapshot("", 0, 0, None, &index, &lookup, deps).await;
+    let snapshot = intellisense_testkit::completion_snapshot_domain(&items, is_incomplete);
 
     intellisense_testkit::assert_snapshot("m8_completion_incomplete.json", &snapshot);
 }

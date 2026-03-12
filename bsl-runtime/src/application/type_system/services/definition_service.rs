@@ -138,7 +138,12 @@ fn goto_definition_v2_with_source_opt(
             // If it's not a local variable, allow treating it as a global common module.
             if ir_program.resolve_variable(name, node.scope_id).is_none() {
                 if strict_semantic_mode {
-                    return semantic_definition_target_at_offset(ir_program.as_ref(), offset);
+                    return semantic_definition_target_at_offset(
+                        ir_program.as_ref(),
+                        analysis,
+                        file_id,
+                        offset,
+                    );
                 }
                 if let Some(target) = common_module_definition_target(repo.as_ref(), name) {
                     return Some(target);
@@ -148,7 +153,13 @@ fn goto_definition_v2_with_source_opt(
 
         if let SemanticNodeKind::MemberAccess { access_kind, .. } = &node.kind {
             if access_kind.is_method() {
-                return semantic_method_definition_target(ir_program.as_ref(), node, offset);
+                return semantic_method_definition_target(
+                    ir_program.as_ref(),
+                    analysis,
+                    file_id,
+                    node,
+                    offset,
+                );
             }
         }
 
@@ -163,7 +174,12 @@ fn goto_definition_v2_with_source_opt(
             // go-to-definition on receiver should open the module file.
             if cursor_targets_receiver {
                 if strict_semantic_mode {
-                    return semantic_definition_target_at_offset(ir_program.as_ref(), offset);
+                    return semantic_definition_target_at_offset(
+                        ir_program.as_ref(),
+                        analysis,
+                        file_id,
+                        offset,
+                    );
                 }
 
                 if let Some(obj_name) = object_name.as_deref() {
@@ -200,12 +216,18 @@ fn goto_definition_v2_with_source_opt(
                 return None;
             }
 
-            return semantic_method_definition_target(ir_program.as_ref(), node, offset);
+            return semantic_method_definition_target(
+                ir_program.as_ref(),
+                analysis,
+                file_id,
+                node,
+                offset,
+            );
         }
     }
 
     if strict_semantic_mode {
-        return semantic_definition_target_at_offset(ir_program.as_ref(), offset);
+        return semantic_definition_target_at_offset(ir_program.as_ref(), analysis, file_id, offset);
     }
 
     let type_resolution = type_at_position?;
@@ -245,7 +267,18 @@ fn semantic_type_at_offset(
     offset: u32,
     coordinator: Option<&SystemCoordinator>,
 ) -> Option<TypeResolution> {
-    let _ = (analysis, file_id, coordinator);
+    let _ = coordinator;
+    if let (Some(analysis), Some(file_id)) = (analysis, file_id) {
+        return analysis
+            .type_at_byte_offset_serve_only(file_id, offset)
+            .ok()
+            .flatten()
+            .or_else(|| {
+                program.find_node_at_byte_offset(offset).and_then(|node| {
+                    analysis.type_for_span_serve_only(file_id, node.span).ok().flatten()
+                })
+            });
+    }
     program
         .semantic_facts
         .type_at_byte_offset(offset)
@@ -284,17 +317,39 @@ fn semantic_receiver_type(
     node: &bsl_shared::ir::SemanticNode,
     coordinator: Option<&SystemCoordinator>,
 ) -> Option<TypeResolution> {
-    let _ = (analysis, file_id, coordinator);
+    let _ = coordinator;
 
     let span_fallback = |span: Span| {
-        semantic_type_at_offset(program, None, None, span.start, None)
+        semantic_type_at_offset(program, analysis, file_id, span.start, None)
             .or_else(|| {
                 span.end
                     .checked_sub(1)
-                    .and_then(|offset| semantic_type_at_offset(program, None, None, offset, None))
+                    .and_then(|offset| semantic_type_at_offset(program, analysis, file_id, offset, None))
             })
-            .or_else(|| program.semantic_facts.type_resolution_for_span(span))
+            .or_else(|| {
+                if let (Some(analysis), Some(file_id)) = (analysis, file_id) {
+                    analysis.type_for_span_serve_only(file_id, span).ok().flatten()
+                } else {
+                    program.semantic_facts.type_resolution_for_span(span)
+                }
+            })
     };
+
+    if let (Some(analysis), Some(file_id)) = (analysis, file_id) {
+        return match &node.kind {
+            SemanticNodeKind::MemberAccess { .. } => analysis
+                .member_access_object_type_for_span_serve_only(file_id, node.span)
+                .ok()
+                .flatten()
+                .or_else(|| receiver_span_for_node(program, node).and_then(span_fallback)),
+            SemanticNodeKind::FunctionCall { .. } => analysis
+                .call_receiver_type_for_span_serve_only(file_id, node.span)
+                .ok()
+                .flatten()
+                .or_else(|| receiver_span_for_node(program, node).and_then(span_fallback)),
+            _ => None,
+        };
+    }
 
     match &node.kind {
         SemanticNodeKind::MemberAccess { .. } => program
@@ -334,22 +389,51 @@ fn exact_type_index_ready(
 
 fn semantic_method_definition_target(
     ir_program: &SemanticProgram,
+    analysis: Option<&bsl_analysis_v2::AnalysisV2>,
+    file_id: Option<bsl_analysis_v2::FileId>,
     node: &SemanticNode,
     byte_offset: u32,
 ) -> Option<DefinitionTarget> {
-    let exact = match &node.kind {
-        SemanticNodeKind::MemberAccess { access_kind, .. } if access_kind.is_method() => ir_program
-            .semantic_facts
-            .member_method_targets_by_span
-            .get(&node.span),
-        SemanticNodeKind::FunctionCall { .. } => ir_program
-            .semantic_facts
-            .call_method_targets_by_span
-            .get(&node.span),
-        _ => None,
-    };
-    let target =
-        exact.or_else(|| semantic_method_definition_target_at_offset(ir_program, byte_offset))?;
+    let target = if let (Some(analysis), Some(file_id)) = (analysis, file_id) {
+        match &node.kind {
+            SemanticNodeKind::MemberAccess { access_kind, .. } if access_kind.is_method() => analysis
+                .member_method_target_for_span_serve_only(file_id, node.span)
+                .ok()
+                .flatten()
+                .or_else(|| {
+                    analysis
+                        .member_method_target_at_byte_offset_serve_only(file_id, byte_offset)
+                        .ok()
+                        .flatten()
+                }),
+            SemanticNodeKind::FunctionCall { .. } => analysis
+                .call_method_target_for_span_serve_only(file_id, node.span)
+                .ok()
+                .flatten()
+                .or_else(|| {
+                    analysis
+                        .call_method_target_at_byte_offset_serve_only(file_id, byte_offset)
+                        .ok()
+                        .flatten()
+                }),
+            _ => None,
+        }
+    } else {
+        let exact = match &node.kind {
+            SemanticNodeKind::MemberAccess { access_kind, .. } if access_kind.is_method() => ir_program
+                .semantic_facts
+                .member_method_targets_by_span
+                .get(&node.span)
+                .cloned(),
+            SemanticNodeKind::FunctionCall { .. } => ir_program
+                .semantic_facts
+                .call_method_targets_by_span
+                .get(&node.span)
+                .cloned(),
+            _ => None,
+        };
+        exact.or_else(|| semantic_method_definition_target_at_offset(ir_program, byte_offset).cloned())
+    }?;
 
     target
         .definition_location
@@ -383,8 +467,18 @@ fn semantic_method_definition_target_at_offset(
 
 fn semantic_definition_target_at_offset(
     ir_program: &SemanticProgram,
+    analysis: Option<&bsl_analysis_v2::AnalysisV2>,
+    file_id: Option<bsl_analysis_v2::FileId>,
     byte_offset: u32,
 ) -> Option<DefinitionTarget> {
+    if let (Some(analysis), Some(file_id)) = (analysis, file_id) {
+        return analysis
+            .definition_location_at_byte_offset_serve_only(file_id, byte_offset)
+            .ok()
+            .flatten()
+            .and_then(definition_target_from_location);
+    }
+
     ir_program
         .semantic_facts
         .definition_location_at_byte_offset(byte_offset)

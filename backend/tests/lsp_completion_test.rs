@@ -4,14 +4,87 @@
 mod lsp_completion_tests {
     use std::sync::Arc;
 
-    use bsl_backend::application::get_completion;
+    use bsl_analysis_v2::{
+        AnalysisHostV2, Change as ChangeV2, DepsSnapshotId, FileId as V2FileId, SettingsId,
+    };
+    use bsl_backend::application::get_completion_with_semantic_program_snapshot_with_trigger_hint;
     use bsl_backend::system::{
         keyword_index::default_keyword_items, IndexItem, IndexItemKind, IndexKind,
         IntellisenseIndexStore, TypeKind,
     };
+    use bsl_shared::domain::resolver::TypeResolver;
     use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
     use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
-    use bsl_shared::domain::types::{RawDataSource, RawMethodData, RawTypeData};
+    use bsl_shared::domain::signature_index::SignatureIndex;
+    use bsl_shared::domain::types::{RawDataSource, RawMethodData, RawTypeData, TypeResolution};
+    use bsl_shared::formatting::DetailLevel;
+
+    async fn completion_with_shared_snapshot(
+        content: &str,
+        line: u32,
+        column: u32,
+        file_uri: Option<&str>,
+        index: &IntellisenseIndexStore,
+        metadata_lookup: &TypeMetadataLookup,
+        deps: Arc<bsl_analysis_v2::SemanticDeps>,
+        owner_hint: Option<TypeResolution>,
+        trigger_char_hint: Option<char>,
+    ) -> Vec<String> {
+        let mut host = AnalysisHostV2::default();
+        let file_id = V2FileId(1);
+        let file_path = file_uri.unwrap_or("inline.bsl").to_string();
+        host.apply_change(ChangeV2::SetDepsSnapshot {
+            deps_id: DepsSnapshotId::from_hash("lsp-completion-shared-snapshot-test"),
+            deps: deps.clone(),
+        });
+        host.apply_change(ChangeV2::SetSettingsSnapshot {
+            settings_id: SettingsId::from_hash("lsp-completion-shared-snapshot-test"),
+            diagnostics_detail_level: DetailLevel::Full,
+        });
+        host.apply_change(ChangeV2::SetFile {
+            file_id,
+            text: Arc::from(content.to_string()),
+            version: 0,
+            path: Arc::from(file_path.clone()),
+        });
+
+        let analysis = host.analysis();
+        analysis
+            .precompute_type_index_for_file(file_id, Some(0), 0)
+            .expect("precompute exact type index");
+        let ir_program = analysis.ir(file_id).ok().flatten().expect("ir");
+        let resolved_file_path = analysis
+            .file_path(file_id)
+            .ok()
+            .flatten()
+            .expect("file path");
+        let resolver = deps
+            .resolver
+            .clone()
+            .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())));
+        let index_snapshot = index.snapshot();
+
+        get_completion_with_semantic_program_snapshot_with_trigger_hint(
+            content,
+            line,
+            column,
+            file_uri,
+            &index_snapshot,
+            metadata_lookup,
+            resolved_file_path.as_ref(),
+            resolver.as_ref(),
+            ir_program,
+            owner_hint,
+            false,
+            trigger_char_hint,
+        )
+        .await
+        .expect("completion ok")
+        .items
+        .into_iter()
+        .map(|candidate| candidate.item.label)
+        .collect()
+    }
 
     #[tokio::test]
     async fn completion_member_access_without_semantic_owner_stays_empty() {
@@ -37,15 +110,30 @@ mod lsp_completion_tests {
             .expect("load types");
 
         let lookup = TypeMetadataLookup::new(repository);
-        let result = get_completion("Массив.", 0, 7, None, &index, &lookup)
-            .await
-            .expect("completion ok");
+        let deps_repo: Arc<dyn TypeRepository> = Arc::new(InMemoryTypeRepository::new());
+        let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+            repository: deps_repo.clone(),
+            signature_index: SignatureIndex::new(),
+            resolver: Some(Arc::new(TypeResolver::new(deps_repo))),
+            platform_signatures_loaded: false,
+        });
+        let result = completion_with_shared_snapshot(
+            "Массив.",
+            0,
+            7,
+            None,
+            &index,
+            &lookup,
+            deps,
+            None,
+            Some('.'),
+        )
+        .await;
 
-        let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
         assert!(
-            labels.is_empty(),
+            result.is_empty(),
             "raw helper without canonical member owner must stay fail-closed, labels: {:?}",
-            labels
+            result
         );
     }
 
@@ -53,16 +141,21 @@ mod lsp_completion_tests {
     async fn completion_falls_back_to_default_keywords_when_index_empty() {
         let index = IntellisenseIndexStore::new("cfg", "platform");
         let repository = Arc::new(InMemoryTypeRepository::new());
-        let lookup = TypeMetadataLookup::new(repository);
+        let lookup = TypeMetadataLookup::new(repository.clone());
+        let deps_repo = repository as Arc<dyn TypeRepository>;
+        let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+            repository: deps_repo.clone(),
+            signature_index: SignatureIndex::new(),
+            resolver: Some(Arc::new(TypeResolver::new(deps_repo))),
+            platform_signatures_loaded: false,
+        });
 
-        let result = get_completion("", 0, 0, None, &index, &lookup)
-            .await
-            .expect("completion ok");
-        let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
-
+        let result =
+            completion_with_shared_snapshot("", 0, 0, None, &index, &lookup, deps, None, None)
+                .await;
         let default_keywords = default_keyword_items();
         assert!(default_keywords
             .iter()
-            .any(|item| labels.contains(&item.name)));
+            .any(|item| result.contains(&item.name)));
     }
 }

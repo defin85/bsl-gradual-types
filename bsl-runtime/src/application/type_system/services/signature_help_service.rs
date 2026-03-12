@@ -53,14 +53,14 @@ pub fn get_signature_help_v2_with_analysis(
     coordinator: Option<&SystemCoordinator>,
 ) -> Option<SignatureHelpData> {
     let call_context = signature_help_query(file_content, line, character)?;
-    if let (Some(analysis), Some(file_id)) = (analysis, file_id) {
+    let signature_info = if let (Some(analysis), Some(file_id)) = (analysis, file_id) {
         if !exact_type_index_ready(analysis, file_id, coordinator) {
             return None;
         }
-    }
-    let _ = (analysis, file_id, coordinator);
-    let signature_info =
-        signature_target_from_semantic_facts(file_content, &call_context, ir_program.as_ref())?;
+        signature_target_from_exact_index(file_content, &call_context, analysis, file_id)?
+    } else {
+        signature_target_from_semantic_facts(file_content, &call_context, ir_program.as_ref())?
+    };
 
     let active_param = calculate_active_parameter(file_content, &call_context, line, character);
     let (label, parameters) = match signature_info {
@@ -81,6 +81,60 @@ pub fn get_signature_help_v2_with_analysis(
         parameters,
         active_parameter: active_param,
     })
+}
+
+fn signature_target_from_exact_index(
+    file_content: &str,
+    call_context: &SignatureHelpQuery,
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+) -> Option<SignatureTarget> {
+    let line_index = LineIndex::new(file_content);
+    let call_start_offset = line_index
+        .utf16_position_to_byte_offset(
+            file_content,
+            call_context.call_start_line,
+            call_context.call_start_character,
+        )
+        .min(u32::MAX as usize) as u32;
+
+    for offset in [
+        call_start_offset.saturating_sub(1),
+        call_start_offset,
+        call_start_offset.saturating_add(1),
+    ] {
+        let constructor = analysis
+            .constructor_target_at_byte_offset_serve_only(file_id, offset)
+            .ok()
+            .flatten()
+            .and_then(|target| target.signature.clone())
+            .map(SignatureTarget::Constructor);
+        if constructor.is_some() {
+            return constructor;
+        }
+
+        let call_method = analysis
+            .call_method_target_at_byte_offset_serve_only(file_id, offset)
+            .ok()
+            .flatten()
+            .and_then(|target| target.signature.clone())
+            .map(SignatureTarget::Method);
+        if call_method.is_some() {
+            return call_method;
+        }
+
+        let member_method = analysis
+            .member_method_target_at_byte_offset_serve_only(file_id, offset)
+            .ok()
+            .flatten()
+            .and_then(|target| target.signature.clone())
+            .map(SignatureTarget::Method);
+        if member_method.is_some() {
+            return member_method;
+        }
+    }
+
+    None
 }
 
 pub fn signature_help_exact_type_index_available_at_position(

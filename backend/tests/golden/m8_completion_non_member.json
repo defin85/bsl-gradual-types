@@ -14,10 +14,376 @@
       "label": "Строка"
     },
     {
+      "insertText": "#Если",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "#Если"
+    },
+    {
+      "insertText": "#Иначе",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "#Иначе"
+    },
+    {
+      "insertText": "#КонецЕсли",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "#КонецЕсли"
+    },
+    {
+      "insertText": "#КонецОбласти",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "#КонецОбласти"
+    },
+    {
+      "insertText": "#Область",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "#Область"
+    },
+    {
+      "insertText": "&AtClient",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "&AtClient"
+    },
+    {
+      "insertText": "&AtClientAtServerNoContext",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "&AtClientAtServerNoContext"
+    },
+    {
+      "insertText": "&AtServer",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "&AtServer"
+    },
+    {
+      "insertText": "&AtServerNoContext",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "&AtServerNoContext"
+    },
+    {
+      "insertText": "&НаКлиенте",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "&НаКлиенте"
+    },
+    {
+      "insertText": "&НаКлиентеНаСервереБезКонтекста",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "&НаКлиентеНаСервереБезКонтекста"
+    },
+    {
+      "insertText": "&НаСервере",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "&НаСервере"
+    },
+    {
+      "insertText": "&НаСервереБезКонтекста",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "&НаСервереБезКонтекста"
+    },
+    {
+      "insertText": "Break",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Break"
+    },
+    {
+      "insertText": "Continue",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Continue"
+    },
+    {
+      "insertText": "Do",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Do"
+    },
+    {
+      "insertText": "Each",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Each"
+    },
+    {
+      "insertText": "Else",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Else"
+    },
+    {
+      "insertText": "ElsIf",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "ElsIf"
+    },
+    {
+      "insertText": "EndDo",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "EndDo"
+    },
+    {
+      "insertText": "EndFunction",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "EndFunction"
+    },
+    {
+      "insertText": "EndIf",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "EndIf"
+    },
+    {
+      "insertText": "EndProcedure",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "EndProcedure"
+    },
+    {
+      "insertText": "EndTry",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "EndTry"
+    },
+    {
+      "insertText": "Except",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Except"
+    },
+    {
+      "insertText": "Execute",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Execute"
+    },
+    {
+      "insertText": "Export",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Export"
+    },
+    {
+      "insertText": "For",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "For"
+    },
+    {
+      "insertText": "Function",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Function"
+    },
+    {
+      "insertText": "If",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "If"
+    },
+    {
+      "insertText": "In",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "In"
+    },
+    {
+      "insertText": "New",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "New"
+    },
+    {
+      "insertText": "Procedure",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Procedure"
+    },
+    {
+      "insertText": "Raise",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Raise"
+    },
+    {
+      "insertText": "Return",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Return"
+    },
+    {
+      "insertText": "Then",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Then"
+    },
+    {
+      "insertText": "To",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "To"
+    },
+    {
+      "insertText": "Try",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Try"
+    },
+    {
+      "insertText": "Var",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Var"
+    },
+    {
+      "insertText": "While",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "While"
+    },
+    {
+      "insertText": "Возврат",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Возврат"
+    },
+    {
+      "insertText": "ВызватьИсключение",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "ВызватьИсключение"
+    },
+    {
+      "insertText": "Выполнить",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Выполнить"
+    },
+    {
+      "insertText": "Для",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Для"
+    },
+    {
+      "insertText": "Если",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Если"
+    },
+    {
+      "insertText": "Из",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Из"
+    },
+    {
+      "insertText": "Иначе",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Иначе"
+    },
+    {
+      "insertText": "ИначеЕсли",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "ИначеЕсли"
+    },
+    {
+      "insertText": "Исключение",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Исключение"
+    },
+    {
+      "insertText": "Каждого",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Каждого"
+    },
+    {
+      "insertText": "КонецЕсли",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "КонецЕсли"
+    },
+    {
+      "insertText": "КонецПопытки",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "КонецПопытки"
+    },
+    {
+      "insertText": "КонецПроцедуры",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "КонецПроцедуры"
+    },
+    {
+      "insertText": "КонецФункции",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "КонецФункции"
+    },
+    {
+      "insertText": "КонецЦикла",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "КонецЦикла"
+    },
+    {
+      "insertText": "Новый",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Новый"
+    },
+    {
       "insertText": "Перем",
       "insertTextFormat": null,
       "kind": "KEYWORD",
       "label": "Перем"
+    },
+    {
+      "insertText": "По",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "По"
+    },
+    {
+      "insertText": "Пока",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Пока"
+    },
+    {
+      "insertText": "Попытка",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Попытка"
+    },
+    {
+      "insertText": "Прервать",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Прервать"
+    },
+    {
+      "insertText": "Продолжить",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Продолжить"
     },
     {
       "insertText": "Процедура",
@@ -26,16 +392,28 @@
       "label": "Процедура"
     },
     {
-      "insertText": "Старт",
+      "insertText": "Тогда",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Старт"
+      "label": "Тогда"
     },
     {
       "insertText": "Функция",
       "insertTextFormat": null,
       "kind": "KEYWORD",
       "label": "Функция"
+    },
+    {
+      "insertText": "Цикл",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Цикл"
+    },
+    {
+      "insertText": "Экспорт",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "Экспорт"
     }
   ]
 }

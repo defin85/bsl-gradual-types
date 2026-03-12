@@ -8,10 +8,28 @@
       "label": "Строка"
     },
     {
-      "insertText": "Старт",
+      "insertText": "#КонецОбласти",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Старт"
+      "label": "#КонецОбласти"
+    },
+    {
+      "insertText": "#Область",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "#Область"
+    },
+    {
+      "insertText": "&НаКлиентеНаСервереБезКонтекста",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "&НаКлиентеНаСервереБезКонтекста"
+    },
+    {
+      "insertText": "&НаСервереБезКонтекста",
+      "insertTextFormat": null,
+      "kind": "KEYWORD",
+      "label": "&НаСервереБезКонтекста"
     }
   ]
 }

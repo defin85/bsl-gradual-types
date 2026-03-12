@@ -2,7 +2,7 @@
   "schema_version": "v1",
   "contract_version": "quality-gates-v1",
   "change_id": "refactor-ir-canonical-semantic-pipeline",
-  "generated_at": "2026-03-12T14:05:31+03:00",
+  "generated_at": "2026-03-12T19:10:00+03:00",
   "overall": {
     "verdict": "pass",
     "gates_total": 7,
@@ -45,6 +45,9 @@
         "backend/tests/form_module_object_unified_contract_test.rs::diagnostics_hover_and_type_at_position_follow_unified_form_contract",
         "backend/tests/form_module_object_unified_contract_test.rs::completion_and_resolve_follow_unified_form_contract",
         "backend/tests/form_module_object_unified_contract_test.rs::recordset_module_resolves_system_members_and_manager_path_call",
+        "backend/tests/hover_property_access_test.rs::test_hover_on_property_name_uses_exact_semantic_index_when_runtime_ir_facts_are_missing",
+        "backend/tests/lsp_intellisense_tests.rs::lsp_signature_help_uses_exact_semantic_index_when_runtime_ir_facts_are_missing",
+        "backend/tests/goto_definition_common_module_test.rs::goto_definition_uses_exact_semantic_index_when_runtime_ir_facts_are_missing",
         "cli/src/main.rs::cli_inline_completion_uses_shared_runtime_snapshot",
         "cli/src/main.rs::cli_inline_type_info_uses_shared_runtime_snapshot",
         "cli/src/main.rs::cli_type_info_preserves_object_module_binding_facets",
@@ -116,6 +119,7 @@
         "docs/architecture/components-detailed.md",
         "docs/guides/lsp-v2-latency-policy.md",
         "docs/api/web-api-reference.md",
+        "docs/roadmap/mcp-bsl-agent/api.md",
         "openspec/changes/refactor-ir-canonical-semantic-pipeline/execution-matrix.md"
       ]
     }

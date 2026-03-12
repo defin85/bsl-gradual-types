@@ -11,7 +11,8 @@
 ```text
 SystemCoordinator / DepsBundleV2
   -> AnalysisHostV2 / AnalysisV2
-  -> SemanticProgram + semantic_facts
+  -> SemanticProgram (canonical IR + semantic_facts)
+  -> derived exact semantic index
   -> IntellisenseV2Facade runtime
   -> shared type-system services
   -> LSP / Web / MCP / CLI adapters
@@ -87,7 +88,7 @@ SystemCoordinator / DepsBundleV2
 
 ### SemanticFacts
 
-**Назначение:** canonical semantic payload, из которого consumers читают owner/member/type/definition truth.
+**Назначение:** canonical semantic payload, из которого materialize-ится derived exact semantic index.
 
 После cutover хранит:
 
@@ -180,9 +181,9 @@ SystemCoordinator / DepsBundleV2
 Текущий contract:
 
 - syntax helpers извлекают только позицию/receiver slice;
-- owner/member truth приходит из shared hints или semantic facts;
+- owner/member truth приходит из shared exact hints текущей revision;
 - non-member semantic path не использует discovery/search `IndexSnapshot`;
-- при miss current-revision facts completion работает fail-closed.
+- при miss current-revision exact artifact completion работает fail-closed.
 
 Файлы:
 
@@ -195,8 +196,8 @@ SystemCoordinator / DepsBundleV2
 
 **Назначение:** user-facing type/member hover поверх canonical facts.
 
-Analyzed path читает `semantic_facts` и exact current-revision type lookup, а не request-time rescue
-из consumer-local repository state.
+Analyzed path читает exact type/member facts из derived exact semantic index и использует canonical IR
+только для node lookup/formatting context, а не для request-time rescue из consumer-local repository state.
 
 Файл:
 
@@ -208,7 +209,7 @@ Analyzed path читает `semantic_facts` и exact current-revision type looku
 
 После закрытия `xgg.3` сервис:
 
-- читает definition anchors из `semantic_facts` на analyzed path;
+- читает definition anchors, receiver types и method targets из derived exact semantic index;
 - использует canonical `TypeDefinitionLocation` для configuration/common-module/local targets;
 - не восстанавливает configuration XML path локально из consumer repo.
 
@@ -220,8 +221,8 @@ Analyzed path читает `semantic_facts` и exact current-revision type looku
 
 **Назначение:** callable/signature lookup для LSP.
 
-На analyzed path сигнатура берётся из semantic facts, materialized на IR build, а не из request-time
-repository rescue.
+На analyzed path сигнатура берётся из callable targets exact semantic index, materialized из того же IR snapshot,
+а не из request-time repository rescue.
 
 Файл:
 

@@ -2,7 +2,7 @@
   "schema_version": "v1",
   "contract_version": "acceptance-report-v1",
   "change_id": "refactor-ir-canonical-semantic-pipeline",
-  "generated_at": "2026-03-12T14:05:31+03:00",
+  "generated_at": "2026-03-12T19:10:00+03:00",
   "evidence_basis": "checked_in_automated_assets",
   "human_matrix_ref": "openspec/changes/refactor-ir-canonical-semantic-pipeline/execution-matrix.md",
   "fixtures": [
@@ -23,7 +23,7 @@
       "kind": "steady_current_revision"
     },
     {
-      "id": "signature_help_semantic_facts",
+      "id": "signature_help_exact_index",
       "kind": "steady_current_revision"
     },
     {
@@ -93,7 +93,8 @@
     "facet_identity_preserved",
     "legacy_fallback_removed",
     "semantic_definition_anchor",
-    "semantic_signature_contract"
+    "semantic_signature_contract",
+    "exact_index_survives_runtime_ir_fact_miss"
   ],
   "bundles": [
     {
@@ -104,7 +105,7 @@
     {
       "id": "no_adapter_local_semantic_truth",
       "verdict": "pass",
-      "checks_total": 9
+      "checks_total": 10
     },
     {
       "id": "search_isolation_and_revision_integrity",
@@ -258,12 +259,12 @@
       "source_asset": {
         "kind": "test",
         "path": "backend/tests/goto_definition_common_module_test.rs",
-        "selector": "goto_definition_resolves_configuration_symbol_metadata_xml_from_semantic_facts_with_empty_consumer_repo"
+        "selector": "goto_definition_uses_exact_semantic_index_when_runtime_ir_facts_are_missing"
       }
     },
     {
       "bundle_id": "cross_consumer_semantic_equivalence",
-      "fixture_id": "signature_help_semantic_facts",
+      "fixture_id": "signature_help_exact_index",
       "operation": "signature_help",
       "consumer": "lsp",
       "verdict": "pass",
@@ -271,12 +272,12 @@
       "source_asset": {
         "kind": "test",
         "path": "backend/tests/lsp_intellisense_tests.rs",
-        "selector": "lsp_signature_help_keeps_method_semantic_facts_with_empty_request_time_repository"
+        "selector": "lsp_signature_help_uses_exact_semantic_index_when_runtime_ir_facts_are_missing"
       }
     },
     {
       "bundle_id": "cross_consumer_semantic_equivalence",
-      "fixture_id": "signature_help_semantic_facts",
+      "fixture_id": "signature_help_exact_index",
       "operation": "signature_help",
       "consumer": "lsp",
       "verdict": "pass",
@@ -284,12 +285,12 @@
       "source_asset": {
         "kind": "test",
         "path": "backend/tests/lsp_intellisense_tests.rs",
-        "selector": "lsp_signature_help_uses_semantic_facts_for_local_function_with_empty_request_time_repository"
+        "selector": "lsp_signature_help_uses_exact_semantic_index_for_local_function_when_runtime_ir_facts_are_missing"
       }
     },
     {
       "bundle_id": "cross_consumer_semantic_equivalence",
-      "fixture_id": "signature_help_semantic_facts",
+      "fixture_id": "signature_help_exact_index",
       "operation": "signature_help",
       "consumer": "lsp",
       "verdict": "pass",
@@ -297,7 +298,7 @@
       "source_asset": {
         "kind": "test",
         "path": "backend/tests/lsp_intellisense_tests.rs",
-        "selector": "lsp_signature_help_uses_semantic_facts_for_global_function_with_empty_request_time_repository"
+        "selector": "lsp_signature_help_uses_exact_semantic_index_for_global_function_when_runtime_ir_facts_are_missing"
       }
     },
     {
@@ -401,12 +402,12 @@
       "source_asset": {
         "kind": "test",
         "path": "backend/tests/goto_definition_common_module_test.rs",
-        "selector": "goto_definition_resolves_common_module_receiver_from_semantic_facts_with_empty_consumer_repo"
+        "selector": "goto_definition_uses_exact_semantic_index_when_runtime_ir_facts_are_missing"
       }
     },
     {
       "bundle_id": "no_adapter_local_semantic_truth",
-      "fixture_id": "signature_help_semantic_facts",
+      "fixture_id": "signature_help_exact_index",
       "operation": "signature_help",
       "consumer": "lsp",
       "verdict": "pass",
@@ -414,7 +415,20 @@
       "source_asset": {
         "kind": "test",
         "path": "backend/tests/lsp_intellisense_tests.rs",
-        "selector": "lsp_signature_help_keeps_method_semantic_facts_with_empty_request_time_repository"
+        "selector": "lsp_signature_help_uses_exact_semantic_index_when_runtime_ir_facts_are_missing"
+      }
+    },
+    {
+      "bundle_id": "no_adapter_local_semantic_truth",
+      "fixture_id": "metadata_member_access",
+      "operation": "hover",
+      "consumer": "runtime",
+      "verdict": "pass",
+      "reason_code": "exact_index_survives_runtime_ir_fact_miss",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/tests/hover_property_access_test.rs",
+        "selector": "test_hover_on_property_name_uses_exact_semantic_index_when_runtime_ir_facts_are_missing"
       }
     },
     {

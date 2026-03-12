@@ -347,7 +347,7 @@ Output (job_result):
 }
 ```
 
-Fail-closed job_result keeps the same envelope and returns `type_info: null` plus warning text when canonical artifacts for the current revision are unavailable:
+Fail-closed `job_result` keeps the same envelope and returns `type_info: null` without synthetic transport warnings when canonical artifacts for the current revision are unavailable. Bounded fail-closed reason codes остаются в observability/metrics layer, а не в MCP payload:
 
 ```json
 {
@@ -355,7 +355,7 @@ Fail-closed job_result keeps the same envelope and returns `type_info: null` plu
   "flow_sensitive_enabled": false,
   "type_info": null,
   "node": null,
-  "warnings": ["IR not available"]
+  "warnings": []
 }
 ```
 

@@ -110,7 +110,8 @@ pub(crate) struct CompletionAnalysisContext<'a> {
 ///
 /// # Returns
 /// CompletionResult with items and isIncomplete flag
-pub async fn get_completion(
+#[cfg(test)]
+pub(crate) async fn get_completion(
     file_content: &str,
     line: u32,
     column: u32,
@@ -144,18 +145,6 @@ fn completion_member_access_owner_type_hints_from_analysis_internal(
     };
     if !exact_ready {
         return Vec::new();
-    }
-
-    if let Ok(Some(ir_program)) = analysis.ir(file_id) {
-        let resolutions = completion_member_access_owner_type_hints_from_semantic_program(
-            file_content,
-            line,
-            column,
-            ir_program.as_ref(),
-        );
-        if !resolutions.is_empty() {
-            return resolutions;
-        }
     }
 
     let Some(receiver_spans) = extract_member_access_receiver_spans(file_content, line, column)
@@ -213,15 +202,6 @@ pub fn completion_member_access_owner_type_hints_from_analysis(
         column,
         false,
     )
-}
-
-pub fn completion_member_access_owner_type_hints_from_semantic_program(
-    file_content: &str,
-    line: u32,
-    column: u32,
-    ir_program: &SemanticProgram,
-) -> Vec<TypeResolution> {
-    resolve_member_access_owner_types_from_program(ir_program, file_content, line, column)
 }
 
 pub fn completion_member_access_owner_type_hint_from_analysis(

@@ -37,7 +37,7 @@ pub use services::completion_service::{
     completion_member_access_owner_type_hint_from_analysis_with_flow_sensitive,
     completion_member_access_owner_type_hints_from_analysis,
 };
-pub use services::completion_service::{get_completion, CompletionContext, CompletionStats};
+pub use services::completion_service::CompletionStats;
 pub use services::definition_service::{
     definition_exact_type_index_available_at_position, goto_definition_v2,
     goto_definition_v2_with_source, goto_definition_v2_with_source_and_analysis, DefinitionTarget,

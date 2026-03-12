@@ -1,5 +1,5 @@
 {
-  "isIncomplete": true,
+  "isIncomplete": false,
   "items": [
     {
       "insertText": "Массив",
@@ -14,1192 +14,406 @@
       "label": "Строка"
     },
     {
-      "insertText": "Ключ0",
+      "insertText": "#Если",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ0"
+      "label": "#Если"
     },
     {
-      "insertText": "Ключ1",
+      "insertText": "#Иначе",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ1"
+      "label": "#Иначе"
     },
     {
-      "insertText": "Ключ10",
+      "insertText": "#КонецЕсли",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ10"
+      "label": "#КонецЕсли"
     },
     {
-      "insertText": "Ключ100",
+      "insertText": "#КонецОбласти",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ100"
+      "label": "#КонецОбласти"
     },
     {
-      "insertText": "Ключ101",
+      "insertText": "#Область",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ101"
+      "label": "#Область"
     },
     {
-      "insertText": "Ключ102",
+      "insertText": "&AtClient",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ102"
+      "label": "&AtClient"
     },
     {
-      "insertText": "Ключ103",
+      "insertText": "&AtClientAtServerNoContext",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ103"
+      "label": "&AtClientAtServerNoContext"
     },
     {
-      "insertText": "Ключ104",
+      "insertText": "&AtServer",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ104"
+      "label": "&AtServer"
     },
     {
-      "insertText": "Ключ105",
+      "insertText": "&AtServerNoContext",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ105"
+      "label": "&AtServerNoContext"
     },
     {
-      "insertText": "Ключ106",
+      "insertText": "&НаКлиенте",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ106"
+      "label": "&НаКлиенте"
     },
     {
-      "insertText": "Ключ107",
+      "insertText": "&НаКлиентеНаСервереБезКонтекста",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ107"
+      "label": "&НаКлиентеНаСервереБезКонтекста"
     },
     {
-      "insertText": "Ключ108",
+      "insertText": "&НаСервере",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ108"
+      "label": "&НаСервере"
     },
     {
-      "insertText": "Ключ109",
+      "insertText": "&НаСервереБезКонтекста",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ109"
+      "label": "&НаСервереБезКонтекста"
     },
     {
-      "insertText": "Ключ11",
+      "insertText": "Break",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ11"
+      "label": "Break"
     },
     {
-      "insertText": "Ключ110",
+      "insertText": "Continue",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ110"
+      "label": "Continue"
     },
     {
-      "insertText": "Ключ111",
+      "insertText": "Do",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ111"
+      "label": "Do"
     },
     {
-      "insertText": "Ключ112",
+      "insertText": "Each",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ112"
+      "label": "Each"
     },
     {
-      "insertText": "Ключ113",
+      "insertText": "Else",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ113"
+      "label": "Else"
     },
     {
-      "insertText": "Ключ114",
+      "insertText": "ElsIf",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ114"
+      "label": "ElsIf"
     },
     {
-      "insertText": "Ключ115",
+      "insertText": "EndDo",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ115"
+      "label": "EndDo"
     },
     {
-      "insertText": "Ключ116",
+      "insertText": "EndFunction",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ116"
+      "label": "EndFunction"
     },
     {
-      "insertText": "Ключ117",
+      "insertText": "EndIf",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ117"
+      "label": "EndIf"
     },
     {
-      "insertText": "Ключ118",
+      "insertText": "EndProcedure",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ118"
+      "label": "EndProcedure"
     },
     {
-      "insertText": "Ключ119",
+      "insertText": "EndTry",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ119"
+      "label": "EndTry"
     },
     {
-      "insertText": "Ключ12",
+      "insertText": "Except",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ12"
+      "label": "Except"
     },
     {
-      "insertText": "Ключ120",
+      "insertText": "Execute",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ120"
+      "label": "Execute"
     },
     {
-      "insertText": "Ключ121",
+      "insertText": "Export",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ121"
+      "label": "Export"
     },
     {
-      "insertText": "Ключ122",
+      "insertText": "For",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ122"
+      "label": "For"
     },
     {
-      "insertText": "Ключ123",
+      "insertText": "Function",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ123"
+      "label": "Function"
     },
     {
-      "insertText": "Ключ124",
+      "insertText": "If",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ124"
+      "label": "If"
     },
     {
-      "insertText": "Ключ125",
+      "insertText": "In",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ125"
+      "label": "In"
     },
     {
-      "insertText": "Ключ126",
+      "insertText": "New",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ126"
+      "label": "New"
     },
     {
-      "insertText": "Ключ127",
+      "insertText": "Procedure",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ127"
+      "label": "Procedure"
     },
     {
-      "insertText": "Ключ128",
+      "insertText": "Raise",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ128"
+      "label": "Raise"
     },
     {
-      "insertText": "Ключ129",
+      "insertText": "Return",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ129"
+      "label": "Return"
     },
     {
-      "insertText": "Ключ13",
+      "insertText": "Then",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ13"
+      "label": "Then"
     },
     {
-      "insertText": "Ключ130",
+      "insertText": "To",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ130"
+      "label": "To"
     },
     {
-      "insertText": "Ключ131",
+      "insertText": "Try",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ131"
+      "label": "Try"
     },
     {
-      "insertText": "Ключ132",
+      "insertText": "Var",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ132"
+      "label": "Var"
     },
     {
-      "insertText": "Ключ133",
+      "insertText": "While",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ133"
+      "label": "While"
     },
     {
-      "insertText": "Ключ134",
+      "insertText": "Возврат",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ134"
+      "label": "Возврат"
     },
     {
-      "insertText": "Ключ135",
+      "insertText": "ВызватьИсключение",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ135"
+      "label": "ВызватьИсключение"
     },
     {
-      "insertText": "Ключ136",
+      "insertText": "Выполнить",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ136"
+      "label": "Выполнить"
     },
     {
-      "insertText": "Ключ137",
+      "insertText": "Для",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ137"
+      "label": "Для"
     },
     {
-      "insertText": "Ключ138",
+      "insertText": "Если",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ138"
+      "label": "Если"
     },
     {
-      "insertText": "Ключ139",
+      "insertText": "Из",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ139"
+      "label": "Из"
     },
     {
-      "insertText": "Ключ14",
+      "insertText": "Иначе",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ14"
+      "label": "Иначе"
     },
     {
-      "insertText": "Ключ140",
+      "insertText": "ИначеЕсли",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ140"
+      "label": "ИначеЕсли"
     },
     {
-      "insertText": "Ключ141",
+      "insertText": "Исключение",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ141"
+      "label": "Исключение"
     },
     {
-      "insertText": "Ключ142",
+      "insertText": "Каждого",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ142"
+      "label": "Каждого"
     },
     {
-      "insertText": "Ключ143",
+      "insertText": "КонецЕсли",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ143"
+      "label": "КонецЕсли"
     },
     {
-      "insertText": "Ключ144",
+      "insertText": "КонецПопытки",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ144"
+      "label": "КонецПопытки"
     },
     {
-      "insertText": "Ключ145",
+      "insertText": "КонецПроцедуры",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ145"
+      "label": "КонецПроцедуры"
     },
     {
-      "insertText": "Ключ146",
+      "insertText": "КонецФункции",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ146"
+      "label": "КонецФункции"
     },
     {
-      "insertText": "Ключ147",
+      "insertText": "КонецЦикла",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ147"
+      "label": "КонецЦикла"
     },
     {
-      "insertText": "Ключ148",
+      "insertText": "Новый",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ148"
+      "label": "Новый"
     },
     {
-      "insertText": "Ключ149",
+      "insertText": "Перем",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ149"
+      "label": "Перем"
     },
     {
-      "insertText": "Ключ15",
+      "insertText": "По",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ15"
+      "label": "По"
     },
     {
-      "insertText": "Ключ150",
+      "insertText": "Пока",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ150"
+      "label": "Пока"
     },
     {
-      "insertText": "Ключ151",
+      "insertText": "Попытка",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ151"
+      "label": "Попытка"
     },
     {
-      "insertText": "Ключ152",
+      "insertText": "Прервать",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ152"
+      "label": "Прервать"
     },
     {
-      "insertText": "Ключ153",
+      "insertText": "Продолжить",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ153"
+      "label": "Продолжить"
     },
     {
-      "insertText": "Ключ154",
+      "insertText": "Процедура",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ154"
+      "label": "Процедура"
     },
     {
-      "insertText": "Ключ155",
+      "insertText": "Тогда",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ155"
+      "label": "Тогда"
     },
     {
-      "insertText": "Ключ156",
+      "insertText": "Функция",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ156"
+      "label": "Функция"
     },
     {
-      "insertText": "Ключ157",
+      "insertText": "Цикл",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ157"
+      "label": "Цикл"
     },
     {
-      "insertText": "Ключ158",
+      "insertText": "Экспорт",
       "insertTextFormat": null,
       "kind": "KEYWORD",
-      "label": "Ключ158"
-    },
-    {
-      "insertText": "Ключ159",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ159"
-    },
-    {
-      "insertText": "Ключ16",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ16"
-    },
-    {
-      "insertText": "Ключ160",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ160"
-    },
-    {
-      "insertText": "Ключ161",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ161"
-    },
-    {
-      "insertText": "Ключ162",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ162"
-    },
-    {
-      "insertText": "Ключ163",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ163"
-    },
-    {
-      "insertText": "Ключ164",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ164"
-    },
-    {
-      "insertText": "Ключ165",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ165"
-    },
-    {
-      "insertText": "Ключ166",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ166"
-    },
-    {
-      "insertText": "Ключ167",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ167"
-    },
-    {
-      "insertText": "Ключ168",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ168"
-    },
-    {
-      "insertText": "Ключ169",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ169"
-    },
-    {
-      "insertText": "Ключ17",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ17"
-    },
-    {
-      "insertText": "Ключ170",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ170"
-    },
-    {
-      "insertText": "Ключ171",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ171"
-    },
-    {
-      "insertText": "Ключ172",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ172"
-    },
-    {
-      "insertText": "Ключ173",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ173"
-    },
-    {
-      "insertText": "Ключ174",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ174"
-    },
-    {
-      "insertText": "Ключ175",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ175"
-    },
-    {
-      "insertText": "Ключ176",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ176"
-    },
-    {
-      "insertText": "Ключ177",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ177"
-    },
-    {
-      "insertText": "Ключ178",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ178"
-    },
-    {
-      "insertText": "Ключ179",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ179"
-    },
-    {
-      "insertText": "Ключ18",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ18"
-    },
-    {
-      "insertText": "Ключ180",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ180"
-    },
-    {
-      "insertText": "Ключ181",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ181"
-    },
-    {
-      "insertText": "Ключ182",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ182"
-    },
-    {
-      "insertText": "Ключ183",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ183"
-    },
-    {
-      "insertText": "Ключ184",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ184"
-    },
-    {
-      "insertText": "Ключ185",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ185"
-    },
-    {
-      "insertText": "Ключ186",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ186"
-    },
-    {
-      "insertText": "Ключ187",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ187"
-    },
-    {
-      "insertText": "Ключ188",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ188"
-    },
-    {
-      "insertText": "Ключ189",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ189"
-    },
-    {
-      "insertText": "Ключ19",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ19"
-    },
-    {
-      "insertText": "Ключ190",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ190"
-    },
-    {
-      "insertText": "Ключ191",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ191"
-    },
-    {
-      "insertText": "Ключ192",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ192"
-    },
-    {
-      "insertText": "Ключ193",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ193"
-    },
-    {
-      "insertText": "Ключ194",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ194"
-    },
-    {
-      "insertText": "Ключ195",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ195"
-    },
-    {
-      "insertText": "Ключ196",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ196"
-    },
-    {
-      "insertText": "Ключ197",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ197"
-    },
-    {
-      "insertText": "Ключ198",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ198"
-    },
-    {
-      "insertText": "Ключ199",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ199"
-    },
-    {
-      "insertText": "Ключ2",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ2"
-    },
-    {
-      "insertText": "Ключ20",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ20"
-    },
-    {
-      "insertText": "Ключ200",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ200"
-    },
-    {
-      "insertText": "Ключ201",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ201"
-    },
-    {
-      "insertText": "Ключ202",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ202"
-    },
-    {
-      "insertText": "Ключ203",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ203"
-    },
-    {
-      "insertText": "Ключ204",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ204"
-    },
-    {
-      "insertText": "Ключ205",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ205"
-    },
-    {
-      "insertText": "Ключ206",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ206"
-    },
-    {
-      "insertText": "Ключ207",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ207"
-    },
-    {
-      "insertText": "Ключ208",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ208"
-    },
-    {
-      "insertText": "Ключ209",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ209"
-    },
-    {
-      "insertText": "Ключ21",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ21"
-    },
-    {
-      "insertText": "Ключ210",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ210"
-    },
-    {
-      "insertText": "Ключ211",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ211"
-    },
-    {
-      "insertText": "Ключ212",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ212"
-    },
-    {
-      "insertText": "Ключ213",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ213"
-    },
-    {
-      "insertText": "Ключ214",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ214"
-    },
-    {
-      "insertText": "Ключ215",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ215"
-    },
-    {
-      "insertText": "Ключ216",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ216"
-    },
-    {
-      "insertText": "Ключ217",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ217"
-    },
-    {
-      "insertText": "Ключ218",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ218"
-    },
-    {
-      "insertText": "Ключ219",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ219"
-    },
-    {
-      "insertText": "Ключ22",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ22"
-    },
-    {
-      "insertText": "Ключ220",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ220"
-    },
-    {
-      "insertText": "Ключ221",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ221"
-    },
-    {
-      "insertText": "Ключ222",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ222"
-    },
-    {
-      "insertText": "Ключ223",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ223"
-    },
-    {
-      "insertText": "Ключ224",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ224"
-    },
-    {
-      "insertText": "Ключ225",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ225"
-    },
-    {
-      "insertText": "Ключ226",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ226"
-    },
-    {
-      "insertText": "Ключ227",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ227"
-    },
-    {
-      "insertText": "Ключ228",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ228"
-    },
-    {
-      "insertText": "Ключ229",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ229"
-    },
-    {
-      "insertText": "Ключ23",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ23"
-    },
-    {
-      "insertText": "Ключ24",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ24"
-    },
-    {
-      "insertText": "Ключ25",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ25"
-    },
-    {
-      "insertText": "Ключ26",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ26"
-    },
-    {
-      "insertText": "Ключ27",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ27"
-    },
-    {
-      "insertText": "Ключ28",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ28"
-    },
-    {
-      "insertText": "Ключ29",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ29"
-    },
-    {
-      "insertText": "Ключ3",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ3"
-    },
-    {
-      "insertText": "Ключ30",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ30"
-    },
-    {
-      "insertText": "Ключ31",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ31"
-    },
-    {
-      "insertText": "Ключ32",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ32"
-    },
-    {
-      "insertText": "Ключ33",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ33"
-    },
-    {
-      "insertText": "Ключ34",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ34"
-    },
-    {
-      "insertText": "Ключ35",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ35"
-    },
-    {
-      "insertText": "Ключ36",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ36"
-    },
-    {
-      "insertText": "Ключ37",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ37"
-    },
-    {
-      "insertText": "Ключ38",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ38"
-    },
-    {
-      "insertText": "Ключ39",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ39"
-    },
-    {
-      "insertText": "Ключ4",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ4"
-    },
-    {
-      "insertText": "Ключ40",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ40"
-    },
-    {
-      "insertText": "Ключ41",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ41"
-    },
-    {
-      "insertText": "Ключ42",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ42"
-    },
-    {
-      "insertText": "Ключ43",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ43"
-    },
-    {
-      "insertText": "Ключ44",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ44"
-    },
-    {
-      "insertText": "Ключ45",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ45"
-    },
-    {
-      "insertText": "Ключ46",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ46"
-    },
-    {
-      "insertText": "Ключ47",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ47"
-    },
-    {
-      "insertText": "Ключ48",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ48"
-    },
-    {
-      "insertText": "Ключ49",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ49"
-    },
-    {
-      "insertText": "Ключ5",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ5"
-    },
-    {
-      "insertText": "Ключ50",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ50"
-    },
-    {
-      "insertText": "Ключ51",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ51"
-    },
-    {
-      "insertText": "Ключ52",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ52"
-    },
-    {
-      "insertText": "Ключ53",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ53"
-    },
-    {
-      "insertText": "Ключ54",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ54"
-    },
-    {
-      "insertText": "Ключ55",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ55"
-    },
-    {
-      "insertText": "Ключ56",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ56"
-    },
-    {
-      "insertText": "Ключ57",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ57"
-    },
-    {
-      "insertText": "Ключ58",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ58"
-    },
-    {
-      "insertText": "Ключ59",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ59"
-    },
-    {
-      "insertText": "Ключ6",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ6"
-    },
-    {
-      "insertText": "Ключ60",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ60"
-    },
-    {
-      "insertText": "Ключ61",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ61"
-    },
-    {
-      "insertText": "Ключ62",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ62"
-    },
-    {
-      "insertText": "Ключ63",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ63"
-    },
-    {
-      "insertText": "Ключ64",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ64"
-    },
-    {
-      "insertText": "Ключ65",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ65"
-    },
-    {
-      "insertText": "Ключ66",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ66"
-    },
-    {
-      "insertText": "Ключ67",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ67"
-    },
-    {
-      "insertText": "Ключ68",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ68"
-    },
-    {
-      "insertText": "Ключ69",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ69"
-    },
-    {
-      "insertText": "Ключ7",
-      "insertTextFormat": null,
-      "kind": "KEYWORD",
-      "label": "Ключ7"
+      "label": "Экспорт"
     }
   ]
 }

@@ -100,24 +100,25 @@ fn compute_hover_info_from_ir(
         byte_offset.and_then(|offset| ir_program.find_node_at_byte_offset(offset));
     let word_under_cursor = extract_word_at_position(file_content, line, column);
     let mut type_at_cursor =
-        byte_offset.and_then(|offset| semantic_type_at_offset(ir_program, offset));
+        byte_offset.and_then(|offset| exact_semantic_type_at_offset(analysis, file_id, ir_program, offset));
     if type_at_cursor.is_none() {
         if let Some(offset) = byte_offset {
             if let Some(identifier_span) =
                 identifier_span_at_byte_offset(file_content, offset as usize)
             {
-                type_at_cursor = semantic_type_at_span(ir_program, identifier_span);
+                type_at_cursor =
+                    exact_semantic_type_at_span(analysis, file_id, ir_program, identifier_span);
             }
         }
     }
     if type_at_cursor.is_none() {
         if let Some(node) = node_at_position {
-            type_at_cursor = semantic_type_at_span(ir_program, node.span);
+            type_at_cursor = exact_semantic_type_at_span(analysis, file_id, ir_program, node.span);
         }
     }
     let indexed_expression_hover = byte_offset.and_then(|offset| {
         let span = indexed_expression_span_at_byte_offset(file_content, offset as usize)?;
-        let resolution = semantic_type_at_span(ir_program, span)?;
+        let resolution = exact_semantic_type_at_span(analysis, file_id, ir_program, span)?;
         if resolution.is_unknown() || resolution.is_dynamic() {
             return None;
         }
@@ -156,8 +157,9 @@ fn compute_hover_info_from_ir(
                 let owner_span = object_node
                     .and_then(|idx| ir_program.nodes.get(idx).map(|n| n.span))
                     .unwrap_or(node.span);
-                let owner_resolution = semantic_type_at_span(ir_program, owner_span)
-                    .unwrap_or_else(TypeResolution::unknown);
+                let owner_resolution =
+                    exact_semantic_type_at_span(analysis, file_id, ir_program, owner_span)
+                        .unwrap_or_else(TypeResolution::unknown);
 
                 let (prop_type, is_readonly) = metadata_lookup
                     .get_properties(&owner_resolution)
@@ -191,14 +193,16 @@ fn compute_hover_info_from_ir(
         if let Some(offset) = byte_offset {
             if let Some(node) = control_node_at_position(ir_program, offset) {
                 if control_hover_requested(node, word) {
-                    return format_control_flow_hover(file_content, line, column, ir_program, node)
-                        .or_else(|| {
-                            Some(format_semantic_node_info(
-                                node,
-                                file_content,
-                                metadata_lookup,
-                            ))
-                        });
+                    return format_control_flow_hover(
+                        file_content,
+                        line,
+                        column,
+                        analysis,
+                        file_id,
+                        ir_program,
+                        node,
+                    )
+                    .or_else(|| Some(format_semantic_node_info(node, file_content, metadata_lookup)));
                 }
             }
         }
@@ -255,26 +259,38 @@ fn compute_hover_info_from_ir(
     None
 }
 
-fn semantic_type_at_span(program: &SemanticProgram, span: Span) -> Option<TypeResolution> {
-    program
-        .semantic_facts
-        .type_resolution_for_span(span)
-        .or_else(|| semantic_type_at_offset(program, span.start))
+fn exact_semantic_type_at_span(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    program: &SemanticProgram,
+    span: Span,
+) -> Option<TypeResolution> {
+    analysis
+        .type_for_span_serve_only(file_id, span)
+        .ok()
+        .flatten()
+        .or_else(|| exact_semantic_type_at_offset(analysis, file_id, program, span.start))
         .or_else(|| {
-            span.end
-                .checked_sub(1)
-                .and_then(|probe| semantic_type_at_offset(program, probe))
+            span.end.checked_sub(1).and_then(|probe| {
+                exact_semantic_type_at_offset(analysis, file_id, program, probe)
+            })
         })
 }
 
-fn semantic_type_at_offset(program: &SemanticProgram, probe: u32) -> Option<TypeResolution> {
-    program
-        .semantic_facts
-        .type_at_byte_offset(probe)
+fn exact_semantic_type_at_offset(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    program: &SemanticProgram,
+    probe: u32,
+) -> Option<TypeResolution> {
+    analysis
+        .type_at_byte_offset_serve_only(file_id, probe)
+        .ok()
+        .flatten()
         .or_else(|| {
             program
                 .find_node_at_byte_offset(probe)
-                .and_then(|node| program.semantic_facts.type_resolution_for_span(node.span))
+                .and_then(|node| analysis.type_for_span_serve_only(file_id, node.span).ok().flatten())
         })
 }
 
@@ -419,6 +435,8 @@ fn format_control_flow_hover(
     file_content: &str,
     line: u32,
     column: u32,
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
     ir_program: &SemanticProgram,
     node: &SemanticNode,
 ) -> Option<String> {
@@ -497,8 +515,8 @@ fn format_control_flow_hover(
     };
 
     let probe_abs = line_start.checked_add(probe_in_line.try_into().ok()?)?;
-    let actual_type =
-        semantic_type_at_offset(ir_program, probe_abs).unwrap_or_else(TypeResolution::unknown);
+    let actual_type = exact_semantic_type_at_offset(analysis, file_id, ir_program, probe_abs)
+        .unwrap_or_else(TypeResolution::unknown);
 
     let mut out = String::new();
     out.push_str(&title);

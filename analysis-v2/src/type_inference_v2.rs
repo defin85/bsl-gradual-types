@@ -22,7 +22,7 @@ use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::domain::{CodeLocation, ModuleType};
 use bsl_shared::ir::{
     SemanticConstructorTarget, SemanticFacts, SemanticMethodTarget, SemanticProgram,
-    SemanticTypeEntry,
+    SemanticTypeEntry, Span,
 };
 use bsl_syntax::ast::{CompilerDirective, Expression, ParseError, Program, Statement};
 
@@ -35,6 +35,12 @@ use crate::SemanticDeps;
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TypeIndex {
     entries: Vec<SemanticTypeEntry>,
+    definition_locations_by_span: HashMap<Span, TypeDefinitionLocation>,
+    call_receiver_type_by_span: HashMap<Span, TypeResolution>,
+    member_access_object_type_by_span: HashMap<Span, TypeResolution>,
+    call_method_targets_by_span: HashMap<Span, SemanticMethodTarget>,
+    member_method_targets_by_span: HashMap<Span, SemanticMethodTarget>,
+    constructor_targets_by_span: HashMap<Span, SemanticConstructorTarget>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -64,6 +70,12 @@ impl TypeIndex {
     fn from_semantic_facts(facts: &SemanticFacts) -> Self {
         Self {
             entries: facts.type_entries.clone(),
+            definition_locations_by_span: facts.definition_locations_by_span.clone(),
+            call_receiver_type_by_span: facts.call_receiver_type_by_span.clone(),
+            member_access_object_type_by_span: facts.member_access_object_type_by_span.clone(),
+            call_method_targets_by_span: facts.call_method_targets_by_span.clone(),
+            member_method_targets_by_span: facts.member_method_targets_by_span.clone(),
+            constructor_targets_by_span: facts.constructor_targets_by_span.clone(),
         }
     }
 
@@ -74,6 +86,121 @@ impl TypeIndex {
                 .filter(|entry| entry.span.contains(offset))
                 .min_by_key(|entry| entry.span.len())
                 .map(|entry| entry.resolution.clone())
+        };
+
+        find(byte_offset).or_else(|| byte_offset.checked_sub(1).and_then(find))
+    }
+
+    pub(crate) fn type_for_exact_span(&self, span: Span) -> Option<TypeResolution> {
+        self.entries
+            .iter()
+            .find(|entry| entry.span == span)
+            .map(|entry| entry.resolution.clone())
+    }
+
+    pub(crate) fn type_resolution_for_span(&self, span: Span) -> Option<TypeResolution> {
+        if let Some(exact) = self.type_for_exact_span(span) {
+            return Some(exact);
+        }
+        if span.start == span.end {
+            return self.type_at_byte_offset(span.start);
+        }
+        let end_inclusive = span.end.saturating_sub(1);
+        self.type_at_byte_offset(end_inclusive)
+            .or_else(|| self.type_at_byte_offset(span.start))
+    }
+
+    pub(crate) fn definition_location_for_exact_span(
+        &self,
+        span: Span,
+    ) -> Option<TypeDefinitionLocation> {
+        self.definition_locations_by_span.get(&span).cloned()
+    }
+
+    pub(crate) fn definition_location_at_byte_offset(
+        &self,
+        byte_offset: u32,
+    ) -> Option<TypeDefinitionLocation> {
+        self.closest_fact_by_offset(&self.definition_locations_by_span, byte_offset)
+    }
+
+    pub(crate) fn definition_location_for_span(&self, span: Span) -> Option<TypeDefinitionLocation> {
+        if let Some(exact) = self.definition_location_for_exact_span(span) {
+            return Some(exact);
+        }
+        if span.start == span.end {
+            return self.definition_location_at_byte_offset(span.start);
+        }
+        let end_inclusive = span.end.saturating_sub(1);
+        self.definition_location_at_byte_offset(end_inclusive)
+            .or_else(|| self.definition_location_at_byte_offset(span.start))
+    }
+
+    pub(crate) fn call_receiver_type_for_span(&self, span: Span) -> Option<TypeResolution> {
+        self.call_receiver_type_by_span.get(&span).cloned()
+    }
+
+    pub(crate) fn call_receiver_type_at_byte_offset(&self, byte_offset: u32) -> Option<TypeResolution> {
+        self.closest_fact_by_offset(&self.call_receiver_type_by_span, byte_offset)
+    }
+
+    pub(crate) fn member_access_object_type_for_span(&self, span: Span) -> Option<TypeResolution> {
+        self.member_access_object_type_by_span.get(&span).cloned()
+    }
+
+    pub(crate) fn member_access_object_type_at_byte_offset(
+        &self,
+        byte_offset: u32,
+    ) -> Option<TypeResolution> {
+        self.closest_fact_by_offset(&self.member_access_object_type_by_span, byte_offset)
+    }
+
+    pub(crate) fn call_method_target_for_span(&self, span: Span) -> Option<SemanticMethodTarget> {
+        self.call_method_targets_by_span.get(&span).cloned()
+    }
+
+    pub(crate) fn call_method_target_at_byte_offset(
+        &self,
+        byte_offset: u32,
+    ) -> Option<SemanticMethodTarget> {
+        self.closest_fact_by_offset(&self.call_method_targets_by_span, byte_offset)
+    }
+
+    pub(crate) fn member_method_target_for_span(&self, span: Span) -> Option<SemanticMethodTarget> {
+        self.member_method_targets_by_span.get(&span).cloned()
+    }
+
+    pub(crate) fn member_method_target_at_byte_offset(
+        &self,
+        byte_offset: u32,
+    ) -> Option<SemanticMethodTarget> {
+        self.closest_fact_by_offset(&self.member_method_targets_by_span, byte_offset)
+    }
+
+    pub(crate) fn constructor_target_for_span(
+        &self,
+        span: Span,
+    ) -> Option<SemanticConstructorTarget> {
+        self.constructor_targets_by_span.get(&span).cloned()
+    }
+
+    pub(crate) fn constructor_target_at_byte_offset(
+        &self,
+        byte_offset: u32,
+    ) -> Option<SemanticConstructorTarget> {
+        self.closest_fact_by_offset(&self.constructor_targets_by_span, byte_offset)
+    }
+
+    fn closest_fact_by_offset<T: Clone>(
+        &self,
+        facts: &HashMap<Span, T>,
+        byte_offset: u32,
+    ) -> Option<T> {
+        let find = |offset: u32| {
+            facts.iter()
+                .filter(|(span, _)| span.contains(offset))
+                .min_by_key(|(span, _)| span.len())
+                .map(|(_, value)| value.clone())
         };
 
         find(byte_offset).or_else(|| byte_offset.checked_sub(1).and_then(find))

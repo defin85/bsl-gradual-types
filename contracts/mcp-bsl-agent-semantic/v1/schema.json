@@ -1,0 +1,631 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "mcp-bsl-agent-semantic contract v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "surface",
+    "major_version",
+    "schema_version",
+    "compatibility",
+    "semantic_contract_classes",
+    "tools",
+    "examples"
+  ],
+  "properties": {
+    "surface": {
+      "type": "string",
+      "const": "mcp-bsl-agent-semantic"
+    },
+    "major_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "breaking_change_requires_major_bump",
+        "breaking_change_requires_migration_note"
+      ],
+      "properties": {
+        "breaking_change_requires_major_bump": {
+          "type": "boolean",
+          "const": true
+        },
+        "breaking_change_requires_migration_note": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    },
+    "semantic_contract_classes": {
+      "type": "array",
+      "minItems": 2,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "exact_current_revision",
+          "fail_closed_current_revision"
+        ]
+      }
+    },
+    "tools": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bsl_type_at_position",
+        "bsl_members",
+        "bsl_definition"
+      ],
+      "properties": {
+        "bsl_type_at_position": {
+          "$ref": "#/$defs/tool_type_at_position"
+        },
+        "bsl_members": {
+          "$ref": "#/$defs/tool_members"
+        },
+        "bsl_definition": {
+          "$ref": "#/$defs/tool_definition"
+        }
+      }
+    },
+    "examples": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type_at_position_exact_current_revision",
+        "type_at_position_fail_closed_current_revision",
+        "members_exact_current_revision",
+        "members_fail_closed_current_revision",
+        "definition_exact_current_revision",
+        "definition_fail_closed_current_revision"
+      ],
+      "properties": {
+        "type_at_position_exact_current_revision": {
+          "$ref": "#/$defs/type_at_position_example_exact"
+        },
+        "type_at_position_fail_closed_current_revision": {
+          "$ref": "#/$defs/type_at_position_example_fail_closed"
+        },
+        "members_exact_current_revision": {
+          "$ref": "#/$defs/members_example_exact"
+        },
+        "members_fail_closed_current_revision": {
+          "$ref": "#/$defs/members_example_fail_closed"
+        },
+        "definition_exact_current_revision": {
+          "$ref": "#/$defs/definition_example_exact"
+        },
+        "definition_fail_closed_current_revision": {
+          "$ref": "#/$defs/definition_example_fail_closed"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "tool_common": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_fields",
+        "fail_closed_transport_invariants"
+      ]
+    },
+    "tool_type_at_position": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/tool_common"
+        },
+        {
+          "properties": {
+            "required_fields": {
+              "type": "array",
+              "minItems": 5,
+              "maxItems": 5,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "analysis_revision",
+                  "flow_sensitive_enabled",
+                  "type_info",
+                  "node",
+                  "warnings"
+                ]
+              }
+            },
+            "fail_closed_transport_invariants": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "type_info_null",
+                  "node_null",
+                  "warnings_empty"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "tool_members": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/tool_common"
+        },
+        {
+          "properties": {
+            "required_fields": {
+              "type": "array",
+              "minItems": 4,
+              "maxItems": 4,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "analysis_revision",
+                  "flow_sensitive_enabled",
+                  "members",
+                  "truncated"
+                ]
+              }
+            },
+            "fail_closed_transport_invariants": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "members_empty",
+                  "truncated_false"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "tool_definition": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/tool_common"
+        },
+        {
+          "properties": {
+            "required_fields": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "analysis_revision",
+                  "location",
+                  "snippet"
+                ]
+              }
+            },
+            "fail_closed_transport_invariants": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "location_null",
+                  "snippet_null"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "type_at_position_response_exact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "analysis_revision",
+        "flow_sensitive_enabled",
+        "type_info",
+        "node",
+        "warnings"
+      ],
+      "properties": {
+        "analysis_revision": {
+          "type": "integer"
+        },
+        "flow_sensitive_enabled": {
+          "type": "boolean"
+        },
+        "type_info": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "certainty",
+            "active_facet",
+            "available_facets"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "certainty": {
+              "type": "string"
+            },
+            "active_facet": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "available_facets": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "node": {
+          "$ref": "#/$defs/node_info"
+        },
+        "warnings": {
+          "type": "array",
+          "maxItems": 0
+        }
+      }
+    },
+    "type_at_position_response_fail_closed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "analysis_revision",
+        "flow_sensitive_enabled",
+        "type_info",
+        "node",
+        "warnings"
+      ],
+      "properties": {
+        "analysis_revision": {
+          "type": "integer"
+        },
+        "flow_sensitive_enabled": {
+          "type": "boolean"
+        },
+        "type_info": {
+          "type": "null"
+        },
+        "node": {
+          "type": "null"
+        },
+        "warnings": {
+          "type": "array",
+          "maxItems": 0
+        }
+      }
+    },
+    "members_response_exact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "analysis_revision",
+        "flow_sensitive_enabled",
+        "members",
+        "truncated"
+      ],
+      "properties": {
+        "analysis_revision": {
+          "type": "integer"
+        },
+        "flow_sensitive_enabled": {
+          "type": "boolean"
+        },
+        "members": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "kind",
+              "detail",
+              "member_identity"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "detail": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "member_identity": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "truncated": {
+          "type": "boolean",
+          "const": false
+        }
+      }
+    },
+    "members_response_fail_closed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "analysis_revision",
+        "flow_sensitive_enabled",
+        "members",
+        "truncated"
+      ],
+      "properties": {
+        "analysis_revision": {
+          "type": "integer"
+        },
+        "flow_sensitive_enabled": {
+          "type": "boolean"
+        },
+        "members": {
+          "type": "array",
+          "maxItems": 0
+        },
+        "truncated": {
+          "type": "boolean",
+          "const": false
+        }
+      }
+    },
+    "definition_response_exact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "analysis_revision",
+        "location",
+        "snippet"
+      ],
+      "properties": {
+        "analysis_revision": {
+          "type": "integer"
+        },
+        "location": {
+          "$ref": "#/$defs/location_info"
+        },
+        "snippet": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "definition_response_fail_closed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "analysis_revision",
+        "location",
+        "snippet"
+      ],
+      "properties": {
+        "analysis_revision": {
+          "type": "integer"
+        },
+        "location": {
+          "type": "null"
+        },
+        "snippet": {
+          "type": "null"
+        }
+      }
+    },
+    "type_at_position_example_exact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "semantic_contract",
+        "response"
+      ],
+      "properties": {
+        "semantic_contract": {
+          "type": "string",
+          "const": "exact_current_revision"
+        },
+        "response": {
+          "$ref": "#/$defs/type_at_position_response_exact"
+        }
+      }
+    },
+    "type_at_position_example_fail_closed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "semantic_contract",
+        "response"
+      ],
+      "properties": {
+        "semantic_contract": {
+          "type": "string",
+          "const": "fail_closed_current_revision"
+        },
+        "response": {
+          "$ref": "#/$defs/type_at_position_response_fail_closed"
+        }
+      }
+    },
+    "members_example_exact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "semantic_contract",
+        "response"
+      ],
+      "properties": {
+        "semantic_contract": {
+          "type": "string",
+          "const": "exact_current_revision"
+        },
+        "response": {
+          "$ref": "#/$defs/members_response_exact"
+        }
+      }
+    },
+    "members_example_fail_closed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "semantic_contract",
+        "response"
+      ],
+      "properties": {
+        "semantic_contract": {
+          "type": "string",
+          "const": "fail_closed_current_revision"
+        },
+        "response": {
+          "$ref": "#/$defs/members_response_fail_closed"
+        }
+      }
+    },
+    "definition_example_exact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "semantic_contract",
+        "response"
+      ],
+      "properties": {
+        "semantic_contract": {
+          "type": "string",
+          "const": "exact_current_revision"
+        },
+        "response": {
+          "$ref": "#/$defs/definition_response_exact"
+        }
+      }
+    },
+    "definition_example_fail_closed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "semantic_contract",
+        "response"
+      ],
+      "properties": {
+        "semantic_contract": {
+          "type": "string",
+          "const": "fail_closed_current_revision"
+        },
+        "response": {
+          "$ref": "#/$defs/definition_response_fail_closed"
+        }
+      }
+    },
+    "position": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "line",
+        "character"
+      ],
+      "properties": {
+        "line": {
+          "type": "integer"
+        },
+        "character": {
+          "type": "integer"
+        }
+      }
+    },
+    "range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start",
+        "end"
+      ],
+      "properties": {
+        "start": {
+          "$ref": "#/$defs/position"
+        },
+        "end": {
+          "$ref": "#/$defs/position"
+        }
+      }
+    },
+    "document_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "root_id",
+        "path"
+      ],
+      "properties": {
+        "root_id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      }
+    },
+    "location_info": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "file",
+        "range"
+      ],
+      "properties": {
+        "file": {
+          "$ref": "#/$defs/document_ref"
+        },
+        "range": {
+          "$ref": "#/$defs/range"
+        }
+      }
+    },
+    "node_info": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "range"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "range": {
+          "$ref": "#/$defs/range"
+        }
+      }
+    }
+  }
+}

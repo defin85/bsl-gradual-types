@@ -359,6 +359,8 @@ Fail-closed `job_result` keeps the same envelope and returns `type_info: null` w
 }
 ```
 
+Machine-readable baseline для этого payload живёт в `contracts/mcp-bsl-agent-semantic/v1/contract.json`.
+
 ### 3.12. `bsl_members_start`
 
 Member list (completion-like) для receiver в позиции (например для `expr.`).
@@ -407,6 +409,8 @@ Fail-closed job_result for the same public contract:
 }
 ```
 
+Machine-readable baseline для `bsl_members` входит в `contracts/mcp-bsl-agent-semantic/v1/contract.json`.
+
 ### 3.13. `bsl_definition_start`
 
 Definition по `symbol_id` или по позиции.
@@ -447,6 +451,8 @@ Fail-closed job_result keeps the response envelope and returns empty semantic pa
   "snippet": null
 }
 ```
+
+Machine-readable baseline для `bsl_definition` входит в `contracts/mcp-bsl-agent-semantic/v1/contract.json`.
 
 ### 3.14. `bsl_references_start`
 

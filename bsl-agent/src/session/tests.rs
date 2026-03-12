@@ -344,6 +344,21 @@ fn collect_type_at_position_preserves_available_facets_for_recordset_module_bind
 }
 
 #[test]
+fn type_at_position_fail_closed_missing_canonical_ir_keeps_empty_transport_warnings() {
+    let response = fail_closed_type_at_position_response(17, false);
+
+    assert_eq!(response.analysis_revision, 17);
+    assert!(!response.flow_sensitive_enabled);
+    assert!(response.type_info.is_none(), "type_info: {:?}", response.type_info);
+    assert!(response.node.is_none(), "node: {:?}", response.node);
+    assert!(
+        response.warnings.is_empty(),
+        "warnings: {:?}",
+        response.warnings
+    );
+}
+
+#[test]
 fn semantic_helpers_fail_closed_without_precomputed_type_index() {
     use bsl_analysis_v2::{DepsSnapshotId, SemanticDeps};
     use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};

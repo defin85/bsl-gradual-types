@@ -512,14 +512,15 @@ Versioned contract существует только там, где surface уж
 На момент этого slice:
 - `LSP completion` и completion timeline имеют versioned public contract и обязаны пройти через major bump;
 - observability surfaces имеют versioned public contract и обязаны сохранить bounded shared taxonomy;
-- для `Web`, `MCP`, `CLI` в `contracts/**` пока нет самостоятельного versioned baseline.
+- semantic MCP envelopes зафиксированы в `contracts/mcp-bsl-agent-semantic/v1/**` как отдельный public baseline для `bsl_type_at_position`, `bsl_members` и `bsl_definition`;
+- для `Web` и `CLI` в `contracts/**` пока нет самостоятельного versioned baseline.
 
 Следовательно граница ownership такая:
 - shared semantic runtime владеет semantic truth, fail-closed outcome class и machine-readable reason taxonomy;
 - adapter DTO layer владеет только transport mapping: `CompletionList`, JSON response, MCP result envelope, CLI stdout/stderr/report formatting;
 - adapters MAY выбирать surface-специфичную форму unavailable (`empty`, `None`, `explicit warning/envelope`), но MUST NOT вводить adapter-local semantic reason enums или stale/degraded substitute fields;
 - shared reason codes по умолчанию живут в observability/logging contract, а не в новых public DTO fields;
-- если `Web`, `MCP` или `CLI` потребуется новый стабильно поддерживаемый field/enum для fail-closed semantics, merge должен сначала добавить новый versioned surface в `contracts/**`, а не расширять DTO ad hoc.
+- если `Web` или `CLI` потребуется новый стабильно поддерживаемый field/enum для fail-closed semantics, merge должен сначала добавить новый versioned surface в `contracts/**`, а не расширять DTO ad hoc.
 
 Это даёт fail-closed merge-state без скрытого расширения публичного API:
 - semantic truth не зависит от transport DTO;

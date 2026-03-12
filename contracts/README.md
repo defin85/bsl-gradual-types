@@ -20,6 +20,7 @@ Current baseline surfaces:
 - `lsp-completion-v2`
 - `lsp-completion-timeline`
 - `lsp-index-state`
+- `mcp-bsl-agent-semantic`
 - `observability-completion-v2`
 - `observability-diagnostics-v2`
 - `intellisense-perf-gate`

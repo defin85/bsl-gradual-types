@@ -342,12 +342,21 @@ def build_report(
                     "surface": surface,
                     "compared_versions": None,
                     "diff_classification": "non_breaking",
-                    "issues": [],
-                    "violations": ["surface_missing_in_baseline"],
-                    "pass": False,
+                    "issues": [
+                        {
+                            "classification": "non_breaking",
+                            "reason": "surface_added",
+                            "path": "$",
+                            "baseline": None,
+                            "candidate": {
+                                "candidate_latest_major": max(candidate_tree[surface].keys())
+                            },
+                        }
+                    ],
+                    "violations": [],
+                    "pass": True,
                 }
             )
-            global_violations.append(f"{surface}:surface_missing_in_baseline")
             continue
         if surface not in candidate_tree:
             surface_reports.append(

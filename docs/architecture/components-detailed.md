@@ -299,6 +299,7 @@ Shared observability contract фиксирует:
 
 Основные артефакты:
 
+- [contracts/mcp-bsl-agent-semantic/v1/contract.json](../../contracts/mcp-bsl-agent-semantic/v1/contract.json)
 - [contracts/observability-completion-v2/v3/contract.json](../../contracts/observability-completion-v2/v3/contract.json)
 - [contracts/intellisense-perf-gate/v2/contract.json](../../contracts/intellisense-perf-gate/v2/contract.json)
 - [docs/guides/lsp-v2-latency-policy.md](../guides/lsp-v2-latency-policy.md)

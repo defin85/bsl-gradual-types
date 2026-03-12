@@ -572,6 +572,19 @@ struct TypeAtPositionRequest {
     position: crate::server::types::Position,
 }
 
+fn fail_closed_type_at_position_response(
+    analysis_revision: u64,
+    flow_sensitive_enabled: bool,
+) -> BslTypeAtPositionResponse {
+    BslTypeAtPositionResponse {
+        analysis_revision,
+        flow_sensitive_enabled,
+        type_info: None,
+        node: None,
+        warnings: Vec::new(),
+    }
+}
+
 fn collect_type_at_position(
     request: TypeAtPositionRequest,
 ) -> Result<BslTypeAtPositionResponse, rmcp::ErrorData> {
@@ -607,13 +620,10 @@ fn collect_type_at_position(
                 "type_at_position",
                 "missing_canonical_ir",
             );
-            return Ok(BslTypeAtPositionResponse {
+            return Ok(fail_closed_type_at_position_response(
                 analysis_revision,
                 flow_sensitive_enabled,
-                type_info: None,
-                node: None,
-                warnings: vec!["IR not available".to_string()],
-            });
+            ));
         }
     };
 
@@ -631,13 +641,10 @@ fn collect_type_at_position(
             "type_at_position",
             "missing_canonical_ir",
         );
-        return Ok(BslTypeAtPositionResponse {
+        return Ok(fail_closed_type_at_position_response(
             analysis_revision,
             flow_sensitive_enabled,
-            type_info: None,
-            node: None,
-            warnings: vec!["IR not available".to_string()],
-        });
+        ));
     };
 
     let type_info = type_at_utf16_position(

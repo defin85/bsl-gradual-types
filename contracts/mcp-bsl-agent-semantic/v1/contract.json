@@ -1,0 +1,151 @@
+{
+  "surface": "mcp-bsl-agent-semantic",
+  "major_version": 1,
+  "schema_version": 1,
+  "compatibility": {
+    "breaking_change_requires_major_bump": true,
+    "breaking_change_requires_migration_note": true
+  },
+  "semantic_contract_classes": [
+    "exact_current_revision",
+    "fail_closed_current_revision"
+  ],
+  "tools": {
+    "bsl_type_at_position": {
+      "required_fields": [
+        "analysis_revision",
+        "flow_sensitive_enabled",
+        "type_info",
+        "node",
+        "warnings"
+      ],
+      "fail_closed_transport_invariants": [
+        "type_info_null",
+        "node_null",
+        "warnings_empty"
+      ]
+    },
+    "bsl_members": {
+      "required_fields": [
+        "analysis_revision",
+        "flow_sensitive_enabled",
+        "members",
+        "truncated"
+      ],
+      "fail_closed_transport_invariants": [
+        "members_empty",
+        "truncated_false"
+      ]
+    },
+    "bsl_definition": {
+      "required_fields": [
+        "analysis_revision",
+        "location",
+        "snippet"
+      ],
+      "fail_closed_transport_invariants": [
+        "location_null",
+        "snippet_null"
+      ]
+    }
+  },
+  "examples": {
+    "type_at_position_exact_current_revision": {
+      "semantic_contract": "exact_current_revision",
+      "response": {
+        "analysis_revision": 2,
+        "flow_sensitive_enabled": false,
+        "type_info": {
+          "name": "Строка",
+          "certainty": "known",
+          "active_facet": "Object",
+          "available_facets": [
+            "Manager",
+            "Object",
+            "Reference"
+          ]
+        },
+        "node": {
+          "kind": "MemberAccess",
+          "range": {
+            "start": {
+              "line": 10,
+              "character": 0
+            },
+            "end": {
+              "line": 10,
+              "character": 20
+            }
+          }
+        },
+        "warnings": []
+      }
+    },
+    "type_at_position_fail_closed_current_revision": {
+      "semantic_contract": "fail_closed_current_revision",
+      "response": {
+        "analysis_revision": 2,
+        "flow_sensitive_enabled": false,
+        "type_info": null,
+        "node": null,
+        "warnings": []
+      }
+    },
+    "members_exact_current_revision": {
+      "semantic_contract": "exact_current_revision",
+      "response": {
+        "analysis_revision": 2,
+        "flow_sensitive_enabled": false,
+        "members": [
+          {
+            "name": "Записать",
+            "kind": "method",
+            "detail": "Записать()",
+            "member_identity": "method:Документы.ЗаказПокупателя:Object:Записать"
+          }
+        ],
+        "truncated": false
+      }
+    },
+    "members_fail_closed_current_revision": {
+      "semantic_contract": "fail_closed_current_revision",
+      "response": {
+        "analysis_revision": 2,
+        "flow_sensitive_enabled": false,
+        "members": [],
+        "truncated": false
+      }
+    },
+    "definition_exact_current_revision": {
+      "semantic_contract": "exact_current_revision",
+      "response": {
+        "analysis_revision": 2,
+        "location": {
+          "file": {
+            "root_id": "hex",
+            "path": "src/CommonModules/Foo/Module.bsl"
+          },
+          "range": {
+            "start": {
+              "line": 0,
+              "character": 0
+            },
+            "end": {
+              "line": 0,
+              "character": 1
+            }
+          }
+        },
+        "snippet": null
+      }
+    },
+    "definition_fail_closed_current_revision": {
+      "semantic_contract": "fail_closed_current_revision",
+      "response": {
+        "analysis_revision": 2,
+        "location": null,
+        "snippet": null
+      }
+    }
+  }
+}

@@ -577,9 +577,6 @@ async fn collect_cli_completion_items(expression: &str) -> anyhow::Result<Vec<Co
         .flatten()
         .filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
         .map(|hint| normalize_completion_owner_hint(&prepared.metadata_lookup, hint));
-    if member_access_request && owner_hint.is_none() {
-        return Ok(Vec::new());
-    }
     let completions = get_completion_with_semantic_program_snapshot_with_trigger_hint(
         inline.file_text.as_ref(),
         inline.line,

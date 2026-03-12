@@ -2,7 +2,7 @@
   "schema_version": "v1",
   "contract_version": "quality-gates-v1",
   "change_id": "refactor-ir-canonical-semantic-pipeline",
-  "generated_at": "2026-03-12T19:10:00+03:00",
+  "generated_at": "2026-03-12T18:28:03+03:00",
   "overall": {
     "verdict": "pass",
     "gates_total": 7,
@@ -49,9 +49,13 @@
         "backend/tests/lsp_intellisense_tests.rs::lsp_signature_help_uses_exact_semantic_index_when_runtime_ir_facts_are_missing",
         "backend/tests/goto_definition_common_module_test.rs::goto_definition_uses_exact_semantic_index_when_runtime_ir_facts_are_missing",
         "cli/src/main.rs::cli_inline_completion_uses_shared_runtime_snapshot",
+        "cli/src/main.rs::cli_inline_completion_does_not_backfill_from_polluted_search_index",
         "cli/src/main.rs::cli_inline_type_info_uses_shared_runtime_snapshot",
         "cli/src/main.rs::cli_type_info_preserves_object_module_binding_facets",
         "cli/src/main.rs::cli_file_diagnostics_use_shared_runtime_snapshot",
+        "backend/tests/flow_sensitive_web_api_test.rs::hover_endpoints_do_not_backfill_from_polluted_search_index",
+        "bsl-agent/src/session/tests.rs::bsl_members_does_not_execute_parse_result_query_on_semantic_path",
+        "bsl-agent/src/session/tests.rs::semantic_mcp_tools_do_not_backfill_from_polluted_search_index_on_default_path",
         "bsl-agent/tests/stdio_integration.rs::stdio_semantic_tools_happy_path_uses_current_revision_overlay",
         "bsl-agent/tests/stdio_integration.rs::stdio_members_fail_closed_on_current_revision_missing_owner_hint",
         "bsl-agent/tests/stdio_integration.rs::stdio_type_at_position_returns_empty_on_current_revision_without_semantic_surface",
@@ -70,6 +74,7 @@
         "openspec/changes/refactor-ir-canonical-semantic-pipeline/validation/contracts-compatibility-report.json",
         "contracts/lsp-completion-v2/v2/contract.json",
         "contracts/lsp-completion-timeline/v3/contract.json",
+        "contracts/mcp-bsl-agent-semantic/v1/contract.json",
         "contracts/observability-completion-v2/v3/contract.json",
         "contracts/intellisense-perf-gate/v2/contract.json"
       ]
@@ -115,6 +120,7 @@
       "verdict": "pass",
       "reason_code": "docs_match_shipped_contract",
       "artifacts": [
+        "contracts/mcp-bsl-agent-semantic/v1/contract.json",
         "docs/guides/type-lookup-architecture.md",
         "docs/architecture/components-detailed.md",
         "docs/guides/lsp-v2-latency-policy.md",

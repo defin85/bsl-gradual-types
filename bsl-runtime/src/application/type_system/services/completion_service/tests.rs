@@ -436,7 +436,7 @@ async fn completion_limits_output() {
 }
 
 #[tokio::test]
-async fn completion_non_member_without_ir_does_not_use_file_local_symbols() {
+async fn completion_non_member_test_helper_without_ir_uses_snapshot_modules_but_not_file_locals() {
     let index = IntellisenseIndexStore::new("cfg", "platform");
     let uri = "file:///completion_non_member_no_ir_sources_test.bsl";
 
@@ -455,6 +455,11 @@ async fn completion_non_member_without_ir_does_not_use_file_local_symbols() {
     module_from_index.scope = Some(SymbolScope::Module);
 
     index.replace_symbols_for_uri(uri, vec![local_from_index, module_from_index]);
+    index.set_keywords(vec![IndexItem::new(
+        "ИндексКлюч".to_string(),
+        IndexItemKind::Keyword,
+        crate::system::IndexKind::Keyword,
+    )]);
 
     let repository = Arc::new(InMemoryTypeRepository::new());
     let metadata_lookup = TypeMetadataLookup::new(repository);
@@ -472,6 +477,11 @@ async fn completion_non_member_without_ir_does_not_use_file_local_symbols() {
 
     assert!(
         labels.iter().any(|label| label == "ИндексМодуль"),
+        "labels: {:?}",
+        labels
+    );
+    assert!(
+        labels.iter().any(|label| label == "ИндексКлюч"),
         "labels: {:?}",
         labels
     );
@@ -553,7 +563,7 @@ async fn completion_labels_non_member(
         file_uri,
         index,
         metadata_lookup,
-        Some(&ctx),
+        &ctx,
         None,
     )
     .await
@@ -1257,7 +1267,7 @@ async fn completion_resolves_variable_type_for_member_access() {
         Some("completion_test.bsl"),
         &index,
         &metadata_lookup,
-        Some(&ctx),
+        &ctx,
         None,
     )
     .await
@@ -1363,7 +1373,7 @@ async fn completion_resolves_member_owner_from_ir_without_owner_hint() {
         Some("completion_no_owner_hint_test.bsl"),
         &index,
         &metadata_lookup,
-        Some(&ctx),
+        &ctx,
         None,
     )
     .await
@@ -1488,7 +1498,7 @@ async fn completion_unknown_bare_receiver_member_access_ignores_polluted_index_s
         Some("completion_unknown_receiver_member_access_test.bsl"),
         &index,
         &metadata_lookup,
-        Some(&ctx),
+        &ctx,
         None,
     )
     .await
@@ -1601,7 +1611,7 @@ async fn completion_member_access_does_not_reconstruct_type_name_without_canonic
         Some("completion_type_name_receiver_without_owner_hint_test.bsl"),
         &index,
         &metadata_lookup,
-        Some(&ctx),
+        &ctx,
         None,
     )
     .await
@@ -1711,7 +1721,7 @@ async fn completion_implicit_form_object_member_access_resolves_from_ir_without_
         Some("file:///completion_form_module_implicit_owner_test.bsl"),
         &index,
         &metadata_lookup,
-        Some(&ctx),
+        &ctx,
         None,
     )
     .await
@@ -1840,7 +1850,7 @@ async fn completion_resolves_implicit_form_object_member_access_with_shared_hint
         Some("file:///completion_form_module_implicit_owner_test.bsl"),
         &index,
         &metadata_lookup,
-        Some(&ctx),
+        &ctx,
         None,
     )
     .await
@@ -1937,7 +1947,7 @@ async fn completion_uses_owner_hint_for_member_access_when_flow_sensitive_is_ena
         Some("completion_narrowing_test.bsl"),
         &index,
         &metadata_lookup,
-        Some(&ctx),
+        &ctx,
         None,
     )
     .await
@@ -2194,7 +2204,7 @@ async fn completion_resolves_nested_member_access_chain() {
         Some("completion_nested_chain_test.bsl"),
         &index,
         &metadata_lookup,
-        Some(&ctx),
+        &ctx,
         None,
     )
     .await
@@ -2299,7 +2309,7 @@ async fn completion_supports_member_access_after_method_call() {
         Some("completion_call_chain_test.bsl"),
         &index,
         &metadata_lookup,
-        Some(&ctx),
+        &ctx,
         None,
     )
     .await
@@ -2387,7 +2397,7 @@ async fn completion_supports_member_access_after_index_access() {
         Some("completion_index_access_test.bsl"),
         &index,
         &metadata_lookup,
-        Some(&ctx),
+        &ctx,
         None,
     )
     .await
@@ -2475,7 +2485,7 @@ async fn completion_supports_member_access_after_map_index_access() {
         Some("completion_map_index_access_test.bsl"),
         &index,
         &metadata_lookup,
-        Some(&ctx),
+        &ctx,
         None,
     )
     .await
@@ -2563,7 +2573,7 @@ async fn completion_does_not_infer_map_index_owner_without_shared_hint() {
         Some("completion_map_index_access_no_hint_test.bsl"),
         &index,
         &metadata_lookup,
-        Some(&ctx),
+        &ctx,
         None,
     )
     .await
@@ -2650,7 +2660,7 @@ async fn completion_does_not_infer_type_name_member_access_without_canonical_own
         Some("completion_type_name_no_hint_test.bsl"),
         &index,
         &metadata_lookup,
-        Some(&ctx),
+        &ctx,
         None,
     )
     .await
@@ -2744,7 +2754,7 @@ async fn completion_does_not_infer_type_name_member_chain_without_canonical_owne
         Some("completion_type_name_chain_no_hint_test.bsl"),
         &index,
         &metadata_lookup,
-        Some(&ctx),
+        &ctx,
         None,
     )
     .await
@@ -2870,7 +2880,7 @@ async fn completion_supports_member_access_after_ternary_expression() {
         Some("completion_ternary_test.bsl"),
         &index,
         &metadata_lookup,
-        Some(&ctx),
+        &ctx,
         None,
     )
     .await
@@ -3004,7 +3014,7 @@ async fn completion_supports_member_access_after_choice_expression() {
         Some("completion_choice_test.bsl"),
         &index,
         &metadata_lookup,
-        Some(&ctx),
+        &ctx,
         None,
     )
     .await
@@ -3109,7 +3119,7 @@ async fn completion_substitutes_faceted_metadata_name_in_return_type() {
         Some("completion_facet_substitution_test.bsl"),
         &index,
         &metadata_lookup,
-        Some(&ctx),
+        &ctx,
         None,
     )
     .await

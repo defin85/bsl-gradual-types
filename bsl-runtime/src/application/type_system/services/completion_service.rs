@@ -99,6 +99,23 @@ pub(crate) struct CompletionAnalysisContext<'a> {
     pub include_flow_sensitive: bool,
 }
 
+#[derive(Clone, Copy)]
+enum CompletionEvidence<'a> {
+    Semantic(&'a CompletionAnalysisContext<'a>),
+    #[cfg(test)]
+    SnapshotOnly,
+}
+
+impl<'a> CompletionEvidence<'a> {
+    fn file_path(self) -> Option<&'a str> {
+        match self {
+            Self::Semantic(analysis) => Some(analysis.file_path),
+            #[cfg(test)]
+            Self::SnapshotOnly => None,
+        }
+    }
+}
+
 /// LSP operations - get completion at position
 ///
 /// # Arguments
@@ -119,14 +136,16 @@ pub(crate) async fn get_completion(
     index: &IntellisenseIndexStore,
     metadata_lookup: &TypeMetadataLookup,
 ) -> Result<CompletionResult> {
-    get_completion_with_analysis(
+    // Snapshot-only completion is a unit-test helper. Shipped adapters must provide
+    // canonical semantic context via `get_completion_with_semantic_program_snapshot*`.
+    get_completion_internal(
         file_content,
         line,
         column,
         file_uri,
         index,
         metadata_lookup,
-        None,
+        CompletionEvidence::SnapshotOnly,
         None,
     )
     .await
@@ -277,7 +296,7 @@ pub async fn get_completion_with_semantic_program(
         file_uri,
         index,
         metadata_lookup,
-        Some(&analysis),
+        &analysis,
         None,
     )
     .await
@@ -344,7 +363,7 @@ pub async fn get_completion_with_semantic_program_snapshot_with_trigger_hint(
         file_uri,
         index_snapshot,
         metadata_lookup,
-        Some(&analysis),
+        &analysis,
         trigger_char_hint,
     )
     .await
@@ -411,7 +430,7 @@ pub async fn get_completion_with_semantic_program_snapshot_v2_with_trigger_hint(
         file_uri,
         index_snapshot,
         metadata_lookup,
-        Some(&analysis),
+        &analysis,
         trigger_char_hint,
     )
     .await
@@ -425,7 +444,31 @@ pub(crate) async fn get_completion_with_analysis(
     file_uri: Option<&str>,
     index: &dyn IndexSnapshotSource,
     metadata_lookup: &TypeMetadataLookup,
-    analysis: Option<&CompletionAnalysisContext<'_>>,
+    analysis: &CompletionAnalysisContext<'_>,
+    trigger_char_hint: Option<char>,
+) -> Result<CompletionResult> {
+    get_completion_internal(
+        file_content,
+        line,
+        column,
+        file_uri,
+        index,
+        metadata_lookup,
+        CompletionEvidence::Semantic(analysis),
+        trigger_char_hint,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn get_completion_internal(
+    file_content: &str,
+    line: u32,
+    column: u32,
+    file_uri: Option<&str>,
+    index: &dyn IndexSnapshotSource,
+    metadata_lookup: &TypeMetadataLookup,
+    evidence: CompletionEvidence<'_>,
     trigger_char_hint: Option<char>,
 ) -> Result<CompletionResult> {
     let trace_request_id = if completion_trace_enabled() {
@@ -433,12 +476,14 @@ pub(crate) async fn get_completion_with_analysis(
     } else {
         None
     };
-    let analysis_file_path = analysis.map(|analysis| analysis.file_path);
+    let analysis_file_path = evidence.file_path();
     let context =
         analyze_completion_context_with_trigger_hint(file_content, line, column, trigger_char_hint);
     let snapshot_started = Instant::now();
     let snapshot = index.snapshot();
     let snapshot_elapsed = snapshot_started.elapsed();
+    #[cfg(not(test))]
+    let _ = &snapshot;
 
     if let Some(request_id) = trace_request_id {
         info!(
@@ -506,26 +551,40 @@ pub(crate) async fn get_completion_with_analysis(
         // The shared member-access path may only use canonical owner hints or canonical
         // IR-derived owner facts for the current revision. Type-name and text/metadata
         // chain reconstruction must fail closed instead of synthesizing semantic truth.
-        for owner_hint in resolve_member_owner_types_sync(analysis, file_content, line, column, "")
-        {
-            if let Some(kind) = get_collection_kind(&owner_hint.type_name()) {
-                add_metadata_items_from_lookup(metadata_lookup, kind, &mut candidates, 0);
-                continue;
+        match evidence {
+            CompletionEvidence::Semantic(analysis) => {
+                for owner_hint in
+                    resolve_member_owner_types_sync(Some(analysis), file_content, line, column, "")
+                {
+                    if let Some(kind) = get_collection_kind(&owner_hint.type_name()) {
+                        add_metadata_items_from_lookup(metadata_lookup, kind, &mut candidates, 0);
+                        continue;
+                    }
+                    add_methods_from_resolution(metadata_lookup, &owner_hint, &mut candidates, 0);
+                    add_properties_from_resolution(metadata_lookup, &owner_hint, &mut candidates, 1);
+                }
             }
-            add_methods_from_resolution(metadata_lookup, &owner_hint, &mut candidates, 0);
-            add_properties_from_resolution(metadata_lookup, &owner_hint, &mut candidates, 1);
+            #[cfg(test)]
+            CompletionEvidence::SnapshotOnly => {}
         }
     } else {
-        collect_non_member_candidates(
-            analysis,
-            file_content,
-            line,
-            column,
-            file_uri,
-            &snapshot,
-            metadata_lookup,
-            &mut candidates,
-        );
+        match evidence {
+            CompletionEvidence::Semantic(analysis) => collect_non_member_candidates(
+                analysis,
+                file_content,
+                line,
+                column,
+                metadata_lookup,
+                &mut candidates,
+            ),
+            #[cfg(test)]
+            CompletionEvidence::SnapshotOnly => collect_non_member_candidates_from_snapshot_for_tests(
+                file_uri,
+                &snapshot,
+                metadata_lookup,
+                &mut candidates,
+            ),
+        }
     }
     let collect_elapsed = collect_started.elapsed();
     if let Some(request_id) = trace_request_id {
@@ -636,32 +695,33 @@ pub(crate) async fn get_completion_with_analysis(
 }
 
 fn collect_non_member_candidates(
-    analysis: Option<&CompletionAnalysisContext<'_>>,
+    analysis: &CompletionAnalysisContext<'_>,
     file_content: &str,
     line: u32,
     column: u32,
+    metadata_lookup: &TypeMetadataLookup,
+    candidates: &mut Vec<Candidate>,
+) {
+    add_local_symbols_from_ir(Some(analysis), file_content, line, column, candidates, 0);
+    add_module_routines_from_ir(Some(analysis), file_content, line, column, candidates, 1);
+    add_global_functions_from_lookup(metadata_lookup, candidates, 1);
+    add_all_metadata_items_from_lookup(metadata_lookup, candidates, 2);
+    add_repository_types_from_lookup(metadata_lookup, candidates, 3);
+    add_default_keywords(candidates, 4);
+}
+
+#[allow(dead_code)]
+fn collect_non_member_candidates_from_snapshot_for_tests(
     file_uri: Option<&str>,
     snapshot: &IndexSnapshot,
     metadata_lookup: &TypeMetadataLookup,
     candidates: &mut Vec<Candidate>,
 ) {
-    let can_collect_locals_from_ir = analysis.and_then(|ctx| ctx.ir_program.as_ref()).is_some();
-
-    if can_collect_locals_from_ir {
-        add_local_symbols_from_ir(analysis, file_content, line, column, candidates, 0);
-        add_module_routines_from_ir(analysis, file_content, line, column, candidates, 1);
-        add_global_functions_from_lookup(metadata_lookup, candidates, 1);
-        add_all_metadata_items_from_lookup(metadata_lookup, candidates, 2);
-        add_repository_types_from_lookup(metadata_lookup, candidates, 3);
-        add_default_keywords(candidates, 4);
-    } else {
-        // In fallback mode keep local candidates from the file-bound index.
-        add_symbols(snapshot, file_uri, candidates, 0, true);
-        add_module_symbols(snapshot, candidates, 1);
-        add_all_metadata_items_from_lookup(metadata_lookup, candidates, 2);
-        add_types(snapshot, candidates, 3);
-        add_keywords(snapshot, candidates, 4);
-    }
+    add_symbols(snapshot, file_uri, candidates, 0, true);
+    add_module_symbols(snapshot, candidates, 1);
+    add_all_metadata_items_from_lookup(metadata_lookup, candidates, 2);
+    add_types(snapshot, candidates, 3);
+    add_keywords(snapshot, candidates, 4);
 }
 
 #[path = "completion_service/context.rs"]

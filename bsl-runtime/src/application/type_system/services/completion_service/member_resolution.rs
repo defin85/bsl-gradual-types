@@ -83,12 +83,27 @@ pub(super) fn resolve_member_owner_type_sync(
     column: u32,
     _base_name: &str,
 ) -> Option<TypeResolution> {
-    let _ = (analysis, file_content, line, column);
     let ctx = analysis?;
-    ctx.member_access_owner_type_hint
+    if let Some(owner_hint) = ctx
+        .member_access_owner_type_hint
         .as_ref()
         .filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
         .cloned()
+    {
+        return Some(owner_hint);
+    }
+
+    let mut resolutions = resolve_member_access_owner_types_from_ir(
+        Some(ctx),
+        file_content,
+        line,
+        column,
+    );
+    if resolutions.len() == 1 {
+        resolutions.pop()
+    } else {
+        None
+    }
 }
 
 pub(super) fn resolve_member_owner_types_sync(
@@ -98,7 +113,6 @@ pub(super) fn resolve_member_owner_types_sync(
     column: u32,
     _base_name: &str,
 ) -> Vec<TypeResolution> {
-    let _ = (file_content, line, column);
     let Some(ctx) = analysis else {
         return Vec::new();
     };
@@ -111,7 +125,8 @@ pub(super) fn resolve_member_owner_types_sync(
     {
         return vec![owner_hint];
     }
-    Vec::new()
+
+    resolve_member_access_owner_types_from_ir(Some(ctx), file_content, line, column)
 }
 
 #[derive(Debug, Clone)]

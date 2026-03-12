@@ -86,6 +86,14 @@ class ContractCompatibilityDiffScriptTest(unittest.TestCase):
             required_violations=[],
         )
 
+    def test_new_surface_without_baseline_is_non_breaking(self) -> None:
+        self.run_case(
+            name="non_breaking_new_surface_added",
+            expected_exit=0,
+            expected_pass=True,
+            required_violations=[],
+        )
+
     def test_breaking_same_major_without_bump(self) -> None:
         self.run_case(
             name="breaking_same_major_without_bump",

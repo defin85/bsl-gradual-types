@@ -1,4 +1,3 @@
-#[cfg(test)]
 use super::super::completion_target::extract_member_access_receiver_spans;
 use super::*;
 
@@ -249,7 +248,6 @@ pub(super) fn add_global_functions_from_lookup(
     }
 }
 
-#[cfg(test)]
 pub(super) fn resolve_member_access_owner_types_from_program(
     ir_program: &SemanticProgram,
     file_content: &str,
@@ -305,8 +303,6 @@ pub(super) fn resolve_member_access_owner_types_from_program(
     resolutions
 }
 
-#[cfg(test)]
-#[cfg(test)]
 pub(super) fn resolve_member_access_owner_types_from_ir(
     analysis: Option<&CompletionAnalysisContext<'_>>,
     file_content: &str,
@@ -322,8 +318,6 @@ pub(super) fn resolve_member_access_owner_types_from_ir(
     resolve_member_access_owner_types_from_program(ir_program, file_content, line, column)
 }
 
-#[cfg(test)]
-#[cfg(test)]
 fn receiver_identifier_resolution_from_locals(
     ir_program: &SemanticProgram,
     file_content: &str,

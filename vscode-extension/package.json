@@ -197,6 +197,7 @@
                         "default": "8.3.25",
                         "description": "Версия платформы 1С (например: 8.3.25)",
                         "pattern": "^\\d+\\.\\d+\\.\\d+$",
+                        "scope": "resource",
                         "order": 1
                     },
                     "bslAnalyzer.platformDocsArchive": {
@@ -204,6 +205,7 @@
                         "default": "",
                         "description": "⚠️ ОБЯЗАТЕЛЬНЫЙ: Путь к РОДИТЕЛЬСКОЙ ПАПКЕ с документацией платформы 1С (должна содержать rebuilt.shcntx_ru и rebuilt.shlang_ru)",
                         "markdownDescription": "⚠️ **ОБЯЗАТЕЛЬНЫЙ ПАРАМЕТР**: Путь к родительской папке с документацией платформы 1С\n\n**Структура папки:**\n```\nexamples/syntax_helper/\n├── rebuilt.shcntx_ru/  (контекстная справка)\n└── rebuilt.shlang_ru/  (справка по языку)\n```\n\n**Без этого параметра TypeRepository будет пустым!**",
+                        "scope": "resource",
                         "order": 2
                     },
                     "bslAnalyzer.autoIndexBuild": {

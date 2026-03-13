@@ -1,5 +1,35 @@
 import * as vscode from 'vscode';
 
+export type RepoBoundConfigInspection<T> = {
+    defaultValue?: T;
+    globalValue?: T;
+    workspaceValue?: T;
+    workspaceFolderValue?: T;
+};
+
+export function resolveRepoBoundConfigValue<T>(
+    inspection: RepoBoundConfigInspection<T> | undefined,
+    fallback: T,
+    workspaceOpen: boolean
+): T {
+    if (!inspection) {
+        return fallback;
+    }
+
+    if (workspaceOpen) {
+        return inspection.workspaceFolderValue
+            ?? inspection.workspaceValue
+            ?? inspection.defaultValue
+            ?? fallback;
+    }
+
+    return inspection.workspaceFolderValue
+        ?? inspection.workspaceValue
+        ?? inspection.globalValue
+        ?? inspection.defaultValue
+        ?? fallback;
+}
+
 /**
  * Вспомогательный класс для работы с конфигурацией BSL Analyzer
  * Использует плоскую структуру настроек, организованную в категории
@@ -7,6 +37,12 @@ import * as vscode from 'vscode';
 export class BslAnalyzerConfig {
     private static getConfig() {
         return vscode.workspace.getConfiguration('bslAnalyzer');
+    }
+
+    private static getRepoBoundConfig<T>(key: string, fallback: T): T {
+        const inspection = this.getConfig().inspect<T>(key);
+        const workspaceOpen = (vscode.workspace.workspaceFolders?.length ?? 0) > 0;
+        return resolveRepoBoundConfigValue(inspection, fallback, workspaceOpen);
     }
     
     // Основные настройки
@@ -70,15 +106,15 @@ export class BslAnalyzerConfig {
     
     // Настройки индексации
     static get configurationPath(): string {
-        return this.getConfig().get<string>('configurationPath', '');
+        return this.getRepoBoundConfig('configurationPath', '');
     }
     
     static get platformVersion(): string {
-        return this.getConfig().get<string>('platformVersion', '8.3.25');
+        return this.getRepoBoundConfig('platformVersion', '8.3.25');
     }
     
     static get platformDocsArchive(): string {
-        return this.getConfig().get<string>('platformDocsArchive', '');
+        return this.getRepoBoundConfig('platformDocsArchive', '');
     }
     
     static get autoIndexBuild(): boolean {

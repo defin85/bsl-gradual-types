@@ -418,13 +418,14 @@ fn build_v2_ir(
         .flatten()
         .expect("file_path");
     let ir_program = analysis.ir(file_id).ok().flatten().expect("ir");
-    let owner_hint = bsl_backend::application::completion_member_access_owner_type_hint_from_analysis(
-        &analysis,
-        file_id,
-        file_content.as_ref(),
-        position.line,
-        position.character,
-    );
+    let owner_hint =
+        bsl_backend::application::completion_member_access_owner_type_hint_from_analysis(
+            &analysis,
+            file_id,
+            file_content.as_ref(),
+            position.line,
+            position.character,
+        );
 
     (file_content, file_path, ir_program, owner_hint)
 }

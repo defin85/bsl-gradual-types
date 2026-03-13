@@ -9,9 +9,9 @@ use bsl_backend::application::get_completion_with_semantic_program_snapshot_with
 use bsl_backend::system::{
     IndexItem, IndexItemKind, IndexKind, IntellisenseIndexStore, SymbolKind, SymbolScope, TypeKind,
 };
-use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
 use bsl_shared::domain::repository::InMemoryTypeRepository;
+use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::SignatureIndex;
 use bsl_shared::domain::types::{RawDataSource, RawMethodData, RawTypeData};
 use bsl_shared::formatting::DetailLevel;
@@ -159,7 +159,11 @@ async fn completion_with_shared_snapshot(
     .expect("completion ok");
 
     (
-        result.items.into_iter().map(|candidate| candidate.item).collect(),
+        result
+            .items
+            .into_iter()
+            .map(|candidate| candidate.item)
+            .collect(),
         result.is_incomplete,
     )
 }

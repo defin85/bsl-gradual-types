@@ -128,7 +128,10 @@ impl TypeIndex {
         self.closest_fact_by_offset(&self.definition_locations_by_span, byte_offset)
     }
 
-    pub(crate) fn definition_location_for_span(&self, span: Span) -> Option<TypeDefinitionLocation> {
+    pub(crate) fn definition_location_for_span(
+        &self,
+        span: Span,
+    ) -> Option<TypeDefinitionLocation> {
         if let Some(exact) = self.definition_location_for_exact_span(span) {
             return Some(exact);
         }
@@ -226,7 +229,8 @@ impl TypeIndex {
         byte_offset: u32,
     ) -> Option<T> {
         let find = |offset: u32| {
-            facts.iter()
+            facts
+                .iter()
                 .filter(|(span, _)| span.contains(offset))
                 .min_by_key(|(span, _)| span.len())
                 .map(|(_, value)| value.clone())
@@ -1743,7 +1747,7 @@ impl TypeInferencer {
                 None,
                 None,
                 SignatureSource::UserCode,
-                local.return_type.active_facet.clone(),
+                local.return_type.active_facet,
                 Default::default(),
             );
             let definition_location = TypeDefinitionLocation::user_defined(

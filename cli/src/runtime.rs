@@ -95,6 +95,7 @@ impl CliPreparedFileOperation {
         Ok(diagnostics.unwrap_or_else(|| Arc::new(Vec::new())))
     }
 
+    #[cfg(test)]
     pub(crate) fn exact_type_index_ready(&self) -> anyhow::Result<bool> {
         self.analysis()
             .current_type_index_serve_only_ready(self.file_id)

@@ -5356,8 +5356,8 @@ async fn p7_typed_value_table_row_revision_switch_does_not_leak_stale_structural
 }
 
 #[tokio::test]
-async fn p7_hover_and_type_at_position_revision_switch_do_not_report_stale_typed_structure_member(
-) {
+async fn p7_hover_and_type_at_position_revision_switch_do_not_report_stale_typed_structure_member()
+{
     let fixture_v1 = "Процедура Тест()\n\
     S = Новый Структура;\n\
     S.Вставить(\"Идентификатор\", \"A-01\");\n\
@@ -5374,8 +5374,7 @@ async fn p7_hover_and_type_at_position_revision_switch_do_not_report_stale_typed
     )
     .await;
 
-    let v1_position =
-        find_utf16_position_at_marker_tail(fixture_v1, "ДляHover = S.Идентификатор");
+    let v1_position = find_utf16_position_at_marker_tail(fixture_v1, "ДляHover = S.Идентификатор");
     let v1_hover_text = lsp_hover_text_optional_at(&mut service, &uri, v1_position)
         .await
         .expect("v1 hover text");
@@ -5383,10 +5382,14 @@ async fn p7_hover_and_type_at_position_revision_switch_do_not_report_stale_typed
         v1_hover_text.contains("Идентификатор") && v1_hover_text.contains("Строка"),
         "v1 hover must expose the exact typed structure field before revision switch, hover={v1_hover_text}"
     );
-    let v1_type_name =
-        snapshot_type_name_at_marker_optional(&server, file_id, fixture_v1, "ДляHover = S.Идентификатор")
-            .await
-            .expect("v1 type_at_position");
+    let v1_type_name = snapshot_type_name_at_marker_optional(
+        &server,
+        file_id,
+        fixture_v1,
+        "ДляHover = S.Идентификатор",
+    )
+    .await
+    .expect("v1 type_at_position");
     assert_eq!(
         v1_type_name, "Строка",
         "v1 type_at_position must expose the exact typed structure field before revision switch"
@@ -5394,8 +5397,7 @@ async fn p7_hover_and_type_at_position_revision_switch_do_not_report_stale_typed
 
     replace_lsp_fixture_and_wait(&mut service, &server, &uri, file_id, 2, fixture_v2).await;
 
-    let v2_position =
-        find_utf16_position_at_marker_tail(fixture_v2, "ДляHover = S.Идентификатор");
+    let v2_position = find_utf16_position_at_marker_tail(fixture_v2, "ДляHover = S.Идентификатор");
     let v2_hover_text = lsp_hover_text_optional_at(&mut service, &uri, v2_position).await;
     if let Some(text) = &v2_hover_text {
         assert!(
@@ -5408,9 +5410,13 @@ async fn p7_hover_and_type_at_position_revision_switch_do_not_report_stale_typed
         );
     }
 
-    let v2_type_name =
-        snapshot_type_name_at_marker_optional(&server, file_id, fixture_v2, "ДляHover = S.Идентификатор")
-            .await;
+    let v2_type_name = snapshot_type_name_at_marker_optional(
+        &server,
+        file_id,
+        fixture_v2,
+        "ДляHover = S.Идентификатор",
+    )
+    .await;
     assert_ne!(
         v2_type_name.as_deref(),
         Some("Строка"),

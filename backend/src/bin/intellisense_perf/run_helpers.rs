@@ -4,6 +4,7 @@ use bsl_backend::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter};
 use bsl_runtime::application::type_system::{
     definition_exact_type_index_available_at_position, get_hover_info_with_semantic_program,
     goto_definition_v2_with_source_and_analysis, hover_exact_type_index_available_at_position,
+    DefinitionRequest,
 };
 
 pub(super) fn read_scenario(path: &Path) -> Result<Scenario> {
@@ -336,17 +337,16 @@ pub(super) async fn execute_case_iteration(
             (false, fail_closed)
         }
         PerfOperation::Definition => {
-            let definition = goto_definition_v2_with_source_and_analysis(
-                file_path.as_ref(),
-                case_content.as_ref(),
-                &analysis,
-                case.file_id,
+            let definition = goto_definition_v2_with_source_and_analysis(DefinitionRequest {
+                current_file_text: Some(case_content.as_ref()),
+                analysis: Some(&analysis),
+                file_id: Some(case.file_id),
                 ir_program,
                 deps,
-                case.line,
-                case.column,
-                Some(context.coordinator),
-            );
+                line: case.line,
+                character: case.column,
+                coordinator: Some(context.coordinator),
+            });
             let fail_closed = definition.is_none()
                 && !definition_exact_type_index_available_at_position(
                     &analysis,

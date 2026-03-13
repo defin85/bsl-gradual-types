@@ -617,8 +617,7 @@ async fn shared_stateful_perf_operations_warm_exact_type_index_for_representativ
         assert!(
             !measurement.fail_closed,
             "representative {} {:?} case must not stay fail-closed after shared stateful prepare",
-            case.file_uri,
-            case.operation
+            case.file_uri, case.operation
         );
     }
 }

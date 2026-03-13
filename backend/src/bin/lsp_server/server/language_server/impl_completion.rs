@@ -637,14 +637,14 @@ impl BslLanguageServer {
                                     let file_content = analysis.file_text(file_id).ok().flatten();
                                     let file_path = analysis.file_path(file_id).ok().flatten();
                                     let deps = analysis.deps_data().ok();
-                                    let member_access_owner_type_hints =
-                                        file_content.as_deref().map(|text| {
-                                            completion_request_targets_member_access(
+                                    let member_access_owner_type_hints = file_content
+                                        .as_deref()
+                                        .map(|text| {
+                                            if completion_request_targets_member_access(
                                                 text,
                                                 position,
                                                 trigger_char_hint,
-                                            )
-                                            .then(|| {
+                                            ) {
                                                 completion_member_access_owner_type_hints_at_position(
                                                     &analysis,
                                                     file_id,
@@ -652,9 +652,11 @@ impl BslLanguageServer {
                                                     position,
                                                     Some(coordinator_for_query.as_ref()),
                                                 )
-                                            })
-                                            .unwrap_or_default()
-                                        }).unwrap_or_default();
+                                            } else {
+                                                Vec::new()
+                                            }
+                                        })
+                                        .unwrap_or_default();
                                     coordinator_for_query.record_completion_stage_latency(
                                         "query_bundle_deps_and_file_snapshot",
                                         deps_and_file_snapshot_started.elapsed(),

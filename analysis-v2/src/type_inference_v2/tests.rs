@@ -606,7 +606,7 @@ fn extracts_parenthesized_choice_receiver_slices_with_partial_member_tail() {
         "    __tmp = (Выбор Когда Истина Тогда Новый TypeA Иначе Новый TypeB КонецВыбора). X;\n",
         "КонецПроцедуры\n",
     );
-    let dot_offset = source.find("). X").expect("choice dot") as usize + 1;
+    let dot_offset = source.find("). X").expect("choice dot") + 1;
     let slices = extract_incomplete_member_access_receiver_slices_at_dot_offset(source, dot_offset);
     let texts: Vec<&str> = slices
         .iter()

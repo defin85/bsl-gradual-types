@@ -466,8 +466,7 @@ fn inline_cli_expression(
 
     let expression_line = format!("    {expression}");
     let cursor_column =
-        bsl_analysis_v2::byte_offset_to_utf16(&expression_line, expression_line.len())
-            .min(u32::MAX);
+        bsl_analysis_v2::byte_offset_to_utf16(&expression_line, expression_line.len());
     let file_text = Arc::<str>::from(format!(
         "Процедура Test()\n{expression_line}\nКонецПроцедуры\n"
     ));
@@ -555,17 +554,19 @@ fn cli_completion_owner_hints(
     prepared: &CliPreparedFileOperation,
 ) -> Vec<TypeResolution> {
     let member_access_request = expression_targets_member_access(expression);
-    member_access_request
-        .then(|| {
-            completion_member_access_owner_type_hints_from_analysis(
-                prepared.analysis(),
-                prepared.file_id,
-                inline.file_text.as_ref(),
-                inline.line,
-                inline.cursor_column,
-            )
-        })
-        .unwrap_or_default()
+    let owner_hints = if member_access_request {
+        completion_member_access_owner_type_hints_from_analysis(
+            prepared.analysis(),
+            prepared.file_id,
+            inline.file_text.as_ref(),
+            inline.line,
+            inline.cursor_column,
+        )
+    } else {
+        Vec::new()
+    };
+
+    owner_hints
         .into_iter()
         .filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
         .collect()
@@ -587,22 +588,23 @@ async fn collect_cli_completion_items(
     let trigger_char_hint = expression.trim_end().chars().last().filter(|ch| *ch == '.');
 
     let owner_hints = cli_completion_owner_hints(expression, &inline, &prepared);
-    let completions = get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints(
-        inline.file_text.as_ref(),
-        inline.line,
-        inline.cursor_column,
-        None,
-        prepared.index_snapshot(),
-        &prepared.metadata_lookup,
-        inline.file_path.as_ref(),
-        prepared.resolver.as_ref(),
-        ir_program,
-        owner_hints,
-        false,
-        trigger_char_hint,
-    )
-    .await
-    .context("cli shared-runtime completion query failed")?;
+    let completions =
+        get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints(
+            inline.file_text.as_ref(),
+            inline.line,
+            inline.cursor_column,
+            None,
+            prepared.index_snapshot(),
+            &prepared.metadata_lookup,
+            inline.file_path.as_ref(),
+            prepared.resolver.as_ref(),
+            ir_program,
+            owner_hints,
+            false,
+            trigger_char_hint,
+        )
+        .await
+        .context("cli shared-runtime completion query failed")?;
 
     Ok(completions
         .items
@@ -731,21 +733,21 @@ mod tests {
 
         let completions =
             get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints(
-            inline.file_text.as_ref(),
-            inline.line,
-            inline.cursor_column,
-            None,
-            prepared.index_snapshot(),
-            &prepared.metadata_lookup,
-            inline.file_path.as_ref(),
-            prepared.resolver.as_ref(),
-            ir_program,
-            owner_hints,
-            false,
-            Some('.'),
-        )
-        .await
-        .expect("cli completion query");
+                inline.file_text.as_ref(),
+                inline.line,
+                inline.cursor_column,
+                None,
+                prepared.index_snapshot(),
+                &prepared.metadata_lookup,
+                inline.file_path.as_ref(),
+                prepared.resolver.as_ref(),
+                ir_program,
+                owner_hints,
+                false,
+                Some('.'),
+            )
+            .await
+            .expect("cli completion query");
         let labels: Vec<_> = completions
             .items
             .into_iter()
@@ -780,12 +782,10 @@ mod tests {
             "synthetic inline completion must stay unresolved for object-module-only binding without --path, labels={without_path_labels:?}"
         );
 
-        let completions = collect_cli_completion_items(
-            "Объект.",
-            Some("Documents/Док1/Ext/ObjectModule.bsl"),
-        )
-        .await
-        .expect("cli object module completions");
+        let completions =
+            collect_cli_completion_items("Объект.", Some("Documents/Док1/Ext/ObjectModule.bsl"))
+                .await
+                .expect("cli object module completions");
         let labels: Vec<_> = completions.into_iter().map(|item| item.label).collect();
 
         assert!(
@@ -800,12 +800,10 @@ mod tests {
 
     #[tokio::test]
     async fn cli_type_info_preserves_object_module_binding_facets() {
-        let resolution = resolve_cli_expression_type(
-            "Объект",
-            Some("Documents/Док1/Ext/ObjectModule.bsl"),
-        )
-        .await
-        .expect("cli object module type info");
+        let resolution =
+            resolve_cli_expression_type("Объект", Some("Documents/Док1/Ext/ObjectModule.bsl"))
+                .await
+                .expect("cli object module type info");
 
         assert!(
             user_facing_resolution_type_name(&resolution).contains("Док1"),

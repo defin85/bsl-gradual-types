@@ -13,6 +13,16 @@ pub struct SignatureHelpData {
     pub active_parameter: u32,
 }
 
+pub struct SignatureHelpRequest<'a> {
+    pub file_content: &'a str,
+    pub line: u32,
+    pub character: u32,
+    pub analysis: Option<&'a bsl_analysis_v2::AnalysisV2>,
+    pub file_id: Option<bsl_analysis_v2::FileId>,
+    pub ir_program: Arc<SemanticProgram>,
+    pub coordinator: Option<&'a SystemCoordinator>,
+}
+
 #[derive(Debug, Clone)]
 pub struct SignatureHelpQuery {
     pub function_name: String,
@@ -28,30 +38,32 @@ pub fn get_signature_help_v2(
     line: u32,
     character: u32,
     ir_program: Arc<SemanticProgram>,
-    _deps: Arc<bsl_analysis_v2::SemanticDeps>,
+    deps: Arc<bsl_analysis_v2::SemanticDeps>,
 ) -> Option<SignatureHelpData> {
-    get_signature_help_v2_with_analysis(
+    let _ = deps;
+    get_signature_help_v2_with_analysis(SignatureHelpRequest {
         file_content,
         line,
         character,
-        None,
-        None,
+        analysis: None,
+        file_id: None,
         ir_program,
-        _deps,
-        None,
-    )
+        coordinator: None,
+    })
 }
 
 pub fn get_signature_help_v2_with_analysis(
-    file_content: &str,
-    line: u32,
-    character: u32,
-    analysis: Option<&bsl_analysis_v2::AnalysisV2>,
-    file_id: Option<bsl_analysis_v2::FileId>,
-    ir_program: Arc<SemanticProgram>,
-    _deps: Arc<bsl_analysis_v2::SemanticDeps>,
-    coordinator: Option<&SystemCoordinator>,
+    request: SignatureHelpRequest<'_>,
 ) -> Option<SignatureHelpData> {
+    let SignatureHelpRequest {
+        file_content,
+        line,
+        character,
+        analysis,
+        file_id,
+        ir_program,
+        coordinator,
+    } = request;
     let call_context = signature_help_query(file_content, line, character)?;
     let signature_info = if let (Some(analysis), Some(file_id)) = (analysis, file_id) {
         if !exact_type_index_ready(analysis, file_id, coordinator) {

@@ -1608,7 +1608,10 @@ async fn stdio_type_at_position_revision_switch_does_not_return_stale_previous_r
         }),
     )
     .await;
-    assert!(set_v1.analysis_revision > 0, "expected overlay revision bump");
+    assert!(
+        set_v1.analysis_revision > 0,
+        "expected overlay revision bump"
+    );
 
     let v1_type_result: BslTypeAtPositionResponse = run_job_and_collect_result(
         &service,
@@ -1716,11 +1719,7 @@ async fn stdio_definition_revision_switch_does_not_return_stale_previous_revisio
         "    Целевой();\n",
         "КонецПроцедуры\n"
     );
-    let module_code_v2 = concat!(
-        "Процедура Тест()\n",
-        "    Целевой();\n",
-        "КонецПроцедуры\n"
-    );
+    let module_code_v2 = concat!("Процедура Тест()\n", "    Целевой();\n", "КонецПроцедуры\n");
 
     let module_path = temp_root.path().join(MODULE_REL_PATH);
     std::fs::create_dir_all(module_path.parent().expect("module parent"))
@@ -1755,7 +1754,10 @@ async fn stdio_definition_revision_switch_does_not_return_stale_previous_revisio
         }),
     )
     .await;
-    assert!(set_v1.analysis_revision > 0, "expected overlay revision bump");
+    assert!(
+        set_v1.analysis_revision > 0,
+        "expected overlay revision bump"
+    );
 
     let v1_definition_result: BslDefinitionResponse = run_job_and_collect_result(
         &service,
@@ -1771,7 +1773,10 @@ async fn stdio_definition_revision_switch_does_not_return_stale_previous_revisio
         }),
     )
     .await;
-    assert_eq!(v1_definition_result.analysis_revision, set_v1.analysis_revision);
+    assert_eq!(
+        v1_definition_result.analysis_revision,
+        set_v1.analysis_revision
+    );
     assert!(
         v1_definition_result.location.is_some(),
         "v1 current revision must resolve definition before revision switch, got {:?}",
@@ -1813,7 +1818,10 @@ async fn stdio_definition_revision_switch_does_not_return_stale_previous_revisio
         }),
     )
     .await;
-    assert_eq!(v2_definition_result.analysis_revision, set_v2.analysis_revision);
+    assert_eq!(
+        v2_definition_result.analysis_revision,
+        set_v2.analysis_revision
+    );
     assert!(
         v2_definition_result.location.is_none(),
         "current revision must fail closed instead of returning stale previous-revision definition: {:?}",

@@ -651,8 +651,7 @@ async fn lsp_signature_help_uses_exact_semantic_index_for_local_function_when_ru
         "    Локальная(1, );\n",
         "КонецПроцедуры\n"
     );
-    let uri =
-        Url::parse("file:///test_signature_help_local_exact_index.bsl").expect("test uri");
+    let uri = Url::parse("file:///test_signature_help_local_exact_index.bsl").expect("test uri");
     let (analysis, file_id, file_content, ir_program) =
         build_v2_analysis_ir(content, &uri, deps.clone());
     let stripped_deps = build_deps(Arc::new(InMemoryTypeRepository::new()));
@@ -817,8 +816,7 @@ async fn lsp_signature_help_uses_exact_semantic_index_for_global_function_when_r
         "    ГлобальнаяФункция(1, );\n",
         "КонецПроцедуры\n"
     );
-    let uri =
-        Url::parse("file:///test_signature_help_global_exact_index.bsl").expect("test uri");
+    let uri = Url::parse("file:///test_signature_help_global_exact_index.bsl").expect("test uri");
     let (analysis, file_id, file_content, ir_program) =
         build_v2_analysis_ir(content, &uri, deps.clone());
     let stripped_deps = build_deps(Arc::new(InMemoryTypeRepository::new()));

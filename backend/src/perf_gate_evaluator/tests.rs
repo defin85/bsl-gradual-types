@@ -816,13 +816,12 @@ fn perf_gate_reports_but_does_not_block_on_p99_only_tail_jitter() {
             })
         })
         .expect("hover entry");
-    assert!(
-        entry.get("latency")
-            .and_then(|value| value.get("total_duration_ms"))
-            .and_then(|value| value.get("ratio_p99"))
-            .and_then(Value::as_f64)
-            .is_some_and(|ratio| ratio > 1.15)
-    );
+    assert!(entry
+        .get("latency")
+        .and_then(|value| value.get("total_duration_ms"))
+        .and_then(|value| value.get("ratio_p99"))
+        .and_then(Value::as_f64)
+        .is_some_and(|ratio| ratio > 1.15));
     let reason_codes = evaluation
         .get("reason_codes")
         .and_then(Value::as_array)
@@ -982,17 +981,27 @@ fn parity_cutover_accepts_valid_evidence() {
     validate_parity_cutover_evidence(&report).expect("valid parity evidence should pass");
 }
 
+struct ScaleAwarePhaseCounters {
+    wait_budget_exhausted_total: u64,
+    stale_served_total: u64,
+    stale_fallback_total: u64,
+    fallback_unavailable_total: u64,
+}
+
 fn scale_aware_phase_with_counters(
     completion_p95: f64,
     wait_p95: f64,
     snapshot_p95: f64,
     ir_p95: f64,
     count: u64,
-    wait_budget_exhausted_total: u64,
-    stale_served_total: u64,
-    stale_fallback_total: u64,
-    fallback_unavailable_total: u64,
+    counters: ScaleAwarePhaseCounters,
 ) -> Value {
+    let ScaleAwarePhaseCounters {
+        wait_budget_exhausted_total,
+        stale_served_total,
+        stale_fallback_total,
+        fallback_unavailable_total,
+    } = counters;
     json!({
         "metrics": {
             "completion_duration_ms": { "p95": completion_p95, "count": count },
@@ -1020,10 +1029,12 @@ fn scale_aware_phase(
         snapshot_p95,
         ir_p95,
         count,
-        0,
-        0,
-        0,
-        0,
+        ScaleAwarePhaseCounters {
+            wait_budget_exhausted_total: 0,
+            stale_served_total: 0,
+            stale_fallback_total: 0,
+            fallback_unavailable_total: 0,
+        },
     )
 }
 
@@ -1077,12 +1088,36 @@ fn scale_aware_gate_fails_closed_when_authoritative_report_contains_semantic_sub
         [
             scale_aware_phase(3100.0, 1800.0, 600.0, 260.0, 60),
             scale_aware_phase(2950.0, 1700.0, 560.0, 240.0, 80),
-            scale_aware_phase_with_counters(2900.0, 1700.0, 540.0, 220.0, 120, 10, 1, 1, 4),
+            scale_aware_phase_with_counters(
+                2900.0,
+                1700.0,
+                540.0,
+                220.0,
+                120,
+                ScaleAwarePhaseCounters {
+                    wait_budget_exhausted_total: 10,
+                    stale_served_total: 1,
+                    stale_fallback_total: 1,
+                    fallback_unavailable_total: 4,
+                },
+            ),
         ],
         [
             scale_aware_phase(300.0, 7.0, 3.0, 180.0, 60),
             scale_aware_phase(290.0, 6.0, 3.0, 170.0, 80),
-            scale_aware_phase_with_counters(300.0, 5.0, 2.0, 165.0, 120, 10, 0, 0, 1),
+            scale_aware_phase_with_counters(
+                300.0,
+                5.0,
+                2.0,
+                165.0,
+                120,
+                ScaleAwarePhaseCounters {
+                    wait_budget_exhausted_total: 10,
+                    stale_served_total: 0,
+                    stale_fallback_total: 0,
+                    fallback_unavailable_total: 1,
+                },
+            ),
         ],
         120,
         8,
@@ -1129,12 +1164,36 @@ fn scale_aware_gate_keeps_fail_closed_miss_rate_as_diagnostic_without_marking_se
         [
             scale_aware_phase(3100.0, 1800.0, 600.0, 260.0, 60),
             scale_aware_phase(2950.0, 1700.0, 560.0, 240.0, 80),
-            scale_aware_phase_with_counters(2900.0, 1700.0, 540.0, 220.0, 120, 10, 0, 0, 4),
+            scale_aware_phase_with_counters(
+                2900.0,
+                1700.0,
+                540.0,
+                220.0,
+                120,
+                ScaleAwarePhaseCounters {
+                    wait_budget_exhausted_total: 10,
+                    stale_served_total: 0,
+                    stale_fallback_total: 0,
+                    fallback_unavailable_total: 4,
+                },
+            ),
         ],
         [
             scale_aware_phase(300.0, 7.0, 3.0, 180.0, 60),
             scale_aware_phase(290.0, 6.0, 3.0, 170.0, 80),
-            scale_aware_phase_with_counters(300.0, 5.0, 2.0, 165.0, 120, 10, 0, 0, 1),
+            scale_aware_phase_with_counters(
+                300.0,
+                5.0,
+                2.0,
+                165.0,
+                120,
+                ScaleAwarePhaseCounters {
+                    wait_budget_exhausted_total: 10,
+                    stale_served_total: 0,
+                    stale_fallback_total: 0,
+                    fallback_unavailable_total: 1,
+                },
+            ),
         ],
         120,
         8,

@@ -26,11 +26,12 @@ mod services;
 
 pub use services::completion_service::get_completion_with_semantic_program;
 pub use services::completion_service::get_completion_with_semantic_program_snapshot;
-pub use services::completion_service::get_completion_with_semantic_program_snapshot_with_owner_hints;
 pub use services::completion_service::get_completion_with_semantic_program_snapshot_v2;
 pub use services::completion_service::get_completion_with_semantic_program_snapshot_v2_with_trigger_hint;
+pub use services::completion_service::get_completion_with_semantic_program_snapshot_with_owner_hints;
 pub use services::completion_service::get_completion_with_semantic_program_snapshot_with_trigger_hint;
 pub use services::completion_service::get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints;
+pub use services::completion_service::CompletionStats;
 pub use services::completion_service::{
     build_call_snippet, resolve_method_completion, resolve_type_details, CompletionResolveDetails,
 };
@@ -40,10 +41,10 @@ pub use services::completion_service::{
     completion_member_access_owner_type_hints_from_analysis,
     completion_member_access_owner_type_hints_from_analysis_with_flow_sensitive,
 };
-pub use services::completion_service::CompletionStats;
 pub use services::definition_service::{
     definition_exact_type_index_available_at_position, goto_definition_v2,
-    goto_definition_v2_with_source, goto_definition_v2_with_source_and_analysis, DefinitionTarget,
+    goto_definition_v2_with_source, goto_definition_v2_with_source_and_analysis, DefinitionRequest,
+    DefinitionTarget,
 };
 pub use services::hover_service::{
     get_hover_info_with_semantic_program, hover_exact_type_index_available_at_position,
@@ -51,6 +52,6 @@ pub use services::hover_service::{
 pub use services::signature_help_service::{
     get_signature_help_v2, get_signature_help_v2_with_analysis,
     signature_help_exact_type_index_available_at_position, signature_help_query, SignatureHelpData,
-    SignatureHelpQuery,
+    SignatureHelpQuery, SignatureHelpRequest,
 };
 pub use services::web_api_service;

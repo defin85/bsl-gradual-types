@@ -131,12 +131,13 @@ impl IntellisenseV2Facade {
                         let _ = knobs;
                         record_completion_fallback_unavailable();
                         if let Some(coordinator) = observability {
-                            coordinator.record_intellisense_v2_snapshot_latency_with_origin_and_mode(
-                                context.origin.as_str(),
-                                context.operation.as_str(),
-                                context.completion_mode,
-                                snapshot_started.elapsed(),
-                            );
+                            coordinator
+                                .record_intellisense_v2_snapshot_latency_with_origin_and_mode(
+                                    context.origin.as_str(),
+                                    context.operation.as_str(),
+                                    context.completion_mode,
+                                    snapshot_started.elapsed(),
+                                );
                         }
                         return Err(SemanticOutcome::StaleVersion);
                     }
@@ -173,12 +174,15 @@ impl IntellisenseV2Facade {
                     .unwrap_or(false);
                 if !exact_ready {
                     let precompute_started = Instant::now();
-                    if let Ok(precompute) =
-                        analysis.precompute_type_index_for_file(context.file_id, Some(file_version), 0)
-                    {
+                    if let Ok(precompute) = analysis.precompute_type_index_for_file(
+                        context.file_id,
+                        Some(file_version),
+                        0,
+                    ) {
                         if let Some(coordinator) = observability {
-                            coordinator
-                                .record_intellisense_v2_type_index_reason(precompute.reason_code.as_str());
+                            coordinator.record_intellisense_v2_type_index_reason(
+                                precompute.reason_code.as_str(),
+                            );
                             if precompute.stats.evicted_per_file_window_total > 0 {
                                 coordinator.record_intellisense_v2_type_index_reason(
                                     bsl_analysis_v2::TypeIndexArtifactReasonCode::TypeIndexArtifactEvictedPerFileWindow

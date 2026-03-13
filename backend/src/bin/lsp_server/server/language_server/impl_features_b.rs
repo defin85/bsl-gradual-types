@@ -505,15 +505,17 @@ impl BslLanguageServer {
                         position.character,
                     );
                     let definition = handle_goto_definition_v2(
-                        &analysis,
-                        file_id,
-                        file_path,
-                        file_content,
-                        ir_program,
-                        deps,
-                        position,
-                        &uri,
-                        Some(self.coordinator.as_ref()),
+                        crate::handlers::definition::GotoDefinitionRequest {
+                            analysis: &analysis,
+                            file_id,
+                            file_path,
+                            file_content,
+                            ir_program,
+                            deps,
+                            position,
+                            uri: &uri,
+                            coordinator: Some(self.coordinator.as_ref()),
+                        },
                     );
                     if definition.is_none() && !exact_type_index_available {
                         super::helpers::record_lsp_interactive_fail_closed_reason(

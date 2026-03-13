@@ -349,7 +349,11 @@ fn type_at_position_fail_closed_missing_canonical_ir_keeps_empty_transport_warni
 
     assert_eq!(response.analysis_revision, 17);
     assert!(!response.flow_sensitive_enabled);
-    assert!(response.type_info.is_none(), "type_info: {:?}", response.type_info);
+    assert!(
+        response.type_info.is_none(),
+        "type_info: {:?}",
+        response.type_info
+    );
     assert!(response.node.is_none(), "node: {:?}", response.node);
     assert!(
         response.warnings.is_empty(),

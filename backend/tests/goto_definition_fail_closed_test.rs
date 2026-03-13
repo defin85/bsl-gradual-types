@@ -64,17 +64,17 @@ fn goto_definition_fails_closed_without_exact_type_index_artifact() {
     let method_byte = call_line.find("МойМетод").expect("method byte");
     let method_col = utf16_col(call_line, method_byte);
 
-    let target = type_system::goto_definition_v2_with_source_and_analysis(
-        "Documents/Док1/Ext/ObjectModule.bsl",
-        content,
-        &analysis,
-        file_id,
-        ir_program,
-        analysis.deps_data().ok().expect("deps"),
-        4,
-        method_col,
-        None,
-    );
+    let target =
+        type_system::goto_definition_v2_with_source_and_analysis(type_system::DefinitionRequest {
+            current_file_text: Some(content),
+            analysis: Some(&analysis),
+            file_id: Some(file_id),
+            ir_program,
+            deps: analysis.deps_data().expect("deps"),
+            line: 4,
+            character: method_col,
+            coordinator: None,
+        });
 
     assert!(
         target.is_none(),

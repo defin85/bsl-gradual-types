@@ -201,7 +201,6 @@ fn completion_member_access_owner_type_hints_from_analysis_internal(
             }
             break;
         }
-
     }
 
     resolutions
@@ -643,7 +642,12 @@ async fn get_completion_internal(
                         continue;
                     }
                     add_methods_from_resolution(metadata_lookup, &owner_hint, &mut candidates, 0);
-                    add_properties_from_resolution(metadata_lookup, &owner_hint, &mut candidates, 1);
+                    add_properties_from_resolution(
+                        metadata_lookup,
+                        &owner_hint,
+                        &mut candidates,
+                        1,
+                    );
                 }
             }
             #[cfg(test)]
@@ -660,12 +664,14 @@ async fn get_completion_internal(
                 &mut candidates,
             ),
             #[cfg(test)]
-            CompletionEvidence::SnapshotOnly => collect_non_member_candidates_from_snapshot_for_tests(
-                file_uri,
-                &snapshot,
-                metadata_lookup,
-                &mut candidates,
-            ),
+            CompletionEvidence::SnapshotOnly => {
+                collect_non_member_candidates_from_snapshot_for_tests(
+                    file_uri,
+                    &snapshot,
+                    metadata_lookup,
+                    &mut candidates,
+                )
+            }
         }
     }
     let collect_elapsed = collect_started.elapsed();

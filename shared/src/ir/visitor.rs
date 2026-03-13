@@ -325,13 +325,17 @@ fn walk_node<V: SemanticVisitor>(
             let _ = value_node;
         }
 
-        SemanticNodeKind::UnaryExpression { operand_node, .. } => {
-            if let Some(operand_idx) = operand_node {
-                if let Some(child_node) = program.nodes.get(*operand_idx) {
-                    walk_node(child_node, visitor, context, program);
-                }
+        SemanticNodeKind::UnaryExpression {
+            operand_node: Some(operand_idx),
+            ..
+        } => {
+            if let Some(child_node) = program.nodes.get(*operand_idx) {
+                walk_node(child_node, visitor, context, program);
             }
         }
+        SemanticNodeKind::UnaryExpression {
+            operand_node: None, ..
+        } => {}
 
         SemanticNodeKind::TernaryExpression {
             condition_node,
@@ -458,21 +462,23 @@ fn walk_node<V: SemanticVisitor>(
             }
         }
 
-        SemanticNodeKind::ExecuteStatement { code_node } => {
-            if let Some(code_idx) = code_node {
-                if let Some(child_node) = program.nodes.get(*code_idx) {
-                    walk_node(child_node, visitor, context, program);
-                }
+        SemanticNodeKind::ExecuteStatement {
+            code_node: Some(code_idx),
+        } => {
+            if let Some(child_node) = program.nodes.get(*code_idx) {
+                walk_node(child_node, visitor, context, program);
             }
         }
+        SemanticNodeKind::ExecuteStatement { code_node: None } => {}
 
-        SemanticNodeKind::RaiseErrorStatement { message_node } => {
-            if let Some(message_idx) = message_node {
-                if let Some(child_node) = program.nodes.get(*message_idx) {
-                    walk_node(child_node, visitor, context, program);
-                }
+        SemanticNodeKind::RaiseErrorStatement {
+            message_node: Some(message_idx),
+        } => {
+            if let Some(child_node) = program.nodes.get(*message_idx) {
+                walk_node(child_node, visitor, context, program);
             }
         }
+        SemanticNodeKind::RaiseErrorStatement { message_node: None } => {}
 
         SemanticNodeKind::AddHandlerStatement {
             event_node,

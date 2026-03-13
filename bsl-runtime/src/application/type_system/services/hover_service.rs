@@ -99,8 +99,8 @@ fn compute_hover_info_from_ir(
     let node_at_position =
         byte_offset.and_then(|offset| ir_program.find_node_at_byte_offset(offset));
     let word_under_cursor = extract_word_at_position(file_content, line, column);
-    let mut type_at_cursor =
-        byte_offset.and_then(|offset| exact_semantic_type_at_offset(analysis, file_id, ir_program, offset));
+    let mut type_at_cursor = byte_offset
+        .and_then(|offset| exact_semantic_type_at_offset(analysis, file_id, ir_program, offset));
     if type_at_cursor.is_none() {
         if let Some(offset) = byte_offset {
             if let Some(identifier_span) =
@@ -202,7 +202,13 @@ fn compute_hover_info_from_ir(
                         ir_program,
                         node,
                     )
-                    .or_else(|| Some(format_semantic_node_info(node, file_content, metadata_lookup)));
+                    .or_else(|| {
+                        Some(format_semantic_node_info(
+                            node,
+                            file_content,
+                            metadata_lookup,
+                        ))
+                    });
                 }
             }
         }
@@ -271,9 +277,9 @@ fn exact_semantic_type_at_span(
         .flatten()
         .or_else(|| exact_semantic_type_at_offset(analysis, file_id, program, span.start))
         .or_else(|| {
-            span.end.checked_sub(1).and_then(|probe| {
-                exact_semantic_type_at_offset(analysis, file_id, program, probe)
-            })
+            span.end
+                .checked_sub(1)
+                .and_then(|probe| exact_semantic_type_at_offset(analysis, file_id, program, probe))
         })
 }
 
@@ -288,9 +294,12 @@ fn exact_semantic_type_at_offset(
         .ok()
         .flatten()
         .or_else(|| {
-            program
-                .find_node_at_byte_offset(probe)
-                .and_then(|node| analysis.type_for_span_serve_only(file_id, node.span).ok().flatten())
+            program.find_node_at_byte_offset(probe).and_then(|node| {
+                analysis
+                    .type_for_span_serve_only(file_id, node.span)
+                    .ok()
+                    .flatten()
+            })
         })
 }
 

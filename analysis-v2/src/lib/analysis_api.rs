@@ -269,8 +269,6 @@ impl AnalysisV2 {
                 } else {
                     (Some(artifact), TypeIndexServeReasonCode::TypeIndexExactHit)
                 }
-            } else if cache.get_type_index_stale(&key).is_some() {
-                (None, TypeIndexServeReasonCode::TypeIndexFallbackUnavailable)
             } else {
                 (None, TypeIndexServeReasonCode::TypeIndexFallbackUnavailable)
             }

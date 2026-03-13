@@ -788,18 +788,18 @@ fn collect_members(request: MembersRequest) -> Result<BslMembersResponse, rmcp::
     let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
     let member_access_context =
         has_member_access_receiver_at_position(text.as_str(), position.line, position.character);
-    let member_access_owner_type_hints = member_access_context
-        .then(|| {
-            member_access_owner_type_hints_at_position(
-                &analysis,
-                FileId(1),
-                text.as_str(),
-                position.line,
-                position.character,
-                flow_sensitive_enabled,
-            )
-        })
-        .unwrap_or_default()
+    let member_access_owner_type_hints = if member_access_context {
+        member_access_owner_type_hints_at_position(
+            &analysis,
+            FileId(1),
+            text.as_str(),
+            position.line,
+            position.character,
+            flow_sensitive_enabled,
+        )
+    } else {
+        Vec::new()
+    }
         .into_iter()
         .filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
         .collect::<Vec<_>>();

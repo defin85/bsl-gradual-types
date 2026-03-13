@@ -66,6 +66,27 @@ fn build_analysis_ir_for_source(
     (analysis, file_id, ir)
 }
 
+fn goto_definition_with_analysis(
+    source: &str,
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: FileId,
+    ir_program: Arc<bsl_shared::ir::SemanticProgram>,
+    deps: Arc<SemanticDeps>,
+    line: u32,
+    character: u32,
+) -> Option<type_system::DefinitionTarget> {
+    type_system::goto_definition_v2_with_source_and_analysis(type_system::DefinitionRequest {
+        current_file_text: Some(source),
+        analysis: Some(analysis),
+        file_id: Some(file_id),
+        ir_program,
+        deps,
+        line,
+        character,
+        coordinator: None,
+    })
+}
+
 #[test]
 fn goto_definition_resolves_common_module_namespace_and_method() {
     let tmp = TempDir::new().unwrap();
@@ -192,8 +213,7 @@ fn goto_definition_resolves_common_module_namespace_and_method() {
         deps,
         "goto-definition-common-module-legacy-test",
     );
-    let target_method = type_system::goto_definition_v2_with_source_and_analysis(
-        "inline.bsl",
+    let target_method = goto_definition_with_analysis(
         source,
         &analysis,
         file_id,
@@ -201,7 +221,6 @@ fn goto_definition_resolves_common_module_namespace_and_method() {
         empty_semantic_deps(),
         1,
         method_col,
-        None,
     )
     .expect("method definition target");
     assert!(
@@ -364,8 +383,7 @@ fn goto_definition_resolves_common_module_method_from_semantic_facts_with_empty_
             .collect::<Vec<_>>()
     );
 
-    let target_method = type_system::goto_definition_v2_with_source_and_analysis(
-        "inline.bsl",
+    let target_method = goto_definition_with_analysis(
         source,
         &analysis,
         file_id,
@@ -373,7 +391,6 @@ fn goto_definition_resolves_common_module_method_from_semantic_facts_with_empty_
         empty_semantic_deps(),
         1,
         method_col,
-        None,
     )
     .expect("method definition target from semantic facts");
 
@@ -471,8 +488,7 @@ fn goto_definition_resolves_common_module_receiver_from_semantic_facts_with_empt
     let module_byte = call_line.find("МойМодуль").expect("module name");
     let module_col = utf16_col(call_line, module_byte);
 
-    let target = type_system::goto_definition_v2_with_source_and_analysis(
-        "inline.bsl",
+    let target = goto_definition_with_analysis(
         source,
         &analysis,
         file_id,
@@ -480,7 +496,6 @@ fn goto_definition_resolves_common_module_receiver_from_semantic_facts_with_empt
         empty_semantic_deps(),
         1,
         module_col,
-        None,
     )
     .expect("receiver definition target from semantic facts");
 
@@ -604,8 +619,7 @@ fn goto_definition_resolves_object_module_method_without_request_time_hints() {
         deps,
         "goto-definition-object-module-legacy-test",
     );
-    let target_method = type_system::goto_definition_v2_with_source_and_analysis(
-        "Documents/Док1/Ext/ObjectModule.bsl",
+    let target_method = goto_definition_with_analysis(
         source,
         &analysis,
         file_id,
@@ -613,7 +627,6 @@ fn goto_definition_resolves_object_module_method_without_request_time_hints() {
         empty_semantic_deps(),
         1,
         method_col,
-        None,
     )
     .expect("method definition target");
 
@@ -743,8 +756,7 @@ fn goto_definition_resolves_configuration_symbol_metadata_xml_from_exact_semanti
         &root.join("Documents").join("Док1.xml")
     );
 
-    let target = type_system::goto_definition_v2_with_source_and_analysis(
-        "inline.bsl",
+    let target = goto_definition_with_analysis(
         source,
         &analysis,
         file_id,
@@ -752,7 +764,6 @@ fn goto_definition_resolves_configuration_symbol_metadata_xml_from_exact_semanti
         empty_semantic_deps(),
         1,
         doc_col,
-        None,
     )
     .expect("configuration definition target from exact semantic index");
 
@@ -899,8 +910,7 @@ fn goto_definition_resolves_object_module_method_from_semantic_facts_with_empty_
             .collect::<Vec<_>>()
     );
 
-    let target_method = type_system::goto_definition_v2_with_source_and_analysis(
-        "Documents/Док1/Ext/ObjectModule.bsl",
+    let target_method = goto_definition_with_analysis(
         source,
         &analysis,
         file_id,
@@ -908,7 +918,6 @@ fn goto_definition_resolves_object_module_method_from_semantic_facts_with_empty_
         empty_semantic_deps(),
         1,
         method_col,
-        None,
     )
     .expect("method definition target from semantic facts");
 
@@ -1028,8 +1037,7 @@ fn goto_definition_uses_exact_semantic_index_when_runtime_ir_facts_are_missing()
     let method_byte = call_line.find("МойМетод").expect("method byte");
     let method_col = utf16_col(call_line, method_byte);
 
-    let target_method = type_system::goto_definition_v2_with_source_and_analysis(
-        "Documents/Док1/Ext/ObjectModule.bsl",
+    let target_method = goto_definition_with_analysis(
         source,
         &analysis,
         file_id,
@@ -1037,7 +1045,6 @@ fn goto_definition_uses_exact_semantic_index_when_runtime_ir_facts_are_missing()
         empty_semantic_deps(),
         1,
         method_col,
-        None,
     )
     .expect("method definition target from exact semantic index");
 
@@ -1118,8 +1125,7 @@ fn goto_definition_resolves_local_function_from_semantic_facts_with_empty_consum
             .collect::<Vec<_>>()
     );
 
-    let target = type_system::goto_definition_v2_with_source_and_analysis(
-        "inline.bsl",
+    let target = goto_definition_with_analysis(
         source,
         &analysis,
         file_id,
@@ -1127,7 +1133,6 @@ fn goto_definition_resolves_local_function_from_semantic_facts_with_empty_consum
         empty_semantic_deps(),
         5,
         method_col,
-        None,
     )
     .expect("local definition target from semantic facts");
 
@@ -1249,8 +1254,7 @@ fn goto_definition_resolves_common_module_method_with_deps_bundle_v2_snapshot() 
         deps,
         "goto-definition-common-module-snapshot-legacy-test",
     );
-    let target_method = type_system::goto_definition_v2_with_source_and_analysis(
-        "inline.bsl",
+    let target_method = goto_definition_with_analysis(
         source,
         &analysis,
         file_id,
@@ -1258,7 +1262,6 @@ fn goto_definition_resolves_common_module_method_with_deps_bundle_v2_snapshot() 
         empty_semantic_deps(),
         1,
         method_col,
-        None,
     )
     .expect("method definition target");
     assert!(target_method.span.is_some());

@@ -143,15 +143,16 @@ impl SessionManager {
             );
         let target =
             bsl_runtime::application::type_system::goto_definition_v2_with_source_and_analysis(
-                abs_path.to_string_lossy().as_ref(),
-                code.as_ref(),
-                &analysis,
-                FileId(1),
-                program,
-                deps,
-                position.line,
-                position.character,
-                Some(coordinator.as_ref()),
+                bsl_runtime::application::type_system::DefinitionRequest {
+                    current_file_text: Some(code.as_ref()),
+                    analysis: Some(&analysis),
+                    file_id: Some(FileId(1)),
+                    ir_program: program,
+                    deps,
+                    line: position.line,
+                    character: position.character,
+                    coordinator: Some(coordinator.as_ref()),
+                },
             );
 
         let Some(target) = target else {

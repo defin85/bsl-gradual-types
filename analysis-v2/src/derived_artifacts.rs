@@ -215,6 +215,7 @@ impl DerivedArtifactsCache {
             .cloned()
     }
 
+    #[cfg(test)]
     pub(crate) fn get_type_index_stale(
         &self,
         key: &TypeIndexArtifactKey,

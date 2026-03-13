@@ -55,6 +55,7 @@ fn create_test_repository() -> Arc<InMemoryTypeRepository> {
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     };
 
     repo.load_types(vec![array_type]).unwrap();
@@ -95,6 +96,7 @@ fn test_generic_collection_item_type_parameterized_in_return_type() {
         generic_info: None,
         collection_item_type: Some("ДанныеФормыЭлементКоллекции".to_string()),
         module_paths: None,
+        metadata_path: None,
     }])
     .unwrap();
 
@@ -315,6 +317,7 @@ fn create_test_repository_with_generic_types() -> Arc<InMemoryTypeRepository> {
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     };
 
     repo.load_types(vec![tabular_type]).unwrap();
@@ -486,6 +489,7 @@ fn create_test_repository_with_config_types() -> Arc<InMemoryTypeRepository> {
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     };
 
     let catalog2 = RawTypeData {
@@ -504,6 +508,7 @@ fn create_test_repository_with_config_types() -> Arc<InMemoryTypeRepository> {
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     };
 
     let catalog3 = RawTypeData {
@@ -522,6 +527,7 @@ fn create_test_repository_with_config_types() -> Arc<InMemoryTypeRepository> {
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     };
 
     // Создаём тестовый документ
@@ -541,6 +547,7 @@ fn create_test_repository_with_config_types() -> Arc<InMemoryTypeRepository> {
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     };
 
     repo.load_types(vec![catalog1, catalog2, catalog3, document])
@@ -689,6 +696,7 @@ fn test_get_methods_prefers_signature_index() {
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     };
 
     repo.load_types(vec![manager_type]).unwrap();
@@ -832,6 +840,7 @@ fn test_get_methods_merges_manager_facet_with_owner_specific_signatures() {
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     }])
     .expect("Failed to load manager platform type");
 
@@ -900,6 +909,7 @@ fn test_information_register_object_facet_uses_recordset_platform_members() {
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     }])
     .expect("Failed to load recordset platform type");
 
@@ -949,6 +959,7 @@ fn test_information_register_object_facet_adds_intrinsic_system_properties_when_
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     }])
     .expect("Failed to load information register metadata type");
 
@@ -1007,6 +1018,7 @@ fn test_get_methods_fallback_to_raw_when_no_signature_index() {
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     };
 
     repo.load_types(vec![simple_type]).unwrap();
@@ -1068,6 +1080,7 @@ fn create_test_repository_with_tabular_sections() -> Arc<InMemoryTypeRepository>
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     };
 
     repo.load_types(vec![document]).unwrap();

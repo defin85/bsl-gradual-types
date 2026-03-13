@@ -24,16 +24,17 @@ pub fn handle_signature_help_v2(
         position.line, position.character
     );
 
-    let data = type_system::get_signature_help_v2_with_analysis(
-        file_content.as_ref(),
-        position.line,
-        position.character,
-        Some(analysis),
-        Some(file_id),
-        ir_program,
-        deps,
-        coordinator,
-    )?;
+    let _ = deps;
+    let data =
+        type_system::get_signature_help_v2_with_analysis(type_system::SignatureHelpRequest {
+            file_content: file_content.as_ref(),
+            line: position.line,
+            character: position.character,
+            analysis: Some(analysis),
+            file_id: Some(file_id),
+            ir_program,
+            coordinator,
+        })?;
 
     let parameters = data
         .parameters

@@ -71,6 +71,7 @@ fn test_visitor_detects_nonexistent_method() {
             object_name: Some("МассивДанных".to_string()),
             object_node: None,
             object_span: None,
+            arg_nodes: Vec::new(),
             arg_spans: Vec::new(),
         },
         span: call_span,
@@ -155,6 +156,7 @@ fn test_dynamic_like_skips_nonexistent_method_validation() {
             object_name: Some("Объект".to_string()),
             object_node: None,
             object_span: None,
+            arg_nodes: Vec::new(),
             arg_spans: Vec::new(),
         },
         span: call_span,
@@ -231,6 +233,7 @@ fn test_unknown_type_access_is_warning_by_default() {
             object_name: Some("Объект".to_string()),
             object_node: None,
             object_span: None,
+            arg_nodes: Vec::new(),
             arg_spans: Vec::new(),
         },
         span: call_span,
@@ -318,6 +321,7 @@ fn test_inferred_weak_method_validation_suppressed_when_config_not_loaded() {
             object_name: Some("Объект".to_string()),
             object_node: None,
             object_span: None,
+            arg_nodes: Vec::new(),
             arg_spans: Vec::new(),
         },
         span: call_span,
@@ -407,6 +411,7 @@ fn test_type_not_found_remains_error_on_unknown_member_access() {
             object_name: Some("Объект".to_string()),
             object_node: None,
             object_span: None,
+            arg_nodes: Vec::new(),
             arg_spans: Vec::new(),
         },
         span: call_span,
@@ -455,6 +460,7 @@ fn test_visitor_validates_metadata_object_when_config_loaded() {
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     };
     repository.load_types(vec![catalog]).unwrap();
 
@@ -518,6 +524,7 @@ fn test_visitor_no_error_for_existing_metadata_object() {
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     };
     repository.load_types(vec![catalog]).unwrap();
 
@@ -616,6 +623,7 @@ fn test_visitor_hints_override_ir_types_for_method_call() {
             object_name: Some("МассивДанных".to_string()),
             object_node: None,
             object_span: None,
+            arg_nodes: Vec::new(),
             arg_spans: Vec::new(),
         },
         span: call_span,

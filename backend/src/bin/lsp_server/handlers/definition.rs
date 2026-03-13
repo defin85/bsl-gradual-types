@@ -11,33 +11,48 @@ use bsl_backend::application::type_system;
 use bsl_line_index::LineIndex;
 use bsl_shared::ir::SemanticProgram;
 
+pub struct GotoDefinitionRequest<'a> {
+    pub analysis: &'a bsl_analysis_v2::AnalysisV2,
+    pub file_id: bsl_analysis_v2::FileId,
+    pub file_path: Arc<str>,
+    pub file_content: Arc<str>,
+    pub ir_program: Arc<SemanticProgram>,
+    pub deps: Arc<bsl_analysis_v2::SemanticDeps>,
+    pub position: Position,
+    pub uri: &'a Url,
+    pub coordinator: Option<&'a bsl_runtime::system::SystemCoordinator>,
+}
+
 pub fn handle_goto_definition_v2(
-    analysis: &bsl_analysis_v2::AnalysisV2,
-    file_id: bsl_analysis_v2::FileId,
-    file_path: Arc<str>,
-    file_content: Arc<str>,
-    ir_program: Arc<SemanticProgram>,
-    deps: Arc<bsl_analysis_v2::SemanticDeps>,
-    position: Position,
-    uri: &Url,
-    coordinator: Option<&bsl_runtime::system::SystemCoordinator>,
+    request: GotoDefinitionRequest<'_>,
 ) -> Option<GotoDefinitionResponse> {
+    let GotoDefinitionRequest {
+        analysis,
+        file_id,
+        file_path,
+        file_content,
+        ir_program,
+        deps,
+        position,
+        uri,
+        coordinator,
+    } = request;
     info!(
         "Go to definition v2 requested at {}:{} (uri={}, file_path={})",
         position.line, position.character, uri, file_path
     );
 
-    let target = type_system::goto_definition_v2_with_source_and_analysis(
-        file_path.as_ref(),
-        file_content.as_ref(),
-        analysis,
-        file_id,
-        ir_program,
-        deps,
-        position.line,
-        position.character,
-        coordinator,
-    )?;
+    let target =
+        type_system::goto_definition_v2_with_source_and_analysis(type_system::DefinitionRequest {
+            current_file_text: Some(file_content.as_ref()),
+            analysis: Some(analysis),
+            file_id: Some(file_id),
+            ir_program,
+            deps,
+            line: position.line,
+            character: position.character,
+            coordinator,
+        })?;
 
     let target_uri = Url::from_file_path(&target.file_path).ok()?;
     let range = match target.span {

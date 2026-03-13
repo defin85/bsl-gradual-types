@@ -70,6 +70,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     });
 
     // ДокументОбъект
@@ -112,6 +113,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     });
 
     // ДокументСсылка
@@ -141,6 +143,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     });
 
     // ДокументВыборка
@@ -170,6 +173,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     });
 
     // ДокументСписок
@@ -199,6 +203,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     });
 
     // === Справочники (5 фасетов) ===
@@ -243,6 +248,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     });
 
     // СправочникОбъект
@@ -272,6 +278,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     });
 
     // СправочникСсылка
@@ -314,6 +321,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     });
 
     // СправочникВыборка
@@ -343,6 +351,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     });
 
     // СправочникСписок
@@ -372,6 +381,7 @@ fn create_test_repository_with_all_platform_facets() -> Arc<InMemoryTypeReposito
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     });
 
     repo.load_types(platform_types)
@@ -799,6 +809,7 @@ fn test_platform_array_type_ignores_facet_in_lazy_lookup() {
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     }])
     .unwrap();
 

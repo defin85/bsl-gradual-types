@@ -15,6 +15,17 @@ pub struct DefinitionTarget {
     pub span: Option<Span>,
 }
 
+pub struct DefinitionRequest<'a> {
+    pub current_file_text: Option<&'a str>,
+    pub analysis: Option<&'a bsl_analysis_v2::AnalysisV2>,
+    pub file_id: Option<bsl_analysis_v2::FileId>,
+    pub ir_program: Arc<SemanticProgram>,
+    pub deps: Arc<bsl_analysis_v2::SemanticDeps>,
+    pub line: u32,
+    pub character: u32,
+    pub coordinator: Option<&'a SystemCoordinator>,
+}
+
 fn common_module_definition_target(
     repo: &dyn TypeRepository,
     module_name: &str,
@@ -33,68 +44,48 @@ fn common_module_definition_target(
 }
 
 pub fn goto_definition_v2(
-    current_file_path: &str,
+    _current_file_path: &str,
     ir_program: Arc<SemanticProgram>,
     deps: Arc<bsl_analysis_v2::SemanticDeps>,
     line: u32,
     character: u32,
 ) -> Option<DefinitionTarget> {
-    goto_definition_v2_with_source_opt(
-        current_file_path,
-        None,
-        None,
-        None,
+    goto_definition_v2_with_request(DefinitionRequest {
+        current_file_text: None,
+        analysis: None,
+        file_id: None,
         ir_program,
         deps,
         line,
         character,
-        None,
-    )
+        coordinator: None,
+    })
 }
 
 pub fn goto_definition_v2_with_source(
-    current_file_path: &str,
+    _current_file_path: &str,
     current_file_text: &str,
     ir_program: Arc<SemanticProgram>,
     deps: Arc<bsl_analysis_v2::SemanticDeps>,
     line: u32,
     character: u32,
 ) -> Option<DefinitionTarget> {
-    goto_definition_v2_with_source_opt(
-        current_file_path,
-        Some(current_file_text),
-        None,
-        None,
+    goto_definition_v2_with_request(DefinitionRequest {
+        current_file_text: Some(current_file_text),
+        analysis: None,
+        file_id: None,
         ir_program,
         deps,
         line,
         character,
-        None,
-    )
+        coordinator: None,
+    })
 }
 
 pub fn goto_definition_v2_with_source_and_analysis(
-    current_file_path: &str,
-    current_file_text: &str,
-    analysis: &bsl_analysis_v2::AnalysisV2,
-    file_id: bsl_analysis_v2::FileId,
-    ir_program: Arc<SemanticProgram>,
-    deps: Arc<bsl_analysis_v2::SemanticDeps>,
-    line: u32,
-    character: u32,
-    coordinator: Option<&SystemCoordinator>,
+    request: DefinitionRequest<'_>,
 ) -> Option<DefinitionTarget> {
-    goto_definition_v2_with_source_opt(
-        current_file_path,
-        Some(current_file_text),
-        Some(analysis),
-        Some(file_id),
-        ir_program,
-        deps,
-        line,
-        character,
-        coordinator,
-    )
+    goto_definition_v2_with_request(request)
 }
 
 pub fn definition_exact_type_index_available_at_position(
@@ -107,17 +98,17 @@ pub fn definition_exact_type_index_available_at_position(
     exact_type_index_ready(analysis, file_id, None)
 }
 
-fn goto_definition_v2_with_source_opt(
-    _current_file_path: &str,
-    current_file_text: Option<&str>,
-    analysis: Option<&bsl_analysis_v2::AnalysisV2>,
-    file_id: Option<bsl_analysis_v2::FileId>,
-    ir_program: Arc<SemanticProgram>,
-    deps: Arc<bsl_analysis_v2::SemanticDeps>,
-    line: u32,
-    character: u32,
-    coordinator: Option<&SystemCoordinator>,
-) -> Option<DefinitionTarget> {
+fn goto_definition_v2_with_request(request: DefinitionRequest<'_>) -> Option<DefinitionTarget> {
+    let DefinitionRequest {
+        current_file_text,
+        analysis,
+        file_id,
+        ir_program,
+        deps,
+        line,
+        character,
+        coordinator,
+    } = request;
     let repo = deps.repository.clone();
     let strict_semantic_mode = analysis.is_some() && file_id.is_some();
 
@@ -227,7 +218,12 @@ fn goto_definition_v2_with_source_opt(
     }
 
     if strict_semantic_mode {
-        return semantic_definition_target_at_offset(ir_program.as_ref(), analysis, file_id, offset);
+        return semantic_definition_target_at_offset(
+            ir_program.as_ref(),
+            analysis,
+            file_id,
+            offset,
+        );
     }
 
     let type_resolution = type_at_position?;
@@ -275,7 +271,10 @@ fn semantic_type_at_offset(
             .flatten()
             .or_else(|| {
                 program.find_node_at_byte_offset(offset).and_then(|node| {
-                    analysis.type_for_span_serve_only(file_id, node.span).ok().flatten()
+                    analysis
+                        .type_for_span_serve_only(file_id, node.span)
+                        .ok()
+                        .flatten()
                 })
             });
     }
@@ -322,13 +321,16 @@ fn semantic_receiver_type(
     let span_fallback = |span: Span| {
         semantic_type_at_offset(program, analysis, file_id, span.start, None)
             .or_else(|| {
-                span.end
-                    .checked_sub(1)
-                    .and_then(|offset| semantic_type_at_offset(program, analysis, file_id, offset, None))
+                span.end.checked_sub(1).and_then(|offset| {
+                    semantic_type_at_offset(program, analysis, file_id, offset, None)
+                })
             })
             .or_else(|| {
                 if let (Some(analysis), Some(file_id)) = (analysis, file_id) {
-                    analysis.type_for_span_serve_only(file_id, span).ok().flatten()
+                    analysis
+                        .type_for_span_serve_only(file_id, span)
+                        .ok()
+                        .flatten()
                 } else {
                     program.semantic_facts.type_resolution_for_span(span)
                 }
@@ -396,16 +398,18 @@ fn semantic_method_definition_target(
 ) -> Option<DefinitionTarget> {
     let target = if let (Some(analysis), Some(file_id)) = (analysis, file_id) {
         match &node.kind {
-            SemanticNodeKind::MemberAccess { access_kind, .. } if access_kind.is_method() => analysis
-                .member_method_target_for_span_serve_only(file_id, node.span)
-                .ok()
-                .flatten()
-                .or_else(|| {
-                    analysis
-                        .member_method_target_at_byte_offset_serve_only(file_id, byte_offset)
-                        .ok()
-                        .flatten()
-                }),
+            SemanticNodeKind::MemberAccess { access_kind, .. } if access_kind.is_method() => {
+                analysis
+                    .member_method_target_for_span_serve_only(file_id, node.span)
+                    .ok()
+                    .flatten()
+                    .or_else(|| {
+                        analysis
+                            .member_method_target_at_byte_offset_serve_only(file_id, byte_offset)
+                            .ok()
+                            .flatten()
+                    })
+            }
             SemanticNodeKind::FunctionCall { .. } => analysis
                 .call_method_target_for_span_serve_only(file_id, node.span)
                 .ok()
@@ -420,11 +424,13 @@ fn semantic_method_definition_target(
         }
     } else {
         let exact = match &node.kind {
-            SemanticNodeKind::MemberAccess { access_kind, .. } if access_kind.is_method() => ir_program
-                .semantic_facts
-                .member_method_targets_by_span
-                .get(&node.span)
-                .cloned(),
+            SemanticNodeKind::MemberAccess { access_kind, .. } if access_kind.is_method() => {
+                ir_program
+                    .semantic_facts
+                    .member_method_targets_by_span
+                    .get(&node.span)
+                    .cloned()
+            }
             SemanticNodeKind::FunctionCall { .. } => ir_program
                 .semantic_facts
                 .call_method_targets_by_span
@@ -432,7 +438,9 @@ fn semantic_method_definition_target(
                 .cloned(),
             _ => None,
         };
-        exact.or_else(|| semantic_method_definition_target_at_offset(ir_program, byte_offset).cloned())
+        exact.or_else(|| {
+            semantic_method_definition_target_at_offset(ir_program, byte_offset).cloned()
+        })
     }?;
 
     target

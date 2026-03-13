@@ -12,24 +12,36 @@ mod lsp_completion_tests {
         keyword_index::default_keyword_items, IndexItem, IndexItemKind, IndexKind,
         IntellisenseIndexStore, TypeKind,
     };
-    use bsl_shared::domain::resolver::TypeResolver;
     use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
     use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
+    use bsl_shared::domain::resolver::TypeResolver;
     use bsl_shared::domain::signature_index::SignatureIndex;
     use bsl_shared::domain::types::{RawDataSource, RawMethodData, RawTypeData, TypeResolution};
     use bsl_shared::formatting::DetailLevel;
 
-    async fn completion_with_shared_snapshot(
-        content: &str,
+    struct CompletionQuery<'a> {
+        content: &'a str,
         line: u32,
         column: u32,
-        file_uri: Option<&str>,
+        file_uri: Option<&'a str>,
+        owner_hint: Option<TypeResolution>,
+        trigger_char_hint: Option<char>,
+    }
+
+    async fn completion_with_shared_snapshot(
+        query: CompletionQuery<'_>,
         index: &IntellisenseIndexStore,
         metadata_lookup: &TypeMetadataLookup,
         deps: Arc<bsl_analysis_v2::SemanticDeps>,
-        owner_hint: Option<TypeResolution>,
-        trigger_char_hint: Option<char>,
     ) -> Vec<String> {
+        let CompletionQuery {
+            content,
+            line,
+            column,
+            file_uri,
+            owner_hint,
+            trigger_char_hint,
+        } = query;
         let mut host = AnalysisHostV2::default();
         let file_id = V2FileId(1);
         let file_path = file_uri.unwrap_or("inline.bsl").to_string();
@@ -118,15 +130,17 @@ mod lsp_completion_tests {
             platform_signatures_loaded: false,
         });
         let result = completion_with_shared_snapshot(
-            "Массив.",
-            0,
-            7,
-            None,
+            CompletionQuery {
+                content: "Массив.",
+                line: 0,
+                column: 7,
+                file_uri: None,
+                owner_hint: None,
+                trigger_char_hint: Some('.'),
+            },
             &index,
             &lookup,
             deps,
-            None,
-            Some('.'),
         )
         .await;
 
@@ -150,9 +164,20 @@ mod lsp_completion_tests {
             platform_signatures_loaded: false,
         });
 
-        let result =
-            completion_with_shared_snapshot("", 0, 0, None, &index, &lookup, deps, None, None)
-                .await;
+        let result = completion_with_shared_snapshot(
+            CompletionQuery {
+                content: "",
+                line: 0,
+                column: 0,
+                file_uri: None,
+                owner_hint: None,
+                trigger_char_hint: None,
+            },
+            &index,
+            &lookup,
+            deps,
+        )
+        .await;
         let default_keywords = default_keyword_items();
         assert!(default_keywords
             .iter()

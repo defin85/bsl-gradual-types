@@ -178,21 +178,22 @@ pub async fn handle_completion_v2_with_trigger_hint_and_owner_hints(
         });
     }
 
-    let completion = get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints(
-        file_content.as_ref(),
-        position.line,
-        position.character,
-        Some(file_uri.as_str()),
-        index_snapshot,
-        &metadata_lookup,
-        file_path.as_ref(),
-        resolver.as_ref(),
-        ir_program,
-        member_access_owner_type_hints,
-        include_flow_sensitive,
-        trigger_char_hint,
-    )
-    .await;
+    let completion =
+        get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints(
+            file_content.as_ref(),
+            position.line,
+            position.character,
+            Some(file_uri.as_str()),
+            index_snapshot,
+            &metadata_lookup,
+            file_path.as_ref(),
+            resolver.as_ref(),
+            ir_program,
+            member_access_owner_type_hints,
+            include_flow_sensitive,
+            trigger_char_hint,
+        )
+        .await;
 
     match completion {
         Ok(result) => {

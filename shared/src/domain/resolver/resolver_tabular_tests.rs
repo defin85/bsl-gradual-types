@@ -47,6 +47,7 @@ fn create_test_repository_with_tabular_sections() -> Arc<InMemoryTypeRepository>
         generic_info: None,
         collection_item_type: None,
         module_paths: None,
+        metadata_path: None,
     };
 
     repo.load_types(vec![document_type]).unwrap();

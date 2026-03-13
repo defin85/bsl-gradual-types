@@ -333,6 +333,21 @@ async fn wait_lsp_publish_diagnostics(
     last_for_uri.unwrap_or_default()
 }
 
+async fn wait_any_lsp_publish_diagnostics(
+    receiver: &mut UnboundedReceiver<PublishDiagnosticsParams>,
+    uri: &Url,
+    timeout: tokio::time::Duration,
+) -> Option<Vec<tower_lsp::lsp_types::Diagnostic>> {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        match tokio::time::timeout_at(deadline, receiver.recv()).await {
+            Ok(Some(params)) if params.uri == *uri => return Some(params.diagnostics),
+            Ok(Some(_)) => {}
+            Ok(None) | Err(_) => return None,
+        }
+    }
+}
+
 fn build_web_test_state() -> AppState {
     let coordinator = Arc::new(SystemCoordinator::new());
     coordinator
@@ -9640,6 +9655,254 @@ async fn p26_interactive_warm_path_completion_slo_smoke_conf_big() {
         completion_cancelled_total,
         completion_total,
         completion_cancelled_rate
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p32_foreign_document_skips_config_semantic_diagnostics() {
+    fn write_configuration_xml(root: &std::path::Path, name: &str, common_modules: &[&str]) {
+        let mut child_objects = String::new();
+        for module in common_modules {
+            child_objects.push_str(&format!("<CommonModule>{module}</CommonModule>"));
+        }
+        std::fs::write(
+            root.join("Configuration.xml"),
+            format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+  <Configuration uuid="00000000-0000-0000-0000-000000000000">
+    <Properties>
+      <Name>{name}</Name>
+      <CompatibilityMode>Version8_3_25</CompatibilityMode>
+    </Properties>
+    <ChildObjects>{child_objects}</ChildObjects>
+  </Configuration>
+</MetaDataObject>
+"#
+            ),
+        )
+        .expect("write Configuration.xml");
+    }
+
+    fn write_common_module(root: &std::path::Path, name: &str) {
+        std::fs::create_dir_all(root.join("CommonModules")).expect("create CommonModules");
+        std::fs::write(
+            root.join("CommonModules").join(format!("{name}.xml")),
+            format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+  <CommonModule uuid="00000000-0000-0000-0000-000000000001">
+    <Properties>
+      <Name>{name}</Name>
+      <Global>false</Global>
+      <ClientManagedApplication>false</ClientManagedApplication>
+      <ClientOrdinaryApplication>false</ClientOrdinaryApplication>
+      <Server>true</Server>
+      <ExternalConnection>false</ExternalConnection>
+      <ServerCall>false</ServerCall>
+      <Privileged>false</Privileged>
+      <ReturnValuesReuse>DontUse</ReturnValuesReuse>
+    </Properties>
+  </CommonModule>
+</MetaDataObject>
+"#
+            ),
+        )
+        .expect("write CommonModule xml");
+        std::fs::create_dir_all(root.join("CommonModules").join(name).join("Ext"))
+            .expect("create common module dir");
+        std::fs::write(
+            root.join("CommonModules")
+                .join(name)
+                .join("Ext")
+                .join("Module.bsl"),
+            "Процедура Ф() Экспорт\nКонецПроцедуры\n",
+        )
+        .expect("write common module source");
+    }
+
+    fn write_form_module(
+        root: &std::path::Path,
+        document_name: &str,
+        form_name: &str,
+        code: &str,
+    ) -> std::path::PathBuf {
+        let path = root
+            .join("Documents")
+            .join(document_name)
+            .join("Forms")
+            .join(form_name)
+            .join("Ext")
+            .join("Form")
+            .join("Module.bsl");
+        std::fs::create_dir_all(path.parent().expect("form module parent"))
+            .expect("create form module dir");
+        std::fs::write(&path, code).expect("write form module source");
+        path
+    }
+
+    let tmp = tempfile::TempDir::new().expect("temp dir");
+    let configured_root = tmp.path().join("configured");
+    let foreign_root = tmp.path().join("foreign");
+    std::fs::create_dir_all(&configured_root).expect("create configured root");
+    std::fs::create_dir_all(&foreign_root).expect("create foreign root");
+
+    write_configuration_xml(&configured_root, "ConfiguredConfig", &[]);
+    write_configuration_xml(&foreign_root, "ForeignConfig", &["МойМодуль"]);
+    write_common_module(&foreign_root, "МойМодуль");
+
+    let configured_form_code = "Процедура Тест()\n    НесуществующийМодуль.Ф();\nКонецПроцедуры\n";
+    let configured_form_path =
+        write_form_module(&configured_root, "Док1", "Форма1", configured_form_code);
+    let foreign_form_code = "Процедура Тест()\n    МойМодуль.Ф();\nКонецПроцедуры\n";
+    let foreign_form_path = write_form_module(&foreign_root, "Док2", "Форма2", foreign_form_code);
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+
+    let (published_tx, mut published_rx) =
+        tokio::sync::mpsc::unbounded_channel::<PublishDiagnosticsParams>();
+    let drain_task = tokio::spawn(async move {
+        while let Some(req) = socket.next().await {
+            if req.method() != "textDocument/publishDiagnostics" {
+                continue;
+            }
+            let Some(params) = req.params().cloned() else {
+                continue;
+            };
+            let Ok(parsed) = serde_json::from_value::<PublishDiagnosticsParams>(params) else {
+                continue;
+            };
+            let _ = published_tx.send(parsed);
+        }
+    });
+
+    initialize_lsp_service(&mut service).await;
+
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be created");
+    *server.config.write().await = Some(crate::config::LspConfig {
+        platform_docs_archive: None,
+        configuration_path: Some(configured_root.to_string_lossy().to_string()),
+        platform_version: Some("8.3.25".to_string()),
+        cache_enabled: Some(true),
+        strict_fingerprint: Some(false),
+        enable_type_hints: Some(false),
+        enable_code_actions: Some(false),
+    });
+
+    let startup_coordinator = coordinator.clone();
+    let startup_root = configured_root.clone();
+    tokio::task::spawn_blocking(move || {
+        startup_coordinator.start_with_paths_blocking(
+            None,
+            Some(&startup_root),
+            Some("8.3.25"),
+            None,
+        )
+    })
+    .await
+    .expect("config startup join")
+    .expect("config startup");
+    server
+        .deps_update_v2(
+            "p32_foreign_document_skips_config_semantic_diagnostics",
+            None,
+            Some(configured_root.clone()),
+        )
+        .await;
+
+    let configured_uri =
+        Url::from_file_path(&configured_form_path).expect("configured form module uri");
+    let configured_did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: configured_uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: configured_form_code.to_string(),
+        },
+    };
+    let configured_open_req = Request::build("textDocument/didOpen")
+        .params(
+            serde_json::to_value(configured_did_open)
+                .expect("configured DidOpenTextDocumentParams"),
+        )
+        .finish();
+    let configured_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(configured_open_req)
+        .await
+        .expect("configured didOpen notification");
+    assert!(
+        configured_open_response.is_none(),
+        "didOpen is a notification"
+    );
+
+    let configured_diagnostics =
+        wait_lsp_publish_diagnostics(&mut published_rx, &configured_uri).await;
+    assert!(
+        configured_diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains("Необъявленная переменная")
+                && diagnostic.message.contains("НесуществующийМодуль")
+        }),
+        "expected semantic diagnostic for file inside configured root, got {:?}",
+        configured_diagnostics
+    );
+
+    let foreign_uri = Url::from_file_path(&foreign_form_path).expect("foreign form module uri");
+    let foreign_did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: foreign_uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: foreign_form_code.to_string(),
+        },
+    };
+    let foreign_open_req = Request::build("textDocument/didOpen")
+        .params(serde_json::to_value(foreign_did_open).expect("foreign DidOpenTextDocumentParams"))
+        .finish();
+    let foreign_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(foreign_open_req)
+        .await
+        .expect("foreign didOpen notification");
+    assert!(foreign_open_response.is_none(), "didOpen is a notification");
+
+    let foreign_diagnostics = wait_any_lsp_publish_diagnostics(
+        &mut published_rx,
+        &foreign_uri,
+        tokio::time::Duration::from_secs(5),
+    )
+    .await
+    .expect("foreign diagnostics publish");
+    assert!(
+        !foreign_diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains("Необъявленная переменная")
+                && diagnostic.message.contains("МойМодуль")
+        }),
+        "expected semantic stage to be skipped for file outside configured root, got {:?}",
+        foreign_diagnostics
     );
 
     drain_task.abort();

@@ -164,6 +164,58 @@ impl BslLanguageServer {
         None
     }
 
+    fn configured_workspace_root_for_semantic_v2(
+        config: Option<&crate::config::LspConfig>,
+    ) -> Option<std::path::PathBuf> {
+        let path = config
+            .and_then(|cfg| cfg.configuration_path.as_ref())
+            .map(std::path::PathBuf::from)?;
+        if path.is_dir() {
+            return Some(path);
+        }
+        if path.file_name().and_then(|name| name.to_str()) == Some("Configuration.xml") {
+            return path.parent().map(std::path::Path::to_path_buf);
+        }
+        None
+    }
+
+    fn resolve_path_scope_for_semantic_v2(path: &std::path::Path) -> Option<std::path::PathBuf> {
+        if path.exists() {
+            path.canonicalize().ok()
+        } else if path.is_absolute() {
+            Some(path.to_path_buf())
+        } else {
+            None
+        }
+    }
+
+    async fn should_run_semantic_diagnostics_for_uri_v2(&self, uri: &Url) -> bool {
+        let config = self.config.read().await.clone();
+        let Some(config_root) = Self::configured_workspace_root_for_semantic_v2(config.as_ref())
+        else {
+            return true;
+        };
+        let Ok(document_path) = uri.to_file_path() else {
+            return true;
+        };
+        let Some(config_root) = Self::resolve_path_scope_for_semantic_v2(&config_root) else {
+            return true;
+        };
+        let Some(document_path) = Self::resolve_path_scope_for_semantic_v2(&document_path) else {
+            return true;
+        };
+        let in_config_root = document_path.starts_with(&config_root);
+        if !in_config_root {
+            debug!(
+                uri = %uri,
+                document_path = %document_path.display(),
+                config_root = %config_root.display(),
+                "diagnostics_v2: skip semantic stage for document outside configured configurationPath"
+            );
+        }
+        in_config_root
+    }
+
     pub(crate) async fn run_diagnostics_profile_immediate_v2(
         &self,
         uri: Url,
@@ -340,7 +392,9 @@ impl BslLanguageServer {
         };
         let plan =
             bsl_runtime::application::diagnostics_execution_plan(profile, flow_sensitive_enabled);
-        if !plan.run_syntax && !plan.run_semantic {
+        let run_semantic =
+            plan.run_semantic && self.should_run_semantic_diagnostics_for_uri_v2(uri).await;
+        if !plan.run_syntax && !run_semantic {
             self.record_diagnostics_pipeline_event_v2(
                 trigger,
                 profile,
@@ -588,7 +642,7 @@ impl BslLanguageServer {
             return disposition;
         }
 
-        if plan.run_semantic {
+        if run_semantic {
             self.coordinator
                 .record_intellisense_v2_payload_shape_with_origin(
                     context.origin.as_str(),

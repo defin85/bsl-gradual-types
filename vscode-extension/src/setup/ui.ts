@@ -5,6 +5,7 @@
  */
 
 import * as vscode from 'vscode';
+import { openBslExtensionSettings } from '../config';
 
 /**
  * Создание и настройка status bar item
@@ -39,7 +40,7 @@ export async function showWelcomeMessage(): Promise<void> {
                 await showFeaturesOverview();
                 break;
             case 'Configure':
-                await vscode.commands.executeCommand('workbench.action.openSettings', 'bsl');
+                await openBslExtensionSettings();
                 break;
             case "Don't show again":
                 await config.update('hasShownWelcome', true, vscode.ConfigurationTarget.Global);

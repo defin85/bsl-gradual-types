@@ -1,7 +1,24 @@
 import * as assert from 'assert';
-import { resolveRepoBoundConfigValue } from '../../config/configHelper';
+import {
+    BSL_EXTENSION_ID,
+    buildBslExtensionSettingsQuery,
+    resolveRepoBoundConfigValue,
+} from '../../config/configHelper';
 
 suite('Config Helper: repo-bound settings', () => {
+    test('builds settings query for the whole extension', () => {
+        const query = buildBslExtensionSettingsQuery();
+        assert.strictEqual(query, `@ext:${BSL_EXTENSION_ID}`);
+    });
+
+    test('builds settings query with additional search terms', () => {
+        const query = buildBslExtensionSettingsQuery('configurationPath', 'platformDocsArchive');
+        assert.strictEqual(
+            query,
+            `@ext:${BSL_EXTENSION_ID} configurationPath platformDocsArchive`
+        );
+    });
+
     test('prefers workspace value over global when workspace is open', () => {
         const value = resolveRepoBoundConfigValue(
             {

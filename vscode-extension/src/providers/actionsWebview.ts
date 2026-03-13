@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { openBslExtensionSettings } from '../config';
 import { searchTypes } from '../lsp/customRequests';
 import { logger } from '../lsp/logger';
 import { getSidebarSnapshot, invalidateSidebarSnapshot } from './sidebarSnapshot';
@@ -136,7 +137,11 @@ export class BslActionsWebviewProvider implements vscode.WebviewViewProvider {
                     );
                 }
             } else {
-                await vscode.commands.executeCommand(command, 'bslAnalyzer');
+                if (action === 'openSettings') {
+                    await openBslExtensionSettings();
+                } else {
+                    await vscode.commands.executeCommand(command, 'bslAnalyzer');
+                }
             }
         }
     }

@@ -3,7 +3,11 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 // Импорт из новых модулей
-import { BslAnalyzerConfig, migrateLegacySettings } from './config';
+import {
+    BslAnalyzerConfig,
+    migrateLegacySettings,
+    openBslExtensionSettings,
+} from './config';
 import {
     initializeLspClient,
     startLanguageClient,
@@ -130,7 +134,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 );
 
                 if (selection === 'Открыть настройки') {
-                    vscode.commands.executeCommand('workbench.action.openSettings', 'bslAnalyzer.platformDocsArchive');
+                    void openBslExtensionSettings('platformDocsArchive');
                 }
 
                 // НЕ останавливаем активацию полностью, но показываем предупреждение
@@ -253,7 +257,7 @@ function showWelcomeMessage() {
             'Open Settings'
         ).then(selection => {
             if (selection === 'Open Settings') {
-                vscode.commands.executeCommand('workbench.action.openSettings', 'bslAnalyzer');
+                void openBslExtensionSettings();
             }
         });
     } else if (!configPath) {
@@ -262,7 +266,7 @@ function showWelcomeMessage() {
             'Open Settings'
         ).then(selection => {
             if (selection === 'Open Settings') {
-                vscode.commands.executeCommand('workbench.action.openSettings', 'bslAnalyzer.configurationPath');
+                void openBslExtensionSettings('configurationPath');
             }
         });
     } else if (!platformDocs) {
@@ -271,7 +275,7 @@ function showWelcomeMessage() {
             'Open Settings'
         ).then(selection => {
             if (selection === 'Open Settings') {
-                vscode.commands.executeCommand('workbench.action.openSettings', 'bslAnalyzer.platformDocsArchive');
+                void openBslExtensionSettings('platformDocsArchive');
             }
         });
     } else {

@@ -1,11 +1,27 @@
 import * as vscode from 'vscode';
 
+export const BSL_EXTENSION_ID = 'bsl-gradual-types-team.bsl-gradual-types';
+
 export type RepoBoundConfigInspection<T> = {
     defaultValue?: T;
     globalValue?: T;
     workspaceValue?: T;
     workspaceFolderValue?: T;
 };
+
+export function buildBslExtensionSettingsQuery(...terms: string[]): string {
+    const normalizedTerms = terms
+        .map(term => term.trim())
+        .filter(term => term.length > 0);
+    return [`@ext:${BSL_EXTENSION_ID}`, ...normalizedTerms].join(' ');
+}
+
+export async function openBslExtensionSettings(...terms: string[]): Promise<void> {
+    await vscode.commands.executeCommand(
+        'workbench.action.openSettings',
+        buildBslExtensionSettingsQuery(...terms)
+    );
+}
 
 export function resolveRepoBoundConfigValue<T>(
     inspection: RepoBoundConfigInspection<T> | undefined,

@@ -1,4 +1,10 @@
 /**
  * Экспорт всех модулей конфигурации
  */
-export { BslAnalyzerConfig, migrateLegacySettings } from './configHelper';
+export {
+    BSL_EXTENSION_ID,
+    BslAnalyzerConfig,
+    buildBslExtensionSettingsQuery,
+    migrateLegacySettings,
+    openBslExtensionSettings,
+} from './configHelper';

@@ -1,4 +1,3 @@
-use super::super::completion_target::extract_member_access_receiver_spans;
 use super::*;
 
 /// Context for auto-completion.
@@ -246,97 +245,6 @@ pub(super) fn add_global_functions_from_lookup(
             Some(SymbolScope::Module),
         ));
     }
-}
-
-pub(super) fn resolve_member_access_owner_types_from_program(
-    ir_program: &SemanticProgram,
-    file_content: &str,
-    line: u32,
-    column: u32,
-) -> Vec<TypeResolution> {
-    let Some(spans) = extract_member_access_receiver_spans(file_content, line, column) else {
-        return Vec::new();
-    };
-    let scope_position = resolve_completion_scope_position(ir_program, file_content, line, column);
-    let local_candidates = scope_position
-        .as_ref()
-        .map(|position| collect_local_candidates_from_ir(ir_program, position))
-        .unwrap_or_default();
-
-    let mut resolutions = Vec::new();
-    for span in spans {
-        let span = bsl_shared::ir::Span::new(span.start, span.end);
-        let resolution = ir_program
-            .semantic_facts
-            .type_resolution_for_span(span)
-            .or_else(|| {
-                ir_program
-                    .nodes
-                    .iter()
-                    .filter(|node| node.span.start <= span.start && node.span.end >= span.end)
-                    .min_by_key(|node| node.span.len())
-                    .and_then(|node| {
-                        ir_program
-                            .semantic_facts
-                            .type_resolution_for_span(node.span)
-                    })
-            })
-            .or_else(|| {
-                receiver_identifier_resolution_from_locals(
-                    ir_program,
-                    file_content,
-                    span,
-                    &local_candidates,
-                )
-            });
-        let Some(resolution) = resolution else {
-            continue;
-        };
-        if resolution.is_unknown() || resolution.is_dynamic() {
-            continue;
-        }
-        if !resolutions.contains(&resolution) {
-            resolutions.push(resolution);
-        }
-    }
-
-    resolutions
-}
-
-pub(super) fn resolve_member_access_owner_types_from_ir(
-    analysis: Option<&CompletionAnalysisContext<'_>>,
-    file_content: &str,
-    line: u32,
-    column: u32,
-) -> Vec<TypeResolution> {
-    let Some(ctx) = analysis else {
-        return Vec::new();
-    };
-    let Some(ir_program) = ctx.ir_program.as_deref() else {
-        return Vec::new();
-    };
-    resolve_member_access_owner_types_from_program(ir_program, file_content, line, column)
-}
-
-fn receiver_identifier_resolution_from_locals(
-    ir_program: &SemanticProgram,
-    file_content: &str,
-    receiver_span: bsl_shared::ir::Span,
-    local_candidates: &[LocalSymbolCandidate],
-) -> Option<TypeResolution> {
-    let receiver_text = file_content
-        .get(receiver_span.start as usize..receiver_span.end as usize)?
-        .trim();
-    if receiver_text.is_empty() || !receiver_text.chars().all(is_identifier_char) {
-        return None;
-    }
-
-    let candidate = local_candidates
-        .iter()
-        .find(|candidate| candidate.name.eq_ignore_ascii_case(receiver_text))?;
-    ir_program
-        .semantic_facts
-        .type_at_byte_offset(candidate.span_start)
 }
 
 pub(super) fn extract_member_base(line_prefix: &str) -> Option<String> {

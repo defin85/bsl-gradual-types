@@ -17,8 +17,9 @@ use std::time::Instant;
 
 use args::{CacheCommand, CliArgs, CliOutputFormat, Commands};
 use bsl_backend::application::{
-    completion_member_access_owner_type_hint_from_analysis,
-    get_completion_with_semantic_program_snapshot_with_trigger_hint, SemanticOperation,
+    completion_member_access_owner_type_hints_from_analysis,
+    get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints,
+    SemanticOperation,
 };
 use bsl_shared::domain::types::{DiagnosticSeverity, TypeResolution};
 use bsl_shared::domain::CompletionItem;
@@ -512,23 +513,19 @@ fn inline_cli_completion_expression(
         return inline_cli_expression(expression, file_path);
     }
 
-    let receiver = member_access_receiver_expression(expression)
+    member_access_receiver_expression(expression)
         .ok_or_else(|| anyhow::anyhow!("member access expression receiver must not be empty"))?;
-    let dot_pos = expression
-        .rfind('.')
-        .ok_or_else(|| anyhow::anyhow!("member access expression is missing dot"))?;
-    let suffix = expression[dot_pos + 1..].trim_start();
 
-    let completion_line = format!("    ForCompletion.{suffix}");
+    let completion_line = format!("    {expression}");
     let cursor_column =
         bsl_analysis_v2::byte_offset_to_utf16(&completion_line, completion_line.len());
     let file_text = Arc::<str>::from(format!(
-        "Процедура Test()\n    Arr = {receiver};\n    ForCompletion = Arr;\n{completion_line}\nКонецПроцедуры\n"
+        "Процедура Test()\n{completion_line}\nКонецПроцедуры\n"
     ));
     Ok(InlineCliExpression {
         file_text,
         file_path: inline_cli_file_path(file_path, "/virtual/cli-inline-completion.bsl"),
-        line: 3,
+        line: 1,
         cursor_column,
     })
 }
@@ -552,15 +549,15 @@ fn member_access_receiver_expression(expression: &str) -> Option<&str> {
     (!receiver.is_empty()).then_some(receiver)
 }
 
-fn cli_completion_owner_hint(
+fn cli_completion_owner_hints(
     expression: &str,
     inline: &InlineCliExpression,
     prepared: &CliPreparedFileOperation,
-) -> Option<TypeResolution> {
+) -> Vec<TypeResolution> {
     let member_access_request = expression_targets_member_access(expression);
     member_access_request
         .then(|| {
-            completion_member_access_owner_type_hint_from_analysis(
+            completion_member_access_owner_type_hints_from_analysis(
                 prepared.analysis(),
                 prepared.file_id,
                 inline.file_text.as_ref(),
@@ -568,19 +565,10 @@ fn cli_completion_owner_hint(
                 inline.cursor_column,
             )
         })
-        .flatten()
+        .unwrap_or_default()
+        .into_iter()
         .filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
-}
-
-async fn cli_exact_member_access_owner_hint(
-    expression: &str,
-    file_path: Option<&str>,
-) -> Option<TypeResolution> {
-    let receiver = member_access_receiver_expression(expression)?;
-    resolve_cli_expression_type(receiver, file_path)
-        .await
-        .ok()
-        .filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
+        .collect()
 }
 
 async fn collect_cli_completion_items(
@@ -598,10 +586,8 @@ async fn collect_cli_completion_items(
     let ir_program = prepared.ir_program()?;
     let trigger_char_hint = expression.trim_end().chars().last().filter(|ch| *ch == '.');
 
-    let owner_hint = cli_exact_member_access_owner_hint(expression, file_path)
-        .await
-        .or_else(|| cli_completion_owner_hint(expression, &inline, &prepared));
-    let completions = get_completion_with_semantic_program_snapshot_with_trigger_hint(
+    let owner_hints = cli_completion_owner_hints(expression, &inline, &prepared);
+    let completions = get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints(
         inline.file_text.as_ref(),
         inline.line,
         inline.cursor_column,
@@ -611,7 +597,7 @@ async fn collect_cli_completion_items(
         inline.file_path.as_ref(),
         prepared.resolver.as_ref(),
         ir_program,
-        owner_hint,
+        owner_hints,
         false,
         trigger_char_hint,
     )
@@ -695,36 +681,13 @@ mod tests {
 
     #[tokio::test]
     async fn cli_inline_completion_preserves_canonical_generic_owner_hint() {
-        let expression = "(Новый Массив()).";
-        let completion_line = "    ДляCompletion = (Новый Массив()).";
-        let file_text = Arc::<str>::from(format!(
-            "Процедура Test()\n{completion_line}\nКонецПроцедуры\n"
-        ));
-        let file_path = Arc::<str>::from("/virtual/cli-inline-completion-parenthesized.bsl");
-        let cursor_column =
-            bsl_analysis_v2::byte_offset_to_utf16(completion_line, completion_line.len())
-                .min(u32::MAX);
-        let inline = InlineCliExpression {
-            file_text: file_text.clone(),
-            file_path: file_path.clone(),
-            line: 1,
-            cursor_column,
-        };
-        let prepared = prepare_cli_text_operation(
-            file_text.clone(),
-            file_path,
-            SemanticOperation::Completion,
-            DetailLevel::Full,
-        )
-        .await
-        .expect("prepare cli completion");
-        let owner_hint =
-            cli_completion_owner_hint(expression, &inline, &prepared).expect("owner hint");
-
-        assert_eq!(
-            owner_hint.type_name(),
-            "Массив<Неопределено>",
-            "CLI must preserve the canonical generic owner hint instead of adapter-local collapsing"
+        let completions = collect_cli_completion_items("(Новый Массив()).", None)
+            .await
+            .expect("cli parenthesized completions");
+        let labels: Vec<_> = completions.into_iter().map(|item| item.label).collect();
+        assert!(
+            labels.iter().any(|label| label == "Добавить"),
+            "CLI production completion path must preserve canonical generic owner semantics, labels={labels:?}"
         );
     }
 
@@ -754,7 +717,7 @@ mod tests {
         );
         prepared.prepared.index_snapshot = Arc::new(polluted_snapshot);
 
-        let owner_hint = completion_member_access_owner_type_hint_from_analysis(
+        let owner_hints = completion_member_access_owner_type_hints_from_analysis(
             prepared.analysis(),
             prepared.file_id,
             inline.file_text.as_ref(),
@@ -762,11 +725,12 @@ mod tests {
             inline.cursor_column,
         );
         assert!(
-            owner_hint.is_none(),
-            "test precondition: canonical CLI owner hint must be absent for unresolved receiver"
+            owner_hints.is_empty(),
+            "test precondition: canonical CLI owner hints must be absent for unresolved receiver"
         );
 
-        let completions = get_completion_with_semantic_program_snapshot_with_trigger_hint(
+        let completions =
+            get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints(
             inline.file_text.as_ref(),
             inline.line,
             inline.cursor_column,
@@ -776,7 +740,7 @@ mod tests {
             inline.file_path.as_ref(),
             prepared.resolver.as_ref(),
             ir_program,
-            None,
+            owner_hints,
             false,
             Some('.'),
         )

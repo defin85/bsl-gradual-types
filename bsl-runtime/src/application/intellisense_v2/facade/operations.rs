@@ -4,7 +4,8 @@ impl IntellisenseV2Facade {
     fn operation_requires_exact_type_index(operation: SemanticOperation) -> bool {
         matches!(
             operation,
-            SemanticOperation::Hover
+            SemanticOperation::Completion
+                | SemanticOperation::Hover
                 | SemanticOperation::Members
                 | SemanticOperation::TypeAtPosition
                 | SemanticOperation::SignatureHelp

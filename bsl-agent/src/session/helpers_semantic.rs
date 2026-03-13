@@ -110,15 +110,15 @@ fn type_at_utf16_position(
     }
 }
 
-fn member_access_owner_type_hint_at_position(
+fn member_access_owner_type_hints_at_position(
     analysis: &bsl_analysis_v2::AnalysisV2,
     file_id: bsl_analysis_v2::FileId,
     file_content: &str,
     line: u32,
     character: u32,
     include_flow_sensitive: bool,
-) -> Option<bsl_shared::domain::types::TypeResolution> {
-    bsl_runtime::application::completion_member_access_owner_type_hint_from_analysis_with_flow_sensitive(
+) -> Vec<bsl_shared::domain::types::TypeResolution> {
+    bsl_runtime::application::completion_member_access_owner_type_hints_from_analysis_with_flow_sensitive(
         analysis,
         file_id,
         file_content,

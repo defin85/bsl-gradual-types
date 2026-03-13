@@ -78,29 +78,20 @@ pub(super) async fn resolve_member_owner_type(
 #[cfg(test)]
 pub(super) fn resolve_member_owner_type_sync(
     analysis: Option<&CompletionAnalysisContext<'_>>,
-    file_content: &str,
-    line: u32,
-    column: u32,
+    _file_content: &str,
+    _line: u32,
+    _column: u32,
     _base_name: &str,
 ) -> Option<TypeResolution> {
     let ctx = analysis?;
-    if let Some(owner_hint) = ctx
-        .member_access_owner_type_hint
-        .as_ref()
+    let mut owner_hints = ctx
+        .member_access_owner_type_hints
+        .iter()
         .filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
         .cloned()
-    {
-        return Some(owner_hint);
-    }
-
-    let mut resolutions = resolve_member_access_owner_types_from_ir(
-        Some(ctx),
-        file_content,
-        line,
-        column,
-    );
-    if resolutions.len() == 1 {
-        resolutions.pop()
+        .collect::<Vec<_>>();
+    if owner_hints.len() == 1 {
+        owner_hints.pop()
     } else {
         None
     }
@@ -108,25 +99,20 @@ pub(super) fn resolve_member_owner_type_sync(
 
 pub(super) fn resolve_member_owner_types_sync(
     analysis: Option<&CompletionAnalysisContext<'_>>,
-    file_content: &str,
-    line: u32,
-    column: u32,
+    _file_content: &str,
+    _line: u32,
+    _column: u32,
     _base_name: &str,
 ) -> Vec<TypeResolution> {
     let Some(ctx) = analysis else {
         return Vec::new();
     };
 
-    if let Some(owner_hint) = ctx
-        .member_access_owner_type_hint
-        .as_ref()
+    ctx.member_access_owner_type_hints
+        .iter()
         .filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
         .cloned()
-    {
-        return vec![owner_hint];
-    }
-
-    resolve_member_access_owner_types_from_ir(Some(ctx), file_content, line, column)
+        .collect()
 }
 
 #[derive(Debug, Clone)]

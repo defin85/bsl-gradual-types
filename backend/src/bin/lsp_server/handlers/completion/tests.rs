@@ -15,22 +15,11 @@ use bsl_shared::TypeRepository;
 use bsl_shared::TypeResolver;
 use tower_lsp::lsp_types::Url;
 
-fn fixture_path(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join(name)
-}
-
 fn golden_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("golden")
         .join(name)
-}
-
-fn read_fixture(name: &str) -> String {
-    fs::read_to_string(fixture_path(name)).expect("fixture read")
 }
 
 fn find_position(content: &str, marker: &str) -> Position {
@@ -415,6 +404,9 @@ fn build_v2_ir(
     });
 
     let analysis = host.analysis();
+    analysis
+        .precompute_type_index_for_file(file_id, Some(0), 0)
+        .expect("precompute exact type index");
     let file_content = analysis
         .file_text(file_id)
         .ok()
@@ -426,44 +418,15 @@ fn build_v2_ir(
         .flatten()
         .expect("file_path");
     let ir_program = analysis.ir(file_id).ok().flatten().expect("ir");
-    let owner_hint =
-        completion_owner_hint_at_position(&analysis, file_id, file_content.as_ref(), position)
-            .or_else(|| {
-                Some(bsl_shared::domain::types::TypeResolution::explicit(
-                    "Массив",
-                ))
-            });
+    let owner_hint = bsl_backend::application::completion_member_access_owner_type_hint_from_analysis(
+        &analysis,
+        file_id,
+        file_content.as_ref(),
+        position.line,
+        position.character,
+    );
 
     (file_content, file_path, ir_program, owner_hint)
-}
-
-fn completion_owner_hint_at_position(
-    analysis: &bsl_analysis_v2::AnalysisV2,
-    file_id: bsl_analysis_v2::FileId,
-    file_content: &str,
-    position: Position,
-) -> Option<bsl_shared::domain::types::TypeResolution> {
-    let line_text = file_content.lines().nth(position.line as usize)?;
-    let cursor_byte = bsl_analysis_v2::utf16_to_byte_offset(line_text, position.character);
-    let line_prefix = line_text.get(..cursor_byte)?;
-    let dot_idx = line_prefix.rfind('.')?;
-    let receiver = line_prefix.get(..dot_idx)?.trim_end();
-    if receiver.is_empty() {
-        return None;
-    }
-
-    let probe_utf16 = bsl_analysis_v2::byte_offset_to_utf16(line_text, receiver.len());
-    let probe_offset = analysis
-        .utf16_position_to_byte_offset(file_id, position.line, probe_utf16)
-        .ok()
-        .flatten()?
-        .saturating_sub(1)
-        .min(u32::MAX as usize) as u32;
-
-    analysis
-        .type_at_byte_offset(file_id, probe_offset)
-        .ok()
-        .flatten()
 }
 
 #[tokio::test]
@@ -511,9 +474,14 @@ async fn completion_member_access_fails_closed_without_shared_owner_hint() {
 
 #[tokio::test]
 async fn m5_completion_authoritative_path_is_deterministic() {
-    let content = read_fixture("m5_snippets_resolve.bsl");
-    let position = find_position(&content, "МойМассив.");
-    let uri = Url::parse("file:///m5_snippets_resolve.bsl").expect("url");
+    let content = concat!(
+        "Процедура Тест()\n",
+        "    (Новый Массив()).\n",
+        "КонецПроцедуры\n"
+    )
+    .to_string();
+    let position = find_position(&content, "(Новый Массив()).");
+    let uri = Url::parse("file:///m5_completion_supported_exact_receiver.bsl").expect("url");
     let env = create_test_env();
     let index = env.index.clone();
     let index_snapshot = index.snapshot();
@@ -521,6 +489,13 @@ async fn m5_completion_authoritative_path_is_deterministic() {
 
     let (file_content, file_path, ir_program, owner_hint) =
         build_v2_ir(&content, &uri, deps.clone(), position);
+    assert_eq!(
+        owner_hint
+            .as_ref()
+            .map(bsl_shared::domain::TypeResolution::type_name),
+        Some("Массив<Неопределено>".to_string()),
+        "supported exact receiver must surface canonical owner hint before completion"
+    );
     let v2 = handle_completion_v2_with_trigger_hint(
         file_content.clone(),
         file_path.clone(),
@@ -575,15 +550,27 @@ async fn m5_completion_authoritative_path_is_deterministic() {
 
 #[tokio::test]
 async fn m5_completion_resolve_snippets_snapshot() {
-    let content = read_fixture("m5_snippets_resolve.bsl");
-    let position = find_position(&content, "МойМассив.");
-    let uri = Url::parse("file:///m5_snippets_resolve.bsl").expect("url");
+    let content = concat!(
+        "Процедура Тест()\n",
+        "    (Новый Массив()).\n",
+        "КонецПроцедуры\n"
+    )
+    .to_string();
+    let position = find_position(&content, "(Новый Массив()).");
+    let uri = Url::parse("file:///m5_completion_supported_exact_receiver.bsl").expect("url");
     let env = create_test_env();
     let index_snapshot = env.index.snapshot();
     let deps = env.deps;
 
     let (file_content, file_path, ir_program, owner_hint) =
         build_v2_ir(&content, &uri, deps.clone(), position);
+    assert_eq!(
+        owner_hint
+            .as_ref()
+            .map(bsl_shared::domain::TypeResolution::type_name),
+        Some("Массив<Неопределено>".to_string()),
+        "supported exact receiver must surface canonical owner hint before completion"
+    );
     let response = handle_completion_v2_with_trigger_hint(
         file_content,
         file_path,

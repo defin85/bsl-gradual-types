@@ -563,7 +563,7 @@ impl BslLanguageServer {
                     let (
                         file_content,
                         file_path,
-                        member_access_owner_type_hint,
+                        member_access_owner_type_hints,
                         deps,
                         ir_program,
                         index_snapshot,
@@ -637,15 +637,15 @@ impl BslLanguageServer {
                                     let file_content = analysis.file_text(file_id).ok().flatten();
                                     let file_path = analysis.file_path(file_id).ok().flatten();
                                     let deps = analysis.deps_data().ok();
-                                    let member_access_owner_type_hint =
-                                        file_content.as_deref().and_then(|text| {
+                                    let member_access_owner_type_hints =
+                                        file_content.as_deref().map(|text| {
                                             completion_request_targets_member_access(
                                                 text,
                                                 position,
                                                 trigger_char_hint,
                                             )
                                             .then(|| {
-                                                completion_member_access_owner_type_hint_at_position(
+                                                completion_member_access_owner_type_hints_at_position(
                                                     &analysis,
                                                     file_id,
                                                     text,
@@ -653,8 +653,8 @@ impl BslLanguageServer {
                                                     Some(coordinator_for_query.as_ref()),
                                                 )
                                             })
-                                            .flatten()
-                                        });
+                                            .unwrap_or_default()
+                                        }).unwrap_or_default();
                                     coordinator_for_query.record_completion_stage_latency(
                                         "query_bundle_deps_and_file_snapshot",
                                         deps_and_file_snapshot_started.elapsed(),
@@ -670,7 +670,7 @@ impl BslLanguageServer {
                                         return (
                                             file_content,
                                             file_path,
-                                            member_access_owner_type_hint,
+                                            member_access_owner_type_hints,
                                             deps,
                                             None,
                                             false,
@@ -764,7 +764,7 @@ impl BslLanguageServer {
                                         return (
                                             file_content,
                                             file_path,
-                                            member_access_owner_type_hint,
+                                            member_access_owner_type_hints,
                                             deps,
                                             ir_program,
                                             ir_cancelled_after_retry,
@@ -803,7 +803,7 @@ impl BslLanguageServer {
                                         return (
                                             file_content,
                                             file_path,
-                                            member_access_owner_type_hint,
+                                            member_access_owner_type_hints,
                                             deps,
                                             ir_program,
                                             ir_cancelled_after_retry,
@@ -814,7 +814,7 @@ impl BslLanguageServer {
                                     (
                                         file_content,
                                         file_path,
-                                        member_access_owner_type_hint,
+                                        member_access_owner_type_hints,
                                         deps,
                                         ir_program,
                                         ir_cancelled_after_retry,
@@ -827,7 +827,7 @@ impl BslLanguageServer {
                         let (
                             file_content,
                             file_path,
-                            member_access_owner_type_hint,
+                            member_access_owner_type_hints,
                             deps,
                             ir_program,
                             ir_cancelled_after_retry,
@@ -841,7 +841,7 @@ impl BslLanguageServer {
                                     error = %join_error,
                                     "Completion v2: interactive query task failed"
                                 );
-                                (None, None, None, None, None, true, true)
+                                (None, None, Vec::new(), None, None, true, true)
                             }
                         };
                         if (ir_cancelled_after_retry || query_checkpoint_cancelled)
@@ -868,7 +868,7 @@ impl BslLanguageServer {
                         (
                             file_content,
                             file_path,
-                            member_access_owner_type_hint,
+                            member_access_owner_type_hints,
                             deps,
                             ir_program,
                             index_snapshot,
@@ -893,7 +893,7 @@ impl BslLanguageServer {
                         })
                         .unwrap_or(member_access_request);
                     member_access_observed = member_access_context;
-                    if member_access_context && member_access_owner_type_hint.is_none() {
+                    if member_access_context && member_access_owner_type_hints.is_empty() {
                         self.coordinator
                             .record_intellisense_v2_completion_fallback_unavailable();
                         completion_outcome.get_or_insert("wait_not_ready");
@@ -918,11 +918,11 @@ impl BslLanguageServer {
                     let response_build_started = Instant::now();
                     let completion_response = match (file_content, file_path, deps, ir_program) {
                         (Some(file_content), Some(file_path), Some(deps), Some(ir_program)) => {
-                            crate::handlers::handle_completion_v2_with_trigger_hint(
+                            crate::handlers::handle_completion_v2_with_trigger_hint_and_owner_hints(
                                 file_content,
                                 file_path,
                                 ir_program,
-                                member_access_owner_type_hint,
+                                member_access_owner_type_hints,
                                 deps,
                                 position,
                                 &uri,
@@ -955,7 +955,7 @@ impl BslLanguageServer {
                                 member_access_context,
                                 file_content,
                                 file_path,
-                                member_access_owner_type_hint,
+                                member_access_owner_type_hints,
                                 deps,
                                 position,
                                 &uri,

@@ -788,9 +788,9 @@ fn collect_members(request: MembersRequest) -> Result<BslMembersResponse, rmcp::
     let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
     let member_access_context =
         has_member_access_receiver_at_position(text.as_str(), position.line, position.character);
-    let member_access_owner_type_hint = member_access_context
+    let member_access_owner_type_hints = member_access_context
         .then(|| {
-            member_access_owner_type_hint_at_position(
+            member_access_owner_type_hints_at_position(
                 &analysis,
                 FileId(1),
                 text.as_str(),
@@ -799,9 +799,11 @@ fn collect_members(request: MembersRequest) -> Result<BslMembersResponse, rmcp::
                 flow_sensitive_enabled,
             )
         })
-        .flatten()
-        .filter(|hint| !hint.is_unknown() && !hint.is_dynamic());
-    if member_access_context && member_access_owner_type_hint.is_none() {
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
+        .collect::<Vec<_>>();
+    if member_access_context && member_access_owner_type_hints.is_empty() {
         coordinator.record_intellisense_v2_interactive_fail_closed_reason(
             "agent",
             "members",
@@ -817,7 +819,7 @@ fn collect_members(request: MembersRequest) -> Result<BslMembersResponse, rmcp::
 
     let result = completion_runtime
         .block_on(
-            bsl_runtime::application::type_system::get_completion_with_semantic_program_snapshot(
+            bsl_runtime::application::type_system::get_completion_with_semantic_program_snapshot_with_owner_hints(
                 text.as_str(),
                 position.line,
                 position.character,
@@ -827,7 +829,7 @@ fn collect_members(request: MembersRequest) -> Result<BslMembersResponse, rmcp::
                 abs_path.as_str(),
                 resolver.as_ref(),
                 program,
-                member_access_owner_type_hint,
+                member_access_owner_type_hints,
                 flow_sensitive_enabled,
             ),
         )

@@ -2,7 +2,7 @@
   "schema_version": "v1",
   "contract_version": "acceptance-report-v1",
   "change_id": "refactor-ir-canonical-semantic-pipeline",
-  "generated_at": "2026-03-12T23:55:00+03:00",
+  "generated_at": "2026-03-13T10:07:05+03:00",
   "evidence_basis": "checked_in_automated_assets",
   "human_matrix_ref": "openspec/changes/refactor-ir-canonical-semantic-pipeline/execution-matrix.md",
   "fixtures": [
@@ -118,7 +118,7 @@
     {
       "id": "search_isolation_and_revision_integrity",
       "verdict": "pass",
-      "checks_total": 13
+      "checks_total": 14
     },
     {
       "id": "module_context_and_facet_preservation",
@@ -567,6 +567,19 @@
         "kind": "test",
         "path": "backend/tests/flow_sensitive_web_api_test.rs",
         "selector": "hover_endpoints_do_not_backfill_from_polluted_search_index"
+      }
+    },
+    {
+      "bundle_id": "search_isolation_and_revision_integrity",
+      "fixture_id": "semantic_artifact_missing_but_search_alive",
+      "operation": "diagnostics",
+      "consumer": "web",
+      "verdict": "pass",
+      "reason_code": "search_index_isolated",
+      "source_asset": {
+        "kind": "test",
+        "path": "backend/tests/flow_sensitive_web_api_test.rs",
+        "selector": "diagnostics_and_validate_do_not_backfill_from_polluted_search_index"
       }
     },
     {

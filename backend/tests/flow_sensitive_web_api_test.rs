@@ -561,6 +561,95 @@ async fn hover_endpoints_do_not_backfill_from_polluted_search_index() {
 }
 
 #[tokio::test]
+async fn diagnostics_and_validate_do_not_backfill_from_polluted_search_index() {
+    let app = create_router(
+        test_state_with_empty_deps_bundle_and_polluted_search_index(),
+        "backend/static",
+        true,
+    );
+    let code = "Процедура T()\n    Проверка = SearchOnlyType.Unknown;\nКонецПроцедуры\n";
+
+    let diagnostics_resp = app
+        .clone()
+        .oneshot(
+            Request::post("/api/diagnostics")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(axum::body::Body::from(json!({ "code": code }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(diagnostics_resp.status().is_success());
+    let diagnostics_body = axum::body::to_bytes(diagnostics_resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let diagnostics_json: serde_json::Value =
+        serde_json::from_slice(&diagnostics_body).expect("valid json");
+    let diagnostics_messages = diagnostics_json
+        .get("semanticErrors")
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|value| value.get("message").and_then(|message| message.as_str()))
+        .collect::<Vec<_>>();
+    assert!(
+        diagnostics_json
+            .get("syntaxErrors")
+            .and_then(|value| value.as_array())
+            .is_some_and(|errors| errors.is_empty()),
+        "diagnostics regression must exercise semantic path rather than syntax rejection: {diagnostics_json}"
+    );
+    assert!(
+        diagnostics_messages
+            .iter()
+            .any(|message| {
+                message.contains("Необъявленная переменная")
+                    && message.contains("SearchOnlyType")
+            }),
+        "diagnostics must stay on unresolved-variable path when only polluted search index is available: {diagnostics_json}"
+    );
+
+    let validate_resp = app
+        .oneshot(
+            Request::post("/api/validate")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(axum::body::Body::from(json!({ "code": code }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(validate_resp.status().is_success());
+    let validate_body = axum::body::to_bytes(validate_resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let validate_json: serde_json::Value =
+        serde_json::from_slice(&validate_body).expect("valid json");
+    assert_eq!(
+        validate_json
+            .get("isValid")
+            .and_then(|value| value.as_bool()),
+        Some(false),
+        "validate must remain invalid when only polluted search index is available: {validate_json}"
+    );
+    let validate_messages = validate_json
+        .get("errors")
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|value| value.get("message").and_then(|message| message.as_str()))
+        .collect::<Vec<_>>();
+    assert!(
+        validate_messages
+            .iter()
+            .any(|message| {
+                message.contains("Необъявленная переменная")
+                    && message.contains("SearchOnlyType")
+            }),
+        "validate must stay on unresolved-variable path instead of using polluted search index: {validate_json}"
+    );
+}
+
+#[tokio::test]
 async fn hover_endpoints_use_file_path_for_module_context_bindings() {
     let app = create_router(test_state_with_conf_fixture(), "backend/static", true);
     let code = "Процедура Тест()\n    x = Объект;\nКонецПроцедуры\n";

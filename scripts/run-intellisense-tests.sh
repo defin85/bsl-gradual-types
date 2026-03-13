@@ -33,6 +33,7 @@ run_cross_adapter_smoke() {
   cargo test -p bsl-backend --test flow_sensitive_web_api_test hover_endpoints_emit_type_index_reason_metrics -- --nocapture
   cargo test -p bsl-backend --test flow_sensitive_web_api_test hover_endpoints_fail_closed_on_missing_canonical_artifacts -- --nocapture
   cargo test -p bsl-backend --test flow_sensitive_web_api_test hover_endpoints_do_not_backfill_from_polluted_search_index -- --nocapture
+  cargo test -p bsl-backend --test flow_sensitive_web_api_test diagnostics_and_validate_do_not_backfill_from_polluted_search_index -- --nocapture
   cargo test -p bsl-backend --test flow_sensitive_web_api_test file_path_for_module_context_bindings -- --nocapture
   cargo test -p bsl-backend --test flow_sensitive_web_api_test hover_endpoints_use_file_path_for_module_context_bindings -- --nocapture
   cargo test -p bsl-backend --test flow_sensitive_web_api_test diagnostics_and_validate_use_file_path_for_module_context_bindings -- --nocapture

@@ -1,5 +1,4 @@
 use super::*;
-use crate::application::type_system::services::completion_target::extract_member_access_receiver_spans;
 use crate::system::{IndexItem, SymbolKind, SymbolScope, TypeKind};
 use bsl_analysis_v2::{
     AnalysisHostV2, Change as ChangeV2, DepsSnapshotId, FileId as V2FileId, SettingsId,
@@ -552,7 +551,7 @@ async fn completion_labels_non_member(
         ir_program: Some(ir_program),
         resolver,
         file_path,
-        member_access_owner_type_hint: None,
+        member_access_owner_type_hints: Vec::new(),
         include_flow_sensitive: false,
     };
 
@@ -576,8 +575,8 @@ async fn completion_labels_non_member(
         .collect()
 }
 
-fn owner_hint(type_name: &str) -> Option<TypeResolution> {
-    Some(TypeResolution::explicit(type_name))
+fn owner_hint(type_name: &str) -> Vec<TypeResolution> {
+    vec![TypeResolution::explicit(type_name)]
 }
 
 #[tokio::test]
@@ -1251,7 +1250,7 @@ async fn completion_resolves_variable_type_for_member_access() {
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path: "completion_test.bsl",
-        member_access_owner_type_hint: owner_hint("ТаблицаЗначений"),
+        member_access_owner_type_hints: owner_hint("ТаблицаЗначений"),
         include_flow_sensitive: false,
     };
 
@@ -1287,7 +1286,7 @@ async fn completion_resolves_variable_type_for_member_access() {
 }
 
 #[tokio::test]
-async fn completion_resolves_member_owner_from_ir_without_owner_hint() {
+async fn completion_fails_closed_without_owner_hint_even_when_ir_has_owner_fact() {
     let repository = Arc::new(InMemoryTypeRepository::new());
     repository
         .load_types(vec![RawTypeData {
@@ -1355,15 +1354,14 @@ async fn completion_resolves_member_owner_from_ir_without_owner_hint() {
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path: "completion_no_owner_hint_test.bsl",
-        member_access_owner_type_hint: None,
+        member_access_owner_type_hints: Vec::new(),
         include_flow_sensitive: false,
     };
 
     let resolved = resolve_member_owner_type(Some(&ctx), content, line, column, "ТаблЗнач").await;
-    assert_eq!(
-        resolved,
-        owner_hint("ТаблицаЗначений"),
-        "member owner must resolve from canonical IR without adapter-supplied hint"
+    assert!(
+        resolved.is_none(),
+        "member owner resolution must fail closed without adapter-supplied exact owner hint"
     );
 
     let result = get_completion_with_analysis(
@@ -1381,13 +1379,8 @@ async fn completion_resolves_member_owner_from_ir_without_owner_hint() {
 
     let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
     assert!(
-        labels.contains(&"Добавить".to_string()),
-        "labels: {:?}",
-        labels
-    );
-    assert!(
-        labels.contains(&"Количество".to_string()),
-        "labels: {:?}",
+        !labels.contains(&"Добавить".to_string()) && !labels.contains(&"Количество".to_string()),
+        "member-access completion must fail closed without shared exact owner hint, labels: {:?}",
         labels
     );
 }
@@ -1487,7 +1480,7 @@ async fn completion_unknown_bare_receiver_member_access_ignores_polluted_index_s
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path: "completion_unknown_receiver_member_access_test.bsl",
-        member_access_owner_type_hint: None,
+        member_access_owner_type_hints: Vec::new(),
         include_flow_sensitive: false,
     };
 
@@ -1600,7 +1593,7 @@ async fn completion_member_access_does_not_reconstruct_type_name_without_canonic
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path: "completion_type_name_receiver_without_owner_hint_test.bsl",
-        member_access_owner_type_hint: None,
+        member_access_owner_type_hints: Vec::new(),
         include_flow_sensitive: false,
     };
 
@@ -1710,7 +1703,7 @@ async fn completion_implicit_form_object_member_access_resolves_from_ir_without_
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path,
-        member_access_owner_type_hint: None,
+        member_access_owner_type_hints: Vec::new(),
         include_flow_sensitive: false,
     };
 
@@ -1839,7 +1832,7 @@ async fn completion_resolves_implicit_form_object_member_access_with_shared_hint
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path,
-        member_access_owner_type_hint,
+        member_access_owner_type_hints: member_access_owner_type_hint.into_iter().collect(),
         include_flow_sensitive: false,
     };
 
@@ -1936,7 +1929,7 @@ async fn completion_uses_owner_hint_for_member_access_when_flow_sensitive_is_ena
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path: "completion_narrowing_test.bsl",
-        member_access_owner_type_hint: owner_hint("Строка"),
+        member_access_owner_type_hints: owner_hint("Строка"),
         include_flow_sensitive: true,
     };
 
@@ -1962,7 +1955,7 @@ async fn completion_uses_owner_hint_for_member_access_when_flow_sensitive_is_ena
 }
 
 #[test]
-fn implicit_module_context_owner_resolution_uses_ir_for_supported_modules() {
+fn implicit_module_context_owner_resolution_uses_shared_exact_owner_hints_for_supported_modules() {
     let repository = Arc::new(InMemoryTypeRepository::new());
     repository
         .load_types(vec![RawTypeData {
@@ -2002,10 +1995,8 @@ fn implicit_module_context_owner_resolution_uses_ir_for_supported_modules() {
         let assignment_marker = format!("expected = {base_name}");
         let assignment_offset =
             byte_offset_of(&content, &assignment_marker) + "expected = ".len() as u32;
-        let access_column = format!("    {base_name}")
-            .chars()
-            .map(|ch| ch.len_utf16())
-            .sum::<usize>() as u32;
+        let (_, dot_column) = utf16_column(&content, ".");
+        let access_column = dot_column + 1;
 
         let mut host = AnalysisHostV2::default();
         host.apply_change(ChangeV2::SetDepsSnapshot {
@@ -2024,17 +2015,33 @@ fn implicit_module_context_owner_resolution_uses_ir_for_supported_modules() {
         });
 
         let analysis = host.analysis();
+        analysis
+            .precompute_type_index_for_file(V2FileId(1), Some(0), 0)
+            .expect("precompute exact type index");
         let expected = analysis
             .type_at_byte_offset(V2FileId(1), assignment_offset)
             .expect("type_at_byte_offset query")
             .expect("shared resolution for implicit context symbol");
         let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
 
+        let shared_owner_hints = completion_member_access_owner_type_hints_from_analysis(
+            &analysis,
+            V2FileId(1),
+            &content,
+            2,
+            access_column,
+        );
+        assert_eq!(
+            shared_owner_hints,
+            vec![expected.clone()],
+            "supported module-context path must surface canonical exact owner hints for {file_path}:{base_name}"
+        );
+
         let ctx_without_hint = CompletionAnalysisContext {
             ir_program: Some(ir_program),
             resolver: resolver.as_ref(),
             file_path,
-            member_access_owner_type_hint: None,
+            member_access_owner_type_hints: Vec::new(),
             include_flow_sensitive: false,
         };
 
@@ -2045,17 +2052,16 @@ fn implicit_module_context_owner_resolution_uses_ir_for_supported_modules() {
             access_column,
             base_name,
         );
-        assert_eq!(
-            without_hint,
-            Some(expected.clone()),
-            "implicit module-context owner must resolve from canonical IR for {file_path}:{base_name}"
+        assert!(
+            without_hint.is_none(),
+            "member-access owner resolution must fail closed without shared exact hint for {file_path}:{base_name}"
         );
 
         let ctx_with_hint = CompletionAnalysisContext {
             ir_program: Some(ctx_without_hint.ir_program.expect("ir program available")),
             resolver: resolver.as_ref(),
             file_path,
-            member_access_owner_type_hint: Some(expected.clone()),
+            member_access_owner_type_hints: shared_owner_hints,
             include_flow_sensitive: false,
         };
         let resolved = resolve_member_owner_type_sync(
@@ -2111,7 +2117,7 @@ fn implicit_module_context_owner_resolution_fails_closed_outside_supported_modul
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path: "CommonModules/ОбщегоНазначения/Ext/Module.bsl",
-        member_access_owner_type_hint: None,
+        member_access_owner_type_hints: Vec::new(),
         include_flow_sensitive: false,
     };
 
@@ -2193,7 +2199,7 @@ async fn completion_resolves_nested_member_access_chain() {
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path: "completion_nested_chain_test.bsl",
-        member_access_owner_type_hint: owner_hint("КоллекцияКолонокТаблицыЗначений"),
+        member_access_owner_type_hints: owner_hint("КоллекцияКолонокТаблицыЗначений"),
         include_flow_sensitive: false,
     };
 
@@ -2298,7 +2304,7 @@ async fn completion_supports_member_access_after_method_call() {
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path: "completion_call_chain_test.bsl",
-        member_access_owner_type_hint: owner_hint("КолонкаТаблицыЗначений"),
+        member_access_owner_type_hints: owner_hint("КолонкаТаблицыЗначений"),
         include_flow_sensitive: false,
     };
 
@@ -2386,7 +2392,7 @@ async fn completion_supports_member_access_after_index_access() {
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path: "completion_index_access_test.bsl",
-        member_access_owner_type_hint: owner_hint("КолонкаТаблицыЗначений"),
+        member_access_owner_type_hints: owner_hint("КолонкаТаблицыЗначений"),
         include_flow_sensitive: false,
     };
 
@@ -2474,7 +2480,7 @@ async fn completion_supports_member_access_after_map_index_access() {
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path: "completion_map_index_access_test.bsl",
-        member_access_owner_type_hint: owner_hint("КолонкаТаблицыЗначений"),
+        member_access_owner_type_hints: owner_hint("КолонкаТаблицыЗначений"),
         include_flow_sensitive: false,
     };
 
@@ -2562,7 +2568,7 @@ async fn completion_does_not_infer_map_index_owner_without_shared_hint() {
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path: "completion_map_index_access_no_hint_test.bsl",
-        member_access_owner_type_hint: None,
+        member_access_owner_type_hints: Vec::new(),
         include_flow_sensitive: false,
     };
 
@@ -2649,7 +2655,7 @@ async fn completion_does_not_infer_type_name_member_access_without_canonical_own
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path: "completion_type_name_no_hint_test.bsl",
-        member_access_owner_type_hint: None,
+        member_access_owner_type_hints: Vec::new(),
         include_flow_sensitive: false,
     };
 
@@ -2743,7 +2749,7 @@ async fn completion_does_not_infer_type_name_member_chain_without_canonical_owne
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path: "completion_type_name_chain_no_hint_test.bsl",
-        member_access_owner_type_hint: None,
+        member_access_owner_type_hints: Vec::new(),
         include_flow_sensitive: false,
     };
 
@@ -2832,46 +2838,32 @@ async fn completion_supports_member_access_after_ternary_expression() {
         path: Arc::from("completion_ternary_test.bsl"),
     });
     let analysis = host.analysis();
-    let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
-    let ctx = CompletionAnalysisContext {
-        ir_program: Some(ir_program),
-        resolver: resolver.as_ref(),
-        file_path: "completion_ternary_test.bsl",
-        member_access_owner_type_hint: None,
-        include_flow_sensitive: false,
-    };
-    let receiver_spans =
-        extract_member_access_receiver_spans(content, line, column).expect("receiver spans");
-    let receiver_debug: Vec<(String, Option<String>)> = receiver_spans
-        .iter()
-        .map(|span| {
-            let text = content[span.start as usize..span.end as usize].to_string();
-            let resolution = ctx
-                .ir_program
-                .as_ref()
-                .and_then(|program| {
-                    program
-                        .semantic_facts
-                        .type_resolution_for_span(bsl_shared::ir::Span::new(span.start, span.end))
-                })
-                .map(|value| value.type_name());
-            let indexed = analysis
-                .type_at_byte_offset(V2FileId(1), span.end.saturating_sub(1))
-                .ok()
-                .flatten()
-                .map(|value| value.type_name());
-            (text, resolution.or(indexed))
-        })
-        .collect();
-    let owner_types = resolve_member_access_owner_types_from_ir(Some(&ctx), content, line, column);
+    analysis
+        .precompute_type_index_for_file(V2FileId(1), Some(0), 0)
+        .expect("precompute exact type index");
+    let owner_types = completion_member_access_owner_type_hints_from_analysis(
+        &analysis,
+        V2FileId(1),
+        content,
+        line,
+        column,
+    );
     assert_eq!(
         owner_types
             .iter()
             .map(TypeResolution::type_name)
             .collect::<Vec<_>>(),
         vec!["TypeA".to_string(), "TypeB".to_string()],
-        "ternary receiver must resolve canonical owner alternatives from IR; receiver_debug={receiver_debug:?}"
+        "ternary receiver must resolve canonical owner alternatives from the exact shared type index"
     );
+    let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
+    let ctx = CompletionAnalysisContext {
+        ir_program: Some(ir_program),
+        resolver: resolver.as_ref(),
+        file_path: "completion_ternary_test.bsl",
+        member_access_owner_type_hints: owner_types,
+        include_flow_sensitive: false,
+    };
 
     let result = get_completion_with_analysis(
         content,
@@ -2966,46 +2958,32 @@ async fn completion_supports_member_access_after_choice_expression() {
         path: Arc::from("completion_choice_test.bsl"),
     });
     let analysis = host.analysis();
-    let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
-    let ctx = CompletionAnalysisContext {
-        ir_program: Some(ir_program),
-        resolver: resolver.as_ref(),
-        file_path: "completion_choice_test.bsl",
-        member_access_owner_type_hint: None,
-        include_flow_sensitive: false,
-    };
-    let receiver_spans =
-        extract_member_access_receiver_spans(content, line, column).expect("receiver spans");
-    let receiver_debug: Vec<(String, Option<String>)> = receiver_spans
-        .iter()
-        .map(|span| {
-            let text = content[span.start as usize..span.end as usize].to_string();
-            let resolution = ctx
-                .ir_program
-                .as_ref()
-                .and_then(|program| {
-                    program
-                        .semantic_facts
-                        .type_resolution_for_span(bsl_shared::ir::Span::new(span.start, span.end))
-                })
-                .map(|value| value.type_name());
-            let indexed = analysis
-                .type_at_byte_offset(V2FileId(1), span.end.saturating_sub(1))
-                .ok()
-                .flatten()
-                .map(|value| value.type_name());
-            (text, resolution.or(indexed))
-        })
-        .collect();
-    let owner_types = resolve_member_access_owner_types_from_ir(Some(&ctx), content, line, column);
+    analysis
+        .precompute_type_index_for_file(V2FileId(1), Some(0), 0)
+        .expect("precompute exact type index");
+    let owner_types = completion_member_access_owner_type_hints_from_analysis(
+        &analysis,
+        V2FileId(1),
+        content,
+        line,
+        column,
+    );
     assert_eq!(
         owner_types
             .iter()
             .map(TypeResolution::type_name)
             .collect::<Vec<_>>(),
         vec!["TypeA".to_string(), "TypeB".to_string()],
-        "choice receiver must resolve canonical owner alternatives from IR; receiver_debug={receiver_debug:?}"
+        "choice receiver must resolve canonical owner alternatives from the exact shared type index"
     );
+    let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
+    let ctx = CompletionAnalysisContext {
+        ir_program: Some(ir_program),
+        resolver: resolver.as_ref(),
+        file_path: "completion_choice_test.bsl",
+        member_access_owner_type_hints: owner_types,
+        include_flow_sensitive: false,
+    };
 
     let result = get_completion_with_analysis(
         content,
@@ -3108,7 +3086,7 @@ async fn completion_substitutes_faceted_metadata_name_in_return_type() {
         ir_program: Some(ir_program),
         resolver: resolver.as_ref(),
         file_path: "completion_facet_substitution_test.bsl",
-        member_access_owner_type_hint: owner_hint("Справочники.Контрагенты"),
+        member_access_owner_type_hints: owner_hint("Справочники.Контрагенты"),
         include_flow_sensitive: false,
     };
 

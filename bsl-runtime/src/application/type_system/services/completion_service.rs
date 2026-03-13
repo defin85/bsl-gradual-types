@@ -94,7 +94,7 @@ pub(crate) struct CompletionAnalysisContext<'a> {
     #[allow(dead_code)]
     pub resolver: &'a TypeResolver,
     pub file_path: &'a str,
-    pub member_access_owner_type_hint: Option<TypeResolution>,
+    pub member_access_owner_type_hints: Vec<TypeResolution>,
     #[allow(dead_code)]
     pub include_flow_sensitive: bool,
 }
@@ -179,15 +179,15 @@ fn completion_member_access_owner_type_hints_from_analysis_internal(
         }
         probe_offsets.push(span.start);
 
-        for offset in probe_offsets {
+        for offset in &probe_offsets {
             let resolution = if include_flow_sensitive {
                 analysis
-                    .flow_type_at_byte_offset(file_id, offset)
+                    .flow_type_at_byte_offset(file_id, *offset)
                     .ok()
                     .flatten()
             } else {
                 analysis
-                    .type_at_byte_offset_serve_only_profiled(file_id, offset)
+                    .type_at_byte_offset_serve_only_profiled(file_id, *offset)
                     .ok()
                     .and_then(|profiled| profiled.resolution)
             };
@@ -201,6 +201,7 @@ fn completion_member_access_owner_type_hints_from_analysis_internal(
             }
             break;
         }
+
     }
 
     resolutions
@@ -220,6 +221,24 @@ pub fn completion_member_access_owner_type_hints_from_analysis(
         line,
         column,
         false,
+    )
+}
+
+pub fn completion_member_access_owner_type_hints_from_analysis_with_flow_sensitive(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    file_content: &str,
+    line: u32,
+    column: u32,
+    include_flow_sensitive: bool,
+) -> Vec<TypeResolution> {
+    completion_member_access_owner_type_hints_from_analysis_internal(
+        analysis,
+        file_id,
+        file_content,
+        line,
+        column,
+        include_flow_sensitive,
     )
 }
 
@@ -285,7 +304,7 @@ pub async fn get_completion_with_semantic_program(
         ir_program: Some(ir_program),
         resolver,
         file_path,
-        member_access_owner_type_hint,
+        member_access_owner_type_hints: member_access_owner_type_hint.into_iter().collect(),
         include_flow_sensitive: false,
     };
 
@@ -334,6 +353,37 @@ pub async fn get_completion_with_semantic_program_snapshot(
 }
 
 #[allow(clippy::too_many_arguments)]
+pub async fn get_completion_with_semantic_program_snapshot_with_owner_hints(
+    file_content: &str,
+    line: u32,
+    column: u32,
+    file_uri: Option<&str>,
+    index_snapshot: &IndexSnapshot,
+    metadata_lookup: &TypeMetadataLookup,
+    file_path: &str,
+    resolver: &TypeResolver,
+    ir_program: Arc<SemanticProgram>,
+    member_access_owner_type_hints: Vec<TypeResolution>,
+    include_flow_sensitive: bool,
+) -> Result<CompletionResult> {
+    get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints(
+        file_content,
+        line,
+        column,
+        file_uri,
+        index_snapshot,
+        metadata_lookup,
+        file_path,
+        resolver,
+        ir_program,
+        member_access_owner_type_hints,
+        include_flow_sensitive,
+        None,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
 pub async fn get_completion_with_semantic_program_snapshot_with_trigger_hint(
     file_content: &str,
     line: u32,
@@ -348,11 +398,43 @@ pub async fn get_completion_with_semantic_program_snapshot_with_trigger_hint(
     include_flow_sensitive: bool,
     trigger_char_hint: Option<char>,
 ) -> Result<CompletionResult> {
+    get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints(
+        file_content,
+        line,
+        column,
+        file_uri,
+        index_snapshot,
+        metadata_lookup,
+        file_path,
+        resolver,
+        ir_program,
+        member_access_owner_type_hint.into_iter().collect(),
+        include_flow_sensitive,
+        trigger_char_hint,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints(
+    file_content: &str,
+    line: u32,
+    column: u32,
+    file_uri: Option<&str>,
+    index_snapshot: &IndexSnapshot,
+    metadata_lookup: &TypeMetadataLookup,
+    file_path: &str,
+    resolver: &TypeResolver,
+    ir_program: Arc<SemanticProgram>,
+    member_access_owner_type_hints: Vec<TypeResolution>,
+    include_flow_sensitive: bool,
+    trigger_char_hint: Option<char>,
+) -> Result<CompletionResult> {
     let analysis = CompletionAnalysisContext {
         ir_program: Some(ir_program),
         resolver,
         file_path,
-        member_access_owner_type_hint,
+        member_access_owner_type_hints,
         include_flow_sensitive,
     };
 
@@ -419,7 +501,7 @@ pub async fn get_completion_with_semantic_program_snapshot_v2_with_trigger_hint(
         ir_program: Some(ir_program),
         resolver,
         file_path,
-        member_access_owner_type_hint,
+        member_access_owner_type_hints: member_access_owner_type_hint.into_iter().collect(),
         include_flow_sensitive,
     };
 
@@ -548,9 +630,9 @@ async fn get_completion_internal(
     let collect_started = Instant::now();
 
     if context.member_access {
-        // The shared member-access path may only use canonical owner hints or canonical
-        // IR-derived owner facts for the current revision. Type-name and text/metadata
-        // chain reconstruction must fail closed instead of synthesizing semantic truth.
+        // The shared member-access path may only use canonical owner hints materialized
+        // from the current-revision exact semantic index. Type-name/text-based rescue
+        // and IR fallback reconstruction must fail closed instead of synthesizing truth.
         match evidence {
             CompletionEvidence::Semantic(analysis) => {
                 for owner_hint in

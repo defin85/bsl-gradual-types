@@ -404,6 +404,7 @@ fn prepare_ephemeral_operation_warms_exact_type_index_only_for_shared_interactiv
         .expect("probe for exact type index");
 
     for operation in [
+        SemanticOperation::Completion,
         SemanticOperation::Hover,
         SemanticOperation::Members,
         SemanticOperation::TypeAtPosition,
@@ -507,6 +508,7 @@ async fn prepare_stateful_operation_warms_exact_type_index_only_for_shared_inter
         .expect("probe for stateful exact type index");
 
     for operation in [
+        SemanticOperation::Completion,
         SemanticOperation::Hover,
         SemanticOperation::Members,
         SemanticOperation::TypeAtPosition,

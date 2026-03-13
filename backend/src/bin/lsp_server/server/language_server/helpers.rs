@@ -201,21 +201,21 @@ pub(super) fn completion_request_targets_member_access(
     after_dot.is_empty() || after_dot.chars().all(is_completion_identifier_char)
 }
 
-pub(super) fn completion_member_access_owner_type_hint_at_position(
+pub(super) fn completion_member_access_owner_type_hints_at_position(
     analysis: &bsl_analysis_v2::AnalysisV2,
     file_id: bsl_analysis_v2::FileId,
     file_content: &str,
     position: Position,
     coordinator: Option<&bsl_runtime::system::SystemCoordinator>,
-) -> Option<bsl_shared::domain::types::TypeResolution> {
+) -> Vec<bsl_shared::domain::types::TypeResolution> {
     let Some(_line_text) = file_content.lines().nth(position.line as usize) else {
         if let Some(coordinator) = coordinator {
             coordinator.record_intellisense_v2_completion_owner_hint_result("no_line");
         }
-        return None;
+        return Vec::new();
     };
-    let resolution =
-        bsl_runtime::application::completion_member_access_owner_type_hint_from_analysis(
+    let resolutions =
+        bsl_runtime::application::completion_member_access_owner_type_hints_from_analysis(
             analysis,
             file_id,
             file_content,
@@ -228,14 +228,16 @@ pub(super) fn completion_member_access_owner_type_hint_at_position(
     }
 
     if let Some(coordinator) = coordinator {
-        coordinator.record_intellisense_v2_completion_owner_hint_result(if resolution.is_some() {
-            "type_hit"
-        } else {
-            "type_miss"
-        });
+        coordinator.record_intellisense_v2_completion_owner_hint_result(
+            if resolutions.is_empty() {
+                "type_miss"
+            } else {
+                "type_hit"
+            },
+        );
     }
 
-    resolution
+    resolutions
 }
 
 pub(super) fn completion_labels_fingerprint(response: &CompletionResponse) -> Vec<String> {
@@ -555,7 +557,7 @@ pub(super) async fn resolve_completion_without_ir(
     _member_access_context: bool,
     _file_content: Arc<str>,
     _file_path: Arc<str>,
-    _member_access_owner_type_hint: Option<bsl_shared::domain::types::TypeResolution>,
+    _member_access_owner_type_hints: Vec<bsl_shared::domain::types::TypeResolution>,
     _deps: Arc<bsl_analysis_v2::SemanticDeps>,
     _position: Position,
     _uri: &Url,

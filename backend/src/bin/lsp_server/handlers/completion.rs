@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 use tracing::error;
 
-use bsl_backend::application::get_completion_with_semantic_program_snapshot_with_trigger_hint;
+use bsl_backend::application::get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints;
 use bsl_backend::application::type_system::{
     build_call_snippet, resolve_method_completion, resolve_type_details,
 };
@@ -120,6 +120,36 @@ pub async fn handle_completion_v2_with_trigger_hint(
     include_flow_sensitive: bool,
     trigger_char_hint: Option<char>,
 ) -> Option<CompletionResponseWithStats> {
+    handle_completion_v2_with_trigger_hint_and_owner_hints(
+        file_content,
+        file_path,
+        ir_program,
+        member_access_owner_type_hint.into_iter().collect(),
+        deps,
+        position,
+        file_uri,
+        index_snapshot,
+        snippet_support,
+        include_flow_sensitive,
+        trigger_char_hint,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn handle_completion_v2_with_trigger_hint_and_owner_hints(
+    file_content: Arc<str>,
+    file_path: Arc<str>,
+    ir_program: Arc<SemanticProgram>,
+    member_access_owner_type_hints: Vec<TypeResolution>,
+    deps: Arc<bsl_analysis_v2::SemanticDeps>,
+    position: Position,
+    file_uri: &Url,
+    index_snapshot: &IndexSnapshot,
+    snippet_support: bool,
+    include_flow_sensitive: bool,
+    trigger_char_hint: Option<char>,
+) -> Option<CompletionResponseWithStats> {
     let resolver = deps
         .resolver
         .clone()
@@ -130,12 +160,14 @@ pub async fn handle_completion_v2_with_trigger_hint(
         position,
         trigger_char_hint,
     );
-    let member_access_owner_type_hint =
-        member_access_owner_type_hint.filter(|hint| !hint.is_unknown() && !hint.is_dynamic());
+    let member_access_owner_type_hints = member_access_owner_type_hints
+        .into_iter()
+        .filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
+        .collect::<Vec<_>>();
 
     // Default LSP delivery must not reconstruct owner type from IR when the shared
     // exact owner hint is unavailable for a member-access request.
-    if member_access_request && member_access_owner_type_hint.is_none() {
+    if member_access_request && member_access_owner_type_hints.is_empty() {
         return Some(CompletionResponseWithStats {
             response: CompletionResponse::List(CompletionList {
                 is_incomplete: false,
@@ -146,7 +178,7 @@ pub async fn handle_completion_v2_with_trigger_hint(
         });
     }
 
-    let completion = get_completion_with_semantic_program_snapshot_with_trigger_hint(
+    let completion = get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints(
         file_content.as_ref(),
         position.line,
         position.character,
@@ -156,7 +188,7 @@ pub async fn handle_completion_v2_with_trigger_hint(
         file_path.as_ref(),
         resolver.as_ref(),
         ir_program,
-        member_access_owner_type_hint,
+        member_access_owner_type_hints,
         include_flow_sensitive,
         trigger_char_hint,
     )

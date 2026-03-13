@@ -10426,6 +10426,59 @@ fn scale_aware_churn_every_from_env() -> u64 {
         .clamp(1, 1024)
 }
 
+fn scale_aware_non_zero_u64_from_env(name: &str, default: u64, max: u64) -> u64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(default)
+        .clamp(1, max)
+}
+
+fn scale_aware_u64_from_env(name: &str, default: u64, max: u64) -> u64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(default)
+        .min(max)
+}
+
+fn scale_aware_phase_plan_from_env() -> [ScaleAwarePhase; 3] {
+    [
+        ScaleAwarePhase {
+            name: "start",
+            warmup: 0,
+            iterations: scale_aware_non_zero_u64_from_env(
+                "BSL_V2_SCALE_AWARE_START_ITERATIONS",
+                1,
+                10_000,
+            ),
+        },
+        ScaleAwarePhase {
+            name: "cold",
+            warmup: 0,
+            iterations: scale_aware_non_zero_u64_from_env(
+                "BSL_V2_SCALE_AWARE_COLD_ITERATIONS",
+                5,
+                10_000,
+            ),
+        },
+        ScaleAwarePhase {
+            name: "warm",
+            warmup: scale_aware_u64_from_env("BSL_V2_SCALE_AWARE_WARM_WARMUP", 5, 10_000),
+            iterations: scale_aware_non_zero_u64_from_env(
+                "BSL_V2_SCALE_AWARE_WARM_ITERATIONS",
+                50,
+                10_000,
+            ),
+        },
+    ]
+}
+
+fn scale_aware_required_warm_samples_from_env() -> u64 {
+    scale_aware_non_zero_u64_from_env("BSL_V2_SCALE_AWARE_REQUIRED_WARM_SAMPLES", 50, 10_000)
+}
+
 fn should_apply_scale_aware_churn(
     mode: ScaleAwareChurnMode,
     profile_name: &str,
@@ -12480,6 +12533,112 @@ fn scale_aware_progress_emits_start_step_and_finish() {
 }
 
 #[test]
+fn scale_aware_phase_plan_defaults_match_acceptance_contract() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn unset(key: &'static str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::remove_var(key);
+            Self { key, previous }
+        }
+
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+    let _guards = [
+        EnvVarGuard::unset("BSL_V2_SCALE_AWARE_START_ITERATIONS"),
+        EnvVarGuard::unset("BSL_V2_SCALE_AWARE_COLD_ITERATIONS"),
+        EnvVarGuard::unset("BSL_V2_SCALE_AWARE_WARM_WARMUP"),
+        EnvVarGuard::unset("BSL_V2_SCALE_AWARE_WARM_ITERATIONS"),
+        EnvVarGuard::unset("BSL_V2_SCALE_AWARE_REQUIRED_WARM_SAMPLES"),
+    ];
+
+    let phases = scale_aware_phase_plan_from_env();
+    assert_eq!(phases[0].name, "start");
+    assert_eq!(phases[0].warmup, 0);
+    assert_eq!(phases[0].iterations, 1);
+    assert_eq!(phases[1].name, "cold");
+    assert_eq!(phases[1].warmup, 0);
+    assert_eq!(phases[1].iterations, 5);
+    assert_eq!(phases[2].name, "warm");
+    assert_eq!(phases[2].warmup, 5);
+    assert_eq!(phases[2].iterations, 50);
+    assert_eq!(scale_aware_required_warm_samples_from_env(), 50);
+
+    let _override_guard = EnvVarGuard::set("BSL_V2_SCALE_AWARE_START_ITERATIONS", "7");
+    assert_eq!(scale_aware_phase_plan_from_env()[0].iterations, 7);
+}
+
+#[test]
+fn scale_aware_phase_plan_accepts_local_debug_overrides() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+    let _guards = [
+        EnvVarGuard::set("BSL_V2_SCALE_AWARE_START_ITERATIONS", "2"),
+        EnvVarGuard::set("BSL_V2_SCALE_AWARE_COLD_ITERATIONS", "1"),
+        EnvVarGuard::set("BSL_V2_SCALE_AWARE_WARM_WARMUP", "1"),
+        EnvVarGuard::set("BSL_V2_SCALE_AWARE_WARM_ITERATIONS", "4"),
+        EnvVarGuard::set("BSL_V2_SCALE_AWARE_REQUIRED_WARM_SAMPLES", "4"),
+    ];
+
+    let phases = scale_aware_phase_plan_from_env();
+    assert_eq!(phases[0].iterations, 2);
+    assert_eq!(phases[1].iterations, 1);
+    assert_eq!(phases[2].warmup, 1);
+    assert_eq!(phases[2].iterations, 4);
+    assert_eq!(scale_aware_required_warm_samples_from_env(), 4);
+}
+
+#[test]
 fn scale_aware_progress_skips_intermediate_non_step_points() {
     assert!(!should_emit_scale_aware_progress(1, 55, 10));
     assert!(!should_emit_scale_aware_progress(8, 55, 10));
@@ -12971,23 +13130,8 @@ async fn p31_scale_aware_large_small_completion_gate_live() {
 
     let large_position = find_utf16_position_after_marker(&large_text, "Объект.");
     let small_position = find_utf16_position_after_marker(&small_text, "Arr.");
-    let phases = [
-        ScaleAwarePhase {
-            name: "start",
-            warmup: 0,
-            iterations: 1,
-        },
-        ScaleAwarePhase {
-            name: "cold",
-            warmup: 0,
-            iterations: 5,
-        },
-        ScaleAwarePhase {
-            name: "warm",
-            warmup: 5,
-            iterations: 50,
-        },
-    ];
+    let phases = scale_aware_phase_plan_from_env();
+    let required_warm_samples = scale_aware_required_warm_samples_from_env();
     let churn_mode = scale_aware_churn_mode_from_env();
     let churn_every = scale_aware_churn_every_from_env();
 
@@ -13026,6 +13170,9 @@ async fn p31_scale_aware_large_small_completion_gate_live() {
         "churn": {
             "mode": churn_mode.as_str(),
             "every": churn_every
+        },
+        "requirements": {
+            "required_warm_samples": required_warm_samples
         },
         "profiles": {
             "large": large_profile,
@@ -13106,8 +13253,8 @@ async fn p31_scale_aware_large_small_completion_gate_live() {
         get_report_u64(&report, &["profiles", "small", "warm", "completion_total"])
             .expect("small warm completion_total");
     assert!(
-        large_warm_total >= 50 && small_warm_total >= 50,
-        "expected >=50 warm completion samples for both profiles, got large={} small={}",
+        large_warm_total >= required_warm_samples && small_warm_total >= required_warm_samples,
+        "expected >={required_warm_samples} warm completion samples for both profiles, got large={} small={}",
         large_warm_total,
         small_warm_total
     );

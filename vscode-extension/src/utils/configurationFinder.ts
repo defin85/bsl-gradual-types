@@ -10,6 +10,24 @@ export interface ConfigurationInfo {
     uuid?: string;
 }
 
+async function detectConfigurationAtPath(configPath: string): Promise<ConfigurationInfo | null> {
+    const configXmlPath = path.join(configPath, 'Configuration.xml');
+    if (!fs.existsSync(configXmlPath)) {
+        return null;
+    }
+
+    const configInfo = await analyzeConfiguration(configXmlPath);
+    if (!configInfo) {
+        return null;
+    }
+
+    return {
+        ...configInfo,
+        path: configPath,
+        name: path.basename(configPath),
+    };
+}
+
 /**
  * Находит все конфигурации 1С в директории
  */
@@ -17,22 +35,22 @@ export async function findConfigurations(rootPath: string): Promise<Configuratio
     const configurations: ConfigurationInfo[] = [];
     
     try {
+        const rootConfiguration = await detectConfigurationAtPath(rootPath);
+        if (rootConfiguration) {
+            configurations.push(rootConfiguration);
+        }
+
         const entries = await fs.promises.readdir(rootPath, { withFileTypes: true });
         
         for (const entry of entries) {
             if (entry.isDirectory()) {
                 const configPath = path.join(rootPath, entry.name);
-                const configXmlPath = path.join(configPath, 'Configuration.xml');
-                
-                if (fs.existsSync(configXmlPath)) {
-                    const configInfo = await analyzeConfiguration(configXmlPath);
-                    if (configInfo) {
-                        configurations.push({
-                            ...configInfo,
-                            path: configPath,
-                            name: entry.name
-                        });
-                    }
+                const configInfo = await detectConfigurationAtPath(configPath);
+                if (configInfo) {
+                    configurations.push({
+                        ...configInfo,
+                        name: entry.name,
+                    });
                 }
             }
         }

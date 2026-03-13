@@ -111,7 +111,8 @@ export async function activate(context: vscode.ExtensionContext) {
         await migrateLegacySettings();
 
         // MILESTONE 2.9: Валидация ОБЯЗАТЕЛЬНОГО параметра platformDocsArchive
-        const platformDocsArchive = BslAnalyzerConfig.platformDocsArchive;
+        const platformDocsArchiveInfo = BslAnalyzerConfig.getPlatformDocsArchiveResolution();
+        const platformDocsArchive = platformDocsArchiveInfo.value;
 
         // Определяем, запущены ли мы в тестовом режиме
         const isTestMode = process.env.NODE_ENV === 'test' ||
@@ -124,11 +125,15 @@ export async function activate(context: vscode.ExtensionContext) {
                 logger.warn('[Test Mode] platformDocsArchive not configured - using mocks');
                 outputChannel.appendLine('ℹ️ [Test Mode] platformDocsArchive не настроен - используются mocks');
             } else {
+                const message = platformDocsArchiveInfo.ignoredGlobalValue
+                    ? '⚠️ BSL Analyzer: platformDocsArchive задан только в User/Remote scope и игнорируется для текущей рабочей области.\n\n' +
+                      'Перенесите значение в настройки Workspace, иначе типы платформы 1С не будут доступны в LSP hover.'
+                    : '⚠️ BSL Analyzer: platformDocsArchive не настроен!\n\n' +
+                      'Это ОБЯЗАТЕЛЬНЫЙ параметр для работы TypeRepository.\n' +
+                      'Без него типы платформы 1С не будут доступны в LSP hover.';
                 // В production режиме показываем предупреждение
                 const selection = await vscode.window.showErrorMessage(
-                    '⚠️ BSL Analyzer: platformDocsArchive не настроен!\n\n' +
-                    'Это ОБЯЗАТЕЛЬНЫЙ параметр для работы TypeRepository.\n' +
-                    'Без него типы платформы 1С не будут доступны в LSP hover.',
+                    message,
                     'Открыть настройки',
                     'Закрыть'
                 );
@@ -138,7 +143,13 @@ export async function activate(context: vscode.ExtensionContext) {
                 }
 
                 // НЕ останавливаем активацию полностью, но показываем предупреждение
-                outputChannel.appendLine('⚠️ Extension будет работать в ограниченном режиме без платформенных типов');
+                if (platformDocsArchiveInfo.ignoredGlobalValue) {
+                    outputChannel.appendLine(
+                        `⚠️ platformDocsArchive задан глобально (${platformDocsArchiveInfo.ignoredGlobalValue}), но проигнорирован для текущей workspace`
+                    );
+                } else {
+                    outputChannel.appendLine('⚠️ Extension будет работать в ограниченном режиме без платформенных типов');
+                }
             }
         } else {
             outputChannel.appendLine(`✅ Platform docs archive configured: ${platformDocsArchive}`);

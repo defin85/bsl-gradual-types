@@ -2,6 +2,7 @@ import * as assert from 'assert';
 import {
     BSL_EXTENSION_ID,
     buildBslExtensionSettingsQuery,
+    resolveRepoBoundConfig,
     resolveRepoBoundConfigValue,
 } from '../../config/configHelper';
 
@@ -44,6 +45,20 @@ suite('Config Helper: repo-bound settings', () => {
         );
 
         assert.strictEqual(value, '');
+    });
+
+    test('exposes ignored global value when workspace is open', () => {
+        const resolution = resolveRepoBoundConfig(
+            {
+                defaultValue: '',
+                globalValue: '/global/docs',
+            },
+            '',
+            true
+        );
+
+        assert.strictEqual(resolution.value, '');
+        assert.strictEqual(resolution.ignoredGlobalValue, '/global/docs');
     });
 
     test('prefers workspace folder over workspace value', () => {

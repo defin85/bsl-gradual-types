@@ -26,7 +26,8 @@ export function getPlatformVersion(): string {
  * Получить путь к архиву документации платформы
  */
 export function getPlatformDocsArchive(): string {
-    const userArchive = BslAnalyzerConfig.platformDocsArchive;
+    const platformDocsResolution = BslAnalyzerConfig.getPlatformDocsArchiveResolution();
+    const userArchive = platformDocsResolution.value;
     
     if (userArchive && fs.existsSync(userArchive)) {
         outputChannel?.appendLine(`📚 Using user-specified platform documentation: ${userArchive}`);
@@ -34,8 +35,15 @@ export function getPlatformDocsArchive(): string {
     }
     
     if (!userArchive) {
-        outputChannel?.appendLine(`⚠️ Platform documentation not configured. Some features may be limited.`);
-        outputChannel?.appendLine(`💡 Specify path to rebuilt.shcntx_ru.zip or rebuilt.shlang_ru.zip in settings.`);
+        if (platformDocsResolution.ignoredGlobalValue) {
+            outputChannel?.appendLine(
+                `⚠️ Platform documentation configured only in User/Remote scope and ignored for this workspace: ${platformDocsResolution.ignoredGlobalValue}`
+            );
+            outputChannel?.appendLine(`💡 Move platformDocsArchive to Workspace settings for this repo.`);
+        } else {
+            outputChannel?.appendLine(`⚠️ Platform documentation not configured. Some features may be limited.`);
+            outputChannel?.appendLine(`💡 Specify path to rebuilt.shcntx_ru.zip or rebuilt.shlang_ru.zip in settings.`);
+        }
     } else {
         outputChannel?.appendLine(`❌ Platform documentation not found at: ${userArchive}`);
     }

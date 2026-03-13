@@ -9,6 +9,11 @@ export type RepoBoundConfigInspection<T> = {
     workspaceFolderValue?: T;
 };
 
+export type RepoBoundConfigResolution<T> = {
+    value: T;
+    ignoredGlobalValue?: T;
+};
+
 export function buildBslExtensionSettingsQuery(...terms: string[]): string {
     const normalizedTerms = terms
         .map(term => term.trim())
@@ -23,27 +28,42 @@ export async function openBslExtensionSettings(...terms: string[]): Promise<void
     );
 }
 
+export function resolveRepoBoundConfig<T>(
+    inspection: RepoBoundConfigInspection<T> | undefined,
+    fallback: T,
+    workspaceOpen: boolean
+): RepoBoundConfigResolution<T> {
+    if (!inspection) {
+        return { value: fallback };
+    }
+
+    if (workspaceOpen) {
+        return {
+            value:
+                inspection.workspaceFolderValue
+                ?? inspection.workspaceValue
+                ?? inspection.defaultValue
+                ?? fallback,
+            ignoredGlobalValue: inspection.globalValue,
+        };
+    }
+
+    return {
+        value:
+            inspection.workspaceFolderValue
+            ?? inspection.workspaceValue
+            ?? inspection.globalValue
+            ?? inspection.defaultValue
+            ?? fallback,
+    };
+}
+
 export function resolveRepoBoundConfigValue<T>(
     inspection: RepoBoundConfigInspection<T> | undefined,
     fallback: T,
     workspaceOpen: boolean
 ): T {
-    if (!inspection) {
-        return fallback;
-    }
-
-    if (workspaceOpen) {
-        return inspection.workspaceFolderValue
-            ?? inspection.workspaceValue
-            ?? inspection.defaultValue
-            ?? fallback;
-    }
-
-    return inspection.workspaceFolderValue
-        ?? inspection.workspaceValue
-        ?? inspection.globalValue
-        ?? inspection.defaultValue
-        ?? fallback;
+    return resolveRepoBoundConfig(inspection, fallback, workspaceOpen).value;
 }
 
 /**
@@ -55,10 +75,17 @@ export class BslAnalyzerConfig {
         return vscode.workspace.getConfiguration('bslAnalyzer');
     }
 
-    private static getRepoBoundConfig<T>(key: string, fallback: T): T {
+    private static getRepoBoundConfigResolution<T>(
+        key: string,
+        fallback: T
+    ): RepoBoundConfigResolution<T> {
         const inspection = this.getConfig().inspect<T>(key);
         const workspaceOpen = (vscode.workspace.workspaceFolders?.length ?? 0) > 0;
-        return resolveRepoBoundConfigValue(inspection, fallback, workspaceOpen);
+        return resolveRepoBoundConfig(inspection, fallback, workspaceOpen);
+    }
+
+    private static getRepoBoundConfig<T>(key: string, fallback: T): T {
+        return this.getRepoBoundConfigResolution(key, fallback).value;
     }
     
     // Основные настройки
@@ -131,6 +158,10 @@ export class BslAnalyzerConfig {
     
     static get platformDocsArchive(): string {
         return this.getRepoBoundConfig('platformDocsArchive', '');
+    }
+
+    static getPlatformDocsArchiveResolution(): RepoBoundConfigResolution<string> {
+        return this.getRepoBoundConfigResolution('platformDocsArchive', '');
     }
     
     static get autoIndexBuild(): boolean {

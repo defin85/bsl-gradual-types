@@ -561,6 +561,14 @@ impl AnalysisV2 {
         };
         let file_version = file.version(&self.db);
         let deps_id = self.deps.id(&self.db).clone();
+        if let Some(cached) = self
+            .derived_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get_ir(file_id, file_version, &deps_id)
+        {
+            return Ok(Some(cached));
+        }
         if let Some(snapshot) = self.parse_snapshot_for_file(file_id, file) {
             let source = file.text(&self.db);
             if let Some(reused) = self.try_reuse_ir_from_previous_version(

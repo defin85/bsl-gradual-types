@@ -13,6 +13,20 @@ impl IntellisenseV2Facade {
         )
     }
 
+    fn should_eager_warm_exact_type_index(context: &ExecutionContext) -> bool {
+        if !Self::operation_requires_exact_type_index(context.operation) {
+            return false;
+        }
+
+        // LSP completion already has event-driven exact type-index precompute on didOpen/didChange
+        // and a bounded wait/fail-closed path before member-access resolution. Rebuilding the
+        // exact artifact here duplicates cold work directly on the request path.
+        !matches!(
+            (context.origin, context.operation),
+            (ObservabilityOrigin::Lsp, SemanticOperation::Completion)
+        )
+    }
+
     pub async fn snapshot_for_operation(&self, operation: SemanticOperation) -> SemanticSnapshot {
         let queue_priority = RuntimeQueuePriority::for_operation(operation);
         let (analysis, _index_snapshot, deps_id) = self
@@ -166,7 +180,7 @@ impl IntellisenseV2Facade {
             }
         }
 
-        if Self::operation_requires_exact_type_index(context.operation) {
+        if Self::should_eager_warm_exact_type_index(context) {
             if let Some(file_version) = observed_file_version {
                 let exact_ready = analysis
                     .current_type_index_serve_only_ready(context.file_id)

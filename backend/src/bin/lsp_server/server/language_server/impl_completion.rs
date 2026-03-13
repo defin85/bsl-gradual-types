@@ -557,6 +557,18 @@ impl BslLanguageServer {
                         );
                         timeline_capture
                             .push_completed_stage("wait_exact_type_index", exact_wait_elapsed);
+                        let exact_ready_after_wait = prepared
+                            .snapshot
+                            .analysis
+                            .current_type_index_serve_only_ready(file_id)
+                            .ok()
+                            .unwrap_or(false);
+                        if !exact_ready_after_wait {
+                            self.coordinator
+                                .record_intellisense_v2_completion_fallback_unavailable();
+                            completion_outcome.get_or_insert("wait_not_ready");
+                            break 'completion_flow Some(completion_empty_response(false));
+                        }
                     }
 
                     let query_bundle_started = Instant::now();

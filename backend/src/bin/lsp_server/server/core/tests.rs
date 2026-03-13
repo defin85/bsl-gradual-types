@@ -3807,6 +3807,10 @@ async fn p7_member_access_completion_does_not_backfill_from_runtime_index_snapsh
         .get("counters")
         .and_then(|value| value.as_object())
         .expect("metrics.counters object");
+    let histograms = metrics
+        .get("histograms")
+        .and_then(|value| value.as_object())
+        .expect("metrics.histograms object");
     let fallback_unavailable_total =
         read_u64_metric(counters.get("intellisense_v2_completion_fallback_unavailable_total"));
     assert!(
@@ -3817,6 +3821,24 @@ async fn p7_member_access_completion_does_not_backfill_from_runtime_index_snapsh
     assert!(
         fail_closed_reason_total > 0,
         "member-access cache miss must emit missing_semantic_index bounded public reason metrics, counters={counters:?}"
+    );
+    let ir_query_count = histograms
+        .get("intellisense_v2_ir_query_completion_ms")
+        .and_then(|value| value.as_object())
+        .map(|histogram| read_u64_metric(histogram.get("count")))
+        .unwrap_or(0);
+    assert_eq!(
+        ir_query_count, 0,
+        "member-access fail-closed path must not build canonical IR when exact type index is unavailable, histograms={histograms:?}"
+    );
+    let query_bundle_count = histograms
+        .get("completion_stage_query_bundle_ms")
+        .and_then(|value| value.as_object())
+        .map(|histogram| read_u64_metric(histogram.get("count")))
+        .unwrap_or(0);
+    assert_eq!(
+        query_bundle_count, 0,
+        "member-access fail-closed path must short-circuit before query_bundle, histograms={histograms:?}"
     );
 
     drain_task.abort();

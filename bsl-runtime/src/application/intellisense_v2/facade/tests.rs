@@ -626,6 +626,86 @@ async fn prepare_stateful_operation_warms_exact_type_index_only_for_shared_inter
     runtime.shutdown_for_test().await;
 }
 
+#[tokio::test]
+async fn prepare_stateful_operation_skips_eager_exact_type_index_warm_for_lsp_completion() {
+    let deps_id = DepsSnapshotId::from_hash("deps_lsp_completion_exact_type_index");
+    let settings = ExecutionSettings {
+        settings_id: SettingsId::from_hash("settings_lsp_completion_exact_type_index"),
+        diagnostics_detail_level: DetailLevel::Full,
+    };
+    let file_id = FileId(190);
+    let file_text: Arc<str> = Arc::from(
+        "Procedure Test()\n\
+             arr = Новый Массив;\n\
+             result = arr;\n\
+             EndProcedure",
+    );
+    let probe = file_text
+        .find("result = arr;")
+        .map(|idx| idx as u32 + "result = ".len() as u32)
+        .expect("probe for lsp completion exact type index");
+
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: deps_id.clone(),
+        deps: make_deps(),
+    });
+    host.apply_change(Change::SetSettingsSnapshot {
+        settings_id: settings.settings_id.clone(),
+        diagnostics_detail_level: settings.diagnostics_detail_level,
+    });
+    let runtime = IntellisenseV2Facade::new(
+        host,
+        make_index_snapshot("index_lsp_completion_exact_type_index"),
+        None,
+    );
+    runtime.apply_changes(vec![Change::SetFile {
+        file_id,
+        text: file_text,
+        version: 3,
+        path: Arc::from("<lsp-completion-exact-type-index>"),
+    }]);
+    let _ = runtime.snapshot().await;
+
+    let context = ExecutionContext {
+        origin: ObservabilityOrigin::Lsp,
+        operation: SemanticOperation::Completion,
+        completion_mode: None,
+        completion_large_churn_active: false,
+        file_id,
+        min_file_version: Some(3),
+        expected_deps_id: Some(deps_id),
+        flow_sensitive: false,
+        settings,
+        cancellation: CancellationPolicy::BestEffort,
+    };
+
+    let prepared = runtime
+        .prepare_stateful_operation(&context, None)
+        .await
+        .expect("prepare_stateful_operation");
+
+    assert!(
+        !prepared
+            .snapshot
+            .analysis
+            .current_type_index_serve_only_ready(file_id)
+            .expect("serve-only readiness after lsp completion prepare"),
+        "lsp completion prepare must leave exact type index warming to background precompute"
+    );
+    assert!(
+        prepared
+            .snapshot
+            .analysis
+            .type_at_byte_offset_serve_only(file_id, probe)
+            .expect("serve-only lookup after lsp completion prepare")
+            .is_none(),
+        "lsp completion prepare must not materialize exact type index eagerly"
+    );
+
+    runtime.shutdown_for_test().await;
+}
+
 #[test]
 fn semantic_operation_contract_values_are_stable() {
     assert_eq!(SemanticOperation::Completion.as_str(), "completion");

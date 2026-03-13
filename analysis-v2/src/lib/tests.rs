@@ -619,6 +619,30 @@ fn ir_reuses_previous_version_for_tail_whitespace_append_snapshot() {
 }
 
 #[test]
+fn ir_reuses_current_version_artifact_for_snapshot_backed_analysis() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(13);
+    let text: Arc<str> = Arc::from("Procedure Test()\n    x = 1;\nEndProcedure");
+
+    host.apply_change(Change::SetFileWithSnapshot {
+        file_id,
+        text: text.clone(),
+        version: 1,
+        path: Arc::from("current-version-cache.bsl"),
+        parse_snapshot: parse_snapshot_for_test(file_id, 1, text.as_ref(), Vec::new(), true, None),
+    });
+
+    let analysis = host.analysis();
+    let ir_a = analysis.ir(file_id).unwrap().unwrap();
+    let ir_b = analysis.ir(file_id).unwrap().unwrap();
+
+    assert!(
+        Arc::ptr_eq(&ir_a, &ir_b),
+        "snapshot-backed analysis must reuse current-version IR artifact"
+    );
+}
+
+#[test]
 fn ir_does_not_reuse_previous_version_for_non_tail_snapshot_change() {
     let mut host = AnalysisHostV2::default();
     let file_id = FileId(12);

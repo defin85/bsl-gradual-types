@@ -2758,6 +2758,13 @@ async fn p30_cross_file_did_change_parallel_completion_no_global_lock_bottleneck
         }
     }
 
+    fn completion_is_incomplete(response: &CompletionResponse) -> bool {
+        match response {
+            CompletionResponse::Array(_) => false,
+            CompletionResponse::List(list) => list.is_incomplete,
+        }
+    }
+
     fn metric_as_f64(value: Option<&serde_json::Value>) -> f64 {
         value
             .and_then(|value| value.as_f64().or_else(|| value.as_u64().map(|v| v as f64)))
@@ -2766,7 +2773,7 @@ async fn p30_cross_file_did_change_parallel_completion_no_global_lock_bottleneck
 
     fn build_document_text(function_name: &str) -> String {
         format!(
-            "Процедура {function_name}()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.\nКонецПроцедуры\n"
+            "Процедура {function_name}()\n    ДляCompletion = (Новый Массив()).\nКонецПроцедуры\n"
         )
     }
 
@@ -2792,6 +2799,15 @@ async fn p30_cross_file_did_change_parallel_completion_no_global_lock_bottleneck
     let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
 
     initialize_lsp_service(&mut service).await;
+    {
+        let server = server_holder
+            .lock()
+            .expect("server holder lock")
+            .as_ref()
+            .cloned()
+            .expect("server instance");
+        prime_server_with_syntax_helper_deps(&server).await;
+    }
 
     let mut documents = vec![
         DocumentState {
@@ -2865,10 +2881,38 @@ async fn p30_cross_file_did_change_parallel_completion_no_global_lock_bottleneck
         .as_ref()
         .cloned()
         .expect("server instance");
-    let member_character = "    ЛокМассив."
-        .chars()
-        .map(|ch| ch.len_utf16())
-        .sum::<usize>() as u32;
+    for document in &documents {
+        let file_id = server.get_or_create_file_id_v2(&document.uri).await;
+        assert!(
+            server
+                .analysis_v2
+                .wait_for_file_version(file_id, document.version)
+                .await,
+            "analysis runtime must catch up to didChange burst for {}",
+            document.uri
+        );
+        wait_for_type_index_precompute_completion(&server, file_id).await;
+    }
+    let mut owner_hint_type_names = Vec::with_capacity(documents.len());
+    let completion_position =
+        find_utf16_position_after_marker(&documents[0].text, "(Новый Массив()).");
+    for document in &documents {
+        let file_id = server.get_or_create_file_id_v2(&document.uri).await;
+        let analysis = server.analysis_v2.snapshot().await;
+        owner_hint_type_names.push((
+            document.uri.to_string(),
+            bsl_runtime::application::completion_member_access_owner_type_hints_from_analysis(
+                &analysis,
+                file_id,
+                &document.text,
+                completion_position.line,
+                completion_position.character,
+            )
+            .into_iter()
+            .map(|hint| hint.type_name())
+            .collect::<Vec<_>>(),
+        ));
+    }
 
     let mut handles = Vec::with_capacity(documents.len().saturating_mul(COMPLETION_BURST_PER_FILE));
     let wall_started = Instant::now();
@@ -2882,7 +2926,7 @@ async fn p30_cross_file_did_change_parallel_completion_no_global_lock_bottleneck
                     .completion(CompletionParams {
                         text_document_position: TextDocumentPositionParams {
                             text_document: TextDocumentIdentifier { uri },
-                            position: Position::new(2, member_character),
+                            position: completion_position,
                         },
                         work_done_progress_params: WorkDoneProgressParams::default(),
                         partial_result_params: PartialResultParams::default(),
@@ -2910,6 +2954,8 @@ async fn p30_cross_file_did_change_parallel_completion_no_global_lock_bottleneck
 
     let mut success_total = 0_u64;
     let mut non_empty_total = 0_u64;
+    let mut empty_incomplete_total = 0_u64;
+    let mut empty_complete_total = 0_u64;
     let mut sum_latency_ms = 0.0_f64;
     let mut max_latency_ms = 0.0_f64;
     for (response, latency_ms) in completion_outcomes {
@@ -2919,6 +2965,10 @@ async fn p30_cross_file_did_change_parallel_completion_no_global_lock_bottleneck
             success_total += 1;
             if completion_items_count(&completion) > 0 {
                 non_empty_total += 1;
+            } else if completion_is_incomplete(&completion) {
+                empty_incomplete_total += 1;
+            } else {
+                empty_complete_total += 1;
             }
         }
     }
@@ -2937,7 +2987,7 @@ async fn p30_cross_file_did_change_parallel_completion_no_global_lock_bottleneck
     );
     assert!(
         non_empty_total > 0,
-        "parallel completion burst produced only empty completion payloads after didChange burst"
+        "parallel completion burst produced only empty completion payloads after didChange burst: empty_incomplete_total={empty_incomplete_total}, empty_complete_total={empty_complete_total}, owner_hint_type_names={owner_hint_type_names:?}"
     );
     assert!(
         max_latency_ms <= MAX_COMPLETION_LATENCY_MS,
@@ -3074,8 +3124,7 @@ async fn p7_trigger_character_and_invoked_member_access_keep_semantic_parity() {
     let uri = Url::parse("file:///test_p7_trigger_parity.bsl").expect("test uri");
     let text = concat!(
         "Процедура Тест()\n",
-        "    ЛокМассив = Новый Массив;\n",
-        "    ЛокМассив.\n",
+        "    ДляCompletion = (Новый Массив()).\n",
         "КонецПроцедуры\n"
     );
     let did_open = DidOpenTextDocumentParams {
@@ -3120,15 +3169,12 @@ async fn p7_trigger_character_and_invoked_member_access_keep_semantic_parity() {
         .await
         .expect("didChange notification");
     assert!(did_change_response.is_none(), "didChange is a notification");
-    let member_character = "    ЛокМассив."
-        .chars()
-        .map(|ch| ch.len_utf16())
-        .sum::<usize>() as u32;
+    let completion_position = find_utf16_position_after_marker(text, "(Новый Массив()).");
     let dot_response = server
         .completion(CompletionParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position::new(2, member_character),
+                position: completion_position,
             },
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
@@ -3145,7 +3191,7 @@ async fn p7_trigger_character_and_invoked_member_access_keep_semantic_parity() {
         .completion(CompletionParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position::new(2, member_character),
+                position: completion_position,
             },
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
@@ -11344,22 +11390,30 @@ async fn wait_for_type_index_precompute_completion(
             let tasks = server.type_index_precompute_tasks_v2.lock().await;
             tasks.contains_key(&file_id)
         };
-        let exact_ready = server
-            .analysis_v2
-            .snapshot()
-            .await
+        let analysis = server.analysis_v2.snapshot().await;
+        let exact_ready = analysis
             .current_type_index_serve_only_ready(file_id)
             .expect("current_type_index_serve_only_ready");
         if !has_task && exact_ready {
             return;
         }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "type-index precompute did not yield current exact serve-only artifact for file_id={} (has_task={}, exact_ready={})",
-            file_id.0,
-            has_task,
-            exact_ready
-        );
+        if tokio::time::Instant::now() >= deadline {
+            let observed_version = analysis.file_version(file_id).expect("file_version");
+            let manual_precompute = observed_version.and_then(|version| {
+                analysis
+                    .precompute_type_index_for_file(file_id, Some(version), 0)
+                    .ok()
+            });
+            let exact_ready_after_manual = analysis
+                .current_type_index_serve_only_ready(file_id)
+                .expect("current_type_index_serve_only_ready after manual precompute");
+            panic!(
+                "type-index precompute did not yield current exact serve-only artifact for file_id={} (has_task={}, exact_ready={}, observed_version={observed_version:?}, manual_precompute={manual_precompute:?}, exact_ready_after_manual={exact_ready_after_manual})",
+                file_id.0,
+                has_task,
+                exact_ready
+            );
+        }
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
     }
 }

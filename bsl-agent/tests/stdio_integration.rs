@@ -19,6 +19,20 @@ use serde_json::json;
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 
+fn skip_stdio_http_ui_test_when_loopback_tcp_is_unavailable() -> bool {
+    match std::net::TcpListener::bind(std::net::SocketAddr::from(([127, 0, 0, 1], 0))) {
+        Ok(listener) => {
+            drop(listener);
+            false
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => {
+            eprintln!("skipping stdio http ui test: loopback TCP unavailable: {err}");
+            true
+        }
+        Err(err) => panic!("loopback TCP must be available for stdio http ui test: {err}"),
+    }
+}
+
 fn bsl_agent_bin() -> &'static str {
     env!("CARGO_BIN_EXE_bsl-agent")
 }
@@ -1900,6 +1914,10 @@ async fn stdio_bsl_diagnostics_tagged_file_scope_and_string_file_hint() {
 
 #[tokio::test]
 async fn stdio_ui_url_enabled_returns_url() {
+    if skip_stdio_http_ui_test_when_loopback_tcp_is_unavailable() {
+        return;
+    }
+
     let cache_dir = tempfile::TempDir::new().expect("tempdir");
     let static_dir = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
@@ -2349,6 +2367,10 @@ async fn stdio_fails_fast_when_log_path_cannot_be_initialized() {
 
 #[tokio::test]
 async fn stdio_http_ui_parity_endpoints_return_dtos_when_ready() {
+    if skip_stdio_http_ui_test_when_loopback_tcp_is_unavailable() {
+        return;
+    }
+
     let cache_dir = tempfile::TempDir::new().expect("tempdir");
     let static_dir = tempfile::TempDir::new().expect("tempdir");
     std::fs::write(
@@ -2886,6 +2908,11 @@ async fn stdio_platform_docs_file_loads_platform_types_via_parent_dir() {
     .await;
 
     let _ = wait_workspace_ready(&service, &open).await;
+
+    if skip_stdio_http_ui_test_when_loopback_tcp_is_unavailable() {
+        let _ = service.cancel().await;
+        return;
+    }
 
     let resp: UiUrlResponse = call_tool(&service, "ui_url", json!({})).await;
     let url = resp.ui_url.expect("ui_url");

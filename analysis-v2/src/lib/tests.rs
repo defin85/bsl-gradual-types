@@ -685,6 +685,44 @@ fn ir_does_not_reuse_previous_version_for_non_tail_snapshot_change() {
     );
 }
 
+#[test]
+fn ir_does_not_reuse_previous_version_when_snapshot_has_no_edit_ranges() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(14);
+    let text_v1: Arc<str> = Arc::from("Procedure Test()\n    x = 1;\nEndProcedure");
+
+    host.apply_change(Change::SetFile {
+        file_id,
+        text: text_v1.clone(),
+        version: 1,
+        path: Arc::from("missing-edit-ranges.bsl"),
+    });
+
+    let ir_v1 = host.analysis().ir(file_id).unwrap().unwrap();
+
+    let text_v2: Arc<str> = Arc::from(text_v1.replacen('1', "2", 1));
+    host.apply_change(Change::SetFileWithSnapshot {
+        file_id,
+        text: text_v2.clone(),
+        version: 2,
+        path: Arc::from("missing-edit-ranges.bsl"),
+        parse_snapshot: parse_snapshot_for_test(
+            file_id,
+            2,
+            text_v2.as_ref(),
+            Vec::new(),
+            true,
+            None,
+        ),
+    });
+
+    let ir_v2 = host.analysis().ir(file_id).unwrap().unwrap();
+    assert!(
+        !Arc::ptr_eq(&ir_v1, &ir_v2),
+        "snapshot without edit ranges must fail closed and recompute IR"
+    );
+}
+
 fn build_large_burst_module(marker: u32) -> String {
     let mut text = String::from("Процедура СтрессТест()\n");
     text.push_str("    ЛокМассив = Новый Массив;\n");
@@ -892,11 +930,7 @@ fn ir_is_deterministic_for_same_input_across_hosts() {
         analysis.ir(file_id).unwrap().unwrap()
     };
 
-    let mut json_a = serde_json::to_value(&*program_a).expect("serialize SemanticProgram");
-    let mut json_b = serde_json::to_value(&*program_b).expect("serialize SemanticProgram");
-    normalize_json(&mut json_a);
-    normalize_json(&mut json_b);
-    assert_eq!(json_a, json_b);
+    assert_eq!(program_a.as_ref(), program_b.as_ref());
 }
 
 #[test]

@@ -51,7 +51,7 @@ impl std::fmt::Display for Span {
 }
 
 /// Информация об исходном файле
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SourceInfo {
     pub path: String,
     pub content_hash: u64,

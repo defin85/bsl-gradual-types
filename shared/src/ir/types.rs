@@ -9,7 +9,7 @@ use super::span::Span;
 use super::symbol_table::ScopeId;
 
 /// Упрощённое семантическое представление элементов программы
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SemanticNode {
     /// Тип узла
     pub kind: SemanticNodeKind,
@@ -53,7 +53,7 @@ impl MemberAccessKind {
 }
 
 /// Виды семантических узлов
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SemanticNodeKind {
     // === Базовые объявления ===
     /// Объявление переменной: `Перем x: Число;`
@@ -379,7 +379,7 @@ pub enum SemanticNodeKind {
 }
 
 /// Параметр функции/процедуры
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Parameter {
     pub name: String,
     pub type_hint: Option<String>,
@@ -388,7 +388,7 @@ pub struct Parameter {
 }
 
 /// Сигнатура функции/процедуры
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FunctionSignature {
     pub name: String,
     pub params: Vec<Parameter>,

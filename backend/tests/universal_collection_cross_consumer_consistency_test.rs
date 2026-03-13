@@ -300,8 +300,8 @@ async fn assert_completion_with_shared_owner_hint(
 }
 
 #[tokio::test]
-async fn typed_structure_completion_without_shared_owner_hint_uses_ir_contract_in_direct_handler_path(
-) {
+async fn typed_structure_completion_without_shared_owner_hint_fails_closed_in_direct_handler_path()
+{
     let code = concat!(
         "Процедура Тест()\n",
         "    S = Новый Структура;\n",
@@ -354,30 +354,22 @@ async fn typed_structure_completion_without_shared_owner_hint_uses_ir_contract_i
     .expect("completion response");
     assert!(
         !completion.had_error,
-        "direct handler path without shared owner hint must use shared IR contract, not fail"
+        "direct handler path without shared owner hint must fail closed without transport error"
+    );
+    assert!(
+        completion.stats.is_none(),
+        "fail-closed direct handler path must not report semantic completion stats"
     );
 
     let items = completion_items(completion.response);
-    let labels = items
-        .iter()
-        .map(|item| item.label.clone())
-        .collect::<Vec<_>>();
     assert!(
-        items.iter().any(|item| {
-            item.label == "Идентификатор"
-                && matches!(
-                    item.kind,
-                    Some(CompletionItemKind::PROPERTY)
-                        | Some(CompletionItemKind::FIELD)
-                        | Some(CompletionItemKind::METHOD)
-                )
-        }),
-        "direct handler path without shared owner hint must surface shared IR member/property candidate, labels={labels:?}"
+        items.is_empty(),
+        "direct handler path without shared owner hint must stay fail-closed for structural receiver, items={items:?}"
     );
 }
 
 #[tokio::test]
-async fn typed_value_table_row_completion_without_shared_owner_hint_uses_ir_contract_in_direct_handler_path(
+async fn typed_value_table_row_completion_without_shared_owner_hint_fails_closed_in_direct_handler_path(
 ) {
     let code = concat!(
         "Процедура Тест()\n",
@@ -432,25 +424,17 @@ async fn typed_value_table_row_completion_without_shared_owner_hint_uses_ir_cont
     .expect("completion response");
     assert!(
         !completion.had_error,
-        "direct handler path without shared owner hint must use shared IR contract for typed-row, not fail"
+        "direct handler path without shared owner hint must fail closed for typed-row without transport error"
+    );
+    assert!(
+        completion.stats.is_none(),
+        "fail-closed direct handler path must not report semantic completion stats"
     );
 
     let items = completion_items(completion.response);
-    let labels = items
-        .iter()
-        .map(|item| item.label.clone())
-        .collect::<Vec<_>>();
     assert!(
-        items.iter().any(|item| {
-            item.label == "Идентификатор"
-                && matches!(
-                    item.kind,
-                    Some(CompletionItemKind::PROPERTY)
-                        | Some(CompletionItemKind::FIELD)
-                        | Some(CompletionItemKind::METHOD)
-                )
-        }),
-        "direct handler path without shared owner hint must surface typed-row structural column from shared IR, labels={labels:?}"
+        items.is_empty(),
+        "direct handler path without shared owner hint must stay fail-closed for typed-row structural receiver, items={items:?}"
     );
 }
 

@@ -314,6 +314,12 @@ fn walk_node<V: SemanticVisitor>(
             value_node,
             ..
         } => {
+            if let Some(value_idx) = value_node {
+                if let Some(child_node) = program.nodes.get(*value_idx) {
+                    walk_node(child_node, visitor, context, program);
+                }
+            }
+
             let updated = match context.variable_states.get(variable).cloned() {
                 Some(mut state) => {
                     state.mark_initialized();
@@ -322,7 +328,6 @@ fn walk_node<V: SemanticVisitor>(
                 None => VariableState::initialized(node.span),
             };
             context.update_variable_state(variable.clone(), updated);
-            let _ = value_node;
         }
 
         SemanticNodeKind::UnaryExpression {

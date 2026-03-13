@@ -14,7 +14,7 @@ use super::types::{SemanticNode, SemanticNodeKind};
 ///
 /// Не зависит от конкретного парсера и представляет программу
 /// в терминах, необходимых для типового анализа.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SemanticProgram {
     /// Таблица символов (переменные, функции)
     pub symbols: SymbolTable,

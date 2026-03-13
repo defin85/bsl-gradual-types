@@ -30,7 +30,7 @@ pub enum ScopeKind {
 }
 
 /// Область видимости (scope)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Scope {
     /// ID scope
     pub id: ScopeId,
@@ -50,7 +50,7 @@ pub struct Scope {
 }
 
 /// Таблица символов с иерархией scope-ов
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SymbolTable {
     /// Все scope-ы программы
     pub scopes: HashMap<ScopeId, Scope>,

@@ -27,6 +27,21 @@ impl TypeIndexIdentity {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct IrIdentity {
+    deps_id: DepsSnapshotId,
+    settings_id: SettingsId,
+}
+
+impl IrIdentity {
+    fn new(deps_id: DepsSnapshotId, settings_id: SettingsId) -> Self {
+        Self {
+            deps_id,
+            settings_id,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct TypeIndexArtifactKey {
     pub(crate) file_id: FileId,
     pub(crate) file_version: i32,
@@ -97,7 +112,7 @@ pub(crate) struct TypeIndexStoreOutcome {
 
 #[derive(Clone, Default)]
 struct DerivedVersionArtifacts {
-    ir_by_deps_id: HashMap<DepsSnapshotId, Arc<SemanticProgram>>,
+    ir_by_identity: HashMap<IrIdentity, Arc<SemanticProgram>>,
     type_index_by_identity: HashMap<TypeIndexIdentity, Arc<TypeIndexArtifact>>,
 }
 
@@ -159,7 +174,7 @@ impl DerivedArtifactsCache {
                 if let Some(artifacts) = versioned.get_mut(&version) {
                     // IR versions remain window-based, while type_index retention
                     // is handled by per-identity count semantics.
-                    artifacts.ir_by_deps_id.clear();
+                    artifacts.ir_by_identity.clear();
                     remove_version_entry = artifacts.type_index_by_identity.is_empty();
                 }
                 if remove_version_entry {
@@ -176,12 +191,14 @@ impl DerivedArtifactsCache {
         file_id: FileId,
         file_version: i32,
         deps_id: &DepsSnapshotId,
+        settings_id: &SettingsId,
     ) -> Option<Arc<SemanticProgram>> {
+        let identity = IrIdentity::new(deps_id.clone(), settings_id.clone());
         self.by_file
             .get(&file_id)?
             .get(&file_version)?
-            .ir_by_deps_id
-            .get(deps_id)
+            .ir_by_identity
+            .get(&identity)
             .cloned()
     }
 
@@ -190,16 +207,18 @@ impl DerivedArtifactsCache {
         file_id: FileId,
         file_version: i32,
         deps_id: DepsSnapshotId,
+        settings_id: SettingsId,
         program: Arc<SemanticProgram>,
     ) {
         let _ = self.retain_versions_for_file(file_id, file_version);
+        let identity = IrIdentity::new(deps_id, settings_id);
         self.by_file
             .entry(file_id)
             .or_default()
             .entry(file_version)
             .or_default()
-            .ir_by_deps_id
-            .insert(deps_id, program);
+            .ir_by_identity
+            .insert(identity, program);
     }
 
     pub(crate) fn get_type_index_exact(
@@ -374,7 +393,7 @@ impl DerivedArtifactsCache {
                         self.type_index_artifacts_total.saturating_sub(1);
                     evicted = evicted.saturating_add(1);
                 }
-                remove_version_entry = artifacts.ir_by_deps_id.is_empty()
+                remove_version_entry = artifacts.ir_by_identity.is_empty()
                     && artifacts.type_index_by_identity.is_empty();
             }
             if remove_version_entry {
@@ -441,7 +460,7 @@ impl DerivedArtifactsCache {
             return false;
         }
         self.type_index_artifacts_total = self.type_index_artifacts_total.saturating_sub(1);
-        if artifacts.ir_by_deps_id.is_empty() && artifacts.type_index_by_identity.is_empty() {
+        if artifacts.ir_by_identity.is_empty() && artifacts.type_index_by_identity.is_empty() {
             versioned.remove(&candidate.file_version);
         }
         self.prune_empty_file_entry_if_needed(candidate.file_id);

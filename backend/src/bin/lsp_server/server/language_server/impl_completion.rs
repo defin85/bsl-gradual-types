@@ -534,6 +534,7 @@ impl BslLanguageServer {
                         break 'completion_flow Some(completion_incomplete_empty_response());
                     }
 
+                    let mut refreshed_snapshot_after_wait = None;
                     if member_access_request {
                         let exact_wait_budget =
                             bsl_runtime::application::intellisense_v2::interactive_freshness_knobs(
@@ -557,9 +558,10 @@ impl BslLanguageServer {
                         );
                         timeline_capture
                             .push_completed_stage("wait_exact_type_index", exact_wait_elapsed);
-                        let exact_ready_after_wait = prepared
-                            .snapshot
-                            .analysis
+
+                        let (analysis_after_wait, index_snapshot_after_wait, deps_id_after_wait) =
+                            self.analysis_v2.snapshot_with_deps().await;
+                        let exact_ready_after_wait = analysis_after_wait
                             .current_type_index_serve_only_ready(file_id)
                             .ok()
                             .unwrap_or(false);
@@ -569,6 +571,11 @@ impl BslLanguageServer {
                             completion_outcome.get_or_insert("wait_not_ready");
                             break 'completion_flow Some(completion_empty_response(false));
                         }
+                        refreshed_snapshot_after_wait = Some((
+                            analysis_after_wait,
+                            index_snapshot_after_wait,
+                            deps_id_after_wait,
+                        ));
                     }
 
                     let query_bundle_started = Instant::now();
@@ -583,10 +590,13 @@ impl BslLanguageServer {
                         observed_settings_id,
                         observed_file_version,
                     ) = {
-                        let analysis = prepared.snapshot.analysis;
-                        let index_snapshot = prepared.index_snapshot;
+                        let (analysis, index_snapshot, observed_deps_id) =
+                            refreshed_snapshot_after_wait.unwrap_or((
+                                prepared.snapshot.analysis,
+                                prepared.index_snapshot,
+                                prepared.snapshot.deps_id,
+                            ));
                         let observed_file_version = analysis.file_version(file_id).ok().flatten();
-                        let observed_deps_id = prepared.snapshot.deps_id;
                         let observed_settings_id = analysis.settings_id().ok();
                         debug!(
                         "Completion v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}, index_snapshot_id={}",

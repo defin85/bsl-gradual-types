@@ -30,9 +30,6 @@ impl AnalysisV2 {
         if !snapshot.incremental || snapshot.fallback_reason.is_some() {
             return false;
         }
-        if snapshot.changed_ranges.is_empty() {
-            return true;
-        }
         if snapshot.changed_ranges.len() != 1 {
             return false;
         }
@@ -58,6 +55,7 @@ impl AnalysisV2 {
         snapshot: &ParseSnapshot,
         current_text: &str,
         deps_id: &DepsSnapshotId,
+        settings_id: &SettingsId,
     ) -> Option<Arc<SemanticProgram>> {
         if file_version <= 0 || !Self::parse_snapshot_can_reuse_previous_ir(snapshot, current_text)
         {
@@ -68,7 +66,7 @@ impl AnalysisV2 {
             .derived_cache
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        cache.get_ir(file_id, previous_version, deps_id)
+        cache.get_ir(file_id, previous_version, deps_id, settings_id)
     }
 
     fn remember_ir_artifact(
@@ -76,12 +74,13 @@ impl AnalysisV2 {
         file_id: FileId,
         file_version: i32,
         deps_id: DepsSnapshotId,
+        settings_id: SettingsId,
         program: Arc<SemanticProgram>,
     ) {
         self.derived_cache
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .store_ir(file_id, file_version, deps_id, program);
+            .store_ir(file_id, file_version, deps_id, settings_id, program);
     }
 
     fn make_type_index_artifact_key(
@@ -561,11 +560,12 @@ impl AnalysisV2 {
         };
         let file_version = file.version(&self.db);
         let deps_id = self.deps.id(&self.db).clone();
+        let settings_id = self.settings.id(&self.db).clone();
         if let Some(cached) = self
             .derived_cache
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get_ir(file_id, file_version, &deps_id)
+            .get_ir(file_id, file_version, &deps_id, &settings_id)
         {
             return Ok(Some(cached));
         }
@@ -577,8 +577,15 @@ impl AnalysisV2 {
                 snapshot,
                 source.as_ref(),
                 &deps_id,
+                &settings_id,
             ) {
-                self.remember_ir_artifact(file_id, file_version, deps_id, reused.clone());
+                self.remember_ir_artifact(
+                    file_id,
+                    file_version,
+                    deps_id,
+                    settings_id,
+                    reused.clone(),
+                );
                 return Ok(Some(reused));
             }
             let deps_data = self.deps.data(&self.db).0.clone();
@@ -590,11 +597,11 @@ impl AnalysisV2 {
                 file_path.as_ref(),
                 deps_data,
             );
-            self.remember_ir_artifact(file_id, file_version, deps_id, program.clone());
+            self.remember_ir_artifact(file_id, file_version, deps_id, settings_id, program.clone());
             return Ok(Some(program));
         }
         let program = cancellable(|| ir(&self.db, file, self.deps, self.settings).0)?;
-        self.remember_ir_artifact(file_id, file_version, deps_id, program.clone());
+        self.remember_ir_artifact(file_id, file_version, deps_id, settings_id, program.clone());
         Ok(Some(program))
     }
 

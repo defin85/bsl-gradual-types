@@ -273,12 +273,22 @@ fn test_document_attributes_parsing() {
         "Количество атрибутов должно сохраняться при конвертации"
     );
 
-    // Проверяем конвертацию атрибутов в properties
-    assert_eq!(
-        raw_type.properties.len(),
-        metadata.attributes.len(),
-        "Атрибуты должны конвертироваться в properties"
+    // Проверяем, что каждый XML-атрибут попадает в properties, даже если
+    // конвертер дополнительно добавляет стандартные свойства документа.
+    assert!(
+        raw_type.properties.len() >= metadata.attributes.len(),
+        "Количество properties не должно быть меньше количества XML-атрибутов"
     );
+    for attr in &metadata.attributes {
+        assert!(
+            raw_type
+                .properties
+                .iter()
+                .any(|prop| prop.name == attr.name),
+            "Атрибут '{}' должен конвертироваться в property",
+            attr.name
+        );
+    }
 }
 
 // ============================================================================

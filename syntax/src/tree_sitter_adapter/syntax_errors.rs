@@ -5,9 +5,11 @@
 //! - Проверки отсутствующих токенов (например, точек с запятой)
 //! - Формирования диагностических сообщений
 
+use std::sync::OnceLock;
+
 use bsl_shared::domain::types::{ErrorType, ParseError, RelatedInformation};
 use bsl_shared::ir::Span;
-use tree_sitter::Node;
+use tree_sitter::{Node, Query, QueryCursor, StreamingIterator};
 
 use super::span::{byte_offset_to_utf16, node_to_span_cached, LineIndex};
 
@@ -83,18 +85,57 @@ pub fn check_missing_semicolons(
 ) -> Vec<ParseError> {
     let mut errors = Vec::new();
 
-    // Проверяем только тела функций и процедур
-    if matches!(node.kind(), "function_definition" | "procedure_definition") {
-        errors.extend(check_function_body_semicolons(node, source, line_index));
-    }
-
-    // Рекурсивно проверяем вложенные узлы (для вложенных конструкций)
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        errors.extend(check_missing_semicolons(&child, source, line_index));
+    let mut cursor = QueryCursor::new();
+    let mut matches = cursor.matches(
+        semicolon_scoped_definition_query(),
+        *node,
+        source.as_bytes(),
+    );
+    matches.advance();
+    while let Some(query_match) = matches.get() {
+        for capture in query_match.captures {
+            errors.extend(check_function_body_semicolons(
+                &capture.node,
+                source,
+                line_index,
+            ));
+        }
+        matches.advance();
     }
 
     errors
+}
+
+/// Проверить, есть ли в дереве хотя бы один пропущенный `;`.
+///
+/// Используется как дешёвый precheck для fast-path: при первом нарушении
+/// выходим, не собирая полный список diagnostics.
+pub fn has_missing_semicolons(node: &Node) -> bool {
+    if matches!(node.kind(), "function_definition" | "procedure_definition")
+        && function_body_has_missing_semicolon(node)
+    {
+        return true;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if has_missing_semicolons(&child) {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn semicolon_scoped_definition_query() -> &'static Query {
+    static QUERY: OnceLock<Query> = OnceLock::new();
+    QUERY.get_or_init(|| {
+        Query::new(
+            &tree_sitter_bsl::LANGUAGE.into(),
+            "[(function_definition) (procedure_definition)] @definition",
+        )
+        .expect("semicolon definition query must compile")
+    })
 }
 
 /// Проверить точки с запятой в теле функции/процедуры
@@ -105,9 +146,7 @@ fn check_function_body_semicolons(
 ) -> Vec<ParseError> {
     let mut errors = Vec::new();
     let mut cursor = func_node.walk();
-
-    // Собираем все statement узлы в теле функции
-    let mut statements: Vec<Node> = Vec::new();
+    let mut previous_statement: Option<Node> = None;
     let mut found_end_keyword = false;
 
     for child in func_node.children(&mut cursor) {
@@ -124,7 +163,9 @@ fn check_function_body_semicolons(
             | "continue_statement"
             | "var_statement"
             | "try_statement" => {
-                statements.push(child);
+                if let Some(statement) = previous_statement.replace(child) {
+                    maybe_push_missing_semicolon_error(&mut errors, &statement, source, line_index);
+                }
             }
             // Конец функции/процедуры
             "ENDFUNCTION_KEYWORD" | "ENDPROCEDURE_KEYWORD" => {
@@ -134,35 +175,71 @@ fn check_function_body_semicolons(
         }
     }
 
-    // Проверяем каждый statement (кроме последнего)
-    for (i, stmt) in statements.iter().enumerate() {
-        let is_last = i == statements.len() - 1;
-
-        // Последний statement перед КонецФункции может не иметь точку с запятой
-        if is_last && found_end_keyword {
-            continue;
-        }
-
-        // Проверяем наличие точки с запятой после statement
-        if !has_semicolon_child(stmt) {
-            let span = node_to_span_cached(stmt, source, line_index);
-
-            // Позиция для диагностики - конец statement
-            let error_span = Span::new(span.end, span.end);
-
-            errors.push(ParseError {
-                message: format!(
-                    "Отсутствует точка с запятой после оператора '{}'",
-                    stmt.kind().replace("_statement", "")
-                ),
-                span: error_span,
-                error_type: ErrorType::MissingToken,
-                related: Vec::new(),
-            });
-        }
+    if let Some(statement) = previous_statement.filter(|_| !found_end_keyword) {
+        maybe_push_missing_semicolon_error(&mut errors, &statement, source, line_index);
     }
 
     errors
+}
+
+fn function_body_has_missing_semicolon(func_node: &Node) -> bool {
+    let mut cursor = func_node.walk();
+    let mut previous_statement: Option<Node> = None;
+    let mut found_end_keyword = false;
+
+    for child in func_node.children(&mut cursor) {
+        match child.kind() {
+            "if_statement"
+            | "while_statement"
+            | "for_statement"
+            | "for_each_statement"
+            | "assignment_statement"
+            | "call_statement"
+            | "return_statement"
+            | "break_statement"
+            | "continue_statement"
+            | "var_statement"
+            | "try_statement" => {
+                if previous_statement
+                    .replace(child)
+                    .is_some_and(|statement| !has_semicolon_child(&statement))
+                {
+                    return true;
+                }
+            }
+            "ENDFUNCTION_KEYWORD" | "ENDPROCEDURE_KEYWORD" => {
+                found_end_keyword = true;
+            }
+            _ => {}
+        }
+    }
+
+    previous_statement
+        .filter(|_| !found_end_keyword)
+        .is_some_and(|statement| !has_semicolon_child(&statement))
+}
+
+fn maybe_push_missing_semicolon_error(
+    errors: &mut Vec<ParseError>,
+    stmt: &Node,
+    source: &str,
+    line_index: &LineIndex,
+) {
+    if has_semicolon_child(stmt) {
+        return;
+    }
+
+    let span = node_to_span_cached(stmt, source, line_index);
+
+    errors.push(ParseError {
+        message: format!(
+            "Отсутствует точка с запятой после оператора '{}'",
+            stmt.kind().replace("_statement", "")
+        ),
+        span: Span::new(span.end, span.end),
+        error_type: ErrorType::MissingToken,
+        related: Vec::new(),
+    });
 }
 
 /// Проверить незавершённые выражения `Новый` без типа/аргументов.

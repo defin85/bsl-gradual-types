@@ -79,3 +79,42 @@ fn global_guard_candidate_picker_does_not_select_protected_exact_key() {
         "global guard candidate must never be the protected latest exact key"
     );
 }
+
+#[test]
+fn ir_cache_distinguishes_settings_identity() {
+    let mut cache = DerivedArtifactsCache::default();
+    let file_id = FileId(3);
+    let deps_id = DepsSnapshotId::from_hash("deps-ir-test");
+    let settings_a = SettingsId::from_hash("settings-a");
+    let settings_b = SettingsId::from_hash("settings-b");
+    let program_a = Arc::new(SemanticProgram::new());
+    let program_b = Arc::new(SemanticProgram::new());
+
+    cache.store_ir(
+        file_id,
+        1,
+        deps_id.clone(),
+        settings_a.clone(),
+        program_a.clone(),
+    );
+    cache.store_ir(
+        file_id,
+        1,
+        deps_id.clone(),
+        settings_b.clone(),
+        program_b.clone(),
+    );
+
+    assert!(Arc::ptr_eq(
+        &cache
+            .get_ir(file_id, 1, &deps_id, &settings_a)
+            .expect("ir for settings A"),
+        &program_a
+    ));
+    assert!(Arc::ptr_eq(
+        &cache
+            .get_ir(file_id, 1, &deps_id, &settings_b)
+            .expect("ir for settings B"),
+        &program_b
+    ));
+}

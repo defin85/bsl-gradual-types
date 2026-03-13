@@ -160,10 +160,20 @@ pub async fn handle_completion_v2_with_trigger_hint_and_owner_hints(
         position,
         trigger_char_hint,
     );
-    let member_access_owner_type_hints = member_access_owner_type_hints
+    let mut member_access_owner_type_hints = member_access_owner_type_hints
         .into_iter()
         .filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
         .collect::<Vec<_>>();
+
+    if member_access_request && member_access_owner_type_hints.is_empty() {
+        member_access_owner_type_hints =
+            bsl_backend::application::completion_member_access_owner_type_hints_from_static_receiver(
+                file_content.as_ref(),
+                position.line,
+                position.character,
+                resolver.as_ref(),
+            );
+    }
 
     // Default LSP delivery must not reconstruct owner type from IR when the shared
     // exact owner hint is unavailable for a member-access request.

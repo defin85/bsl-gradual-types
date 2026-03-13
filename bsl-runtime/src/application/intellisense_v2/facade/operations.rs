@@ -20,10 +20,13 @@ impl IntellisenseV2Facade {
 
         // LSP completion already has event-driven exact type-index precompute on didOpen/didChange
         // and a bounded wait/fail-closed path before member-access resolution. Rebuilding the
-        // exact artifact here duplicates cold work directly on the request path.
+        // exact artifact here duplicates cold work directly on the request path. The synthetic
+        // LSP members perf path follows the same contract: exact owner-hint extraction is
+        // request-aware and should not be paid during generic stateful prepare.
         !matches!(
             (context.origin, context.operation),
             (ObservabilityOrigin::Lsp, SemanticOperation::Completion)
+                | (ObservabilityOrigin::Lsp, SemanticOperation::Members)
         )
     }
 

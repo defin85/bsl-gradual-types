@@ -7,6 +7,7 @@
 use bsl_analysis_v2::AstToIrConverter;
 use bsl_backend::application::semantic_validation_visitor::SemanticValidationVisitor;
 use bsl_backend::system::tree_sitter_adapter::TreeSitterAdapter;
+use bsl_diagnostics::SemanticTypeHints;
 use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::signature_index::SignatureIndex;
@@ -66,6 +67,27 @@ fn create_repository_with_config() -> Arc<InMemoryTypeRepository> {
     repo.load_types(vec![config_type, doc_type]).unwrap();
 
     repo
+}
+
+fn assignment_value_hints(
+    ir: &bsl_shared::ir::SemanticProgram,
+    resolver: &bsl_shared::domain::resolver::TypeResolver,
+    expression: &str,
+) -> SemanticTypeHints {
+    let mut hints = SemanticTypeHints::default();
+    let assignment_span = ir
+        .nodes
+        .iter()
+        .find_map(|node| match node.kind {
+            bsl_shared::ir::SemanticNodeKind::Assignment { .. } => Some(node.span),
+            _ => None,
+        })
+        .expect("assignment node span");
+    hints.assignment_value_type_by_span.insert(
+        assignment_span,
+        resolver.resolve_expression_sync(expression),
+    );
+    hints
 }
 
 #[test]
@@ -131,8 +153,10 @@ fn test_nonexistent_document_generates_error_when_config_loaded() {
 
     let validator = TypeValidator::new(&metadata_lookup);
     let resolver = bsl_shared::domain::resolver::TypeResolver::new(repository);
+    let hints = assignment_value_hints(&ir, &resolver, "Документы.ЗаказКлиента");
 
     let mut visitor = SemanticValidationVisitor::new(&validator, &ir, &resolver, &signature_index);
+    visitor.set_type_hints(Some(&hints));
     walk_program(&ir, &mut visitor);
 
     let errors = visitor.into_errors();
@@ -187,8 +211,10 @@ fn test_existing_document_no_error() {
     let metadata_lookup = TypeMetadataLookup::new(repository.clone());
     let validator = TypeValidator::new(&metadata_lookup);
     let resolver = bsl_shared::domain::resolver::TypeResolver::new(repository);
+    let hints = assignment_value_hints(&ir, &resolver, "Документы.РеализацияТоваров");
 
     let mut visitor = SemanticValidationVisitor::new(&validator, &ir, &resolver, &signature_index);
+    visitor.set_type_hints(Some(&hints));
     walk_program(&ir, &mut visitor);
 
     let errors = visitor.into_errors();
@@ -252,8 +278,10 @@ fn test_graceful_degradation_no_config() {
 
     let validator = TypeValidator::new(&metadata_lookup);
     let resolver = bsl_shared::domain::resolver::TypeResolver::new(repository);
+    let hints = assignment_value_hints(&ir, &resolver, "Документы.ЗаказКлиента");
 
     let mut visitor = SemanticValidationVisitor::new(&validator, &ir, &resolver, &signature_index);
+    visitor.set_type_hints(Some(&hints));
     walk_program(&ir, &mut visitor);
 
     let errors = visitor.into_errors();

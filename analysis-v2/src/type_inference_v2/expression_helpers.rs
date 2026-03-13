@@ -1,4 +1,5 @@
 use super::*;
+use bsl_shared::domain::types::FORM_DATA_SEMANTICS_NOTE;
 
 impl TypeInferencer {
     pub(super) fn infer_binary(
@@ -61,11 +62,18 @@ impl TypeInferencer {
             .into_iter()
             .find(|p| p.name.to_lowercase() == property_key)?;
 
-        if self
-            .metadata_lookup
-            .get_tabular_sections(object_type)
-            .into_iter()
-            .any(|section| section.name.eq_ignore_ascii_case(&prop.name))
+        let is_form_data_contextual = object_type
+            .metadata
+            .notes
+            .iter()
+            .any(|note| note == FORM_DATA_SEMANTICS_NOTE);
+
+        if !is_form_data_contextual
+            && self
+                .metadata_lookup
+                .get_tabular_sections(object_type)
+                .into_iter()
+                .any(|section| section.name.eq_ignore_ascii_case(&prop.name))
         {
             let resolved = self.resolver.resolve_expression_sync(&format!(
                 "{}.{}",

@@ -228,3 +228,52 @@ fn test_visitor_traverses_expression_bearing_statement_operands() {
 
     assert_eq!(tracker.names.len(), 7);
 }
+
+#[test]
+fn test_visitor_traverses_assignment_value_node_before_marking_variable_initialized() {
+    let mut program = SemanticProgram::new();
+
+    program.nodes.push(SemanticNode {
+        kind: SemanticNodeKind::VariableAccess {
+            name: "x".to_string(),
+        },
+        span: Span::stub(),
+        scope_id: program.symbols.root_scope,
+    });
+
+    program.nodes.push(SemanticNode {
+        kind: SemanticNodeKind::Assignment {
+            variable: "x".to_string(),
+            value_node: Some(0),
+            value_span: Span::stub(),
+        },
+        span: Span::stub(),
+        scope_id: program.symbols.root_scope,
+    });
+
+    struct AssignmentRhsTracker {
+        initialized_on_access: Vec<bool>,
+    }
+
+    impl SemanticVisitor for AssignmentRhsTracker {
+        fn visit_node(&mut self, node: &SemanticNode, context: &mut FlowContext) {
+            let SemanticNodeKind::VariableAccess { name } = &node.kind else {
+                return;
+            };
+            if name.eq_ignore_ascii_case("x") {
+                self.initialized_on_access.push(context.is_initialized("x"));
+            }
+        }
+    }
+
+    let mut tracker = AssignmentRhsTracker {
+        initialized_on_access: Vec::new(),
+    };
+    walk_program(&program, &mut tracker);
+
+    assert_eq!(
+        tracker.initialized_on_access,
+        vec![false],
+        "assignment RHS must be visited before the assignment marks the target as initialized"
+    );
+}

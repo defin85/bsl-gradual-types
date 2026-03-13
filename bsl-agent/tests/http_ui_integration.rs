@@ -9,8 +9,26 @@ use reqwest::Method;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+fn skip_http_ui_test_when_loopback_tcp_is_unavailable() -> bool {
+    match std::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))) {
+        Ok(listener) => {
+            drop(listener);
+            false
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => {
+            eprintln!("skipping http_ui integration test: loopback TCP unavailable: {err}");
+            true
+        }
+        Err(err) => panic!("loopback TCP must be available for http_ui integration test: {err}"),
+    }
+}
+
 #[tokio::test]
 async fn http_ui_serves_spa_and_readonly_api() {
+    if skip_http_ui_test_when_loopback_tcp_is_unavailable() {
+        return;
+    }
+
     let static_dir = tempfile::tempdir().expect("tempdir");
     std::fs::write(
         static_dir.path().join("index.html"),
@@ -123,6 +141,10 @@ async fn http_ui_serves_spa_and_readonly_api() {
 
 #[tokio::test]
 async fn http_ui_serves_embedded_spa_by_default() {
+    if skip_http_ui_test_when_loopback_tcp_is_unavailable() {
+        return;
+    }
+
     let session_manager = Arc::new(SessionManager::new());
     let job_manager = Arc::new(JobManager::new_in_memory());
 
@@ -169,6 +191,10 @@ async fn http_ui_serves_embedded_spa_by_default() {
 
 #[tokio::test]
 async fn http_ui_parity_endpoints_require_ready_session() {
+    if skip_http_ui_test_when_loopback_tcp_is_unavailable() {
+        return;
+    }
+
     let session_manager = Arc::new(SessionManager::new());
     let job_manager = Arc::new(JobManager::new_in_memory());
 

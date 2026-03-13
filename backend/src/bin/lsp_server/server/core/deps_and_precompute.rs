@@ -283,6 +283,29 @@ impl BslLanguageServer {
                 queue_wait,
             );
 
+        // The precompute task is spawned right after enqueueing didOpen/didChange into the
+        // analysis runtime. Wait until the runtime actually applies the requested revision,
+        // otherwise snapshot_with_deps() may observe an older version and treat the precompute
+        // as spuriously superseded.
+        if !self
+            .analysis_v2
+            .wait_for_file_version(key.file_id, key.requested_version)
+            .await
+        {
+            debug!(
+                file_id = key.file_id.0,
+                requested_version = key.requested_version,
+                "Event-driven type_index precompute stopped before runtime reached requested version"
+            );
+            return;
+        }
+        if self
+            .type_index_precompute_checkpoint_v2(key, "after_wait_for_file_version")
+            .await
+        {
+            return;
+        }
+
         let (analysis, _index_snapshot, _deps_id) = self.analysis_v2.snapshot_with_deps().await;
         if self
             .type_index_precompute_checkpoint_v2(key, "before_compute")

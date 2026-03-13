@@ -81,16 +81,40 @@ impl TreeSitterAdapter {
 
         // Milestone 2.19+: Предпросчитываем индекс строк один раз (O(n))
         let line_index = LineIndex::new(source);
+        let (maybe_semicolon_errors, maybe_incomplete_new_errors) = if root.has_error() {
+            (None, None)
+        } else {
+            let has_missing_semicolons = syntax_errors::has_missing_semicolons(&root);
+            let incomplete_new_errors =
+                syntax_errors::check_incomplete_new_expressions(source, &line_index);
+
+            if !has_missing_semicolons && incomplete_new_errors.is_empty() {
+                let statements =
+                    statement_converter::convert_source_file_cached(&root, source, &line_index)?;
+                let program = Program { statements };
+                return Ok(ParseResult::success(program));
+            }
+
+            let semicolon_errors = if has_missing_semicolons {
+                None
+            } else {
+                Some(Vec::new())
+            };
+
+            (semicolon_errors, Some(incomplete_new_errors))
+        };
 
         // Собираем синтаксические ошибки из дерева с использованием индекса строк
         let parser_errors = syntax_errors::collect_syntax_errors_cached(&root, source, &line_index);
 
         // Проверяем отсутствующие точки с запятой (BSL linter)
-        let mut heuristic_errors =
-            syntax_errors::check_missing_semicolons(&root, source, &line_index);
+        let mut heuristic_errors = maybe_semicolon_errors
+            .unwrap_or_else(|| syntax_errors::check_missing_semicolons(&root, source, &line_index));
 
         // Проверяем незавершённые `Новый` без типа/аргументов (IDE-friendly)
-        let new_errors = syntax_errors::check_incomplete_new_expressions(source, &line_index);
+        let new_errors = maybe_incomplete_new_errors.unwrap_or_else(|| {
+            syntax_errors::check_incomplete_new_expressions(source, &line_index)
+        });
         heuristic_errors.extend(new_errors);
 
         // Нормализация синтаксических diagnostics (rewrite/enrich + строгий line-cap + детерминизм)

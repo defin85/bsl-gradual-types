@@ -803,6 +803,10 @@ fn collect_members(request: MembersRequest) -> Result<BslMembersResponse, rmcp::
         .into_iter()
         .filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
         .collect::<Vec<_>>();
+    if member_access_context && !flow_sensitive_enabled && !member_access_owner_type_hints.is_empty()
+    {
+        coordinator.record_intellisense_v2_type_index_reason("type_index_exact_hit");
+    }
     if member_access_context && member_access_owner_type_hints.is_empty() {
         coordinator.record_intellisense_v2_interactive_fail_closed_reason(
             "agent",

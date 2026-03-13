@@ -714,5 +714,11 @@ fn collect_semantic_diagnostics_from_program(
                 &b.message,
             ))
     });
+    diagnostics.dedup_by(|left, right| {
+        left.span.start == right.span.start
+            && left.span.end == right.span.end
+            && left.severity == right.severity
+            && left.message == right.message
+    });
     diagnostics
 }

@@ -118,6 +118,9 @@ fn apply_file(
     });
 
     let analysis = host.analysis();
+    analysis
+        .precompute_type_index_for_file(file_id, Some(1), 0)
+        .expect("precompute exact type index");
     let file_content = analysis
         .file_text(file_id)
         .ok()

@@ -168,7 +168,7 @@ fn hover_text(hover: Hover) -> String {
 #[tokio::test]
 async fn m5_hover_v2_is_deterministic() {
     let content = read_fixture("m5_snippets_resolve.bsl");
-    let mut position = find_position(&content, "    Массив");
+    let mut position = find_position(&content, "    МойМассив");
     position.character = position.character.saturating_sub(1);
     let uri = Url::parse("file:///m5_snippets_resolve.bsl").expect("url");
     let env = create_test_env();

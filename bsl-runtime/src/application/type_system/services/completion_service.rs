@@ -19,7 +19,9 @@ use super::super::extractors::symbol_extractor::{
     extract_word_at_position, is_identifier_char, utf16_to_byte_offset,
 };
 use super::completion_ranking::{rank_candidates_with_trace, RankingCandidate};
-use super::completion_target::extract_member_access_receiver_spans;
+use super::completion_target::{
+    extract_member_access_receiver_chain, extract_member_access_receiver_spans,
+};
 use crate::system::keyword_index::DEFAULT_KEYWORDS;
 use crate::system::{
     IndexItemKind, IndexSnapshot, IntellisenseIndexStore, LineIndex, SymbolKind, SymbolScope,
@@ -204,6 +206,29 @@ fn completion_member_access_owner_type_hints_from_analysis_internal(
     }
 
     resolutions
+}
+
+pub fn completion_member_access_owner_type_hints_from_static_receiver(
+    file_content: &str,
+    line: u32,
+    column: u32,
+    resolver: &TypeResolver,
+) -> Vec<TypeResolution> {
+    let Some(receiver_chain) = extract_member_access_receiver_chain(file_content, line, column)
+    else {
+        return Vec::new();
+    };
+    let Some(name_chain) = receiver_chain.to_name_chain() else {
+        return Vec::new();
+    };
+
+    let receiver_expr = name_chain.join(".");
+    let resolution = resolver.resolve_expression_sync(&receiver_expr);
+    if resolution.is_unknown() || resolution.is_dynamic() {
+        return Vec::new();
+    }
+
+    vec![resolution]
 }
 
 pub fn completion_member_access_owner_type_hints_from_analysis(

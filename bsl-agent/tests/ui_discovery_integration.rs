@@ -11,6 +11,20 @@ use std::path::Path;
 use std::path::PathBuf;
 use tokio::process::Command;
 
+fn skip_ui_discovery_test_when_loopback_tcp_is_unavailable() -> bool {
+    match std::net::TcpListener::bind(std::net::SocketAddr::from(([127, 0, 0, 1], 0))) {
+        Ok(listener) => {
+            drop(listener);
+            false
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => {
+            eprintln!("skipping ui discovery integration test: loopback TCP unavailable: {err}");
+            true
+        }
+        Err(err) => panic!("loopback TCP must be available for ui discovery test: {err}"),
+    }
+}
+
 fn bsl_agent_bin() -> &'static str {
     env!("CARGO_BIN_EXE_bsl-agent")
 }
@@ -200,6 +214,10 @@ async fn run_ui_url_with_roots(
 
 #[tokio::test]
 async fn ui_registry_record_written_and_points_to_live_ui() {
+    if skip_ui_discovery_test_when_loopback_tcp_is_unavailable() {
+        return;
+    }
+
     let cache_dir = tempfile::tempdir().expect("tempdir");
     let cache_dir_path = cache_dir.path().to_path_buf();
 
@@ -252,6 +270,10 @@ async fn ui_registry_record_written_and_points_to_live_ui() {
 
 #[tokio::test]
 async fn ui_url_single_instance_returns_url_and_multiple_is_ambiguous() {
+    if skip_ui_discovery_test_when_loopback_tcp_is_unavailable() {
+        return;
+    }
+
     let cache_dir = tempfile::tempdir().expect("tempdir");
     let cache_dir_path = cache_dir.path().to_path_buf();
 
@@ -300,6 +322,10 @@ async fn ui_url_single_instance_returns_url_and_multiple_is_ambiguous() {
 
 #[tokio::test]
 async fn ui_url_roots_selector_picks_matching_instance() {
+    if skip_ui_discovery_test_when_loopback_tcp_is_unavailable() {
+        return;
+    }
+
     let cache_dir = tempfile::tempdir().expect("tempdir");
     let cache_dir_path = cache_dir.path().to_path_buf();
 

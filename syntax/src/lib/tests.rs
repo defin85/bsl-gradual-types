@@ -12,6 +12,17 @@ fn parse_valid_code_has_no_syntax_errors() {
 }
 
 #[test]
+fn parse_missing_semicolons_reports_heuristic_errors() {
+    let source = "Функция Тест()\n    МассивДанных = Новый Массив()\n    МассивДанных.Добавить(42)\n    Возврат МассивДанных\nКонецФункции";
+    let result = parse(source, &ParseOptions::default()).unwrap();
+
+    assert!(result.has_errors());
+    assert!(result.syntax_errors.iter().any(|error| {
+        error.message.contains("точка с запятой") || error.message.contains("точки с запятой")
+    }));
+}
+
+#[test]
 fn parse_broken_code_returns_partial_result_with_errors() {
     let source = "Процедура Тест(\nКонецПроцедуры";
     let result = parse(source, &ParseOptions::default()).unwrap();

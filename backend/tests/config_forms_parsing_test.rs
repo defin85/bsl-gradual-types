@@ -445,8 +445,8 @@ fn test_form_synthetic_types_loaded_into_repository() {
         .find(|p| p.name == "Объект")
         .expect("Form type should have property 'Объект'");
     assert_eq!(
-        form_object.prop_type, "ДокументОбъект.ЗаказНаряды",
-        "Form 'Объект' should point to object facet type"
+        form_object.prop_type, "ДанныеФормыСтруктура",
+        "Form 'Объект' should use canonical form-data type"
     );
     assert!(
         repo.find_type("ДанныеФормыОбъект.Документы.ЗаказНаряды")

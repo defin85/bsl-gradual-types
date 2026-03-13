@@ -12,6 +12,7 @@ use bsl_backend::system::{
     build_deps_bundle_v2, DepsBundleV2, ParserCoordinator, SystemCoordinator,
 };
 use bsl_shared::domain::resolver::TypeResolver;
+use bsl_shared::domain::types::TypeResolution;
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::formatting::DetailLevel;
 use bsl_shared::ir::SemanticProgram;
@@ -58,12 +59,33 @@ fn analysis_and_ir_program_for_code(
     });
 
     let analysis = host.analysis();
+    analysis
+        .precompute_type_index_for_file(V2FileId(1), Some(0), 0)
+        .expect("precompute exact type index");
     let ir_program = analysis
         .ir(V2FileId(1))
         .expect("ir query cancelled")
         .expect("ir unavailable");
 
     (analysis, ir_program)
+}
+
+fn type_hint_at_position(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: V2FileId,
+    line: u32,
+    column: u32,
+) -> Option<TypeResolution> {
+    let probe_offset = analysis
+        .utf16_position_to_byte_offset(file_id, line, column)
+        .ok()
+        .flatten()?
+        .min(u32::MAX as usize) as u32;
+
+    analysis
+        .type_at_byte_offset(file_id, probe_offset)
+        .ok()
+        .flatten()
 }
 
 #[tokio::test]
@@ -147,7 +169,7 @@ async fn test_v2_completion_and_hover_smoke() {
         &analysis,
         V2FileId(1),
         code,
-        3,
+        2,
         5,
         false,
         &metadata_lookup,
@@ -157,6 +179,12 @@ async fn test_v2_completion_and_hover_smoke() {
         ir_program.clone(),
     );
     assert!(hover.is_some(), "Hover должен вернуть строку");
+
+    let owner_hint = type_hint_at_position(&analysis, V2FileId(1), 2, 5);
+    assert!(
+        owner_hint.is_some(),
+        "Completion должен получить type hint для владельца member access"
+    );
 
     let completion = get_completion_with_semantic_program_snapshot(
         code,
@@ -168,7 +196,7 @@ async fn test_v2_completion_and_hover_smoke() {
         "inline.bsl",
         resolver.as_ref(),
         ir_program,
-        None,
+        owner_hint,
         false,
     )
     .await

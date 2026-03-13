@@ -28,7 +28,7 @@ pub enum NodeAtByteOffsetBias {
 /// Граф потока управления (для flow-sensitive анализа)
 ///
 /// Упрощённая версия для отслеживания последовательности блоков кода.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ControlFlowGraph {
     /// Узлы графа (базовые блоки)
     nodes: Vec<CfgNode>,
@@ -165,7 +165,7 @@ impl Default for ControlFlowGraph {
 }
 
 /// Узел графа потока управления (базовый блок)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CfgNode {
     /// ID узла (для удобства отладки; должен совпадать с индексом в `ControlFlowGraph.nodes`)
     pub id: usize,
@@ -175,7 +175,7 @@ pub struct CfgNode {
 }
 
 /// Типы узлов CFG
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CfgNodeKind {
     /// Начало программы/функции
     Entry,
@@ -214,7 +214,7 @@ pub enum CfgNodeKind {
 }
 
 /// Ребро графа потока управления
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CfgEdge {
     /// От какого узла
     pub from: usize,

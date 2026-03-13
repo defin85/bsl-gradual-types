@@ -257,11 +257,49 @@ fn build_v2_analysis_ir(
 }
 
 #[tokio::test]
-async fn lsp_completion_member_access_without_owner_hint_is_fail_closed() {
+async fn lsp_completion_static_receiver_without_owner_hint_returns_items_and_stats() {
     let env = build_env();
     let content = "Массив.";
     let position = position_at_marker(content, "Массив.");
     let uri = Url::parse("file:///m8_lsp_completion.bsl").expect("url");
+
+    let (file_content, file_path, ir_program) = build_v2_ir(content, &uri, env.deps.clone());
+    let response = completion_handler::handle_completion_v2(
+        file_content,
+        file_path,
+        ir_program,
+        None,
+        env.deps.clone(),
+        position,
+        &uri,
+        &env.index_snapshot,
+        false,
+        false,
+    )
+    .await
+    .expect("completion response");
+
+    assert!(!response.had_error);
+    assert!(response.stats.is_some());
+
+    let items = match response.response {
+        CompletionResponse::List(list) => list.items,
+        CompletionResponse::Array(list) => list,
+    };
+
+    assert!(
+        items.iter().any(|item| item.label == "Добавить"),
+        "items: {:?}",
+        items
+    );
+}
+
+#[tokio::test]
+async fn lsp_completion_unknown_member_access_without_owner_hint_is_fail_closed() {
+    let env = build_env();
+    let content = "МойМассив.";
+    let position = position_at_marker(content, "МойМассив.");
+    let uri = Url::parse("file:///m8_lsp_completion_unknown_owner.bsl").expect("url");
 
     let (file_content, file_path, ir_program) = build_v2_ir(content, &uri, env.deps.clone());
     let response = completion_handler::handle_completion_v2(

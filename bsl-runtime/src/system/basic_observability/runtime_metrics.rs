@@ -34,6 +34,14 @@ impl BasicObservability {
             .observe_histogram("intellisense_v2_revision_lag_versions", lag_versions);
     }
 
+    pub fn record_intellisense_v2_completion_exact_type_index_wait_outcome(&self, reason: &str) {
+        let reason = normalize_completion_exact_type_index_wait_reason_label(reason);
+        let key = format!(
+            "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_{reason}"
+        );
+        self.metrics.increment(&key);
+    }
+
     pub fn record_intellisense_v2_singleflight_leader(&self) {
         self.record_intellisense_v2_singleflight_leader_with_origin("runtime", "ir");
     }

@@ -181,6 +181,14 @@ pub(super) const SHARED_FAIL_CLOSED_REASON_REGISTRY: &[(&str, &str)] = &[
     ("missing_file_path", "unavailable_by_contract"),
 ];
 
+pub(super) const COMPLETION_EXACT_TYPE_INDEX_WAIT_REASON_REGISTRY: &[(&str, &str)] = &[
+    ("ready", "ready"),
+    ("deadline", "deadline"),
+    ("no_matching_task", "no_matching_task"),
+    ("task_present_wrong_version", "task_present_wrong_version"),
+    ("observed_version_mismatch", "observed_version_mismatch"),
+];
+
 pub(super) const LEGACY_WAIT_FOR_FILE_VERSION_METRICS_REGISTRY: &[(&str, (&str, &str))] = &[
     (
         "completion",
@@ -495,6 +503,16 @@ pub(super) fn normalize_completion_owner_hint_reason_label(reason: &str) -> &'st
 
 pub(super) fn normalize_type_index_reason_label(reason: &str) -> &'static str {
     registry_label(reason, TYPE_INDEX_REASON_REGISTRY, "other")
+}
+
+pub(super) fn normalize_completion_exact_type_index_wait_reason_label(
+    reason: &str,
+) -> &'static str {
+    registry_label(
+        reason,
+        COMPLETION_EXACT_TYPE_INDEX_WAIT_REASON_REGISTRY,
+        "other",
+    )
 }
 
 pub(super) fn normalize_shared_fail_closed_reason_label(reason: &str) -> &'static str {

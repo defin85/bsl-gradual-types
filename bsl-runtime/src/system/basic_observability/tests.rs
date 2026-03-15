@@ -85,10 +85,7 @@ fn canonical_wait_stage_projection_matches_legacy_values() {
 fn sidebar_metrics_export_filters_histograms_to_sidebar_subset() {
     let observability = BasicObservability::default();
     observability.record_completion_latency(Duration::from_millis(33));
-    observability.record_intellisense_v2_ir_query_latency(
-        "completion",
-        Duration::from_millis(21),
-    );
+    observability.record_intellisense_v2_ir_query_latency("completion", Duration::from_millis(21));
 
     let exported = observability.get_metrics().export_metrics_sidebar();
     let histograms = histograms(&exported);
@@ -101,6 +98,63 @@ fn sidebar_metrics_export_filters_histograms_to_sidebar_subset() {
         !histograms.contains_key("completion_duration_ms"),
         "sidebar export must skip unrelated histogram summaries to stay lightweight"
     );
+}
+
+#[test]
+fn completion_exact_wait_and_semantic_breakdown_metrics_are_recorded() {
+    let observability = BasicObservability::default();
+    observability
+        .record_intellisense_v2_completion_exact_type_index_wait_outcome("no_matching_task");
+    observability
+        .record_completion_stage_latency("prepare_apply_age_at_start", Duration::from_millis(9));
+    observability.record_completion_stage_latency(
+        "prepare_apply_age_at_terminal",
+        Duration::from_millis(13),
+    );
+    observability.record_completion_stage_latency(
+        "exact_wait_apply_age_at_start",
+        Duration::from_millis(17),
+    );
+    observability.record_completion_stage_latency(
+        "exact_wait_apply_age_at_terminal",
+        Duration::from_millis(21),
+    );
+    observability.record_intellisense_v2_semantic_diagnostics_query_breakdown(
+        Duration::from_millis(3),
+        Duration::from_millis(5),
+        Duration::from_millis(7),
+        Duration::from_millis(11),
+        Some(Duration::from_millis(13)),
+    );
+
+    let exported = observability.get_metrics().export_metrics();
+    let counters = counters(&exported);
+    let histograms = histograms(&exported);
+
+    assert_eq!(
+        counter_value(
+            counters,
+            "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_no_matching_task"
+        ),
+        1,
+        "exact wait outcome counter must be exported under bounded reason labels"
+    );
+    for key in [
+        "completion_stage_prepare_apply_age_at_start_ms",
+        "completion_stage_prepare_apply_age_at_terminal_ms",
+        "completion_stage_exact_wait_apply_age_at_start_ms",
+        "completion_stage_exact_wait_apply_age_at_terminal_ms",
+        "intellisense_v2_semantic_diagnostics_query_inputs_ms",
+        "intellisense_v2_semantic_diagnostics_query_parse_result_ms",
+        "intellisense_v2_semantic_diagnostics_query_ir_ms",
+        "intellisense_v2_semantic_diagnostics_query_collect_ms",
+        "intellisense_v2_semantic_diagnostics_query_flow_sensitive_ms",
+    ] {
+        assert!(
+            histograms.contains_key(key),
+            "expected histogram key {key} in observability export"
+        );
+    }
 }
 
 #[test]

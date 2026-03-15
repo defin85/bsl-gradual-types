@@ -638,6 +638,59 @@ impl AnalysisV2 {
         cancellable(|| semantic_diagnostics(&self.db, file, self.deps, self.settings).0).map(Some)
     }
 
+    pub fn semantic_diagnostics_profiled(
+        &self,
+        file_id: FileId,
+    ) -> Cancellable<Option<SemanticDiagnosticsProfiledResult>> {
+        let Some(&file) = self.files.get(&file_id) else {
+            return Ok(None);
+        };
+
+        let started = Instant::now();
+        let inputs_started = Instant::now();
+        let deps_data = cancellable(|| self.deps.data(&self.db).0.clone())?;
+        let detail_level = cancellable(|| self.settings.diagnostics_detail_level(&self.db))?;
+        let inputs_ms = inputs_started.elapsed().as_millis();
+
+        let parse_started = Instant::now();
+        let parsed = cancellable(|| parse_result(&self.db, file, self.settings).0)?;
+        let parse_result_ms = parse_started.elapsed().as_millis();
+        if !parsed.syntax_errors.is_empty()
+            && !syntax_errors_only_in_directives(file.text(&self.db).as_ref(), &parsed.syntax_errors)
+        {
+            return Ok(Some(SemanticDiagnosticsProfiledResult {
+                diagnostics: Arc::new(Vec::new()),
+                profile: SemanticDiagnosticsProfile {
+                    inputs_ms,
+                    parse_result_ms,
+                    total_ms: started.elapsed().as_millis(),
+                    ..SemanticDiagnosticsProfile::default()
+                },
+            }));
+        }
+
+        let ir_started = Instant::now();
+        let program = cancellable(|| ir(&self.db, file, self.deps, self.settings).0)?;
+        let ir_ms = ir_started.elapsed().as_millis();
+
+        let collect_started = Instant::now();
+        let diagnostics =
+            cancellable(|| collect_semantic_diagnostics_from_program(program, deps_data, detail_level))?;
+        let collect_ms = collect_started.elapsed().as_millis();
+
+        Ok(Some(SemanticDiagnosticsProfiledResult {
+            diagnostics: Arc::new(diagnostics),
+            profile: SemanticDiagnosticsProfile {
+                inputs_ms,
+                parse_result_ms,
+                ir_ms,
+                collect_ms,
+                flow_sensitive_ms: 0,
+                total_ms: started.elapsed().as_millis(),
+            },
+        }))
+    }
+
     pub fn semantic_diagnostics_flow_sensitive(
         &self,
         file_id: FileId,
@@ -649,6 +702,77 @@ impl AnalysisV2 {
             semantic_diagnostics_flow_sensitive(&self.db, file, self.deps, self.settings).0
         })
         .map(Some)
+    }
+
+    pub fn semantic_diagnostics_flow_sensitive_profiled(
+        &self,
+        file_id: FileId,
+    ) -> Cancellable<Option<SemanticDiagnosticsProfiledResult>> {
+        let Some(&file) = self.files.get(&file_id) else {
+            return Ok(None);
+        };
+
+        let started = Instant::now();
+        let Some(mut base) = self.semantic_diagnostics_profiled(file_id)? else {
+            return Ok(None);
+        };
+
+        let parse_started = Instant::now();
+        let parsed = cancellable(|| parse_result(&self.db, file, self.settings).0)?;
+        base.profile.parse_result_ms = base
+            .profile
+            .parse_result_ms
+            .saturating_add(parse_started.elapsed().as_millis());
+        if !parsed.syntax_errors.is_empty()
+            && !syntax_errors_only_in_directives(file.text(&self.db).as_ref(), &parsed.syntax_errors)
+        {
+            base.profile.total_ms = started.elapsed().as_millis();
+            return Ok(Some(base));
+        }
+
+        let ir_started = Instant::now();
+        let program = cancellable(|| ir(&self.db, file, self.deps, self.settings).0)?;
+        base.profile.ir_ms = base
+            .profile
+            .ir_ms
+            .saturating_add(ir_started.elapsed().as_millis());
+
+        let flow_started = Instant::now();
+        let deps_data = cancellable(|| self.deps.data(&self.db).0.clone())?;
+        let resolver = deps_data
+            .resolver
+            .clone()
+            .unwrap_or_else(|| Arc::new(TypeResolver::new(deps_data.repository.clone())));
+        let mut diagnostics = (*base.diagnostics).clone();
+        diagnostics.extend(flow_sensitive_null_safety_diagnostics(
+            &program,
+            resolver.as_ref(),
+        ));
+        diagnostics.sort_by(|a, b| {
+            let severity_key = |severity: DiagnosticSeverity| match severity {
+                DiagnosticSeverity::Error => 0_u8,
+                DiagnosticSeverity::Warning => 1_u8,
+                DiagnosticSeverity::Info => 2_u8,
+                DiagnosticSeverity::Hint => 3_u8,
+            };
+            (
+                a.span.start,
+                a.span.end,
+                severity_key(a.severity),
+                &a.message,
+            )
+                .cmp(&(
+                    b.span.start,
+                    b.span.end,
+                    severity_key(b.severity),
+                    &b.message,
+                ))
+        });
+        base.diagnostics = Arc::new(diagnostics);
+        base.profile.flow_sensitive_ms = flow_started.elapsed().as_millis();
+        base.profile.total_ms = started.elapsed().as_millis();
+
+        Ok(Some(base))
     }
 
     pub fn utf16_position_to_byte_offset(

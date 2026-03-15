@@ -103,6 +103,11 @@ const UNIFIED_STAGE_COUNTER_KEYS: &[&str] = &[
     "intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_parse_result_total",
     "intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_other_total",
     "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_check_cancellation_total",
+    "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_ready",
+    "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_deadline",
+    "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_no_matching_task",
+    "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_task_present_wrong_version",
+    "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_observed_version_mismatch",
     "intellisense_v2_revision_lag_sample_total",
     "intellisense_v2_observability_contract_violation_total",
     "intellisense_v2_projection_missing_total",
@@ -153,6 +158,15 @@ const UNIFIED_STAGE_HISTOGRAM_KEYS: &[&str] = &[
     "intellisense_v2_runtime_queue_wait_background_ms",
     "intellisense_v2_runtime_exec_interactive_ms",
     "intellisense_v2_runtime_exec_background_ms",
+    "completion_stage_prepare_apply_age_at_start_ms",
+    "completion_stage_prepare_apply_age_at_terminal_ms",
+    "completion_stage_exact_wait_apply_age_at_start_ms",
+    "completion_stage_exact_wait_apply_age_at_terminal_ms",
+    "intellisense_v2_semantic_diagnostics_query_inputs_ms",
+    "intellisense_v2_semantic_diagnostics_query_parse_result_ms",
+    "intellisense_v2_semantic_diagnostics_query_ir_ms",
+    "intellisense_v2_semantic_diagnostics_query_collect_ms",
+    "intellisense_v2_semantic_diagnostics_query_flow_sensitive_ms",
     "intellisense_v2_revision_lag_versions",
 ];
 
@@ -4009,6 +4023,13 @@ async fn p7_member_access_completion_does_not_backfill_from_runtime_index_snapsh
         fallback_unavailable_total > 0,
         "member-access cache miss must record fallback_unavailable before public reason emission, counters={counters:?}"
     );
+    let exact_wait_no_matching_task_total = read_u64_metric(counters.get(
+        "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_no_matching_task",
+    ));
+    assert!(
+        exact_wait_no_matching_task_total > 0,
+        "member-access exact wait must expose no_matching_task outcome, counters={counters:?}"
+    );
     let fail_closed_reason_total = read_u64_metric(counters.get(FAIL_CLOSED_REASON_KEY));
     assert!(
         fail_closed_reason_total > 0,
@@ -4028,9 +4049,23 @@ async fn p7_member_access_completion_does_not_backfill_from_runtime_index_snapsh
         .and_then(|value| value.as_object())
         .map(|histogram| read_u64_metric(histogram.get("count")))
         .unwrap_or(0);
+    let exact_wait_apply_age_start_count = histograms
+        .get("completion_stage_exact_wait_apply_age_at_start_ms")
+        .and_then(|value| value.as_object())
+        .map(|histogram| read_u64_metric(histogram.get("count")))
+        .unwrap_or(0);
+    let exact_wait_apply_age_terminal_count = histograms
+        .get("completion_stage_exact_wait_apply_age_at_terminal_ms")
+        .and_then(|value| value.as_object())
+        .map(|histogram| read_u64_metric(histogram.get("count")))
+        .unwrap_or(0);
     assert_eq!(
         query_bundle_count, 0,
         "member-access fail-closed path must short-circuit before query_bundle, histograms={histograms:?}"
+    );
+    assert!(
+        exact_wait_apply_age_start_count > 0 && exact_wait_apply_age_terminal_count > 0,
+        "member-access exact wait must expose apply-age histograms before fail-closed return, histograms={histograms:?}"
     );
 
     drain_task.abort();
@@ -4377,6 +4412,10 @@ async fn p7_large_churn_budget_timeout_without_prior_completion_returns_fail_clo
         .get("counters")
         .and_then(|value| value.as_object())
         .expect("metrics.counters object");
+    let histograms = metrics
+        .get("histograms")
+        .and_then(|value| value.as_object())
+        .expect("metrics.histograms object");
     let stale_fallback_total = counters
         .get("intellisense_v2_completion_stale_fallback_total")
         .and_then(|value| value.as_u64())
@@ -4392,6 +4431,22 @@ async fn p7_large_churn_budget_timeout_without_prior_completion_returns_fail_clo
     assert!(
         fallback_unavailable_total > 0,
         "expected fallback_unavailable counter to increment for stale cache-miss"
+    );
+    let prepare_apply_age_start_count = histograms
+        .get("completion_stage_prepare_apply_age_at_start_ms")
+        .and_then(|value| value.as_object())
+        .and_then(|histogram| histogram.get("count"))
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let prepare_apply_age_terminal_count = histograms
+        .get("completion_stage_prepare_apply_age_at_terminal_ms")
+        .and_then(|value| value.as_object())
+        .and_then(|histogram| histogram.get("count"))
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    assert!(
+        prepare_apply_age_start_count > 0 && prepare_apply_age_terminal_count > 0,
+        "prepare fail-closed path must expose apply-age histograms, histograms={histograms:?}"
     );
 
     drain_task.abort();
@@ -8803,6 +8858,106 @@ async fn p22_get_observability_metrics_sidebar_shape_filters_unrelated_histogram
 }
 
 #[tokio::test]
+async fn p22_get_observability_metrics_exposes_semantic_diagnostics_breakdown() {
+    const SEMANTIC_FIXTURE: &str = "Процедура Тест()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.НесуществующийМетод();\nКонецПроцедуры\n";
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        move |client| BslLanguageServer::new(client, coordinator.clone())
+    })
+    .finish();
+    let (published_tx, mut published_rx) =
+        tokio::sync::mpsc::unbounded_channel::<PublishDiagnosticsParams>();
+    let drain_task = tokio::spawn(async move {
+        while let Some(req) = socket.next().await {
+            if req.method() != "textDocument/publishDiagnostics" {
+                continue;
+            }
+            let Some(params) = req.params().cloned() else {
+                continue;
+            };
+            let Ok(parsed) =
+                serde_json::from_value::<tower_lsp::lsp_types::PublishDiagnosticsParams>(params)
+            else {
+                continue;
+            };
+            let _ = published_tx.send(parsed);
+        }
+    });
+
+    initialize_lsp_service(&mut service).await;
+
+    let uri = Url::parse("file:///semantic_breakdown_fixture.bsl").expect("fixture uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: SEMANTIC_FIXTURE.to_string(),
+        },
+    };
+    let did_open_req = Request::build("textDocument/didOpen")
+        .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+        .finish();
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(did_open_req)
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+    let diagnostics = wait_lsp_publish_diagnostics(&mut published_rx, &uri).await;
+    assert!(
+        !diagnostics.is_empty(),
+        "semantic fixture must publish diagnostics before metrics snapshot"
+    );
+
+    let execute = Request::build("workspace/executeCommand")
+        .id(2204)
+        .params(serde_json::json!({
+            "command": "bsl.getObservabilityMetrics",
+            "arguments": [],
+        }))
+        .finish();
+    let execute_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(execute)
+        .await
+        .expect("workspace/executeCommand request")
+        .expect("workspace/executeCommand response");
+    let value = serde_json::to_value(&execute_response).expect("serialize response");
+    let result = value.get("result").cloned().expect("result field");
+    let metrics = result.get("metrics").expect("metrics field");
+    let histograms = metrics
+        .get("histograms")
+        .and_then(|value| value.as_object())
+        .expect("metrics.histograms object");
+
+    for key in [
+        "intellisense_v2_semantic_diagnostics_query_inputs_ms",
+        "intellisense_v2_semantic_diagnostics_query_parse_result_ms",
+        "intellisense_v2_semantic_diagnostics_query_ir_ms",
+        "intellisense_v2_semantic_diagnostics_query_collect_ms",
+    ] {
+        let count = histograms
+            .get(key)
+            .and_then(|value| value.get("count"))
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0);
+        assert!(
+            count > 0,
+            "metrics endpoint must expose semantic diagnostics breakdown histogram {key}"
+        );
+    }
+
+    drain_task.abort();
+}
+
+#[tokio::test]
 async fn p22_get_completion_timeline_exposes_versioned_contract() {
     let coordinator = Arc::new(SystemCoordinator::new());
 
@@ -12131,8 +12286,24 @@ fn dominant_stage_from_metrics(metrics: &serde_json::Value) -> serde_json::Value
             "completion_stage_prepare_stateful_ms",
         ),
         (
+            "completion_stage_prepare_apply_age_at_start",
+            "completion_stage_prepare_apply_age_at_start_ms",
+        ),
+        (
+            "completion_stage_prepare_apply_age_at_terminal",
+            "completion_stage_prepare_apply_age_at_terminal_ms",
+        ),
+        (
             "completion_stage_sync_globals",
             "completion_stage_sync_globals_ms",
+        ),
+        (
+            "completion_stage_exact_wait_apply_age_at_start",
+            "completion_stage_exact_wait_apply_age_at_start_ms",
+        ),
+        (
+            "completion_stage_exact_wait_apply_age_at_terminal",
+            "completion_stage_exact_wait_apply_age_at_terminal_ms",
         ),
         (
             "completion_stage_query_bundle",
@@ -12325,6 +12496,26 @@ fn dominant_stage_from_metrics(metrics: &serde_json::Value) -> serde_json::Value
         (
             "semantic_diagnostics_query",
             "intellisense_v2_semantic_diagnostics_query_ms",
+        ),
+        (
+            "semantic_diagnostics_query_inputs",
+            "intellisense_v2_semantic_diagnostics_query_inputs_ms",
+        ),
+        (
+            "semantic_diagnostics_query_parse_result",
+            "intellisense_v2_semantic_diagnostics_query_parse_result_ms",
+        ),
+        (
+            "semantic_diagnostics_query_ir",
+            "intellisense_v2_semantic_diagnostics_query_ir_ms",
+        ),
+        (
+            "semantic_diagnostics_query_collect",
+            "intellisense_v2_semantic_diagnostics_query_collect_ms",
+        ),
+        (
+            "semantic_diagnostics_query_flow_sensitive",
+            "intellisense_v2_semantic_diagnostics_query_flow_sensitive_ms",
         ),
     ];
 
@@ -12680,9 +12871,29 @@ async fn run_scale_aware_profile(
                 "completion_stage_prepare_stateful_ms",
                 None
             ),
+            "completion_stage_prepare_apply_age_at_start_ms": histogram_metric_value_or_zero(
+                histograms,
+                "completion_stage_prepare_apply_age_at_start_ms",
+                None
+            ),
+            "completion_stage_prepare_apply_age_at_terminal_ms": histogram_metric_value_or_zero(
+                histograms,
+                "completion_stage_prepare_apply_age_at_terminal_ms",
+                None
+            ),
             "completion_stage_sync_globals_ms": histogram_metric_value_or_zero(
                 histograms,
                 "completion_stage_sync_globals_ms",
+                None
+            ),
+            "completion_stage_exact_wait_apply_age_at_start_ms": histogram_metric_value_or_zero(
+                histograms,
+                "completion_stage_exact_wait_apply_age_at_start_ms",
+                None
+            ),
+            "completion_stage_exact_wait_apply_age_at_terminal_ms": histogram_metric_value_or_zero(
+                histograms,
+                "completion_stage_exact_wait_apply_age_at_terminal_ms",
                 None
             ),
             "completion_stage_query_bundle_ms": histogram_metric_value_or_zero(
@@ -12953,6 +13164,31 @@ async fn run_scale_aware_profile(
                 "intellisense_v2_semantic_diagnostics_query_ms",
                 None
             ),
+            "intellisense_v2_semantic_diagnostics_query_inputs_ms": histogram_metric_value_or_zero(
+                histograms,
+                "intellisense_v2_semantic_diagnostics_query_inputs_ms",
+                None
+            ),
+            "intellisense_v2_semantic_diagnostics_query_parse_result_ms": histogram_metric_value_or_zero(
+                histograms,
+                "intellisense_v2_semantic_diagnostics_query_parse_result_ms",
+                None
+            ),
+            "intellisense_v2_semantic_diagnostics_query_ir_ms": histogram_metric_value_or_zero(
+                histograms,
+                "intellisense_v2_semantic_diagnostics_query_ir_ms",
+                None
+            ),
+            "intellisense_v2_semantic_diagnostics_query_collect_ms": histogram_metric_value_or_zero(
+                histograms,
+                "intellisense_v2_semantic_diagnostics_query_collect_ms",
+                None
+            ),
+            "intellisense_v2_semantic_diagnostics_query_flow_sensitive_ms": histogram_metric_value_or_zero(
+                histograms,
+                "intellisense_v2_semantic_diagnostics_query_flow_sensitive_ms",
+                None
+            ),
             "intellisense_v2_interactive_wait_budget_exhausted_total": read_u64_metric(
                 counters.get("intellisense_v2_interactive_wait_budget_exhausted_total")
             ),
@@ -12964,6 +13200,21 @@ async fn run_scale_aware_profile(
             ),
             "intellisense_v2_completion_fallback_unavailable_total": read_u64_metric(
                 counters.get("intellisense_v2_completion_fallback_unavailable_total")
+            ),
+            "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_ready": read_u64_metric(
+                counters.get("intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_ready")
+            ),
+            "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_deadline": read_u64_metric(
+                counters.get("intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_deadline")
+            ),
+            "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_no_matching_task": read_u64_metric(
+                counters.get("intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_no_matching_task")
+            ),
+            "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_task_present_wrong_version": read_u64_metric(
+                counters.get("intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_task_present_wrong_version")
+            ),
+            "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_observed_version_mismatch": read_u64_metric(
+                counters.get("intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_observed_version_mismatch")
             ),
             "intellisense_v2_completion_owner_hint_index_fetch_block_on_total": read_u64_metric(
                 counters.get("intellisense_v2_completion_owner_hint_index_fetch_block_on_total")

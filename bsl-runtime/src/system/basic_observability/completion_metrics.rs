@@ -15,7 +15,13 @@ impl BasicObservability {
             "format" => "completion_stage_format_ms",
             "turn_wait" => "completion_stage_turn_wait_ms",
             "prepare_stateful" => "completion_stage_prepare_stateful_ms",
+            "prepare_apply_age_at_start" => "completion_stage_prepare_apply_age_at_start_ms",
+            "prepare_apply_age_at_terminal" => "completion_stage_prepare_apply_age_at_terminal_ms",
             "sync_globals" => "completion_stage_sync_globals_ms",
+            "exact_wait_apply_age_at_start" => "completion_stage_exact_wait_apply_age_at_start_ms",
+            "exact_wait_apply_age_at_terminal" => {
+                "completion_stage_exact_wait_apply_age_at_terminal_ms"
+            }
             "query_bundle" => "completion_stage_query_bundle_ms",
             "query_bundle_owner_hint" => "completion_stage_query_bundle_owner_hint_ms",
             "query_bundle_owner_hint_extract" => {

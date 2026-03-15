@@ -460,6 +460,24 @@ impl SystemCoordinator {
             );
     }
 
+    pub fn record_intellisense_v2_semantic_diagnostics_query_breakdown(
+        &self,
+        inputs: std::time::Duration,
+        parse_result: std::time::Duration,
+        ir: std::time::Duration,
+        collect: std::time::Duration,
+        flow_sensitive: Option<std::time::Duration>,
+    ) {
+        self.observability
+            .record_intellisense_v2_semantic_diagnostics_query_breakdown(
+                inputs,
+                parse_result,
+                ir,
+                collect,
+                flow_sensitive,
+            );
+    }
+
     pub fn record_intellisense_v2_parse_result_query_latency(&self, duration: std::time::Duration) {
         self.record_intellisense_v2_parse_result_query_latency_with_origin_and_operation(
             "runtime", "other", duration,
@@ -558,6 +576,11 @@ impl SystemCoordinator {
     pub fn record_intellisense_v2_revision_lag(&self, lag_versions: i32) {
         self.observability
             .record_intellisense_v2_revision_lag(lag_versions);
+    }
+
+    pub fn record_intellisense_v2_completion_exact_type_index_wait_outcome(&self, reason: &str) {
+        self.observability
+            .record_intellisense_v2_completion_exact_type_index_wait_outcome(reason);
     }
 
     pub fn record_intellisense_v2_singleflight_leader(&self) {

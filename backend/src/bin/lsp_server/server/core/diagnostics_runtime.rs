@@ -680,17 +680,30 @@ impl BslLanguageServer {
                         Some(coordinator_for_blocking.as_ref()),
                         |analysis| {
                             if semantic_flow_sensitive {
-                                analysis.semantic_diagnostics_flow_sensitive(file_id)
+                                analysis.semantic_diagnostics_flow_sensitive_profiled(file_id)
                             } else {
-                                analysis.semantic_diagnostics(file_id)
+                                analysis.semantic_diagnostics_profiled(file_id)
                             }
                         },
                     );
                     let elapsed = started.elapsed();
+                    let duration_from_profile_ms = |value: u128| {
+                        Duration::from_millis(value.min(u64::MAX as u128) as u64)
+                    };
                     match query {
-                        Ok(Some(semantic_errors)) => {
+                        Ok(Some(profiled)) => {
+                            coordinator_for_blocking
+                                .record_intellisense_v2_semantic_diagnostics_query_breakdown(
+                                    duration_from_profile_ms(profiled.profile.inputs_ms),
+                                    duration_from_profile_ms(profiled.profile.parse_result_ms),
+                                    duration_from_profile_ms(profiled.profile.ir_ms),
+                                    duration_from_profile_ms(profiled.profile.collect_ms),
+                                    (profiled.profile.flow_sensitive_ms > 0).then(|| {
+                                        duration_from_profile_ms(profiled.profile.flow_sensitive_ms)
+                                    }),
+                                );
                             let mut diagnostics = Vec::new();
-                            for error in semantic_errors.iter() {
+                            for error in profiled.diagnostics.iter() {
                                 if !semantic_show_hints
                                     && matches!(
                                         error.severity,

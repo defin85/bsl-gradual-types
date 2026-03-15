@@ -292,6 +292,19 @@ where
     }
 }
 
+async fn completion_apply_age_for_file(
+    server: &BslLanguageServer,
+    file_id: bsl_analysis_v2::FileId,
+) -> Option<std::time::Duration> {
+    server
+        .latest_apply_enqueued_at_v2
+        .read()
+        .await
+        .get(&file_id)
+        .copied()
+        .map(|enqueued_at| enqueued_at.elapsed())
+}
+
 impl BslLanguageServer {
     pub(super) async fn lsp_completion(
         &self,
@@ -530,6 +543,10 @@ impl BslLanguageServer {
                 break 'completion_flow Some(completion_incomplete_empty_response());
             }
 
+            if let Some(apply_age) = completion_apply_age_for_file(self, file_id).await {
+                self.coordinator
+                    .record_completion_stage_latency("prepare_apply_age_at_start", apply_age);
+            }
             let prepare_started = Instant::now();
             let prepare_timeout =
                 bsl_runtime::application::intellisense_v2::interactive_freshness_knobs(
@@ -562,6 +579,10 @@ impl BslLanguageServer {
             let prepare_elapsed = prepare_started.elapsed();
             self.coordinator
                 .record_completion_stage_latency("prepare_stateful", prepare_elapsed);
+            if let Some(apply_age) = completion_apply_age_for_file(self, file_id).await {
+                self.coordinator
+                    .record_completion_stage_latency("prepare_apply_age_at_terminal", apply_age);
+            }
 
             let prepared = match guarded_prepare {
                 Ok(prepared) => {
@@ -675,8 +696,15 @@ impl BslLanguageServer {
                             )
                             .map(|knobs| knobs.wait_budget)
                             .unwrap_or_default();
+                        if let Some(apply_age) = completion_apply_age_for_file(self, file_id).await
+                        {
+                            self.coordinator.record_completion_stage_latency(
+                                "exact_wait_apply_age_at_start",
+                                apply_age,
+                            );
+                        }
                         let exact_wait_started = Instant::now();
-                        let _ = self
+                        let exact_wait_outcome = self
                             .wait_for_current_type_index_serve_only_ready_v2(
                                 file_id,
                                 Some(expected_version),
@@ -691,6 +719,27 @@ impl BslLanguageServer {
                         timeline_capture
                             .push_completed_stage("wait_exact_type_index", exact_wait_elapsed);
 
+                        if exact_wait_outcome
+                            != super::super::core::ExactTypeIndexWaitOutcomeV2::Ready
+                        {
+                            if let Some(apply_age) =
+                                completion_apply_age_for_file(self, file_id).await
+                            {
+                                self.coordinator.record_completion_stage_latency(
+                                    "exact_wait_apply_age_at_terminal",
+                                    apply_age,
+                                );
+                            }
+                            self.coordinator
+                                .record_intellisense_v2_completion_exact_type_index_wait_outcome(
+                                    exact_wait_outcome.as_str(),
+                                );
+                            self.coordinator
+                                .record_intellisense_v2_completion_fallback_unavailable();
+                            completion_outcome.get_or_insert("wait_not_ready");
+                            break 'completion_flow Some(completion_empty_response(false));
+                        }
+
                         let (analysis_after_wait, index_snapshot_after_wait, deps_id_after_wait) =
                             self.analysis_v2.snapshot_with_deps().await;
                         let exact_ready_after_wait = analysis_after_wait
@@ -698,11 +747,44 @@ impl BslLanguageServer {
                             .ok()
                             .unwrap_or(false);
                         if !exact_ready_after_wait {
+                            let terminal_outcome = if analysis_after_wait
+                                .file_version(file_id)
+                                .ok()
+                                .flatten()
+                                != Some(expected_version)
+                            {
+                                super::super::core::ExactTypeIndexWaitOutcomeV2::ObservedVersionMismatch
+                            } else {
+                                super::super::core::ExactTypeIndexWaitOutcomeV2::Deadline
+                            };
+                            if let Some(apply_age) =
+                                completion_apply_age_for_file(self, file_id).await
+                            {
+                                self.coordinator.record_completion_stage_latency(
+                                    "exact_wait_apply_age_at_terminal",
+                                    apply_age,
+                                );
+                            }
+                            self.coordinator
+                                .record_intellisense_v2_completion_exact_type_index_wait_outcome(
+                                    terminal_outcome.as_str(),
+                                );
                             self.coordinator
                                 .record_intellisense_v2_completion_fallback_unavailable();
                             completion_outcome.get_or_insert("wait_not_ready");
                             break 'completion_flow Some(completion_empty_response(false));
                         }
+                        if let Some(apply_age) = completion_apply_age_for_file(self, file_id).await
+                        {
+                            self.coordinator.record_completion_stage_latency(
+                                "exact_wait_apply_age_at_terminal",
+                                apply_age,
+                            );
+                        }
+                        self.coordinator
+                            .record_intellisense_v2_completion_exact_type_index_wait_outcome(
+                                super::super::core::ExactTypeIndexWaitOutcomeV2::Ready.as_str(),
+                            );
                         refreshed_snapshot_after_wait = Some((
                             analysis_after_wait,
                             index_snapshot_after_wait,

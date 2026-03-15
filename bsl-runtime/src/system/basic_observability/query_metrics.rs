@@ -419,6 +419,38 @@ impl BasicObservability {
         );
     }
 
+    pub fn record_intellisense_v2_semantic_diagnostics_query_breakdown(
+        &self,
+        inputs: Duration,
+        parse_result: Duration,
+        ir: Duration,
+        collect: Duration,
+        flow_sensitive: Option<Duration>,
+    ) {
+        self.metrics.observe_histogram(
+            "intellisense_v2_semantic_diagnostics_query_inputs_ms",
+            inputs.as_millis() as f64,
+        );
+        self.metrics.observe_histogram(
+            "intellisense_v2_semantic_diagnostics_query_parse_result_ms",
+            parse_result.as_millis() as f64,
+        );
+        self.metrics.observe_histogram(
+            "intellisense_v2_semantic_diagnostics_query_ir_ms",
+            ir.as_millis() as f64,
+        );
+        self.metrics.observe_histogram(
+            "intellisense_v2_semantic_diagnostics_query_collect_ms",
+            collect.as_millis() as f64,
+        );
+        if let Some(flow_sensitive) = flow_sensitive {
+            self.metrics.observe_histogram(
+                "intellisense_v2_semantic_diagnostics_query_flow_sensitive_ms",
+                flow_sensitive.as_millis() as f64,
+            );
+        }
+    }
+
     pub fn record_intellisense_v2_parse_result_query_latency(&self, duration: Duration) {
         self.record_intellisense_v2_parse_result_query_latency_with_origin_and_operation(
             "runtime", "other", duration,

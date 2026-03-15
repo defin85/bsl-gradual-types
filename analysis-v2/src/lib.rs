@@ -220,6 +220,22 @@ pub struct TypeAtByteOffsetProfiledResult {
     pub serve_reason_code: TypeIndexServeReasonCode,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SemanticDiagnosticsProfile {
+    pub inputs_ms: u128,
+    pub parse_result_ms: u128,
+    pub ir_ms: u128,
+    pub collect_ms: u128,
+    pub flow_sensitive_ms: u128,
+    pub total_ms: u128,
+}
+
+#[derive(Debug, Clone)]
+pub struct SemanticDiagnosticsProfiledResult {
+    pub diagnostics: Arc<Vec<TypeDiagnostic>>,
+    pub profile: SemanticDiagnosticsProfile,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypeIndexServeReasonCode {
     TypeIndexExactHit,

@@ -1,5 +1,26 @@
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ExactTypeIndexWaitOutcomeV2 {
+    Ready,
+    Deadline,
+    NoMatchingTask,
+    TaskPresentWrongVersion,
+    ObservedVersionMismatch,
+}
+
+impl ExactTypeIndexWaitOutcomeV2 {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Ready => "ready",
+            Self::Deadline => "deadline",
+            Self::NoMatchingTask => "no_matching_task",
+            Self::TaskPresentWrongVersion => "task_present_wrong_version",
+            Self::ObservedVersionMismatch => "observed_version_mismatch",
+        }
+    }
+}
+
 impl BslLanguageServer {
     pub(crate) async fn sync_v2_globals(&self) {
         let settings = self.settings.read().await.clone();
@@ -202,7 +223,7 @@ impl BslLanguageServer {
         file_id: V2FileId,
         expected_version: Option<i32>,
         max_wait: std::time::Duration,
-    ) -> bool {
+    ) -> ExactTypeIndexWaitOutcomeV2 {
         let deadline = tokio::time::Instant::now() + max_wait;
         loop {
             let analysis = self.analysis_v2.snapshot().await;
@@ -213,19 +234,49 @@ impl BslLanguageServer {
                     .current_type_index_serve_only_ready(file_id)
                     .unwrap_or(false);
             if exact_ready {
-                return true;
+                return ExactTypeIndexWaitOutcomeV2::Ready;
             }
 
-            let has_matching_task = {
+            enum MatchingTaskState {
+                Matching,
+                WrongVersion,
+                Missing,
+            }
+
+            let matching_task_state = {
                 let tasks = self.type_index_precompute_tasks_v2.lock().await;
-                tasks.get(&file_id).is_some_and(|task| {
-                    expected_version
-                        .map(|version| task.supersession_key.requested_version == version)
-                        .unwrap_or(true)
-                })
+                match tasks.get(&file_id) {
+                    Some(task) => {
+                        if expected_version
+                            .map(|version| task.supersession_key.requested_version == version)
+                            .unwrap_or(true)
+                        {
+                            MatchingTaskState::Matching
+                        } else {
+                            MatchingTaskState::WrongVersion
+                        }
+                    }
+                    None => MatchingTaskState::Missing,
+                }
             };
-            if !has_matching_task || tokio::time::Instant::now() >= deadline {
-                return false;
+            if matches!(matching_task_state, MatchingTaskState::WrongVersion) {
+                return ExactTypeIndexWaitOutcomeV2::TaskPresentWrongVersion;
+            }
+            let observed_version_mismatch =
+                expected_version.is_some_and(|version| observed_version != Some(version));
+            if matches!(matching_task_state, MatchingTaskState::Missing) {
+                return if observed_version_mismatch {
+                    ExactTypeIndexWaitOutcomeV2::ObservedVersionMismatch
+                } else {
+                    ExactTypeIndexWaitOutcomeV2::NoMatchingTask
+                };
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return if observed_version_mismatch {
+                    ExactTypeIndexWaitOutcomeV2::ObservedVersionMismatch
+                } else {
+                    ExactTypeIndexWaitOutcomeV2::Deadline
+                };
             }
 
             tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;

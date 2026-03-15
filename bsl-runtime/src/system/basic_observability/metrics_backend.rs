@@ -136,7 +136,8 @@ impl SimpleMetrics {
         self.histograms
             .lock()
             .map(|histograms| {
-                names.iter()
+                names
+                    .iter()
                     .filter_map(|name| {
                         histograms
                             .get(*name)

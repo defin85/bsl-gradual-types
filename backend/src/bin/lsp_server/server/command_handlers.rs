@@ -457,9 +457,7 @@ impl BslLanguageServer {
         } else {
             self.coordinator.observability_metrics()
         };
-        Ok(ObservabilityMetricsResponse {
-            metrics,
-        })
+        Ok(ObservabilityMetricsResponse { metrics })
     }
 
     pub(crate) async fn handle_get_completion_timeline(

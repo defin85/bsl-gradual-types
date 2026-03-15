@@ -216,6 +216,82 @@ fn completion_prepare_error_outcome(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn wait_for_completion_prepare_abort(
+    server: &BslLanguageServer,
+    file_id: bsl_analysis_v2::FileId,
+    request_id: Option<&str>,
+    request_epoch: u64,
+    cancellation_token: Option<&super::super::completion_cancellation::CompletionCancellationToken>,
+    cancel_event_emitted: &mut bool,
+) -> &'static str {
+    const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
+
+    loop {
+        if let Some(outcome) = super::helpers::completion_checkpoint_outcome(
+            server,
+            file_id,
+            request_id,
+            request_epoch,
+            cancellation_token,
+            "prepare",
+            cancel_event_emitted,
+        )
+        .await
+        {
+            return outcome;
+        }
+
+        if let Some(token) = cancellation_token {
+            tokio::select! {
+                _ = token.cancelled() => {}
+                _ = tokio::time::sleep(POLL_INTERVAL) => {}
+            }
+        } else {
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    }
+}
+
+async fn run_completion_prepare_guard<T, PF, AF>(
+    prepare_future: PF,
+    prepare_timeout: Option<std::time::Duration>,
+    abort_future: Option<AF>,
+) -> Result<T, &'static str>
+where
+    PF: std::future::Future<Output = T>,
+    AF: std::future::Future<Output = &'static str>,
+{
+    let mut prepare_future = std::pin::pin!(prepare_future);
+
+    match (prepare_timeout, abort_future) {
+        (Some(timeout), Some(abort_future)) => {
+            let mut abort_future = std::pin::pin!(abort_future);
+            let mut timeout_sleep = std::pin::pin!(tokio::time::sleep(timeout));
+            tokio::select! {
+                prepared = &mut prepare_future => Ok(prepared),
+                outcome = &mut abort_future => Err(outcome),
+                _ = &mut timeout_sleep => Err("wait_not_ready"),
+            }
+        }
+        (Some(timeout), None) => {
+            let mut timeout_sleep = std::pin::pin!(tokio::time::sleep(timeout));
+            tokio::select! {
+                prepared = &mut prepare_future => Ok(prepared),
+                _ = &mut timeout_sleep => Err("wait_not_ready"),
+            }
+        }
+        (None, Some(abort_future)) => {
+            let mut abort_future = std::pin::pin!(abort_future);
+            tokio::select! {
+                prepared = &mut prepare_future => Ok(prepared),
+                outcome = &mut abort_future => Err(outcome),
+            }
+        }
+        (None, None) => Ok(prepare_future.await),
+    }
+}
+
 impl BslLanguageServer {
     pub(super) async fn lsp_completion(
         &self,
@@ -438,20 +514,76 @@ impl BslLanguageServer {
                 settings.enable_flow_sensitive
             };
 
+            if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
+                event_driven_guards_enabled,
+                self,
+                file_id,
+                completion_request_id.as_deref(),
+                completion_ticket.request_epoch,
+                completion_cancellation_token.as_ref(),
+                "before_prepare",
+                &mut cancel_event_emitted,
+            )
+            .await
+            {
+                completion_outcome = Some(outcome);
+                break 'completion_flow Some(completion_incomplete_empty_response());
+            }
+
             let prepare_started = Instant::now();
-            let prepared = self
-                .prepare_lsp_stateful_operation_v2_with_completion_mode(
+            let prepare_timeout =
+                bsl_runtime::application::intellisense_v2::interactive_freshness_knobs(
+                    bsl_runtime::application::SemanticOperation::Completion,
+                    Some(self.coordinator.as_ref()),
+                )
+                .map(|knobs| knobs.wait_budget);
+            let prepare_abort = event_driven_guards_enabled.then(|| {
+                wait_for_completion_prepare_abort(
+                    self,
+                    file_id,
+                    completion_request_id.as_deref(),
+                    completion_ticket.request_epoch,
+                    completion_cancellation_token.as_ref(),
+                    &mut cancel_event_emitted,
+                )
+            });
+            let guarded_prepare = run_completion_prepare_guard(
+                self.prepare_lsp_stateful_operation_v2_with_completion_mode(
                     &uri,
                     file_id,
                     bsl_runtime::application::SemanticOperation::Completion,
                     include_flow_sensitive,
                     Some(completion_observability_mode),
-                )
-                .await;
+                ),
+                prepare_timeout,
+                prepare_abort,
+            )
+            .await;
             let prepare_elapsed = prepare_started.elapsed();
             self.coordinator
                 .record_completion_stage_latency("prepare_stateful", prepare_elapsed);
-            timeline_capture.push_completed_stage("prepare_stateful", prepare_elapsed);
+
+            let prepared = match guarded_prepare {
+                Ok(prepared) => {
+                    timeline_capture.push_completed_stage("prepare_stateful", prepare_elapsed);
+                    prepared
+                }
+                Err(outcome) => {
+                    if outcome == "wait_not_ready" {
+                        self.coordinator
+                            .record_intellisense_v2_interactive_wait_budget_exhausted();
+                        self.coordinator
+                            .record_intellisense_v2_completion_fallback_unavailable();
+                    }
+                    let stage_status = match outcome {
+                        "cancelled" | "superseded" => CompletionTimelineStageStatus::Cancelled,
+                        _ => CompletionTimelineStageStatus::Failed,
+                    };
+                    timeline_capture.push_stage("prepare_stateful", stage_status, prepare_elapsed);
+                    completion_outcome = Some(outcome);
+                    break 'completion_flow Some(completion_incomplete_empty_response());
+                }
+            };
 
             match prepared {
                 Ok((context, prepared, expected_version)) => {
@@ -1117,6 +1249,7 @@ impl BslLanguageServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::future::pending;
     use tower_lsp::lsp_types::Url;
 
     fn sample_capture() -> CompletionTimelineCapture {
@@ -1221,5 +1354,35 @@ mod tests {
         ] {
             assert_eq!(completion_public_timeline_outcome(outcome), "fail_closed");
         }
+    }
+
+    #[tokio::test]
+    async fn prepare_guard_times_out_pending_prepare() {
+        let guarded = run_completion_prepare_guard(
+            pending::<()>(),
+            Some(std::time::Duration::from_millis(20)),
+            Option::<std::future::Ready<&'static str>>::None,
+        )
+        .await;
+
+        assert_eq!(guarded, Err("wait_not_ready"));
+    }
+
+    #[tokio::test]
+    async fn prepare_guard_returns_abort_outcome_before_timeout() {
+        let (tx, rx) = tokio::sync::oneshot::channel::<&'static str>();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            let _ = tx.send("cancelled");
+        });
+
+        let guarded = run_completion_prepare_guard(
+            pending::<()>(),
+            Some(std::time::Duration::from_secs(1)),
+            Some(async move { rx.await.expect("abort outcome") }),
+        )
+        .await;
+
+        assert_eq!(guarded, Err("cancelled"));
     }
 }

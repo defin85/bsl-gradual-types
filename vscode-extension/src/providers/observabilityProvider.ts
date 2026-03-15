@@ -383,13 +383,14 @@ export class ObservabilityProvider implements vscode.TreeDataProvider<BslOvervie
                     if (metrics) {
                         this.cachedMetrics = metrics;
                         this.lastSuccessAt = this.lastFetchAt;
+                        return metrics;
                     }
-                    return metrics;
+                    return this.cachedMetrics;
                 })
                 .catch((error) => {
                     this.lastFetchAt = Date.now();
                     this.outputChannel.appendLine(`[Observability] Failed to fetch metrics: ${error}`);
-                    return null;
+                    return this.cachedMetrics;
                 })
                 .finally(() => {
                     this.inflight = null;

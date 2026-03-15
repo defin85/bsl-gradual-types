@@ -5,6 +5,7 @@ import {
     queryType,
     buildIndex,
     getIndexState,
+    getObservabilityMetrics,
     getCompletionTimeline,
     resetCompletionTimelineSupportCacheForTests,
     validateMethod,
@@ -361,6 +362,30 @@ suite('LSP Custom Requests Test Suite', () => {
         const second = await getCompletionTimeline({ limit: 1 });
         assert.strictEqual(second.kind, 'unsupported');
         assert.strictEqual(sendRequestStub.callCount, callCountBefore);
+    });
+
+    test('getObservabilityMetrics should timeout instead of hanging forever', async function() {
+        this.timeout(5000);
+
+        const clock = sinon.useFakeTimers();
+        try {
+            sendRequestStub.resetBehavior();
+            sendRequestStub.callsFake((method: string, params: any) => {
+                if (method === 'workspace/executeCommand' && params?.command === 'bsl.getObservabilityMetrics') {
+                    return new Promise(() => {});
+                }
+                return Promise.resolve(null);
+            });
+
+            const promise = getObservabilityMetrics();
+            await clock.tickAsync(5000);
+
+            const result = await promise;
+            assert.strictEqual(result, null);
+            assert.strictEqual(sendRequestStub.callCount, 1);
+        } finally {
+            clock.restore();
+        }
     });
 
     /**

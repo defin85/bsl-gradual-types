@@ -67,3 +67,21 @@ fn remove_file_cleans_all_entries_for_file() {
     assert!(second_token.is_cancelled());
     assert!(!other_token.is_cancelled());
 }
+
+#[tokio::test]
+async fn cancelled_waiter_wakes_when_request_is_cancelled() {
+    let registry = Arc::new(CompletionCancellationRegistry::default());
+    let registration = registry.register_request("42".to_string(), V2FileId(7), 1);
+    let token = registration.token();
+
+    let waiter = tokio::spawn({
+        let token = token.clone();
+        async move {
+            token.cancelled().await;
+        }
+    });
+
+    let cancelled = registry.cancel_request("42").expect("cancelled entry");
+    assert!(cancelled.token.is_cancelled());
+    waiter.await.expect("waiter join");
+}

@@ -3,29 +3,52 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use bsl_analysis_v2::FileId as V2FileId;
+use tokio::sync::Notify;
+
+#[derive(Debug)]
+struct CompletionCancellationInner {
+    cancelled: AtomicBool,
+    notify: Notify,
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct CompletionCancellationToken {
-    cancelled: Arc<AtomicBool>,
+    inner: Arc<CompletionCancellationInner>,
 }
 
 impl CompletionCancellationToken {
     fn new() -> Self {
         Self {
-            cancelled: Arc::new(AtomicBool::new(false)),
+            inner: Arc::new(CompletionCancellationInner {
+                cancelled: AtomicBool::new(false),
+                notify: Notify::new(),
+            }),
         }
     }
 
     pub(crate) fn cancel(&self) {
-        self.cancelled.store(true, Ordering::SeqCst);
+        if !self.inner.cancelled.swap(true, Ordering::SeqCst) {
+            self.inner.notify.notify_waiters();
+        }
     }
 
     pub(crate) fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::SeqCst)
+        self.inner.cancelled.load(Ordering::SeqCst)
+    }
+
+    pub(crate) async fn cancelled(&self) {
+        if self.is_cancelled() {
+            return;
+        }
+        let notified = self.inner.notify.notified();
+        if self.is_cancelled() {
+            return;
+        }
+        notified.await;
     }
 
     fn same_inner(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.cancelled, &other.cancelled)
+        Arc::ptr_eq(&self.inner, &other.inner)
     }
 }
 

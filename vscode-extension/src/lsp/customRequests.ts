@@ -296,6 +296,33 @@ export function isMethodNotFoundError(error: unknown): boolean {
     return /method not found/i.test(message);
 }
 
+function isTimeoutError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return /timed out/i.test(message);
+}
+
+async function withRequestTimeout<T>(
+    request: Promise<T>,
+    timeoutMs: number,
+    label: string
+): Promise<T> {
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    try {
+        return await Promise.race([
+            request,
+            new Promise<T>((_, reject) => {
+                timeoutHandle = setTimeout(() => {
+                    reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+                }, timeoutMs);
+            })
+        ]);
+    } finally {
+        if (timeoutHandle) {
+            clearTimeout(timeoutHandle);
+        }
+    }
+}
+
 /**
  * Валидация вызова метода через LSP
  * Заменяет: executeBslCommand('check_type_compatibility', ...)
@@ -633,6 +660,7 @@ export async function getWorkspaceStats(): Promise<WorkspaceStatsResponse | null
  */
 let observabilityMetricsUnsupported = false;
 let observabilityMetricsUnsupportedNotified = false;
+const OBSERVABILITY_METRICS_TIMEOUT_MS = 1500;
 
 export async function getObservabilityMetrics(): Promise<ObservabilityMetricsResponse | null> {
     if (observabilityMetricsUnsupported) {
@@ -646,14 +674,17 @@ export async function getObservabilityMetrics(): Promise<ObservabilityMetricsRes
     }
 
     try {
-        const result = await client.sendRequest('workspace/executeCommand', {
-            command: 'bsl.getObservabilityMetrics',
-            arguments: [{}]
-        });
+        const result = await withRequestTimeout(
+            client.sendRequest('workspace/executeCommand', {
+                command: 'bsl.getObservabilityMetrics',
+                arguments: [{}]
+            }),
+            OBSERVABILITY_METRICS_TIMEOUT_MS,
+            'Observability request'
+        );
         return result as ObservabilityMetricsResponse || null;
     } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (message.includes('Method not found')) {
+        if (isMethodNotFoundError(error)) {
             observabilityMetricsUnsupported = true;
             if (!observabilityMetricsUnsupportedNotified) {
                 observabilityMetricsUnsupportedNotified = true;
@@ -663,6 +694,12 @@ export async function getObservabilityMetrics(): Promise<ObservabilityMetricsRes
                     'BSL Analyzer: LSP server does not support observability metrics yet. Please обновите бинарник.'
                 );
             }
+            return null;
+        }
+        if (isTimeoutError(error)) {
+            logger.warn(
+                `[Observability] Request timed out after ${OBSERVABILITY_METRICS_TIMEOUT_MS}ms`
+            );
             return null;
         }
         logger.error('Failed to get observability metrics', error);

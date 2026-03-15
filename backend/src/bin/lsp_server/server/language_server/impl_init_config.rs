@@ -211,8 +211,6 @@ impl BslLanguageServer {
         })
     }
 
-    // TODO: Consider splitting initialized() into smaller functions in future refactoring
-    // This method is 278 lines but handles complex async progress reporting that's hard to split
     pub(super) async fn lsp_initialized(&self, _: InitializedParams) {
         self.client
             .log_message(MessageType::INFO, "BSL Language Server initialized!")
@@ -222,10 +220,9 @@ impl BslLanguageServer {
         self.sync_inlay_hints_capability_registration().await;
         self.sync_code_actions_capability_registration().await;
 
-        // MILESTONE 2.10: Reload types with config from initializationOptions
-        let config = self.config.read().await;
-        if let Some(ref cfg) = *config {
-            if let Some(ref platform_docs) = cfg.platform_docs_archive {
+        let config = self.config.read().await.clone();
+        if let Some(cfg) = config {
+            if let Some(platform_docs) = cfg.platform_docs_archive.clone() {
                 info!(
                     "Reloading types with platformDocsArchive: {}",
                     platform_docs
@@ -254,231 +251,229 @@ impl BslLanguageServer {
                     }
                 };
 
-                // Create channels for progress and result
-                let (progress_tx, mut progress_rx) = mpsc::unbounded_channel::<ProgressUpdate>();
-                let (result_tx, result_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
-
-                // Send bsl/serverStatus (loading: true)
-                info!("[LSP->Extension] Sending bsl/serverStatus: loading=true");
-                let _ = self
-                    .client
-                    .send_notification::<ServerStatus>(ServerStatusParams::loading(
-                        "Loading types...",
-                    ))
-                    .await;
-
-                // Send WorkDoneProgressBegin (единый progress bridge)
-                let title = if cfg.configuration_path.is_some() {
-                    "Loading platform and configuration types".to_string()
-                } else {
-                    "Loading platform types".to_string()
-                };
-
-                let mut reporter =
-                    LspWorkDoneReporter::create(self.client.clone(), "bsl-load-types").await;
-                reporter.set_throttle_interval(std::time::Duration::from_millis(150));
-                reporter
-                    .begin(title, Some("Initializing...".to_string()))
-                    .await;
-
-                log_progress_to_file("[LSP->Extension] SEND WorkDoneProgressBegin");
-
-                // Spawn task to handle progress
-                let client_clone = self.client.clone();
-                let start_time = std::time::Instant::now();
-                let self_clone = self.clone();
-
+                let server = self.clone();
                 tokio::spawn(async move {
-                    let mut reporter = reporter;
-
-                    // PHASE 1: Process progress updates
-                    while let Some(update) = progress_rx.recv().await {
-                        debug!(
-                            "[RECV] {:?} {:.1}% ({}/{}) - {}",
-                            update.phase,
-                            update.percentage,
-                            update.current,
-                            update.total,
-                            update.message.as_deref().unwrap_or("")
-                        );
-
-                        // Calculate ETA
-                        let elapsed = start_time.elapsed().as_secs_f32();
-                        let eta = if update.percentage > 5.0 {
-                            Some(((elapsed * 100.0 / update.percentage) - elapsed) as u32)
-                        } else {
-                            None
-                        };
-
-                        // Format message
-                        let message = match update.phase {
-                            IndexingPhase::ParsingFiles => {
-                                format!(
-                                    "Type {}/{}{}",
-                                    update.current,
-                                    update.total,
-                                    update
-                                        .message
-                                        .as_ref()
-                                        .map(|m| format!(" - {}", m))
-                                        .unwrap_or_default()
-                                )
-                            }
-                            IndexingPhase::ConfigurationParsing => {
-                                update.message.clone().unwrap_or_else(|| {
-                                    format!(
-                                        "{} | {}/{}",
-                                        update.phase.display_name(),
-                                        update.current,
-                                        update.total
-                                    )
-                                })
-                            }
-                            _ => update.message.clone().unwrap_or_else(|| {
-                                format!(
-                                    "{} | {}/{}",
-                                    update.phase.display_name(),
-                                    update.current,
-                                    update.total
-                                )
-                            }),
-                        };
-
-                        let message_with_eta = if let Some(eta_secs) = eta {
-                            format!("{} - ETA: {}s", message, eta_secs)
-                        } else {
-                            message
-                        };
-
-                        reporter
-                            .report(update.percentage as u32, Some(message_with_eta))
-                            .await;
-                    }
-
-                    // PHASE 2: Channel closed, wait for result
-                    match result_rx.await {
-                        Ok(Ok(())) => {
-                            // SUCCESS: Send WorkDoneProgressEnd
-                            reporter
-                                .end(Some("Platform types loaded successfully".to_string()))
-                                .await;
-
-                            let _ = client_clone
-                                .send_notification::<ServerStatus>(ServerStatusParams::ready())
-                                .await;
-
-                            // Reschedule diagnostics for open documents so they are recomputed
-                            // against the latest deps snapshot.
-                            info!("Rescheduling v2 diagnostics for open documents after deps update...");
-                            let open_versions: Vec<(bsl_analysis_v2::FileId, i32)> = {
-                                self_clone
-                                    .latest_received_file_versions_v2
-                                    .read()
-                                    .await
-                                    .iter()
-                                    .map(|(file_id, version)| (*file_id, *version))
-                                    .collect()
-                            };
-                            let keys = self_clone.file_key_to_file_id_v2.read().await.clone();
-
-                            for (file_id, version) in open_versions {
-                                let uri = keys.iter().find_map(|(key, mapped)| {
-                                    if *mapped != file_id {
-                                        return None;
-                                    }
-                                    match key {
-                                        super::super::V2FileKey::Path(path) => {
-                                            Url::from_file_path(path).ok()
-                                        }
-                                        super::super::V2FileKey::Url(raw) => Url::parse(raw).ok(),
-                                    }
-                                });
-
-                                if let Some(uri) = uri {
-                                    let diagnostics_generation =
-                                        self_clone.bump_diagnostics_generation_v2(file_id).await;
-                                    for profile in
-                                        bsl_runtime::application::diagnostics_profiles_for_trigger(
-                                            bsl_runtime::application::DiagnosticsTrigger::DidOpen,
-                                        )
-                                    {
-                                        self_clone
-                                            .schedule_diagnostics_profile_v2(
-                                                uri.clone(),
-                                                file_id,
-                                                version,
-                                                diagnostics_generation,
-                                                bsl_runtime::application::DiagnosticsTrigger::DidOpen,
-                                                *profile,
-                                                true,
-                                            )
-                                            .await;
-                                    }
-                                }
-                            }
-                        }
-                        Ok(Err(error_msg)) => {
-                            // ERROR: Send WorkDoneProgressEnd with error
-                            reporter.end(Some(format!("Error: {}", error_msg))).await;
-
-                            let _ = client_clone
-                                .send_notification::<ServerStatus>(ServerStatusParams::ready())
-                                .await;
-                        }
-                        Err(_) => {
-                            warn!("Result channel closed unexpectedly");
-                        }
-                    }
+                    server
+                        .run_startup_reload_task(cfg, platform_docs, startup_operation_id)
+                        .await;
                 });
-
-                // Load types
-                let inputs = StartupInputs::from_lsp_settings(
-                    Some(platform_docs),
-                    cfg.configuration_path.as_deref(),
-                    cfg.platform_version.as_deref(),
-                    cfg.cache_enabled,
-                    cfg.strict_fingerprint,
-                );
-
-                let result = startup_v2(self.coordinator.clone(), inputs, Some(progress_tx)).await;
-
-                match result {
-                    Ok(startup) => {
-                        info!("Platform types loaded successfully");
-                        self.apply_deps_bundle_v2("start_with_paths", startup.deps_bundle_v2)
-                            .await;
-                        self.sync_v2_globals().await;
-                        self.finish_full_index_operation_success(
-                            &startup_operation_id,
-                            "Startup index ready",
-                        )
-                        .await;
-                        let _ = result_tx.send(Ok(()));
-                        self.client
-                            .log_message(
-                                MessageType::INFO,
-                                format!("Platform documentation loaded from: {}", platform_docs),
-                            )
-                            .await;
-                    }
-                    Err(e) => {
-                        error!("Failed to load platform types: {}", e);
-                        self.finish_full_index_operation_failed(
-                            &startup_operation_id,
-                            format!("Startup index failed: {e}"),
-                        )
-                        .await;
-                        let _ = result_tx.send(Err(e.to_string()));
-                        self.client
-                            .log_message(
-                                MessageType::ERROR,
-                                format!("Failed to load platform documentation: {}", e),
-                            )
-                            .await;
-                    }
-                }
             } else {
                 info!("platformDocsArchive not provided - using basic types only");
+            }
+        }
+    }
+
+    async fn run_startup_reload_task(
+        &self,
+        cfg: crate::config::LspConfig,
+        platform_docs: String,
+        startup_operation_id: String,
+    ) {
+        let (progress_tx, mut progress_rx) = mpsc::unbounded_channel::<ProgressUpdate>();
+        let (result_tx, result_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+
+        info!("[LSP->Extension] Sending bsl/serverStatus: loading=true");
+        let _ = self
+            .client
+            .send_notification::<ServerStatus>(ServerStatusParams::loading("Loading types..."))
+            .await;
+
+        let title = if cfg.configuration_path.is_some() {
+            "Loading platform and configuration types".to_string()
+        } else {
+            "Loading platform types".to_string()
+        };
+
+        let mut reporter = LspWorkDoneReporter::create(self.client.clone(), "bsl-load-types").await;
+        reporter.set_throttle_interval(std::time::Duration::from_millis(150));
+        reporter
+            .begin(title, Some("Initializing...".to_string()))
+            .await;
+
+        log_progress_to_file("[LSP->Extension] SEND WorkDoneProgressBegin");
+
+        let client_clone = self.client.clone();
+        let start_time = std::time::Instant::now();
+        let self_clone = self.clone();
+
+        tokio::spawn(async move {
+            let mut reporter = reporter;
+
+            while let Some(update) = progress_rx.recv().await {
+                debug!(
+                    "[RECV] {:?} {:.1}% ({}/{}) - {}",
+                    update.phase,
+                    update.percentage,
+                    update.current,
+                    update.total,
+                    update.message.as_deref().unwrap_or("")
+                );
+
+                let elapsed = start_time.elapsed().as_secs_f32();
+                let eta = if update.percentage > 5.0 {
+                    Some(((elapsed * 100.0 / update.percentage) - elapsed) as u32)
+                } else {
+                    None
+                };
+
+                let message = match update.phase {
+                    IndexingPhase::ParsingFiles => {
+                        format!(
+                            "Type {}/{}{}",
+                            update.current,
+                            update.total,
+                            update
+                                .message
+                                .as_ref()
+                                .map(|m| format!(" - {}", m))
+                                .unwrap_or_default()
+                        )
+                    }
+                    IndexingPhase::ConfigurationParsing => {
+                        update.message.clone().unwrap_or_else(|| {
+                            format!(
+                                "{} | {}/{}",
+                                update.phase.display_name(),
+                                update.current,
+                                update.total
+                            )
+                        })
+                    }
+                    _ => update.message.clone().unwrap_or_else(|| {
+                        format!(
+                            "{} | {}/{}",
+                            update.phase.display_name(),
+                            update.current,
+                            update.total
+                        )
+                    }),
+                };
+
+                let message_with_eta = if let Some(eta_secs) = eta {
+                    format!("{} - ETA: {}s", message, eta_secs)
+                } else {
+                    message
+                };
+
+                reporter
+                    .report(update.percentage as u32, Some(message_with_eta))
+                    .await;
+            }
+
+            match result_rx.await {
+                Ok(Ok(())) => {
+                    reporter
+                        .end(Some("Platform types loaded successfully".to_string()))
+                        .await;
+
+                    let _ = client_clone
+                        .send_notification::<ServerStatus>(ServerStatusParams::ready())
+                        .await;
+
+                    info!("Rescheduling v2 diagnostics for open documents after deps update...");
+                    let open_versions: Vec<(bsl_analysis_v2::FileId, i32)> = {
+                        self_clone
+                            .latest_received_file_versions_v2
+                            .read()
+                            .await
+                            .iter()
+                            .map(|(file_id, version)| (*file_id, *version))
+                            .collect()
+                    };
+                    let keys = self_clone.file_key_to_file_id_v2.read().await.clone();
+
+                    for (file_id, version) in open_versions {
+                        let uri = keys.iter().find_map(|(key, mapped)| {
+                            if *mapped != file_id {
+                                return None;
+                            }
+                            match key {
+                                super::super::V2FileKey::Path(path) => {
+                                    Url::from_file_path(path).ok()
+                                }
+                                super::super::V2FileKey::Url(raw) => Url::parse(raw).ok(),
+                            }
+                        });
+
+                        if let Some(uri) = uri {
+                            let diagnostics_generation =
+                                self_clone.bump_diagnostics_generation_v2(file_id).await;
+                            for profile in
+                                bsl_runtime::application::diagnostics_profiles_for_trigger(
+                                    bsl_runtime::application::DiagnosticsTrigger::DidOpen,
+                                )
+                            {
+                                self_clone
+                                    .schedule_diagnostics_profile_v2(
+                                        uri.clone(),
+                                        file_id,
+                                        version,
+                                        diagnostics_generation,
+                                        bsl_runtime::application::DiagnosticsTrigger::DidOpen,
+                                        *profile,
+                                        true,
+                                    )
+                                    .await;
+                            }
+                        }
+                    }
+                }
+                Ok(Err(error_msg)) => {
+                    reporter.end(Some(format!("Error: {}", error_msg))).await;
+
+                    let _ = client_clone
+                        .send_notification::<ServerStatus>(ServerStatusParams::ready())
+                        .await;
+                }
+                Err(_) => {
+                    warn!("Result channel closed unexpectedly");
+                }
+            }
+        });
+
+        let inputs = StartupInputs::from_lsp_settings(
+            Some(&platform_docs),
+            cfg.configuration_path.as_deref(),
+            cfg.platform_version.as_deref(),
+            cfg.cache_enabled,
+            cfg.strict_fingerprint,
+        );
+
+        let result = startup_v2(self.coordinator.clone(), inputs, Some(progress_tx)).await;
+
+        match result {
+            Ok(startup) => {
+                info!("Platform types loaded successfully");
+                self.apply_deps_bundle_v2("start_with_paths", startup.deps_bundle_v2)
+                    .await;
+                self.sync_v2_globals().await;
+                self.finish_full_index_operation_success(
+                    &startup_operation_id,
+                    "Startup index ready",
+                )
+                .await;
+                let _ = result_tx.send(Ok(()));
+                self.client
+                    .log_message(
+                        MessageType::INFO,
+                        format!("Platform documentation loaded from: {}", platform_docs),
+                    )
+                    .await;
+            }
+            Err(e) => {
+                error!("Failed to load platform types: {}", e);
+                self.finish_full_index_operation_failed(
+                    &startup_operation_id,
+                    format!("Startup index failed: {e}"),
+                )
+                .await;
+                let _ = result_tx.send(Err(e.to_string()));
+                self.client
+                    .log_message(
+                        MessageType::ERROR,
+                        format!("Failed to load platform documentation: {}", e),
+                    )
+                    .await;
             }
         }
     }

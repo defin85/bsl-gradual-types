@@ -2,17 +2,20 @@
 //!
 //! Contains implementation of helper methods for command handling.
 
+use bsl_backend::system::fs_utils::read_bsl_file;
+use bsl_line_index::LineIndex;
 use tower_lsp::jsonrpc::Result as JsonRpcResult;
 use tower_lsp::lsp_types::{MessageType, Url};
 use tracing::{info, warn};
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::commands::{
     handle_incremental_update, handle_parse_configuration, ParseConfigurationParams,
 };
-use crate::handlers::{find_containing_function_in_dto, CurrentContextResponse};
+use crate::handlers::{find_containing_function_in_parse_result, CurrentContextResponse};
 use crate::types::{
     AutoReindexCommandParams, AutoReindexStateResponse, BuildIndexParams, BuildIndexResponse,
     CompletionTimelineRequest, CompletionTimelineResponse, GetCurrentContextParams,
@@ -172,73 +175,77 @@ impl BslLanguageServer {
             tower_lsp::jsonrpc::Error::invalid_params(format!("Invalid URI: {}", e))
         })?;
 
-        self.sync_v2_globals().await;
         let file_id = self.get_or_create_file_id_v2(&uri).await;
-        let include_flow_sensitive = {
-            let settings = self.settings.read().await;
-            settings.enable_flow_sensitive
+        let path = match uri.to_file_path() {
+            Ok(path) => path.to_string_lossy().to_string(),
+            Err(_) => uri.to_string(),
         };
-        let prepared = self
-            .prepare_lsp_stateful_operation_v2(
-                &uri,
-                file_id,
-                bsl_runtime::application::SemanticOperation::TypeAtPosition,
-                include_flow_sensitive,
-            )
-            .await;
-        let (context, prepared, _expected_version) = match prepared {
-            Ok(values) => values,
-            Err(outcome) => {
-                warn!(
-                    uri = %uri,
-                    file_id = file_id.0,
-                    outcome = outcome.as_str(),
-                    "getCurrentContext: stateful operation not ready"
-                );
-                return Ok(CurrentContextResponse::empty());
-            }
-        };
-
-        let analysis = prepared.snapshot.analysis;
-        let ir_query = bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
-            &context,
-            bsl_runtime::application::ObservabilityStage::IrQuery,
-            &analysis,
-            Some(self.coordinator.as_ref()),
-            |analysis| analysis.ir(file_id),
-        );
-        let ir_program = match ir_query {
-            Ok(Some(ir_program)) => ir_program,
-            Ok(None) => return Ok(CurrentContextResponse::empty()),
-            Err(cancelled) => {
-                warn!(
-                    uri = %uri,
-                    file_id = file_id.0,
-                    error = ?cancelled,
-                    "getCurrentContext: IR query cancelled"
-                );
-                return Ok(CurrentContextResponse::empty());
-            }
-        };
-
-        let (Some(file_text), Some(line_index)) = (
-            analysis.file_text(file_id).ok().flatten(),
-            analysis.line_index(file_id).ok().flatten(),
-        ) else {
+        let file_text = self
+            .latest_document_shadow_state_v2
+            .read()
+            .await
+            .get(&file_id)
+            .map(|state| state.text.clone())
+            .or_else(|| {
+                uri.to_file_path()
+                    .ok()
+                    .and_then(|path| read_bsl_file(&path).ok().map(Arc::from))
+            });
+        let Some(file_text) = file_text else {
+            warn!(
+                uri = %uri,
+                file_id = file_id.0,
+                "getCurrentContext: document text is unavailable"
+            );
             return Ok(CurrentContextResponse::empty());
         };
 
-        let semantic_tree_dto =
-            ir_program.to_dto(true, true, file_text.as_ref(), line_index.as_ref());
-        match find_containing_function_in_dto(&semantic_tree_dto, params.line, params.character) {
-            Some((name, kind, params_list, return_type)) => Ok(CurrentContextResponse {
-                function_name: Some(name),
-                function_kind: kind,
-                params: Some(params_list),
-                return_type,
-            }),
-            None => Ok(CurrentContextResponse::empty()),
-        }
+        let parsed = self
+            .coordinator
+            .parser_coordinator()
+            .and_then(|parser| {
+                parser
+                    .parse_incremental_with_report(
+                        PathBuf::from(path.as_str()),
+                        file_text.to_string(),
+                        Vec::new(),
+                    )
+                    .ok()
+            })
+            .map(|report| (report.parse_result, report.line_index))
+            .or_else(|| {
+                bsl_syntax::parse(file_text.as_ref(), &bsl_syntax::ParseOptions::default())
+                    .ok()
+                    .map(|parse_result| {
+                        (parse_result, Arc::new(LineIndex::new(file_text.as_ref())))
+                    })
+            });
+        let Some((parse_result, line_index)) = parsed else {
+            warn!(
+                uri = %uri,
+                file_id = file_id.0,
+                "getCurrentContext: parse snapshot is unavailable"
+            );
+            return Ok(CurrentContextResponse::empty());
+        };
+
+        Ok(
+            match find_containing_function_in_parse_result(
+                &parse_result,
+                file_text.as_ref(),
+                line_index.as_ref(),
+                params.line,
+                params.character,
+            ) {
+                Some((name, kind, params_list, return_type)) => CurrentContextResponse {
+                    function_name: Some(name),
+                    function_kind: kind,
+                    params: Some(params_list),
+                    return_type,
+                },
+                None => CurrentContextResponse::empty(),
+            },
+        )
     }
 
     /// Custom request: bsl/buildIndex

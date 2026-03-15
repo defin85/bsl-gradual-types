@@ -2,9 +2,8 @@
 //!
 //! MILESTONE 2.20.3: Handles bsl.getCurrentContext command.
 
-use bsl_shared::api::semantic_dtos::{
-    SemanticNodeDto, SemanticTreeDto, SourceLocationDto, SourceRangeDto,
-};
+use bsl_line_index::LineIndex;
+use bsl_syntax::ast::{ParseResult, Statement};
 
 /// Response for getCurrentContext command
 #[derive(Debug, Clone, serde::Serialize)]
@@ -31,93 +30,173 @@ impl CurrentContextResponse {
     }
 }
 
-/// Find function/procedure containing the specified position (MILESTONE 2.20.3)
-pub fn find_containing_function_in_dto(
-    tree_dto: &SemanticTreeDto,
+pub fn find_containing_function_in_parse_result(
+    parse_result: &ParseResult,
+    source: &str,
+    line_index: &LineIndex,
     line: u32,
     character: u32,
 ) -> Option<(String, String, Vec<String>, Option<String>)> {
-    for node in &tree_dto.root_nodes {
-        if let Some(result) = find_in_node(node, line, character) {
+    find_in_statements(
+        &parse_result.program.statements,
+        source,
+        line_index,
+        line,
+        character,
+        None,
+    )
+}
+
+type RoutineContext = (String, String, Vec<String>, Option<String>);
+
+fn find_in_statements(
+    statements: &[Statement],
+    source: &str,
+    line_index: &LineIndex,
+    line: u32,
+    character: u32,
+    current_routine: Option<&RoutineContext>,
+) -> Option<RoutineContext> {
+    for statement in statements {
+        if let Some(result) = find_in_statement(
+            statement,
+            source,
+            line_index,
+            line,
+            character,
+            current_routine,
+        ) {
             return Some(result);
         }
     }
     None
 }
 
-/// Recursive search in SemanticNodeDto
-fn find_in_node(
-    node: &SemanticNodeDto,
+fn find_in_statement(
+    statement: &Statement,
+    source: &str,
+    line_index: &LineIndex,
     line: u32,
     character: u32,
-) -> Option<(String, String, Vec<String>, Option<String>)> {
-    // Check if position is inside node's range (if exists)
-    if let Some(ref range) = node.range {
-        if !range_contains(range, line, character) {
-            return None;
-        }
-    } else if !location_matches(&node.location, line, character) {
+    current_routine: Option<&RoutineContext>,
+) -> Option<RoutineContext> {
+    if !statement_contains_position(statement, source, line_index, line, character) {
         return None;
     }
 
-    // Check node type
-    match node.kind.as_str() {
-        "FunctionDeclaration" => {
-            let name = node
-                .name
-                .clone()
-                .unwrap_or_else(|| "<anonymous>".to_string());
-            let params = extract_params_from_node(node);
-            let return_type = extract_return_type_from_node(node);
-
-            return Some((name, "function".to_string(), params, return_type));
+    match statement {
+        Statement::FunctionDecl {
+            name, params, body, ..
+        } => {
+            let current = (name.clone(), "function".to_string(), params.clone(), None);
+            find_in_statements(body, source, line_index, line, character, Some(&current))
+                .or(Some(current))
         }
-        "ProcedureDeclaration" => {
-            let name = node
-                .name
-                .clone()
-                .unwrap_or_else(|| "<anonymous>".to_string());
-            let params = extract_params_from_node(node);
-
-            return Some((name, "procedure".to_string(), params, None));
+        Statement::ProcedureDecl {
+            name, params, body, ..
+        } => {
+            let current = (name.clone(), "procedure".to_string(), params.clone(), None);
+            find_in_statements(body, source, line_index, line, character, Some(&current))
+                .or(Some(current))
         }
-        _ => {
-            // Recursively search in children
-            for child in &node.children {
-                if let Some(result) = find_in_node(child, line, character) {
-                    return Some(result);
-                }
-            }
+        Statement::If {
+            then_body,
+            else_body,
+            ..
+        } => find_in_statements(
+            then_body,
+            source,
+            line_index,
+            line,
+            character,
+            current_routine,
+        )
+        .or_else(|| {
+            else_body.as_ref().and_then(|else_body| {
+                find_in_statements(
+                    else_body,
+                    source,
+                    line_index,
+                    line,
+                    character,
+                    current_routine,
+                )
+            })
+        })
+        .or_else(|| current_routine.cloned()),
+        Statement::For { body, .. }
+        | Statement::ForEach { body, .. }
+        | Statement::While { body, .. } => {
+            find_in_statements(body, source, line_index, line, character, current_routine)
+                .or_else(|| current_routine.cloned())
         }
+        Statement::Try {
+            try_body,
+            except_body,
+            ..
+        } => find_in_statements(
+            try_body,
+            source,
+            line_index,
+            line,
+            character,
+            current_routine,
+        )
+        .or_else(|| {
+            find_in_statements(
+                except_body,
+                source,
+                line_index,
+                line,
+                character,
+                current_routine,
+            )
+        })
+        .or_else(|| current_routine.cloned()),
+        _ => current_routine.cloned(),
     }
-
-    None
 }
 
-/// Check if range contains position
-fn range_contains(range: &SourceRangeDto, line: u32, character: u32) -> bool {
-    let start = &range.start;
-    let end = &range.end;
+fn statement_contains_position(
+    statement: &Statement,
+    source: &str,
+    line_index: &LineIndex,
+    line: u32,
+    character: u32,
+) -> bool {
+    let span = statement_span(statement);
+    let (start_line, start_character) =
+        line_index.byte_offset_to_utf16_position(source, span.start as usize);
+    let (end_line, end_character) =
+        line_index.byte_offset_to_utf16_position(source, span.end as usize);
 
-    line >= start.line
-        && line <= end.line
-        && (line > start.line || character >= start.column)
-        && (line < end.line || character <= end.column)
+    line >= start_line
+        && line <= end_line
+        && (line > start_line || character >= start_character)
+        && (line < end_line || character <= end_character)
 }
 
-/// Check if location matches position
-fn location_matches(location: &SourceLocationDto, line: u32, character: u32) -> bool {
-    location.line == line && location.column == character
-}
-
-/// Extract parameters from node metadata (if exists)
-fn extract_params_from_node(_node: &SemanticNodeDto) -> Vec<String> {
-    // Stub for now - can be extended later through metadata
-    vec![]
-}
-
-/// Extract return type from node metadata (if exists)
-fn extract_return_type_from_node(_node: &SemanticNodeDto) -> Option<String> {
-    // Stub for now - can be extended later through metadata
-    None
+fn statement_span(statement: &Statement) -> bsl_syntax::ast::Span {
+    match statement {
+        Statement::Assignment { span, .. }
+        | Statement::VarDeclaration { span, .. }
+        | Statement::FunctionDecl { span, .. }
+        | Statement::ProcedureDecl { span, .. }
+        | Statement::If { span, .. }
+        | Statement::For { span, .. }
+        | Statement::ForEach { span, .. }
+        | Statement::While { span, .. }
+        | Statement::Return { span, .. }
+        | Statement::Try { span, .. }
+        | Statement::Call { span, .. }
+        | Statement::Break { span, .. }
+        | Statement::Continue { span, .. }
+        | Statement::Goto { span, .. }
+        | Statement::Label { span, .. }
+        | Statement::Execute { span, .. }
+        | Statement::RaiseError { span, .. }
+        | Statement::AddHandler { span, .. }
+        | Statement::RemoveHandler { span, .. }
+        | Statement::Await { span, .. } => *span,
+    }
 }

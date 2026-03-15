@@ -306,6 +306,152 @@ async fn shutdown_lsp_service(
     assert!(exit_response.is_none(), "exit is a notification");
 }
 
+#[tokio::test]
+async fn p34_initialized_with_startup_config_returns_without_waiting_for_startup() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (mut service, mut socket) =
+        LspService::build(move |client| BslLanguageServer::new(client, coordinator.clone()))
+            .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    let syntax_helper_path = syntax_helper_path_for_tests();
+    let initialize_params = InitializeParams {
+        capabilities: ClientCapabilities {
+            window: Some(tower_lsp::lsp_types::WindowClientCapabilities {
+                work_done_progress: Some(true),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        initialization_options: Some(serde_json::json!({
+            "platformDocsArchive": syntax_helper_path.to_string_lossy(),
+            "platformVersion": "8.3.25",
+            "cacheEnabled": true,
+            "enableTypeHints": false,
+            "enableCodeActions": false
+        })),
+        ..Default::default()
+    };
+
+    let initialize = Request::build("initialize")
+        .id(1)
+        .params(serde_json::to_value(initialize_params).expect("InitializeParams"))
+        .finish();
+    let initialize_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(initialize)
+        .await
+        .expect("initialize request");
+    assert!(
+        initialize_response.is_some(),
+        "initialize should return a response"
+    );
+
+    let initialized = Request::build("initialized")
+        .params(serde_json::to_value(InitializedParams {}).expect("InitializedParams"))
+        .finish();
+    let initialized_response = tokio::time::timeout(std::time::Duration::from_millis(200), async {
+        service
+            .ready()
+            .await
+            .unwrap()
+            .call(initialized)
+            .await
+            .expect("initialized notification")
+    })
+    .await
+    .expect("initialized must return without waiting for startup");
+    assert!(
+        initialized_response.is_none(),
+        "initialized is a notification"
+    );
+
+    let stats_request = Request::build("workspace/executeCommand")
+        .id(2)
+        .params(serde_json::json!({
+            "command": "bsl.getTypeRepositoryStats",
+            "arguments": [{}]
+        }))
+        .finish();
+    let stats_response = tokio::time::timeout(std::time::Duration::from_millis(200), async {
+        service
+            .ready()
+            .await
+            .unwrap()
+            .call(stats_request)
+            .await
+            .expect("bsl.getTypeRepositoryStats request")
+    })
+    .await
+    .expect("interactive command must stay responsive during startup");
+    assert!(
+        stats_response.is_some(),
+        "executeCommand should return a response"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p35_large_conf_big_did_open_returns_promptly() {
+    let conf_big_module = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("examples")
+        .join("conf_big")
+        .join("Documents")
+        .join("РеализацияТоваровУслуг")
+        .join("Forms")
+        .join("ФормаДокументаОбщая")
+        .join("Ext")
+        .join("Form")
+        .join("Module.bsl");
+    if !conf_big_module.exists() {
+        eprintln!(
+            "skipping p35_large_conf_big_did_open_returns_promptly: missing fixture {}",
+            conf_big_module.display()
+        );
+        return;
+    }
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (mut service, mut socket) =
+        LspService::build(move |client| BslLanguageServer::new(client, coordinator.clone()))
+            .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let uri = Url::from_file_path(&conf_big_module).expect("conf_big module uri");
+    let text = std::fs::read_to_string(&conf_big_module).expect("read conf_big module");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri,
+            language_id: "bsl".to_string(),
+            version: 1,
+            text,
+        },
+    };
+    let did_open_req = Request::build("textDocument/didOpen")
+        .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+        .finish();
+    let did_open_response = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_open_req)
+            .await
+            .expect("didOpen notification")
+    })
+    .await
+    .expect("didOpen on large conf_big module must return promptly");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    drain_task.abort();
+}
+
 async fn wait_lsp_publish_diagnostics(
     receiver: &mut UnboundedReceiver<PublishDiagnosticsParams>,
     uri: &Url,
@@ -11453,6 +11599,84 @@ async fn force_current_revision_without_exact_type_index(
         !exact_ready,
         "test setup must create current-revision semantic-index miss"
     );
+}
+
+#[tokio::test]
+async fn p33_get_current_context_uses_parse_snapshot_without_warming_exact_type_index() {
+    let fixture = concat!(
+        "Процедура Тест(ПервыйПараметр, ВторойПараметр)\n",
+        "    Если Истина Тогда\n",
+        "        Сообщить(ПервыйПараметр);\n",
+        "    КонецЕсли;\n",
+        "КонецПроцедуры\n",
+    );
+
+    let (mut service, drain_task, server, uri, file_id) =
+        open_lsp_fixture_with_snapshot(fixture, "file:///current_context_fixture.bsl").await;
+    force_current_revision_without_exact_type_index(&server, file_id, &uri, fixture, 2).await;
+
+    let execute = Request::build("workspace/executeCommand")
+        .id(13301)
+        .params(serde_json::json!({
+            "command": "bsl.getCurrentContext",
+            "arguments": [{
+                "uri": uri.to_string(),
+                "line": 2,
+                "character": 18,
+            }],
+        }))
+        .finish();
+    let execute_response = tokio::time::timeout(Duration::from_secs(2), async {
+        service
+            .ready()
+            .await
+            .unwrap()
+            .call(execute)
+            .await
+            .expect("workspace/executeCommand request")
+    })
+    .await
+    .expect("bsl.getCurrentContext timeout")
+    .expect("workspace/executeCommand response");
+
+    let value = serde_json::to_value(&execute_response).expect("serialize response");
+    let result = value.get("result").cloned().expect("result field");
+    assert_eq!(
+        result.get("functionName").and_then(|value| value.as_str()),
+        Some("Тест"),
+        "current context must resolve enclosing procedure name from parse snapshot"
+    );
+    assert_eq!(
+        result.get("functionKind").and_then(|value| value.as_str()),
+        Some("procedure"),
+        "current context must resolve enclosing routine kind from parse snapshot"
+    );
+    let params = result
+        .get("params")
+        .and_then(|value| value.as_array())
+        .expect("current context params array");
+    let params = params
+        .iter()
+        .filter_map(|value| value.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        params,
+        vec!["ПервыйПараметр", "ВторойПараметр"],
+        "current context must surface routine parameters without exact type index"
+    );
+
+    let exact_ready = server
+        .analysis_v2
+        .snapshot()
+        .await
+        .current_type_index_serve_only_ready(file_id)
+        .expect("current_type_index_serve_only_ready after getCurrentContext");
+    assert!(
+        !exact_ready,
+        "getCurrentContext must not eagerly warm exact type index on the request path"
+    );
+
+    drain_task.abort();
 }
 
 fn message_has_unknown_member(message: &str, member_name: &str) -> bool {

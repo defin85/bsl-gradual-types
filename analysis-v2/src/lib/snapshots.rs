@@ -641,6 +641,23 @@ fn build_ir_from_parsed(
     file_path: &str,
     deps_data: Arc<SemanticDeps>,
 ) -> Arc<SemanticProgram> {
+    build_ir_from_parsed_profiled(parsed, source, file_path, deps_data).program
+}
+
+fn build_ir_from_parsed_profiled(
+    parsed: Arc<bsl_syntax::ast::ParseResult>,
+    source: &str,
+    file_path: &str,
+    deps_data: Arc<SemanticDeps>,
+) -> IrProfiledResult {
+    let started = Instant::now();
+    let convert_started = Instant::now();
+    tracing::debug!(
+        target: "bsl_backend::analysis_v2",
+        file_path,
+        source_len = source.len(),
+        "ir_build: ast_to_ir start"
+    );
     match AstToIrConverter::convert_with_resolver(
         parsed.program.clone(),
         source.to_string(),
@@ -650,6 +667,19 @@ fn build_ir_from_parsed(
         deps_data.resolver.clone(),
     ) {
         Ok(mut program) => {
+            let ast_to_ir_convert_ms = convert_started.elapsed().as_millis();
+            let materialize_started = Instant::now();
+            tracing::debug!(
+                target: "bsl_backend::analysis_v2",
+                file_path,
+                ast_to_ir_convert_ms,
+                "ir_build: ast_to_ir finished"
+            );
+            tracing::debug!(
+                target: "bsl_backend::analysis_v2",
+                file_path,
+                "ir_build: semantic_facts start"
+            );
             type_inference_v2::materialize_semantic_facts_with_path_profiled(
                 &mut program,
                 &parsed.program,
@@ -657,13 +687,37 @@ fn build_ir_from_parsed(
                 file_path,
                 deps_data,
             );
-            Arc::new(program)
+            let semantic_facts_materialize_ms = materialize_started.elapsed().as_millis();
+            let total_ms = started.elapsed().as_millis();
+            tracing::debug!(
+                target: "bsl_backend::analysis_v2",
+                file_path,
+                ast_to_ir_convert_ms,
+                semantic_facts_materialize_ms,
+                total_ms,
+                "ir_build: semantic_facts finished"
+            );
+            IrProfiledResult {
+                program: Arc::new(program),
+                profile: IrBuildProfile {
+                    ast_to_ir_convert_ms,
+                    semantic_facts_materialize_ms,
+                    total_ms,
+                },
+            }
         }
         Err(_err) => {
             let mut program = SemanticProgram::new();
             program.source_info.path = file_path.to_string();
             program.source_info.content_hash = hash_content(source);
-            Arc::new(program)
+            IrProfiledResult {
+                program: Arc::new(program),
+                profile: IrBuildProfile {
+                    ast_to_ir_convert_ms: convert_started.elapsed().as_millis(),
+                    semantic_facts_materialize_ms: 0,
+                    total_ms: started.elapsed().as_millis(),
+                },
+            }
         }
     }
 }

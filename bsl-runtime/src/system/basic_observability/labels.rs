@@ -80,6 +80,15 @@ pub(super) const RUNTIME_STAGE_KIND_REGISTRY: &[(&str, &str)] = &[
     ),
     ("type_index_precompute", "type_index_precompute"),
     ("type_index_precompute_build", "type_index_precompute_build"),
+    ("type_index_precompute_ir", "type_index_precompute_ir"),
+    (
+        "type_index_precompute_ast_to_ir",
+        "type_index_precompute_ast_to_ir",
+    ),
+    (
+        "type_index_precompute_semantic_facts",
+        "type_index_precompute_semantic_facts",
+    ),
 ];
 
 pub(super) const QUERY_KIND_REGISTRY: &[(&str, &str)] = &[
@@ -344,6 +353,27 @@ pub(super) const LEGACY_RUNTIME_EXEC_METRICS_REGISTRY: &[(&str, (&str, &str))] =
         (
             "intellisense_v2_runtime_type_index_precompute_build_exec_total",
             "intellisense_v2_runtime_type_index_precompute_build_exec_ms",
+        ),
+    ),
+    (
+        "type_index_precompute_ir",
+        (
+            "intellisense_v2_runtime_type_index_precompute_ir_exec_total",
+            "intellisense_v2_runtime_type_index_precompute_ir_exec_ms",
+        ),
+    ),
+    (
+        "type_index_precompute_ast_to_ir",
+        (
+            "intellisense_v2_runtime_type_index_precompute_ast_to_ir_exec_total",
+            "intellisense_v2_runtime_type_index_precompute_ast_to_ir_exec_ms",
+        ),
+    ),
+    (
+        "type_index_precompute_semantic_facts",
+        (
+            "intellisense_v2_runtime_type_index_precompute_semantic_facts_exec_total",
+            "intellisense_v2_runtime_type_index_precompute_semantic_facts_exec_ms",
         ),
     ),
 ];

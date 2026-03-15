@@ -1516,6 +1516,43 @@ fn current_type_index_serve_only_ready_requires_exact_artifact() {
 }
 
 #[test]
+fn precompute_type_index_records_ir_build_breakdown_for_parse_snapshot_path() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(213);
+    let text: Arc<str> = Arc::from(
+        "Procedure Test()\n\
+             arr = Новый Массив;\n\
+             result = arr;\n\
+             EndProcedure",
+    );
+
+    host.apply_change(Change::SetFileWithSnapshot {
+        file_id,
+        text: text.clone(),
+        version: 1,
+        path: Arc::from("precompute-ir-breakdown.bsl"),
+        parse_snapshot: parse_snapshot_for_test(file_id, 1, text.as_ref(), Vec::new(), true, None),
+    });
+
+    let analysis = host.snapshot();
+    let precompute = analysis
+        .precompute_type_index_for_file(file_id, Some(1), 0)
+        .expect("precompute");
+    assert_eq!(
+        precompute.reason_code,
+        TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeExactStored
+    );
+    assert!(
+        precompute.stats.ir_ms >= precompute.stats.ast_to_ir_convert_ms,
+        "IR total must include AST->IR conversion time"
+    );
+    assert!(
+        precompute.stats.ir_ms >= precompute.stats.semantic_facts_materialize_ms,
+        "IR total must include semantic-facts materialization time"
+    );
+}
+
+#[test]
 fn serve_only_matches_legacy_for_universal_collections_in_complete_snapshot() {
     let mut host = AnalysisHostV2::default();
     let file_id = FileId(208);

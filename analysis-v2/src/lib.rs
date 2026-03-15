@@ -236,6 +236,19 @@ pub struct SemanticDiagnosticsProfiledResult {
     pub profile: SemanticDiagnosticsProfile,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct IrBuildProfile {
+    pub ast_to_ir_convert_ms: u128,
+    pub semantic_facts_materialize_ms: u128,
+    pub total_ms: u128,
+}
+
+#[derive(Debug, Clone)]
+pub struct IrProfiledResult {
+    pub program: Arc<SemanticProgram>,
+    pub profile: IrBuildProfile,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypeIndexServeReasonCode {
     TypeIndexExactHit,
@@ -306,6 +319,9 @@ pub struct TypeIndexCacheChangeEffects {
 pub struct TypeIndexPrecomputeStats {
     pub queue_wait_ms: u128,
     pub exec_ms: u128,
+    pub ir_ms: u128,
+    pub ast_to_ir_convert_ms: u128,
+    pub semantic_facts_materialize_ms: u128,
     pub build_ms: u128,
     pub evicted_per_file_window_total: u64,
     pub evicted_global_guard_total: u64,

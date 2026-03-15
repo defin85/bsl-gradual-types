@@ -61,6 +61,12 @@ const UNIFIED_STAGE_COUNTER_KEYS: &[&str] = &[
     "intellisense_v2_runtime_apply_change_set_file_with_snapshot_exec_total",
     "intellisense_v2_runtime_apply_change_remove_file_exec_total",
     "intellisense_v2_runtime_apply_change_set_settings_snapshot_exec_total",
+    "intellisense_v2_runtime_type_index_precompute_queue_wait_total",
+    "intellisense_v2_runtime_type_index_precompute_exec_total",
+    "intellisense_v2_runtime_type_index_precompute_build_exec_total",
+    "intellisense_v2_runtime_type_index_precompute_ir_exec_total",
+    "intellisense_v2_runtime_type_index_precompute_ast_to_ir_exec_total",
+    "intellisense_v2_runtime_type_index_precompute_semantic_facts_exec_total",
     "intellisense_v2_parse_snapshot_total_origin_lsp_mode_incremental",
     "intellisense_v2_parse_snapshot_total_origin_lsp_mode_reused",
     "intellisense_v2_parse_snapshot_total_origin_lsp_mode_full",
@@ -125,6 +131,12 @@ const UNIFIED_STAGE_HISTOGRAM_KEYS: &[&str] = &[
     "intellisense_v2_runtime_apply_change_set_file_with_snapshot_exec_ms",
     "intellisense_v2_runtime_apply_change_remove_file_exec_ms",
     "intellisense_v2_runtime_apply_change_set_settings_snapshot_exec_ms",
+    "intellisense_v2_runtime_type_index_precompute_queue_wait_ms",
+    "intellisense_v2_runtime_type_index_precompute_exec_ms",
+    "intellisense_v2_runtime_type_index_precompute_build_exec_ms",
+    "intellisense_v2_runtime_type_index_precompute_ir_exec_ms",
+    "intellisense_v2_runtime_type_index_precompute_ast_to_ir_exec_ms",
+    "intellisense_v2_runtime_type_index_precompute_semantic_facts_exec_ms",
     "intellisense_v2_runtime_apply_changes_batch_size",
     "intellisense_v2_runtime_apply_changes_changed_files_count",
     "intellisense_v2_completion_owner_hint_index_fetch_will_check_cancellation_per_fetch",
@@ -8958,6 +8970,76 @@ async fn p22_get_observability_metrics_exposes_semantic_diagnostics_breakdown() 
 }
 
 #[tokio::test]
+async fn p22_get_observability_metrics_exposes_type_index_precompute_breakdown() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    for (stage, millis) in [
+        ("type_index_precompute", 4800_u64),
+        ("type_index_precompute_build", 14_u64),
+        ("type_index_precompute_ir", 4700_u64),
+        ("type_index_precompute_ast_to_ir", 1900_u64),
+        ("type_index_precompute_semantic_facts", 2600_u64),
+    ] {
+        coordinator.record_intellisense_v2_runtime_exec_latency_with_origin(
+            bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+            stage,
+            Duration::from_millis(millis),
+        );
+    }
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        move |client| BslLanguageServer::new(client, coordinator.clone())
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let execute = Request::build("workspace/executeCommand")
+        .id(2205)
+        .params(serde_json::json!({
+            "command": "bsl.getObservabilityMetrics",
+            "arguments": [],
+        }))
+        .finish();
+    let execute_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(execute)
+        .await
+        .expect("workspace/executeCommand request")
+        .expect("workspace/executeCommand response");
+    let value = serde_json::to_value(&execute_response).expect("serialize response");
+    let result = value.get("result").cloned().expect("result field");
+    let metrics = result.get("metrics").expect("metrics field");
+    let histograms = metrics
+        .get("histograms")
+        .and_then(|value| value.as_object())
+        .expect("metrics.histograms object");
+
+    for key in [
+        "intellisense_v2_runtime_type_index_precompute_exec_ms",
+        "intellisense_v2_runtime_type_index_precompute_build_exec_ms",
+        "intellisense_v2_runtime_type_index_precompute_ir_exec_ms",
+        "intellisense_v2_runtime_type_index_precompute_ast_to_ir_exec_ms",
+        "intellisense_v2_runtime_type_index_precompute_semantic_facts_exec_ms",
+    ] {
+        let count = histograms
+            .get(key)
+            .and_then(|value| value.get("count"))
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0);
+        assert!(
+            count > 0,
+            "metrics endpoint must expose type-index precompute breakdown histogram {key}"
+        );
+    }
+
+    drain_task.abort();
+}
+
+#[tokio::test]
 async fn p22_get_completion_timeline_exposes_versioned_contract() {
     let coordinator = Arc::new(SystemCoordinator::new());
 
@@ -12280,6 +12362,30 @@ fn dominant_stage_from_metrics(metrics: &serde_json::Value) -> serde_json::Value
             "runtime_apply_change_set_settings_snapshot_exec",
             "intellisense_v2_runtime_apply_change_set_settings_snapshot_exec_ms",
         ),
+        (
+            "runtime_type_index_precompute_queue_wait",
+            "intellisense_v2_runtime_type_index_precompute_queue_wait_ms",
+        ),
+        (
+            "runtime_type_index_precompute_exec",
+            "intellisense_v2_runtime_type_index_precompute_exec_ms",
+        ),
+        (
+            "runtime_type_index_precompute_build_exec",
+            "intellisense_v2_runtime_type_index_precompute_build_exec_ms",
+        ),
+        (
+            "runtime_type_index_precompute_ir_exec",
+            "intellisense_v2_runtime_type_index_precompute_ir_exec_ms",
+        ),
+        (
+            "runtime_type_index_precompute_ast_to_ir_exec",
+            "intellisense_v2_runtime_type_index_precompute_ast_to_ir_exec_ms",
+        ),
+        (
+            "runtime_type_index_precompute_semantic_facts_exec",
+            "intellisense_v2_runtime_type_index_precompute_semantic_facts_exec_ms",
+        ),
         ("completion_stage_turn_wait", "completion_stage_turn_wait_ms"),
         (
             "completion_stage_prepare_stateful",
@@ -12849,6 +12955,36 @@ async fn run_scale_aware_profile(
             "intellisense_v2_runtime_apply_change_set_settings_snapshot_exec_ms": histogram_metric_value_or_zero(
                 histograms,
                 "intellisense_v2_runtime_apply_change_set_settings_snapshot_exec_ms",
+                None
+            ),
+            "intellisense_v2_runtime_type_index_precompute_queue_wait_ms": histogram_metric_value_or_zero(
+                histograms,
+                "intellisense_v2_runtime_type_index_precompute_queue_wait_ms",
+                None
+            ),
+            "intellisense_v2_runtime_type_index_precompute_exec_ms": histogram_metric_value_or_zero(
+                histograms,
+                "intellisense_v2_runtime_type_index_precompute_exec_ms",
+                None
+            ),
+            "intellisense_v2_runtime_type_index_precompute_build_exec_ms": histogram_metric_value_or_zero(
+                histograms,
+                "intellisense_v2_runtime_type_index_precompute_build_exec_ms",
+                None
+            ),
+            "intellisense_v2_runtime_type_index_precompute_ir_exec_ms": histogram_metric_value_or_zero(
+                histograms,
+                "intellisense_v2_runtime_type_index_precompute_ir_exec_ms",
+                None
+            ),
+            "intellisense_v2_runtime_type_index_precompute_ast_to_ir_exec_ms": histogram_metric_value_or_zero(
+                histograms,
+                "intellisense_v2_runtime_type_index_precompute_ast_to_ir_exec_ms",
+                None
+            ),
+            "intellisense_v2_runtime_type_index_precompute_semantic_facts_exec_ms": histogram_metric_value_or_zero(
+                histograms,
+                "intellisense_v2_runtime_type_index_precompute_semantic_facts_exec_ms",
                 None
             ),
             "intellisense_v2_runtime_apply_changes_batch_size": histogram_metric_value_or_zero(
@@ -13919,6 +14055,35 @@ fn scale_aware_dominant_stage_includes_runtime_apply_changes_breakdown() {
             .and_then(|value| value.as_f64())
             .unwrap_or(0.0),
         3500.0
+    );
+}
+
+#[test]
+fn scale_aware_dominant_stage_includes_type_index_precompute_breakdown() {
+    let metrics = serde_json::json!({
+        "intellisense_v2_runtime_type_index_precompute_queue_wait_ms": {"p95": 120.0},
+        "intellisense_v2_runtime_type_index_precompute_exec_ms": {"p95": 4800.0},
+        "intellisense_v2_runtime_type_index_precompute_build_exec_ms": {"p95": 14.0},
+        "intellisense_v2_runtime_type_index_precompute_ir_exec_ms": {"p95": 4700.0},
+        "intellisense_v2_runtime_type_index_precompute_ast_to_ir_exec_ms": {"p95": 1900.0},
+        "intellisense_v2_runtime_type_index_precompute_semantic_facts_exec_ms": {"p95": 2600.0},
+        "completion_stage_prepare_stateful_ms": {"p95": 121.0}
+    });
+
+    let dominant = dominant_stage_from_metrics(&metrics);
+    assert_eq!(
+        dominant
+            .get("stage")
+            .and_then(|value| value.as_str())
+            .unwrap_or(""),
+        "runtime_type_index_precompute_exec"
+    );
+    assert_eq!(
+        dominant
+            .get("p95_ms")
+            .and_then(|value| value.as_f64())
+            .unwrap_or(0.0),
+        4800.0
     );
 }
 

@@ -408,6 +408,24 @@ impl BslLanguageServer {
                         "type_index_precompute_build",
                         duration_from_millis_u128(result.stats.build_ms),
                     );
+                self.coordinator
+                    .record_intellisense_v2_runtime_exec_latency_with_origin(
+                        bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                        "type_index_precompute_ir",
+                        duration_from_millis_u128(result.stats.ir_ms),
+                    );
+                self.coordinator
+                    .record_intellisense_v2_runtime_exec_latency_with_origin(
+                        bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                        "type_index_precompute_ast_to_ir",
+                        duration_from_millis_u128(result.stats.ast_to_ir_convert_ms),
+                    );
+                self.coordinator
+                    .record_intellisense_v2_runtime_exec_latency_with_origin(
+                        bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                        "type_index_precompute_semantic_facts",
+                        duration_from_millis_u128(result.stats.semantic_facts_materialize_ms),
+                    );
                 debug!(
                     file_id = key.file_id.0,
                     requested_version = key.requested_version,
@@ -415,6 +433,9 @@ impl BslLanguageServer {
                     reason_code = result.reason_code.as_str(),
                     queue_wait_ms = result.stats.queue_wait_ms,
                     exec_ms = result.stats.exec_ms,
+                    ir_ms = result.stats.ir_ms,
+                    ast_to_ir_convert_ms = result.stats.ast_to_ir_convert_ms,
+                    semantic_facts_materialize_ms = result.stats.semantic_facts_materialize_ms,
                     build_ms = result.stats.build_ms,
                     evicted_per_file_window_total = result.stats.evicted_per_file_window_total,
                     evicted_global_guard_total = result.stats.evicted_global_guard_total,

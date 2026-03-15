@@ -126,14 +126,42 @@ impl AnalysisV2 {
             .unwrap_or_default();
         let key = self.make_type_index_artifact_key(file_id, initial_version);
         let exec_started = Instant::now();
-        let (type_index, build_profile) = if let Some(_snapshot) = self.parse_snapshot_for_file(file_id, file) {
+        tracing::debug!(
+            target: "bsl_backend::analysis_v2",
+            file_id = file_id.0,
+            expected_version,
+            initial_version,
+            queue_wait_ms,
+            parse_snapshot_incremental = parse_snapshot_meta.incremental,
+            parse_snapshot_changed_ranges = parse_snapshot_meta.changed_ranges_count,
+            parse_snapshot_serve_only_blocked = parse_snapshot_meta.serve_only_blocked,
+            "type_index_precompute: start"
+        );
+        let (type_index, build_profile, ir_profile) =
+            if let Some(_snapshot) = self.parse_snapshot_for_file(file_id, file) {
+            tracing::debug!(
+                target: "bsl_backend::analysis_v2",
+                file_id = file_id.0,
+                file_version = initial_version,
+                "type_index_precompute: entering ir_profiled"
+            );
             let deps_data = self.deps.data(&self.db).0.clone();
             let file_path = file.path(&self.db).clone();
-            let Some(program) = self.ir(file_id)? else {
+            let Some(profiled_ir) = self.ir_profiled(file_id)? else {
                 return Ok(TypeIndexPrecomputeResult::with_reason(
                     TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeMissingFile,
                 ));
             };
+            tracing::debug!(
+                target: "bsl_backend::analysis_v2",
+                file_id = file_id.0,
+                file_version = initial_version,
+                ir_ms = profiled_ir.profile.total_ms,
+                ast_to_ir_convert_ms = profiled_ir.profile.ast_to_ir_convert_ms,
+                semantic_facts_materialize_ms = profiled_ir.profile.semantic_facts_materialize_ms,
+                "type_index_precompute: ir_profiled ready"
+            );
+            let program = profiled_ir.program;
             let profiled = cancellable(|| {
                 type_inference_v2::build_type_index_from_semantic_program_with_path_profiled(
                     program.as_ref(),
@@ -141,10 +169,29 @@ impl AnalysisV2 {
                     deps_data,
                 )
             })?;
-            (Arc::new(profiled.index), profiled.profile)
+            tracing::debug!(
+                target: "bsl_backend::analysis_v2",
+                file_id = file_id.0,
+                file_version = initial_version,
+                build_ms = profiled.profile.total_ms,
+                statement_count = profiled.profile.statement_count,
+                local_function_summary_count = profiled.profile.local_function_summary_count,
+                index_entry_count = profiled.profile.index_entry_count,
+                "type_index_precompute: type_index build ready"
+            );
+            (
+                Arc::new(profiled.index),
+                profiled.profile,
+                profiled_ir.profile,
+            )
         } else {
-            let index_snapshot = cancellable(|| type_index(&self.db, file, self.deps, self.settings))?;
-            (index_snapshot.index(), index_snapshot.build_profile())
+            let index_snapshot =
+                cancellable(|| type_index(&self.db, file, self.deps, self.settings))?;
+            (
+                index_snapshot.index(),
+                index_snapshot.build_profile(),
+                IrBuildProfile::default(),
+            )
         };
         let exec_ms = exec_started.elapsed().as_millis();
         let latest_version = file.version(&self.db);
@@ -155,6 +202,9 @@ impl AnalysisV2 {
                 stats: TypeIndexPrecomputeStats {
                     queue_wait_ms,
                     exec_ms,
+                    ir_ms: ir_profile.total_ms,
+                    ast_to_ir_convert_ms: ir_profile.ast_to_ir_convert_ms,
+                    semantic_facts_materialize_ms: ir_profile.semantic_facts_materialize_ms,
                     build_ms: build_profile.total_ms,
                     ..TypeIndexPrecomputeStats::default()
                 },
@@ -179,6 +229,9 @@ impl AnalysisV2 {
             stats: TypeIndexPrecomputeStats {
                 queue_wait_ms,
                 exec_ms,
+                ir_ms: ir_profile.total_ms,
+                ast_to_ir_convert_ms: ir_profile.ast_to_ir_convert_ms,
+                semantic_facts_materialize_ms: ir_profile.semantic_facts_materialize_ms,
                 build_ms: build_profile.total_ms,
                 evicted_per_file_window_total: store_outcome.evicted_per_file_window_total,
                 evicted_global_guard_total: store_outcome.evicted_global_guard_total,
@@ -555,6 +608,11 @@ impl AnalysisV2 {
     }
 
     pub fn ir(&self, file_id: FileId) -> Cancellable<Option<Arc<SemanticProgram>>> {
+        self.ir_profiled(file_id)
+            .map(|result| result.map(|profiled| profiled.program))
+    }
+
+    pub fn ir_profiled(&self, file_id: FileId) -> Cancellable<Option<IrProfiledResult>> {
         let Some(&file) = self.files.get(&file_id) else {
             return Ok(None);
         };
@@ -567,7 +625,10 @@ impl AnalysisV2 {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get_ir(file_id, file_version, &deps_id, &settings_id)
         {
-            return Ok(Some(cached));
+            return Ok(Some(IrProfiledResult {
+                program: cached,
+                profile: IrBuildProfile::default(),
+            }));
         }
         if let Some(snapshot) = self.parse_snapshot_for_file(file_id, file) {
             let source = file.text(&self.db);
@@ -586,23 +647,58 @@ impl AnalysisV2 {
                     settings_id,
                     reused.clone(),
                 );
-                return Ok(Some(reused));
+                return Ok(Some(IrProfiledResult {
+                    program: reused,
+                    profile: IrBuildProfile::default(),
+                }));
             }
             let deps_data = self.deps.data(&self.db).0.clone();
             let parsed = parse_result(&self.db, file, self.settings).0;
             let file_path = file.path(&self.db);
-            let program = build_ir_from_parsed(
+            tracing::debug!(
+                target: "bsl_backend::analysis_v2",
+                file_id = file_id.0,
+                file_version,
+                file_path = %file_path,
+                source_len = source.len(),
+                "ir_profiled: build_ir_from_parsed start"
+            );
+            let profiled = build_ir_from_parsed_profiled(
                 parsed,
                 source.as_ref(),
                 file_path.as_ref(),
                 deps_data,
             );
-            self.remember_ir_artifact(file_id, file_version, deps_id, settings_id, program.clone());
-            return Ok(Some(program));
+            tracing::debug!(
+                target: "bsl_backend::analysis_v2",
+                file_id = file_id.0,
+                file_version,
+                file_path = %file_path,
+                ir_ms = profiled.profile.total_ms,
+                ast_to_ir_convert_ms = profiled.profile.ast_to_ir_convert_ms,
+                semantic_facts_materialize_ms = profiled.profile.semantic_facts_materialize_ms,
+                "ir_profiled: build_ir_from_parsed finished"
+            );
+            self.remember_ir_artifact(
+                file_id,
+                file_version,
+                deps_id,
+                settings_id,
+                profiled.program.clone(),
+            );
+            return Ok(Some(profiled));
         }
+        let ir_started = Instant::now();
         let program = cancellable(|| ir(&self.db, file, self.deps, self.settings).0)?;
         self.remember_ir_artifact(file_id, file_version, deps_id, settings_id, program.clone());
-        Ok(Some(program))
+        Ok(Some(IrProfiledResult {
+            program,
+            profile: IrBuildProfile {
+                ast_to_ir_convert_ms: 0,
+                semantic_facts_materialize_ms: 0,
+                total_ms: ir_started.elapsed().as_millis(),
+            },
+        }))
     }
 
     pub fn syntax_diagnostics(&self, file_id: FileId) -> Cancellable<Option<Arc<Vec<ParseError>>>> {

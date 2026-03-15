@@ -532,6 +532,21 @@ fn runtime_queue_and_exec_projection_do_not_raise_hint_mismatch() {
         "type_index_precompute_build",
         Duration::from_millis(4),
     );
+    observability.record_intellisense_v2_runtime_exec_latency_with_origin(
+        "lsp",
+        "type_index_precompute_ir",
+        Duration::from_millis(7),
+    );
+    observability.record_intellisense_v2_runtime_exec_latency_with_origin(
+        "lsp",
+        "type_index_precompute_ast_to_ir",
+        Duration::from_millis(5),
+    );
+    observability.record_intellisense_v2_runtime_exec_latency_with_origin(
+        "lsp",
+        "type_index_precompute_semantic_facts",
+        Duration::from_millis(3),
+    );
     observability.record_intellisense_v2_runtime_apply_changes_batch_size(4);
     observability.record_intellisense_v2_runtime_apply_changes_changed_files_count(2);
 
@@ -596,6 +611,27 @@ fn runtime_queue_and_exec_projection_do_not_raise_hint_mismatch() {
     assert!(
         counter_value(
             counters,
+            "intellisense_v2_runtime_type_index_precompute_ir_exec_total"
+        ) > 0,
+        "type_index precompute IR exec must not be projected into runtime_other_*"
+    );
+    assert!(
+        counter_value(
+            counters,
+            "intellisense_v2_runtime_type_index_precompute_ast_to_ir_exec_total"
+        ) > 0,
+        "type_index precompute AST->IR exec must not be projected into runtime_other_*"
+    );
+    assert!(
+        counter_value(
+            counters,
+            "intellisense_v2_runtime_type_index_precompute_semantic_facts_exec_total"
+        ) > 0,
+        "type_index precompute semantic-facts exec must not be projected into runtime_other_*"
+    );
+    assert!(
+        counter_value(
+            counters,
             "intellisense_v2_runtime_apply_change_set_file_exec_total"
         ) > 0,
         "legacy apply-change set_file exec counter should be projected"
@@ -649,6 +685,27 @@ fn runtime_queue_and_exec_projection_do_not_raise_hint_mismatch() {
     assert!(
         histogram_count(
             histograms,
+            "intellisense_v2_runtime_type_index_precompute_ir_exec_ms"
+        ) > 0,
+        "type_index precompute IR exec histogram must be projected to dedicated metric"
+    );
+    assert!(
+        histogram_count(
+            histograms,
+            "intellisense_v2_runtime_type_index_precompute_ast_to_ir_exec_ms"
+        ) > 0,
+        "type_index precompute AST->IR exec histogram must be projected to dedicated metric"
+    );
+    assert!(
+        histogram_count(
+            histograms,
+            "intellisense_v2_runtime_type_index_precompute_semantic_facts_exec_ms"
+        ) > 0,
+        "type_index precompute semantic-facts exec histogram must be projected to dedicated metric"
+    );
+    assert!(
+        histogram_count(
+            histograms,
             "intellisense_v2_runtime_apply_change_set_file_exec_ms"
         ) > 0,
         "legacy apply-change set_file exec histogram should be projected"
@@ -685,6 +742,9 @@ fn runtime_stage_registry_and_projection_contract_require_explicit_updates() {
         "apply_change_set_settings_snapshot",
         "type_index_precompute",
         "type_index_precompute_build",
+        "type_index_precompute_ir",
+        "type_index_precompute_ast_to_ir",
+        "type_index_precompute_semantic_facts",
     ]
     .into_iter()
     .collect();
@@ -724,6 +784,9 @@ fn runtime_stage_registry_and_projection_contract_require_explicit_updates() {
         "apply_change_set_settings_snapshot",
         "type_index_precompute",
         "type_index_precompute_build",
+        "type_index_precompute_ir",
+        "type_index_precompute_ast_to_ir",
+        "type_index_precompute_semantic_facts",
     ]
     .into_iter()
     .collect();

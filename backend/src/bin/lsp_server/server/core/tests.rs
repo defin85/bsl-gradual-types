@@ -4398,6 +4398,133 @@ async fn p7_large_churn_budget_timeout_without_prior_completion_returns_fail_clo
 }
 
 #[tokio::test]
+async fn p7_large_churn_did_change_skips_inline_parse_snapshot() {
+    const FILLER_LINES: usize = 2200;
+    const LATEST_VERSION: i32 = 7;
+    let mut fixture = String::new();
+    fixture.push_str("Процедура Тест()\n");
+    fixture.push_str("    ЛокМассив = Новый Массив;\n");
+    for idx in 0..FILLER_LINES {
+        fixture.push_str(&format!("    // filler {idx}\n"));
+    }
+    fixture.push_str("    ЛокМассив.\n");
+    fixture.push_str("КонецПроцедуры\n");
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let uri = Url::parse("file:///test_p7_large_churn_skip_parse_snapshot.bsl").expect("test uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: fixture.clone(),
+        },
+    };
+    let did_open_req = Request::build("textDocument/didOpen")
+        .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+        .finish();
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(did_open_req)
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    for version in 2..=LATEST_VERSION {
+        let did_change = DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: uri.clone(),
+                version,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                range: None,
+                range_length: None,
+                text: fixture.clone(),
+            }],
+        };
+        let did_change_req = Request::build("textDocument/didChange")
+            .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+            .finish();
+        let did_change_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(did_change_req)
+            .await
+            .expect("didChange notification");
+        assert!(did_change_response.is_none(), "didChange is a notification");
+    }
+
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be created");
+    server.sync_v2_globals().await;
+
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    let large_churn_active = server
+        .scale_aware_churn_state_v2
+        .read()
+        .await
+        .get(&file_id)
+        .is_some_and(|state| state.large_churn_active);
+    assert!(
+        large_churn_active,
+        "expected large+churn state to be active after burst didChange on large document"
+    );
+    assert!(
+        server
+            .analysis_v2
+            .wait_for_file_version(file_id, LATEST_VERSION)
+            .await,
+        "analysis runtime must catch up to the latest didChange version"
+    );
+
+    let analysis = server.analysis_v2.snapshot().await;
+    let parse_mode = analysis
+        .syntax_diagnostics_observability_mode(file_id)
+        .expect("syntax diagnostics mode query")
+        .expect("syntax diagnostics mode for active file");
+    assert_eq!(
+        parse_mode, "other",
+        "large+churn didChange must skip inline parse snapshot and leave syntax diagnostics on fallback mode"
+    );
+
+    let metrics = coordinator.observability_metrics();
+    let counters = metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    assert!(
+        read_u64_metric(counters.get("intellisense_v2_parse_snapshot_total_origin_lsp_mode_other"))
+            > 0,
+        "skipped large+churn parse snapshot must be visible via mode=other counters"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
 async fn p7_hover_cache_miss_emits_bounded_fail_closed_reason() {
     const FALLBACK_REASON_KEY: &str =
         "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_hover_reason_missing_semantic_index";

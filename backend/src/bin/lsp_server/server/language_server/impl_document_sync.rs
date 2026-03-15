@@ -1,4 +1,5 @@
 use super::*;
+use std::time::Duration;
 
 impl BslLanguageServer {
     pub(super) async fn lsp_did_open(&self, params: DidOpenTextDocumentParams) {
@@ -311,67 +312,79 @@ impl BslLanguageServer {
                 text: updated_text.clone(),
             },
         );
-        let parse_snapshot = self
-            .coordinator
-            .parser_coordinator()
-            .and_then(|parser| {
-                let parse_started = Instant::now();
-                let report = parser
-                    .parse_incremental_with_report(
-                        PathBuf::from(path.as_ref()),
-                        updated_text.to_string(),
-                        parser_edits,
-                    )
-                    .ok()?;
-                Some((report, parse_started.elapsed()))
-            })
-            .map(|(report, parse_elapsed)| {
-                let mode = if report.incremental {
-                    if report.changed_ranges.is_empty() {
-                        "reused"
+        let parse_snapshot = if large_churn_active {
+            // Under large+churn we must not keep synchronous parse work on the didChange path.
+            self.coordinator.record_intellisense_v2_parse_snapshot(
+                bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                "other",
+                0,
+                0,
+                Some("other"),
+                Duration::default(),
+            );
+            None
+        } else {
+            self.coordinator
+                .parser_coordinator()
+                .and_then(|parser| {
+                    let parse_started = Instant::now();
+                    let report = parser
+                        .parse_incremental_with_report(
+                            PathBuf::from(path.as_ref()),
+                            updated_text.to_string(),
+                            parser_edits,
+                        )
+                        .ok()?;
+                    Some((report, parse_started.elapsed()))
+                })
+                .map(|(report, parse_elapsed)| {
+                    let mode = if report.incremental {
+                        if report.changed_ranges.is_empty() {
+                            "reused"
+                        } else {
+                            "incremental"
+                        }
                     } else {
-                        "incremental"
+                        "full"
+                    };
+                    let changed_ranges_count = report.changed_ranges.len();
+                    let changed_ranges_bytes: usize = report
+                        .changed_ranges
+                        .iter()
+                        .map(changed_range_footprint_bytes)
+                        .sum();
+                    self.coordinator.record_intellisense_v2_parse_snapshot(
+                        bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                        mode,
+                        changed_ranges_count,
+                        changed_ranges_bytes,
+                        report.fallback_reason.as_deref(),
+                        parse_elapsed,
+                    );
+                    bsl_analysis_v2::ParseSnapshot {
+                        file_id,
+                        file_version: version,
+                        parse_result: Arc::new(report.parse_result),
+                        line_index: report.line_index,
+                        backend_tree: report.backend_tree,
+                        changed_ranges: Arc::new(
+                            report
+                                .changed_ranges
+                                .into_iter()
+                                .map(|range| bsl_analysis_v2::ParseChangedRange {
+                                    start_byte: range.start_byte,
+                                    old_end_byte: range.old_end_byte,
+                                    new_end_byte: range.new_end_byte,
+                                })
+                                .collect(),
+                        ),
+                        produced_at_millis: unix_time_millis(),
+                        backend_tree_hash: report.backend_tree_hash,
+                        incremental: report.incremental,
+                        fallback_reason: report.fallback_reason.map(Arc::from),
                     }
-                } else {
-                    "full"
-                };
-                let changed_ranges_count = report.changed_ranges.len();
-                let changed_ranges_bytes: usize = report
-                    .changed_ranges
-                    .iter()
-                    .map(changed_range_footprint_bytes)
-                    .sum();
-                self.coordinator.record_intellisense_v2_parse_snapshot(
-                    bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
-                    mode,
-                    changed_ranges_count,
-                    changed_ranges_bytes,
-                    report.fallback_reason.as_deref(),
-                    parse_elapsed,
-                );
-                bsl_analysis_v2::ParseSnapshot {
-                    file_id,
-                    file_version: version,
-                    parse_result: Arc::new(report.parse_result),
-                    line_index: report.line_index,
-                    backend_tree: report.backend_tree,
-                    changed_ranges: Arc::new(
-                        report
-                            .changed_ranges
-                            .into_iter()
-                            .map(|range| bsl_analysis_v2::ParseChangedRange {
-                                start_byte: range.start_byte,
-                                old_end_byte: range.old_end_byte,
-                                new_end_byte: range.new_end_byte,
-                            })
-                            .collect(),
-                    ),
-                    produced_at_millis: unix_time_millis(),
-                    backend_tree_hash: report.backend_tree_hash,
-                    incremental: report.incremental,
-                    fallback_reason: report.fallback_reason.map(Arc::from),
-                }
-            });
+                })
+        };
         self.latest_apply_enqueued_at_v2
             .write()
             .await

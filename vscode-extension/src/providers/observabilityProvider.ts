@@ -3,6 +3,7 @@ import { BslOverviewItem } from './items';
 import { BslAnalyzerConfig } from '../config/configHelper';
 import { getLanguageClient } from '../lsp/client';
 import { getObservabilityMetricsWithRequest } from '../lsp/customRequests';
+import { getServerStatusSnapshot, onServerStatusChange } from '../lsp/serverStatus';
 
 type ObservabilitySection =
     | 'obs-status'
@@ -87,6 +88,13 @@ export class ObservabilityProvider implements vscode.TreeDataProvider<BslOvervie
         });
         this.disposables.push(configDisposable);
 
+        const serverStatusDisposable = onServerStatusChange((status) => {
+            if (!status.loading) {
+                this.refresh();
+            }
+        });
+        this.disposables.push(serverStatusDisposable);
+
         this.startAutoRefresh();
     }
 
@@ -154,6 +162,7 @@ export class ObservabilityProvider implements vscode.TreeDataProvider<BslOvervie
     private async getStatusItems(): Promise<BslOverviewItem[]> {
         const client = getLanguageClient();
         const serverRunning = !!client?.isRunning();
+        const serverLoading = getServerStatusSnapshot().loading;
         const metrics = await this.loadMetrics();
 
         const statusItem = new BslOverviewItem(
@@ -197,7 +206,9 @@ export class ObservabilityProvider implements vscode.TreeDataProvider<BslOvervie
 
         if (!metrics) {
             const unavailable = new BslOverviewItem(
-                'Metrics: unavailable (LSP unsupported or not ready)',
+                serverLoading
+                    ? 'Metrics: deferred while server is loading'
+                    : 'Metrics: unavailable (LSP unsupported or not ready)',
                 vscode.TreeItemCollapsibleState.None
             );
             unavailable.iconPath = new vscode.ThemeIcon('warning');
@@ -370,6 +381,10 @@ export class ObservabilityProvider implements vscode.TreeDataProvider<BslOvervie
     }
 
     private async loadMetrics(): Promise<Record<string, unknown> | null> {
+        if (getServerStatusSnapshot().loading) {
+            return this.cachedMetrics;
+        }
+
         const now = Date.now();
         if (this.cachedMetrics && now - this.lastFetchAt < this.ttlMs) {
             return this.cachedMetrics;

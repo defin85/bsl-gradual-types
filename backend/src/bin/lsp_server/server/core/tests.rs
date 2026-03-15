@@ -8754,10 +8754,7 @@ async fn p22_get_observability_metrics_exposes_syntax_diagnostics_mode_drilldown
 async fn p22_get_observability_metrics_sidebar_shape_filters_unrelated_histograms() {
     let coordinator = Arc::new(SystemCoordinator::new());
     coordinator.record_completion_latency(Duration::from_millis(33));
-    coordinator.record_intellisense_v2_ir_query_latency(
-        "completion",
-        Duration::from_millis(21),
-    );
+    coordinator.record_intellisense_v2_ir_query_latency("completion", Duration::from_millis(21));
 
     let (mut service, mut socket) = LspService::build({
         let coordinator = coordinator.clone();
@@ -9790,22 +9787,7 @@ async fn p25_cross_interface_semantic_parity_lsp_web_mcp_core_tools() {
 async fn p26_interactive_warm_path_completion_slo_smoke_conf_big() {
     let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
 
-    fn conf_big_root() -> Option<std::path::PathBuf> {
-        let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("workspace root")
-            .to_path_buf();
-        let candidates = [
-            workspace_root.join("examples").join("conf_big"),
-            std::path::PathBuf::from("examples/conf_big"),
-            std::path::PathBuf::from("../examples/conf_big"),
-        ];
-        candidates
-            .into_iter()
-            .find(|path| path.join("Configuration.xml").exists())
-    }
-
-    let Some(root) = conf_big_root() else {
+    let Some(root) = conf_big_root_for_tests() else {
         if allow_fixture_skip {
             eprintln!(
                 "skipping p26 warm-path SLO smoke: examples/conf_big fixture is missing and BSL_TEST_ALLOW_MISSING_CONF_BIG is set"
@@ -9817,14 +9799,7 @@ async fn p26_interactive_warm_path_completion_slo_smoke_conf_big() {
         );
     };
 
-    let module_rel = std::path::PathBuf::from("Documents")
-        .join("РеализацияТоваровУслуг")
-        .join("Forms")
-        .join("ФормаДокументаОбщая")
-        .join("Ext")
-        .join("Form")
-        .join("Module.bsl");
-    let module_path = root.join(&module_rel);
+    let module_path = conf_big_large_module_path_for_tests(&root);
     if !module_path.exists() {
         if allow_fixture_skip {
             eprintln!(
@@ -10783,6 +10758,26 @@ struct ScaleAwarePhase {
     iterations: u64,
 }
 
+#[derive(Debug, Clone)]
+struct ScaleAwareWorkspaceSetup {
+    platform_docs_archive: std::path::PathBuf,
+    configuration_path: std::path::PathBuf,
+    platform_version: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ScaleAwareObservabilityProbe {
+    every: u64,
+    timeout: Duration,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScaleAwareObservabilityProbeOutcome {
+    Ok,
+    TimedOut,
+    Error,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ScaleAwareChurnMode {
     Off,
@@ -10875,6 +10870,56 @@ fn scale_aware_required_warm_samples_from_env() -> u64 {
     scale_aware_non_zero_u64_from_env("BSL_V2_SCALE_AWARE_REQUIRED_WARM_SAMPLES", 50, 10_000)
 }
 
+fn real_module_phase_plan_from_env() -> [ScaleAwarePhase; 3] {
+    [
+        ScaleAwarePhase {
+            name: "start",
+            warmup: 0,
+            iterations: scale_aware_non_zero_u64_from_env(
+                "BSL_V2_REAL_MODULE_START_ITERATIONS",
+                1,
+                10_000,
+            ),
+        },
+        ScaleAwarePhase {
+            name: "cold",
+            warmup: 0,
+            iterations: scale_aware_non_zero_u64_from_env(
+                "BSL_V2_REAL_MODULE_COLD_ITERATIONS",
+                2,
+                10_000,
+            ),
+        },
+        ScaleAwarePhase {
+            name: "warm",
+            warmup: scale_aware_u64_from_env("BSL_V2_REAL_MODULE_WARM_WARMUP", 1, 10_000),
+            iterations: scale_aware_non_zero_u64_from_env(
+                "BSL_V2_REAL_MODULE_WARM_ITERATIONS",
+                10,
+                10_000,
+            ),
+        },
+    ]
+}
+
+fn real_module_required_warm_samples_from_env() -> u64 {
+    scale_aware_non_zero_u64_from_env("BSL_V2_REAL_MODULE_REQUIRED_WARM_SAMPLES", 10, 10_000)
+}
+
+fn real_module_observability_probe_from_env() -> ScaleAwareObservabilityProbe {
+    let every =
+        scale_aware_non_zero_u64_from_env("BSL_V2_REAL_MODULE_OBSERVABILITY_PROBE_EVERY", 1, 1024);
+    let timeout_ms = scale_aware_non_zero_u64_from_env(
+        "BSL_V2_REAL_MODULE_OBSERVABILITY_TIMEOUT_MS",
+        1_500,
+        30_000,
+    );
+    ScaleAwareObservabilityProbe {
+        every,
+        timeout: Duration::from_millis(timeout_ms),
+    }
+}
+
 fn should_apply_scale_aware_churn(
     mode: ScaleAwareChurnMode,
     profile_name: &str,
@@ -10897,6 +10942,19 @@ fn should_apply_scale_aware_churn(
         ScaleAwareChurnMode::WarmAll => phase.name == "warm",
         ScaleAwareChurnMode::All => true,
     }
+}
+
+fn should_probe_scale_aware_observability(
+    phase: ScaleAwarePhase,
+    request_index: u64,
+    every: u64,
+) -> bool {
+    let measured = request_index >= phase.warmup;
+    if !measured {
+        return false;
+    }
+    let measured_index = request_index - phase.warmup;
+    measured_index.is_multiple_of(every)
 }
 
 fn scale_aware_progress_enabled() -> bool {
@@ -10966,6 +11024,36 @@ fn read_numeric_metric(value: Option<&serde_json::Value>) -> f64 {
 
 fn read_u64_metric(value: Option<&serde_json::Value>) -> u64 {
     value.and_then(|v| v.as_u64()).unwrap_or(0)
+}
+
+fn percentile_from_sorted_samples(sorted: &[f64], quantile: f64) -> f64 {
+    if sorted.is_empty() {
+        return 0.0;
+    }
+    let last_index = sorted.len().saturating_sub(1);
+    let rank = ((last_index as f64) * quantile).round() as usize;
+    sorted[rank.min(last_index)]
+}
+
+fn sample_histogram_value(samples_ms: &[f64]) -> serde_json::Value {
+    if samples_ms.is_empty() {
+        return serde_json::json!({
+            "count": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "p99": 0.0,
+        });
+    }
+
+    let mut sorted = samples_ms.to_vec();
+    sorted.sort_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal));
+
+    serde_json::json!({
+        "count": sorted.len(),
+        "p50": percentile_from_sorted_samples(&sorted, 0.50),
+        "p95": percentile_from_sorted_samples(&sorted, 0.95),
+        "p99": percentile_from_sorted_samples(&sorted, 0.99),
+    })
 }
 
 fn histogram_metric_value(
@@ -11059,6 +11147,31 @@ fn syntax_helper_path_for_tests() -> std::path::PathBuf {
     syntax_helper_path
 }
 
+fn conf_big_root_for_tests() -> Option<std::path::PathBuf> {
+    let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("workspace root")
+        .to_path_buf();
+    let candidates = [
+        workspace_root.join("examples").join("conf_big"),
+        std::path::PathBuf::from("examples/conf_big"),
+        std::path::PathBuf::from("../examples/conf_big"),
+    ];
+    candidates
+        .into_iter()
+        .find(|path| path.join("Configuration.xml").exists())
+}
+
+fn conf_big_large_module_path_for_tests(root: &std::path::Path) -> std::path::PathBuf {
+    root.join("Documents")
+        .join("РеализацияТоваровУслуг")
+        .join("Forms")
+        .join("ФормаДокументаОбщая")
+        .join("Ext")
+        .join("Form")
+        .join("Module.bsl")
+}
+
 async fn prime_server_with_syntax_helper_deps(server: &BslLanguageServer) {
     let syntax_helper_path = syntax_helper_path_for_tests();
     let coordinator = server.coordinator.clone();
@@ -11077,6 +11190,75 @@ async fn prime_server_with_syntax_helper_deps(server: &BslLanguageServer) {
         )
         .await;
     server.sync_v2_globals().await;
+}
+
+async fn prime_server_with_workspace_setup(
+    server: &BslLanguageServer,
+    setup: &ScaleAwareWorkspaceSetup,
+    operation_id: &str,
+) {
+    *server.config.write().await = Some(crate::config::LspConfig {
+        platform_docs_archive: Some(setup.platform_docs_archive.to_string_lossy().to_string()),
+        configuration_path: Some(setup.configuration_path.to_string_lossy().to_string()),
+        platform_version: Some(setup.platform_version.clone()),
+        cache_enabled: Some(true),
+        strict_fingerprint: Some(false),
+        enable_type_hints: Some(false),
+        enable_code_actions: Some(false),
+    });
+
+    let coordinator = server.coordinator.clone();
+    let startup_docs = setup.platform_docs_archive.clone();
+    let startup_root = setup.configuration_path.clone();
+    let startup_version = setup.platform_version.clone();
+    tokio::task::spawn_blocking(move || {
+        coordinator.start_with_paths_blocking(
+            Some(startup_docs.as_path()),
+            Some(&startup_root),
+            Some(startup_version.as_str()),
+            None,
+        )
+    })
+    .await
+    .expect("workspace startup join")
+    .expect("workspace startup");
+    server
+        .deps_update_v2(
+            operation_id,
+            Some(setup.platform_docs_archive.clone()),
+            Some(setup.configuration_path.clone()),
+        )
+        .await;
+    server.sync_v2_globals().await;
+}
+
+async fn probe_observability_sidebar_latency(
+    service: &mut LspService<BslLanguageServer>,
+    request_id: i64,
+    timeout: Duration,
+) -> (ScaleAwareObservabilityProbeOutcome, Option<f64>) {
+    let execute = Request::build("workspace/executeCommand")
+        .id(request_id)
+        .params(serde_json::json!({
+            "command": "bsl.getObservabilityMetrics",
+            "arguments": [{
+                "shape": "sidebar",
+            }],
+        }))
+        .finish();
+    let started = Instant::now();
+    let response = tokio::time::timeout(timeout, async {
+        service.ready().await.unwrap().call(execute).await
+    })
+    .await;
+    match response {
+        Ok(Ok(Some(_))) => (
+            ScaleAwareObservabilityProbeOutcome::Ok,
+            Some(started.elapsed().as_millis() as f64),
+        ),
+        Ok(Ok(None)) | Ok(Err(_)) => (ScaleAwareObservabilityProbeOutcome::Error, None),
+        Err(_) => (ScaleAwareObservabilityProbeOutcome::TimedOut, None),
+    }
 }
 
 async fn open_lsp_fixture_with_snapshot(
@@ -12172,12 +12354,14 @@ async fn run_scale_aware_profile(
     phases: &[ScaleAwarePhase],
     churn_mode: ScaleAwareChurnMode,
     churn_every: u64,
+    workspace_setup: Option<&ScaleAwareWorkspaceSetup>,
+    observability_probe: Option<ScaleAwareObservabilityProbe>,
 ) -> serde_json::Value {
     let mut profile_report = serde_json::Map::new();
     let progress_enabled = scale_aware_progress_enabled();
     let progress_every = scale_aware_progress_every();
 
-    for phase in phases {
+    for (phase_index, phase) in phases.iter().enumerate() {
         let phase_started = Instant::now();
         let mut progress_line_width = 0usize;
         let coordinator = Arc::new(SystemCoordinator::new());
@@ -12197,6 +12381,20 @@ async fn run_scale_aware_profile(
             tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
 
         initialize_lsp_service(&mut service).await;
+
+        let server = server_holder
+            .lock()
+            .expect("server holder lock")
+            .clone()
+            .expect("server must be created");
+        if let Some(setup) = workspace_setup {
+            prime_server_with_workspace_setup(
+                &server,
+                setup,
+                "p31_scale_aware_real_workspace_setup",
+            )
+            .await;
+        }
 
         let did_open = DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
@@ -12218,14 +12416,12 @@ async fn run_scale_aware_profile(
             .expect("didOpen notification");
         assert!(did_open_response.is_none(), "didOpen is a notification");
 
-        let server = server_holder
-            .lock()
-            .expect("server holder lock")
-            .clone()
-            .expect("server must be created");
         let mut current_text = text.clone();
         let mut current_version: i32 = 1;
         let mut churn_edits_applied = 0u64;
+        let mut observability_ok_latencies_ms = Vec::new();
+        let mut observability_timeouts_total = 0u64;
+        let mut observability_errors_total = 0u64;
 
         let total_requests = phase.warmup + phase.iterations;
         if progress_enabled {
@@ -12337,6 +12533,33 @@ async fn run_scale_aware_profile(
                     &mut progress_line_width,
                 );
             }
+
+            if let Some(probe) = observability_probe {
+                if should_probe_scale_aware_observability(*phase, request_index, probe.every) {
+                    let request_id = 31_000_000_i64
+                        .saturating_add((phase_index as i64) * 100_000)
+                        .saturating_add(request_index as i64);
+                    let (outcome, latency_ms) = probe_observability_sidebar_latency(
+                        &mut service,
+                        request_id,
+                        probe.timeout,
+                    )
+                    .await;
+                    match outcome {
+                        ScaleAwareObservabilityProbeOutcome::Ok => {
+                            if let Some(latency_ms) = latency_ms {
+                                observability_ok_latencies_ms.push(latency_ms);
+                            }
+                        }
+                        ScaleAwareObservabilityProbeOutcome::TimedOut => {
+                            observability_timeouts_total += 1;
+                        }
+                        ScaleAwareObservabilityProbeOutcome::Error => {
+                            observability_errors_total += 1;
+                        }
+                    }
+                }
+            }
         }
 
         let metrics = coordinator.observability_metrics();
@@ -12358,6 +12581,12 @@ async fn run_scale_aware_profile(
             read_u64_metric(counters.get("intellisense_v2_completion_result_total_cancelled"));
         let completion_cancelled_rate =
             completion_cancelled_total as f64 / completion_total.max(1) as f64;
+        let completion_ok_non_empty_total =
+            read_u64_metric(counters.get("intellisense_v2_completion_result_total_ok_non_empty"));
+        let completion_ok_empty_total =
+            read_u64_metric(counters.get("intellisense_v2_completion_result_total_ok_empty"));
+        let completion_fail_closed_total =
+            read_u64_metric(counters.get("intellisense_v2_completion_result_total_fail_closed"));
 
         let mut phase_metrics = serde_json::json!({
             "completion_duration_ms": histogram_metric_value(histograms, "completion_duration_ms", None),
@@ -12966,8 +13195,25 @@ async fn run_scale_aware_profile(
             "profile_size": profile_name,
             "churn_mode": churn_mode.as_str(),
             "completion_total": completion_total,
+            "completion_outcomes": {
+                "ok_non_empty": completion_ok_non_empty_total,
+                "ok_empty": completion_ok_empty_total,
+                "fail_closed": completion_fail_closed_total,
+                "cancelled": completion_cancelled_total,
+            },
             "completion_cancelled_total": completion_cancelled_total,
             "completion_cancelled_rate": completion_cancelled_rate,
+            "observability_sidebar_probe": {
+                "enabled": observability_probe.is_some(),
+                "every": observability_probe.map(|probe| probe.every).unwrap_or(0),
+                "timeout_ms": observability_probe
+                    .map(|probe| probe.timeout.as_millis().min(u64::MAX as u128) as u64)
+                    .unwrap_or(0),
+                "ok_total": observability_ok_latencies_ms.len(),
+                "timeout_total": observability_timeouts_total,
+                "error_total": observability_errors_total,
+                "request_ms": sample_histogram_value(&observability_ok_latencies_ms),
+            },
             "churn_edits_applied": churn_edits_applied,
             "metrics": phase_metrics,
             "dominant_stage": dominant_stage
@@ -13556,15 +13802,7 @@ async fn p31_scale_aware_large_small_completion_gate_live() {
         .parent()
         .expect("workspace root")
         .to_path_buf();
-    let conf_big_root = [
-        workspace_root.join("examples").join("conf_big"),
-        std::path::PathBuf::from("examples/conf_big"),
-        std::path::PathBuf::from("../examples/conf_big"),
-    ]
-    .into_iter()
-    .find(|path| path.join("Configuration.xml").exists());
-
-    let Some(conf_big_root) = conf_big_root else {
+    let Some(conf_big_root) = conf_big_root_for_tests() else {
         if allow_fixture_skip {
             eprintln!(
                 "skipping p31 scale-aware gate: examples/conf_big fixture is missing and BSL_TEST_ALLOW_MISSING_CONF_BIG is set"
@@ -13576,14 +13814,7 @@ async fn p31_scale_aware_large_small_completion_gate_live() {
         );
     };
 
-    let large_module_rel = std::path::PathBuf::from("Documents")
-        .join("РеализацияТоваровУслуг")
-        .join("Forms")
-        .join("ФормаДокументаОбщая")
-        .join("Ext")
-        .join("Form")
-        .join("Module.bsl");
-    let large_module_path = conf_big_root.join(&large_module_rel);
+    let large_module_path = conf_big_large_module_path_for_tests(&conf_big_root);
     if !large_module_path.exists() {
         if allow_fixture_skip {
             eprintln!(
@@ -13625,6 +13856,8 @@ async fn p31_scale_aware_large_small_completion_gate_live() {
         &phases,
         churn_mode,
         churn_every,
+        None,
+        None,
     )
     .await;
     let small_profile = run_scale_aware_profile(
@@ -13635,6 +13868,8 @@ async fn p31_scale_aware_large_small_completion_gate_live() {
         &phases,
         churn_mode,
         churn_every,
+        None,
+        None,
     )
     .await;
 
@@ -13739,5 +13974,157 @@ async fn p31_scale_aware_large_small_completion_gate_live() {
         "expected >={required_warm_samples} warm completion samples for both profiles, got large={} small={}",
         large_warm_total,
         small_warm_total
+    );
+}
+
+#[tokio::test]
+async fn p36_real_conf_big_completion_and_observability_gate_live() {
+    init_test_tracing();
+    let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
+
+    let Some(conf_big_root) = conf_big_root_for_tests() else {
+        if allow_fixture_skip {
+            eprintln!(
+                "skipping p36 real conf_big gate: examples/conf_big fixture is missing and BSL_TEST_ALLOW_MISSING_CONF_BIG is set"
+            );
+            return;
+        }
+        panic!(
+            "examples/conf_big fixture is missing; set BSL_TEST_ALLOW_MISSING_CONF_BIG=1 to skip explicitly"
+        );
+    };
+
+    let module_path = conf_big_large_module_path_for_tests(&conf_big_root);
+    if !module_path.exists() {
+        if allow_fixture_skip {
+            eprintln!(
+                "skipping p36 real conf_big gate: module fixture is missing and BSL_TEST_ALLOW_MISSING_CONF_BIG is set: {}",
+                module_path.display()
+            );
+            return;
+        }
+        panic!(
+            "conf_big module fixture is missing: {}; set BSL_TEST_ALLOW_MISSING_CONF_BIG=1 to skip explicitly",
+            module_path.display()
+        );
+    }
+
+    let module_text =
+        std::fs::read_to_string(&module_path).expect("read conf_big module text for p36 gate");
+    let phases = real_module_phase_plan_from_env();
+    let required_warm_samples = real_module_required_warm_samples_from_env();
+    let churn_mode = scale_aware_churn_mode_from_env();
+    let churn_every = scale_aware_churn_every_from_env();
+    let observability_probe = real_module_observability_probe_from_env();
+    let workspace_setup = ScaleAwareWorkspaceSetup {
+        platform_docs_archive: syntax_helper_path_for_tests(),
+        configuration_path: conf_big_root.clone(),
+        platform_version: "8.3.25".to_string(),
+    };
+    let profile = run_scale_aware_profile(
+        "large",
+        Url::from_file_path(&module_path).expect("real conf_big module uri"),
+        module_text.clone(),
+        find_utf16_position_after_marker(&module_text, "Объект."),
+        &phases,
+        churn_mode,
+        churn_every,
+        Some(&workspace_setup),
+        Some(observability_probe),
+    )
+    .await;
+
+    let mut report = serde_json::json!({
+        "change_id": "refactor-ir-canonical-semantic-pipeline",
+        "profile": "p36_real_conf_big_completion_and_observability_gate_live",
+        "schema_version": 1,
+        "configuration_path": conf_big_root,
+        "module_path": module_path,
+        "phases": phases.iter().map(|phase| {
+            serde_json::json!({
+                "name": phase.name,
+                "warmup": phase.warmup,
+                "iterations": phase.iterations
+            })
+        }).collect::<Vec<_>>(),
+        "churn": {
+            "mode": churn_mode.as_str(),
+            "every": churn_every
+        },
+        "requirements": {
+            "required_warm_samples": required_warm_samples
+        },
+        "observability_probe": {
+            "every": observability_probe.every,
+            "timeout_ms": observability_probe.timeout.as_millis(),
+        },
+        "profile_report": profile,
+    });
+
+    let report_path = std::env::var("BSL_V2_REAL_MODULE_GATE_REPORT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("tests")
+                .join("perf")
+                .join("reports")
+                .join("real-conf-big-completion-observability-live.json")
+        });
+    if let Some(parent) = report_path.parent() {
+        std::fs::create_dir_all(parent)
+            .expect("failed to create directory for p36 real-module report");
+    }
+
+    let warm_completion_total =
+        get_report_u64(&report, &["profile_report", "warm", "completion_total"])
+            .expect("real-module warm completion_total");
+    let warm_fail_closed_total = get_report_u64(
+        &report,
+        &[
+            "profile_report",
+            "warm",
+            "completion_outcomes",
+            "fail_closed",
+        ],
+    )
+    .expect("real-module warm fail_closed");
+    let warm_ok_non_empty_total = get_report_u64(
+        &report,
+        &[
+            "profile_report",
+            "warm",
+            "completion_outcomes",
+            "ok_non_empty",
+        ],
+    )
+    .expect("real-module warm ok_non_empty");
+    let warm_observability_timeout_total = get_report_u64(
+        &report,
+        &[
+            "profile_report",
+            "warm",
+            "observability_sidebar_probe",
+            "timeout_total",
+        ],
+    )
+    .expect("real-module warm observability timeout_total");
+    report["summary"] = serde_json::json!({
+        "warm_completion_total": warm_completion_total,
+        "warm_fail_closed_total": warm_fail_closed_total,
+        "warm_ok_non_empty_total": warm_ok_non_empty_total,
+        "warm_observability_timeout_total": warm_observability_timeout_total,
+    });
+
+    std::fs::write(
+        &report_path,
+        serde_json::to_string_pretty(&report).expect("serialize p36 real-module report"),
+    )
+    .expect("write p36 real-module report");
+    println!("p36_real_module_gate_report={}", report_path.display());
+
+    assert!(
+        warm_completion_total >= required_warm_samples,
+        "expected >={required_warm_samples} warm completion samples for real module, got {}",
+        warm_completion_total
     );
 }

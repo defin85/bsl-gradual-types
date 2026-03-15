@@ -113,6 +113,34 @@ function getFileSizeMB(filePath) {
     }
 }
 
+function makeAtomicTempPath(targetPath) {
+    return path.join(
+        path.dirname(targetPath),
+        `.${path.basename(targetPath)}.tmp-${process.pid}-${Date.now()}`
+    );
+}
+
+function atomicReplaceFile(sourcePath, targetPath, fsImpl = fs) {
+    const tempPath = makeAtomicTempPath(targetPath);
+    let tempWritten = false;
+
+    try {
+        fsImpl.copyFileSync(sourcePath, tempPath);
+        tempWritten = true;
+        fsImpl.renameSync(tempPath, targetPath);
+        tempWritten = false;
+    } catch (error) {
+        if (tempWritten) {
+            try {
+                fsImpl.unlinkSync(tempPath);
+            } catch {
+                // Fail-closed on the original replacement error; temp cleanup is best-effort.
+            }
+        }
+        throw error;
+    }
+}
+
 /**
  * Проверяет актуальность бинарника
  */
@@ -132,7 +160,11 @@ function isBinaryUpToDate(sourcePath, targetPath) {
  */
 function copyBinary(sourcePath, targetPath, binaryName) {
     try {
-        fs.copyFileSync(sourcePath, targetPath);
+        if (isWindows) {
+            fs.copyFileSync(sourcePath, targetPath);
+        } else {
+            atomicReplaceFile(sourcePath, targetPath);
+        }
         const size = getFileSizeMB(targetPath);
         log(`  ✅ Скопирован ${binaryName} (${size} MB)`, colors.green);
         return true;
@@ -359,5 +391,13 @@ function main() {
     }
 }
 
-// Запуск
-main();
+if (require.main === module) {
+    main();
+}
+
+module.exports = {
+    atomicReplaceFile,
+    copyBinary,
+    main,
+    makeAtomicTempPath,
+};

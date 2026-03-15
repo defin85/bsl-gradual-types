@@ -20,7 +20,7 @@ use crate::types::{
     AutoReindexCommandParams, AutoReindexStateResponse, BuildIndexParams, BuildIndexResponse,
     CompletionTimelineRequest, CompletionTimelineResponse, GetCurrentContextParams,
     GetIndexStateParams, GetIndexStateResponse, IncrementalUpdateParams, IncrementalUpdateResponse,
-    ObservabilityMetricsResponse, WorkspaceStatsResponse,
+    ObservabilityMetricsRequest, ObservabilityMetricsResponse, WorkspaceStatsResponse,
 };
 
 use super::{BslLanguageServer, FullIndexOperationKind, FullIndexStateKind};
@@ -450,9 +450,15 @@ impl BslLanguageServer {
     /// Custom request: bsl/getObservabilityMetrics
     pub(crate) async fn handle_get_observability_metrics(
         &self,
+        request: ObservabilityMetricsRequest,
     ) -> JsonRpcResult<ObservabilityMetricsResponse> {
+        let metrics = if request.shape.as_deref() == Some("sidebar") {
+            self.coordinator.observability_metrics_sidebar()
+        } else {
+            self.coordinator.observability_metrics()
+        };
         Ok(ObservabilityMetricsResponse {
-            metrics: self.coordinator.observability_metrics(),
+            metrics,
         })
     }
 

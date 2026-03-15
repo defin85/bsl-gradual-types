@@ -6,6 +6,7 @@ import {
     buildIndex,
     getIndexState,
     getObservabilityMetrics,
+    getObservabilityMetricsWithRequest,
     getCompletionTimeline,
     resetCompletionTimelineSupportCacheForTests,
     validateMethod,
@@ -203,6 +204,25 @@ suite('LSP Custom Requests Test Suite', () => {
                         ]
                     });
                 }
+
+                if (command === 'bsl.getObservabilityMetrics') {
+                    return Promise.resolve({
+                        metrics: {
+                            uptime_seconds: 42,
+                            counters: { completion_total: 3 },
+                            gauges: { queue_depth: 0 },
+                            histograms: {
+                                intellisense_v2_ir_query_completion_ms: {
+                                    count: 1,
+                                    p50: 12,
+                                    p95: 12,
+                                    p99: 12
+                                }
+                            },
+                            rates: { completion_error_rate: 0 }
+                        }
+                    });
+                }
             }
 
             return Promise.resolve(null);
@@ -386,6 +406,22 @@ suite('LSP Custom Requests Test Suite', () => {
         } finally {
             clock.restore();
         }
+    });
+
+    test('getObservabilityMetricsWithRequest should forward shape argument', async function() {
+        this.timeout(5000);
+
+        sendRequestStub.resetHistory();
+        const result = await getObservabilityMetricsWithRequest({ shape: 'sidebar' });
+
+        assert.ok(result);
+        const call = sendRequestStub.getCall(0);
+        assert.ok(call, 'sendRequest should be called');
+        assert.strictEqual(call.args[0], 'workspace/executeCommand');
+        assert.deepStrictEqual(call.args[1], {
+            command: 'bsl.getObservabilityMetrics',
+            arguments: [{ shape: 'sidebar' }]
+        });
     });
 
     /**

@@ -1,5 +1,17 @@
 use super::*;
 
+const SIDEBAR_HISTOGRAM_KEYS: &[&str] = &[
+    "intellisense_v2_wait_for_file_version_completion_ms",
+    "intellisense_v2_snapshot_completion_ms",
+    "intellisense_v2_ir_query_completion_ms",
+    "intellisense_v2_wait_for_file_version_hover_ms",
+    "intellisense_v2_snapshot_hover_ms",
+    "intellisense_v2_ir_query_hover_ms",
+    "intellisense_v2_wait_for_file_version_diagnostics_ms",
+    "intellisense_v2_syntax_diagnostics_query_ms",
+    "intellisense_v2_semantic_diagnostics_query_ms",
+];
+
 impl StructuredLogger {
     pub(super) fn new() -> Self {
         Self {}
@@ -99,24 +111,46 @@ impl SimpleMetrics {
         }
     }
 
-    /// Экспорт всех метрик (для health endpoints)
-    pub fn export_metrics(&self) -> serde_json::Value {
-        let counters = self
-            .counters
+    fn clone_counters(&self) -> HashMap<String, u64> {
+        self.counters
             .lock()
             .map(|c| c.clone())
-            .unwrap_or_else(|_| HashMap::new());
-        let gauges = self
-            .gauges
+            .unwrap_or_else(|_| HashMap::new())
+    }
+
+    fn clone_gauges(&self) -> HashMap<String, f64> {
+        self.gauges
             .lock()
             .map(|g| g.clone())
-            .unwrap_or_else(|_| HashMap::new());
-        let histograms = self
-            .histograms
+            .unwrap_or_else(|_| HashMap::new())
+    }
+
+    fn clone_histograms(&self) -> HashMap<String, Vec<f64>> {
+        self.histograms
             .lock()
             .map(|h| h.clone())
-            .unwrap_or_else(|_| HashMap::new());
+            .unwrap_or_else(|_| HashMap::new())
+    }
 
+    fn clone_histograms_by_name(&self, names: &[&str]) -> HashMap<String, Vec<f64>> {
+        self.histograms
+            .lock()
+            .map(|histograms| {
+                names.iter()
+                    .filter_map(|name| {
+                        histograms
+                            .get(*name)
+                            .cloned()
+                            .map(|values| ((*name).to_string(), values))
+                    })
+                    .collect()
+            })
+            .unwrap_or_else(|_| HashMap::new())
+    }
+
+    fn build_histogram_stats(
+        histograms: HashMap<String, Vec<f64>>,
+    ) -> HashMap<String, serde_json::Value> {
         let mut histogram_stats = HashMap::new();
         for (name, mut values) in histograms {
             if values.is_empty() {
@@ -146,25 +180,28 @@ impl SimpleMetrics {
                 }),
             );
         }
+        histogram_stats
+    }
 
+    fn build_rates(counters: &HashMap<String, u64>) -> HashMap<String, f64> {
         let mut rates = HashMap::new();
         if let Some(rate) =
-            compute_rate(&counters, "completion_incomplete_total", "completion_total")
+            compute_rate(counters, "completion_incomplete_total", "completion_total")
         {
             rates.insert("completion_incomplete_rate".to_string(), rate);
         }
-        if let Some(rate) = compute_rate(&counters, "completion_error_total", "completion_total") {
+        if let Some(rate) = compute_rate(counters, "completion_error_total", "completion_total") {
             rates.insert("completion_error_rate".to_string(), rate);
         }
         if let Some(rate) = compute_rate(
-            &counters,
+            counters,
             "signature_help_empty_total",
             "signature_help_total",
         ) {
             rates.insert("signature_help_empty_rate".to_string(), rate);
         }
         let parse_result_leader = sum_counters_with_all_substrings(
-            &counters,
+            counters,
             &[
                 "intellisense_v2_drilldown_singleflight_effectiveness_total",
                 "_outcome_leader_",
@@ -172,7 +209,7 @@ impl SimpleMetrics {
             ],
         );
         let parse_result_shared = sum_counters_with_all_substrings(
-            &counters,
+            counters,
             &[
                 "intellisense_v2_drilldown_singleflight_effectiveness_total",
                 "_outcome_shared_",
@@ -187,7 +224,7 @@ impl SimpleMetrics {
             );
         }
         let parse_result_cancelled = sum_counters_with_all_substrings(
-            &counters,
+            counters,
             &[
                 "intellisense_v2_drilldown_stage_reason_total",
                 "_stage_parse_result_query_",
@@ -202,7 +239,16 @@ impl SimpleMetrics {
                 );
             }
         }
+        rates
+    }
 
+    fn build_metrics_payload(
+        &self,
+        counters: HashMap<String, u64>,
+        gauges: HashMap<String, f64>,
+        histogram_stats: HashMap<String, serde_json::Value>,
+    ) -> serde_json::Value {
+        let rates = Self::build_rates(&counters);
         json!({
             "counters": counters,
             "gauges": gauges,
@@ -210,5 +256,23 @@ impl SimpleMetrics {
             "rates": rates,
             "uptime_seconds": self.uptime().as_secs()
         })
+    }
+
+    /// Экспорт всех метрик (для health endpoints)
+    pub fn export_metrics(&self) -> serde_json::Value {
+        let counters = self.clone_counters();
+        let gauges = self.clone_gauges();
+        let histograms = self.clone_histograms();
+        let histogram_stats = Self::build_histogram_stats(histograms);
+        self.build_metrics_payload(counters, gauges, histogram_stats)
+    }
+
+    /// Экспорт lightweight snapshot для sidebar polling.
+    pub fn export_metrics_sidebar(&self) -> serde_json::Value {
+        let counters = self.clone_counters();
+        let gauges = self.clone_gauges();
+        let histograms = self.clone_histograms_by_name(SIDEBAR_HISTOGRAM_KEYS);
+        let histogram_stats = Self::build_histogram_stats(histograms);
+        self.build_metrics_payload(counters, gauges, histogram_stats)
     }
 }

@@ -423,7 +423,17 @@ impl BslLanguageServer {
                 })?))
             }
             "bsl.getObservabilityMetrics" => {
-                let result = self.handle_get_observability_metrics().await?;
+                let request = if params.arguments.is_empty() {
+                    crate::types::ObservabilityMetricsRequest::default()
+                } else {
+                    serde_json::from_value(params.arguments[0].clone()).map_err(|e| {
+                        tower_lsp::jsonrpc::Error::invalid_params(format!(
+                            "Invalid parameters: {}",
+                            e
+                        ))
+                    })?
+                };
+                let result = self.handle_get_observability_metrics(request).await?;
                 Ok(Some(serde_json::to_value(result).map_err(|_| {
                     tower_lsp::jsonrpc::Error::internal_error()
                 })?))

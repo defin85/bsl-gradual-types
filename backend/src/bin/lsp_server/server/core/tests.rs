@@ -8751,6 +8751,61 @@ async fn p22_get_observability_metrics_exposes_syntax_diagnostics_mode_drilldown
 }
 
 #[tokio::test]
+async fn p22_get_observability_metrics_sidebar_shape_filters_unrelated_histograms() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    coordinator.record_completion_latency(Duration::from_millis(33));
+    coordinator.record_intellisense_v2_ir_query_latency(
+        "completion",
+        Duration::from_millis(21),
+    );
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        move |client| BslLanguageServer::new(client, coordinator.clone())
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let execute = Request::build("workspace/executeCommand")
+        .id(2203)
+        .params(serde_json::json!({
+            "command": "bsl.getObservabilityMetrics",
+            "arguments": [{
+                "shape": "sidebar",
+            }],
+        }))
+        .finish();
+    let execute_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(execute)
+        .await
+        .expect("workspace/executeCommand request")
+        .expect("workspace/executeCommand response");
+
+    let value = serde_json::to_value(&execute_response).expect("serialize response");
+    let result = value.get("result").cloned().expect("result field");
+    let metrics = result.get("metrics").expect("metrics field");
+    let histograms = metrics
+        .get("histograms")
+        .and_then(|value| value.as_object())
+        .expect("metrics.histograms object");
+    assert!(
+        histograms.contains_key("intellisense_v2_ir_query_completion_ms"),
+        "sidebar shape must keep key completion IR histogram"
+    );
+    assert!(
+        !histograms.contains_key("completion_duration_ms"),
+        "sidebar shape must omit unrelated full histograms"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
 async fn p22_get_completion_timeline_exposes_versioned_contract() {
     let coordinator = Arc::new(SystemCoordinator::new());
 

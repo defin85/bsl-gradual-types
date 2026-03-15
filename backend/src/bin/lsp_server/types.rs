@@ -86,6 +86,14 @@ pub struct WorkspaceStatsResponse {
 }
 
 /// Custom request: bsl/getObservabilityMetrics - observability metrics snapshot
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ObservabilityMetricsRequest {
+    #[serde(default)]
+    pub shape: Option<String>,
+}
+
+/// Custom request: bsl/getObservabilityMetrics - observability metrics snapshot
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ObservabilityMetricsResponse {

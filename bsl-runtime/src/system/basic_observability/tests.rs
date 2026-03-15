@@ -82,6 +82,28 @@ fn canonical_wait_stage_projection_matches_legacy_values() {
 }
 
 #[test]
+fn sidebar_metrics_export_filters_histograms_to_sidebar_subset() {
+    let observability = BasicObservability::default();
+    observability.record_completion_latency(Duration::from_millis(33));
+    observability.record_intellisense_v2_ir_query_latency(
+        "completion",
+        Duration::from_millis(21),
+    );
+
+    let exported = observability.get_metrics().export_metrics_sidebar();
+    let histograms = histograms(&exported);
+
+    assert!(
+        histograms.contains_key("intellisense_v2_ir_query_completion_ms"),
+        "sidebar export must keep key observability latency histograms"
+    );
+    assert!(
+        !histograms.contains_key("completion_duration_ms"),
+        "sidebar export must skip unrelated histogram summaries to stay lightweight"
+    );
+}
+
+#[test]
 fn completion_stage_metrics_include_mode_dimension_and_keep_projection_parity() {
     let observability = BasicObservability::default();
 

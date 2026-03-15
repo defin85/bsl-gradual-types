@@ -483,6 +483,10 @@ export interface ObservabilityMetricsResponse {
     metrics: any;
 }
 
+export interface ObservabilityMetricsRequest {
+    shape?: 'full' | 'sidebar';
+}
+
 export type CompletionTimelineStageStatus = 'completed' | 'cancelled' | 'failed' | 'skipped';
 
 export interface CompletionTimelineRequest {
@@ -663,6 +667,12 @@ let observabilityMetricsUnsupportedNotified = false;
 const OBSERVABILITY_METRICS_TIMEOUT_MS = 1500;
 
 export async function getObservabilityMetrics(): Promise<ObservabilityMetricsResponse | null> {
+    return getObservabilityMetricsWithRequest();
+}
+
+export async function getObservabilityMetricsWithRequest(
+    request: ObservabilityMetricsRequest = {}
+): Promise<ObservabilityMetricsResponse | null> {
     if (observabilityMetricsUnsupported) {
         return null;
     }
@@ -674,10 +684,11 @@ export async function getObservabilityMetrics(): Promise<ObservabilityMetricsRes
     }
 
     try {
+        const args = Object.keys(request).length > 0 ? [request] : [];
         const result = await withRequestTimeout(
             client.sendRequest('workspace/executeCommand', {
                 command: 'bsl.getObservabilityMetrics',
-                arguments: [{}]
+                arguments: args
             }),
             OBSERVABILITY_METRICS_TIMEOUT_MS,
             'Observability request'

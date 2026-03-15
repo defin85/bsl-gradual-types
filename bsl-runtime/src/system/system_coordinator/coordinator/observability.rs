@@ -273,6 +273,10 @@ impl SystemCoordinator {
         self.observability.get_metrics().export_metrics()
     }
 
+    pub fn observability_metrics_sidebar(&self) -> Value {
+        self.observability.get_metrics().export_metrics_sidebar()
+    }
+
     pub fn record_signature_help_latency(&self, duration: std::time::Duration) {
         self.observability.record_signature_help_latency(duration);
     }

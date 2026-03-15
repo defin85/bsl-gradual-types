@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { BslOverviewItem } from './items';
 import { BslAnalyzerConfig } from '../config/configHelper';
 import { getLanguageClient } from '../lsp/client';
-import { getObservabilityMetrics } from '../lsp/customRequests';
+import { getObservabilityMetricsWithRequest } from '../lsp/customRequests';
 
 type ObservabilitySection =
     | 'obs-status'
@@ -376,7 +376,7 @@ export class ObservabilityProvider implements vscode.TreeDataProvider<BslOvervie
         }
 
         if (!this.inflight) {
-            this.inflight = getObservabilityMetrics()
+            this.inflight = getObservabilityMetricsWithRequest({ shape: 'sidebar' })
                 .then((response) => {
                     const metrics = asRecord(response?.metrics);
                     this.lastFetchAt = Date.now();

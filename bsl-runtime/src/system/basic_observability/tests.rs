@@ -547,6 +547,21 @@ fn runtime_queue_and_exec_projection_do_not_raise_hint_mismatch() {
         "type_index_precompute_semantic_facts",
         Duration::from_millis(3),
     );
+    observability.record_intellisense_v2_runtime_exec_latency_with_origin(
+        "lsp",
+        "type_index_precompute_semantic_facts_seed_module_context",
+        Duration::from_millis(1),
+    );
+    observability.record_intellisense_v2_runtime_exec_latency_with_origin(
+        "lsp",
+        "type_index_precompute_semantic_facts_local_function_summaries",
+        Duration::from_millis(2),
+    );
+    observability.record_intellisense_v2_runtime_exec_latency_with_origin(
+        "lsp",
+        "type_index_precompute_semantic_facts_visit_statements",
+        Duration::from_millis(9),
+    );
     observability.record_intellisense_v2_runtime_apply_changes_batch_size(4);
     observability.record_intellisense_v2_runtime_apply_changes_changed_files_count(2);
 
@@ -632,6 +647,27 @@ fn runtime_queue_and_exec_projection_do_not_raise_hint_mismatch() {
     assert!(
         counter_value(
             counters,
+            "intellisense_v2_runtime_type_index_precompute_semantic_facts_seed_module_context_exec_total"
+        ) > 0,
+        "type_index precompute semantic-facts seed-module-context exec must not be projected into runtime_other_*"
+    );
+    assert!(
+        counter_value(
+            counters,
+            "intellisense_v2_runtime_type_index_precompute_semantic_facts_local_function_summaries_exec_total"
+        ) > 0,
+        "type_index precompute semantic-facts local-function-summaries exec must not be projected into runtime_other_*"
+    );
+    assert!(
+        counter_value(
+            counters,
+            "intellisense_v2_runtime_type_index_precompute_semantic_facts_visit_statements_exec_total"
+        ) > 0,
+        "type_index precompute semantic-facts visit-statements exec must not be projected into runtime_other_*"
+    );
+    assert!(
+        counter_value(
+            counters,
             "intellisense_v2_runtime_apply_change_set_file_exec_total"
         ) > 0,
         "legacy apply-change set_file exec counter should be projected"
@@ -706,6 +742,27 @@ fn runtime_queue_and_exec_projection_do_not_raise_hint_mismatch() {
     assert!(
         histogram_count(
             histograms,
+            "intellisense_v2_runtime_type_index_precompute_semantic_facts_seed_module_context_exec_ms"
+        ) > 0,
+        "type_index precompute semantic-facts seed-module-context exec histogram must be projected to dedicated metric"
+    );
+    assert!(
+        histogram_count(
+            histograms,
+            "intellisense_v2_runtime_type_index_precompute_semantic_facts_local_function_summaries_exec_ms"
+        ) > 0,
+        "type_index precompute semantic-facts local-function-summaries exec histogram must be projected to dedicated metric"
+    );
+    assert!(
+        histogram_count(
+            histograms,
+            "intellisense_v2_runtime_type_index_precompute_semantic_facts_visit_statements_exec_ms"
+        ) > 0,
+        "type_index precompute semantic-facts visit-statements exec histogram must be projected to dedicated metric"
+    );
+    assert!(
+        histogram_count(
+            histograms,
             "intellisense_v2_runtime_apply_change_set_file_exec_ms"
         ) > 0,
         "legacy apply-change set_file exec histogram should be projected"
@@ -745,6 +802,9 @@ fn runtime_stage_registry_and_projection_contract_require_explicit_updates() {
         "type_index_precompute_ir",
         "type_index_precompute_ast_to_ir",
         "type_index_precompute_semantic_facts",
+        "type_index_precompute_semantic_facts_seed_module_context",
+        "type_index_precompute_semantic_facts_local_function_summaries",
+        "type_index_precompute_semantic_facts_visit_statements",
     ]
     .into_iter()
     .collect();
@@ -787,6 +847,9 @@ fn runtime_stage_registry_and_projection_contract_require_explicit_updates() {
         "type_index_precompute_ir",
         "type_index_precompute_ast_to_ir",
         "type_index_precompute_semantic_facts",
+        "type_index_precompute_semantic_facts_seed_module_context",
+        "type_index_precompute_semantic_facts_local_function_summaries",
+        "type_index_precompute_semantic_facts_visit_statements",
     ]
     .into_iter()
     .collect();

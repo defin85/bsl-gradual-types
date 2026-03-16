@@ -240,6 +240,12 @@ pub struct SemanticDiagnosticsProfiledResult {
 pub struct IrBuildProfile {
     pub ast_to_ir_convert_ms: u128,
     pub semantic_facts_materialize_ms: u128,
+    pub semantic_facts_seed_module_context_ms: u128,
+    pub semantic_facts_local_function_summaries_ms: u128,
+    pub semantic_facts_visit_statements_ms: u128,
+    pub semantic_facts_statement_count: u64,
+    pub semantic_facts_local_function_summary_count: u64,
+    pub semantic_facts_index_entry_count: u64,
     pub total_ms: u128,
 }
 
@@ -322,6 +328,12 @@ pub struct TypeIndexPrecomputeStats {
     pub ir_ms: u128,
     pub ast_to_ir_convert_ms: u128,
     pub semantic_facts_materialize_ms: u128,
+    pub semantic_facts_seed_module_context_ms: u128,
+    pub semantic_facts_local_function_summaries_ms: u128,
+    pub semantic_facts_visit_statements_ms: u128,
+    pub semantic_facts_statement_count: u64,
+    pub semantic_facts_local_function_summary_count: u64,
+    pub semantic_facts_index_entry_count: u64,
     pub build_ms: u128,
     pub evicted_per_file_window_total: u64,
     pub evicted_global_guard_total: u64,

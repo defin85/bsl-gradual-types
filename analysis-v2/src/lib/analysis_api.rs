@@ -159,6 +159,12 @@ impl AnalysisV2 {
                 ir_ms = profiled_ir.profile.total_ms,
                 ast_to_ir_convert_ms = profiled_ir.profile.ast_to_ir_convert_ms,
                 semantic_facts_materialize_ms = profiled_ir.profile.semantic_facts_materialize_ms,
+                semantic_facts_seed_module_context_ms = profiled_ir.profile.semantic_facts_seed_module_context_ms,
+                semantic_facts_local_function_summaries_ms = profiled_ir.profile.semantic_facts_local_function_summaries_ms,
+                semantic_facts_visit_statements_ms = profiled_ir.profile.semantic_facts_visit_statements_ms,
+                semantic_facts_statement_count = profiled_ir.profile.semantic_facts_statement_count,
+                semantic_facts_local_function_summary_count = profiled_ir.profile.semantic_facts_local_function_summary_count,
+                semantic_facts_index_entry_count = profiled_ir.profile.semantic_facts_index_entry_count,
                 "type_index_precompute: ir_profiled ready"
             );
             let program = profiled_ir.program;
@@ -205,6 +211,16 @@ impl AnalysisV2 {
                     ir_ms: ir_profile.total_ms,
                     ast_to_ir_convert_ms: ir_profile.ast_to_ir_convert_ms,
                     semantic_facts_materialize_ms: ir_profile.semantic_facts_materialize_ms,
+                    semantic_facts_seed_module_context_ms: ir_profile
+                        .semantic_facts_seed_module_context_ms,
+                    semantic_facts_local_function_summaries_ms: ir_profile
+                        .semantic_facts_local_function_summaries_ms,
+                    semantic_facts_visit_statements_ms: ir_profile
+                        .semantic_facts_visit_statements_ms,
+                    semantic_facts_statement_count: ir_profile.semantic_facts_statement_count,
+                    semantic_facts_local_function_summary_count: ir_profile
+                        .semantic_facts_local_function_summary_count,
+                    semantic_facts_index_entry_count: ir_profile.semantic_facts_index_entry_count,
                     build_ms: build_profile.total_ms,
                     ..TypeIndexPrecomputeStats::default()
                 },
@@ -232,6 +248,15 @@ impl AnalysisV2 {
                 ir_ms: ir_profile.total_ms,
                 ast_to_ir_convert_ms: ir_profile.ast_to_ir_convert_ms,
                 semantic_facts_materialize_ms: ir_profile.semantic_facts_materialize_ms,
+                semantic_facts_seed_module_context_ms: ir_profile.semantic_facts_seed_module_context_ms,
+                semantic_facts_local_function_summaries_ms: ir_profile
+                    .semantic_facts_local_function_summaries_ms,
+                semantic_facts_visit_statements_ms: ir_profile
+                    .semantic_facts_visit_statements_ms,
+                semantic_facts_statement_count: ir_profile.semantic_facts_statement_count,
+                semantic_facts_local_function_summary_count: ir_profile
+                    .semantic_facts_local_function_summary_count,
+                semantic_facts_index_entry_count: ir_profile.semantic_facts_index_entry_count,
                 build_ms: build_profile.total_ms,
                 evicted_per_file_window_total: store_outcome.evicted_per_file_window_total,
                 evicted_global_guard_total: store_outcome.evicted_global_guard_total,
@@ -697,6 +722,7 @@ impl AnalysisV2 {
                 ast_to_ir_convert_ms: 0,
                 semantic_facts_materialize_ms: 0,
                 total_ms: ir_started.elapsed().as_millis(),
+                ..IrBuildProfile::default()
             },
         }))
     }

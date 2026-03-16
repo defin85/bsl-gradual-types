@@ -426,6 +426,28 @@ impl BslLanguageServer {
                         "type_index_precompute_semantic_facts",
                         duration_from_millis_u128(result.stats.semantic_facts_materialize_ms),
                     );
+                self.coordinator
+                    .record_intellisense_v2_runtime_exec_latency_with_origin(
+                        bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                        "type_index_precompute_semantic_facts_seed_module_context",
+                        duration_from_millis_u128(
+                            result.stats.semantic_facts_seed_module_context_ms,
+                        ),
+                    );
+                self.coordinator
+                    .record_intellisense_v2_runtime_exec_latency_with_origin(
+                        bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                        "type_index_precompute_semantic_facts_local_function_summaries",
+                        duration_from_millis_u128(
+                            result.stats.semantic_facts_local_function_summaries_ms,
+                        ),
+                    );
+                self.coordinator
+                    .record_intellisense_v2_runtime_exec_latency_with_origin(
+                        bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                        "type_index_precompute_semantic_facts_visit_statements",
+                        duration_from_millis_u128(result.stats.semantic_facts_visit_statements_ms),
+                    );
                 debug!(
                     file_id = key.file_id.0,
                     requested_version = key.requested_version,
@@ -436,6 +458,17 @@ impl BslLanguageServer {
                     ir_ms = result.stats.ir_ms,
                     ast_to_ir_convert_ms = result.stats.ast_to_ir_convert_ms,
                     semantic_facts_materialize_ms = result.stats.semantic_facts_materialize_ms,
+                    semantic_facts_seed_module_context_ms =
+                        result.stats.semantic_facts_seed_module_context_ms,
+                    semantic_facts_local_function_summaries_ms =
+                        result.stats.semantic_facts_local_function_summaries_ms,
+                    semantic_facts_visit_statements_ms =
+                        result.stats.semantic_facts_visit_statements_ms,
+                    semantic_facts_statement_count = result.stats.semantic_facts_statement_count,
+                    semantic_facts_local_function_summary_count =
+                        result.stats.semantic_facts_local_function_summary_count,
+                    semantic_facts_index_entry_count =
+                        result.stats.semantic_facts_index_entry_count,
                     build_ms = result.stats.build_ms,
                     evicted_per_file_window_total = result.stats.evicted_per_file_window_total,
                     evicted_global_guard_total = result.stats.evicted_global_guard_total,

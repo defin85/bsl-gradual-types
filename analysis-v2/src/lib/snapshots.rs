@@ -680,7 +680,7 @@ fn build_ir_from_parsed_profiled(
                 file_path,
                 "ir_build: semantic_facts start"
             );
-            type_inference_v2::materialize_semantic_facts_with_path_profiled(
+            let profile = type_inference_v2::materialize_semantic_facts_with_path_profiled(
                 &mut program,
                 &parsed.program,
                 source,
@@ -694,6 +694,12 @@ fn build_ir_from_parsed_profiled(
                 file_path,
                 ast_to_ir_convert_ms,
                 semantic_facts_materialize_ms,
+                semantic_facts_seed_module_context_ms = profile.seed_module_context_ms,
+                semantic_facts_local_function_summaries_ms = profile.local_function_summaries_ms,
+                semantic_facts_visit_statements_ms = profile.visit_statements_ms,
+                semantic_facts_statement_count = profile.statement_count,
+                semantic_facts_local_function_summary_count = profile.local_function_summary_count,
+                semantic_facts_index_entry_count = profile.index_entry_count,
                 total_ms,
                 "ir_build: semantic_facts finished"
             );
@@ -702,6 +708,12 @@ fn build_ir_from_parsed_profiled(
                 profile: IrBuildProfile {
                     ast_to_ir_convert_ms,
                     semantic_facts_materialize_ms,
+                    semantic_facts_seed_module_context_ms: profile.seed_module_context_ms,
+                    semantic_facts_local_function_summaries_ms: profile.local_function_summaries_ms,
+                    semantic_facts_visit_statements_ms: profile.visit_statements_ms,
+                    semantic_facts_statement_count: profile.statement_count,
+                    semantic_facts_local_function_summary_count: profile.local_function_summary_count,
+                    semantic_facts_index_entry_count: profile.index_entry_count,
                     total_ms,
                 },
             }
@@ -716,6 +728,7 @@ fn build_ir_from_parsed_profiled(
                     ast_to_ir_convert_ms: convert_started.elapsed().as_millis(),
                     semantic_facts_materialize_ms: 0,
                     total_ms: started.elapsed().as_millis(),
+                    ..IrBuildProfile::default()
                 },
             }
         }

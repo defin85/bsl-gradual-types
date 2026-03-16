@@ -89,6 +89,18 @@ pub(super) const RUNTIME_STAGE_KIND_REGISTRY: &[(&str, &str)] = &[
         "type_index_precompute_semantic_facts",
         "type_index_precompute_semantic_facts",
     ),
+    (
+        "type_index_precompute_semantic_facts_seed_module_context",
+        "type_index_precompute_semantic_facts_seed_module_context",
+    ),
+    (
+        "type_index_precompute_semantic_facts_local_function_summaries",
+        "type_index_precompute_semantic_facts_local_function_summaries",
+    ),
+    (
+        "type_index_precompute_semantic_facts_visit_statements",
+        "type_index_precompute_semantic_facts_visit_statements",
+    ),
 ];
 
 pub(super) const QUERY_KIND_REGISTRY: &[(&str, &str)] = &[
@@ -374,6 +386,27 @@ pub(super) const LEGACY_RUNTIME_EXEC_METRICS_REGISTRY: &[(&str, (&str, &str))] =
         (
             "intellisense_v2_runtime_type_index_precompute_semantic_facts_exec_total",
             "intellisense_v2_runtime_type_index_precompute_semantic_facts_exec_ms",
+        ),
+    ),
+    (
+        "type_index_precompute_semantic_facts_seed_module_context",
+        (
+            "intellisense_v2_runtime_type_index_precompute_semantic_facts_seed_module_context_exec_total",
+            "intellisense_v2_runtime_type_index_precompute_semantic_facts_seed_module_context_exec_ms",
+        ),
+    ),
+    (
+        "type_index_precompute_semantic_facts_local_function_summaries",
+        (
+            "intellisense_v2_runtime_type_index_precompute_semantic_facts_local_function_summaries_exec_total",
+            "intellisense_v2_runtime_type_index_precompute_semantic_facts_local_function_summaries_exec_ms",
+        ),
+    ),
+    (
+        "type_index_precompute_semantic_facts_visit_statements",
+        (
+            "intellisense_v2_runtime_type_index_precompute_semantic_facts_visit_statements_exec_total",
+            "intellisense_v2_runtime_type_index_precompute_semantic_facts_visit_statements_exec_ms",
         ),
     ),
 ];

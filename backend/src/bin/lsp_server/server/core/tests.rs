@@ -67,6 +67,9 @@ const UNIFIED_STAGE_COUNTER_KEYS: &[&str] = &[
     "intellisense_v2_runtime_type_index_precompute_ir_exec_total",
     "intellisense_v2_runtime_type_index_precompute_ast_to_ir_exec_total",
     "intellisense_v2_runtime_type_index_precompute_semantic_facts_exec_total",
+    "intellisense_v2_runtime_type_index_precompute_semantic_facts_seed_module_context_exec_total",
+    "intellisense_v2_runtime_type_index_precompute_semantic_facts_local_function_summaries_exec_total",
+    "intellisense_v2_runtime_type_index_precompute_semantic_facts_visit_statements_exec_total",
     "intellisense_v2_parse_snapshot_total_origin_lsp_mode_incremental",
     "intellisense_v2_parse_snapshot_total_origin_lsp_mode_reused",
     "intellisense_v2_parse_snapshot_total_origin_lsp_mode_full",
@@ -137,6 +140,9 @@ const UNIFIED_STAGE_HISTOGRAM_KEYS: &[&str] = &[
     "intellisense_v2_runtime_type_index_precompute_ir_exec_ms",
     "intellisense_v2_runtime_type_index_precompute_ast_to_ir_exec_ms",
     "intellisense_v2_runtime_type_index_precompute_semantic_facts_exec_ms",
+    "intellisense_v2_runtime_type_index_precompute_semantic_facts_seed_module_context_exec_ms",
+    "intellisense_v2_runtime_type_index_precompute_semantic_facts_local_function_summaries_exec_ms",
+    "intellisense_v2_runtime_type_index_precompute_semantic_facts_visit_statements_exec_ms",
     "intellisense_v2_runtime_apply_changes_batch_size",
     "intellisense_v2_runtime_apply_changes_changed_files_count",
     "intellisense_v2_completion_owner_hint_index_fetch_will_check_cancellation_per_fetch",
@@ -8978,6 +8984,18 @@ async fn p22_get_observability_metrics_exposes_type_index_precompute_breakdown()
         ("type_index_precompute_ir", 4700_u64),
         ("type_index_precompute_ast_to_ir", 1900_u64),
         ("type_index_precompute_semantic_facts", 2600_u64),
+        (
+            "type_index_precompute_semantic_facts_seed_module_context",
+            120_u64,
+        ),
+        (
+            "type_index_precompute_semantic_facts_local_function_summaries",
+            2300_u64,
+        ),
+        (
+            "type_index_precompute_semantic_facts_visit_statements",
+            180_u64,
+        ),
     ] {
         coordinator.record_intellisense_v2_runtime_exec_latency_with_origin(
             bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
@@ -9024,6 +9042,9 @@ async fn p22_get_observability_metrics_exposes_type_index_precompute_breakdown()
         "intellisense_v2_runtime_type_index_precompute_ir_exec_ms",
         "intellisense_v2_runtime_type_index_precompute_ast_to_ir_exec_ms",
         "intellisense_v2_runtime_type_index_precompute_semantic_facts_exec_ms",
+        "intellisense_v2_runtime_type_index_precompute_semantic_facts_seed_module_context_exec_ms",
+        "intellisense_v2_runtime_type_index_precompute_semantic_facts_local_function_summaries_exec_ms",
+        "intellisense_v2_runtime_type_index_precompute_semantic_facts_visit_statements_exec_ms",
     ] {
         let count = histograms
             .get(key)
@@ -12386,6 +12407,18 @@ fn dominant_stage_from_metrics(metrics: &serde_json::Value) -> serde_json::Value
             "runtime_type_index_precompute_semantic_facts_exec",
             "intellisense_v2_runtime_type_index_precompute_semantic_facts_exec_ms",
         ),
+        (
+            "runtime_type_index_precompute_semantic_facts_seed_module_context_exec",
+            "intellisense_v2_runtime_type_index_precompute_semantic_facts_seed_module_context_exec_ms",
+        ),
+        (
+            "runtime_type_index_precompute_semantic_facts_local_function_summaries_exec",
+            "intellisense_v2_runtime_type_index_precompute_semantic_facts_local_function_summaries_exec_ms",
+        ),
+        (
+            "runtime_type_index_precompute_semantic_facts_visit_statements_exec",
+            "intellisense_v2_runtime_type_index_precompute_semantic_facts_visit_statements_exec_ms",
+        ),
         ("completion_stage_turn_wait", "completion_stage_turn_wait_ms"),
         (
             "completion_stage_prepare_stateful",
@@ -12985,6 +13018,21 @@ async fn run_scale_aware_profile(
             "intellisense_v2_runtime_type_index_precompute_semantic_facts_exec_ms": histogram_metric_value_or_zero(
                 histograms,
                 "intellisense_v2_runtime_type_index_precompute_semantic_facts_exec_ms",
+                None
+            ),
+            "intellisense_v2_runtime_type_index_precompute_semantic_facts_seed_module_context_exec_ms": histogram_metric_value_or_zero(
+                histograms,
+                "intellisense_v2_runtime_type_index_precompute_semantic_facts_seed_module_context_exec_ms",
+                None
+            ),
+            "intellisense_v2_runtime_type_index_precompute_semantic_facts_local_function_summaries_exec_ms": histogram_metric_value_or_zero(
+                histograms,
+                "intellisense_v2_runtime_type_index_precompute_semantic_facts_local_function_summaries_exec_ms",
+                None
+            ),
+            "intellisense_v2_runtime_type_index_precompute_semantic_facts_visit_statements_exec_ms": histogram_metric_value_or_zero(
+                histograms,
+                "intellisense_v2_runtime_type_index_precompute_semantic_facts_visit_statements_exec_ms",
                 None
             ),
             "intellisense_v2_runtime_apply_changes_batch_size": histogram_metric_value_or_zero(
@@ -14067,6 +14115,9 @@ fn scale_aware_dominant_stage_includes_type_index_precompute_breakdown() {
         "intellisense_v2_runtime_type_index_precompute_ir_exec_ms": {"p95": 4700.0},
         "intellisense_v2_runtime_type_index_precompute_ast_to_ir_exec_ms": {"p95": 1900.0},
         "intellisense_v2_runtime_type_index_precompute_semantic_facts_exec_ms": {"p95": 2600.0},
+        "intellisense_v2_runtime_type_index_precompute_semantic_facts_seed_module_context_exec_ms": {"p95": 120.0},
+        "intellisense_v2_runtime_type_index_precompute_semantic_facts_local_function_summaries_exec_ms": {"p95": 4100.0},
+        "intellisense_v2_runtime_type_index_precompute_semantic_facts_visit_statements_exec_ms": {"p95": 320.0},
         "completion_stage_prepare_stateful_ms": {"p95": 121.0}
     });
 
@@ -14084,6 +14135,15 @@ fn scale_aware_dominant_stage_includes_type_index_precompute_breakdown() {
             .and_then(|value| value.as_f64())
             .unwrap_or(0.0),
         4800.0
+    );
+    assert_eq!(
+        dominant
+            .get("candidates_p95_ms")
+            .and_then(|value| value
+                .get("runtime_type_index_precompute_semantic_facts_local_function_summaries_exec"))
+            .and_then(|value| value.as_f64())
+            .unwrap_or(0.0),
+        4100.0
     );
 }
 

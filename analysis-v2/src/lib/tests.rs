@@ -1550,6 +1550,21 @@ fn precompute_type_index_records_ir_build_breakdown_for_parse_snapshot_path() {
         precompute.stats.ir_ms >= precompute.stats.semantic_facts_materialize_ms,
         "IR total must include semantic-facts materialization time"
     );
+    assert_eq!(
+        precompute.stats.semantic_facts_materialize_ms,
+        precompute.stats.semantic_facts_seed_module_context_ms
+            + precompute.stats.semantic_facts_local_function_summaries_ms
+            + precompute.stats.semantic_facts_visit_statements_ms,
+        "semantic-facts total must equal internal breakdown sum for parse-snapshot precompute"
+    );
+    assert!(
+        precompute.stats.semantic_facts_statement_count > 0,
+        "semantic-facts statement count should be populated"
+    );
+    assert!(
+        precompute.stats.semantic_facts_index_entry_count > 0,
+        "semantic-facts index entry count should be populated"
+    );
 }
 
 #[test]

@@ -448,6 +448,18 @@ impl TypeInferencer {
             );
         }
         let visit_statements_ms = visit_statements_started.elapsed().as_millis();
+        tracing::debug!(
+            target: "bsl_backend::analysis_v2",
+            file_path,
+            source_text_len = source_text.map(|text| text.len()).unwrap_or(0),
+            seed_module_context_ms,
+            local_function_summaries_ms,
+            visit_statements_ms,
+            statement_count = program.statements.len(),
+            local_function_summary_count,
+            index_entry_count = facts.type_entries.len(),
+            "semantic_facts: build_facts_internal finished"
+        );
 
         SemanticFactsBuildProfiled {
             profile: TypeIndexBuildProfile {

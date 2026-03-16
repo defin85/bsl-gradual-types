@@ -501,6 +501,31 @@ export interface CompletionTimelineStageTrace {
     duration_ms: number;
 }
 
+export interface CompletionTimelineTurnHolderTrace {
+    request_id?: string;
+    file_seq: number;
+    request_epoch: number;
+    trigger_mode: string;
+    version_hint?: number;
+    age_ms: number;
+}
+
+export interface CompletionTimelineTurnAttributionTrace {
+    request_file_seq: number;
+    request_epoch: number;
+    queue_outcome: string;
+    turn_wait_outcome?: string;
+    queue_capacity: number;
+    queue_depth_before_enqueue: number;
+    queue_depth_after_enqueue: number;
+    queued_completion_ahead_count: number;
+    did_change_ahead_count: number;
+    active_completion_count: number;
+    dropped_completion_file_seq: number[];
+    active_holder?: CompletionTimelineTurnHolderTrace;
+    queued_completion_ahead?: CompletionTimelineTurnHolderTrace;
+}
+
 export interface CompletionTimelineTrace {
     trace_id: string;
     request_id?: string;
@@ -510,6 +535,7 @@ export interface CompletionTimelineTrace {
     started_at_ms: number;
     total_duration_ms: number;
     dominant_stage?: string;
+    turn_attribution?: CompletionTimelineTurnAttributionTrace;
     stages: CompletionTimelineStageTrace[];
 }
 

@@ -19,6 +19,27 @@ suite('Completion Timeline Model Test Suite', () => {
                     started_at_ms: 1_700_000_000_042,
                     total_duration_ms: 48,
                     dominant_stage: 'query_bundle',
+                    turn_attribution: {
+                        request_file_seq: 42,
+                        request_epoch: 7,
+                        queue_outcome: 'enqueued',
+                        turn_wait_outcome: 'ready',
+                        queue_capacity: 256,
+                        queue_depth_before_enqueue: 1,
+                        queue_depth_after_enqueue: 2,
+                        queued_completion_ahead_count: 1,
+                        did_change_ahead_count: 0,
+                        active_completion_count: 1,
+                        dropped_completion_file_seq: [],
+                        active_holder: {
+                            request_id: 'req-41',
+                            file_seq: 41,
+                            request_epoch: 6,
+                            trigger_mode: 'trigger_character',
+                            version_hint: 2,
+                            age_ms: 55,
+                        },
+                    },
                     stages: [
                         { name: 'prepare_stateful', status: 'completed', started_offset_ms: 0, duration_ms: 12 },
                         { name: 'query_bundle', status: 'completed', started_offset_ms: 12, duration_ms: 30 },
@@ -38,6 +59,8 @@ suite('Completion Timeline Model Test Suite', () => {
         assert.strictEqual(state.traces.length, 1);
         assert.strictEqual(state.traces[0].trace_id, 'trace-42');
         assert.strictEqual(state.traces[0].stages.length, 3);
+        assert.strictEqual(state.traces[0].turn_attribution?.queue_outcome, 'enqueued');
+        assert.strictEqual(state.traces[0].turn_attribution?.active_holder?.file_seq, 41);
         assert.ok(state.traces[0].stages.every((stage) => stage.width_percent >= 0));
         assert.ok(state.traces[0].stages.every((stage) => stage.duration_percent >= 0));
         assert.ok(state.average_trace, 'average trace should be available for non-empty payload');

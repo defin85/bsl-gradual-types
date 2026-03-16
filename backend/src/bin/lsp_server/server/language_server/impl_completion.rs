@@ -26,6 +26,7 @@ struct CompletionTimelineCapture {
     trigger_mode: String,
     started_at_ms: u64,
     timeline_cursor_ms: u64,
+    turn_attribution: Option<crate::types::CompletionTimelineTurnAttributionTrace>,
     stages: Vec<crate::types::CompletionTimelineStageTrace>,
 }
 
@@ -45,6 +46,7 @@ impl CompletionTimelineCapture {
             trigger_mode: trigger_mode.to_string(),
             started_at_ms,
             timeline_cursor_ms: 0,
+            turn_attribution: None,
             stages: Vec::new(),
         }
     }
@@ -139,6 +141,13 @@ impl CompletionTimelineCapture {
         self.push_stage("terminal", status, std::time::Duration::from_millis(0));
     }
 
+    fn set_turn_attribution(
+        &mut self,
+        attribution: crate::types::CompletionTimelineTurnAttributionTrace,
+    ) {
+        self.turn_attribution = Some(attribution);
+    }
+
     fn into_trace(
         self,
         trace_id: String,
@@ -169,8 +178,44 @@ impl CompletionTimelineCapture {
             started_at_ms: self.started_at_ms,
             total_duration_ms,
             dominant_stage,
+            turn_attribution: self.turn_attribution,
             stages: self.stages,
         }
+    }
+}
+
+fn turn_holder_snapshot_to_trace(
+    holder: super::super::completion_dispatcher::CompletionTurnHolderSnapshot,
+) -> crate::types::CompletionTimelineTurnHolderTrace {
+    crate::types::CompletionTimelineTurnHolderTrace {
+        request_id: holder.request_id,
+        file_seq: holder.file_seq,
+        request_epoch: holder.request_epoch,
+        trigger_mode: holder.trigger_mode,
+        version_hint: holder.version_hint,
+        age_ms: CompletionTimelineCapture::duration_to_ms(holder.age),
+    }
+}
+
+fn dispatch_attribution_to_trace(
+    attribution: super::super::completion_dispatcher::CompletionDispatchAttributionSnapshot,
+) -> crate::types::CompletionTimelineTurnAttributionTrace {
+    crate::types::CompletionTimelineTurnAttributionTrace {
+        request_file_seq: attribution.request_file_seq,
+        request_epoch: attribution.request_epoch,
+        queue_outcome: attribution.queue_outcome.as_str().to_string(),
+        turn_wait_outcome: None,
+        queue_capacity: attribution.queue_capacity,
+        queue_depth_before_enqueue: attribution.queue_depth_before_enqueue,
+        queue_depth_after_enqueue: attribution.queue_depth_after_enqueue,
+        queued_completion_ahead_count: attribution.queued_completion_ahead_count,
+        did_change_ahead_count: attribution.did_change_ahead_count,
+        active_completion_count: attribution.active_completion_count,
+        dropped_completion_file_seq: attribution.dropped_completion_file_seq,
+        active_holder: attribution.active_holder.map(turn_holder_snapshot_to_trace),
+        queued_completion_ahead: attribution
+            .queued_completion_ahead
+            .map(turn_holder_snapshot_to_trace),
     }
 }
 
@@ -390,7 +435,15 @@ impl BslLanguageServer {
             _completion_request_registration,
             completion_cancellation_token,
             mut completion_drop_guard,
+            mut completion_active_turn_guard,
+            completion_dispatch_attribution,
         ) = if event_driven_guards_enabled {
+            let completion_request_metadata =
+                super::super::completion_dispatcher::CompletionRequestMetadata {
+                    request_id: completion_request_id.clone(),
+                    version_hint,
+                    trigger_mode: trigger_mode.to_string(),
+                };
             let completion_dispatch = self
                 .completion_dispatcher_v2
                 .emit_completion_request_with_turn(
@@ -408,6 +461,8 @@ impl BslLanguageServer {
                     completion_ticket.request_epoch,
                 )
             });
+            let mut completion_dispatch_attribution =
+                dispatch_attribution_to_trace(completion_dispatch.attribution);
             let completion_cancellation_token = completion_request_registration
                 .as_ref()
                 .map(|registration| registration.token());
@@ -437,16 +492,41 @@ impl BslLanguageServer {
                     self.coordinator
                         .record_completion_stage_latency("turn_wait", turn_wait_elapsed);
                     timeline_capture.push_completed_stage("turn_wait", turn_wait_elapsed);
+                    completion_dispatch_attribution.turn_wait_outcome =
+                        Some(turn_outcome.as_str().to_string());
                     turn_outcome
                 } else {
+                    completion_dispatch_attribution.turn_wait_outcome = Some(
+                        super::super::completion_dispatcher::CompletionTurnOutcome::QueueRejected
+                            .as_str()
+                            .to_string(),
+                    );
                     super::super::completion_dispatcher::CompletionTurnOutcome::QueueRejected
                 };
+            let completion_active_turn_guard = if matches!(
+                completion_turn_outcome,
+                super::super::completion_dispatcher::CompletionTurnOutcome::Ready
+            ) {
+                let _ = self
+                    .completion_dispatcher_v2
+                    .mark_completion_active(file_id, completion_ticket, completion_request_metadata)
+                    .await;
+                Some(super::helpers::CompletionActiveTurnGuard::new(
+                    file_id,
+                    completion_ticket.file_seq,
+                    Arc::clone(&self.completion_dispatcher_v2),
+                ))
+            } else {
+                None
+            };
             (
                 completion_ticket,
                 Some(completion_turn_outcome),
                 completion_request_registration,
                 completion_cancellation_token,
                 completion_drop_guard,
+                completion_active_turn_guard,
+                Some(completion_dispatch_attribution),
             )
         } else {
             (
@@ -460,8 +540,13 @@ impl BslLanguageServer {
                 None,
                 None,
                 None,
+                None,
+                None,
             )
         };
+        if let Some(turn_attribution) = completion_dispatch_attribution {
+            timeline_capture.set_turn_attribution(turn_attribution);
+        }
         let snippet_support = *self.completion_snippet_support.read().await;
         #[cfg(test)]
         if let Some(delay_ms) = std::env::var("BSL_TEST_COMPLETION_DELAY_MS")
@@ -1324,6 +1409,7 @@ impl BslLanguageServer {
         if let Some(drop_guard) = completion_drop_guard.as_mut() {
             drop_guard.disarm();
         }
+        drop(completion_active_turn_guard.take());
         Ok(completion.map(|result| result.response))
     }
 }

@@ -8,6 +8,13 @@ use tokio::sync::{oneshot, Mutex as TokioMutex, Notify};
 use tokio::task::JoinHandle;
 
 #[derive(Debug, Clone)]
+pub(crate) struct CompletionRequestMetadata {
+    pub request_id: Option<String>,
+    pub version_hint: Option<i32>,
+    pub trigger_mode: String,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct CompletionEventEnvelope {
     pub file_id: V2FileId,
     pub file_seq: u64,
@@ -47,6 +54,21 @@ pub(crate) enum QueueEnqueueOutcome {
     Closed,
 }
 
+impl QueueEnqueueOutcome {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Enqueued => "enqueued",
+            Self::CoalescedDidChange => "coalesced_did_change",
+            Self::CoalescedCancel => "coalesced_cancel",
+            Self::EvictedStaleCompletion => "evicted_stale_completion",
+            Self::EvictedNonCancelForCancel => "evicted_non_cancel_for_cancel",
+            Self::EvictedCancelForCancel => "evicted_cancel_for_cancel",
+            Self::Full => "full",
+            Self::Closed => "closed",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct DispatchTicket {
     pub file_seq: u64,
@@ -59,6 +81,16 @@ pub(crate) enum CompletionTurnOutcome {
     Ready,
     SupersededBeforeStart,
     QueueRejected,
+}
+
+impl CompletionTurnOutcome {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Ready => "ready",
+            Self::SupersededBeforeStart => "superseded_before_start",
+            Self::QueueRejected => "queue_rejected",
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -78,6 +110,33 @@ impl CompletionTurnWaiter {
 pub(crate) struct CompletionRequestDispatch {
     pub ticket: DispatchTicket,
     pub turn_waiter: Option<CompletionTurnWaiter>,
+    pub attribution: CompletionDispatchAttributionSnapshot,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CompletionTurnHolderSnapshot {
+    pub request_id: Option<String>,
+    pub file_seq: u64,
+    pub request_epoch: u64,
+    pub trigger_mode: String,
+    pub version_hint: Option<i32>,
+    pub age: Duration,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CompletionDispatchAttributionSnapshot {
+    pub request_file_seq: u64,
+    pub request_epoch: u64,
+    pub queue_outcome: QueueEnqueueOutcome,
+    pub queue_capacity: usize,
+    pub queue_depth_before_enqueue: usize,
+    pub queue_depth_after_enqueue: usize,
+    pub queued_completion_ahead_count: usize,
+    pub did_change_ahead_count: usize,
+    pub active_completion_count: usize,
+    pub dropped_completion_file_seq: Vec<u64>,
+    pub active_holder: Option<CompletionTurnHolderSnapshot>,
+    pub queued_completion_ahead: Option<CompletionTurnHolderSnapshot>,
 }
 
 #[derive(Debug, Default)]
@@ -221,6 +280,49 @@ impl CompletionEventQueue {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         state.entries.iter().cloned().collect()
+    }
+
+    fn summary(&self, now: Instant) -> CompletionEventQueueSummary {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut completion_request_count = 0usize;
+        let mut did_change_count = 0usize;
+        let mut first_completion = None;
+        for entry in state.entries.iter() {
+            match &entry.payload {
+                CompletionEventPayload::CompletionRequest {
+                    request_id,
+                    version_hint,
+                    trigger_mode,
+                } => {
+                    completion_request_count = completion_request_count.saturating_add(1);
+                    if first_completion.is_none() {
+                        first_completion = Some(CompletionTurnHolderSnapshot {
+                            request_id: request_id.clone(),
+                            file_seq: entry.file_seq,
+                            request_epoch: entry.request_epoch,
+                            trigger_mode: trigger_mode.clone(),
+                            version_hint: *version_hint,
+                            age: now.saturating_duration_since(entry.received_at),
+                        });
+                    }
+                }
+                CompletionEventPayload::DidChange { .. } => {
+                    did_change_count = did_change_count.saturating_add(1);
+                }
+                CompletionEventPayload::DidOpen { .. }
+                | CompletionEventPayload::Cancel { .. }
+                | CompletionEventPayload::DidClose => {}
+            }
+        }
+        CompletionEventQueueSummary {
+            depth: state.entries.len(),
+            completion_request_count,
+            did_change_count,
+            first_completion,
+        }
     }
 
     fn apply_pre_enqueue_policy(
@@ -499,6 +601,24 @@ impl CompletionTurnState {
     }
 }
 
+#[derive(Debug, Clone)]
+struct CompletionEventQueueSummary {
+    depth: usize,
+    completion_request_count: usize,
+    did_change_count: usize,
+    first_completion: Option<CompletionTurnHolderSnapshot>,
+}
+
+#[derive(Debug, Clone)]
+struct ActiveCompletionEntry {
+    request_id: Option<String>,
+    file_seq: u64,
+    request_epoch: u64,
+    trigger_mode: String,
+    version_hint: Option<i32>,
+    started_at: Instant,
+}
+
 #[derive(Debug)]
 struct PerFileDispatcher {
     queue: CompletionEventQueue,
@@ -506,6 +626,7 @@ struct PerFileDispatcher {
     latest_request_epoch: u64,
     latest_request_epoch_shared: Arc<AtomicU64>,
     turn_state: Arc<Mutex<CompletionTurnState>>,
+    active_completions: Arc<Mutex<HashMap<u64, ActiveCompletionEntry>>>,
     drain_task: JoinHandle<()>,
 }
 
@@ -517,6 +638,7 @@ impl PerFileDispatcher {
         let turn_state = Arc::new(Mutex::new(CompletionTurnState {
             waiters: HashMap::new(),
         }));
+        let active_completions = Arc::new(Mutex::new(HashMap::new()));
         let turn_state_for_drain = Arc::clone(&turn_state);
         let latest_epoch_for_drain = Arc::clone(&latest_request_epoch_shared);
         let drain_task = tokio::spawn(async move {
@@ -549,6 +671,7 @@ impl PerFileDispatcher {
             latest_request_epoch: 0,
             latest_request_epoch_shared,
             turn_state,
+            active_completions,
             drain_task,
         }
     }
@@ -597,6 +720,55 @@ impl PerFileDispatcher {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         turn_state.resolve_all(CompletionTurnOutcome::QueueRejected);
+    }
+
+    fn register_active_completion(
+        &self,
+        ticket: DispatchTicket,
+        metadata: CompletionRequestMetadata,
+    ) {
+        let mut active = self
+            .active_completions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        active.insert(
+            ticket.file_seq,
+            ActiveCompletionEntry {
+                request_id: metadata.request_id,
+                file_seq: ticket.file_seq,
+                request_epoch: ticket.request_epoch,
+                trigger_mode: metadata.trigger_mode,
+                version_hint: metadata.version_hint,
+                started_at: Instant::now(),
+            },
+        );
+    }
+
+    fn unregister_active_completion(&self, file_seq: u64) {
+        let mut active = self
+            .active_completions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        active.remove(&file_seq);
+    }
+
+    fn active_snapshot(&self, now: Instant) -> (usize, Option<CompletionTurnHolderSnapshot>) {
+        let active = self
+            .active_completions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let holder = active
+            .values()
+            .min_by_key(|entry| entry.started_at)
+            .map(|entry| CompletionTurnHolderSnapshot {
+                request_id: entry.request_id.clone(),
+                file_seq: entry.file_seq,
+                request_epoch: entry.request_epoch,
+                trigger_mode: entry.trigger_mode.clone(),
+                version_hint: entry.version_hint,
+                age: now.saturating_duration_since(entry.started_at),
+            });
+        (active.len(), holder)
     }
 }
 
@@ -678,6 +850,9 @@ impl CompletionDispatcherRegistry {
         let dispatcher = per_file
             .entry(file_id)
             .or_insert_with(|| PerFileDispatcher::new(self.queue_capacity()));
+        let observed_at = Instant::now();
+        let queue_before = dispatcher.queue.summary(observed_at);
+        let (active_completion_count, active_holder) = dispatcher.active_snapshot(observed_at);
         let payload = CompletionEventPayload::CompletionRequest {
             request_id,
             version_hint,
@@ -696,7 +871,22 @@ impl CompletionDispatcherRegistry {
 
         let (queue_outcome, dropped_completion_file_seq) =
             dispatcher.queue.try_enqueue_with_report(event);
+        let queue_after = dispatcher.queue.summary(observed_at);
         ticket.queue_outcome = queue_outcome;
+        let attribution = CompletionDispatchAttributionSnapshot {
+            request_file_seq: ticket.file_seq,
+            request_epoch: ticket.request_epoch,
+            queue_outcome,
+            queue_capacity: dispatcher.queue.capacity(),
+            queue_depth_before_enqueue: queue_before.depth,
+            queue_depth_after_enqueue: queue_after.depth,
+            queued_completion_ahead_count: queue_before.completion_request_count,
+            did_change_ahead_count: queue_before.did_change_count,
+            active_completion_count,
+            dropped_completion_file_seq: dropped_completion_file_seq.clone(),
+            active_holder,
+            queued_completion_ahead: queue_before.first_completion,
+        };
         let _ = dispatcher.resolve_turn_waiters(
             &dropped_completion_file_seq,
             CompletionTurnOutcome::SupersededBeforeStart,
@@ -710,12 +900,14 @@ impl CompletionDispatcherRegistry {
             return CompletionRequestDispatch {
                 ticket,
                 turn_waiter: None,
+                attribution,
             };
         }
 
         CompletionRequestDispatch {
             ticket,
             turn_waiter: Some(CompletionTurnWaiter { receiver }),
+            attribution,
         }
     }
 
@@ -767,6 +959,29 @@ impl CompletionDispatcherRegistry {
             let _ = tokio::time::timeout(Duration::from_millis(50), dispatcher.drain_task).await;
         }
         Some(ticket)
+    }
+
+    pub(crate) async fn mark_completion_active(
+        &self,
+        file_id: V2FileId,
+        ticket: DispatchTicket,
+        metadata: CompletionRequestMetadata,
+    ) -> bool {
+        let per_file = self.per_file.lock().await;
+        let Some(dispatcher) = per_file.get(&file_id) else {
+            return false;
+        };
+        dispatcher.register_active_completion(ticket, metadata);
+        true
+    }
+
+    pub(crate) async fn mark_completion_inactive(&self, file_id: V2FileId, file_seq: u64) -> bool {
+        let per_file = self.per_file.lock().await;
+        let Some(dispatcher) = per_file.get(&file_id) else {
+            return false;
+        };
+        dispatcher.unregister_active_completion(file_seq);
+        true
     }
 
     async fn emit(&self, file_id: V2FileId, payload: CompletionEventPayload) -> DispatchTicket {

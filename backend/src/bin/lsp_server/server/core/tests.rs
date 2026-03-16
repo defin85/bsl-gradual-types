@@ -9214,6 +9214,7 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
         "started_at_ms",
         "total_duration_ms",
         "dominant_stage",
+        "turn_attribution",
         "stages",
     ] {
         assert!(
@@ -9234,6 +9235,27 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
                 "missing field `{field}` in stage"
             );
         }
+    }
+    let turn_attribution = trace
+        .get("turn_attribution")
+        .and_then(|value| value.as_object())
+        .expect("turn_attribution object");
+    for field in [
+        "request_file_seq",
+        "request_epoch",
+        "queue_outcome",
+        "queue_capacity",
+        "queue_depth_before_enqueue",
+        "queue_depth_after_enqueue",
+        "queued_completion_ahead_count",
+        "did_change_ahead_count",
+        "active_completion_count",
+        "dropped_completion_file_seq",
+    ] {
+        assert!(
+            turn_attribution.contains_key(field),
+            "missing field `{field}` in turn_attribution"
+        );
     }
 
     drain_task.abort();

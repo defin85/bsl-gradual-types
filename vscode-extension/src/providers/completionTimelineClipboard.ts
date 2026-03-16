@@ -77,6 +77,35 @@ export function formatCompletionTimelineTraceForClipboard(
             `unattributed_overhead=${trace.unattributed_overhead_ms}ms | max_stage_end=${trace.max_stage_end_ms}ms`
         );
     }
+    if (trace.turn_attribution) {
+        const turn = trace.turn_attribution;
+        const turnBits = [
+            `turn_request_file_seq=${turn.request_file_seq}`,
+            `turn_request_epoch=${turn.request_epoch}`,
+            `queue_outcome=${turn.queue_outcome}`,
+            `queue_depth=${turn.queue_depth_before_enqueue}->${turn.queue_depth_after_enqueue}/${turn.queue_capacity}`,
+            `queued_completion_ahead=${turn.queued_completion_ahead_count}`,
+            `did_change_ahead=${turn.did_change_ahead_count}`,
+            `active_completion_count=${turn.active_completion_count}`,
+        ];
+        if (turn.turn_wait_outcome) {
+            turnBits.push(`turn_wait_outcome=${turn.turn_wait_outcome}`);
+        }
+        if (turn.dropped_completion_file_seq.length > 0) {
+            turnBits.push(`dropped_completion_file_seq=${turn.dropped_completion_file_seq.join(',')}`);
+        }
+        lines.push(turnBits.join(' | '));
+        if (turn.active_holder) {
+            lines.push(
+                formatTurnHolderLine('active_holder', turn.active_holder)
+            );
+        }
+        if (turn.queued_completion_ahead) {
+            lines.push(
+                formatTurnHolderLine('queued_completion_ahead', turn.queued_completion_ahead)
+            );
+        }
+    }
 
     for (const stage of trace.stages) {
         const dominant = stage.is_dominant ? ' | dominant' : '';
@@ -86,4 +115,15 @@ export function formatCompletionTimelineTraceForClipboard(
     }
 
     return lines.join('\n');
+}
+
+function formatTurnHolderLine(
+    label: string,
+    holder: NonNullable<CompletionTimelineTraceViewModel['turn_attribution']>['active_holder']
+): string {
+    const requestId = holder?.request_id ?? 'n/a';
+    const versionHint = typeof holder?.version_hint === 'number'
+        ? ` | version_hint=${holder.version_hint}`
+        : '';
+    return `${label} | request=${requestId} | file_seq=${holder?.file_seq} | epoch=${holder?.request_epoch} | trigger=${holder?.trigger_mode}${versionHint} | age=${holder?.age_ms}ms`;
 }

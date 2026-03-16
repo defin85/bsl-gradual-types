@@ -3,6 +3,7 @@ import {
     CompletionTimelineResponse,
     CompletionTimelineStageStatus,
     CompletionTimelineStageTrace,
+    CompletionTimelineTurnAttributionTrace,
     CompletionTimelineTrace,
 } from '../lsp/customRequests';
 
@@ -28,6 +29,7 @@ export interface CompletionTimelineTraceViewModel {
     max_stage_end_ms: number;
     unattributed_overhead_ms: number;
     dominant_stage?: string;
+    turn_attribution?: CompletionTimelineTurnAttributionTrace;
     stages: CompletionTimelineStageViewModel[];
 }
 

@@ -118,6 +118,38 @@ pub struct CompletionTimelineStageTrace {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompletionTimelineTurnHolderTrace {
+    pub request_id: Option<String>,
+    pub file_seq: u64,
+    pub request_epoch: u64,
+    pub trigger_mode: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version_hint: Option<i32>,
+    pub age_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompletionTimelineTurnAttributionTrace {
+    pub request_file_seq: u64,
+    pub request_epoch: u64,
+    pub queue_outcome: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turn_wait_outcome: Option<String>,
+    pub queue_capacity: usize,
+    pub queue_depth_before_enqueue: usize,
+    pub queue_depth_after_enqueue: usize,
+    pub queued_completion_ahead_count: usize,
+    pub did_change_ahead_count: usize,
+    pub active_completion_count: usize,
+    #[serde(default)]
+    pub dropped_completion_file_seq: Vec<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_holder: Option<CompletionTimelineTurnHolderTrace>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queued_completion_ahead: Option<CompletionTimelineTurnHolderTrace>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompletionTimelineTrace {
     pub trace_id: String,
     pub request_id: Option<String>,
@@ -127,6 +159,8 @@ pub struct CompletionTimelineTrace {
     pub started_at_ms: u64,
     pub total_duration_ms: u64,
     pub dominant_stage: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turn_attribution: Option<CompletionTimelineTurnAttributionTrace>,
     pub stages: Vec<CompletionTimelineStageTrace>,
 }
 

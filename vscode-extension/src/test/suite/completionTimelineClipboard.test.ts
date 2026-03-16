@@ -23,6 +23,27 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                     max_stage_end_ms: 28,
                     unattributed_overhead_ms: 2,
                     dominant_stage: 'query_bundle',
+                    turn_attribution: {
+                        request_file_seq: 17,
+                        request_epoch: 9,
+                        queue_outcome: 'enqueued',
+                        turn_wait_outcome: 'ready',
+                        queue_capacity: 256,
+                        queue_depth_before_enqueue: 1,
+                        queue_depth_after_enqueue: 2,
+                        queued_completion_ahead_count: 1,
+                        did_change_ahead_count: 0,
+                        active_completion_count: 1,
+                        dropped_completion_file_seq: [12],
+                        active_holder: {
+                            request_id: 'req-0',
+                            file_seq: 16,
+                            request_epoch: 8,
+                            trigger_mode: 'trigger_character',
+                            version_hint: 1,
+                            age_ms: 88,
+                        },
+                    },
                     stages: [
                         {
                             name: 'prepare_stateful',
@@ -80,6 +101,8 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text);
         assert.ok(text!.includes('Completion Timeline | mode=all'));
         assert.ok(text!.includes('trace-1 (invoked)'));
+        assert.ok(text!.includes('turn_request_file_seq=17'));
+        assert.ok(text!.includes('active_holder | request=req-0'));
         assert.ok(text!.includes('query_bundle | completed'));
     });
 

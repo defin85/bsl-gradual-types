@@ -508,6 +508,51 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             '</tr>';
         }
 
+        function renderTurnHolder(label, holder) {
+            if (!holder) {
+                return '';
+            }
+            const requestId = holder.request_id || 'n/a';
+            const versionHint = typeof holder.version_hint === 'number'
+                ? ' | version_hint=' + escapeHtml(holder.version_hint)
+                : '';
+            return '<div class="overhead">' +
+                escapeHtml(label) + ': request=' + escapeHtml(requestId) +
+                ' | file_seq=' + escapeHtml(holder.file_seq) +
+                ' | epoch=' + escapeHtml(holder.request_epoch) +
+                ' | trigger=' + escapeHtml(holder.trigger_mode) +
+                versionHint +
+                ' | age=' + escapeHtml(holder.age_ms) + 'ms' +
+            '</div>';
+        }
+
+        function renderTurnAttribution(trace) {
+            if (!trace.turn_attribution) {
+                return '';
+            }
+            const turn = trace.turn_attribution;
+            const dropped = Array.isArray(turn.dropped_completion_file_seq) && turn.dropped_completion_file_seq.length > 0
+                ? ' | dropped=' + escapeHtml(turn.dropped_completion_file_seq.join(','))
+                : '';
+            const waitOutcome = turn.turn_wait_outcome
+                ? ' | turn_wait=' + escapeHtml(turn.turn_wait_outcome)
+                : '';
+            return '<div class="overhead">' +
+                'Turn attribution: file_seq=' + escapeHtml(turn.request_file_seq) +
+                ' | epoch=' + escapeHtml(turn.request_epoch) +
+                ' | queue_outcome=' + escapeHtml(turn.queue_outcome) +
+                waitOutcome +
+                ' | queue=' + escapeHtml(turn.queue_depth_before_enqueue) + '->' +
+                escapeHtml(turn.queue_depth_after_enqueue) + '/' + escapeHtml(turn.queue_capacity) +
+                ' | queued_completion_ahead=' + escapeHtml(turn.queued_completion_ahead_count) +
+                ' | did_change_ahead=' + escapeHtml(turn.did_change_ahead_count) +
+                ' | active=' + escapeHtml(turn.active_completion_count) +
+                dropped +
+            '</div>' +
+            renderTurnHolder('Active holder', turn.active_holder) +
+            renderTurnHolder('Queued ahead', turn.queued_completion_ahead);
+        }
+
         function renderTrace(trace) {
             const outcomeClass = outcomeBadgeClass(trace.outcome);
             const stageSegments = trace.stages.map((stage) => {
@@ -532,6 +577,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                     escapeHtml(trace.max_stage_end_ms) + 'ms)' +
                 '</div>'
                 : '';
+            const turnAttribution = renderTurnAttribution(trace);
 
             return '<section class="trace">' +
                 '<div class="trace-header">' +
@@ -549,6 +595,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 '<div class="meta">request=' + escapeHtml(requestId) + ' | started=' + escapeHtml(startedAt) + '</div>' +
                 '<div class="timeline-track">' + stageSegments + '</div>' +
                 overhead +
+                turnAttribution +
                 '<table class="stage-table"><tbody>' + stageRows + '</tbody></table>' +
             '</section>';
         }

@@ -253,6 +253,45 @@ fn queue_burst_latest_wins_keeps_latest_did_change_and_completion() {
 }
 
 #[test]
+fn queue_summary_reports_first_completion_ahead_and_did_change_backlog() {
+    let queue = CompletionEventQueue::new(8);
+    let _ = queue.try_enqueue(make_event(
+        1,
+        0,
+        CompletionEventPayload::DidChange { version: 7 },
+    ));
+    let _ = queue.try_enqueue(make_event(
+        2,
+        1,
+        CompletionEventPayload::CompletionRequest {
+            request_id: Some("r1".to_string()),
+            version_hint: Some(1),
+            trigger_mode: "invoked".to_string(),
+        },
+    ));
+    let _ = queue.try_enqueue(make_event(
+        3,
+        1,
+        CompletionEventPayload::CompletionRequest {
+            request_id: Some("r2".to_string()),
+            version_hint: Some(2),
+            trigger_mode: "trigger_character".to_string(),
+        },
+    ));
+
+    let summary = queue.summary(Instant::now() + Duration::from_millis(25));
+    assert_eq!(summary.depth, 3);
+    assert_eq!(summary.did_change_count, 1);
+    assert_eq!(summary.completion_request_count, 2);
+    let first_completion = summary.first_completion.expect("first completion");
+    assert_eq!(first_completion.request_id.as_deref(), Some("r1"));
+    assert_eq!(first_completion.file_seq, 2);
+    assert_eq!(first_completion.request_epoch, 1);
+    assert_eq!(first_completion.trigger_mode, "invoked");
+    assert_eq!(first_completion.version_hint, Some(1));
+}
+
+#[test]
 fn newer_completion_evicts_stale_cancel_for_previous_request() {
     let queue = CompletionEventQueue::new(4);
 
@@ -487,6 +526,70 @@ async fn queue_capacity_update_applies_to_existing_dispatchers() {
         "updated capacity must unblock completion enqueue"
     );
 
+    let close = registry.close_file_dispatcher(file_id).await;
+    assert!(close.is_some());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn dispatch_attribution_reports_active_completion_holder() {
+    let registry = CompletionDispatcherRegistry::new(8);
+    let file_id = V2FileId(124);
+
+    let first = registry
+        .emit_completion_request_with_turn(
+            file_id,
+            Some("r1".to_string()),
+            Some(1),
+            "invoked".to_string(),
+        )
+        .await;
+    assert!(
+        registry
+            .mark_completion_active(
+                file_id,
+                first.ticket,
+                CompletionRequestMetadata {
+                    request_id: Some("r1".to_string()),
+                    version_hint: Some(1),
+                    trigger_mode: "invoked".to_string(),
+                },
+            )
+            .await
+    );
+
+    tokio::time::sleep(Duration::from_millis(5)).await;
+
+    let second = registry
+        .emit_completion_request_with_turn(
+            file_id,
+            Some("r2".to_string()),
+            Some(2),
+            "trigger_character".to_string(),
+        )
+        .await;
+    assert_eq!(second.attribution.request_file_seq, second.ticket.file_seq);
+    assert_eq!(
+        second.attribution.request_epoch,
+        second.ticket.request_epoch
+    );
+    assert_eq!(
+        second.attribution.queue_outcome,
+        QueueEnqueueOutcome::Enqueued
+    );
+    assert_eq!(second.attribution.active_completion_count, 1);
+    let holder = second.attribution.active_holder.expect("active holder");
+    assert_eq!(holder.request_id.as_deref(), Some("r1"));
+    assert_eq!(holder.file_seq, first.ticket.file_seq);
+    assert_eq!(holder.request_epoch, first.ticket.request_epoch);
+    assert_eq!(holder.trigger_mode, "invoked");
+    assert_eq!(holder.version_hint, Some(1));
+    assert!(holder.age >= Duration::from_millis(1));
+
+    assert!(
+        registry
+            .mark_completion_inactive(file_id, first.ticket.file_seq)
+            .await
+    );
     let close = registry.close_file_dispatcher(file_id).await;
     assert!(close.is_some());
 }

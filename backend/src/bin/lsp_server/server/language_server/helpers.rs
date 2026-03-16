@@ -477,6 +477,37 @@ impl Drop for CompletionRequestDropCancelGuard {
     }
 }
 
+pub(super) struct CompletionActiveTurnGuard {
+    file_id: bsl_analysis_v2::FileId,
+    file_seq: u64,
+    dispatcher: Arc<super::super::completion_dispatcher::CompletionDispatcherRegistry>,
+}
+
+impl CompletionActiveTurnGuard {
+    pub(super) fn new(
+        file_id: bsl_analysis_v2::FileId,
+        file_seq: u64,
+        dispatcher: Arc<super::super::completion_dispatcher::CompletionDispatcherRegistry>,
+    ) -> Self {
+        Self {
+            file_id,
+            file_seq,
+            dispatcher,
+        }
+    }
+}
+
+impl Drop for CompletionActiveTurnGuard {
+    fn drop(&mut self) {
+        let dispatcher = Arc::clone(&self.dispatcher);
+        let file_id = self.file_id;
+        let file_seq = self.file_seq;
+        tokio::spawn(async move {
+            let _ = dispatcher.mark_completion_inactive(file_id, file_seq).await;
+        });
+    }
+}
+
 pub(super) async fn completion_checkpoint_outcome(
     server: &BslLanguageServer,
     file_id: bsl_analysis_v2::FileId,

@@ -105,6 +105,9 @@ fn completion_exact_wait_and_semantic_breakdown_metrics_are_recorded() {
     let observability = BasicObservability::default();
     observability
         .record_intellisense_v2_completion_exact_type_index_wait_outcome("no_matching_task");
+    observability.record_intellisense_v2_completion_exact_type_index_wait_promotion();
+    observability.record_intellisense_v2_completion_exact_type_index_wait_join();
+    observability.record_intellisense_v2_completion_exact_type_index_wait_ready_after_wait();
     observability
         .record_completion_stage_latency("prepare_apply_age_at_start", Duration::from_millis(9));
     observability.record_completion_stage_latency(
@@ -139,6 +142,17 @@ fn completion_exact_wait_and_semantic_breakdown_metrics_are_recorded() {
         1,
         "exact wait outcome counter must be exported under bounded reason labels"
     );
+    for key in [
+        "intellisense_v2_completion_exact_type_index_wait_promotion_total",
+        "intellisense_v2_completion_exact_type_index_wait_join_total",
+        "intellisense_v2_completion_exact_type_index_wait_ready_after_wait_total",
+    ] {
+        assert_eq!(
+            counter_value(counters, key),
+            1,
+            "expected counter key {key} in observability export"
+        );
+    }
     for key in [
         "completion_stage_prepare_apply_age_at_start_ms",
         "completion_stage_prepare_apply_age_at_terminal_ms",

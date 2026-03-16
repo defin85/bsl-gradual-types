@@ -21,7 +21,76 @@ impl ExactTypeIndexWaitOutcomeV2 {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TypeIndexPrecomputeWaiterActionV2 {
+    None,
+    Joined,
+    Promoted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TypeIndexPrecomputePhaseV2 {
+    WaitingForVersion = 1,
+    Snapshotting = 2,
+    WaitingCpuPermit = 3,
+    Computing = 4,
+    Completed = 5,
+}
+
+impl TypeIndexPrecomputePhaseV2 {
+    pub(super) fn as_u8(self) -> u8 {
+        self as u8
+    }
+
+    fn from_atomic(value: u8) -> Self {
+        match value {
+            1 => Self::WaitingForVersion,
+            2 => Self::Snapshotting,
+            3 => Self::WaitingCpuPermit,
+            4 => Self::Computing,
+            _ => Self::Completed,
+        }
+    }
+}
+
 impl BslLanguageServer {
+    fn spawn_type_index_precompute_task_v2(
+        &self,
+        supersession_key: super::super::TypeIndexPrecomputeSupersessionKeyV2,
+        work_class: bsl_runtime::application::CpuWorkClass,
+    ) -> super::super::TypeIndexPrecomputeTaskV2 {
+        let task_id = self
+            .next_type_index_precompute_task_id
+            .fetch_add(1, Ordering::Relaxed);
+        let phase = Arc::new(std::sync::atomic::AtomicU8::new(
+            TypeIndexPrecomputePhaseV2::WaitingForVersion.as_u8(),
+        ));
+        let phase_for_task = Arc::clone(&phase);
+        let server = self.clone();
+        let handle = tokio::spawn(async move {
+            let enqueued_at = Instant::now();
+            server
+                .execute_type_index_precompute_once_v2(
+                    supersession_key,
+                    work_class,
+                    Arc::clone(&phase_for_task),
+                    enqueued_at,
+                )
+                .await;
+            server
+                .finalize_type_index_precompute_task_v2(supersession_key.file_id, task_id)
+                .await;
+        });
+
+        super::super::TypeIndexPrecomputeTaskV2 {
+            task_id,
+            supersession_key,
+            work_class,
+            phase,
+            handle,
+        }
+    }
+
     pub(crate) async fn sync_v2_globals(&self) {
         let settings = self.settings.read().await.clone();
         let settings_id = compute_settings_id_v2(&settings);
@@ -176,22 +245,12 @@ impl BslLanguageServer {
             previous.handle.abort();
         }
 
-        let server = self.clone();
-        let handle = tokio::spawn(async move {
-            let enqueued_at = Instant::now();
-            server
-                .execute_type_index_precompute_once_v2(supersession_key, enqueued_at)
-                .await;
-            server
-                .finalize_type_index_precompute_task_v2(supersession_key)
-                .await;
-        });
         tasks.insert(
             file_id,
-            super::super::TypeIndexPrecomputeTaskV2 {
+            self.spawn_type_index_precompute_task_v2(
                 supersession_key,
-                handle,
-            },
+                bsl_runtime::application::CpuWorkClass::Background,
+            ),
         );
     }
 
@@ -225,6 +284,7 @@ impl BslLanguageServer {
         max_wait: std::time::Duration,
     ) -> ExactTypeIndexWaitOutcomeV2 {
         let deadline = tokio::time::Instant::now() + max_wait;
+        let mut waiter_action = TypeIndexPrecomputeWaiterActionV2::None;
         loop {
             let analysis = self.analysis_v2.snapshot().await;
             let observed_version = analysis.file_version(file_id).ok().flatten();
@@ -234,7 +294,26 @@ impl BslLanguageServer {
                     .current_type_index_serve_only_ready(file_id)
                     .unwrap_or(false);
             if exact_ready {
+                if !matches!(waiter_action, TypeIndexPrecomputeWaiterActionV2::None) {
+                    self.coordinator
+                        .record_intellisense_v2_completion_exact_type_index_wait_ready_after_wait();
+                }
                 return ExactTypeIndexWaitOutcomeV2::Ready;
+            }
+
+            if matches!(waiter_action, TypeIndexPrecomputeWaiterActionV2::None) {
+                waiter_action = self
+                    .promote_type_index_precompute_for_waiter_v2(file_id, expected_version)
+                    .await;
+                match waiter_action {
+                    TypeIndexPrecomputeWaiterActionV2::Joined => self
+                        .coordinator
+                        .record_intellisense_v2_completion_exact_type_index_wait_join(),
+                    TypeIndexPrecomputeWaiterActionV2::Promoted => self
+                        .coordinator
+                        .record_intellisense_v2_completion_exact_type_index_wait_promotion(),
+                    TypeIndexPrecomputeWaiterActionV2::None => {}
+                }
             }
 
             enum MatchingTaskState {
@@ -283,6 +362,50 @@ impl BslLanguageServer {
         }
     }
 
+    pub(super) async fn promote_type_index_precompute_for_waiter_v2(
+        &self,
+        file_id: V2FileId,
+        expected_version: Option<i32>,
+    ) -> TypeIndexPrecomputeWaiterActionV2 {
+        let Some(expected_version) = expected_version else {
+            return TypeIndexPrecomputeWaiterActionV2::None;
+        };
+
+        let mut tasks = self.type_index_precompute_tasks_v2.lock().await;
+        let Some(task) = tasks.get(&file_id) else {
+            return TypeIndexPrecomputeWaiterActionV2::None;
+        };
+        if task.supersession_key.requested_version != expected_version {
+            return TypeIndexPrecomputeWaiterActionV2::None;
+        }
+        if matches!(
+            task.work_class,
+            bsl_runtime::application::CpuWorkClass::Interactive
+        ) {
+            return TypeIndexPrecomputeWaiterActionV2::Joined;
+        }
+        let phase = TypeIndexPrecomputePhaseV2::from_atomic(task.phase.load(Ordering::Relaxed));
+        if matches!(
+            phase,
+            TypeIndexPrecomputePhaseV2::Computing | TypeIndexPrecomputePhaseV2::Completed
+        ) {
+            return TypeIndexPrecomputeWaiterActionV2::Joined;
+        }
+
+        let previous = tasks
+            .remove(&file_id)
+            .expect("matching type-index precompute task must exist");
+        previous.handle.abort();
+        tasks.insert(
+            file_id,
+            self.spawn_type_index_precompute_task_v2(
+                previous.supersession_key,
+                bsl_runtime::application::CpuWorkClass::Interactive,
+            ),
+        );
+        TypeIndexPrecomputeWaiterActionV2::Promoted
+    }
+
     async fn type_index_precompute_checkpoint_v2(
         &self,
         key: super::super::TypeIndexPrecomputeSupersessionKeyV2,
@@ -316,6 +439,8 @@ impl BslLanguageServer {
     async fn execute_type_index_precompute_once_v2(
         &self,
         key: super::super::TypeIndexPrecomputeSupersessionKeyV2,
+        work_class: bsl_runtime::application::CpuWorkClass,
+        phase: Arc<std::sync::atomic::AtomicU8>,
         enqueued_at: Instant,
     ) {
         if self
@@ -338,6 +463,10 @@ impl BslLanguageServer {
         // analysis runtime. Wait until the runtime actually applies the requested revision,
         // otherwise snapshot_with_deps() may observe an older version and treat the precompute
         // as spuriously superseded.
+        phase.store(
+            TypeIndexPrecomputePhaseV2::WaitingForVersion.as_u8(),
+            Ordering::Relaxed,
+        );
         if !self
             .analysis_v2
             .wait_for_file_version(key.file_id, key.requested_version)
@@ -357,6 +486,10 @@ impl BslLanguageServer {
             return;
         }
 
+        phase.store(
+            TypeIndexPrecomputePhaseV2::Snapshotting.as_u8(),
+            Ordering::Relaxed,
+        );
         let (analysis, _index_snapshot, _deps_id) = self.analysis_v2.snapshot_with_deps().await;
         if self
             .type_index_precompute_checkpoint_v2(key, "before_compute")
@@ -365,12 +498,21 @@ impl BslLanguageServer {
             return;
         }
 
+        phase.store(
+            TypeIndexPrecomputePhaseV2::WaitingCpuPermit.as_u8(),
+            Ordering::Relaxed,
+        );
+        let phase_for_compute = Arc::clone(&phase);
         let precompute =
             bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
-                bsl_runtime::application::CpuWorkClass::Background,
+                work_class,
                 bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
                 Some(self.coordinator.as_ref()),
                 move || {
+                    phase_for_compute.store(
+                        TypeIndexPrecomputePhaseV2::Computing.as_u8(),
+                        Ordering::Relaxed,
+                    );
                     analysis.precompute_type_index_for_file(
                         key.file_id,
                         Some(key.requested_version),
@@ -379,6 +521,10 @@ impl BslLanguageServer {
                 },
             )
             .await;
+        phase.store(
+            TypeIndexPrecomputePhaseV2::Completed.as_u8(),
+            Ordering::Relaxed,
+        );
 
         match precompute {
             Ok(Ok(result)) => {
@@ -506,16 +652,13 @@ impl BslLanguageServer {
         }
     }
 
-    async fn finalize_type_index_precompute_task_v2(
-        &self,
-        key: super::super::TypeIndexPrecomputeSupersessionKeyV2,
-    ) {
+    async fn finalize_type_index_precompute_task_v2(&self, file_id: V2FileId, task_id: u64) {
         let mut tasks = self.type_index_precompute_tasks_v2.lock().await;
         if tasks
-            .get(&key.file_id)
-            .is_some_and(|task| task.supersession_key == key)
+            .get(&file_id)
+            .is_some_and(|task| task.task_id == task_id)
         {
-            tasks.remove(&key.file_id);
+            tasks.remove(&file_id);
         }
     }
 }

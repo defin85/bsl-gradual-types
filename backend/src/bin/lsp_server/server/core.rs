@@ -211,6 +211,7 @@ impl BslLanguageServer {
             full_index_watchdog_timeout: Duration::from_millis(1_200_000),
             completion_timeline_traces: Arc::new(Mutex::new(VecDeque::new())),
             next_completion_timeline_trace_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            next_type_index_precompute_task_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
         }
     }
 

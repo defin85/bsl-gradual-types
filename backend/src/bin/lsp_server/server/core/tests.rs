@@ -117,6 +117,9 @@ const UNIFIED_STAGE_COUNTER_KEYS: &[&str] = &[
     "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_no_matching_task",
     "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_task_present_wrong_version",
     "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_observed_version_mismatch",
+    "intellisense_v2_completion_exact_type_index_wait_promotion_total",
+    "intellisense_v2_completion_exact_type_index_wait_join_total",
+    "intellisense_v2_completion_exact_type_index_wait_ready_after_wait_total",
     "intellisense_v2_revision_lag_sample_total",
     "intellisense_v2_observability_contract_violation_total",
     "intellisense_v2_projection_missing_total",
@@ -4084,6 +4087,206 @@ async fn p7_member_access_completion_does_not_backfill_from_runtime_index_snapsh
     assert!(
         exact_wait_apply_age_start_count > 0 && exact_wait_apply_age_terminal_count > 0,
         "member-access exact wait must expose apply-age histograms before fail-closed return, histograms={histograms:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p7_waiting_completion_promotes_matching_type_index_precompute_to_interactive() {
+    const FIXTURE: &str =
+        "Процедура Тест()\n    ДляCompletion = (Новый Массив()).\nКонецПроцедуры\n";
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let (background_started_tx, background_started_rx) = tokio::sync::oneshot::channel::<()>();
+    let background_blocker = tokio::spawn(async move {
+        bsl_runtime::application::spawn_bounded_blocking_with_class(
+            bsl_runtime::application::CpuWorkClass::Background,
+            move || {
+                let _ = background_started_tx.send(());
+                std::thread::sleep(Duration::from_millis(400));
+            },
+        )
+        .await
+        .expect("background blocker join");
+    });
+    background_started_rx
+        .await
+        .expect("background blocker should start");
+
+    let uri = Url::parse("file:///test_p7_waiter_promotes_exact_precompute.bsl").expect("uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: FIXTURE.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    server.sync_v2_globals().await;
+
+    let completion_position = find_utf16_position_after_marker(FIXTURE, "(Новый Массив()).");
+    let completion_labels = lsp_completion_labels_at(&mut service, &uri, completion_position).await;
+    let metrics = coordinator.observability_metrics();
+    let counters = metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    let promotion_total = read_u64_metric(
+        counters.get("intellisense_v2_completion_exact_type_index_wait_promotion_total"),
+    );
+    let join_total = read_u64_metric(
+        counters.get("intellisense_v2_completion_exact_type_index_wait_join_total"),
+    );
+    assert!(
+        !completion_labels.is_empty(),
+        "waiting completion should promote matching exact precompute instead of failing closed, labels={completion_labels:?}, counters={counters:?}"
+    );
+    assert!(
+        promotion_total + join_total > 0,
+        "waiting completion must observe waiter-aware exact precompute orchestration (join or promotion), counters={counters:?}"
+    );
+    assert!(
+        read_u64_metric(
+            counters.get("intellisense_v2_completion_exact_type_index_wait_ready_after_wait_total")
+        ) > 0,
+        "waiting completion must report ready_after_wait after joining or promoting the matching precompute, counters={counters:?}"
+    );
+    assert_eq!(
+        read_u64_metric(
+            counters.get("intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_deadline")
+        ),
+        0,
+        "promotion path must avoid exact wait deadline miss in this scenario, counters={counters:?}"
+    );
+
+    background_blocker.await.expect("background blocker task");
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p7_promote_type_index_precompute_replaces_matching_background_waiter() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (_service, socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move {
+        let mut socket = socket;
+        while let Some(_req) = socket.next().await {}
+    });
+
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+
+    let file_id = bsl_analysis_v2::FileId(4242);
+    let requested_version = 7;
+    server
+        .latest_received_file_versions_v2
+        .write()
+        .await
+        .insert(file_id, requested_version);
+
+    let previous_task_id = 999_u64;
+    let previous_handle = tokio::spawn(std::future::pending::<()>());
+    let previous_phase = Arc::new(std::sync::atomic::AtomicU8::new(
+        super::deps_and_precompute::TypeIndexPrecomputePhaseV2::WaitingCpuPermit.as_u8(),
+    ));
+    {
+        let mut tasks = server.type_index_precompute_tasks_v2.lock().await;
+        tasks.insert(
+            file_id,
+            crate::server::TypeIndexPrecomputeTaskV2 {
+                task_id: previous_task_id,
+                supersession_key: crate::server::TypeIndexPrecomputeSupersessionKeyV2 {
+                    file_id,
+                    requested_version,
+                },
+                work_class: bsl_runtime::application::CpuWorkClass::Background,
+                phase: Arc::clone(&previous_phase),
+                handle: previous_handle,
+            },
+        );
+    }
+
+    let action = server
+        .promote_type_index_precompute_for_waiter_v2(file_id, Some(requested_version))
+        .await;
+    assert_eq!(
+        action,
+        super::deps_and_precompute::TypeIndexPrecomputeWaiterActionV2::Promoted,
+        "matching background task in pre-compute wait phase must be promoted for interactive waiter"
+    );
+
+    let promoted_task = {
+        let mut tasks = server.type_index_precompute_tasks_v2.lock().await;
+        let task = tasks
+            .remove(&file_id)
+            .expect("promoted task must remain registered");
+        task.handle.abort();
+        task
+    };
+    assert_eq!(
+        promoted_task.supersession_key.requested_version, requested_version,
+        "promotion must preserve requested version for the matching waiter"
+    );
+    assert_eq!(
+        promoted_task.work_class,
+        bsl_runtime::application::CpuWorkClass::Interactive,
+        "promotion must respawn the task in interactive work class"
+    );
+    assert_ne!(
+        promoted_task.task_id, previous_task_id,
+        "promotion must replace the previous task instance instead of mutating it in place"
     );
 
     drain_task.abort();

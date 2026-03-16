@@ -583,6 +583,21 @@ impl SystemCoordinator {
             .record_intellisense_v2_completion_exact_type_index_wait_outcome(reason);
     }
 
+    pub fn record_intellisense_v2_completion_exact_type_index_wait_promotion(&self) {
+        self.observability
+            .record_intellisense_v2_completion_exact_type_index_wait_promotion();
+    }
+
+    pub fn record_intellisense_v2_completion_exact_type_index_wait_join(&self) {
+        self.observability
+            .record_intellisense_v2_completion_exact_type_index_wait_join();
+    }
+
+    pub fn record_intellisense_v2_completion_exact_type_index_wait_ready_after_wait(&self) {
+        self.observability
+            .record_intellisense_v2_completion_exact_type_index_wait_ready_after_wait();
+    }
+
     pub fn record_intellisense_v2_singleflight_leader(&self) {
         self.record_intellisense_v2_singleflight_leader_with_origin("runtime", "ir");
     }

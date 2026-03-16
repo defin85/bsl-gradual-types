@@ -216,6 +216,7 @@ pub struct BslLanguageServer {
     pub(crate) completion_timeline_traces:
         Arc<Mutex<VecDeque<crate::types::CompletionTimelineTrace>>>,
     pub(crate) next_completion_timeline_trace_id: Arc<AtomicU64>,
+    pub(crate) next_type_index_precompute_task_id: Arc<AtomicU64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -329,7 +330,10 @@ pub(crate) struct TypeIndexPrecomputeSupersessionKeyV2 {
 }
 
 pub(crate) struct TypeIndexPrecomputeTaskV2 {
+    pub task_id: u64,
     pub supersession_key: TypeIndexPrecomputeSupersessionKeyV2,
+    pub work_class: bsl_runtime::application::CpuWorkClass,
+    pub phase: Arc<AtomicU8>,
     pub handle: JoinHandle<()>,
 }
 

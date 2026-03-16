@@ -42,6 +42,21 @@ impl BasicObservability {
         self.metrics.increment(&key);
     }
 
+    pub fn record_intellisense_v2_completion_exact_type_index_wait_promotion(&self) {
+        self.metrics
+            .increment("intellisense_v2_completion_exact_type_index_wait_promotion_total");
+    }
+
+    pub fn record_intellisense_v2_completion_exact_type_index_wait_join(&self) {
+        self.metrics
+            .increment("intellisense_v2_completion_exact_type_index_wait_join_total");
+    }
+
+    pub fn record_intellisense_v2_completion_exact_type_index_wait_ready_after_wait(&self) {
+        self.metrics
+            .increment("intellisense_v2_completion_exact_type_index_wait_ready_after_wait_total");
+    }
+
     pub fn record_intellisense_v2_singleflight_leader(&self) {
         self.record_intellisense_v2_singleflight_leader_with_origin("runtime", "ir");
     }

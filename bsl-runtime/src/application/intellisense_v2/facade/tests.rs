@@ -98,6 +98,60 @@ async fn interactive_commands_preempt_background_backlog() {
 }
 
 #[tokio::test]
+async fn interactive_apply_changes_preempts_background_backlog_for_wait_for_file_version() {
+    let runtime = IntellisenseV2Facade::new(
+        AnalysisHostV2::default(),
+        Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p7"))),
+        None,
+    );
+    let file_id = FileId(19);
+
+    let mut sleepers = Vec::new();
+    for _ in 0..6 {
+        sleepers.push(
+            runtime.enqueue_test_sleep(RuntimeQueuePriority::Background, Duration::from_millis(40)),
+        );
+    }
+
+    runtime.apply_changes_interactive(
+        ObservabilityOrigin::Lsp,
+        vec![Change::SetFile {
+            file_id,
+            text: Arc::from("x = 1;"),
+            version: 7,
+            path: Arc::from("interactive_apply_latest.bsl"),
+        }],
+    );
+
+    let wait_result = timeout(
+        Duration::from_millis(120),
+        runtime.wait_for_file_version_with_priority(
+            ObservabilityOrigin::Lsp,
+            RuntimeQueuePriority::Interactive,
+            file_id,
+            7,
+        ),
+    )
+    .await
+    .expect(
+        "interactive apply_changes should let interactive wait_for_file_version complete before background backlog drains",
+    );
+    assert!(
+        wait_result,
+        "wait_for_file_version should observe the interactively enqueued revision"
+    );
+
+    for sleeper_ack in sleepers {
+        timeout(Duration::from_secs(1), sleeper_ack)
+            .await
+            .expect("background sleeper ack timeout")
+            .expect("background sleeper ack");
+    }
+
+    runtime.shutdown_for_test().await;
+}
+
+#[tokio::test]
 async fn background_commands_make_progress_under_interactive_flood() {
     let runtime = IntellisenseV2Facade::new(
         AnalysisHostV2::default(),

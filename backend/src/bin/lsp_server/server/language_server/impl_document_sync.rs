@@ -117,8 +117,9 @@ impl BslLanguageServer {
             .await
             .insert(file_id, Instant::now());
 
-        self.analysis_v2
-            .apply_changes(vec![if let Some(parse_snapshot) = parse_snapshot {
+        self.analysis_v2.apply_changes_interactive(
+            bsl_runtime::application::ObservabilityOrigin::Lsp,
+            vec![if let Some(parse_snapshot) = parse_snapshot {
                 bsl_analysis_v2::Change::SetFileWithSnapshot {
                     file_id,
                     text,
@@ -133,7 +134,8 @@ impl BslLanguageServer {
                     version,
                     path,
                 }
-            }]);
+            }],
+        );
         self.schedule_type_index_precompute_v2(file_id, version)
             .await;
 
@@ -389,8 +391,9 @@ impl BslLanguageServer {
             .write()
             .await
             .insert(file_id, Instant::now());
-        self.analysis_v2
-            .apply_changes(vec![if let Some(parse_snapshot) = parse_snapshot {
+        self.analysis_v2.apply_changes_interactive(
+            bsl_runtime::application::ObservabilityOrigin::Lsp,
+            vec![if let Some(parse_snapshot) = parse_snapshot {
                 bsl_analysis_v2::Change::SetFileWithSnapshot {
                     file_id,
                     text: updated_text,
@@ -405,7 +408,8 @@ impl BslLanguageServer {
                     version,
                     path,
                 }
-            }]);
+            }],
+        );
         self.schedule_type_index_precompute_v2(file_id, version)
             .await;
 

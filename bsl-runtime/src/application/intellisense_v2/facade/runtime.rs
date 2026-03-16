@@ -387,20 +387,44 @@ impl IntellisenseV2Facade {
         self.send_command_with_priority(RuntimeQueuePriority::Background, command)
     }
 
-    pub fn apply_changes(&self, changes: Vec<Change>) {
+    fn apply_changes_with_enqueue_priority(
+        &self,
+        origin: ObservabilityOrigin,
+        priority: RuntimeQueuePriority,
+        changes: Vec<Change>,
+    ) {
         if changes.is_empty() {
             return;
         }
         if self
-            .send_background_command(Command::ApplyChanges {
-                origin: ObservabilityOrigin::Runtime,
-                enqueued_at: Instant::now(),
-                changes,
-            })
+            .send_command_with_priority(
+                priority,
+                Command::ApplyChanges {
+                    origin,
+                    enqueued_at: Instant::now(),
+                    changes,
+                },
+            )
             .is_err()
         {
             warn!("analysis_v2_runtime: failed to send ApplyChanges (writer thread is gone)");
         }
+    }
+
+    pub fn apply_changes(&self, changes: Vec<Change>) {
+        self.apply_changes_with_enqueue_priority(
+            ObservabilityOrigin::Runtime,
+            RuntimeQueuePriority::Background,
+            changes,
+        );
+    }
+
+    pub fn apply_changes_interactive(&self, origin: ObservabilityOrigin, changes: Vec<Change>) {
+        self.apply_changes_with_enqueue_priority(
+            origin,
+            RuntimeQueuePriority::Interactive,
+            changes,
+        );
     }
 
     pub async fn apply_deps_bundle(

@@ -201,13 +201,15 @@ impl BslLanguageServer {
                 };
 
                 let path_string = path.to_string_lossy().to_string();
-                self.analysis_v2
-                    .apply_changes(vec![bsl_analysis_v2::Change::SetFile {
+                self.analysis_v2.apply_changes_interactive(
+                    bsl_runtime::application::ObservabilityOrigin::Lsp,
+                    vec![bsl_analysis_v2::Change::SetFile {
                         file_id,
                         text: Arc::from(file_content.clone()),
                         version: 0,
                         path: Arc::from(path_string.clone()),
-                    }]);
+                    }],
+                );
                 self.latest_received_file_versions_v2
                     .write()
                     .await

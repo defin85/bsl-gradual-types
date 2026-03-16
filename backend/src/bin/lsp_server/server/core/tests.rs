@@ -4470,6 +4470,119 @@ async fn p7_large_churn_budget_timeout_without_prior_completion_returns_fail_clo
     drain_task.abort();
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn p7_completion_prepare_timeout_stays_bounded_when_disk_fallback_blocks() {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let fifo_path = temp.path().join("blocking_prepare_fallback.bsl");
+    let mkfifo_status = std::process::Command::new("mkfifo")
+        .arg(&fifo_path)
+        .status()
+        .expect("mkfifo status");
+    assert!(mkfifo_status.success(), "mkfifo must succeed");
+
+    let writer_path = fifo_path.clone();
+    let writer = std::thread::spawn(move || {
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .mode(0o644)
+            .open(&writer_path)
+            .expect("open fifo writer");
+        std::thread::sleep(Duration::from_millis(350));
+        let fixture =
+            "Процедура Тест()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.\nКонецПроцедуры\n";
+        file.write_all(fixture.as_bytes())
+            .expect("write fifo contents");
+    });
+
+    let uri = Url::from_file_path(&fifo_path).expect("fifo uri");
+    let wait_budget_ms = bsl_runtime::system::global_runtime_config()
+        .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
+        .unwrap_or(120);
+
+    let started = Instant::now();
+    let completion_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/completion")
+                .id(17701)
+                .params(
+                    serde_json::to_value(CompletionParams {
+                        text_document_position: TextDocumentPositionParams {
+                            text_document: TextDocumentIdentifier { uri: uri.clone() },
+                            position: Position::new(2, 13),
+                        },
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                        partial_result_params: PartialResultParams::default(),
+                        context: Some(CompletionContext {
+                            trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+                            trigger_character: Some(".".to_string()),
+                        }),
+                    })
+                    .expect("CompletionParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("completion request")
+        .expect("completion response");
+    let elapsed = started.elapsed();
+
+    let completion_value =
+        serde_json::to_value(&completion_response).expect("serialize completion response");
+    let result = completion_value
+        .get("result")
+        .cloned()
+        .expect("result field");
+    let response: Option<CompletionResponse> =
+        serde_json::from_value(result).expect("parse completion result");
+    match response.expect("completion payload") {
+        CompletionResponse::List(list) => {
+            assert!(
+                list.items.is_empty(),
+                "blocking disk fallback must still fail closed under prepare timeout"
+            );
+        }
+        CompletionResponse::Array(items) => {
+            assert!(
+                items.is_empty(),
+                "blocking disk fallback must still fail closed under prepare timeout"
+            );
+        }
+    }
+    assert!(
+        elapsed <= Duration::from_millis(wait_budget_ms.saturating_add(200)),
+        "blocking disk fallback must stay bounded by prepare wait budget (elapsed={elapsed:?}, budget_ms={wait_budget_ms})"
+    );
+
+    writer.join().expect("writer thread");
+    drain_task.abort();
+}
+
 #[tokio::test]
 async fn p7_large_churn_did_change_skips_inline_parse_snapshot() {
     const FILLER_LINES: usize = 2200;

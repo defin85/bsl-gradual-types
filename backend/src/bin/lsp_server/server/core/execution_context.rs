@@ -168,15 +168,33 @@ impl BslLanguageServer {
                     }
                 };
 
-                let file_content = match read_bsl_file(&path) {
-                    Ok(content) => content,
-                    Err(err) => {
+                // Disk fallback must not block the async LSP request thread; otherwise the
+                // outer interactive wait budget guard cannot fire until fs::read_to_string
+                // returns.
+                let path_for_read = path.clone();
+                let file_content = match tokio::task::spawn_blocking(move || {
+                    read_bsl_file(&path_for_read)
+                })
+                .await
+                {
+                    Ok(Ok(content)) => content,
+                    Ok(Err(err)) => {
                         warn!(
                             uri = %uri,
                             file_id = file_id.0,
                             operation = operation.as_str(),
                             error = %err,
                             "IntelliSense v2: failed to read file for fallback load"
+                        );
+                        return Err(bsl_runtime::application::SemanticOutcome::StaleVersion);
+                    }
+                    Err(err) => {
+                        warn!(
+                            uri = %uri,
+                            file_id = file_id.0,
+                            operation = operation.as_str(),
+                            error = %err,
+                            "IntelliSense v2: fallback file-read task join failed"
                         );
                         return Err(bsl_runtime::application::SemanticOutcome::StaleVersion);
                     }

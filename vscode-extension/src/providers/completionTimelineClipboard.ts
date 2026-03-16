@@ -77,6 +77,49 @@ export function formatCompletionTimelineTraceForClipboard(
             `unattributed_overhead=${trace.unattributed_overhead_ms}ms | max_stage_end=${trace.max_stage_end_ms}ms`
         );
     }
+    if (trace.prepare_details) {
+        const detailsBits: string[] = [];
+        if (typeof trace.prepare_details.wait_budget_ms === 'number') {
+            detailsBits.push(`prepare_wait_budget_ms=${trace.prepare_details.wait_budget_ms}`);
+        }
+        if (trace.prepare_details.outcome) {
+            detailsBits.push(`prepare_outcome=${trace.prepare_details.outcome}`);
+        }
+        if (typeof trace.prepare_details.min_file_version === 'number') {
+            detailsBits.push(`prepare_min_file_version=${trace.prepare_details.min_file_version}`);
+        }
+        if (typeof trace.prepare_details.shadow_version_at_start === 'number') {
+            detailsBits.push(
+                `prepare_shadow_version_at_start=${trace.prepare_details.shadow_version_at_start}`
+            );
+        }
+        if (typeof trace.prepare_details.observed_file_version === 'number') {
+            detailsBits.push(
+                `prepare_observed_file_version=${trace.prepare_details.observed_file_version}`
+            );
+        }
+        if (typeof trace.prepare_details.wait_elapsed_ms === 'number') {
+            detailsBits.push(`prepare_wait_elapsed_ms=${trace.prepare_details.wait_elapsed_ms}`);
+        }
+        if (typeof trace.prepare_details.snapshot_elapsed_ms === 'number') {
+            detailsBits.push(
+                `prepare_snapshot_elapsed_ms=${trace.prepare_details.snapshot_elapsed_ms}`
+            );
+        }
+        if (typeof trace.prepare_details.apply_age_at_start_ms === 'number') {
+            detailsBits.push(
+                `prepare_apply_age_at_start_ms=${trace.prepare_details.apply_age_at_start_ms}`
+            );
+        }
+        if (typeof trace.prepare_details.apply_age_at_terminal_ms === 'number') {
+            detailsBits.push(
+                `prepare_apply_age_at_terminal_ms=${trace.prepare_details.apply_age_at_terminal_ms}`
+            );
+        }
+        if (detailsBits.length > 0) {
+            lines.push(detailsBits.join(' | '));
+        }
+    }
     if (trace.turn_attribution) {
         const turn = trace.turn_attribution;
         const turnBits = [

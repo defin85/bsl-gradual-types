@@ -98,6 +98,14 @@ fn sidebar_metrics_export_filters_histograms_to_sidebar_subset() {
         !histograms.contains_key("completion_duration_ms"),
         "sidebar export must skip unrelated histogram summaries to stay lightweight"
     );
+    let config = exported
+        .get("config")
+        .and_then(|value| value.as_object())
+        .expect("sidebar export must expose config object");
+    assert!(
+        config.contains_key("BSL_INTELLISENSE_V2_INTERACTIVE_WAIT_BUDGET_MS"),
+        "sidebar export must keep effective interactive wait budget"
+    );
 }
 
 #[test]

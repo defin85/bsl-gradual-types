@@ -149,6 +149,28 @@ pub struct CompletionTimelineTurnAttributionTrace {
     pub queued_completion_ahead: Option<CompletionTimelineTurnHolderTrace>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CompletionTimelinePrepareDetailsTrace {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wait_budget_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_file_version: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shadow_version_at_start: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed_file_version: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wait_elapsed_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot_elapsed_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub apply_age_at_start_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub apply_age_at_terminal_ms: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompletionTimelineTrace {
     pub trace_id: String,
@@ -159,6 +181,8 @@ pub struct CompletionTimelineTrace {
     pub started_at_ms: u64,
     pub total_duration_ms: u64,
     pub dominant_stage: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prepare_details: Option<CompletionTimelinePrepareDetailsTrace>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_attribution: Option<CompletionTimelineTurnAttributionTrace>,
     pub stages: Vec<CompletionTimelineStageTrace>,

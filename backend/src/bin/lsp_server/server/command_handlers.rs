@@ -889,6 +889,7 @@ mod tests {
                 .iter()
                 .max_by_key(|stage| stage.duration_ms)
                 .map(|stage| stage.name.clone()),
+            prepare_details: None,
             turn_attribution: None,
             stages,
         }

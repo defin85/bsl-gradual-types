@@ -23,6 +23,15 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                     max_stage_end_ms: 28,
                     unattributed_overhead_ms: 2,
                     dominant_stage: 'query_bundle',
+                    prepare_details: {
+                        wait_budget_ms: 120,
+                        outcome: 'wait_not_ready',
+                        min_file_version: 9,
+                        shadow_version_at_start: 9,
+                        observed_file_version: 8,
+                        apply_age_at_start_ms: 3001,
+                        apply_age_at_terminal_ms: 3088,
+                    },
                     turn_attribution: {
                         request_file_seq: 17,
                         request_epoch: 9,
@@ -101,6 +110,8 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text);
         assert.ok(text!.includes('Completion Timeline | mode=all'));
         assert.ok(text!.includes('trace-1 (invoked)'));
+        assert.ok(text!.includes('prepare_wait_budget_ms=120'));
+        assert.ok(text!.includes('prepare_outcome=wait_not_ready'));
         assert.ok(text!.includes('turn_request_file_seq=17'));
         assert.ok(text!.includes('active_holder | request=req-0'));
         assert.ok(text!.includes('query_bundle | completed'));

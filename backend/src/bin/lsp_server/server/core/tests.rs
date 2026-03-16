@@ -9698,6 +9698,7 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
         "started_at_ms",
         "total_duration_ms",
         "dominant_stage",
+        "prepare_details",
         "turn_attribution",
         "stages",
     ] {
@@ -9706,6 +9707,18 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
             "missing field `{field}` in trace"
         );
     }
+    let prepare_details = trace
+        .get("prepare_details")
+        .and_then(|value| value.as_object())
+        .expect("prepare_details object");
+    assert!(
+        prepare_details.contains_key("wait_budget_ms"),
+        "missing field `wait_budget_ms` in prepare_details"
+    );
+    assert!(
+        prepare_details.contains_key("min_file_version"),
+        "missing field `min_file_version` in prepare_details"
+    );
     let stages = trace
         .get("stages")
         .and_then(|value| value.as_array())
@@ -9741,6 +9754,68 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
             "missing field `{field}` in turn_attribution"
         );
     }
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p22_get_observability_metrics_exposes_runtime_knobs_config() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        move |client| BslLanguageServer::new(client, coordinator.clone())
+    })
+    .finish();
+
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let execute = Request::build("workspace/executeCommand")
+        .id(2)
+        .params(serde_json::json!({
+            "command": "bsl.getObservabilityMetrics",
+            "arguments": [{}],
+        }))
+        .finish();
+    let execute_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(execute)
+        .await
+        .expect("workspace/executeCommand request")
+        .expect("workspace/executeCommand response");
+
+    let value = serde_json::to_value(&execute_response).expect("serialize response");
+    let result = value.get("result").cloned().expect("result field");
+    let metrics = result
+        .get("metrics")
+        .and_then(|value| value.as_object())
+        .expect("metrics object");
+    let config = metrics
+        .get("config")
+        .and_then(|value| value.as_object())
+        .expect("config object");
+    let interactive_wait_budget = config
+        .get("BSL_INTELLISENSE_V2_INTERACTIVE_WAIT_BUDGET_MS")
+        .and_then(|value| value.as_object())
+        .expect("interactive wait budget config entry");
+    assert_eq!(
+        interactive_wait_budget
+            .get("effective")
+            .and_then(|value| value.as_u64()),
+        Some(120),
+        "metrics config must expose effective interactive wait budget"
+    );
+    assert!(
+        interactive_wait_budget
+            .get("source")
+            .and_then(|value| value.as_str())
+            .is_some(),
+        "metrics config must expose value source"
+    );
 
     drain_task.abort();
 }

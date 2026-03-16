@@ -19,6 +19,17 @@ suite('Completion Timeline Model Test Suite', () => {
                     started_at_ms: 1_700_000_000_042,
                     total_duration_ms: 48,
                     dominant_stage: 'query_bundle',
+                    prepare_details: {
+                        wait_budget_ms: 120,
+                        outcome: 'ready',
+                        min_file_version: 7,
+                        shadow_version_at_start: 7,
+                        observed_file_version: 7,
+                        wait_elapsed_ms: 12,
+                        snapshot_elapsed_ms: 4,
+                        apply_age_at_start_ms: 9,
+                        apply_age_at_terminal_ms: 13,
+                    },
                     turn_attribution: {
                         request_file_seq: 42,
                         request_epoch: 7,
@@ -58,6 +69,7 @@ suite('Completion Timeline Model Test Suite', () => {
         assert.strictEqual(state.version, 1);
         assert.strictEqual(state.traces.length, 1);
         assert.strictEqual(state.traces[0].trace_id, 'trace-42');
+        assert.strictEqual(state.traces[0].prepare_details?.wait_budget_ms, 120);
         assert.strictEqual(state.traces[0].stages.length, 3);
         assert.strictEqual(state.traces[0].turn_attribution?.queue_outcome, 'enqueued');
         assert.strictEqual(state.traces[0].turn_attribution?.active_holder?.file_seq, 41);
@@ -79,6 +91,9 @@ suite('Completion Timeline Model Test Suite', () => {
                     started_at_ms: 1_700_000_000_001,
                     total_duration_ms: 25,
                     dominant_stage: 'missing_stage',
+                    prepare_details: {
+                        wait_budget_ms: 120,
+                    },
                     stages: [
                         { name: 'sync_globals', status: 'completed', started_offset_ms: 0, duration_ms: 5 },
                         { name: 'query_bundle', status: 'completed', started_offset_ms: 5, duration_ms: 15 },
@@ -112,6 +127,10 @@ suite('Completion Timeline Model Test Suite', () => {
                     started_at_ms: 1_700_000_000_500,
                     total_duration_ms: 50,
                     dominant_stage: 'query_bundle',
+                    prepare_details: {
+                        wait_budget_ms: 120,
+                        outcome: 'ready',
+                    },
                     stages: [
                         { name: 'prepare_stateful', status: 'completed', started_offset_ms: 0, duration_ms: 10 },
                         { name: 'query_bundle', status: 'completed', started_offset_ms: 10, duration_ms: 30 },

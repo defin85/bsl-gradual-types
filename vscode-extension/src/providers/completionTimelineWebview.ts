@@ -553,6 +553,45 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             renderTurnHolder('Queued ahead', turn.queued_completion_ahead);
         }
 
+        function renderPrepareDetails(trace) {
+            if (!trace.prepare_details) {
+                return '';
+            }
+            const details = trace.prepare_details;
+            const bits = [];
+            if (typeof details.wait_budget_ms === 'number') {
+                bits.push('prepare_wait_budget=' + escapeHtml(details.wait_budget_ms) + 'ms');
+            }
+            if (details.outcome) {
+                bits.push('prepare_outcome=' + escapeHtml(details.outcome));
+            }
+            if (typeof details.min_file_version === 'number') {
+                bits.push('min_version=' + escapeHtml(details.min_file_version));
+            }
+            if (typeof details.shadow_version_at_start === 'number') {
+                bits.push('shadow_version=' + escapeHtml(details.shadow_version_at_start));
+            }
+            if (typeof details.observed_file_version === 'number') {
+                bits.push('observed_version=' + escapeHtml(details.observed_file_version));
+            }
+            if (typeof details.wait_elapsed_ms === 'number') {
+                bits.push('wait_elapsed=' + escapeHtml(details.wait_elapsed_ms) + 'ms');
+            }
+            if (typeof details.snapshot_elapsed_ms === 'number') {
+                bits.push('snapshot_elapsed=' + escapeHtml(details.snapshot_elapsed_ms) + 'ms');
+            }
+            if (typeof details.apply_age_at_start_ms === 'number') {
+                bits.push('apply_age_start=' + escapeHtml(details.apply_age_at_start_ms) + 'ms');
+            }
+            if (typeof details.apply_age_at_terminal_ms === 'number') {
+                bits.push('apply_age_terminal=' + escapeHtml(details.apply_age_at_terminal_ms) + 'ms');
+            }
+            if (bits.length === 0) {
+                return '';
+            }
+            return '<div class="overhead">' + bits.join(' | ') + '</div>';
+        }
+
         function renderTrace(trace) {
             const outcomeClass = outcomeBadgeClass(trace.outcome);
             const stageSegments = trace.stages.map((stage) => {
@@ -577,6 +616,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                     escapeHtml(trace.max_stage_end_ms) + 'ms)' +
                 '</div>'
                 : '';
+            const prepareDetails = renderPrepareDetails(trace);
             const turnAttribution = renderTurnAttribution(trace);
 
             return '<section class="trace">' +
@@ -595,6 +635,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 '<div class="meta">request=' + escapeHtml(requestId) + ' | started=' + escapeHtml(startedAt) + '</div>' +
                 '<div class="timeline-track">' + stageSegments + '</div>' +
                 overhead +
+                prepareDetails +
                 turnAttribution +
                 '<table class="stage-table"><tbody>' + stageRows + '</tbody></table>' +
             '</section>';

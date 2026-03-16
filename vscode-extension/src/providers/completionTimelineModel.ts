@@ -1,5 +1,6 @@
 import {
     CompletionTimelineFetchResult,
+    CompletionTimelinePrepareDetailsTrace,
     CompletionTimelineResponse,
     CompletionTimelineStageStatus,
     CompletionTimelineStageTrace,
@@ -29,6 +30,7 @@ export interface CompletionTimelineTraceViewModel {
     max_stage_end_ms: number;
     unattributed_overhead_ms: number;
     dominant_stage?: string;
+    prepare_details?: CompletionTimelinePrepareDetailsTrace;
     turn_attribution?: CompletionTimelineTurnAttributionTrace;
     stages: CompletionTimelineStageViewModel[];
 }

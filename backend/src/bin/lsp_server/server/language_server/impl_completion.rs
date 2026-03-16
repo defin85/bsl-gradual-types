@@ -26,6 +26,7 @@ struct CompletionTimelineCapture {
     trigger_mode: String,
     started_at_ms: u64,
     timeline_cursor_ms: u64,
+    prepare_details: Option<crate::types::CompletionTimelinePrepareDetailsTrace>,
     turn_attribution: Option<crate::types::CompletionTimelineTurnAttributionTrace>,
     stages: Vec<crate::types::CompletionTimelineStageTrace>,
 }
@@ -46,6 +47,7 @@ impl CompletionTimelineCapture {
             trigger_mode: trigger_mode.to_string(),
             started_at_ms,
             timeline_cursor_ms: 0,
+            prepare_details: None,
             turn_attribution: None,
             stages: Vec::new(),
         }
@@ -148,6 +150,51 @@ impl CompletionTimelineCapture {
         self.turn_attribution = Some(attribution);
     }
 
+    fn prepare_details_mut(&mut self) -> &mut crate::types::CompletionTimelinePrepareDetailsTrace {
+        self.prepare_details.get_or_insert_with(Default::default)
+    }
+
+    fn set_prepare_wait_budget(&mut self, wait_budget: Option<std::time::Duration>) {
+        self.prepare_details_mut().wait_budget_ms =
+            wait_budget.map(CompletionTimelineCapture::duration_to_ms);
+    }
+
+    fn set_prepare_min_file_version(&mut self, min_file_version: Option<i32>) {
+        self.prepare_details_mut().min_file_version = min_file_version;
+    }
+
+    fn set_prepare_shadow_version_at_start(&mut self, shadow_version: Option<i32>) {
+        self.prepare_details_mut().shadow_version_at_start = shadow_version;
+    }
+
+    fn set_prepare_outcome(&mut self, outcome: &str) {
+        self.prepare_details_mut().outcome = Some(outcome.to_string());
+    }
+
+    fn set_prepare_observed_file_version(&mut self, observed_file_version: Option<i32>) {
+        self.prepare_details_mut().observed_file_version = observed_file_version;
+    }
+
+    fn set_prepare_wait_elapsed(&mut self, wait_elapsed: Option<std::time::Duration>) {
+        self.prepare_details_mut().wait_elapsed_ms =
+            wait_elapsed.map(CompletionTimelineCapture::duration_to_ms);
+    }
+
+    fn set_prepare_snapshot_elapsed(&mut self, snapshot_elapsed: std::time::Duration) {
+        self.prepare_details_mut().snapshot_elapsed_ms =
+            Some(CompletionTimelineCapture::duration_to_ms(snapshot_elapsed));
+    }
+
+    fn set_prepare_apply_age_at_start(&mut self, apply_age: Option<std::time::Duration>) {
+        self.prepare_details_mut().apply_age_at_start_ms =
+            apply_age.map(CompletionTimelineCapture::duration_to_ms);
+    }
+
+    fn set_prepare_apply_age_at_terminal(&mut self, apply_age: Option<std::time::Duration>) {
+        self.prepare_details_mut().apply_age_at_terminal_ms =
+            apply_age.map(CompletionTimelineCapture::duration_to_ms);
+    }
+
     fn into_trace(
         self,
         trace_id: String,
@@ -178,6 +225,7 @@ impl CompletionTimelineCapture {
             started_at_ms: self.started_at_ms,
             total_duration_ms,
             dominant_stage,
+            prepare_details: self.prepare_details,
             turn_attribution: self.turn_attribution,
             stages: self.stages,
         }
@@ -429,6 +477,14 @@ impl BslLanguageServer {
             trigger_mode,
             super::super::unix_timestamp_ms(),
         );
+        timeline_capture.set_prepare_min_file_version(version_hint);
+        timeline_capture.set_prepare_shadow_version_at_start(
+            self.latest_document_shadow_state_v2
+                .read()
+                .await
+                .get(&file_id)
+                .map(|state| state.version),
+        );
         let (
             completion_ticket,
             completion_turn_outcome,
@@ -645,7 +701,9 @@ impl BslLanguageServer {
                 break 'completion_flow Some(completion_incomplete_empty_response());
             }
 
-            if let Some(apply_age) = completion_apply_age_for_file(self, file_id).await {
+            let prepare_apply_age_at_start = completion_apply_age_for_file(self, file_id).await;
+            timeline_capture.set_prepare_apply_age_at_start(prepare_apply_age_at_start);
+            if let Some(apply_age) = prepare_apply_age_at_start {
                 self.coordinator
                     .record_completion_stage_latency("prepare_apply_age_at_start", apply_age);
             }
@@ -656,6 +714,7 @@ impl BslLanguageServer {
                     Some(self.coordinator.as_ref()),
                 )
                 .map(|knobs| knobs.wait_budget);
+            timeline_capture.set_prepare_wait_budget(prepare_timeout);
             let prepare_abort = event_driven_guards_enabled.then(|| {
                 wait_for_completion_prepare_abort(
                     self,
@@ -681,7 +740,9 @@ impl BslLanguageServer {
             let prepare_elapsed = prepare_started.elapsed();
             self.coordinator
                 .record_completion_stage_latency("prepare_stateful", prepare_elapsed);
-            if let Some(apply_age) = completion_apply_age_for_file(self, file_id).await {
+            let prepare_apply_age_at_terminal = completion_apply_age_for_file(self, file_id).await;
+            timeline_capture.set_prepare_apply_age_at_terminal(prepare_apply_age_at_terminal);
+            if let Some(apply_age) = prepare_apply_age_at_terminal {
                 self.coordinator
                     .record_completion_stage_latency("prepare_apply_age_at_terminal", apply_age);
             }
@@ -692,6 +753,7 @@ impl BslLanguageServer {
                     prepared
                 }
                 Err(outcome) => {
+                    timeline_capture.set_prepare_outcome(outcome);
                     if outcome == "wait_not_ready" {
                         self.coordinator
                             .record_intellisense_v2_interactive_wait_budget_exhausted();
@@ -710,6 +772,17 @@ impl BslLanguageServer {
 
             match prepared {
                 Ok((context, prepared, expected_version)) => {
+                    timeline_capture.set_prepare_outcome("ready");
+                    timeline_capture.set_prepare_observed_file_version(
+                        prepared
+                            .snapshot
+                            .analysis
+                            .file_version(file_id)
+                            .ok()
+                            .flatten(),
+                    );
+                    timeline_capture.set_prepare_wait_elapsed(prepared.wait_elapsed);
+                    timeline_capture.set_prepare_snapshot_elapsed(prepared.snapshot_elapsed);
                     if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
                         event_driven_guards_enabled,
                         self,
@@ -1358,7 +1431,9 @@ impl BslLanguageServer {
                     completion_response
                 }
                 Err(outcome) => {
-                    completion_outcome = Some(completion_prepare_error_outcome(outcome));
+                    let prepare_outcome = completion_prepare_error_outcome(outcome);
+                    timeline_capture.set_prepare_outcome(prepare_outcome);
+                    completion_outcome = Some(prepare_outcome);
                     debug!(
                         uri = %uri,
                         file_id = file_id.0,

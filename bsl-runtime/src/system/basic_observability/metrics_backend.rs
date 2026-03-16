@@ -1,4 +1,5 @@
 use super::*;
+use crate::system::global_runtime_config;
 
 const SIDEBAR_HISTOGRAM_KEYS: &[&str] = &[
     "intellisense_v2_wait_for_file_version_completion_ms",
@@ -255,8 +256,28 @@ impl SimpleMetrics {
             "gauges": gauges,
             "histograms": histogram_stats,
             "rates": rates,
+            "config": Self::build_config_payload(),
             "uptime_seconds": self.uptime().as_secs()
         })
+    }
+
+    fn build_config_payload() -> serde_json::Value {
+        let snapshot = global_runtime_config().snapshot();
+        let mut config = serde_json::Map::new();
+        for env_key in [
+            "BSL_INTELLISENSE_V2_INTERACTIVE_WAIT_BUDGET_MS",
+            "BSL_INTELLISENSE_V2_SLOW_CLIENT_LOG_MS",
+            "BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS",
+        ] {
+            config.insert(
+                env_key.to_string(),
+                json!({
+                    "effective": snapshot.effective.get(env_key).cloned().flatten(),
+                    "source": snapshot.sources.get(env_key).copied(),
+                }),
+            );
+        }
+        serde_json::Value::Object(config)
     }
 
     /// Экспорт всех метрик (для health endpoints)

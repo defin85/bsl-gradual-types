@@ -526,6 +526,18 @@ export interface CompletionTimelineTurnAttributionTrace {
     queued_completion_ahead?: CompletionTimelineTurnHolderTrace;
 }
 
+export interface CompletionTimelinePrepareDetailsTrace {
+    wait_budget_ms?: number;
+    outcome?: string;
+    min_file_version?: number;
+    shadow_version_at_start?: number;
+    observed_file_version?: number;
+    wait_elapsed_ms?: number;
+    snapshot_elapsed_ms?: number;
+    apply_age_at_start_ms?: number;
+    apply_age_at_terminal_ms?: number;
+}
+
 export interface CompletionTimelineTrace {
     trace_id: string;
     request_id?: string;
@@ -535,6 +547,7 @@ export interface CompletionTimelineTrace {
     started_at_ms: number;
     total_duration_ms: number;
     dominant_stage?: string;
+    prepare_details?: CompletionTimelinePrepareDetailsTrace;
     turn_attribution?: CompletionTimelineTurnAttributionTrace;
     stages: CompletionTimelineStageTrace[];
 }

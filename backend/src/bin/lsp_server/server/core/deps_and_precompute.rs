@@ -464,6 +464,14 @@ impl BslLanguageServer {
                         result.stats.semantic_facts_local_function_summaries_ms,
                     semantic_facts_visit_statements_ms =
                         result.stats.semantic_facts_visit_statements_ms,
+                    semantic_facts_visit_callable_body_ms =
+                        result.stats.semantic_facts_visit_callable_body_ms,
+                    semantic_facts_visit_callable_body_count =
+                        result.stats.semantic_facts_visit_callable_body_count,
+                    semantic_facts_merge_control_flow_env_ms =
+                        result.stats.semantic_facts_merge_control_flow_env_ms,
+                    semantic_facts_merge_control_flow_env_count =
+                        result.stats.semantic_facts_merge_control_flow_env_count,
                     semantic_facts_statement_count = result.stats.semantic_facts_statement_count,
                     semantic_facts_local_function_summary_count =
                         result.stats.semantic_facts_local_function_summary_count,

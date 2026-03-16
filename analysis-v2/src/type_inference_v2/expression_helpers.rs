@@ -48,6 +48,14 @@ impl TypeInferencer {
         object_type: &TypeResolution,
         property_key: &str,
     ) -> Option<TypeResolution> {
+        let cache_key = ResolutionPropertyCacheKey {
+            base: Self::lookup_cache_base_key(object_type),
+            property_name_lower: property_key.to_string(),
+        };
+        if let Some(cached) = self.property_type_cache.borrow().get(&cache_key).cloned() {
+            return cached;
+        }
+
         let properties = self.metadata_lookup.get_properties(object_type);
         let properties = if properties.is_empty() {
             self.deps
@@ -81,19 +89,35 @@ impl TypeInferencer {
                 prop.name
             ));
             if !resolved.is_unknown() {
-                return Some(resolved);
+                let resolved = Some(resolved);
+                self.property_type_cache
+                    .borrow_mut()
+                    .insert(cache_key, resolved.clone());
+                return resolved;
             }
         }
 
         if let Some(resolved) = self.try_resolve_configuration_type(&prop.prop_type) {
-            return Some(resolved);
+            let resolved = Some(resolved);
+            self.property_type_cache
+                .borrow_mut()
+                .insert(cache_key, resolved.clone());
+            return resolved;
         }
         if self.deps.repository.find_type(&prop.prop_type).is_some() {
-            return Some(self.resolver.resolve_expression_sync(&prop.prop_type));
+            let resolved = Some(self.resolver.resolve_expression_sync(&prop.prop_type));
+            self.property_type_cache
+                .borrow_mut()
+                .insert(cache_key, resolved.clone());
+            return resolved;
         }
         // Типы свойств из metadata (в т.ч. синтетические UI-типы форм вроде "ГруппаФормы")
         // должны возвращаться даже если их документация не загружена в repository.
-        Some(TypeResolution::inferred(&prop.prop_type))
+        let resolved = Some(TypeResolution::inferred(&prop.prop_type));
+        self.property_type_cache
+            .borrow_mut()
+            .insert(cache_key, resolved.clone());
+        resolved
     }
 }
 

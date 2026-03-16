@@ -617,6 +617,80 @@ fn extracts_parenthesized_choice_receiver_slices_with_partial_member_tail() {
 }
 
 #[test]
+fn filters_precomputed_incomplete_member_access_offsets_by_span() {
+    let source = concat!(
+        "Процедура Первая()\n",
+        "    Первый.\n",
+        "КонецПроцедуры\n",
+        "\n",
+        "Процедура Вторая()\n",
+        "    Второй.\n",
+        "КонецПроцедуры\n",
+    );
+    let all_offsets = incomplete_member_access_dot_offsets(source);
+    let second_start = source
+        .find("Процедура Вторая()")
+        .expect("second procedure start");
+    let second_end = source
+        .match_indices("КонецПроцедуры")
+        .nth(1)
+        .map(|(offset, marker)| offset + marker.len())
+        .expect("second procedure end");
+    let span = bsl_shared::ir::Span::new(second_start as u32, second_end as u32);
+
+    let direct = scan_incomplete_member_access_dot_offsets_within_span(source, span);
+    let filtered =
+        incomplete_member_access_dot_offsets_within_span_from_candidates(&all_offsets, span);
+
+    assert_eq!(filtered, direct);
+    assert_eq!(filtered.len(), 1);
+}
+
+#[test]
+fn incomplete_member_access_offsets_ignore_comment_only_lines() {
+    let source = concat!(
+        "Процедура Тест()\n",
+        "    // Комментарий с точкой.\n",
+        "    Значение.\n",
+        "КонецПроцедуры\n",
+    );
+
+    let offsets = incomplete_member_access_dot_offsets(source);
+    let expected_offset = source
+        .find("    Значение.")
+        .map(|idx| idx + "    Значение".len())
+        .expect("incomplete member access offset");
+
+    assert_eq!(
+        offsets,
+        vec![expected_offset],
+        "comment-only lines ending with '.' must not be treated as incomplete member access candidates"
+    );
+}
+
+#[test]
+fn incomplete_member_access_offsets_ignore_complete_member_tails() {
+    let source = concat!(
+        "Процедура Тест()\n",
+        "    Значение.Свойство;\n",
+        "    ДругоеЗначение.\n",
+        "КонецПроцедуры\n",
+    );
+
+    let offsets = incomplete_member_access_dot_offsets(source);
+    let expected_offset = source
+        .find("    ДругоеЗначение.")
+        .map(|idx| idx + "    ДругоеЗначение".len())
+        .expect("incomplete member access offset");
+
+    assert_eq!(
+        offsets,
+        vec![expected_offset],
+        "source-only incomplete member access scan must ignore complete member tails like 'obj.Member;'"
+    );
+}
+
+#[test]
 fn parenthesized_choice_with_partial_member_tail_triggers_parser_recovery() {
     let source = concat!(
         "Процедура Тест()\n",

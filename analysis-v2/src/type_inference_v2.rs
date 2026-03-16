@@ -1,3 +1,5 @@
+use std::cell::Cell;
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -24,6 +26,7 @@ use bsl_shared::ir::{
     SemanticConstructorTarget, SemanticFacts, SemanticMethodTarget, SemanticProgram,
     SemanticTypeEntry, Span,
 };
+use bsl_shared::FORM_DATA_SEMANTICS_NOTE;
 use bsl_syntax::ast::{CompilerDirective, Expression, ParseError, Program, Statement};
 
 use crate::ast_to_ir::{is_global_collection, lookup_global_collection};
@@ -50,6 +53,10 @@ pub(crate) struct TypeIndexBuildProfile {
     pub seed_module_context_ms: u128,
     pub local_function_summaries_ms: u128,
     pub visit_statements_ms: u128,
+    pub visit_callable_body_ms: u128,
+    pub visit_callable_body_count: u64,
+    pub merge_control_flow_env_ms: u128,
+    pub merge_control_flow_env_count: u64,
     pub total_ms: u128,
     pub statement_count: u64,
     pub local_function_summary_count: u64,
@@ -274,11 +281,62 @@ struct LocalFunctionSummary {
     is_function: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ResolutionLookupCacheBaseKey {
+    type_name: String,
+    active_facet: Option<FacetKind>,
+    has_form_data_semantics: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ResolutionMethodCacheKey {
+    base: ResolutionLookupCacheBaseKey,
+    method_name_lower: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ResolutionPropertyCacheKey {
+    base: ResolutionLookupCacheBaseKey,
+    property_name_lower: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct MethodTargetCacheKey {
+    owner_type: String,
+    method_name_lower: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum DefinitionLocationCacheKey {
+    Configuration(String),
+    TabularRowParent(String),
+}
+
+#[derive(Default)]
+struct TypeInferencerStats {
+    visit_callable_body_ms: Cell<u128>,
+    visit_callable_body_count: Cell<u64>,
+    merge_control_flow_env_ms: Cell<u128>,
+    merge_control_flow_env_count: Cell<u64>,
+    source_incomplete_member_access_recovery_ms: Cell<u128>,
+    source_incomplete_member_access_recovery_count: Cell<u64>,
+    syntax_incomplete_member_access_recovery_ms: Cell<u128>,
+    syntax_incomplete_member_access_recovery_count: Cell<u64>,
+    incomplete_call_target_recovery_ms: Cell<u128>,
+    incomplete_call_target_recovery_count: Cell<u64>,
+}
+
 struct TypeInferencer {
     deps: Arc<SemanticDeps>,
     resolver: Arc<TypeResolver>,
     signature_index: SignatureIndex,
     metadata_lookup: TypeMetadataLookup,
+    property_type_cache: RefCell<HashMap<ResolutionPropertyCacheKey, Option<TypeResolution>>>,
+    method_return_cache: RefCell<HashMap<ResolutionMethodCacheKey, TypeResolution>>,
+    method_target_cache: RefCell<HashMap<MethodTargetCacheKey, Option<SemanticMethodTarget>>>,
+    definition_location_cache:
+        RefCell<HashMap<DefinitionLocationCacheKey, Option<TypeDefinitionLocation>>>,
+    stats: TypeInferencerStats,
 }
 
 #[path = "type_inference_v2/expression_helpers.rs"]
@@ -307,6 +365,31 @@ impl TypeInferencer {
             resolver,
             signature_index,
             metadata_lookup,
+            property_type_cache: RefCell::new(HashMap::new()),
+            method_return_cache: RefCell::new(HashMap::new()),
+            method_target_cache: RefCell::new(HashMap::new()),
+            definition_location_cache: RefCell::new(HashMap::new()),
+            stats: TypeInferencerStats::default(),
+        }
+    }
+
+    fn add_u128_stat(stat: &Cell<u128>, value: u128) {
+        stat.set(stat.get().saturating_add(value));
+    }
+
+    fn add_u64_stat(stat: &Cell<u64>, value: u64) {
+        stat.set(stat.get().saturating_add(value));
+    }
+
+    fn lookup_cache_base_key(resolution: &TypeResolution) -> ResolutionLookupCacheBaseKey {
+        ResolutionLookupCacheBaseKey {
+            type_name: resolution.type_name(),
+            active_facet: resolution.active_facet,
+            has_form_data_semantics: resolution
+                .metadata
+                .notes
+                .iter()
+                .any(|note| note == FORM_DATA_SEMANTICS_NOTE),
         }
     }
 
@@ -380,6 +463,8 @@ impl TypeInferencer {
         let local_function_summary_count = local_function_summaries.len() as u64;
         env.local_function_summaries = Arc::new(local_function_summaries);
         let local_function_summaries_ms = local_function_summaries_started.elapsed().as_millis();
+        let source_incomplete_member_access_offsets =
+            source_text.map(incomplete_member_access_dot_offsets);
 
         let visit_statements_started = Instant::now();
         for stmt in &program.statements {
@@ -406,48 +491,118 @@ impl TypeInferencer {
                         &mut facts,
                     );
                     if let Some(source_text) = source_text {
+                        let started = Instant::now();
                         self.record_source_incomplete_member_access_entries(
                             source_text,
                             *span,
+                            source_incomplete_member_access_offsets.as_deref(),
                             &fn_env,
                             &mut facts,
                         );
+                        Self::add_u128_stat(
+                            &self.stats.source_incomplete_member_access_recovery_ms,
+                            started.elapsed().as_millis(),
+                        );
+                        Self::add_u64_stat(
+                            &self.stats.source_incomplete_member_access_recovery_count,
+                            1,
+                        );
                     }
                     if let Some(recovery) = recovery {
+                        let member_recovery_started = Instant::now();
                         self.record_incomplete_member_access_recovery_entries(
                             recovery, *span, &fn_env, &mut facts,
                         );
+                        Self::add_u128_stat(
+                            &self.stats.syntax_incomplete_member_access_recovery_ms,
+                            member_recovery_started.elapsed().as_millis(),
+                        );
+                        Self::add_u64_stat(
+                            &self.stats.syntax_incomplete_member_access_recovery_count,
+                            1,
+                        );
+                        let call_target_started = Instant::now();
                         self.record_incomplete_call_target_recovery_entries(
                             recovery, *span, &fn_env, &mut facts,
                         );
+                        Self::add_u128_stat(
+                            &self.stats.incomplete_call_target_recovery_ms,
+                            call_target_started.elapsed().as_millis(),
+                        );
+                        Self::add_u64_stat(&self.stats.incomplete_call_target_recovery_count, 1);
                     }
                 }
                 _ => self.visit_statement(stmt, &mut env, &mut facts),
             }
         }
         if let Some(source_text) = source_text {
+            let started = Instant::now();
             self.record_source_incomplete_member_access_entries(
                 source_text,
                 bsl_shared::ir::Span::new(0, source_text.len() as u32),
+                source_incomplete_member_access_offsets.as_deref(),
                 &env,
                 &mut facts,
             );
+            Self::add_u128_stat(
+                &self.stats.source_incomplete_member_access_recovery_ms,
+                started.elapsed().as_millis(),
+            );
+            Self::add_u64_stat(
+                &self.stats.source_incomplete_member_access_recovery_count,
+                1,
+            );
         }
         if let Some(recovery) = recovery {
+            let member_recovery_started = Instant::now();
             self.record_incomplete_member_access_recovery_entries(
                 recovery,
                 bsl_shared::ir::Span::new(0, recovery.source_text.len() as u32),
                 &env,
                 &mut facts,
             );
+            Self::add_u128_stat(
+                &self.stats.syntax_incomplete_member_access_recovery_ms,
+                member_recovery_started.elapsed().as_millis(),
+            );
+            Self::add_u64_stat(
+                &self.stats.syntax_incomplete_member_access_recovery_count,
+                1,
+            );
+            let call_target_started = Instant::now();
             self.record_incomplete_call_target_recovery_entries(
                 recovery,
                 bsl_shared::ir::Span::new(0, recovery.source_text.len() as u32),
                 &env,
                 &mut facts,
             );
+            Self::add_u128_stat(
+                &self.stats.incomplete_call_target_recovery_ms,
+                call_target_started.elapsed().as_millis(),
+            );
+            Self::add_u64_stat(&self.stats.incomplete_call_target_recovery_count, 1);
         }
         let visit_statements_ms = visit_statements_started.elapsed().as_millis();
+        let visit_callable_body_ms = self.stats.visit_callable_body_ms.get();
+        let visit_callable_body_count = self.stats.visit_callable_body_count.get();
+        let merge_control_flow_env_ms = self.stats.merge_control_flow_env_ms.get();
+        let merge_control_flow_env_count = self.stats.merge_control_flow_env_count.get();
+        let source_incomplete_member_access_recovery_ms =
+            self.stats.source_incomplete_member_access_recovery_ms.get();
+        let source_incomplete_member_access_recovery_count = self
+            .stats
+            .source_incomplete_member_access_recovery_count
+            .get();
+        let syntax_incomplete_member_access_recovery_ms =
+            self.stats.syntax_incomplete_member_access_recovery_ms.get();
+        let syntax_incomplete_member_access_recovery_count = self
+            .stats
+            .syntax_incomplete_member_access_recovery_count
+            .get();
+        let incomplete_call_target_recovery_ms =
+            self.stats.incomplete_call_target_recovery_ms.get();
+        let incomplete_call_target_recovery_count =
+            self.stats.incomplete_call_target_recovery_count.get();
         tracing::debug!(
             target: "bsl_backend::analysis_v2",
             file_path,
@@ -455,6 +610,16 @@ impl TypeInferencer {
             seed_module_context_ms,
             local_function_summaries_ms,
             visit_statements_ms,
+            visit_callable_body_ms,
+            visit_callable_body_count,
+            merge_control_flow_env_ms,
+            merge_control_flow_env_count,
+            source_incomplete_member_access_recovery_ms,
+            source_incomplete_member_access_recovery_count,
+            syntax_incomplete_member_access_recovery_ms,
+            syntax_incomplete_member_access_recovery_count,
+            incomplete_call_target_recovery_ms,
+            incomplete_call_target_recovery_count,
             statement_count = program.statements.len(),
             local_function_summary_count,
             index_entry_count = facts.type_entries.len(),
@@ -466,6 +631,10 @@ impl TypeInferencer {
                 seed_module_context_ms,
                 local_function_summaries_ms,
                 visit_statements_ms,
+                visit_callable_body_ms,
+                visit_callable_body_count,
+                merge_control_flow_env_ms,
+                merge_control_flow_env_count,
                 total_ms: started.elapsed().as_millis(),
                 statement_count: program.statements.len() as u64,
                 local_function_summary_count,
@@ -483,6 +652,7 @@ impl TypeInferencer {
         env: &TypeEnv,
         facts: &mut SemanticFacts,
     ) -> TypeEnv {
+        let started = Instant::now();
         let mut fn_env = env.clone();
         if directive_disables_form_context(compiler_directive) {
             for key in FORM_CONTEXT_BOUND_SYMBOL_KEYS {
@@ -496,6 +666,11 @@ impl TypeInferencer {
         for stmt in body {
             self.visit_statement(stmt, &mut fn_env, facts);
         }
+        Self::add_u128_stat(
+            &self.stats.visit_callable_body_ms,
+            started.elapsed().as_millis(),
+        );
+        Self::add_u64_stat(&self.stats.visit_callable_body_count, 1);
         fn_env
     }
 
@@ -510,8 +685,10 @@ impl TypeInferencer {
             return;
         }
 
-        let mut dot_offsets =
-            incomplete_member_access_dot_offsets_within_span(recovery.source_text, container_span);
+        let mut dot_offsets = recovery_incomplete_member_access_dot_offsets_within_span(
+            recovery.source_text,
+            container_span,
+        );
         for error in recovery.syntax_errors {
             if let Some(dot_offset) =
                 find_incomplete_member_access_dot_offset(recovery.source_text, error.span)
@@ -560,12 +737,21 @@ impl TypeInferencer {
         &self,
         source_text: &str,
         container_span: bsl_shared::ir::Span,
+        candidate_offsets: Option<&[usize]>,
         env: &TypeEnv,
         facts: &mut SemanticFacts,
     ) {
-        for dot_offset in
-            incomplete_member_access_dot_offsets_within_span(source_text, container_span)
-        {
+        let dot_offsets = candidate_offsets
+            .map(|offsets| {
+                incomplete_member_access_dot_offsets_within_span_from_candidates(
+                    offsets,
+                    container_span,
+                )
+            })
+            .unwrap_or_else(|| {
+                incomplete_member_access_dot_offsets_within_span(source_text, container_span)
+            });
+        for dot_offset in dot_offsets {
             self.record_incomplete_member_access_receiver_entries_at_dot_offset(
                 source_text,
                 dot_offset,
@@ -1621,6 +1807,7 @@ impl TypeInferencer {
     }
 
     fn merge_control_flow_env(&self, base: &TypeEnv, left: &TypeEnv, right: &TypeEnv) -> TypeEnv {
+        let started = Instant::now();
         let mut merged = base.clone();
         merged.instance_effects = InstanceEffectStore::merge_branch(
             &base.instance_effects,
@@ -1670,6 +1857,11 @@ impl TypeInferencer {
             merged.set_description_type_resolution(key, merged_description);
         }
 
+        Self::add_u128_stat(
+            &self.stats.merge_control_flow_env_ms,
+            started.elapsed().as_millis(),
+        );
+        Self::add_u64_stat(&self.stats.merge_control_flow_env_count, 1);
         merged
     }
 
@@ -1793,10 +1985,21 @@ impl TypeInferencer {
     }
 
     fn infer_method_call(&self, receiver: &TypeResolution, method: &str) -> TypeResolution {
+        let cache_key = ResolutionMethodCacheKey {
+            base: Self::lookup_cache_base_key(receiver),
+            method_name_lower: method.to_lowercase(),
+        };
+        if let Some(cached) = self.method_return_cache.borrow().get(&cache_key).cloned() {
+            return cached;
+        }
+
         let type_name = signature_lookup_type_name(receiver);
         let metadata_name = SignatureIndex::extract_metadata_name(&type_name);
-        let method_key = method.to_lowercase();
+        let method_key = cache_key.method_name_lower.clone();
         if let Some(resolved) = self.try_resolve_tabular_section_row_method(receiver, &method_key) {
+            self.method_return_cache
+                .borrow_mut()
+                .insert(cache_key.clone(), resolved.clone());
             return resolved;
         }
         let concretize_return_type = |return_type: &str| -> String {
@@ -1839,6 +2042,9 @@ impl TypeInferencer {
             if let Some(resolved) =
                 resolve_lookup_method(self.metadata_lookup.get_methods(receiver))
             {
+                self.method_return_cache
+                    .borrow_mut()
+                    .insert(cache_key, resolved.clone());
                 return resolved;
             }
         }
@@ -1847,17 +2053,31 @@ impl TypeInferencer {
             if let Some(return_type) = sig.return_type.as_deref().filter(|s| !s.is_empty()) {
                 let return_type = concretize_return_type(return_type);
                 if let Some(resolved) = self.try_resolve_configuration_type(&return_type) {
+                    self.method_return_cache
+                        .borrow_mut()
+                        .insert(cache_key.clone(), resolved.clone());
                     return resolved;
                 }
-                return self.resolver.resolve_expression_sync(&return_type);
+                let resolved = self.resolver.resolve_expression_sync(&return_type);
+                self.method_return_cache
+                    .borrow_mut()
+                    .insert(cache_key.clone(), resolved.clone());
+                return resolved;
             }
         }
 
         if let Some(resolved) = resolve_lookup_method(self.metadata_lookup.get_methods(receiver)) {
+            self.method_return_cache
+                .borrow_mut()
+                .insert(cache_key.clone(), resolved.clone());
             return resolved;
         }
 
-        TypeResolution::unknown()
+        let resolved = TypeResolution::unknown();
+        self.method_return_cache
+            .borrow_mut()
+            .insert(cache_key, resolved.clone());
+        resolved
     }
 
     fn try_resolve_tabular_section_row_method(
@@ -1907,7 +2127,15 @@ impl TypeInferencer {
             return None;
         }
 
-        Some(SemanticMethodTarget {
+        let cache_key = MethodTargetCacheKey {
+            owner_type: owner_type.to_string(),
+            method_name_lower: method_name.to_lowercase(),
+        };
+        if let Some(cached) = self.method_target_cache.borrow().get(&cache_key).cloned() {
+            return cached;
+        }
+
+        let target = Some(SemanticMethodTarget {
             owner_type: Some(owner_type.to_string()),
             method_name: method_name.to_string(),
             signature: self
@@ -1918,7 +2146,11 @@ impl TypeInferencer {
                 .deps
                 .repository
                 .find_method_definition_location(Some(owner_type), method_name),
-        })
+        });
+        self.method_target_cache
+            .borrow_mut()
+            .insert(cache_key, target.clone());
+        target
     }
 
     fn semantic_definition_location(
@@ -1928,20 +2160,53 @@ impl TypeInferencer {
         match &resolution.result {
             ResolutionResult::Concrete(ConcreteType::Configuration(cfg)) => {
                 let type_key = format!("{}.{}", cfg.kind.to_prefix(), cfg.name);
-                let raw = self.deps.repository.find_type(&type_key)?;
-                let metadata_path = raw.metadata_path?;
-                Some(TypeDefinitionLocation::configuration_with_modules(
-                    metadata_path,
-                    raw.module_paths.unwrap_or_default(),
-                ))
+                let cache_key = DefinitionLocationCacheKey::Configuration(type_key.clone());
+                if let Some(cached) = self
+                    .definition_location_cache
+                    .borrow()
+                    .get(&cache_key)
+                    .cloned()
+                {
+                    return cached;
+                }
+                let location = self.deps.repository.find_type(&type_key).and_then(|raw| {
+                    let metadata_path = raw.metadata_path?;
+                    Some(TypeDefinitionLocation::configuration_with_modules(
+                        metadata_path,
+                        raw.module_paths.unwrap_or_default(),
+                    ))
+                });
+                self.definition_location_cache
+                    .borrow_mut()
+                    .insert(cache_key, location.clone());
+                location
             }
             ResolutionResult::Concrete(ConcreteType::TabularRow(tabular_row)) => {
-                let raw = self.deps.repository.find_type(&tabular_row.parent_type)?;
-                let metadata_path = raw.metadata_path?;
-                Some(TypeDefinitionLocation::configuration_with_modules(
-                    metadata_path,
-                    raw.module_paths.unwrap_or_default(),
-                ))
+                let cache_key =
+                    DefinitionLocationCacheKey::TabularRowParent(tabular_row.parent_type.clone());
+                if let Some(cached) = self
+                    .definition_location_cache
+                    .borrow()
+                    .get(&cache_key)
+                    .cloned()
+                {
+                    return cached;
+                }
+                let location = self
+                    .deps
+                    .repository
+                    .find_type(&tabular_row.parent_type)
+                    .and_then(|raw| {
+                        let metadata_path = raw.metadata_path?;
+                        Some(TypeDefinitionLocation::configuration_with_modules(
+                            metadata_path,
+                            raw.module_paths.unwrap_or_default(),
+                        ))
+                    });
+                self.definition_location_cache
+                    .borrow_mut()
+                    .insert(cache_key, location.clone());
+                location
             }
             ResolutionResult::Concrete(ConcreteType::Primitive(_))
             | ResolutionResult::Concrete(ConcreteType::Special(_))
@@ -2473,21 +2738,73 @@ fn incomplete_member_access_dot_offsets_within_span(
     source_text: &str,
     container_span: bsl_shared::ir::Span,
 ) -> Vec<usize> {
+    let global_offsets = incomplete_member_access_dot_offsets(source_text);
+    incomplete_member_access_dot_offsets_within_span_from_candidates(
+        &global_offsets,
+        container_span,
+    )
+}
+
+fn incomplete_member_access_dot_offsets(source_text: &str) -> Vec<usize> {
+    let container_span =
+        bsl_shared::ir::Span::new(0, source_text.len().min(u32::MAX as usize) as u32);
+    scan_incomplete_member_access_dot_offsets_within_span(source_text, container_span)
+}
+
+fn incomplete_member_access_dot_offsets_within_span_from_candidates(
+    candidate_offsets: &[usize],
+    container_span: bsl_shared::ir::Span,
+) -> Vec<usize> {
+    let start = container_span.start as usize;
+    let end = container_span.end as usize;
+    let start_idx = candidate_offsets.partition_point(|offset| *offset < start);
+    let end_idx = candidate_offsets.partition_point(|offset| *offset < end);
+    candidate_offsets[start_idx..end_idx].to_vec()
+}
+
+fn scan_incomplete_member_access_dot_offsets_within_span(
+    source_text: &str,
+    container_span: bsl_shared::ir::Span,
+) -> Vec<usize> {
+    scan_member_access_dot_offsets_within_span(
+        source_text,
+        container_span,
+        looks_like_source_incomplete_member_access_tail,
+    )
+}
+
+fn recovery_incomplete_member_access_dot_offsets_within_span(
+    source_text: &str,
+    container_span: bsl_shared::ir::Span,
+) -> Vec<usize> {
+    scan_member_access_dot_offsets_within_span(
+        source_text,
+        container_span,
+        looks_like_recovery_incomplete_member_access_tail,
+    )
+}
+
+fn scan_member_access_dot_offsets_within_span(
+    source_text: &str,
+    container_span: bsl_shared::ir::Span,
+    tail_predicate: fn(&str) -> bool,
+) -> Vec<usize> {
     let start = container_span.start as usize;
     let end = (container_span.end as usize).min(source_text.len());
     let Some(container_text) = source_text.get(start..end) else {
         return Vec::new();
     };
-
     let mut offsets = Vec::new();
     let mut cursor = start;
     for chunk in container_text.split_inclusive('\n') {
         let line_text = chunk.strip_suffix('\n').unwrap_or(chunk);
         let line_text = line_text.strip_suffix('\r').unwrap_or(line_text);
+        if line_text.trim_start().starts_with("//") {
+            cursor = cursor.saturating_add(chunk.len());
+            continue;
+        }
         if let Some(dot_in_line) = line_text.rfind('.') {
-            let valid_tail = line_text
-                .get(dot_in_line + 1..)
-                .is_some_and(looks_like_incomplete_member_access_tail);
+            let valid_tail = line_text.get(dot_in_line + 1..).is_some_and(tail_predicate);
             if valid_tail {
                 offsets.push(cursor.saturating_add(dot_in_line));
             }
@@ -2498,7 +2815,11 @@ fn incomplete_member_access_dot_offsets_within_span(
     offsets
 }
 
-fn looks_like_incomplete_member_access_tail(tail: &str) -> bool {
+fn looks_like_source_incomplete_member_access_tail(tail: &str) -> bool {
+    tail.trim().trim_end_matches(';').trim().is_empty()
+}
+
+fn looks_like_recovery_incomplete_member_access_tail(tail: &str) -> bool {
     let trimmed = tail.trim();
     if trimmed.is_empty() {
         return true;

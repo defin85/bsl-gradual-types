@@ -162,6 +162,10 @@ impl AnalysisV2 {
                 semantic_facts_seed_module_context_ms = profiled_ir.profile.semantic_facts_seed_module_context_ms,
                 semantic_facts_local_function_summaries_ms = profiled_ir.profile.semantic_facts_local_function_summaries_ms,
                 semantic_facts_visit_statements_ms = profiled_ir.profile.semantic_facts_visit_statements_ms,
+                semantic_facts_visit_callable_body_ms = profiled_ir.profile.semantic_facts_visit_callable_body_ms,
+                semantic_facts_visit_callable_body_count = profiled_ir.profile.semantic_facts_visit_callable_body_count,
+                semantic_facts_merge_control_flow_env_ms = profiled_ir.profile.semantic_facts_merge_control_flow_env_ms,
+                semantic_facts_merge_control_flow_env_count = profiled_ir.profile.semantic_facts_merge_control_flow_env_count,
                 semantic_facts_statement_count = profiled_ir.profile.semantic_facts_statement_count,
                 semantic_facts_local_function_summary_count = profiled_ir.profile.semantic_facts_local_function_summary_count,
                 semantic_facts_index_entry_count = profiled_ir.profile.semantic_facts_index_entry_count,
@@ -217,6 +221,14 @@ impl AnalysisV2 {
                         .semantic_facts_local_function_summaries_ms,
                     semantic_facts_visit_statements_ms: ir_profile
                         .semantic_facts_visit_statements_ms,
+                    semantic_facts_visit_callable_body_ms: ir_profile
+                        .semantic_facts_visit_callable_body_ms,
+                    semantic_facts_visit_callable_body_count: ir_profile
+                        .semantic_facts_visit_callable_body_count,
+                    semantic_facts_merge_control_flow_env_ms: ir_profile
+                        .semantic_facts_merge_control_flow_env_ms,
+                    semantic_facts_merge_control_flow_env_count: ir_profile
+                        .semantic_facts_merge_control_flow_env_count,
                     semantic_facts_statement_count: ir_profile.semantic_facts_statement_count,
                     semantic_facts_local_function_summary_count: ir_profile
                         .semantic_facts_local_function_summary_count,
@@ -253,6 +265,14 @@ impl AnalysisV2 {
                     .semantic_facts_local_function_summaries_ms,
                 semantic_facts_visit_statements_ms: ir_profile
                     .semantic_facts_visit_statements_ms,
+                semantic_facts_visit_callable_body_ms: ir_profile
+                    .semantic_facts_visit_callable_body_ms,
+                semantic_facts_visit_callable_body_count: ir_profile
+                    .semantic_facts_visit_callable_body_count,
+                semantic_facts_merge_control_flow_env_ms: ir_profile
+                    .semantic_facts_merge_control_flow_env_ms,
+                semantic_facts_merge_control_flow_env_count: ir_profile
+                    .semantic_facts_merge_control_flow_env_count,
                 semantic_facts_statement_count: ir_profile.semantic_facts_statement_count,
                 semantic_facts_local_function_summary_count: ir_profile
                     .semantic_facts_local_function_summary_count,
@@ -1155,6 +1175,10 @@ impl AnalysisV2 {
             clip_to_index_fetch(index_build_profile.local_function_summaries_ms);
         let index_build_visit_statements_ms =
             clip_to_index_fetch(index_build_profile.visit_statements_ms);
+        let index_build_visit_callable_body_ms =
+            clip_to_index_fetch(index_build_profile.visit_callable_body_ms);
+        let index_build_merge_control_flow_env_ms =
+            clip_to_index_fetch(index_build_profile.merge_control_flow_env_ms);
 
         let index_scan_started = Instant::now();
         let source_text = file.text(&self.db);
@@ -1284,6 +1308,11 @@ impl AnalysisV2 {
                 index_build_seed_module_context_ms,
                 index_build_local_function_summaries_ms,
                 index_build_visit_statements_ms,
+                index_build_visit_callable_body_ms,
+                index_build_visit_callable_body_count: index_build_profile.visit_callable_body_count,
+                index_build_merge_control_flow_env_ms,
+                index_build_merge_control_flow_env_count:
+                    index_build_profile.merge_control_flow_env_count,
                 index_scan_ms,
                 total_ms,
             },

@@ -1,0 +1,100 @@
+import * as assert from 'assert';
+import {
+    formatSelectedCompletionTraceForClipboard,
+    formatVisibleCompletionTimelineForClipboard,
+} from '../../providers/completionTimelineClipboard';
+import { CompletionTimelinePanelState } from '../../providers/completionTimelineModel';
+
+suite('Completion Timeline Clipboard Test Suite', () => {
+    function buildReadyState(): CompletionTimelinePanelState {
+        return {
+            kind: 'ready',
+            version: 1,
+            updated_at_ms: 1_700_000_000_100,
+            traces: [
+                {
+                    trace_id: 'trace-1',
+                    request_id: 'req-1',
+                    uri: 'file:///tmp/test1.bsl',
+                    trigger_mode: 'invoked',
+                    outcome: 'ok_non_empty',
+                    started_at_ms: 1_700_000_000_001,
+                    total_duration_ms: 30,
+                    max_stage_end_ms: 28,
+                    unattributed_overhead_ms: 2,
+                    dominant_stage: 'query_bundle',
+                    stages: [
+                        {
+                            name: 'prepare_stateful',
+                            status: 'completed',
+                            started_offset_ms: 0,
+                            end_offset_ms: 10,
+                            duration_ms: 10,
+                            width_percent: 33.3,
+                            duration_percent: 33.3,
+                            is_dominant: false,
+                        },
+                        {
+                            name: 'query_bundle',
+                            status: 'completed',
+                            started_offset_ms: 10,
+                            end_offset_ms: 28,
+                            duration_ms: 18,
+                            width_percent: 60,
+                            duration_percent: 60,
+                            is_dominant: true,
+                        },
+                    ],
+                },
+            ],
+            average_trace: {
+                trace_id: 'average(1)',
+                sample_count: 1,
+                request_id: undefined,
+                uri: 'average://completion-timeline',
+                trigger_mode: 'averaged',
+                outcome: 'ok_non_empty',
+                started_at_ms: 1_700_000_000_001,
+                total_duration_ms: 30,
+                max_stage_end_ms: 30,
+                unattributed_overhead_ms: 0,
+                dominant_stage: 'query_bundle',
+                stages: [
+                    {
+                        name: 'query_bundle',
+                        status: 'completed',
+                        started_offset_ms: 0,
+                        end_offset_ms: 30,
+                        duration_ms: 30,
+                        width_percent: 100,
+                        duration_percent: 100,
+                        is_dominant: true,
+                    },
+                ],
+            },
+        };
+    }
+
+    test('formatVisibleCompletionTimelineForClipboard should include header and visible traces', () => {
+        const text = formatVisibleCompletionTimelineForClipboard(buildReadyState(), 'all');
+        assert.ok(text);
+        assert.ok(text!.includes('Completion Timeline | mode=all'));
+        assert.ok(text!.includes('trace-1 (invoked)'));
+        assert.ok(text!.includes('query_bundle | completed'));
+    });
+
+    test('formatVisibleCompletionTimelineForClipboard should use average trace in average mode', () => {
+        const text = formatVisibleCompletionTimelineForClipboard(buildReadyState(), 'average');
+        assert.ok(text);
+        assert.ok(text!.includes('Completion Timeline | mode=average'));
+        assert.ok(text!.includes('average(1) (averaged) | sample=1'));
+        assert.ok(!text!.includes('trace-1 (invoked)'));
+    });
+
+    test('formatSelectedCompletionTraceForClipboard should return single requested trace', () => {
+        const text = formatSelectedCompletionTraceForClipboard(buildReadyState(), 'trace-1');
+        assert.ok(text);
+        assert.ok(text!.startsWith('trace-1 (invoked)'));
+        assert.ok(!text!.includes('Completion Timeline | mode='));
+    });
+});

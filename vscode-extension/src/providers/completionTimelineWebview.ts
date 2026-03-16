@@ -1,11 +1,17 @@
 import * as vscode from 'vscode';
 import { BslAnalyzerConfig } from '../config/configHelper';
 import { getCompletionTimeline } from '../lsp/customRequests';
+import {
+    CompletionTimelineClipboardMode,
+    formatSelectedCompletionTraceForClipboard,
+    formatVisibleCompletionTimelineForClipboard,
+} from './completionTimelineClipboard';
 import { mapCompletionTimelineFetchResultToPanelState } from './completionTimelineModel';
 
-type CompletionTimelineWebviewMessage = {
-    type: 'ready' | 'refresh';
-};
+type CompletionTimelineWebviewMessage =
+    | { type: 'ready' | 'refresh' }
+    | { type: 'copyVisible'; mode: CompletionTimelineClipboardMode }
+    | { type: 'copyTrace'; trace_id: string };
 
 function asCompletionTimelineWebviewMessage(
     value: unknown
@@ -17,6 +23,15 @@ function asCompletionTimelineWebviewMessage(
     if (record.type === 'ready' || record.type === 'refresh') {
         return { type: record.type };
     }
+    if (
+        record.type === 'copyVisible' &&
+        (record.mode === 'all' || record.mode === 'average')
+    ) {
+        return { type: 'copyVisible', mode: record.mode };
+    }
+    if (record.type === 'copyTrace' && typeof record.trace_id === 'string' && record.trace_id.length > 0) {
+        return { type: 'copyTrace', trace_id: record.trace_id };
+    }
     return null;
 }
 
@@ -25,8 +40,14 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
     private pollTimer: NodeJS.Timeout | null = null;
     private refreshInFlight = false;
     private readonly disposables: vscode.Disposable[] = [];
+    private latestState:
+        | ReturnType<typeof mapCompletionTimelineFetchResultToPanelState>
+        | null = null;
 
-    constructor(private readonly outputChannel: vscode.OutputChannel) {
+    constructor(
+        private readonly outputChannel: vscode.OutputChannel,
+        private readonly clipboardWriter: (text: string) => Thenable<void> = (text) => vscode.env.clipboard.writeText(text)
+    ) {
         this.disposables.push(
             vscode.workspace.onDidChangeConfiguration((event) => {
                 if (event.affectsConfiguration('bslAnalyzer.observabilityRefreshMs')) {
@@ -44,13 +65,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
         webviewView.webview.html = this.getWebviewContent(webviewView.webview);
 
         const messageDisposable = webviewView.webview.onDidReceiveMessage((message) => {
-            const parsedMessage = asCompletionTimelineWebviewMessage(message);
-            if (!parsedMessage) {
-                return;
-            }
-            if (parsedMessage.type === 'ready' || parsedMessage.type === 'refresh') {
-                void this.refreshInternal();
-            }
+            void this.handleWebviewMessage(message);
         });
 
         const visibilityDisposable = webviewView.onDidChangeVisibility(() => {
@@ -114,6 +129,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
         try {
             const fetchResult = await getCompletionTimeline({ limit: 50 });
             const state = mapCompletionTimelineFetchResultToPanelState(fetchResult);
+            this.latestState = state;
             await this.view.webview.postMessage({
                 type: 'timelineState',
                 state,
@@ -121,6 +137,10 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             this.outputChannel.appendLine(`❌ Completion Timeline refresh failed: ${message}`);
+            this.latestState = {
+                kind: 'error',
+                message,
+            };
             await this.view.webview.postMessage({
                 type: 'timelineState',
                 state: {
@@ -131,6 +151,63 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
         } finally {
             this.refreshInFlight = false;
         }
+    }
+
+    private async handleWebviewMessage(message: unknown): Promise<void> {
+        const parsedMessage = asCompletionTimelineWebviewMessage(message);
+        if (!parsedMessage) {
+            return;
+        }
+
+        if (parsedMessage.type === 'ready' || parsedMessage.type === 'refresh') {
+            await this.refreshInternal();
+            return;
+        }
+
+        if (parsedMessage.type === 'copyVisible') {
+            const text = this.latestState
+                ? formatVisibleCompletionTimelineForClipboard(this.latestState, parsedMessage.mode)
+                : null;
+            await this.copyTextToClipboard(text, 'visible traces');
+            return;
+        }
+
+        if (parsedMessage.type === 'copyTrace') {
+            const text = this.latestState
+                ? formatSelectedCompletionTraceForClipboard(this.latestState, parsedMessage.trace_id)
+                : null;
+            await this.copyTextToClipboard(text, `trace ${parsedMessage.trace_id}`);
+        }
+    }
+
+    private async copyTextToClipboard(
+        text: string | null,
+        label: string
+    ): Promise<void> {
+        if (!text) {
+            await this.postCopyResult(false, `Nothing to copy for ${label}.`);
+            return;
+        }
+
+        try {
+            await this.clipboardWriter(text);
+            await this.postCopyResult(true, `${label} copied.`);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            this.outputChannel.appendLine(`❌ Completion Timeline copy failed: ${message}`);
+            await this.postCopyResult(false, `Copy failed: ${message}`);
+        }
+    }
+
+    private async postCopyResult(ok: boolean, message: string): Promise<void> {
+        if (!this.view) {
+            return;
+        }
+        await this.view.webview.postMessage({
+            type: 'copyResult',
+            ok,
+            message,
+        });
     }
 
     private getWebviewContent(webview: vscode.Webview): string {
@@ -195,6 +272,20 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
         .meta {
             color: var(--vscode-descriptionForeground);
         }
+        .toolbar-spacer {
+            flex: 1 1 auto;
+        }
+        .copy {
+            border: 1px solid var(--vscode-button-secondaryBorder, var(--vscode-panel-border));
+            background: var(--vscode-button-secondaryBackground, transparent);
+            color: var(--vscode-button-secondaryForeground, var(--vscode-editor-foreground));
+            border-radius: 6px;
+            padding: 4px 10px;
+            cursor: pointer;
+        }
+        .copy:hover {
+            background: var(--vscode-button-secondaryHoverBackground, color-mix(in srgb, var(--vscode-button-background) 20%, transparent));
+        }
         .trace {
             border: 1px solid var(--vscode-panel-border);
             border-radius: 8px;
@@ -213,6 +304,11 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             gap: 10px;
             margin-bottom: 6px;
             flex-wrap: wrap;
+        }
+        .trace-actions {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
         }
         .badge {
             border-radius: 999px;
@@ -308,27 +404,51 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             <button class="mode-button active" id="modeAll" role="tab" aria-selected="true">All traces</button>
             <button class="mode-button" id="modeAverage" role="tab" aria-selected="false">Averaged</button>
         </div>
+        <button class="copy" id="copyVisible">Copy visible</button>
+        <span class="toolbar-spacer"></span>
         <span class="meta" id="updatedAt">Waiting for data...</span>
+        <span class="meta" id="copyStatus" aria-live="polite"></span>
     </div>
     <div id="root" class="placeholder">Loading completion timeline...</div>
     <script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
         const root = document.getElementById('root');
         const updatedAtNode = document.getElementById('updatedAt');
+        const copyStatusNode = document.getElementById('copyStatus');
         const refreshButton = document.getElementById('refresh');
+        const copyVisibleButton = document.getElementById('copyVisible');
         const modeAllButton = document.getElementById('modeAll');
         const modeAverageButton = document.getElementById('modeAverage');
         let currentMode = 'all';
         let latestReadyState = null;
+        let copyStatusTimer = null;
 
         refreshButton.addEventListener('click', () => {
             vscode.postMessage({ type: 'refresh' });
+        });
+        copyVisibleButton.addEventListener('click', () => {
+            vscode.postMessage({ type: 'copyVisible', mode: currentMode });
         });
         modeAllButton.addEventListener('click', () => {
             setMode('all');
         });
         modeAverageButton.addEventListener('click', () => {
             setMode('average');
+        });
+        root.addEventListener('click', (event) => {
+            const target = event.target;
+            if (!(target instanceof Element)) {
+                return;
+            }
+            const button = target.closest('[data-copy-trace-id]');
+            if (!button) {
+                return;
+            }
+            const traceId = button.getAttribute('data-copy-trace-id');
+            if (!traceId) {
+                return;
+            }
+            vscode.postMessage({ type: 'copyTrace', trace_id: traceId });
         });
 
         function escapeHtml(value) {
@@ -420,7 +540,8 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                         ' <span class="meta">(' + escapeHtml(trace.trigger_mode) + ')</span>' +
                         (trace.sample_count ? ' <span class="meta">| sample=' + escapeHtml(trace.sample_count) + '</span>' : '') +
                     '</div>' +
-                    '<div>' +
+                    '<div class="trace-actions">' +
+                        '<button class="copy" data-copy-trace-id="' + escapeHtml(trace.trace_id) + '">Copy</button>' +
                         '<span class="badge ' + outcomeClass + '">' + escapeHtml(trace.outcome) + '</span>' +
                         ' <span class="meta">' + escapeHtml(trace.total_duration_ms) + 'ms</span>' +
                     '</div>' +
@@ -491,10 +612,29 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             }
         }
 
+        function showCopyStatus(message, ok) {
+            if (!copyStatusNode) {
+                return;
+            }
+            copyStatusNode.textContent = message;
+            copyStatusNode.style.color = ok
+                ? 'var(--vscode-descriptionForeground)'
+                : 'var(--vscode-errorForeground)';
+            if (copyStatusTimer) {
+                clearTimeout(copyStatusTimer);
+            }
+            copyStatusTimer = setTimeout(() => {
+                copyStatusNode.textContent = '';
+            }, 3000);
+        }
+
         window.addEventListener('message', (event) => {
             const payload = event.data;
             if (payload && payload.type === 'timelineState') {
                 renderState(payload.state);
+            }
+            if (payload && payload.type === 'copyResult') {
+                showCopyStatus(String(payload.message || ''), Boolean(payload.ok));
             }
         });
 

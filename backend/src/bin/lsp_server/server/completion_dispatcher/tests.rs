@@ -593,3 +593,54 @@ async fn dispatch_attribution_reports_active_completion_holder() {
     let close = registry.close_file_dispatcher(file_id).await;
     assert!(close.is_some());
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn newer_request_reports_superseded_active_request_ids() {
+    let registry = CompletionDispatcherRegistry::new(8);
+    let file_id = V2FileId(125);
+
+    let first = registry
+        .emit_completion_request_with_turn(
+            file_id,
+            Some("r1".to_string()),
+            Some(1),
+            "invoked".to_string(),
+        )
+        .await;
+    assert!(
+        registry
+            .mark_completion_active(
+                file_id,
+                first.ticket,
+                CompletionRequestMetadata {
+                    request_id: Some("r1".to_string()),
+                    version_hint: Some(1),
+                    trigger_mode: "invoked".to_string(),
+                },
+            )
+            .await
+    );
+
+    let second = registry
+        .emit_completion_request_with_turn(
+            file_id,
+            Some("r2".to_string()),
+            Some(2),
+            "trigger_character".to_string(),
+        )
+        .await;
+
+    assert_eq!(
+        second.superseded_active_request_ids,
+        vec!["r1".to_string()],
+        "newer completion request must identify older active request ids for proactive cancellation"
+    );
+
+    assert!(
+        registry
+            .mark_completion_inactive(file_id, first.ticket.file_seq)
+            .await
+    );
+    let close = registry.close_file_dispatcher(file_id).await;
+    assert!(close.is_some());
+}

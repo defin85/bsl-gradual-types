@@ -2059,6 +2059,174 @@ async fn p28_cancel_request_stops_completion_and_prevents_late_publish() {
 
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
+async fn p28_newer_completion_proactively_cancels_older_active_completion_on_same_file() {
+    fn completion_response_incomplete_empty(response: &CompletionResponse) -> bool {
+        match response {
+            CompletionResponse::List(list) => list.is_incomplete && list.items.is_empty(),
+            CompletionResponse::Array(items) => items.is_empty(),
+        }
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+    let _delay_guard = EnvVarGuard::set("BSL_TEST_COMPLETION_DELAY_MS", "80");
+
+    let fixture =
+        "Процедура Тест()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.\nКонецПроцедуры\n";
+    let (service, drain_task, server, uri, _file_id) = open_lsp_fixture_with_snapshot(
+        fixture,
+        "file:///test_p28_active_completion_supersession.bsl",
+    )
+    .await;
+    let mut service = crate::server::request_context::RequestContextService::new(service);
+    let position = find_utf16_position_after_marker(fixture, "ЛокМассив.");
+
+    let first_req = Request::build("textDocument/completion")
+        .id(28001)
+        .params(
+            serde_json::to_value(CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position,
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: Some(CompletionContext {
+                    trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+                    trigger_character: Some(".".to_string()),
+                }),
+            })
+            .expect("CompletionParams"),
+        )
+        .finish();
+    let first_future = service.ready().await.unwrap().call(first_req);
+    let first_task = tokio::spawn(first_future);
+
+    for _ in 0..40 {
+        if server
+            .completion_cancellation_registry_v2
+            .get("28001")
+            .is_some()
+        {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        server
+            .completion_cancellation_registry_v2
+            .get("28001")
+            .is_some(),
+        "first completion request must register cancellation token before newer request arrives"
+    );
+
+    let second_req = Request::build("textDocument/completion")
+        .id(28002)
+        .params(
+            serde_json::to_value(CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position,
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: Some(CompletionContext {
+                    trigger_kind: CompletionTriggerKind::INVOKED,
+                    trigger_character: None,
+                }),
+            })
+            .expect("CompletionParams"),
+        )
+        .finish();
+    let second_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(second_req)
+        .await
+        .expect("second completion request")
+        .expect("second completion response");
+
+    for _ in 0..40 {
+        if server
+            .completion_cancellation_registry_v2
+            .get("28001")
+            .is_none()
+        {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        server
+            .completion_cancellation_registry_v2
+            .get("28001")
+            .is_none(),
+        "newer completion must proactively cancel the older active completion request on the same file"
+    );
+
+    let first_response = first_task
+        .await
+        .expect("first completion join")
+        .expect("first completion request")
+        .expect("first completion response");
+    let first_value = serde_json::to_value(&first_response).expect("serialize first response");
+    let first_result = first_value
+        .get("result")
+        .cloned()
+        .expect("first completion result field");
+    let first_completion: Option<CompletionResponse> =
+        serde_json::from_value(first_result).expect("parse first completion result");
+    assert!(
+        first_completion
+            .as_ref()
+            .is_some_and(completion_response_incomplete_empty),
+        "older superseded completion must resolve to bounded incomplete empty response, response={first_completion:?}"
+    );
+
+    let second_value = serde_json::to_value(&second_response).expect("serialize second response");
+    let second_result = second_value
+        .get("result")
+        .cloned()
+        .expect("second completion result field");
+    let second_completion: Option<CompletionResponse> =
+        serde_json::from_value(second_result).expect("parse second completion result");
+    assert!(
+        second_completion.is_some(),
+        "newer completion request must still produce a response"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn p29_completion_mode_matrix_parity_on_fixed_revision() {
     const CHANGE_ID: &str = "refactor-v2-completion-event-driven-pipeline";
     const ITERATIONS: usize = 40;

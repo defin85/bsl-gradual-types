@@ -454,6 +454,7 @@ impl BslLanguageServer {
                 )
                 .await;
             let completion_ticket = completion_dispatch.ticket;
+            let superseded_active_request_ids = completion_dispatch.superseded_active_request_ids;
             let completion_request_registration = completion_request_id.clone().map(|request_id| {
                 self.completion_cancellation_registry_v2.register_request(
                     request_id,
@@ -471,6 +472,22 @@ impl BslLanguageServer {
                 Arc::clone(&self.completion_cancellation_registry_v2),
                 Arc::clone(&self.completion_dispatcher_v2),
             ));
+            for stale_request_id in superseded_active_request_ids {
+                if self
+                    .completion_cancellation_registry_v2
+                    .cancel_request(&stale_request_id)
+                    .is_some()
+                {
+                    debug!(
+                        uri = %uri,
+                        file_id = file_id.0,
+                        superseded_request_id = %stale_request_id,
+                        request_epoch = completion_ticket.request_epoch,
+                        request_id = ?completion_request_id,
+                        "completion dispatcher proactively cancelled older active completion"
+                    );
+                }
+            }
             if completion_queue_enqueue_failed(completion_ticket.queue_outcome) {
                 debug!(
                     uri = %uri,

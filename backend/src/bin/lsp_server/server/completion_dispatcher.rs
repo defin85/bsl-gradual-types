@@ -111,6 +111,7 @@ pub(crate) struct CompletionRequestDispatch {
     pub ticket: DispatchTicket,
     pub turn_waiter: Option<CompletionTurnWaiter>,
     pub attribution: CompletionDispatchAttributionSnapshot,
+    pub superseded_active_request_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -770,6 +771,26 @@ impl PerFileDispatcher {
             });
         (active.len(), holder)
     }
+
+    fn stale_active_request_ids(&self, incoming_request_epoch: u64) -> Vec<String> {
+        let active = self
+            .active_completions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut request_ids: Vec<String> = active
+            .values()
+            .filter_map(|entry| {
+                if entry.request_epoch < incoming_request_epoch {
+                    entry.request_id.clone()
+                } else {
+                    None
+                }
+            })
+            .collect();
+        request_ids.sort();
+        request_ids.dedup();
+        request_ids
+    }
 }
 
 fn consume_event(event: CompletionEventEnvelope) {
@@ -871,6 +892,8 @@ impl CompletionDispatcherRegistry {
 
         let (queue_outcome, dropped_completion_file_seq) =
             dispatcher.queue.try_enqueue_with_report(event);
+        let superseded_active_request_ids =
+            dispatcher.stale_active_request_ids(ticket.request_epoch);
         let queue_after = dispatcher.queue.summary(observed_at);
         ticket.queue_outcome = queue_outcome;
         let attribution = CompletionDispatchAttributionSnapshot {
@@ -901,6 +924,7 @@ impl CompletionDispatcherRegistry {
                 ticket,
                 turn_waiter: None,
                 attribution,
+                superseded_active_request_ids,
             };
         }
 
@@ -908,6 +932,7 @@ impl CompletionDispatcherRegistry {
             ticket,
             turn_waiter: Some(CompletionTurnWaiter { receiver }),
             attribution,
+            superseded_active_request_ids,
         }
     }
 

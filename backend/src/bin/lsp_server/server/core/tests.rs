@@ -17146,8 +17146,15 @@ async fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
                         "request_id": trace.get("request_id").and_then(|value| value.as_str()),
                         "trigger_mode": trace.get("trigger_mode").and_then(|value| value.as_str()),
                         "outcome": trace.get("outcome").and_then(|value| value.as_str()),
+                        "route": completion_timeline_prepare_detail_str(trace, "route"),
+                        "fail_closed_cause": completion_timeline_prepare_detail_str(trace, "fail_closed_cause"),
                         "total_duration_ms": trace.get("total_duration_ms").and_then(|value| value.as_u64()),
                         "dominant_stage": trace.get("dominant_stage").and_then(|value| value.as_str()),
+                        "queue_outcome": trace.get("queue_outcome").and_then(|value| value.as_str()),
+                        "turn_wait_outcome": trace.get("turn_wait_outcome").and_then(|value| value.as_str()),
+                        "queued_completion_ahead": trace.get("queued_completion_ahead").and_then(|value| value.as_u64()),
+                        "did_change_ahead": trace.get("did_change_ahead").and_then(|value| value.as_u64()),
+                        "active_completion_count": trace.get("active_completion_count").and_then(|value| value.as_u64()),
                         "prepare_guard_outcome": completion_timeline_prepare_detail_str(trace, "guard_outcome"),
                         "prepare_outcome": completion_timeline_prepare_detail_str(trace, "outcome"),
                         "prepare_wait_elapsed_ms": trace
@@ -17192,9 +17199,16 @@ async fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
                 "request_id": trace.get("request_id").and_then(|value| value.as_str()),
                 "trigger_mode": trace.get("trigger_mode").and_then(|value| value.as_str()),
                 "outcome": trace.get("outcome").and_then(|value| value.as_str()),
+                "route": completion_timeline_prepare_detail_str(trace, "route"),
+                "fail_closed_cause": completion_timeline_prepare_detail_str(trace, "fail_closed_cause"),
                 "started_at_ms": trace.get("started_at_ms").and_then(|value| value.as_u64()),
                 "total_duration_ms": trace.get("total_duration_ms").and_then(|value| value.as_u64()),
                 "dominant_stage": trace.get("dominant_stage").and_then(|value| value.as_str()),
+                "queue_outcome": trace.get("queue_outcome").and_then(|value| value.as_str()),
+                "turn_wait_outcome": trace.get("turn_wait_outcome").and_then(|value| value.as_str()),
+                "queued_completion_ahead": trace.get("queued_completion_ahead").and_then(|value| value.as_u64()),
+                "did_change_ahead": trace.get("did_change_ahead").and_then(|value| value.as_u64()),
+                "active_completion_count": trace.get("active_completion_count").and_then(|value| value.as_u64()),
                 "prepare_guard_outcome": completion_timeline_prepare_detail_str(trace, "guard_outcome"),
                 "prepare_outcome": completion_timeline_prepare_detail_str(trace, "outcome"),
                 "prepare_wait_elapsed_ms": trace
@@ -17263,6 +17277,47 @@ async fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
                 == Some("ok_non_empty")
         })
         .count();
+    let measured_head_hit_traces = measured_samples
+        .iter()
+        .filter(|sample| {
+            sample
+                .get("trace")
+                .and_then(|trace| trace.get("route"))
+                .and_then(|value| value.as_str())
+                == Some("head_hit")
+        })
+        .count();
+    let measured_exact_hit_traces = measured_samples
+        .iter()
+        .filter(|sample| {
+            sample
+                .get("trace")
+                .and_then(|trace| trace.get("route"))
+                .and_then(|value| value.as_str())
+                == Some("exact_hit")
+        })
+        .count();
+    let sample_elapsed_histogram = |samples: &[serde_json::Value]| {
+        let values = samples
+            .iter()
+            .filter_map(|sample| sample.get("elapsed_ms").and_then(|value| value.as_u64()))
+            .map(|value| value as f64)
+            .collect::<Vec<_>>();
+        sample_histogram_value(&values)
+    };
+    let sample_trace_histogram = |samples: &[serde_json::Value], field: &str| {
+        let values = samples
+            .iter()
+            .filter_map(|sample| {
+                sample
+                    .get("trace")
+                    .and_then(|trace| trace.get(field))
+                    .and_then(|value| value.as_u64())
+            })
+            .map(|value| value as f64)
+            .collect::<Vec<_>>();
+        sample_histogram_value(&values)
+    };
 
     let report = serde_json::json!({
         "change_id": "refactor-v2-completion-dual-artifact-path",
@@ -17321,6 +17376,15 @@ async fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
             "warmup_non_empty_samples": warmup_non_empty_samples,
             "measured_non_empty_samples": measured_non_empty_samples,
             "measured_ok_non_empty_traces": measured_ok_non_empty_traces,
+            "measured_head_hit_traces": measured_head_hit_traces,
+            "measured_exact_hit_traces": measured_exact_hit_traces,
+            "warmup_latency_ms": sample_elapsed_histogram(&warmup_samples),
+            "measured_latency_ms": sample_elapsed_histogram(&measured_samples),
+            "measured_turn_wait_ms": sample_trace_histogram(&measured_samples, "turn_wait_ms"),
+            "measured_prepare_stateful_ms": sample_trace_histogram(&measured_samples, "prepare_stateful_ms"),
+            "measured_wait_exact_type_index_ms": sample_trace_histogram(&measured_samples, "wait_exact_type_index_ms"),
+            "measured_query_bundle_ms": sample_trace_histogram(&measured_samples, "query_bundle_ms"),
+            "measured_collect_ms": sample_trace_histogram(&measured_samples, "collect_ms"),
         },
         "extension_like_key_latencies": {
             "intellisense_v2_wait_for_file_version_diagnostics": histogram_metric_value_or_zero(
@@ -17681,8 +17745,15 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
                         "request_id": trace.get("request_id").and_then(|value| value.as_str()),
                         "trigger_mode": trace.get("trigger_mode").and_then(|value| value.as_str()),
                         "outcome": trace.get("outcome").and_then(|value| value.as_str()),
+                        "route": completion_timeline_prepare_detail_str(trace, "route"),
+                        "fail_closed_cause": completion_timeline_prepare_detail_str(trace, "fail_closed_cause"),
                         "total_duration_ms": trace.get("total_duration_ms").and_then(|value| value.as_u64()),
                         "dominant_stage": trace.get("dominant_stage").and_then(|value| value.as_str()),
+                        "queue_outcome": trace.get("queue_outcome").and_then(|value| value.as_str()),
+                        "turn_wait_outcome": trace.get("turn_wait_outcome").and_then(|value| value.as_str()),
+                        "queued_completion_ahead": trace.get("queued_completion_ahead").and_then(|value| value.as_u64()),
+                        "did_change_ahead": trace.get("did_change_ahead").and_then(|value| value.as_u64()),
+                        "active_completion_count": trace.get("active_completion_count").and_then(|value| value.as_u64()),
                         "prepare_guard_outcome": completion_timeline_prepare_detail_str(trace, "guard_outcome"),
                         "prepare_outcome": completion_timeline_prepare_detail_str(trace, "outcome"),
                         "prepare_wait_elapsed_ms": trace
@@ -17728,9 +17799,16 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
                 "request_id": trace.get("request_id").and_then(|value| value.as_str()),
                 "trigger_mode": trace.get("trigger_mode").and_then(|value| value.as_str()),
                 "outcome": trace.get("outcome").and_then(|value| value.as_str()),
+                "route": completion_timeline_prepare_detail_str(trace, "route"),
+                "fail_closed_cause": completion_timeline_prepare_detail_str(trace, "fail_closed_cause"),
                 "started_at_ms": trace.get("started_at_ms").and_then(|value| value.as_u64()),
                 "total_duration_ms": trace.get("total_duration_ms").and_then(|value| value.as_u64()),
                 "dominant_stage": trace.get("dominant_stage").and_then(|value| value.as_str()),
+                "queue_outcome": trace.get("queue_outcome").and_then(|value| value.as_str()),
+                "turn_wait_outcome": trace.get("turn_wait_outcome").and_then(|value| value.as_str()),
+                "queued_completion_ahead": trace.get("queued_completion_ahead").and_then(|value| value.as_u64()),
+                "did_change_ahead": trace.get("did_change_ahead").and_then(|value| value.as_u64()),
+                "active_completion_count": trace.get("active_completion_count").and_then(|value| value.as_u64()),
                 "prepare_guard_outcome": completion_timeline_prepare_detail_str(trace, "guard_outcome"),
                 "prepare_outcome": completion_timeline_prepare_detail_str(trace, "outcome"),
                 "prepare_wait_elapsed_ms": trace
@@ -17788,6 +17866,26 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
                 == Some("fail_closed")
         })
         .count();
+    let measured_head_hit_traces = measured_samples
+        .iter()
+        .filter(|sample| {
+            sample
+                .get("trace")
+                .and_then(|trace| trace.get("route"))
+                .and_then(|value| value.as_str())
+                == Some("head_hit")
+        })
+        .count();
+    let measured_exact_hit_traces = measured_samples
+        .iter()
+        .filter(|sample| {
+            sample
+                .get("trace")
+                .and_then(|trace| trace.get("route"))
+                .and_then(|value| value.as_str())
+                == Some("exact_hit")
+        })
+        .count();
     let measured_trace_linked_samples = measured_samples
         .iter()
         .filter(|sample| sample.get("trace").is_some_and(|trace| !trace.is_null()))
@@ -17802,6 +17900,27 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
                 > 0
         })
         .count();
+    let sample_elapsed_histogram = |samples: &[serde_json::Value]| {
+        let values = samples
+            .iter()
+            .filter_map(|sample| sample.get("elapsed_ms").and_then(|value| value.as_u64()))
+            .map(|value| value as f64)
+            .collect::<Vec<_>>();
+        sample_histogram_value(&values)
+    };
+    let sample_trace_histogram = |samples: &[serde_json::Value], field: &str| {
+        let values = samples
+            .iter()
+            .filter_map(|sample| {
+                sample
+                    .get("trace")
+                    .and_then(|trace| trace.get(field))
+                    .and_then(|value| value.as_u64())
+            })
+            .map(|value| value as f64)
+            .collect::<Vec<_>>();
+        sample_histogram_value(&values)
+    };
 
     let report = serde_json::json!({
         "change_id": "refactor-v2-completion-dual-artifact-path",
@@ -17832,6 +17951,8 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
             "measured_non_empty_samples": measured_non_empty_samples,
             "measured_ok_non_empty_traces": measured_ok_non_empty_traces,
             "measured_fail_closed_traces": measured_fail_closed_traces,
+            "measured_head_hit_traces": measured_head_hit_traces,
+            "measured_exact_hit_traces": measured_exact_hit_traces,
             "measured_completion_total_delta": counter_delta("completion_total"),
             "measured_ok_non_empty_total_delta": counter_delta("intellisense_v2_completion_result_total_ok_non_empty"),
             "measured_ok_empty_total_delta": counter_delta("intellisense_v2_completion_result_total_ok_empty"),
@@ -17853,6 +17974,13 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
             ),
             "measured_fallback_unavailable_total_delta": counter_delta("intellisense_v2_completion_fallback_unavailable_total"),
             "measured_interactive_wait_budget_exhausted_total_delta": counter_delta("intellisense_v2_interactive_wait_budget_exhausted_total"),
+            "warmup_latency_ms": sample_elapsed_histogram(&warmup_samples),
+            "measured_latency_ms": sample_elapsed_histogram(&measured_samples),
+            "measured_turn_wait_ms": sample_trace_histogram(&measured_samples, "turn_wait_ms"),
+            "measured_prepare_stateful_ms": sample_trace_histogram(&measured_samples, "prepare_stateful_ms"),
+            "measured_wait_exact_type_index_ms": sample_trace_histogram(&measured_samples, "wait_exact_type_index_ms"),
+            "measured_query_bundle_ms": sample_trace_histogram(&measured_samples, "query_bundle_ms"),
+            "measured_collect_ms": sample_trace_histogram(&measured_samples, "collect_ms"),
         },
         "extension_like_key_latencies": {
             "intellisense_v2_wait_for_file_version_diagnostics": histogram_metric_value_or_zero(
@@ -17940,10 +18068,49 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
         MEASURE_REQUESTS
     );
     assert!(
+        measured_non_empty_samples == MEASURE_REQUESTS,
+        "expected every measured revision-churn sample to return a first-response candidate list, measured_non_empty_samples={}, measured_samples={measured_samples:?}",
+        measured_non_empty_samples
+    );
+    assert!(
+        measured_ok_non_empty_traces == MEASURE_REQUESTS,
+        "expected every measured revision-churn trace to be ok_non_empty, measured_ok_non_empty_traces={}, measured_samples={measured_samples:?}",
+        measured_ok_non_empty_traces
+    );
+    assert!(
+        measured_fail_closed_traces == 0
+            && counter_delta("intellisense_v2_completion_result_total_fail_closed") == 0,
+        "revision-churn gate must fail on first-response fail_closed regressions, measured_fail_closed_traces={}, fail_closed_total_delta={}, measured_samples={measured_samples:?}",
+        measured_fail_closed_traces,
+        counter_delta("intellisense_v2_completion_result_total_fail_closed")
+    );
+    assert!(
+        counter_delta("intellisense_v2_completion_fallback_unavailable_total") == 0,
+        "revision-churn gate must not degrade to fallback_unavailable, fallback_unavailable_total_delta={}, counters={counters:?}",
+        counter_delta("intellisense_v2_completion_fallback_unavailable_total")
+    );
+    assert!(
         counter_delta("intellisense_v2_completion_fail_closed_cause_total_cause_prepare_timeout")
-            + counter_delta("intellisense_v2_completion_fail_closed_cause_total_cause_exact_deadline")
-            > 0,
-        "expected revision-churn live report to expose split fail-closed buckets, counters={counters:?}"
+            == 0
+            && counter_delta("intellisense_v2_completion_fail_closed_cause_total_cause_exact_deadline")
+                == 0,
+        "revision-churn gate must keep first-response fail-closed cause buckets at zero after head-path rollout, prepare_timeout_total_delta={}, exact_deadline_total_delta={}, counters={counters:?}",
+        counter_delta("intellisense_v2_completion_fail_closed_cause_total_cause_prepare_timeout"),
+        counter_delta("intellisense_v2_completion_fail_closed_cause_total_cause_exact_deadline")
+    );
+    assert!(
+        measured_head_hit_traces + measured_exact_hit_traces == MEASURE_REQUESTS,
+        "expected every measured revision-churn trace to expose head/exact route attribution, measured_head_hit_traces={}, measured_exact_hit_traces={}, measured_samples={measured_samples:?}",
+        measured_head_hit_traces,
+        measured_exact_hit_traces
+    );
+    assert!(
+        counter_delta("intellisense_v2_completion_route_total_route_head_hit")
+            + counter_delta("intellisense_v2_completion_route_total_route_exact_hit")
+            >= MEASURE_REQUESTS as u64,
+        "expected measured revision-churn route counters to cover all samples, head_hit_total_delta={}, exact_hit_total_delta={}, counters={counters:?}",
+        counter_delta("intellisense_v2_completion_route_total_route_head_hit"),
+        counter_delta("intellisense_v2_completion_route_total_route_exact_hit")
     );
 
     drop(server);

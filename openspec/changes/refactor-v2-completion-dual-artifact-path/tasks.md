@@ -19,7 +19,7 @@
 - [x] 4.3 Обновить completion timeline/metrics contract без high-cardinality drift.
 
 ## 5. Perf gates and validation
-- [ ] 5.1 Обновить representative real-module gates так, чтобы:
+- [x] 5.1 Обновить representative real-module gates так, чтобы:
   - `same-revision warm` probe подтверждал healthy steady-state;
   - `revision-churn` probe (`didChange -> completion` перед каждым measured sample) требовал current-revision `ok_non_empty`.
 - [ ] 5.2 Зафиксировать budgets:

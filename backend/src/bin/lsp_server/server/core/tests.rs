@@ -12327,6 +12327,57 @@ async fn lsp_completion_members_at(
     normalize_lsp_member_entries(&completion.expect("completion result present"))
 }
 
+async fn lsp_get_completion_timeline(
+    service: &mut LspService<BslLanguageServer>,
+    request_id: i64,
+    limit: usize,
+) -> serde_json::Value {
+    let execute = Request::build("workspace/executeCommand")
+        .id(request_id)
+        .params(serde_json::json!({
+            "command": "bsl.getCompletionTimeline",
+            "arguments": [{ "limit": limit }],
+        }))
+        .finish();
+    let execute_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(execute)
+        .await
+        .expect("workspace/executeCommand request")
+        .expect("workspace/executeCommand response");
+    let value = serde_json::to_value(&execute_response).expect("serialize response");
+    value.get("result").cloned().expect("result field")
+}
+
+async fn lsp_get_observability_metrics(
+    service: &mut LspService<BslLanguageServer>,
+    request_id: i64,
+) -> serde_json::Value {
+    let execute = Request::build("workspace/executeCommand")
+        .id(request_id)
+        .params(serde_json::json!({
+            "command": "bsl.getObservabilityMetrics",
+            "arguments": [],
+        }))
+        .finish();
+    let execute_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(execute)
+        .await
+        .expect("workspace/executeCommand request")
+        .expect("workspace/executeCommand response");
+    let value = serde_json::to_value(&execute_response).expect("serialize response");
+    value
+        .get("result")
+        .and_then(|result| result.get("metrics"))
+        .cloned()
+        .expect("result.metrics field")
+}
+
 async fn lsp_hover_text_at(
     service: &mut LspService<BslLanguageServer>,
     uri: &Url,
@@ -12771,6 +12822,36 @@ async fn wait_for_type_index_precompute_completion(
     }
 }
 
+fn completion_timeline_trace_stage_duration_ms(
+    trace: &serde_json::Value,
+    stage_name: &str,
+) -> Option<u64> {
+    trace
+        .get("stages")
+        .and_then(|value| value.as_array())
+        .and_then(|stages| {
+            stages.iter().find_map(|stage| {
+                let stage = stage.as_object()?;
+                let name = stage.get("name")?.as_str()?;
+                if name != stage_name {
+                    return None;
+                }
+                stage.get("duration_ms").and_then(|value| value.as_u64())
+            })
+        })
+}
+
+fn completion_timeline_prepare_detail_str<'a>(
+    trace: &'a serde_json::Value,
+    field: &str,
+) -> Option<&'a str> {
+    trace
+        .get("prepare_details")
+        .and_then(|value| value.as_object())
+        .and_then(|details| details.get(field))
+        .and_then(|value| value.as_str())
+}
+
 async fn wait_for_type_index_precompute_phase(
     server: &BslLanguageServer,
     file_id: bsl_analysis_v2::FileId,
@@ -12987,6 +13068,344 @@ async fn p33_completion_exact_wait_deadline_then_recovery_after_precompute_finis
             counters.get("intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_ready")
         ) > 0,
         "second completion must observe ready exact-wait outcome after precompute completion, counters={counters:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p33_completion_exact_wait_deadline_recovery_perf_report() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const FIXTURE: &str =
+        "Процедура Тест()\n    ДляCompletion = (Новый Массив()).\nКонецПроцедуры\n";
+    const PROFILE_NAME: &str = "p33_completion_exact_wait_deadline_recovery_perf_report";
+
+    let precompute_delay_ms = 250_u64;
+    let _precompute_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS",
+        &precompute_delay_ms.to_string(),
+    );
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let uri = Url::parse("file:///test_p33_completion_exact_wait_recovery_perf.bsl").expect("uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: FIXTURE.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    server.sync_v2_globals().await;
+
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    force_current_revision_without_exact_type_index(&server, file_id, &uri, FIXTURE, 2).await;
+    server.schedule_type_index_precompute_v2(file_id, 2).await;
+    wait_for_type_index_precompute_phase(
+        &server,
+        file_id,
+        super::deps_and_precompute::TypeIndexPrecomputePhaseV2::Computing,
+    )
+    .await;
+
+    let completion_position = find_utf16_position_after_marker(FIXTURE, "(Новый Массив()).");
+    let wait_budget_ms = bsl_runtime::system::global_runtime_config()
+        .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
+        .unwrap_or(120);
+
+    let first_started = Instant::now();
+    let first_completion_labels =
+        lsp_completion_labels_at(&mut service, &uri, completion_position).await;
+    let first_elapsed_ms = first_started.elapsed().as_millis() as u64;
+    assert!(
+        first_completion_labels.is_empty(),
+        "first member-access completion must fail closed while matching exact precompute is still computing, labels={first_completion_labels:?}"
+    );
+
+    wait_for_type_index_precompute_completion(&server, file_id).await;
+
+    let second_started = Instant::now();
+    let second_completion_labels =
+        lsp_completion_labels_at(&mut service, &uri, completion_position).await;
+    let second_elapsed_ms = second_started.elapsed().as_millis() as u64;
+    assert!(
+        !second_completion_labels.is_empty(),
+        "second member-access completion must recover once exact precompute finishes, labels={second_completion_labels:?}"
+    );
+
+    let completion_timeline = lsp_get_completion_timeline(&mut service, 13321, 10).await;
+    let observability_metrics = lsp_get_observability_metrics(&mut service, 13322).await;
+
+    let timeline_traces = completion_timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("completion timeline traces array");
+    let filtered_traces: Vec<serde_json::Value> = timeline_traces
+        .iter()
+        .filter(|trace| trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str()))
+        .cloned()
+        .collect();
+    assert!(
+        filtered_traces.len() >= 2,
+        "expected at least two completion traces for perf report, filtered_traces={filtered_traces:?}"
+    );
+    let mut selected_traces: Vec<serde_json::Value> =
+        filtered_traces.iter().rev().take(2).cloned().collect();
+    selected_traces.reverse();
+    let first_trace = &selected_traces[0];
+    let second_trace = &selected_traces[1];
+
+    let counters = observability_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    let histograms = observability_metrics
+        .get("histograms")
+        .and_then(|value| value.as_object())
+        .expect("metrics.histograms object");
+
+    let first_trace_id = first_trace
+        .get("trace_id")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
+    let first_outcome = first_trace
+        .get("outcome")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
+    let first_prepare_guard_outcome =
+        completion_timeline_prepare_detail_str(first_trace, "guard_outcome").map(str::to_string);
+    let first_prepare_outcome =
+        completion_timeline_prepare_detail_str(first_trace, "outcome").map(str::to_string);
+    let first_wait_exact_type_index_ms =
+        completion_timeline_trace_stage_duration_ms(first_trace, "wait_exact_type_index")
+            .unwrap_or(0);
+    let first_prepare_stateful_ms =
+        completion_timeline_trace_stage_duration_ms(first_trace, "prepare_stateful").unwrap_or(0);
+
+    let second_trace_id = second_trace
+        .get("trace_id")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
+    let second_outcome = second_trace
+        .get("outcome")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
+    let second_prepare_guard_outcome =
+        completion_timeline_prepare_detail_str(second_trace, "guard_outcome").map(str::to_string);
+    let second_prepare_outcome =
+        completion_timeline_prepare_detail_str(second_trace, "outcome").map(str::to_string);
+    let second_wait_exact_type_index_ms =
+        completion_timeline_trace_stage_duration_ms(second_trace, "wait_exact_type_index")
+            .unwrap_or(0);
+    let second_query_bundle_ms =
+        completion_timeline_trace_stage_duration_ms(second_trace, "query_bundle").unwrap_or(0);
+    let second_collect_ms =
+        completion_timeline_trace_stage_duration_ms(second_trace, "collect").unwrap_or(0);
+
+    let deadline_total = read_u64_metric(
+        counters
+            .get("intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_deadline"),
+    );
+    let ready_total = read_u64_metric(
+        counters.get("intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_ready"),
+    );
+    let no_matching_task_total = read_u64_metric(counters.get(
+        "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_no_matching_task",
+    ));
+    let fail_closed_total =
+        read_u64_metric(counters.get("intellisense_v2_completion_result_total_fail_closed"));
+    let ok_non_empty_total =
+        read_u64_metric(counters.get("intellisense_v2_completion_result_total_ok_non_empty"));
+
+    let selected_observability = serde_json::json!({
+        "completion_duration_ms": histogram_metric_value(histograms, "completion_duration_ms", None),
+        "intellisense_v2_wait_for_file_version_completion_ms": histogram_metric_value_or_zero(
+            histograms,
+            "intellisense_v2_wait_for_file_version_completion_ms",
+            None
+        ),
+        "intellisense_v2_ir_query_completion_ms": histogram_metric_value_or_zero(
+            histograms,
+            "intellisense_v2_ir_query_completion_ms",
+            None
+        ),
+        "completion_stage_prepare_stateful_ms": histogram_metric_value_or_zero(
+            histograms,
+            "completion_stage_prepare_stateful_ms",
+            None
+        ),
+        "completion_stage_query_bundle_ms": histogram_metric_value_or_zero(
+            histograms,
+            "completion_stage_query_bundle_ms",
+            None
+        ),
+        "completion_stage_collect_ms": histogram_metric_value_or_zero(
+            histograms,
+            "completion_stage_collect_ms",
+            None
+        ),
+        "completion_stage_response_build_ms": histogram_metric_value_or_zero(
+            histograms,
+            "completion_stage_response_build_ms",
+            None
+        ),
+        "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_deadline": deadline_total,
+        "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_ready": ready_total,
+        "intellisense_v2_completion_fallback_unavailable_total": read_u64_metric(
+            counters.get("intellisense_v2_completion_fallback_unavailable_total")
+        ),
+        "intellisense_v2_interactive_wait_budget_exhausted_total": read_u64_metric(
+            counters.get("intellisense_v2_interactive_wait_budget_exhausted_total")
+        ),
+    });
+
+    let report = serde_json::json!({
+        "change_id": "refactor-v2-completion-dual-artifact-path",
+        "profile": PROFILE_NAME,
+        "schema_version": 1,
+        "fixture": {
+            "uri": uri.as_str(),
+            "file_id": file_id.0,
+            "marker": "(Новый Массив()).",
+            "precompute_delay_ms": precompute_delay_ms,
+            "wait_budget_ms": wait_budget_ms,
+        },
+        "requests": {
+            "first": {
+                "expected_behavior": "fail_closed_deadline",
+                "elapsed_ms": first_elapsed_ms,
+                "label_count": first_completion_labels.len(),
+                "labels": first_completion_labels,
+            },
+            "second": {
+                "expected_behavior": "ok_non_empty_after_recovery",
+                "elapsed_ms": second_elapsed_ms,
+                "label_count": second_completion_labels.len(),
+                "labels": second_completion_labels,
+            }
+        },
+        "summary": {
+            "first_trace_id": first_trace_id,
+            "first_outcome": first_outcome,
+            "first_prepare_guard_outcome": first_prepare_guard_outcome,
+            "first_prepare_outcome": first_prepare_outcome,
+            "first_wait_exact_type_index_ms": first_wait_exact_type_index_ms,
+            "first_prepare_stateful_ms": first_prepare_stateful_ms,
+            "second_trace_id": second_trace_id,
+            "second_outcome": second_outcome,
+            "second_prepare_guard_outcome": second_prepare_guard_outcome,
+            "second_prepare_outcome": second_prepare_outcome,
+            "second_wait_exact_type_index_ms": second_wait_exact_type_index_ms,
+            "second_query_bundle_ms": second_query_bundle_ms,
+            "second_collect_ms": second_collect_ms,
+            "deadline_total": deadline_total,
+            "ready_total": ready_total,
+            "no_matching_task_total": no_matching_task_total,
+            "fail_closed_total": fail_closed_total,
+            "ok_non_empty_total": ok_non_empty_total,
+        },
+        "completion_timeline": {
+            "trace_count": filtered_traces.len(),
+            "selected_traces": selected_traces,
+            "raw": completion_timeline,
+        },
+        "observability": {
+            "selected": selected_observability,
+            "raw": observability_metrics,
+        }
+    });
+
+    let report_path = std::env::var("BSL_V2_COMPLETION_DEADLINE_RECOVERY_REPORT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("tests")
+                .join("perf")
+                .join("reports")
+                .join("completion-deadline-recovery-perf.json")
+        });
+    if let Some(parent) = report_path.parent() {
+        std::fs::create_dir_all(parent)
+            .expect("failed to create directory for p33 completion perf report");
+    }
+    std::fs::write(
+        &report_path,
+        serde_json::to_string_pretty(&report).expect("serialize p33 completion perf report"),
+    )
+    .expect("write p33 completion perf report");
+    println!("{}_path={}", PROFILE_NAME, report_path.display());
+
+    assert_eq!(
+        first_trace.get("outcome").and_then(|value| value.as_str()),
+        Some("fail_closed"),
+        "first perf trace must capture fail_closed outcome, trace={first_trace:?}"
+    );
+    assert_eq!(
+        second_trace.get("outcome").and_then(|value| value.as_str()),
+        Some("ok_non_empty"),
+        "second perf trace must capture recovery outcome, trace={second_trace:?}"
     );
 
     drain_task.abort();

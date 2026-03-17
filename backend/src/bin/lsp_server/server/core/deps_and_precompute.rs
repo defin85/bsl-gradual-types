@@ -291,6 +291,19 @@ impl BslLanguageServer {
         }
     }
 
+    pub(crate) async fn has_matching_type_index_precompute_task_v2(
+        &self,
+        file_id: V2FileId,
+        expected_version: Option<i32>,
+    ) -> bool {
+        let tasks = self.type_index_precompute_tasks_v2.lock().await;
+        tasks.get(&file_id).is_some_and(|task| {
+            expected_version
+                .map(|version| task.supersession_key.requested_version == version)
+                .unwrap_or(true)
+        })
+    }
+
     pub(crate) async fn wait_for_current_type_index_serve_only_ready_v2(
         &self,
         file_id: V2FileId,

@@ -168,6 +168,21 @@ impl BslLanguageServer {
                             position.character,
                             ir_program.as_ref(),
                         );
+                    if !exact_type_index_available
+                        && !self
+                            .has_matching_type_index_precompute_task_v2(
+                                file_id,
+                                Some(expected_version),
+                            )
+                            .await
+                    {
+                        super::helpers::record_lsp_interactive_fail_closed_reason(
+                            self.coordinator.as_ref(),
+                            "hover",
+                            "missing_semantic_index",
+                        );
+                        return Ok(None);
+                    }
                     let hover = handle_hover_v2(
                         &analysis,
                         file_id,
@@ -180,13 +195,6 @@ impl BslLanguageServer {
                         &settings.hover,
                         include_flow_sensitive,
                     );
-                    if hover.is_none() && !exact_type_index_available {
-                        super::helpers::record_lsp_interactive_fail_closed_reason(
-                            self.coordinator.as_ref(),
-                            "hover",
-                            "missing_semantic_index",
-                        );
-                    }
                     hover
                 }
                 (None, _, _, _) | (Some(_), None, _, _) | (Some(_), Some(_), None, _) => {
@@ -504,6 +512,21 @@ impl BslLanguageServer {
                         position.line,
                         position.character,
                     );
+                    if !exact_type_index_available
+                        && !self
+                            .has_matching_type_index_precompute_task_v2(
+                                file_id,
+                                Some(expected_version),
+                            )
+                            .await
+                    {
+                        super::helpers::record_lsp_interactive_fail_closed_reason(
+                            self.coordinator.as_ref(),
+                            "definition",
+                            "missing_semantic_index",
+                        );
+                        return Ok(None);
+                    }
                     let definition = handle_goto_definition_v2(
                         crate::handlers::definition::GotoDefinitionRequest {
                             analysis: &analysis,
@@ -517,13 +540,6 @@ impl BslLanguageServer {
                             coordinator: Some(self.coordinator.as_ref()),
                         },
                     );
-                    if definition.is_none() && !exact_type_index_available {
-                        super::helpers::record_lsp_interactive_fail_closed_reason(
-                            self.coordinator.as_ref(),
-                            "definition",
-                            "missing_semantic_index",
-                        );
-                    }
                     definition
                 }
                 (None, _, _, _) | (Some(_), None, _, _) | (Some(_), Some(_), None, _) => {

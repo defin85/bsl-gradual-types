@@ -4531,26 +4531,6 @@ async fn p7_hover_and_definition_do_not_backfill_from_runtime_index_snapshot() {
     ЭтотОбъект.МойМетод();\n\
 КонецПроцедуры\n";
     let uri = Url::parse("file:///test_p7_hover_definition_no_search_rescue.bsl").expect("uri");
-    let did_open = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "bsl".to_string(),
-            version: 1,
-            text: fixture.to_string(),
-        },
-    };
-    let did_open_response = service
-        .ready()
-        .await
-        .unwrap()
-        .call(
-            Request::build("textDocument/didOpen")
-                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
-                .finish(),
-        )
-        .await
-        .expect("didOpen notification");
-    assert!(did_open_response.is_none(), "didOpen is a notification");
 
     coordinator
         .intellisense_index()
@@ -4581,7 +4561,7 @@ async fn p7_hover_and_definition_do_not_backfill_from_runtime_index_snapshot() {
         .clone()
         .expect("server must be captured");
     let file_id = server.get_or_create_file_id_v2(&uri).await;
-    force_current_revision_without_exact_type_index(&server, file_id, &uri, fixture, 2).await;
+    force_current_revision_without_exact_type_index(&server, file_id, &uri, fixture, 1).await;
 
     let member_position = find_utf16_position_after_marker(fixture, "ЭтотОбъект.МойМетод");
 
@@ -5134,34 +5114,13 @@ async fn p7_hover_cache_miss_emits_bounded_fail_closed_reason() {
 ЗначДляHover = МассивДляHover.Количество();\n\
 КонецПроцедуры\n";
     let uri = Url::parse("file:///test_p7_hover_type_index_fallback_unavailable.bsl").expect("uri");
-    let did_open = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "bsl".to_string(),
-            version: 1,
-            text: fixture.to_string(),
-        },
-    };
-    let did_open_response = service
-        .ready()
-        .await
-        .unwrap()
-        .call(
-            Request::build("textDocument/didOpen")
-                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
-                .finish(),
-        )
-        .await
-        .expect("didOpen notification");
-    assert!(did_open_response.is_none(), "didOpen is a notification");
-
     let server = server_holder
         .lock()
         .unwrap()
         .clone()
         .expect("server must be captured");
     let file_id = server.get_or_create_file_id_v2(&uri).await;
-    force_current_revision_without_exact_type_index(&server, file_id, &uri, fixture, 2).await;
+    force_current_revision_without_exact_type_index(&server, file_id, &uri, fixture, 1).await;
 
     let fallback_reason_total = |coordinator: &Arc<SystemCoordinator>| -> u64 {
         let metrics = coordinator.observability_metrics();
@@ -5240,34 +5199,13 @@ Map.Вставить(\"k\", Новый ТаблицаЗначений);\n\
 ЗначДляHover = Map[\"k\"];\n\
 КонецПроцедуры\n";
     let uri = Url::parse("file:///test_p7_hover_map_index_no_legacy_fallback.bsl").expect("uri");
-    let did_open = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "bsl".to_string(),
-            version: 1,
-            text: fixture.to_string(),
-        },
-    };
-    let did_open_response = service
-        .ready()
-        .await
-        .unwrap()
-        .call(
-            Request::build("textDocument/didOpen")
-                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
-                .finish(),
-        )
-        .await
-        .expect("didOpen notification");
-    assert!(did_open_response.is_none(), "didOpen is a notification");
-
     let server = server_holder
         .lock()
         .unwrap()
         .clone()
         .expect("server must be captured");
     let file_id = server.get_or_create_file_id_v2(&uri).await;
-    server.cancel_type_index_precompute_v2(file_id).await;
+    force_current_revision_without_exact_type_index(&server, file_id, &uri, fixture, 1).await;
 
     let hover_position = find_utf16_position_after_marker(fixture, "ЗначДляHover = ");
     let hover_response = service
@@ -13014,19 +12952,28 @@ async fn force_current_revision_without_exact_type_index(
     content: &str,
     version: i32,
 ) {
+    let precompute_task = {
+        let mut tasks = server.type_index_precompute_tasks_v2.lock().await;
+        tasks.remove(&file_id)
+    };
+    if let Some(task) = precompute_task {
+        task.handle.abort();
+        let _ = task.handle.await;
+    }
     let path = uri
         .to_file_path()
         .ok()
         .map(|path| path.to_string_lossy().into_owned())
         .unwrap_or_else(|| uri.to_string());
-    server
-        .analysis_v2
-        .apply_changes(vec![bsl_analysis_v2::Change::SetFile {
+    server.analysis_v2.apply_changes(vec![
+        bsl_analysis_v2::Change::RemoveFile { file_id },
+        bsl_analysis_v2::Change::SetFile {
             file_id,
             text: Arc::from(content.to_string()),
             version,
             path: Arc::from(path),
-        }]);
+        },
+    ]);
     {
         let mut versions = server.latest_received_file_versions_v2.write().await;
         versions.insert(file_id, version);

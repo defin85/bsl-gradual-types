@@ -628,6 +628,21 @@ fn collect_type_at_position(
     };
 
     let analysis = prepared.snapshot.analysis;
+    let exact_type_index_ready = analysis
+        .current_type_index_serve_only_ready(FileId(1))
+        .ok()
+        .unwrap_or(false);
+    if !flow_sensitive_enabled && !exact_type_index_ready {
+        coordinator.record_intellisense_v2_interactive_fail_closed_reason(
+            "agent",
+            "type_at_position",
+            "missing_semantic_index",
+        );
+        return Ok(fail_closed_type_at_position_response(
+            analysis_revision,
+            flow_sensitive_enabled,
+        ));
+    }
     let program_query = IntellisenseV2Facade::run_optional_query(
         &context,
         ObservabilityStage::IrQuery,

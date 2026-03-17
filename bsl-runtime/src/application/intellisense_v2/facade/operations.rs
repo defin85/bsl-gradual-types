@@ -18,16 +18,12 @@ impl IntellisenseV2Facade {
             return false;
         }
 
-        // LSP completion already has event-driven exact type-index precompute on didOpen/didChange
-        // and a bounded wait/fail-closed path before member-access resolution. Rebuilding the
-        // exact artifact here duplicates cold work directly on the request path. The synthetic
-        // LSP members perf path follows the same contract: exact owner-hint extraction is
-        // request-aware and should not be paid during generic stateful prepare.
-        !matches!(
-            (context.origin, context.operation),
-            (ObservabilityOrigin::Lsp, SemanticOperation::Completion)
-                | (ObservabilityOrigin::Lsp, SemanticOperation::Members)
-        )
+        // LSP interactive semantics use bounded current-revision readiness checks and explicit
+        // fail-closed handling at the feature layer. Stateful prepare must not silently
+        // materialize the exact artifact on the request path; otherwise cache-miss probes for
+        // completion, hover, definition, signature help, and type-at-position turn into hidden
+        // cold rebuilds instead of observing readiness as-is.
+        !matches!(context.origin, ObservabilityOrigin::Lsp)
     }
 
     pub async fn snapshot_for_operation(&self, operation: SemanticOperation) -> SemanticSnapshot {

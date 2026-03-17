@@ -106,6 +106,21 @@ impl BslLanguageServer {
                         &analysis,
                         file_id,
                     );
+                    if !exact_type_index_available
+                        && !self
+                            .has_matching_type_index_precompute_task_v2(
+                                file_id,
+                                Some(expected_version),
+                            )
+                            .await
+                    {
+                        super::helpers::record_lsp_interactive_fail_closed_reason(
+                            self.coordinator.as_ref(),
+                            "signature_help",
+                            "missing_semantic_index",
+                        );
+                        return Ok(None);
+                    }
                     let signature_help = handle_signature_help_v2(
                         &analysis,
                         file_id,
@@ -115,13 +130,6 @@ impl BslLanguageServer {
                         deps,
                         Some(self.coordinator.as_ref()),
                     );
-                    if signature_help.is_none() && !exact_type_index_available {
-                        super::helpers::record_lsp_interactive_fail_closed_reason(
-                            self.coordinator.as_ref(),
-                            "signature_help",
-                            "missing_semantic_index",
-                        );
-                    }
                     signature_help
                 }
                 (None, _, _) | (Some(_), None, _) => {

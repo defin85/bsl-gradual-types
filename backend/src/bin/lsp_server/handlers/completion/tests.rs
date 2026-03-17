@@ -741,7 +741,7 @@ async fn m6_completion_resolve_dedup_sources_prefers_local_function() {
 }
 
 #[tokio::test]
-async fn m6_completion_resolve_legacy_fallback_works_without_candidate_id() {
+async fn m6_completion_resolve_returns_item_unchanged_without_candidate_id() {
     let env = create_test_env();
     let deps = env.deps.clone();
 

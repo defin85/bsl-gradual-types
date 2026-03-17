@@ -7,8 +7,38 @@ impl BslLanguageServer {
     ) -> JsonRpcResult<CompletionItem> {
         let snippet_support = *self.completion_snippet_support.read().await;
         let started = Instant::now();
-        let deps = self.analysis_v2.snapshot().await.deps_data().ok();
-        let resolved = handle_completion_resolve(item, deps, snippet_support).await;
+        let (deps, resolve_context_matches) = if let Some(resolve_context) =
+            crate::handlers::parse_completion_resolve_context(&item)
+        {
+            let deps = if let Ok(resolve_uri) = Url::parse(&resolve_context.file_uri) {
+                if let Some(file_id) = self.get_file_id_v2(&resolve_uri).await {
+                    let analysis = self.analysis_v2.snapshot().await;
+                    let current_file_version = analysis.file_version(file_id).ok().flatten();
+                    let current_deps_id = analysis.deps_id().ok();
+                    let current_settings_id = analysis.settings_id().ok();
+                    let matches_context = current_file_version
+                        == Some(resolve_context.file_version)
+                        && current_deps_id
+                            .as_ref()
+                            .is_some_and(|value| value.as_str() == resolve_context.deps_id)
+                        && current_settings_id.as_ref().map(|value| value.as_str())
+                            == resolve_context.settings_id.as_deref();
+                    (analysis.deps_data().ok(), matches_context)
+                } else {
+                    (None, false)
+                }
+            } else {
+                (None, false)
+            };
+            deps
+        } else {
+            (None, false)
+        };
+        let resolved = if resolve_context_matches {
+            handle_completion_resolve(item, deps, snippet_support).await
+        } else {
+            item
+        };
         let elapsed = started.elapsed();
         self.coordinator.record_completion_resolve_latency(elapsed);
         Ok(resolved)

@@ -11,7 +11,7 @@
 ## 3. LSP/runtime orchestration
 - [ ] 3.1 Перевести completion orchestration на split prepare (`head-ready` перед `exact-ready`) и `head-or-exact-or-fail-closed`.
 - [ ] 3.2 Сохранить `hover`, `definition`, `signatureHelp`, `type-at-position` в exact-or-fail-closed режиме.
-- [ ] 3.3 Сохранить стабильный `candidate_id` contract и покрыть tests на согласованность `head` ответа и exact `resolve`.
+- [x] 3.3 Сохранить стабильный `candidate_id` contract и покрыть tests на согласованность `head` ответа и exact `resolve`.
 
 ## 4. Scheduling and observability
 - [x] 4.1 Добавить debounce/coalesce + waiter-aware orchestration для exact precompute одной revision вместо независимых конкурентных exact builds на каждом `didChange`.

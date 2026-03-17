@@ -12457,6 +12457,95 @@ where
     normalize_lsp_member_labels(&completion.expect("completion result present"))
 }
 
+async fn lsp_completion_items_with_request<S>(
+    service: &mut S,
+    request_id: i64,
+    uri: &Url,
+    position: Position,
+    context: Option<CompletionContext>,
+) -> Vec<tower_lsp::lsp_types::CompletionItem>
+where
+    S: Service<Request, Response = Option<JsonRpcResponse>> + Send,
+    S::Future: Send,
+    S::Error: std::fmt::Debug,
+{
+    crate::server::request_context::record_completion_request_id_for_testing(
+        uri,
+        position,
+        &request_id.to_string(),
+    );
+    let completion_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/completion")
+                .id(request_id)
+                .params(
+                    serde_json::to_value(CompletionParams {
+                        text_document_position: TextDocumentPositionParams {
+                            text_document: TextDocumentIdentifier { uri: uri.clone() },
+                            position,
+                        },
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                        partial_result_params: PartialResultParams::default(),
+                        context,
+                    })
+                    .expect("CompletionParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("completion request")
+        .expect("completion response");
+    let completion_value =
+        serde_json::to_value(&completion_response).expect("serialize completion response");
+    let completion_result = completion_value
+        .get("result")
+        .cloned()
+        .expect("completion result field");
+    let completion: Option<CompletionResponse> =
+        serde_json::from_value(completion_result).expect("parse completion result");
+
+    match completion.expect("completion result present") {
+        CompletionResponse::List(list) => list.items,
+        CompletionResponse::Array(items) => items,
+    }
+}
+
+async fn lsp_completion_resolve_item_with_request<S>(
+    service: &mut S,
+    request_id: i64,
+    item: tower_lsp::lsp_types::CompletionItem,
+) -> tower_lsp::lsp_types::CompletionItem
+where
+    S: Service<Request, Response = Option<JsonRpcResponse>> + Send,
+    S::Future: Send,
+    S::Error: std::fmt::Debug,
+{
+    let resolve_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("completionItem/resolve")
+                .id(request_id)
+                .params(serde_json::to_value(item).expect("CompletionItem"))
+                .finish(),
+        )
+        .await
+        .expect("completion resolve request")
+        .expect("completion resolve response");
+    let resolve_value =
+        serde_json::to_value(&resolve_response).expect("serialize completion resolve response");
+    let resolve_result = resolve_value
+        .get("result")
+        .cloned()
+        .expect("completion resolve result field");
+
+    serde_json::from_value(resolve_result).expect("parse completion resolve result")
+}
+
 async fn lsp_completion_members_at(
     service: &mut LspService<BslLanguageServer>,
     uri: &Url,
@@ -13601,6 +13690,350 @@ async fn p33_completion_head_hit_emits_exact_upgrade_when_background_exact_finis
             .unwrap_or(0)
             > 0,
         "head-to-exact upgrade latency histogram must be emitted, histograms={histograms:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p33_completion_head_and_exact_resolve_keep_candidate_id_stable_for_same_revision() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const FIXTURE: &str = "Процедура Тест()\n    Результат = (Новый Массив()).\nКонецПроцедуры\n";
+
+    let _precompute_delay_guard =
+        EnvVarGuard::set("BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS", "200");
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let uri = Url::parse("file:///test_p33_completion_resolve_candidate_parity.bsl").expect("uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: FIXTURE.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    server.sync_v2_globals().await;
+
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    let did_change = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version: 2,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: None,
+            range_length: None,
+            text: FIXTURE.to_string(),
+        }],
+    };
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+    server.sync_v2_globals().await;
+    wait_for_type_index_precompute_phase(
+        &server,
+        file_id,
+        super::deps_and_precompute::TypeIndexPrecomputePhaseV2::Computing,
+    )
+    .await;
+
+    let completion_position = find_utf16_position_after_marker(FIXTURE, "(Новый Массив()).");
+    let head_items = lsp_completion_items_with_request(
+        &mut service,
+        14001,
+        &uri,
+        completion_position,
+        Some(CompletionContext {
+            trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+            trigger_character: Some(".".to_string()),
+        }),
+    )
+    .await;
+    let head_item = head_items
+        .into_iter()
+        .find(|item| item.label == "Добавить")
+        .expect("head completion item for Добавить");
+    let head_candidate_id = head_item
+        .data
+        .as_ref()
+        .and_then(|value| value.get("candidate_id"))
+        .cloned()
+        .expect("head completion candidate_id");
+
+    wait_for_type_index_precompute_completion(&server, file_id).await;
+
+    let resolved_head_item =
+        lsp_completion_resolve_item_with_request(&mut service, 14002, head_item.clone()).await;
+    assert!(
+        resolved_head_item.detail != head_item.detail
+            || resolved_head_item.documentation != head_item.documentation,
+        "head item must gain exact resolve enrichment once the same revision exact path is ready, head_item={head_item:?}, resolved_head_item={resolved_head_item:?}"
+    );
+
+    let exact_items = lsp_completion_items_with_request(
+        &mut service,
+        14003,
+        &uri,
+        completion_position,
+        Some(CompletionContext {
+            trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+            trigger_character: Some(".".to_string()),
+        }),
+    )
+    .await;
+    let exact_item = exact_items
+        .into_iter()
+        .find(|item| item.label == "Добавить")
+        .expect("exact completion item for Добавить");
+    let exact_candidate_id = exact_item
+        .data
+        .as_ref()
+        .and_then(|value| value.get("candidate_id"))
+        .cloned()
+        .expect("exact completion candidate_id");
+    assert_eq!(
+        exact_candidate_id, head_candidate_id,
+        "same-revision head response and exact response must preserve stable candidate_id"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p33_completion_resolve_stays_bound_to_origin_revision() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const FIXTURE: &str = "Процедура Тест()\n    Результат = (Новый Массив()).\nКонецПроцедуры\n";
+
+    let _precompute_delay_guard =
+        EnvVarGuard::set("BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS", "200");
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let uri = Url::parse("file:///test_p33_completion_resolve_revision_binding.bsl").expect("uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: FIXTURE.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    server.sync_v2_globals().await;
+
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    let did_change_v2 = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version: 2,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: None,
+            range_length: None,
+            text: FIXTURE.to_string(),
+        }],
+    };
+    let did_change_v2_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(serde_json::to_value(did_change_v2).expect("DidChangeTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(
+        did_change_v2_response.is_none(),
+        "didChange is a notification"
+    );
+    server.sync_v2_globals().await;
+    wait_for_type_index_precompute_phase(
+        &server,
+        file_id,
+        super::deps_and_precompute::TypeIndexPrecomputePhaseV2::Computing,
+    )
+    .await;
+
+    let completion_position = find_utf16_position_after_marker(FIXTURE, "(Новый Массив()).");
+    let head_items = lsp_completion_items_with_request(
+        &mut service,
+        14011,
+        &uri,
+        completion_position,
+        Some(CompletionContext {
+            trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+            trigger_character: Some(".".to_string()),
+        }),
+    )
+    .await;
+    let head_item = head_items
+        .into_iter()
+        .find(|item| item.label == "Добавить")
+        .expect("head completion item for Добавить");
+
+    let did_change_v3 = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version: 3,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: None,
+            range_length: None,
+            text: FIXTURE.to_string(),
+        }],
+    };
+    let did_change_v3_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(serde_json::to_value(did_change_v3).expect("DidChangeTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(
+        did_change_v3_response.is_none(),
+        "didChange is a notification"
+    );
+    server.sync_v2_globals().await;
+
+    let resolved_stale_item =
+        lsp_completion_resolve_item_with_request(&mut service, 14012, head_item.clone()).await;
+    assert_eq!(
+        resolved_stale_item.detail, head_item.detail,
+        "resolve must stay bound to the origin revision and fail closed once a newer revision supersedes the item"
+    );
+    assert_eq!(
+        resolved_stale_item.documentation, head_item.documentation,
+        "stale resolve must not enrich documentation from a newer revision"
     );
 
     drain_task.abort();

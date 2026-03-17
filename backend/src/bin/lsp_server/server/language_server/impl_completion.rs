@@ -1452,7 +1452,8 @@ impl BslLanguageServer {
                     }
 
                     let response_build_started = Instant::now();
-                    let completion_response = match (file_content, file_path, deps, ir_program) {
+                    let mut completion_response = match (file_content, file_path, deps, ir_program)
+                    {
                         (Some(file_content), Some(file_path), Some(deps), Some(ir_program)) => {
                             crate::handlers::handle_completion_v2_with_trigger_hint_and_owner_hints(
                                 file_content,
@@ -1505,6 +1506,17 @@ impl BslLanguageServer {
                             response
                         }
                     };
+                    if let (Some(response), Some(file_version)) =
+                        (completion_response.as_mut(), observed_file_version)
+                    {
+                        crate::handlers::attach_completion_resolve_context(
+                            &mut response.response,
+                            &uri,
+                            file_version,
+                            &observed_deps_id,
+                            observed_settings_id.as_ref(),
+                        );
+                    }
                     let response_build_elapsed = response_build_started.elapsed();
                     self.coordinator
                         .record_completion_stage_latency("response_build", response_build_elapsed);

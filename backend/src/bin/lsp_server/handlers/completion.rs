@@ -26,6 +26,7 @@ mod kinds;
 use kinds::{completion_kind_tag, map_completion_kind};
 
 const COMPLETION_CANDIDATE_ID_VERSION: u32 = 1;
+const COMPLETION_RESOLVE_CONTEXT_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CompletionCandidateId {
@@ -67,6 +68,16 @@ enum CompletionCandidateIdPayload {
         kind: String,
         name: String,
     },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct CompletionResolveContextData {
+    v: u32,
+    pub(crate) file_uri: String,
+    pub(crate) file_version: i32,
+    pub(crate) deps_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) settings_id: Option<String>,
 }
 
 pub struct CompletionResponseWithStats {
@@ -323,6 +334,39 @@ pub async fn handle_completion_resolve(
     item
 }
 
+pub(crate) fn attach_completion_resolve_context(
+    response: &mut CompletionResponse,
+    file_uri: &Url,
+    file_version: i32,
+    deps_id: &bsl_analysis_v2::DepsSnapshotId,
+    settings_id: Option<&bsl_analysis_v2::SettingsId>,
+) {
+    let context = CompletionResolveContextData {
+        v: COMPLETION_RESOLVE_CONTEXT_VERSION,
+        file_uri: file_uri.to_string(),
+        file_version,
+        deps_id: deps_id.as_str().to_string(),
+        settings_id: settings_id.map(|value| value.as_str().to_string()),
+    };
+
+    let items = match response {
+        CompletionResponse::List(list) => &mut list.items,
+        CompletionResponse::Array(items) => items,
+    };
+    for item in items {
+        attach_completion_resolve_context_to_item(item, &context);
+    }
+}
+
+pub(crate) fn parse_completion_resolve_context(
+    item: &CompletionItem,
+) -> Option<CompletionResolveContextData> {
+    let data = item.data.as_ref()?;
+    let value = data.get("resolve_context")?.clone();
+    let context: CompletionResolveContextData = serde_json::from_value(value).ok()?;
+    (context.v == COMPLETION_RESOLVE_CONTEXT_VERSION).then_some(context)
+}
+
 fn to_lsp_completion(
     item: bsl_shared::domain::CompletionItem,
     owner_type: Option<String>,
@@ -376,6 +420,19 @@ fn to_lsp_completion(
         data: Some(serde_json::Value::Object(data)),
         ..Default::default()
     }
+}
+
+fn attach_completion_resolve_context_to_item(
+    item: &mut CompletionItem,
+    context: &CompletionResolveContextData,
+) {
+    let Some(data) = item.data.as_mut() else {
+        return;
+    };
+    let Some(obj) = data.as_object_mut() else {
+        return;
+    };
+    obj.insert("resolve_context".to_string(), json!(context));
 }
 
 fn build_candidate_id(

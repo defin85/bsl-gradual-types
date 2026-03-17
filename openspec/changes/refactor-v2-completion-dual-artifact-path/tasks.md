@@ -5,7 +5,7 @@
 ## 2. Completion head artifact
 - [ ] 2.1 Ввести `CompletionHeadArtifact` как отдельный canonical derived artifact из current-revision IR snapshot.
 - [ ] 2.2 Ограничить первую фазу `CompletionHeadArtifact` member-access completion path, не расширяя его на `hover/definition/type-at-position/diagnostics`.
-- [ ] 2.3 Добавить инвариантные тесты invalidation по `(file_version, deps_id, settings_id)`.
+- [x] 2.3 Добавить инвариантные тесты invalidation по `(file_version, deps_id, settings_id)`.
 - [ ] 2.4 Гарантировать, что публикация `CompletionHeadArtifact` для текущей revision не зависит от готовности `ExactSemanticArtifact` той же revision.
 
 ## 3. LSP/runtime orchestration

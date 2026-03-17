@@ -963,4 +963,161 @@ mod tests {
         assert_eq!(trace.stages.len(), 1);
         assert_eq!(trace.stages[0].status, "cancelled");
     }
+
+    #[tokio::test]
+    async fn completion_head_observation_invalidation_tracks_latest_file_version() {
+        let server = create_test_server();
+        let file_id = bsl_analysis_v2::FileId(41);
+        let deps_id = bsl_analysis_v2::DepsSnapshotId::from_hash("deps-head-version");
+        let settings_id = Some(bsl_analysis_v2::SettingsId::from_hash(
+            "settings-head-version",
+        ));
+
+        server
+            .record_completion_head_hit_v2(file_id, 7, deps_id.clone(), settings_id.clone(), false)
+            .await;
+        server
+            .record_completion_head_hit_v2(file_id, 8, deps_id.clone(), settings_id.clone(), false)
+            .await;
+
+        let observations = server.completion_head_serve_observations_v2.read().await;
+        let latest = observations
+            .get(&file_id)
+            .expect("latest head observation after version bump");
+        assert_eq!(latest.file_version, 8);
+        drop(observations);
+
+        assert!(
+            !server
+                .record_completion_head_to_exact_upgrade_if_pending_v2(
+                    file_id,
+                    7,
+                    &deps_id,
+                    settings_id.as_ref(),
+                )
+                .await,
+            "stale exact upgrade for previous file_version must not match pending head observation"
+        );
+
+        let observations = server.completion_head_serve_observations_v2.read().await;
+        let still_latest = observations
+            .get(&file_id)
+            .expect("latest head observation must stay pending after stale version mismatch");
+        assert_eq!(still_latest.file_version, 8);
+        drop(observations);
+
+        assert!(
+            server
+                .record_completion_head_to_exact_upgrade_if_pending_v2(
+                    file_id,
+                    8,
+                    &deps_id,
+                    settings_id.as_ref(),
+                )
+                .await,
+            "latest matching file_version must still upgrade pending head observation"
+        );
+        assert!(
+            server
+                .completion_head_serve_observations_v2
+                .read()
+                .await
+                .get(&file_id)
+                .is_none(),
+            "matching upgrade must clear pending head observation"
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_head_observation_invalidation_rejects_deps_mismatch() {
+        let server = create_test_server();
+        let file_id = bsl_analysis_v2::FileId(42);
+        let deps_a = bsl_analysis_v2::DepsSnapshotId::from_hash("deps-head-a");
+        let deps_b = bsl_analysis_v2::DepsSnapshotId::from_hash("deps-head-b");
+        let settings_id = Some(bsl_analysis_v2::SettingsId::from_hash("settings-head-deps"));
+
+        server
+            .record_completion_head_hit_v2(file_id, 3, deps_a.clone(), settings_id.clone(), false)
+            .await;
+
+        assert!(
+            !server
+                .record_completion_head_to_exact_upgrade_if_pending_v2(
+                    file_id,
+                    3,
+                    &deps_b,
+                    settings_id.as_ref(),
+                )
+                .await,
+            "exact upgrade with mismatched deps_id must not consume pending head observation"
+        );
+
+        let observations = server.completion_head_serve_observations_v2.read().await;
+        let pending = observations
+            .get(&file_id)
+            .expect("head observation must stay pending after deps mismatch");
+        assert_eq!(pending.file_version, 3);
+        assert_eq!(
+            pending.deps_id,
+            bsl_analysis_v2::DepsSnapshotId::from_hash("deps-head-a")
+        );
+        drop(observations);
+
+        assert!(
+            server
+                .record_completion_head_to_exact_upgrade_if_pending_v2(
+                    file_id,
+                    3,
+                    &deps_a,
+                    settings_id.as_ref(),
+                )
+                .await,
+            "matching deps_id must still upgrade pending head observation"
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_head_observation_invalidation_rejects_settings_mismatch() {
+        let server = create_test_server();
+        let file_id = bsl_analysis_v2::FileId(43);
+        let deps_id = bsl_analysis_v2::DepsSnapshotId::from_hash("deps-head-settings");
+        let settings_a = Some(bsl_analysis_v2::SettingsId::from_hash("settings-head-a"));
+        let settings_b = Some(bsl_analysis_v2::SettingsId::from_hash("settings-head-b"));
+
+        server
+            .record_completion_head_hit_v2(file_id, 5, deps_id.clone(), settings_a.clone(), false)
+            .await;
+
+        assert!(
+            !server
+                .record_completion_head_to_exact_upgrade_if_pending_v2(
+                    file_id,
+                    5,
+                    &deps_id,
+                    settings_b.as_ref(),
+                )
+                .await,
+            "exact upgrade with mismatched settings_id must not consume pending head observation"
+        );
+
+        let observations = server.completion_head_serve_observations_v2.read().await;
+        let pending = observations
+            .get(&file_id)
+            .expect("head observation must stay pending after settings mismatch");
+        assert_eq!(pending.file_version, 5);
+        assert_eq!(pending.settings_id, settings_a);
+        drop(observations);
+
+        assert!(
+            server
+                .record_completion_head_to_exact_upgrade_if_pending_v2(
+                    file_id,
+                    5,
+                    &deps_id,
+                    settings_a.as_ref(),
+                )
+                .await,
+            "matching settings_id must still upgrade pending head observation"
+        );
+    }
 }

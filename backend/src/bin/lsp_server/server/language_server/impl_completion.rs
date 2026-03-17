@@ -203,6 +203,14 @@ impl CompletionTimelineCapture {
         self.prepare_details_mut().outcome = Some(outcome.to_string());
     }
 
+    fn set_prepare_route(&mut self, route: &str) {
+        self.prepare_details_mut().route = Some(route.to_string());
+    }
+
+    fn set_prepare_fail_closed_cause(&mut self, cause: &str) {
+        self.prepare_details_mut().fail_closed_cause = Some(cause.to_string());
+    }
+
     fn set_prepare_guard_outcome(&mut self, outcome: impl Into<String>) {
         self.prepare_details_mut().guard_outcome = Some(outcome.into());
     }
@@ -793,6 +801,7 @@ impl BslLanguageServer {
                 CompletionPrepareGuardResult::TimedOut => {
                     timeline_capture.set_prepare_guard_outcome("timeout");
                     timeline_capture.set_prepare_outcome("wait_not_ready");
+                    timeline_capture.set_prepare_fail_closed_cause("prepare_timeout");
                     self.coordinator
                         .record_intellisense_v2_interactive_wait_budget_exhausted();
                     self.coordinator
@@ -980,6 +989,7 @@ impl BslLanguageServer {
                             if exact_wait_outcome
                                 == super::super::core::ExactTypeIndexWaitOutcomeV2::Deadline
                             {
+                                timeline_capture.set_prepare_fail_closed_cause("exact_deadline");
                                 self.coordinator
                                     .record_intellisense_v2_completion_fail_closed_cause(
                                         "exact_deadline",
@@ -1023,6 +1033,7 @@ impl BslLanguageServer {
                             if terminal_outcome
                                 == super::super::core::ExactTypeIndexWaitOutcomeV2::Deadline
                             {
+                                timeline_capture.set_prepare_fail_closed_cause("exact_deadline");
                                 self.coordinator
                                     .record_intellisense_v2_completion_fail_closed_cause(
                                         "exact_deadline",
@@ -1599,6 +1610,7 @@ impl BslLanguageServer {
             if let Some(route) = completion_route.take() {
                 match route.kind {
                     CompletionRouteKind::HeadHit => {
+                        timeline_capture.set_prepare_route("head_hit");
                         self.record_completion_head_hit_v2(
                             file_id,
                             route.file_version,
@@ -1609,6 +1621,7 @@ impl BslLanguageServer {
                         .await;
                     }
                     CompletionRouteKind::ExactHit => {
+                        timeline_capture.set_prepare_route("exact_hit");
                         self.record_completion_exact_hit_v2(
                             file_id,
                             route.file_version,

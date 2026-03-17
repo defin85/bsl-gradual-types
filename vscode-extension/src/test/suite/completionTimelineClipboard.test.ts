@@ -9,7 +9,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
     function buildReadyState(): CompletionTimelinePanelState {
         return {
             kind: 'ready',
-            version: 1,
+            version: 2,
             updated_at_ms: 1_700_000_000_100,
             traces: [
                 {
@@ -27,6 +27,8 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                         wait_budget_ms: 120,
                         guard_outcome: 'timeout',
                         outcome: 'wait_not_ready',
+                        route: 'exact_hit',
+                        fail_closed_cause: 'exact_deadline',
                         min_file_version: 9,
                         shadow_version_at_start: 9,
                         observed_file_version: 8,
@@ -114,6 +116,8 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('prepare_wait_budget_ms=120'));
         assert.ok(text!.includes('prepare_guard_outcome=timeout'));
         assert.ok(text!.includes('prepare_outcome=wait_not_ready'));
+        assert.ok(text!.includes('completion_route=exact_hit'));
+        assert.ok(text!.includes('fail_closed_cause=exact_deadline'));
         assert.ok(text!.includes('turn_request_file_seq=17'));
         assert.ok(text!.includes('active_holder | request=req-0'));
         assert.ok(text!.includes('query_bundle | completed'));

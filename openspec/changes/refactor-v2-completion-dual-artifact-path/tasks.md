@@ -14,9 +14,9 @@
 - [ ] 3.3 Сохранить стабильный `candidate_id` contract и покрыть tests на согласованность `head` ответа и exact `resolve`.
 
 ## 4. Scheduling and observability
-- [ ] 4.1 Добавить debounce/coalesce + waiter-aware orchestration для exact precompute одной revision вместо независимых конкурентных exact builds на каждом `didChange`.
-- [ ] 4.2 Разделить observability на `prepare timeout`, `exact deadline`, head-hit, exact-hit и head-to-exact-upgrade.
-- [ ] 4.3 Обновить completion timeline/metrics contract без high-cardinality drift.
+- [x] 4.1 Добавить debounce/coalesce + waiter-aware orchestration для exact precompute одной revision вместо независимых конкурентных exact builds на каждом `didChange`.
+- [x] 4.2 Разделить observability на `prepare timeout`, `exact deadline`, head-hit, exact-hit и head-to-exact-upgrade.
+- [x] 4.3 Обновить completion timeline/metrics contract без high-cardinality drift.
 
 ## 5. Perf gates and validation
 - [ ] 5.1 Обновить representative real-module gates так, чтобы:

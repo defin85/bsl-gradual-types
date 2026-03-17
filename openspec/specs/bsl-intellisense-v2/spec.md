@@ -1716,12 +1716,12 @@ Hardcoded foreign `change_id` в runtime/perf path MUST NOT использова
 - **AND** такой артефакт не может быть использован как cutover evidence
 
 ### Requirement: LSP предоставляет versioned per-request completion timeline контракт (MUST)
-LSP MUST предоставлять server-driven custom request `bsl.getCompletionTimeline` с contract version `1`.
+LSP MUST предоставлять server-driven custom request `bsl.getCompletionTimeline` с contract version `2`.
 
 Для VS Code extension в текущей архитектуре этот контракт MUST быть доступен через `workspace/executeCommand` с `command: bsl.getCompletionTimeline`.
 Per-request timeline payload MUST формироваться на стороне LSP и MUST NOT требовать клиентской реконструкции из логов или агрегированных observability-метрик.
 
-Контракт `v1` MUST включать:
+Контракт `v2` MUST включать:
 - `version` (числовой номер контракта);
 - `traces` (массив completion trace записей).
 
@@ -1729,7 +1729,14 @@ Per-request timeline payload MUST формироваться на стороне
 - `trace_id`, `request_id`, `uri`, `trigger_mode`;
 - `outcome`, `started_at_ms`, `total_duration_ms`;
 - `dominant_stage`;
+- `prepare_details`;
+- `turn_attribution`;
 - `stages`.
+
+Если `prepare_details` присутствует, объект MUST оставаться bounded и MUST NOT вводить high-cardinality labels.
+Для split-prepare routing этот объект MUST содержать:
+- `route` со значениями только из bounded vocabulary `head_hit|exact_hit` либо `null`;
+- `fail_closed_cause` со значениями только из bounded vocabulary `prepare_timeout|exact_deadline` либо `null`.
 
 Каждый stage entry MUST включать:
 - `name`;
@@ -1753,8 +1760,15 @@ Per-request timeline payload MUST формироваться на стороне
 #### Scenario: VS Code клиент получает timeline через `workspace/executeCommand`
 - **GIVEN** VS Code extension запрашивает completion timeline
 - **WHEN** клиент вызывает `workspace/executeCommand` с `command: bsl.getCompletionTimeline`
-- **THEN** LSP возвращает response контракта `v1` с server-generated traces
+- **THEN** LSP возвращает response контракта `v2` с server-generated traces
 - **AND** клиент не строит timeline из текстовых логов или p95/p99 агрегатов
+
+#### Scenario: Timeline раскрывает bounded split-prepare routing без cardinality drift
+- **GIVEN** completion обслужен через current-revision `head` path или fail-closed exact wait
+- **WHEN** клиент читает `prepare_details` в trace
+- **THEN** `route` остаётся только в bounded vocabulary `head_hit|exact_hit` или `null`
+- **AND** `fail_closed_cause` остаётся только в bounded vocabulary `prepare_timeout|exact_deadline` или `null`
+- **AND** timeline не включает динамические route/cause labels
 
 ### Requirement: Timeline stage taxonomy bounded и совместима с completion observability (MUST)
 Stage names в per-request timeline MUST использовать bounded taxonomy, согласованную с completion stage observability.
@@ -1998,4 +2012,3 @@ Smoke/parity проверки MAY использоваться как допол
 - **WHEN** выполняется exact cross-consumer acceptance
 - **THEN** acceptance падает как semantic drift
 - **AND** smoke-level parity без этой проверки не считается достаточным evidence
-

@@ -88,6 +88,12 @@ export function formatCompletionTimelineTraceForClipboard(
         if (trace.prepare_details.outcome) {
             detailsBits.push(`prepare_outcome=${trace.prepare_details.outcome}`);
         }
+        if (trace.prepare_details.route) {
+            detailsBits.push(`completion_route=${trace.prepare_details.route}`);
+        }
+        if (trace.prepare_details.fail_closed_cause) {
+            detailsBits.push(`fail_closed_cause=${trace.prepare_details.fail_closed_cause}`);
+        }
         if (typeof trace.prepare_details.min_file_version === 'number') {
             detailsBits.push(`prepare_min_file_version=${trace.prepare_details.min_file_version}`);
         }

@@ -9679,7 +9679,7 @@ async fn p22_get_completion_timeline_exposes_versioned_contract() {
             .get("version")
             .and_then(|value| value.as_u64())
             .expect("version"),
-        1
+        2
     );
     assert!(
         result
@@ -9812,6 +9812,14 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
     assert!(
         prepare_details.contains_key("wait_budget_ms"),
         "missing field `wait_budget_ms` in prepare_details"
+    );
+    assert!(
+        prepare_details.contains_key("route"),
+        "prepare_details must expose bounded route field even when absent"
+    );
+    assert!(
+        prepare_details.contains_key("fail_closed_cause"),
+        "prepare_details must expose split fail-closed cause field even when absent"
     );
     assert!(
         prepare_details.contains_key("guard_outcome"),
@@ -13191,6 +13199,23 @@ async fn p33_completion_uses_current_revision_head_path_without_exact_artifact()
         completion_labels.iter().any(|label| label == "Количество"),
         "head-path completion should surface canonical members for current-revision explicit receiver, labels={completion_labels:?}"
     );
+    let timeline = lsp_get_completion_timeline(&mut service, 401, 10).await;
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("completion timeline traces array");
+    let trace = traces.last().expect("head-path completion timeline trace");
+    assert_eq!(
+        completion_timeline_prepare_detail_str(trace, "route"),
+        Some("head_hit"),
+        "head-path completion trace must expose bounded route in prepare_details, trace={trace:?}"
+    );
+    assert!(
+        trace.get("prepare_details")
+            .and_then(|value| value.as_object())
+            .is_some_and(|details| details.contains_key("fail_closed_cause")),
+        "head-path completion trace must keep fail_closed_cause field present even when route succeeds, trace={trace:?}"
+    );
 
     let metrics = coordinator.observability_metrics();
     let counters = metrics
@@ -13364,6 +13389,25 @@ async fn p33_completion_exact_wait_deadline_then_recovery_after_precompute_finis
     assert!(
         second_completion_labels.iter().any(|label| label == "Количество"),
         "second member-access completion must recover typed-structure members once exact precompute finishes, labels={second_completion_labels:?}"
+    );
+    let timeline = lsp_get_completion_timeline(&mut service, 402, 10).await;
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("completion timeline traces array");
+    let first_trace = traces
+        .get(traces.len().saturating_sub(2))
+        .expect("first exact-wait completion trace");
+    let second_trace = traces.last().expect("second exact-wait completion trace");
+    assert_eq!(
+        completion_timeline_prepare_detail_str(first_trace, "fail_closed_cause"),
+        Some("exact_deadline"),
+        "fail-closed completion trace must expose bounded exact-deadline attribution, trace={first_trace:?}"
+    );
+    assert_eq!(
+        completion_timeline_prepare_detail_str(second_trace, "route"),
+        Some("exact_hit"),
+        "recovered completion trace must expose exact-hit route after exact precompute finishes, trace={second_trace:?}"
     );
 
     let metrics = coordinator.observability_metrics();

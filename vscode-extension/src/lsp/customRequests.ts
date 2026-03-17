@@ -530,6 +530,8 @@ export interface CompletionTimelinePrepareDetailsTrace {
     wait_budget_ms?: number;
     guard_outcome?: string;
     outcome?: string;
+    route?: string | null;
+    fail_closed_cause?: string | null;
     min_file_version?: number;
     shadow_version_at_start?: number;
     observed_file_version?: number;

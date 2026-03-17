@@ -1342,8 +1342,8 @@ fn completion_v2_contract_matches_runtime_transport_and_trigger_modes() {
 }
 
 #[test]
-fn observability_completion_v3_contract_matches_runtime_metric_labels() {
-    let contract = contract_json("observability-completion-v2/v3/contract.json");
+fn observability_completion_v4_contract_matches_runtime_metric_labels() {
+    let contract = contract_json("observability-completion-v2/v4/contract.json");
     let metrics_contract = contract
         .get("metrics")
         .and_then(|value| value.as_object())
@@ -1376,6 +1376,34 @@ fn observability_completion_v3_contract_matches_runtime_metric_labels() {
             .and_then(|value| value.as_str())
             .expect("completion result counter prefix"),
         "intellisense_v2_completion_result_total_"
+    );
+    assert_eq!(
+        metrics_contract
+            .get("completion_route_counter_prefix")
+            .and_then(|value| value.as_str())
+            .expect("completion route counter prefix"),
+        "intellisense_v2_completion_route_total_route_"
+    );
+    assert_eq!(
+        metrics_contract
+            .get("completion_fail_closed_cause_counter_prefix")
+            .and_then(|value| value.as_str())
+            .expect("completion fail-closed cause counter prefix"),
+        "intellisense_v2_completion_fail_closed_cause_total_cause_"
+    );
+    assert_eq!(
+        metrics_contract
+            .get("completion_head_to_exact_upgrade_counter")
+            .and_then(|value| value.as_str())
+            .expect("completion head-to-exact upgrade counter"),
+        "intellisense_v2_completion_head_to_exact_upgrade_total"
+    );
+    assert_eq!(
+        metrics_contract
+            .get("completion_head_to_exact_upgrade_histogram")
+            .and_then(|value| value.as_str())
+            .expect("completion head-to-exact upgrade histogram"),
+        "intellisense_v2_completion_head_to_exact_upgrade_ms"
     );
     assert_eq!(
         metrics_contract
@@ -1433,10 +1461,50 @@ fn observability_completion_v3_contract_matches_runtime_metric_labels() {
                 .to_string()
         })
         .collect();
+    let completion_routes: Vec<String> = metrics_contract
+        .get("allowed_completion_routes")
+        .and_then(|value| value.as_array())
+        .expect("allowed_completion_routes")
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .expect("allowed completion route string")
+                .to_string()
+        })
+        .collect();
+    let completion_fail_closed_causes: Vec<String> = metrics_contract
+        .get("allowed_completion_fail_closed_causes")
+        .and_then(|value| value.as_array())
+        .expect("allowed_completion_fail_closed_causes")
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .expect("allowed completion fail-closed cause string")
+                .to_string()
+        })
+        .collect();
     let fail_closed_reason_prefix = metrics_contract
         .get("interactive_fail_closed_reason_counter_prefix")
         .and_then(|value| value.as_str())
         .expect("interactive fail-closed reason counter prefix");
+    let completion_route_prefix = metrics_contract
+        .get("completion_route_counter_prefix")
+        .and_then(|value| value.as_str())
+        .expect("completion route counter prefix");
+    let completion_fail_closed_cause_prefix = metrics_contract
+        .get("completion_fail_closed_cause_counter_prefix")
+        .and_then(|value| value.as_str())
+        .expect("completion fail-closed cause counter prefix");
+    let completion_head_to_exact_upgrade_counter = metrics_contract
+        .get("completion_head_to_exact_upgrade_counter")
+        .and_then(|value| value.as_str())
+        .expect("completion head-to-exact upgrade counter");
+    let completion_head_to_exact_upgrade_histogram = metrics_contract
+        .get("completion_head_to_exact_upgrade_histogram")
+        .and_then(|value| value.as_str())
+        .expect("completion head-to-exact upgrade histogram");
     let runtime_queue_wait_interactive_counter = metrics_contract
         .get("runtime_queue_wait_interactive_counter")
         .and_then(|value| value.as_str())
@@ -1509,6 +1577,23 @@ fn observability_completion_v3_contract_matches_runtime_metric_labels() {
             "contract completion outcome must remain in bounded normalization set"
         );
     }
+    for route in &completion_routes {
+        observability.record_intellisense_v2_completion_route(route);
+        assert_eq!(
+            normalize_completion_route_label(route),
+            route,
+            "contract completion route must remain in bounded normalization set"
+        );
+    }
+    for cause in &completion_fail_closed_causes {
+        observability.record_intellisense_v2_completion_fail_closed_cause(cause);
+        assert_eq!(
+            normalize_completion_fail_closed_cause_label(cause),
+            cause,
+            "contract completion fail-closed cause must remain in bounded normalization set"
+        );
+    }
+    observability.record_intellisense_v2_completion_head_to_exact_upgrade(Duration::from_millis(7));
 
     let exported = observability.get_metrics().export_metrics();
     let counters = counters(&exported);
@@ -1542,6 +1627,28 @@ fn observability_completion_v3_contract_matches_runtime_metric_labels() {
             "interactive fail-closed reason counter must be exported for reason {reason}"
         );
     }
+    for route in &completion_routes {
+        let route_key = format!("{completion_route_prefix}{route}");
+        assert!(
+            counter_value(counters, &route_key) > 0,
+            "completion route counter must be exported for route {route}"
+        );
+    }
+    for cause in &completion_fail_closed_causes {
+        let cause_key = format!("{completion_fail_closed_cause_prefix}{cause}");
+        assert!(
+            counter_value(counters, &cause_key) > 0,
+            "completion fail-closed cause counter must be exported for cause {cause}"
+        );
+    }
+    assert!(
+        counter_value(counters, completion_head_to_exact_upgrade_counter) > 0,
+        "head-to-exact upgrade counter must be exported"
+    );
+    assert!(
+        histogram_count(histograms, completion_head_to_exact_upgrade_histogram) > 0,
+        "head-to-exact upgrade histogram must be exported"
+    );
     assert!(
         counter_value(counters, runtime_queue_wait_interactive_counter) > 0,
         "runtime queue wait counter must be projected via contract key"

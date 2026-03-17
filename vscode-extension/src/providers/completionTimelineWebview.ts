@@ -568,6 +568,12 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             if (details.outcome) {
                 bits.push('prepare_outcome=' + escapeHtml(details.outcome));
             }
+            if (details.route) {
+                bits.push('completion_route=' + escapeHtml(details.route));
+            }
+            if (details.fail_closed_cause) {
+                bits.push('fail_closed_cause=' + escapeHtml(details.fail_closed_cause));
+            }
             if (typeof details.min_file_version === 'number') {
                 bits.push('min_version=' + escapeHtml(details.min_file_version));
             }

@@ -30,7 +30,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 1,
+                version: 2,
                 traces: [
                     {
                         trace_id: 'trace-1',
@@ -135,7 +135,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 1,
+                version: 2,
                 traces: [
                     {
                         trace_id: 'trace-copy',

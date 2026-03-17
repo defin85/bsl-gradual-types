@@ -8,7 +8,7 @@ import { CompletionTimelineResponse } from '../../lsp/customRequests';
 suite('Completion Timeline Model Test Suite', () => {
     test('Mapping LSP timeline payload -> UI model', () => {
         const payload: CompletionTimelineResponse = {
-            version: 1,
+            version: 2,
             traces: [
                 {
                     trace_id: 'trace-42',
@@ -21,6 +21,7 @@ suite('Completion Timeline Model Test Suite', () => {
                     dominant_stage: 'query_bundle',
                     prepare_details: {
                         wait_budget_ms: 120,
+                        route: 'head_hit',
                         outcome: 'ready',
                         min_file_version: 7,
                         shadow_version_at_start: 7,
@@ -66,10 +67,11 @@ suite('Completion Timeline Model Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(state.version, 1);
+        assert.strictEqual(state.version, 2);
         assert.strictEqual(state.traces.length, 1);
         assert.strictEqual(state.traces[0].trace_id, 'trace-42');
         assert.strictEqual(state.traces[0].prepare_details?.wait_budget_ms, 120);
+        assert.strictEqual(state.traces[0].prepare_details?.route, 'head_hit');
         assert.strictEqual(state.traces[0].stages.length, 3);
         assert.strictEqual(state.traces[0].turn_attribution?.queue_outcome, 'enqueued');
         assert.strictEqual(state.traces[0].turn_attribution?.active_holder?.file_seq, 41);

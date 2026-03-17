@@ -181,7 +181,7 @@ suite('LSP Custom Requests Test Suite', () => {
 
                 if (command === 'bsl.getCompletionTimeline') {
                     return Promise.resolve({
-                        version: 1,
+                        version: 2,
                         traces: [
                             {
                                 trace_id: 'trace-1',
@@ -358,7 +358,7 @@ suite('LSP Custom Requests Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(result.response.version, 1);
+        assert.strictEqual(result.response.version, 2);
         assert.strictEqual(result.response.traces.length, 1);
         assert.strictEqual(result.response.traces[0].trace_id, 'trace-1');
     });

@@ -91,6 +91,35 @@ fn remove_pending_completion_request_id(request_id: &str) {
     }
 }
 
+#[cfg(test)]
+pub(crate) fn record_completion_request_id_for_testing(
+    uri: &Url,
+    position: Position,
+    request_id: &str,
+) {
+    let key = CompletionRequestKey {
+        uri: uri.to_string(),
+        line: position.line,
+        character: position.character,
+    };
+    let request_id = request_id.to_string();
+    let mut pending = pending_completion_request_ids_cell()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(old_key) = pending
+        .by_request_id
+        .insert(request_id.clone(), key.clone())
+    {
+        if let Some(old_queue) = pending.by_key.get_mut(&old_key) {
+            old_queue.retain(|queued| queued != &request_id);
+            if old_queue.is_empty() {
+                pending.by_key.remove(&old_key);
+            }
+        }
+    }
+    pending.by_key.entry(key).or_default().push_back(request_id);
+}
+
 pub(crate) fn take_completion_request_id(uri: &Url, position: Position) -> Option<String> {
     let key = CompletionRequestKey {
         uri: uri.to_string(),

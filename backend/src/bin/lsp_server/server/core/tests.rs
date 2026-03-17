@@ -23,7 +23,7 @@ use std::collections::BTreeSet;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tower::Service;
 use tower::ServiceExt;
-use tower_lsp::jsonrpc::Request;
+use tower_lsp::jsonrpc::{Request, Response as JsonRpcResponse};
 use tower_lsp::lsp_types::{
     ClientCapabilities, CodeActionContext, CodeActionOrCommand, CodeActionParams,
     CompletionContext, CompletionItemKind, CompletionParams, CompletionResponse,
@@ -4282,6 +4282,7 @@ async fn p7_waiting_completion_promotes_matching_type_index_precompute_to_intera
     let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
 
     initialize_lsp_service(&mut service).await;
+    let mut service = crate::server::request_context::RequestContextService::new(service);
 
     let server = server_holder
         .lock()
@@ -12239,11 +12240,12 @@ async fn replace_lsp_fixture_and_wait(
     wait_for_type_index_precompute_completion(server, file_id).await;
 }
 
-async fn lsp_completion_labels_at(
-    service: &mut LspService<BslLanguageServer>,
-    uri: &Url,
-    position: Position,
-) -> Vec<String> {
+async fn lsp_completion_labels_at<S>(service: &mut S, uri: &Url, position: Position) -> Vec<String>
+where
+    S: Service<Request, Response = Option<JsonRpcResponse>> + Send,
+    S::Future: Send,
+    S::Error: std::fmt::Debug,
+{
     lsp_completion_labels_with_request(
         service,
         12001,
@@ -12257,13 +12259,23 @@ async fn lsp_completion_labels_at(
     .await
 }
 
-async fn lsp_completion_labels_with_request(
-    service: &mut LspService<BslLanguageServer>,
+async fn lsp_completion_labels_with_request<S>(
+    service: &mut S,
     request_id: i64,
     uri: &Url,
     position: Position,
     context: Option<CompletionContext>,
-) -> Vec<String> {
+) -> Vec<String>
+where
+    S: Service<Request, Response = Option<JsonRpcResponse>> + Send,
+    S::Future: Send,
+    S::Error: std::fmt::Debug,
+{
+    crate::server::request_context::record_completion_request_id_for_testing(
+        uri,
+        position,
+        &request_id.to_string(),
+    );
     let completion_response = service
         .ready()
         .await
@@ -12344,11 +12356,16 @@ async fn lsp_completion_members_at(
     normalize_lsp_member_entries(&completion.expect("completion result present"))
 }
 
-async fn lsp_get_completion_timeline(
-    service: &mut LspService<BslLanguageServer>,
+async fn lsp_get_completion_timeline<S>(
+    service: &mut S,
     request_id: i64,
     limit: usize,
-) -> serde_json::Value {
+) -> serde_json::Value
+where
+    S: Service<Request, Response = Option<JsonRpcResponse>> + Send,
+    S::Future: Send,
+    S::Error: std::fmt::Debug,
+{
     let execute = Request::build("workspace/executeCommand")
         .id(request_id)
         .params(serde_json::json!({
@@ -12368,10 +12385,12 @@ async fn lsp_get_completion_timeline(
     value.get("result").cloned().expect("result field")
 }
 
-async fn lsp_get_observability_metrics(
-    service: &mut LspService<BslLanguageServer>,
-    request_id: i64,
-) -> serde_json::Value {
+async fn lsp_get_observability_metrics<S>(service: &mut S, request_id: i64) -> serde_json::Value
+where
+    S: Service<Request, Response = Option<JsonRpcResponse>> + Send,
+    S::Future: Send,
+    S::Error: std::fmt::Debug,
+{
     let execute = Request::build("workspace/executeCommand")
         .id(request_id)
         .params(serde_json::json!({
@@ -16071,6 +16090,7 @@ async fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
                 let trace_summary = trace.map(|trace| {
                     serde_json::json!({
                         "trace_id": trace.get("trace_id").and_then(|value| value.as_str()),
+                        "request_id": trace.get("request_id").and_then(|value| value.as_str()),
                         "trigger_mode": trace.get("trigger_mode").and_then(|value| value.as_str()),
                         "outcome": trace.get("outcome").and_then(|value| value.as_str()),
                         "total_duration_ms": trace.get("total_duration_ms").and_then(|value| value.as_u64()),
@@ -16293,6 +16313,12 @@ async fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
     .expect("write p37 real conf_big perf report");
     println!("{PROFILE_NAME}_path={}", report_path.display());
 
+    assert!(
+        trace_matching_mode == "request_id",
+        "expected request-context parity to expose JSON-RPC request ids in completion timeline, trace_matching_mode={}, trace_request_id_present_total={}, filtered_traces={filtered_traces:?}",
+        trace_matching_mode,
+        trace_request_id_present_total
+    );
     assert!(
         measured_non_empty_samples == MEASURE_REQUESTS,
         "expected all measured warm-cache samples to be non-empty, measured_non_empty_samples={}, measured_samples={measured_samples:?}",

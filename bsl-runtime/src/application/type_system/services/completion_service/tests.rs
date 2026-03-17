@@ -118,6 +118,108 @@ fn completion_context_reads_current_word_with_utf16_column() {
 }
 
 #[test]
+fn completion_head_receiver_resolves_implicit_form_object_descriptor_from_module_path() {
+    let repository = Arc::new(InMemoryTypeRepository::new());
+    repository
+        .load_types(vec![
+            RawTypeData {
+                name: "Документы.Док1".to_string(),
+                source: RawDataSource::Configuration,
+                facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+                kind: Some(MetadataKind::Document),
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "Формы.Документы.Док1.Форма1".to_string(),
+                source: RawDataSource::Configuration,
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "ЭлементыФормы.Документы.Док1.Форма1".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+        ])
+        .expect("load types");
+
+    let repo: Arc<dyn TypeRepository> = repository.clone();
+    let resolver = Arc::new(TypeResolver::new(repo.clone()));
+    let content = concat!("Процедура Тест()\n", "    Объект.\n", "КонецПроцедуры\n");
+    let (line, dot_column) = utf16_column(content, ".");
+    let column = dot_column + 1;
+
+    let hints = completion_member_access_owner_type_hints_from_head_receiver(
+        content,
+        line,
+        column,
+        "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl",
+        resolver.as_ref(),
+        repo.as_ref(),
+    );
+
+    assert_eq!(
+        hints.len(),
+        1,
+        "expected one implicit form-data hint: {hints:?}"
+    );
+    let hint = &hints[0];
+    assert_eq!(hint.type_name(), "Документы.Док1");
+    assert_eq!(hint.active_facet, None);
+    assert!(
+        hint.metadata
+            .notes
+            .contains(&FORM_DATA_SEMANTICS_NOTE.to_string()),
+        "implicit form-data head hint must preserve form-data semantics notes: {:?}",
+        hint.metadata.notes
+    );
+    assert!(
+        hint.metadata.notes.iter().any(|note| {
+            note == &format!(
+                "{}{}",
+                FORM_DATA_FORM_TYPE_NOTE_PREFIX, "Формы.Документы.Док1.Форма1"
+            )
+        }),
+        "implicit form-data head hint must preserve synthetic form type note: {:?}",
+        hint.metadata.notes
+    );
+    assert!(
+        hint.metadata.notes.iter().any(|note| {
+            note == &format!(
+                "{}{}",
+                bsl_shared::domain::types::FORM_DATA_ELEMENTS_TYPE_NOTE_PREFIX,
+                "ЭлементыФормы.Документы.Док1.Форма1"
+            )
+        }),
+        "implicit form-data head hint must preserve synthetic form-elements type note: {:?}",
+        hint.metadata.notes
+    );
+}
+
+#[test]
+fn completion_head_receiver_returns_empty_outside_supported_module_context() {
+    let repository = Arc::new(InMemoryTypeRepository::new());
+    let repo: Arc<dyn TypeRepository> = repository.clone();
+    let resolver = Arc::new(TypeResolver::new(repo.clone()));
+    let content = concat!("Процедура Тест()\n", "    Объект.\n", "КонецПроцедуры\n");
+    let (line, dot_column) = utf16_column(content, ".");
+    let column = dot_column + 1;
+
+    let hints = completion_member_access_owner_type_hints_from_head_receiver(
+        content,
+        line,
+        column,
+        "CommonModules/ОбщийМодуль/Ext/Module.bsl",
+        resolver.as_ref(),
+        repo.as_ref(),
+    );
+
+    assert!(
+        hints.is_empty(),
+        "unsupported module context must not invent head hints: {hints:?}"
+    );
+}
+
+#[test]
 fn completion_context_can_add_statements_flags() {
     let content = "Если Истина Тогда";
     let ctx = analyze_completion_context(content, 0, content.len() as u32);

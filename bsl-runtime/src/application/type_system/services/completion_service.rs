@@ -9,9 +9,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, Span};
 
+use bsl_shared::domain::code_location::{CodeLocation, ModuleType};
 use bsl_shared::domain::get_collection_kind;
+use bsl_shared::domain::repository::TypeRepository;
 use bsl_shared::domain::resolver::TypeResolver;
-use bsl_shared::domain::types::MetadataKind;
+use bsl_shared::domain::types::{ContextualTypeDescriptor, FacetKind, MetadataKind};
 use bsl_shared::domain::{CompletionItem, CompletionKind, TypeMetadataLookup, TypeResolution};
 use bsl_shared::ir::{ScopeId, ScopeKind, SemanticNodeKind, SemanticProgram};
 
@@ -229,6 +231,158 @@ pub fn completion_member_access_owner_type_hints_from_static_receiver(
     }
 
     vec![resolution]
+}
+
+pub fn completion_member_access_owner_type_hints_from_head_receiver(
+    file_content: &str,
+    line: u32,
+    column: u32,
+    file_path: &str,
+    resolver: &TypeResolver,
+    repository: &dyn TypeRepository,
+) -> Vec<TypeResolution> {
+    let static_hints = completion_member_access_owner_type_hints_from_static_receiver(
+        file_content,
+        line,
+        column,
+        resolver,
+    );
+    if !static_hints.is_empty() {
+        return static_hints;
+    }
+
+    let Some(receiver_chain) = extract_member_access_receiver_chain(file_content, line, column)
+    else {
+        return Vec::new();
+    };
+    let Some(name_chain) = receiver_chain.to_name_chain() else {
+        return Vec::new();
+    };
+    if name_chain.len() != 1 {
+        return Vec::new();
+    }
+
+    let Some(descriptor) =
+        completion_member_access_implicit_context_descriptor(file_path, &name_chain[0])
+    else {
+        return Vec::new();
+    };
+    let resolution = resolve_completion_contextual_descriptor(&descriptor, resolver, repository);
+    if resolution.is_unknown() || resolution.is_dynamic() {
+        return Vec::new();
+    }
+
+    vec![resolution]
+}
+
+fn completion_member_access_implicit_context_descriptor(
+    file_path: &str,
+    base_name: &str,
+) -> Option<ContextualTypeDescriptor> {
+    let location = CodeLocation::determine_from_path(std::path::Path::new(file_path)).ok()?;
+    let lowered = base_name.trim().to_lowercase();
+
+    match location.module_type {
+        ModuleType::FormModule {
+            form_name,
+            owner_type,
+        } => {
+            let (kind, owner_name) = parse_contextual_owner(&owner_type)?;
+            match lowered.as_str() {
+                "этотобъект" | "этаформа" | "форма" => {
+                    Some(ContextualTypeDescriptor::FormType {
+                        kind,
+                        owner_name,
+                        form_name,
+                    })
+                }
+                "объект" => Some(ContextualTypeDescriptor::FormDataObject {
+                    kind,
+                    owner_name,
+                    form_name,
+                }),
+                "элементы" => Some(ContextualTypeDescriptor::FormElementsType {
+                    kind,
+                    owner_name,
+                    form_name,
+                }),
+                "параметры" => Some(ContextualTypeDescriptor::PlatformType {
+                    type_name: "Структура".to_string(),
+                }),
+                _ => None,
+            }
+        }
+        ModuleType::ManagerModule { owner_type } => {
+            let (kind, owner_name) = parse_contextual_owner(&owner_type)?;
+            match lowered.as_str() {
+                "этотобъект" | "объект" => {
+                    Some(ContextualTypeDescriptor::ConfigurationFacet {
+                        kind,
+                        name: owner_name,
+                        facet: FacetKind::Manager,
+                    })
+                }
+                _ => None,
+            }
+        }
+        ModuleType::ObjectModule { owner_type } | ModuleType::RecordSetModule { owner_type } => {
+            let (kind, owner_name) = parse_contextual_owner(&owner_type)?;
+            match lowered.as_str() {
+                "этотобъект" | "объект" => {
+                    Some(ContextualTypeDescriptor::ConfigurationFacet {
+                        kind,
+                        name: owner_name,
+                        facet: FacetKind::Object,
+                    })
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn parse_contextual_owner(owner_type: &str) -> Option<(MetadataKind, String)> {
+    let (xml_kind, owner_name) = owner_type.split_once('.')?;
+    let kind = MetadataKind::from_xml_tag(xml_kind)?;
+    Some((kind, owner_name.to_string()))
+}
+
+fn resolve_completion_contextual_descriptor(
+    descriptor: &ContextualTypeDescriptor,
+    resolver: &TypeResolver,
+    repository: &dyn TypeRepository,
+) -> TypeResolution {
+    match descriptor {
+        ContextualTypeDescriptor::PlatformType { .. }
+        | ContextualTypeDescriptor::FormType { .. }
+        | ContextualTypeDescriptor::FormElementsType { .. } => {
+            let type_name = descriptor.canonical_type_name();
+            let resolved = resolver.resolve_expression_sync(&type_name);
+            if !resolved.is_unknown() {
+                return resolved;
+            }
+            if repository.find_type(&type_name).is_some() {
+                TypeResolution::explicit(&type_name)
+            } else {
+                TypeResolution::inferred_weak(&type_name)
+            }
+        }
+        ContextualTypeDescriptor::ConfigurationFacet { kind, name, facet } => {
+            TypeResolution::metadata_type(*kind, name, Some(*facet))
+        }
+        ContextualTypeDescriptor::FormDataObject {
+            kind, owner_name, ..
+        } => {
+            let mut resolution = TypeResolution::metadata_type(*kind, owner_name, None);
+            for note in descriptor.resolution_metadata_notes() {
+                if !resolution.metadata.notes.contains(&note) {
+                    resolution.metadata.notes.push(note);
+                }
+            }
+            resolution
+        }
+    }
 }
 
 pub fn completion_member_access_owner_type_hints_from_analysis(

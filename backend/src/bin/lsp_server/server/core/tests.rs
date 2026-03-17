@@ -13339,6 +13339,134 @@ async fn p33_completion_uses_current_revision_head_path_without_exact_artifact()
 }
 
 #[tokio::test]
+async fn p33_form_module_object_completion_uses_current_revision_head_path_without_exact_artifact()
+{
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let fixture = "Процедура Тест()\n    ДляCompletion = Объект.\nКонецПроцедуры\n";
+    let uri = Url::parse("file:///Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl")
+        .expect("form module uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: fixture.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    server.sync_v2_globals().await;
+
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    force_current_revision_without_exact_type_index(&server, file_id, &uri, fixture, 2).await;
+
+    let completion_position = find_utf16_position_after_marker(fixture, "ДляCompletion = Объект.");
+    let completion_labels = lsp_completion_labels_at(&mut service, &uri, completion_position).await;
+    assert!(
+        completion_labels.iter().any(|label| label == "Ссылка"),
+        "head-path completion for FormModule.Объект must include form-data property Ссылка, labels={completion_labels:?}"
+    );
+    assert!(
+        completion_labels
+            .iter()
+            .any(|label| label == "ПометкаУдаления"),
+        "head-path completion for FormModule.Объект must include form-data property ПометкаУдаления, labels={completion_labels:?}"
+    );
+    assert!(
+        !completion_labels
+            .iter()
+            .any(|label| label == "ПолучитьСсылкуНового"),
+        "head-path completion for FormModule.Объект must not leak object-facet method ПолучитьСсылкуНового, labels={completion_labels:?}"
+    );
+
+    let timeline = lsp_get_completion_timeline(&mut service, 403, 10).await;
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("completion timeline traces array");
+    let trace = traces
+        .last()
+        .expect("form-module head-path completion timeline trace");
+    assert_eq!(
+        completion_timeline_prepare_detail_str(trace, "route"),
+        Some("head_hit"),
+        "form-module head-path completion trace must expose bounded route in prepare_details, trace={trace:?}"
+    );
+    assert!(
+        trace.get("prepare_details")
+            .and_then(|value| value.as_object())
+            .is_some_and(|details| details.contains_key("fail_closed_cause")),
+        "form-module head-path completion trace must keep fail_closed_cause field present even when route succeeds, trace={trace:?}"
+    );
+
+    let metrics = coordinator.observability_metrics();
+    let counters = metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    assert_eq!(
+        read_u64_metric(
+            counters.get(
+                "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_deadline"
+            )
+        ),
+        0,
+        "form-module head-path completion should not rely on exact wait deadline, counters={counters:?}"
+    );
+    assert_eq!(
+        read_u64_metric(counters.get("intellisense_v2_completion_fallback_unavailable_total")),
+        0,
+        "form-module head-path completion should not record fallback_unavailable, counters={counters:?}"
+    );
+    assert!(
+        read_u64_metric(counters.get("intellisense_v2_completion_route_total_route_head_hit")) > 0,
+        "form-module head-path completion must record head-hit route, counters={counters:?}"
+    );
+    assert_eq!(
+        read_u64_metric(counters.get("intellisense_v2_completion_route_total_route_exact_hit")),
+        0,
+        "form-module head-path completion must not record exact-hit route, counters={counters:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
 async fn p33_completion_exact_wait_deadline_then_recovery_after_precompute_finish() {
     struct EnvVarGuard {
         key: &'static str,

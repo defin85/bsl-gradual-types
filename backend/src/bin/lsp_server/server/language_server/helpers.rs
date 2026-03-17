@@ -240,6 +240,31 @@ pub(super) fn completion_member_access_owner_type_hints_at_position(
     resolutions
 }
 
+pub(super) fn completion_member_access_owner_type_hints_from_current_revision_head(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    position: Position,
+) -> Vec<bsl_shared::domain::types::TypeResolution> {
+    let Some(file_content) = analysis.file_text(file_id).ok().flatten() else {
+        return Vec::new();
+    };
+    let Ok(deps) = analysis.deps_data() else {
+        return Vec::new();
+    };
+    let resolver = deps.resolver.clone().unwrap_or_else(|| {
+        Arc::new(bsl_shared::domain::resolver::TypeResolver::new(
+            deps.repository.clone(),
+        ))
+    });
+
+    bsl_runtime::application::completion_member_access_owner_type_hints_from_static_receiver(
+        file_content.as_ref(),
+        position.line,
+        position.character,
+        resolver.as_ref(),
+    )
+}
+
 pub(super) fn completion_labels_fingerprint(response: &CompletionResponse) -> Vec<String> {
     const PARITY_LABELS_LIMIT: usize = 64;
 

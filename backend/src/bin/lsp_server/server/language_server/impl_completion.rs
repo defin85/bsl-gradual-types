@@ -895,7 +895,16 @@ impl BslLanguageServer {
                     }
 
                     let mut refreshed_snapshot_after_wait = None;
-                    if member_access_request {
+                    let current_revision_head_owner_type_hints = if member_access_request {
+                        completion_member_access_owner_type_hints_from_current_revision_head(
+                            &prepared.snapshot.analysis,
+                            file_id,
+                            position,
+                        )
+                    } else {
+                        Vec::new()
+                    };
+                    if member_access_request && current_revision_head_owner_type_hints.is_empty() {
                         let exact_wait_budget =
                             bsl_runtime::application::intellisense_v2::interactive_freshness_knobs(
                                 bsl_runtime::application::SemanticOperation::Completion,
@@ -1003,7 +1012,7 @@ impl BslLanguageServer {
                     let (
                         file_content,
                         file_path,
-                        member_access_owner_type_hints,
+                        mut member_access_owner_type_hints,
                         deps,
                         ir_program,
                         index_snapshot,
@@ -1338,6 +1347,10 @@ impl BslLanguageServer {
                         })
                         .unwrap_or(member_access_request);
                     member_access_observed = member_access_context;
+                    if member_access_context && member_access_owner_type_hints.is_empty() {
+                        member_access_owner_type_hints =
+                            current_revision_head_owner_type_hints.clone();
+                    }
                     if member_access_context && member_access_owner_type_hints.is_empty() {
                         self.coordinator
                             .record_intellisense_v2_completion_fallback_unavailable();

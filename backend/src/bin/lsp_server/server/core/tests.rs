@@ -4263,7 +4263,7 @@ async fn p7_member_access_completion_does_not_backfill_from_runtime_index_snapsh
 #[tokio::test]
 async fn p7_waiting_completion_promotes_matching_type_index_precompute_to_interactive() {
     const FIXTURE: &str =
-        "Процедура Тест()\n    ДляCompletion = (Новый Массив()).\nКонецПроцедуры\n";
+        "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
 
     let coordinator = Arc::new(SystemCoordinator::new());
     let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
@@ -4331,7 +4331,32 @@ async fn p7_waiting_completion_promotes_matching_type_index_precompute_to_intera
 
     server.sync_v2_globals().await;
 
-    let completion_position = find_utf16_position_after_marker(FIXTURE, "(Новый Массив()).");
+    let did_change = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version: 2,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: None,
+            range_length: None,
+            text: FIXTURE.to_string(),
+        }],
+    };
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+    server.sync_v2_globals().await;
+
+    let completion_position = find_utf16_position_after_marker(FIXTURE, "ДляCompletion = S.");
     let completion_labels = lsp_completion_labels_at(&mut service, &uri, completion_position).await;
     let metrics = coordinator.observability_metrics();
     let counters = metrics
@@ -4345,8 +4370,8 @@ async fn p7_waiting_completion_promotes_matching_type_index_precompute_to_intera
         counters.get("intellisense_v2_completion_exact_type_index_wait_join_total"),
     );
     assert!(
-        !completion_labels.is_empty(),
-        "waiting completion should promote matching exact precompute instead of failing closed, labels={completion_labels:?}, counters={counters:?}"
+        completion_labels.iter().any(|label| label == "Количество"),
+        "waiting completion should recover typed-structure members once matching exact precompute is promoted or joined, labels={completion_labels:?}, counters={counters:?}"
     );
     assert!(
         promotion_total + join_total > 0,
@@ -13020,6 +13045,96 @@ async fn force_current_revision_without_exact_type_index(
 }
 
 #[tokio::test]
+async fn p33_completion_uses_current_revision_head_path_without_exact_artifact() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let fixture = "Процедура Тест()\n    Результат = (Новый Массив()).\nКонецПроцедуры\n";
+    let uri =
+        Url::parse("file:///test_p33_completion_head_without_exact_artifact.bsl").expect("uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: fixture.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    server.sync_v2_globals().await;
+
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    force_current_revision_without_exact_type_index(&server, file_id, &uri, fixture, 2).await;
+
+    let completion_position = find_utf16_position_after_marker(fixture, "(Новый Массив()).");
+    let completion_labels = lsp_completion_labels_at(&mut service, &uri, completion_position).await;
+    assert!(
+        !completion_labels.is_empty(),
+        "member-access completion should use current-revision head path even when exact artifact is missing, labels={completion_labels:?}"
+    );
+    assert!(
+        completion_labels.iter().any(|label| label == "Количество"),
+        "head-path completion should surface canonical members for current-revision explicit receiver, labels={completion_labels:?}"
+    );
+
+    let metrics = coordinator.observability_metrics();
+    let counters = metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    assert_eq!(
+        read_u64_metric(
+            counters.get(
+                "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_deadline"
+            )
+        ),
+        0,
+        "head-path completion should not rely on exact wait deadline, counters={counters:?}"
+    );
+    assert_eq!(
+        read_u64_metric(counters.get("intellisense_v2_completion_fallback_unavailable_total")),
+        0,
+        "head-path completion should not record fallback_unavailable for explicit current-revision receiver, counters={counters:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
 async fn p33_completion_exact_wait_deadline_then_recovery_after_precompute_finish() {
     struct EnvVarGuard {
         key: &'static str,
@@ -13045,7 +13160,7 @@ async fn p33_completion_exact_wait_deadline_then_recovery_after_precompute_finis
     }
 
     const FIXTURE: &str =
-        "Процедура Тест()\n    ДляCompletion = (Новый Массив()).\nКонецПроцедуры\n";
+        "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
 
     let _precompute_delay_guard =
         EnvVarGuard::set("BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS", "250");
@@ -13099,8 +13214,30 @@ async fn p33_completion_exact_wait_deadline_then_recovery_after_precompute_finis
     server.sync_v2_globals().await;
 
     let file_id = server.get_or_create_file_id_v2(&uri).await;
-    force_current_revision_without_exact_type_index(&server, file_id, &uri, FIXTURE, 2).await;
-    server.schedule_type_index_precompute_v2(file_id, 2).await;
+    let did_change = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version: 2,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: None,
+            range_length: None,
+            text: FIXTURE.to_string(),
+        }],
+    };
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+    server.sync_v2_globals().await;
     wait_for_type_index_precompute_phase(
         &server,
         file_id,
@@ -13108,7 +13245,7 @@ async fn p33_completion_exact_wait_deadline_then_recovery_after_precompute_finis
     )
     .await;
 
-    let completion_position = find_utf16_position_after_marker(FIXTURE, "(Новый Массив()).");
+    let completion_position = find_utf16_position_after_marker(FIXTURE, "ДляCompletion = S.");
     let wait_budget_ms = bsl_runtime::system::global_runtime_config()
         .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
         .unwrap_or(120);
@@ -13135,8 +13272,8 @@ async fn p33_completion_exact_wait_deadline_then_recovery_after_precompute_finis
     let second_completion_labels =
         lsp_completion_labels_at(&mut service, &uri, completion_position).await;
     assert!(
-        !second_completion_labels.is_empty(),
-        "second member-access completion must recover once exact precompute finishes, labels={second_completion_labels:?}"
+        second_completion_labels.iter().any(|label| label == "Количество"),
+        "second member-access completion must recover typed-structure members once exact precompute finishes, labels={second_completion_labels:?}"
     );
 
     let metrics = coordinator.observability_metrics();
@@ -13202,7 +13339,7 @@ async fn p33_completion_exact_wait_deadline_recovery_perf_report() {
     }
 
     const FIXTURE: &str =
-        "Процедура Тест()\n    ДляCompletion = (Новый Массив()).\nКонецПроцедуры\n";
+        "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
     const PROFILE_NAME: &str = "p33_completion_exact_wait_deadline_recovery_perf_report";
 
     let precompute_delay_ms = 250_u64;
@@ -13260,8 +13397,30 @@ async fn p33_completion_exact_wait_deadline_recovery_perf_report() {
     server.sync_v2_globals().await;
 
     let file_id = server.get_or_create_file_id_v2(&uri).await;
-    force_current_revision_without_exact_type_index(&server, file_id, &uri, FIXTURE, 2).await;
-    server.schedule_type_index_precompute_v2(file_id, 2).await;
+    let did_change = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version: 2,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: None,
+            range_length: None,
+            text: FIXTURE.to_string(),
+        }],
+    };
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+    server.sync_v2_globals().await;
     wait_for_type_index_precompute_phase(
         &server,
         file_id,
@@ -13269,7 +13428,7 @@ async fn p33_completion_exact_wait_deadline_recovery_perf_report() {
     )
     .await;
 
-    let completion_position = find_utf16_position_after_marker(FIXTURE, "(Новый Массив()).");
+    let completion_position = find_utf16_position_after_marker(FIXTURE, "ДляCompletion = S.");
     let wait_budget_ms = bsl_runtime::system::global_runtime_config()
         .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
         .unwrap_or(120);
@@ -13290,8 +13449,8 @@ async fn p33_completion_exact_wait_deadline_recovery_perf_report() {
         lsp_completion_labels_at(&mut service, &uri, completion_position).await;
     let second_elapsed_ms = second_started.elapsed().as_millis() as u64;
     assert!(
-        !second_completion_labels.is_empty(),
-        "second member-access completion must recover once exact precompute finishes, labels={second_completion_labels:?}"
+        second_completion_labels.iter().any(|label| label == "Количество"),
+        "second member-access completion must recover typed-structure members once exact precompute finishes, labels={second_completion_labels:?}"
     );
 
     let completion_timeline = lsp_get_completion_timeline(&mut service, 13321, 10).await;
@@ -13431,7 +13590,7 @@ async fn p33_completion_exact_wait_deadline_recovery_perf_report() {
         "fixture": {
             "uri": uri.as_str(),
             "file_id": file_id.0,
-            "marker": "(Новый Массив()).",
+            "marker": "ДляCompletion = S.",
             "precompute_delay_ms": precompute_delay_ms,
             "wait_budget_ms": wait_budget_ms,
         },

@@ -21,6 +21,20 @@ impl ExactTypeIndexWaitOutcomeV2 {
     }
 }
 
+#[cfg(test)]
+fn test_type_index_precompute_delay() -> Option<std::time::Duration> {
+    std::env::var("BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .map(std::time::Duration::from_millis)
+}
+
+#[cfg(not(test))]
+fn test_type_index_precompute_delay() -> Option<std::time::Duration> {
+    None
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum TypeIndexPrecomputeWaiterActionV2 {
     None,
@@ -513,6 +527,9 @@ impl BslLanguageServer {
                         TypeIndexPrecomputePhaseV2::Computing.as_u8(),
                         Ordering::Relaxed,
                     );
+                    if let Some(delay) = test_type_index_precompute_delay() {
+                        std::thread::sleep(delay);
+                    }
                     analysis.precompute_type_index_for_file(
                         key.file_id,
                         Some(key.requested_version),

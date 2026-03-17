@@ -9597,7 +9597,7 @@ async fn p22_get_completion_timeline_exposes_versioned_contract() {
 #[tokio::test]
 async fn p22_get_completion_timeline_contains_completion_trace() {
     const FIXTURE: &str =
-        "Процедура Тест()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.\nКонецПроцедуры\n";
+        "Процедура Тест()\n    ДляCompletion = (Новый Массив()).\nКонецПроцедуры\n";
 
     let coordinator = Arc::new(SystemCoordinator::new());
 
@@ -12771,6 +12771,33 @@ async fn wait_for_type_index_precompute_completion(
     }
 }
 
+async fn wait_for_type_index_precompute_phase(
+    server: &BslLanguageServer,
+    file_id: bsl_analysis_v2::FileId,
+    expected_phase: super::deps_and_precompute::TypeIndexPrecomputePhaseV2,
+) {
+    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(5);
+    loop {
+        let observed_phase = {
+            let tasks = server.type_index_precompute_tasks_v2.lock().await;
+            tasks
+                .get(&file_id)
+                .map(|task| task.phase.load(std::sync::atomic::Ordering::Relaxed))
+        };
+        if observed_phase == Some(expected_phase.as_u8()) {
+            return;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            panic!(
+                "type-index precompute did not reach expected phase for file_id={} (expected_phase={}, observed_phase={observed_phase:?})",
+                file_id.0,
+                expected_phase.as_u8(),
+            );
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
+}
+
 async fn force_current_revision_without_exact_type_index(
     server: &BslLanguageServer,
     file_id: bsl_analysis_v2::FileId,
@@ -12806,6 +12833,163 @@ async fn force_current_revision_without_exact_type_index(
         !exact_ready,
         "test setup must create current-revision semantic-index miss"
     );
+}
+
+#[tokio::test]
+async fn p33_completion_exact_wait_deadline_then_recovery_after_precompute_finish() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const FIXTURE: &str =
+        "Процедура Тест()\n    ДляCompletion = (Новый Массив()).\nКонецПроцедуры\n";
+
+    let _precompute_delay_guard =
+        EnvVarGuard::set("BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS", "250");
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let uri = Url::parse("file:///test_p33_completion_exact_wait_recovery.bsl").expect("uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: FIXTURE.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    server.sync_v2_globals().await;
+
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    force_current_revision_without_exact_type_index(&server, file_id, &uri, FIXTURE, 2).await;
+    server.schedule_type_index_precompute_v2(file_id, 2).await;
+    wait_for_type_index_precompute_phase(
+        &server,
+        file_id,
+        super::deps_and_precompute::TypeIndexPrecomputePhaseV2::Computing,
+    )
+    .await;
+
+    let completion_position = find_utf16_position_after_marker(FIXTURE, "(Новый Массив()).");
+    let wait_budget_ms = bsl_runtime::system::global_runtime_config()
+        .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
+        .unwrap_or(120);
+
+    let first_started = Instant::now();
+    let first_completion_labels =
+        lsp_completion_labels_at(&mut service, &uri, completion_position).await;
+    let first_elapsed = first_started.elapsed();
+    assert!(
+        first_completion_labels.is_empty(),
+        "first member-access completion must fail closed while matching exact precompute is still computing, labels={first_completion_labels:?}"
+    );
+    assert!(
+        first_elapsed >= Duration::from_millis(wait_budget_ms.saturating_sub(30)),
+        "first fail-closed completion should spend the exact wait budget before returning (elapsed={first_elapsed:?}, budget_ms={wait_budget_ms})"
+    );
+    assert!(
+        first_elapsed <= Duration::from_millis(wait_budget_ms.saturating_add(300)),
+        "first fail-closed completion should stay bounded near exact wait budget (elapsed={first_elapsed:?}, budget_ms={wait_budget_ms})"
+    );
+
+    wait_for_type_index_precompute_completion(&server, file_id).await;
+
+    let second_completion_labels =
+        lsp_completion_labels_at(&mut service, &uri, completion_position).await;
+    assert!(
+        !second_completion_labels.is_empty(),
+        "second member-access completion must recover once exact precompute finishes, labels={second_completion_labels:?}"
+    );
+
+    let metrics = coordinator.observability_metrics();
+    let counters = metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    assert!(
+        read_u64_metric(
+            counters.get(
+                "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_deadline"
+            )
+        ) > 0,
+        "first completion must record exact-wait deadline outcome, counters={counters:?}"
+    );
+    assert_eq!(
+        read_u64_metric(
+            counters.get("intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_no_matching_task")
+        ),
+        0,
+        "matching precompute recovery scenario must not degrade to no_matching_task, counters={counters:?}"
+    );
+    assert_eq!(
+        read_u64_metric(
+            counters.get("intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_task_present_wrong_version")
+        ),
+        0,
+        "matching precompute recovery scenario must not report wrong_version, counters={counters:?}"
+    );
+    assert!(
+        read_u64_metric(
+            counters.get("intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_ready")
+        ) > 0,
+        "second completion must observe ready exact-wait outcome after precompute completion, counters={counters:?}"
+    );
+
+    drain_task.abort();
 }
 
 #[tokio::test]

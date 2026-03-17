@@ -1129,17 +1129,34 @@ impl BslLanguageServer {
                         observed_point,
                     );
 
-                        let context_for_query = context.clone();
-                        let coordinator_for_query = self.coordinator.clone();
-                        let uri_for_query = uri.clone();
-                        let observed_deps_id_for_query = observed_deps_id.clone();
-                        let cancellation_token_for_query = completion_cancellation_token.clone();
-                        let query_result =
-                            bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
-                                bsl_runtime::application::CpuWorkClass::Interactive,
-                                context_for_query.origin.as_str(),
-                                Some(self.coordinator.as_ref()),
-                                move || {
+                        if head_route_candidate {
+                            let file_content = analysis.file_text(file_id).ok().flatten();
+                            let file_path = analysis.file_path(file_id).ok().flatten();
+                            let deps = analysis.deps_data().ok();
+                            (
+                                file_content,
+                                file_path,
+                                current_revision_head_owner_type_hints.clone(),
+                                deps,
+                                None,
+                                index_snapshot,
+                                observed_deps_id,
+                                observed_settings_id,
+                                observed_file_version,
+                            )
+                        } else {
+                            let context_for_query = context.clone();
+                            let coordinator_for_query = self.coordinator.clone();
+                            let uri_for_query = uri.clone();
+                            let observed_deps_id_for_query = observed_deps_id.clone();
+                            let cancellation_token_for_query =
+                                completion_cancellation_token.clone();
+                            let query_result =
+                                bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
+                                    bsl_runtime::application::CpuWorkClass::Interactive,
+                                    context_for_query.origin.as_str(),
+                                    Some(self.coordinator.as_ref()),
+                                    move || {
                                     let deps_and_file_snapshot_started = Instant::now();
                                     let file_content = analysis.file_text(file_id).ok().flatten();
                                     let file_path = analysis.file_path(file_id).ok().flatten();
@@ -1185,6 +1202,17 @@ impl BslLanguageServer {
                                             false,
                                             true,
                                         );
+                                    }
+
+                                    #[cfg(test)]
+                                    if let Some(delay_ms) = std::env::var(
+                                        "BSL_TEST_COMPLETION_IR_QUERY_DELAY_MS",
+                                    )
+                                    .ok()
+                                    .and_then(|value| value.parse::<u64>().ok())
+                                    .filter(|value| *value > 0)
+                                    {
+                                        std::thread::sleep(std::time::Duration::from_millis(delay_ms));
                                     }
 
                                     let ir_started = Instant::now();
@@ -1330,61 +1358,62 @@ impl BslLanguageServer {
                                         false,
                                     )
                                 },
-                            )
-                            .await;
+                                )
+                                .await;
 
-                        let (
-                            file_content,
-                            file_path,
-                            member_access_owner_type_hints,
-                            deps,
-                            ir_program,
-                            ir_cancelled_after_retry,
-                            query_checkpoint_cancelled,
-                        ) = match query_result {
-                            Ok(result) => result,
-                            Err(join_error) => {
-                                warn!(
-                                    uri = %uri,
-                                    file_id = file_id.0,
-                                    error = %join_error,
-                                    "Completion v2: interactive query task failed"
-                                );
-                                (None, None, Vec::new(), None, None, true, true)
+                            let (
+                                file_content,
+                                file_path,
+                                member_access_owner_type_hints,
+                                deps,
+                                ir_program,
+                                ir_cancelled_after_retry,
+                                query_checkpoint_cancelled,
+                            ) = match query_result {
+                                Ok(result) => result,
+                                Err(join_error) => {
+                                    warn!(
+                                        uri = %uri,
+                                        file_id = file_id.0,
+                                        error = %join_error,
+                                        "Completion v2: interactive query task failed"
+                                    );
+                                    (None, None, Vec::new(), None, None, true, true)
+                                }
+                            };
+                            if (ir_cancelled_after_retry || query_checkpoint_cancelled)
+                                && completion_outcome.is_none()
+                            {
+                                completion_outcome = Some("cancelled");
                             }
-                        };
-                        if (ir_cancelled_after_retry || query_checkpoint_cancelled)
-                            && completion_outcome.is_none()
-                        {
-                            completion_outcome = Some("cancelled");
-                        }
-                        if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
-                            event_driven_guards_enabled,
-                            self,
-                            file_id,
-                            completion_request_id.as_deref(),
-                            completion_ticket.request_epoch,
-                            completion_cancellation_token.as_ref(),
-                            "ir",
-                            &mut cancel_event_emitted,
-                        )
-                        .await
-                        {
-                            completion_outcome = Some(outcome);
-                            break 'completion_flow Some(completion_incomplete_empty_response());
-                        }
+                            if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
+                                event_driven_guards_enabled,
+                                self,
+                                file_id,
+                                completion_request_id.as_deref(),
+                                completion_ticket.request_epoch,
+                                completion_cancellation_token.as_ref(),
+                                "ir",
+                                &mut cancel_event_emitted,
+                            )
+                            .await
+                            {
+                                completion_outcome = Some(outcome);
+                                break 'completion_flow Some(completion_incomplete_empty_response());
+                            }
 
-                        (
-                            file_content,
-                            file_path,
-                            member_access_owner_type_hints,
-                            deps,
-                            ir_program,
-                            index_snapshot,
-                            observed_deps_id,
-                            observed_settings_id,
-                            observed_file_version,
-                        )
+                            (
+                                file_content,
+                                file_path,
+                                member_access_owner_type_hints,
+                                deps,
+                                ir_program,
+                                index_snapshot,
+                                observed_deps_id,
+                                observed_settings_id,
+                                observed_file_version,
+                            )
+                        }
                     };
                     let query_bundle_elapsed = query_bundle_started.elapsed();
                     self.coordinator
@@ -1458,7 +1487,26 @@ impl BslLanguageServer {
                             crate::handlers::handle_completion_v2_with_trigger_hint_and_owner_hints(
                                 file_content,
                                 file_path,
-                                ir_program,
+                                Some(ir_program),
+                                member_access_owner_type_hints,
+                                deps,
+                                position,
+                                &uri,
+                                index_snapshot.as_ref(),
+                                snippet_support,
+                                include_flow_sensitive,
+                                trigger_char_hint,
+                            )
+                            .await
+                        }
+                        (Some(file_content), Some(file_path), Some(deps), None)
+                            if member_access_context
+                                && !member_access_owner_type_hints.is_empty() =>
+                        {
+                            crate::handlers::handle_completion_v2_with_trigger_hint_and_owner_hints(
+                                file_content,
+                                file_path,
+                                None,
                                 member_access_owner_type_hints,
                                 deps,
                                 position,

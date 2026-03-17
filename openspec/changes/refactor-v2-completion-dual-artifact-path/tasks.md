@@ -22,7 +22,7 @@
 - [x] 5.1 Обновить representative real-module gates так, чтобы:
   - `same-revision warm` probe подтверждал healthy steady-state;
   - `revision-churn` probe (`didChange -> completion` перед каждым measured sample) требовал current-revision `ok_non_empty`.
-- [ ] 5.2 Зафиксировать budgets:
+- [x] 5.2 Зафиксировать budgets:
   - first-response completion head под `revision-churn` `p95 <= 150ms` на representative large module;
   - same-revision warm измеряется отдельно и не должен регрессировать относительно head path;
   - exact upgrade измеряется отдельно и не маскирует first-response availability.

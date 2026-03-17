@@ -134,7 +134,7 @@ pub async fn handle_completion_v2_with_trigger_hint(
     handle_completion_v2_with_trigger_hint_and_owner_hints(
         file_content,
         file_path,
-        ir_program,
+        Some(ir_program),
         member_access_owner_type_hint.into_iter().collect(),
         deps,
         position,
@@ -151,7 +151,7 @@ pub async fn handle_completion_v2_with_trigger_hint(
 pub async fn handle_completion_v2_with_trigger_hint_and_owner_hints(
     file_content: Arc<str>,
     file_path: Arc<str>,
-    ir_program: Arc<SemanticProgram>,
+    ir_program: Option<Arc<SemanticProgram>>,
     member_access_owner_type_hints: Vec<TypeResolution>,
     deps: Arc<bsl_analysis_v2::SemanticDeps>,
     position: Position,
@@ -199,7 +199,32 @@ pub async fn handle_completion_v2_with_trigger_hint_and_owner_hints(
         });
     }
 
-    let completion =
+    let completion = if member_access_request {
+        bsl_backend::application::get_completion_with_trigger_hint_and_owner_hints_without_ir(
+            file_content.as_ref(),
+            position.line,
+            position.character,
+            Some(file_uri.as_str()),
+            index_snapshot,
+            &metadata_lookup,
+            file_path.as_ref(),
+            resolver.as_ref(),
+            member_access_owner_type_hints,
+            include_flow_sensitive,
+            trigger_char_hint,
+        )
+        .await
+    } else {
+        let Some(ir_program) = ir_program else {
+            return Some(CompletionResponseWithStats {
+                response: CompletionResponse::List(CompletionList {
+                    is_incomplete: false,
+                    items: vec![],
+                }),
+                stats: None,
+                had_error: false,
+            });
+        };
         get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints(
             file_content.as_ref(),
             position.line,
@@ -214,7 +239,8 @@ pub async fn handle_completion_v2_with_trigger_hint_and_owner_hints(
             include_flow_sensitive,
             trigger_char_hint,
         )
-        .await;
+        .await
+    };
 
     match completion {
         Ok(result) => {

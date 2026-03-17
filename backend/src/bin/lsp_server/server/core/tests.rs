@@ -13467,6 +13467,148 @@ async fn p33_form_module_object_completion_uses_current_revision_head_path_witho
 }
 
 #[tokio::test]
+async fn p33_form_module_head_path_skips_ir_query_delay_when_owner_hints_are_ready() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+    let _ir_delay_guard = EnvVarGuard::set("BSL_TEST_COMPLETION_IR_QUERY_DELAY_MS", "400");
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let fixture = "Процедура Тест()\n    ДляCompletion = Объект.\nКонецПроцедуры\n";
+    let uri = Url::parse("file:///Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl")
+        .expect("form module uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: fixture.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    server.sync_v2_globals().await;
+
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    force_current_revision_without_exact_type_index(&server, file_id, &uri, fixture, 2).await;
+
+    let metrics_before = coordinator.observability_metrics();
+    let counters_before = metrics_before
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics_before.counters object");
+
+    let completion_position = find_utf16_position_after_marker(fixture, "ДляCompletion = Объект.");
+    let started = Instant::now();
+    let completion_labels = lsp_completion_labels_at(&mut service, &uri, completion_position).await;
+    let elapsed = started.elapsed();
+    assert!(
+        completion_labels.iter().any(|label| label == "Ссылка"),
+        "head-path completion for FormModule.Объект must remain non-empty even when IR query delay is injected, labels={completion_labels:?}"
+    );
+    assert!(
+        elapsed < Duration::from_millis(250),
+        "head-path completion must stay bounded and skip IR delay (elapsed={elapsed:?})"
+    );
+
+    let timeline = lsp_get_completion_timeline(&mut service, 404, 10).await;
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("completion timeline traces array");
+    let trace = traces
+        .last()
+        .expect("form-module head-path completion timeline trace with ir delay");
+    assert_eq!(
+        completion_timeline_prepare_detail_str(trace, "route"),
+        Some("head_hit"),
+        "form-module head-path completion with injected IR delay must still expose head route, trace={trace:?}"
+    );
+    assert!(
+        completion_timeline_trace_stage_duration_ms(trace, "query_bundle").unwrap_or(u64::MAX)
+            < 250,
+        "head-path query_bundle must not inherit injected IR delay, trace={trace:?}"
+    );
+
+    let metrics_after = coordinator.observability_metrics();
+    let counters_after = metrics_after
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics_after.counters object");
+    let ir_query_delta =
+        read_u64_metric(counters_after.get("intellisense_v2_ir_query_completion_total"))
+            .saturating_sub(read_u64_metric(
+                counters_before.get("intellisense_v2_ir_query_completion_total"),
+            ));
+    assert_eq!(
+        ir_query_delta, 0,
+        "head-path completion must not execute completion IR query when owner hints are already ready, counters_before={counters_before:?}, counters_after={counters_after:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
 async fn p33_completion_exact_wait_deadline_then_recovery_after_precompute_finish() {
     struct EnvVarGuard {
         key: &'static str,
@@ -16916,6 +17058,7 @@ async fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
     const PROFILE_NAME: &str = "p37_real_conf_big_warm_cache_completion_perf_report_live";
     const WARMUP_REQUESTS: usize = 5;
     const MEASURE_REQUESTS: usize = 4;
+    const WARM_HEAD_PATH_P95_BUDGET_MS: f64 = 150.0;
 
     let Some(conf_big_root) = conf_big_root_for_tests() else {
         if allow_fixture_skip {
@@ -17318,6 +17461,9 @@ async fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
             .collect::<Vec<_>>();
         sample_histogram_value(&values)
     };
+    let warmup_latency_histogram = sample_elapsed_histogram(&warmup_samples);
+    let measured_latency_histogram = sample_elapsed_histogram(&measured_samples);
+    let measured_latency_p95_ms = read_numeric_metric(measured_latency_histogram.get("p95"));
 
     let report = serde_json::json!({
         "change_id": "refactor-v2-completion-dual-artifact-path",
@@ -17378,8 +17524,8 @@ async fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
             "measured_ok_non_empty_traces": measured_ok_non_empty_traces,
             "measured_head_hit_traces": measured_head_hit_traces,
             "measured_exact_hit_traces": measured_exact_hit_traces,
-            "warmup_latency_ms": sample_elapsed_histogram(&warmup_samples),
-            "measured_latency_ms": sample_elapsed_histogram(&measured_samples),
+            "warmup_latency_ms": warmup_latency_histogram,
+            "measured_latency_ms": measured_latency_histogram,
             "measured_turn_wait_ms": sample_trace_histogram(&measured_samples, "turn_wait_ms"),
             "measured_prepare_stateful_ms": sample_trace_histogram(&measured_samples, "prepare_stateful_ms"),
             "measured_wait_exact_type_index_ms": sample_trace_histogram(&measured_samples, "wait_exact_type_index_ms"),
@@ -17466,6 +17612,12 @@ async fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
         measured_ok_non_empty_traces
     );
     assert!(
+        measured_latency_p95_ms <= WARM_HEAD_PATH_P95_BUDGET_MS,
+        "warm-cache head-path p95 regression: measured_latency_p95_ms={}ms > {}ms, measured_samples={measured_samples:?}",
+        measured_latency_p95_ms,
+        WARM_HEAD_PATH_P95_BUDGET_MS
+    );
+    assert!(
         read_u64_metric(counters.get("intellisense_v2_completion_route_total_route_head_hit"))
             + read_u64_metric(counters.get("intellisense_v2_completion_route_total_route_exact_hit"))
             > 0,
@@ -17490,6 +17642,7 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
     const PROFILE_NAME: &str = "p38_real_conf_big_revision_churn_completion_perf_report_live";
     const WARMUP_REQUESTS: usize = 3;
     const MEASURE_REQUESTS: usize = 4;
+    const REVISION_CHURN_HEAD_PATH_P95_BUDGET_MS: f64 = 150.0;
 
     let Some(conf_big_root) = conf_big_root_for_tests() else {
         if allow_fixture_skip {
@@ -17921,6 +18074,9 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
             .collect::<Vec<_>>();
         sample_histogram_value(&values)
     };
+    let warmup_latency_histogram = sample_elapsed_histogram(&warmup_samples);
+    let measured_latency_histogram = sample_elapsed_histogram(&measured_samples);
+    let measured_latency_p95_ms = read_numeric_metric(measured_latency_histogram.get("p95"));
 
     let report = serde_json::json!({
         "change_id": "refactor-v2-completion-dual-artifact-path",
@@ -17974,8 +18130,8 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
             ),
             "measured_fallback_unavailable_total_delta": counter_delta("intellisense_v2_completion_fallback_unavailable_total"),
             "measured_interactive_wait_budget_exhausted_total_delta": counter_delta("intellisense_v2_interactive_wait_budget_exhausted_total"),
-            "warmup_latency_ms": sample_elapsed_histogram(&warmup_samples),
-            "measured_latency_ms": sample_elapsed_histogram(&measured_samples),
+            "warmup_latency_ms": warmup_latency_histogram,
+            "measured_latency_ms": measured_latency_histogram,
             "measured_turn_wait_ms": sample_trace_histogram(&measured_samples, "turn_wait_ms"),
             "measured_prepare_stateful_ms": sample_trace_histogram(&measured_samples, "prepare_stateful_ms"),
             "measured_wait_exact_type_index_ms": sample_trace_histogram(&measured_samples, "wait_exact_type_index_ms"),
@@ -18103,6 +18259,12 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
         "expected every measured revision-churn trace to expose head/exact route attribution, measured_head_hit_traces={}, measured_exact_hit_traces={}, measured_samples={measured_samples:?}",
         measured_head_hit_traces,
         measured_exact_hit_traces
+    );
+    assert!(
+        measured_latency_p95_ms <= REVISION_CHURN_HEAD_PATH_P95_BUDGET_MS,
+        "revision-churn head-path p95 regression: measured_latency_p95_ms={}ms > {}ms, measured_samples={measured_samples:?}",
+        measured_latency_p95_ms,
+        REVISION_CHURN_HEAD_PATH_P95_BUDGET_MS
     );
     assert!(
         counter_delta("intellisense_v2_completion_route_total_route_head_hit")

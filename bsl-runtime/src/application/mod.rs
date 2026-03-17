@@ -27,6 +27,7 @@ pub use type_system::get_completion_with_semantic_program_snapshot_v2_with_trigg
 pub use type_system::get_completion_with_semantic_program_snapshot_with_owner_hints;
 pub use type_system::get_completion_with_semantic_program_snapshot_with_trigger_hint;
 pub use type_system::get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints;
+pub use type_system::get_completion_with_trigger_hint_and_owner_hints_without_ir;
 pub use type_system::get_hover_info_with_semantic_program;
 pub use type_system::CompletionStats;
 pub use type_system::{

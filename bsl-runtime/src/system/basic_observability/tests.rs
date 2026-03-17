@@ -180,6 +180,70 @@ fn completion_exact_wait_and_semantic_breakdown_metrics_are_recorded() {
 }
 
 #[test]
+fn completion_route_fail_closed_cause_and_upgrade_metrics_are_recorded() {
+    let observability = BasicObservability::default();
+    observability.record_intellisense_v2_completion_route("head_hit");
+    observability.record_intellisense_v2_completion_route("exact_hit");
+    observability.record_intellisense_v2_completion_fail_closed_cause("prepare_timeout");
+    observability.record_intellisense_v2_completion_fail_closed_cause("exact_deadline");
+    observability
+        .record_intellisense_v2_completion_head_to_exact_upgrade(Duration::from_millis(17));
+
+    let exported = observability.get_metrics().export_metrics();
+    let counters = counters(&exported);
+    let histograms = histograms(&exported);
+
+    assert_eq!(
+        counter_value(
+            counters,
+            "intellisense_v2_completion_route_total_route_head_hit"
+        ),
+        1,
+        "head-hit completion route must be exported under bounded labels"
+    );
+    assert_eq!(
+        counter_value(
+            counters,
+            "intellisense_v2_completion_route_total_route_exact_hit"
+        ),
+        1,
+        "exact-hit completion route must be exported under bounded labels"
+    );
+    assert_eq!(
+        counter_value(
+            counters,
+            "intellisense_v2_completion_fail_closed_cause_total_cause_prepare_timeout"
+        ),
+        1,
+        "prepare-timeout completion fail-closed cause must be exported under bounded labels"
+    );
+    assert_eq!(
+        counter_value(
+            counters,
+            "intellisense_v2_completion_fail_closed_cause_total_cause_exact_deadline"
+        ),
+        1,
+        "exact-deadline completion fail-closed cause must be exported under bounded labels"
+    );
+    assert_eq!(
+        counter_value(
+            counters,
+            "intellisense_v2_completion_head_to_exact_upgrade_total"
+        ),
+        1,
+        "head-to-exact upgrade counter must be exported"
+    );
+    assert_eq!(
+        histogram_count(
+            histograms,
+            "intellisense_v2_completion_head_to_exact_upgrade_ms"
+        ),
+        1,
+        "head-to-exact upgrade latency histogram must be exported"
+    );
+}
+
+#[test]
 fn completion_stage_metrics_include_mode_dimension_and_keep_projection_parity() {
     let observability = BasicObservability::default();
 

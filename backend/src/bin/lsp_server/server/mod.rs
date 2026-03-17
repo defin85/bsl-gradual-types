@@ -89,6 +89,14 @@ pub(crate) struct CompletionParityStateV2 {
     pub invoked_labels: Option<Vec<String>>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct CompletionHeadServeObservationV2 {
+    pub file_version: i32,
+    pub deps_id: DepsSnapshotId,
+    pub settings_id: Option<SettingsId>,
+    pub served_at: Instant,
+}
+
 pub(crate) type CompletionParityKeyV2 = (V2FileId, i32, u32, u32);
 pub(crate) type CompletionParityStoreV2 =
     Arc<RwLock<HashMap<CompletionParityKeyV2, CompletionParityStateV2>>>;
@@ -205,6 +213,8 @@ pub struct BslLanguageServer {
     pub(crate) scale_aware_churn_state_v2: Arc<RwLock<HashMap<V2FileId, ScaleAwareChurnStateV2>>>,
     pub(crate) completion_seen_files_v2: Arc<RwLock<HashSet<V2FileId>>>,
     pub(crate) completion_parity_state_v2: CompletionParityStoreV2,
+    pub(crate) completion_head_serve_observations_v2:
+        Arc<RwLock<HashMap<V2FileId, CompletionHeadServeObservationV2>>>,
     pub(crate) completion_dispatcher_v2: Arc<completion_dispatcher::CompletionDispatcherRegistry>,
     pub(crate) completion_cancellation_registry_v2:
         Arc<completion_cancellation::CompletionCancellationRegistry>,

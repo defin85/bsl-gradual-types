@@ -184,6 +184,14 @@ pub(super) const COMPLETION_OWNER_HINT_REASON_REGISTRY: &[(&str, &str)] = &[
     ),
 ];
 
+pub(super) const COMPLETION_ROUTE_REGISTRY: &[(&str, &str)] =
+    &[("head_hit", "head_hit"), ("exact_hit", "exact_hit")];
+
+pub(super) const COMPLETION_FAIL_CLOSED_CAUSE_REGISTRY: &[(&str, &str)] = &[
+    ("prepare_timeout", "prepare_timeout"),
+    ("exact_deadline", "exact_deadline"),
+];
+
 pub(super) const SHARED_FAIL_CLOSED_REASON_REGISTRY: &[(&str, &str)] = &[
     ("missing_canonical_ir", "missing_canonical_ir"),
     ("missing_semantic_index", "missing_semantic_index"),
@@ -562,6 +570,14 @@ pub(super) fn normalize_completion_terminal_reason_label(reason: &str) -> &'stat
 
 pub(super) fn normalize_completion_owner_hint_reason_label(reason: &str) -> &'static str {
     registry_label(reason, COMPLETION_OWNER_HINT_REASON_REGISTRY, "other")
+}
+
+pub(super) fn normalize_completion_route_label(route: &str) -> &'static str {
+    registry_label(route, COMPLETION_ROUTE_REGISTRY, "other")
+}
+
+pub(super) fn normalize_completion_fail_closed_cause_label(cause: &str) -> &'static str {
+    registry_label(cause, COMPLETION_FAIL_CLOSED_CAUSE_REGISTRY, "other")
 }
 
 pub(super) fn normalize_type_index_reason_label(reason: &str) -> &'static str {

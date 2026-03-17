@@ -754,6 +754,33 @@ impl BslLanguageServer {
                     evicted_global_guard_total = result.stats.evicted_global_guard_total,
                     "Event-driven type_index precompute finished"
                 );
+                if result.reason_code
+                    == bsl_analysis_v2::TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeExactStored
+                {
+                    if let Some(file_version) = result.file_version {
+                        let (analysis_after_store, _index_snapshot_after_store, deps_id_after_store) =
+                            self.analysis_v2.snapshot_with_deps().await;
+                        let observed_version_after_store =
+                            analysis_after_store.file_version(key.file_id).ok().flatten();
+                        let settings_id_after_store = analysis_after_store.settings_id().ok();
+                        let exact_ready_after_store = analysis_after_store
+                            .current_type_index_serve_only_ready(key.file_id)
+                            .ok()
+                            .unwrap_or(false);
+                        if observed_version_after_store == Some(file_version)
+                            && exact_ready_after_store
+                        {
+                            let _ = self
+                                .record_completion_head_to_exact_upgrade_if_pending_v2(
+                                    key.file_id,
+                                    file_version,
+                                    &deps_id_after_store,
+                                    settings_id_after_store.as_ref(),
+                                )
+                                .await;
+                        }
+                    }
+                }
             }
             Ok(Err(_cancelled)) => {
                 self.coordinator.record_intellisense_v2_type_index_reason(

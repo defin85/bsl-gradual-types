@@ -202,6 +202,7 @@ impl BslLanguageServer {
             scale_aware_churn_state_v2: Arc::new(RwLock::new(HashMap::new())),
             completion_seen_files_v2: Arc::new(RwLock::new(std::collections::HashSet::new())),
             completion_parity_state_v2: Arc::new(RwLock::new(HashMap::new())),
+            completion_head_serve_observations_v2: Arc::new(RwLock::new(HashMap::new())),
             completion_dispatcher_v2,
             completion_cancellation_registry_v2,
             last_deps_id_v2: Arc::new(RwLock::new(Some(initial_deps_id))),
@@ -231,6 +232,87 @@ impl BslLanguageServer {
         while traces.len() > super::COMPLETION_TIMELINE_MAX_ENTRIES {
             let _ = traces.pop_front();
         }
+    }
+
+    pub(crate) async fn record_completion_head_hit_v2(
+        &self,
+        file_id: V2FileId,
+        file_version: i32,
+        deps_id: DepsSnapshotId,
+        settings_id: Option<SettingsId>,
+        exact_ready: bool,
+    ) {
+        self.coordinator
+            .record_intellisense_v2_completion_route("head_hit");
+        let mut observations = self.completion_head_serve_observations_v2.write().await;
+        if exact_ready {
+            observations.remove(&file_id);
+            return;
+        }
+        match observations.get(&file_id) {
+            Some(existing)
+                if existing.file_version == file_version
+                    && existing.deps_id == deps_id
+                    && existing.settings_id == settings_id => {}
+            _ => {
+                observations.insert(
+                    file_id,
+                    super::CompletionHeadServeObservationV2 {
+                        file_version,
+                        deps_id,
+                        settings_id,
+                        served_at: Instant::now(),
+                    },
+                );
+            }
+        }
+    }
+
+    pub(crate) async fn record_completion_exact_hit_v2(
+        &self,
+        file_id: V2FileId,
+        file_version: i32,
+        deps_id: DepsSnapshotId,
+        settings_id: Option<SettingsId>,
+    ) {
+        self.coordinator
+            .record_intellisense_v2_completion_route("exact_hit");
+        let _ = self
+            .record_completion_head_to_exact_upgrade_if_pending_v2(
+                file_id,
+                file_version,
+                &deps_id,
+                settings_id.as_ref(),
+            )
+            .await;
+    }
+
+    pub(crate) async fn record_completion_head_to_exact_upgrade_if_pending_v2(
+        &self,
+        file_id: V2FileId,
+        file_version: i32,
+        deps_id: &DepsSnapshotId,
+        settings_id: Option<&SettingsId>,
+    ) -> bool {
+        let pending_duration = {
+            let mut observations = self.completion_head_serve_observations_v2.write().await;
+            let Some(existing) = observations.get(&file_id) else {
+                return false;
+            };
+            if existing.file_version != file_version
+                || &existing.deps_id != deps_id
+                || existing.settings_id.as_ref() != settings_id
+            {
+                return false;
+            }
+            let duration = existing.served_at.elapsed();
+            observations.remove(&file_id);
+            duration
+        };
+
+        self.coordinator
+            .record_intellisense_v2_completion_head_to_exact_upgrade(pending_duration);
+        true
     }
 }
 

@@ -247,6 +247,39 @@ impl BasicObservability {
         self.metrics.increment(&key);
     }
 
+    pub fn record_intellisense_v2_completion_route(&self, route: &str) {
+        let is_known_route = COMPLETION_ROUTE_REGISTRY
+            .iter()
+            .any(|(raw, _normalized)| *raw == route);
+        let route = normalize_completion_route_label(route);
+        let key = format!("intellisense_v2_completion_route_total_route_{route}");
+        self.metrics.increment(&key);
+        if !is_known_route {
+            self.record_observability_contract_violation("unknown_completion_route");
+        }
+    }
+
+    pub fn record_intellisense_v2_completion_fail_closed_cause(&self, cause: &str) {
+        let is_known_cause = COMPLETION_FAIL_CLOSED_CAUSE_REGISTRY
+            .iter()
+            .any(|(raw, _normalized)| *raw == cause);
+        let cause = normalize_completion_fail_closed_cause_label(cause);
+        let key = format!("intellisense_v2_completion_fail_closed_cause_total_cause_{cause}");
+        self.metrics.increment(&key);
+        if !is_known_cause {
+            self.record_observability_contract_violation("unknown_completion_fail_closed_cause");
+        }
+    }
+
+    pub fn record_intellisense_v2_completion_head_to_exact_upgrade(&self, duration: Duration) {
+        self.metrics
+            .increment("intellisense_v2_completion_head_to_exact_upgrade_total");
+        self.metrics.observe_histogram(
+            "intellisense_v2_completion_head_to_exact_upgrade_ms",
+            duration.as_millis() as f64,
+        );
+    }
+
     pub fn record_intellisense_v2_interactive_fail_closed_reason(
         &self,
         origin: &str,

@@ -36,6 +36,21 @@ impl<T> CompletionPrepareGuardResult<T> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompletionRouteKind {
+    HeadHit,
+    ExactHit,
+}
+
+#[derive(Debug, Clone)]
+struct CompletionRouteObservation {
+    kind: CompletionRouteKind,
+    file_version: i32,
+    deps_id: bsl_analysis_v2::DepsSnapshotId,
+    settings_id: Option<bsl_analysis_v2::SettingsId>,
+    exact_ready: bool,
+}
+
 #[derive(Debug, Clone)]
 struct CompletionTimelineCapture {
     request_id: Option<String>,
@@ -654,6 +669,7 @@ impl BslLanguageServer {
         let mut observed_file_version_for_completion: Option<i32> = None;
         let mut member_access_observed = false;
         let mut cancel_event_emitted = false;
+        let mut completion_route: Option<CompletionRouteObservation> = None;
         let mut completion = 'completion_flow: {
             if let Some(turn_outcome) = completion_turn_outcome {
                 match turn_outcome {
@@ -780,6 +796,8 @@ impl BslLanguageServer {
                     self.coordinator
                         .record_intellisense_v2_interactive_wait_budget_exhausted();
                     self.coordinator
+                        .record_intellisense_v2_completion_fail_closed_cause("prepare_timeout");
+                    self.coordinator
                         .record_intellisense_v2_completion_fallback_unavailable();
                     timeline_capture.push_stage(
                         "prepare_stateful",
@@ -904,6 +922,15 @@ impl BslLanguageServer {
                     } else {
                         Vec::new()
                     };
+                    let head_route_candidate =
+                        member_access_request && !current_revision_head_owner_type_hints.is_empty();
+                    let exact_ready_before_wait = prepared
+                        .snapshot
+                        .analysis
+                        .current_type_index_serve_only_ready(file_id)
+                        .ok()
+                        .unwrap_or(false);
+                    let mut exact_hit_candidate = false;
                     if member_access_request && current_revision_head_owner_type_hints.is_empty() {
                         let exact_wait_budget =
                             bsl_runtime::application::intellisense_v2::interactive_freshness_knobs(
@@ -950,6 +977,14 @@ impl BslLanguageServer {
                                 .record_intellisense_v2_completion_exact_type_index_wait_outcome(
                                     exact_wait_outcome.as_str(),
                                 );
+                            if exact_wait_outcome
+                                == super::super::core::ExactTypeIndexWaitOutcomeV2::Deadline
+                            {
+                                self.coordinator
+                                    .record_intellisense_v2_completion_fail_closed_cause(
+                                        "exact_deadline",
+                                    );
+                            }
                             self.coordinator
                                 .record_intellisense_v2_completion_fallback_unavailable();
                             completion_outcome.get_or_insert("wait_not_ready");
@@ -985,6 +1020,14 @@ impl BslLanguageServer {
                                 .record_intellisense_v2_completion_exact_type_index_wait_outcome(
                                     terminal_outcome.as_str(),
                                 );
+                            if terminal_outcome
+                                == super::super::core::ExactTypeIndexWaitOutcomeV2::Deadline
+                            {
+                                self.coordinator
+                                    .record_intellisense_v2_completion_fail_closed_cause(
+                                        "exact_deadline",
+                                    );
+                            }
                             self.coordinator
                                 .record_intellisense_v2_completion_fallback_unavailable();
                             completion_outcome.get_or_insert("wait_not_ready");
@@ -1001,6 +1044,7 @@ impl BslLanguageServer {
                             .record_intellisense_v2_completion_exact_type_index_wait_outcome(
                                 super::super::core::ExactTypeIndexWaitOutcomeV2::Ready.as_str(),
                             );
+                        exact_hit_candidate = true;
                         refreshed_snapshot_after_wait = Some((
                             analysis_after_wait,
                             index_snapshot_after_wait,
@@ -1351,6 +1395,29 @@ impl BslLanguageServer {
                         member_access_owner_type_hints =
                             current_revision_head_owner_type_hints.clone();
                     }
+                    if member_access_context {
+                        if head_route_candidate {
+                            if let Some(file_version) = observed_file_version {
+                                completion_route = Some(CompletionRouteObservation {
+                                    kind: CompletionRouteKind::HeadHit,
+                                    file_version,
+                                    deps_id: observed_deps_id.clone(),
+                                    settings_id: observed_settings_id.clone(),
+                                    exact_ready: exact_ready_before_wait,
+                                });
+                            }
+                        } else if exact_hit_candidate {
+                            if let Some(file_version) = observed_file_version {
+                                completion_route = Some(CompletionRouteObservation {
+                                    kind: CompletionRouteKind::ExactHit,
+                                    file_version,
+                                    deps_id: observed_deps_id.clone(),
+                                    settings_id: observed_settings_id.clone(),
+                                    exact_ready: true,
+                                });
+                            }
+                        }
+                    }
                     if member_access_context && member_access_owner_type_hints.is_empty() {
                         self.coordinator
                             .record_intellisense_v2_completion_fallback_unavailable();
@@ -1528,6 +1595,31 @@ impl BslLanguageServer {
 
         let timeline_outcome =
             completion_public_timeline_outcome(completion_outcome.unwrap_or("ok_empty"));
+        if matches!(timeline_outcome, "ok_non_empty" | "ok_empty") {
+            if let Some(route) = completion_route.take() {
+                match route.kind {
+                    CompletionRouteKind::HeadHit => {
+                        self.record_completion_head_hit_v2(
+                            file_id,
+                            route.file_version,
+                            route.deps_id,
+                            route.settings_id,
+                            route.exact_ready,
+                        )
+                        .await;
+                    }
+                    CompletionRouteKind::ExactHit => {
+                        self.record_completion_exact_hit_v2(
+                            file_id,
+                            route.file_version,
+                            route.deps_id,
+                            route.settings_id,
+                        )
+                        .await;
+                    }
+                }
+            }
+        }
         timeline_capture.push_terminal_stage(timeline_outcome);
         if !shadow_internal_request {
             let trace = timeline_capture.into_trace(

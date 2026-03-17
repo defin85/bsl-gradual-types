@@ -76,6 +76,24 @@ impl SystemCoordinator {
             .record_intellisense_v2_completion_owner_hint_result(reason);
     }
 
+    pub fn record_intellisense_v2_completion_route(&self, route: &str) {
+        self.observability
+            .record_intellisense_v2_completion_route(route);
+    }
+
+    pub fn record_intellisense_v2_completion_fail_closed_cause(&self, cause: &str) {
+        self.observability
+            .record_intellisense_v2_completion_fail_closed_cause(cause);
+    }
+
+    pub fn record_intellisense_v2_completion_head_to_exact_upgrade(
+        &self,
+        duration: std::time::Duration,
+    ) {
+        self.observability
+            .record_intellisense_v2_completion_head_to_exact_upgrade(duration);
+    }
+
     pub fn record_intellisense_v2_interactive_fail_closed_reason(
         &self,
         origin: &str,

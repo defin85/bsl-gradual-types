@@ -5067,6 +5067,29 @@ async fn p7_completion_prepare_timeout_stays_bounded_when_disk_fallback_blocks()
         "blocking disk fallback must stay bounded by prepare wait budget (elapsed={elapsed:?}, budget_ms={wait_budget_ms})"
     );
 
+    let metrics = coordinator.observability_metrics();
+    let counters = metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    assert!(
+        read_u64_metric(
+            counters.get(
+                "intellisense_v2_completion_fail_closed_cause_total_cause_prepare_timeout"
+            )
+        ) > 0,
+        "blocking disk fallback must attribute fail-closed completion to prepare-timeout, counters={counters:?}"
+    );
+    assert_eq!(
+        read_u64_metric(
+            counters.get(
+                "intellisense_v2_completion_fail_closed_cause_total_cause_exact_deadline"
+            )
+        ),
+        0,
+        "blocking disk fallback must not attribute fail-closed completion to exact-deadline, counters={counters:?}"
+    );
+
     writer.join().expect("writer thread");
     drain_task.abort();
 }
@@ -13188,6 +13211,15 @@ async fn p33_completion_uses_current_revision_head_path_without_exact_artifact()
         0,
         "head-path completion should not record fallback_unavailable for explicit current-revision receiver, counters={counters:?}"
     );
+    assert!(
+        read_u64_metric(counters.get("intellisense_v2_completion_route_total_route_head_hit")) > 0,
+        "head-path completion must record head-hit route, counters={counters:?}"
+    );
+    assert_eq!(
+        read_u64_metric(counters.get("intellisense_v2_completion_route_total_route_exact_hit")),
+        0,
+        "head-path completion must not record exact-hit route, counters={counters:?}"
+    );
 
     drain_task.abort();
 }
@@ -13366,6 +13398,165 @@ async fn p33_completion_exact_wait_deadline_then_recovery_after_precompute_finis
             counters.get("intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_ready")
         ) > 0,
         "second completion must observe ready exact-wait outcome after precompute completion, counters={counters:?}"
+    );
+    assert!(
+        read_u64_metric(
+            counters.get("intellisense_v2_completion_fail_closed_cause_total_cause_exact_deadline")
+        ) > 0,
+        "first completion must attribute fail-closed completion to exact-deadline, counters={counters:?}"
+    );
+    assert!(
+        read_u64_metric(counters.get("intellisense_v2_completion_route_total_route_exact_hit")) > 0,
+        "recovered completion must record exact-hit route after exact precompute finishes, counters={counters:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p33_completion_head_hit_emits_exact_upgrade_when_background_exact_finishes() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const FIXTURE: &str = "Процедура Тест()\n    Результат = (Новый Массив()).\nКонецПроцедуры\n";
+
+    let _precompute_delay_guard =
+        EnvVarGuard::set("BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS", "200");
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let uri = Url::parse("file:///test_p33_completion_head_to_exact_upgrade.bsl").expect("uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: FIXTURE.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    server.sync_v2_globals().await;
+
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    let did_change = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version: 2,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: None,
+            range_length: None,
+            text: FIXTURE.to_string(),
+        }],
+    };
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+    server.sync_v2_globals().await;
+    wait_for_type_index_precompute_phase(
+        &server,
+        file_id,
+        super::deps_and_precompute::TypeIndexPrecomputePhaseV2::Computing,
+    )
+    .await;
+
+    let completion_position = find_utf16_position_after_marker(FIXTURE, "(Новый Массив()).");
+    let completion_labels = lsp_completion_labels_at(&mut service, &uri, completion_position).await;
+    assert!(
+        !completion_labels.is_empty(),
+        "head route must still provide current-revision completion while exact precompute computes in background, labels={completion_labels:?}"
+    );
+
+    wait_for_type_index_precompute_completion(&server, file_id).await;
+
+    let metrics = coordinator.observability_metrics();
+    let counters = metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    let histograms = metrics
+        .get("histograms")
+        .and_then(|value| value.as_object())
+        .expect("metrics.histograms object");
+    assert!(
+        read_u64_metric(counters.get("intellisense_v2_completion_route_total_route_head_hit")) > 0,
+        "head route must be recorded before upgrade, counters={counters:?}"
+    );
+    assert!(
+        read_u64_metric(counters.get("intellisense_v2_completion_head_to_exact_upgrade_total")) > 0,
+        "background exact precompute must record head-to-exact upgrade for same revision, counters={counters:?}"
+    );
+    assert!(
+        histograms
+            .get("intellisense_v2_completion_head_to_exact_upgrade_ms")
+            .and_then(|value| value.get("count"))
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0)
+            > 0,
+        "head-to-exact upgrade latency histogram must be emitted, histograms={histograms:?}"
     );
 
     drain_task.abort();
@@ -16495,6 +16686,25 @@ async fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
             "cancelled_total": cancelled_total,
             "deadline_total": deadline_total,
             "ready_total": ready_total,
+            "head_hit_total": read_u64_metric(
+                counters.get("intellisense_v2_completion_route_total_route_head_hit")
+            ),
+            "exact_hit_total": read_u64_metric(
+                counters.get("intellisense_v2_completion_route_total_route_exact_hit")
+            ),
+            "head_to_exact_upgrade_total": read_u64_metric(
+                counters.get("intellisense_v2_completion_head_to_exact_upgrade_total")
+            ),
+            "prepare_timeout_total": read_u64_metric(
+                counters.get(
+                    "intellisense_v2_completion_fail_closed_cause_total_cause_prepare_timeout"
+                )
+            ),
+            "exact_deadline_total": read_u64_metric(
+                counters.get(
+                    "intellisense_v2_completion_fail_closed_cause_total_cause_exact_deadline"
+                )
+            ),
             "fallback_unavailable_total": read_u64_metric(
                 counters.get("intellisense_v2_completion_fallback_unavailable_total")
             ),
@@ -16585,6 +16795,12 @@ async fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
         measured_ok_non_empty_traces >= MEASURE_REQUESTS.saturating_sub(1),
         "expected nearly all measured warm-cache traces to be ok_non_empty, measured_ok_non_empty_traces={}, measured_samples={measured_samples:?}",
         measured_ok_non_empty_traces
+    );
+    assert!(
+        read_u64_metric(counters.get("intellisense_v2_completion_route_total_route_head_hit"))
+            + read_u64_metric(counters.get("intellisense_v2_completion_route_total_route_exact_hit"))
+            > 0,
+        "expected warm-cache live report to expose at least one completion route bucket, counters={counters:?}"
     );
     assert!(
         completion_total >= (WARMUP_REQUESTS + MEASURE_REQUESTS) as u64,
@@ -17021,6 +17237,15 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
             "measured_no_matching_task_total_delta": counter_delta("intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_no_matching_task"),
             "measured_task_present_wrong_version_total_delta": counter_delta("intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_task_present_wrong_version"),
             "measured_observed_version_mismatch_total_delta": counter_delta("intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_observed_version_mismatch"),
+            "measured_head_hit_total_delta": counter_delta("intellisense_v2_completion_route_total_route_head_hit"),
+            "measured_exact_hit_total_delta": counter_delta("intellisense_v2_completion_route_total_route_exact_hit"),
+            "measured_head_to_exact_upgrade_total_delta": counter_delta("intellisense_v2_completion_head_to_exact_upgrade_total"),
+            "measured_prepare_timeout_total_delta": counter_delta(
+                "intellisense_v2_completion_fail_closed_cause_total_cause_prepare_timeout"
+            ),
+            "measured_exact_deadline_total_delta": counter_delta(
+                "intellisense_v2_completion_fail_closed_cause_total_cause_exact_deadline"
+            ),
             "measured_fallback_unavailable_total_delta": counter_delta("intellisense_v2_completion_fallback_unavailable_total"),
             "measured_interactive_wait_budget_exhausted_total_delta": counter_delta("intellisense_v2_interactive_wait_budget_exhausted_total"),
         },
@@ -17108,6 +17333,12 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
         "expected measured completion_total delta >= churn request samples, completion_total_delta={}, measured_requests={}",
         counter_delta("completion_total"),
         MEASURE_REQUESTS
+    );
+    assert!(
+        counter_delta("intellisense_v2_completion_fail_closed_cause_total_cause_prepare_timeout")
+            + counter_delta("intellisense_v2_completion_fail_closed_cause_total_cause_exact_deadline")
+            > 0,
+        "expected revision-churn live report to expose split fail-closed buckets, counters={counters:?}"
     );
 
     drop(server);

@@ -12244,13 +12244,33 @@ async fn lsp_completion_labels_at(
     uri: &Url,
     position: Position,
 ) -> Vec<String> {
+    lsp_completion_labels_with_request(
+        service,
+        12001,
+        uri,
+        position,
+        Some(CompletionContext {
+            trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+            trigger_character: Some(".".to_string()),
+        }),
+    )
+    .await
+}
+
+async fn lsp_completion_labels_with_request(
+    service: &mut LspService<BslLanguageServer>,
+    request_id: i64,
+    uri: &Url,
+    position: Position,
+    context: Option<CompletionContext>,
+) -> Vec<String> {
     let completion_response = service
         .ready()
         .await
         .unwrap()
         .call(
             Request::build("textDocument/completion")
-                .id(12001)
+                .id(request_id)
                 .params(
                     serde_json::to_value(CompletionParams {
                         text_document_position: TextDocumentPositionParams {
@@ -12259,10 +12279,7 @@ async fn lsp_completion_labels_at(
                         },
                         work_done_progress_params: WorkDoneProgressParams::default(),
                         partial_result_params: PartialResultParams::default(),
-                        context: Some(CompletionContext {
-                            trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
-                            trigger_character: Some(".".to_string()),
-                        }),
+                        context,
                     })
                     .expect("CompletionParams"),
                 )
@@ -12820,6 +12837,33 @@ async fn wait_for_type_index_precompute_completion(
         }
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
     }
+}
+
+async fn seed_exact_type_index_for_current_file_version(
+    server: &BslLanguageServer,
+    file_id: bsl_analysis_v2::FileId,
+) -> serde_json::Value {
+    let analysis = server.analysis_v2.snapshot().await;
+    let observed_version = analysis
+        .file_version(file_id)
+        .expect("file_version for exact type index seed")
+        .expect("observed file version for exact type index seed");
+    let manual_precompute = analysis
+        .precompute_type_index_for_file(file_id, Some(observed_version), 0)
+        .expect("manual exact type index precompute for current file version");
+    let exact_ready = analysis
+        .current_type_index_serve_only_ready(file_id)
+        .expect("current_type_index_serve_only_ready after exact type index seed");
+    assert!(
+        exact_ready,
+        "manual exact type index seed must produce current serve-only artifact for file_id={}",
+        file_id.0
+    );
+    serde_json::json!({
+        "observed_version": observed_version,
+        "manual_precompute": format!("{manual_precompute:?}"),
+        "exact_ready": exact_ready,
+    })
 }
 
 fn completion_timeline_trace_stage_duration_ms(
@@ -15791,4 +15835,482 @@ async fn p36_real_conf_big_completion_and_observability_gate_live() {
         "expected >={required_warm_samples} warm completion samples for real module, got {}",
         warm_completion_total
     );
+}
+
+#[tokio::test]
+async fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
+    init_test_tracing();
+    let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
+    const PROFILE_NAME: &str = "p37_real_conf_big_warm_cache_completion_perf_report_live";
+    const WARMUP_REQUESTS: usize = 5;
+    const MEASURE_REQUESTS: usize = 4;
+
+    let Some(conf_big_root) = conf_big_root_for_tests() else {
+        if allow_fixture_skip {
+            eprintln!(
+                "skipping {PROFILE_NAME}: examples/conf_big fixture is missing and BSL_TEST_ALLOW_MISSING_CONF_BIG is set"
+            );
+            return;
+        }
+        panic!(
+            "examples/conf_big fixture is missing; set BSL_TEST_ALLOW_MISSING_CONF_BIG=1 to skip explicitly"
+        );
+    };
+
+    let module_path = conf_big_large_module_path_for_tests(&conf_big_root);
+    if !module_path.exists() {
+        if allow_fixture_skip {
+            eprintln!(
+                "skipping {PROFILE_NAME}: module fixture is missing and BSL_TEST_ALLOW_MISSING_CONF_BIG is set: {}",
+                module_path.display()
+            );
+            return;
+        }
+        panic!(
+            "conf_big module fixture is missing: {}; set BSL_TEST_ALLOW_MISSING_CONF_BIG=1 to skip explicitly",
+            module_path.display()
+        );
+    }
+
+    let module_text =
+        std::fs::read_to_string(&module_path).expect("read conf_big module text for p37 report");
+    let workspace_setup = ScaleAwareWorkspaceSetup {
+        platform_docs_archive: syntax_helper_path_for_tests(),
+        configuration_path: conf_big_root.clone(),
+        platform_version: "8.3.25".to_string(),
+    };
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+    prime_server_with_workspace_setup(&server, &workspace_setup, "p37_real_conf_big_live_setup")
+        .await;
+
+    let uri = Url::from_file_path(&module_path).expect("real conf_big module uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: module_text.clone(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    server.sync_v2_globals().await;
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    let opened_version = server
+        .latest_received_file_versions_v2
+        .read()
+        .await
+        .get(&file_id)
+        .copied()
+        .expect("latest received version for p37 opened file");
+    assert_eq!(
+        opened_version, 1,
+        "real conf_big fixture must open at version 1"
+    );
+    assert!(
+        server
+            .analysis_v2
+            .wait_for_file_version(file_id, opened_version)
+            .await,
+        "analysis runtime must catch up to opened real conf_big file version"
+    );
+    let exact_type_index_seed =
+        seed_exact_type_index_for_current_file_version(&server, file_id).await;
+    server.cancel_type_index_precompute_v2(file_id).await;
+
+    let completion_position = find_utf16_position_after_marker(&module_text, "Объект.");
+    let completion_context = Some(CompletionContext {
+        trigger_kind: CompletionTriggerKind::INVOKED,
+        trigger_character: None,
+    });
+
+    let mut warmup_samples = Vec::new();
+    for index in 0..WARMUP_REQUESTS {
+        let request_id = 37_100_000_i64 + index as i64;
+        let started = Instant::now();
+        let labels = lsp_completion_labels_with_request(
+            &mut service,
+            request_id,
+            &uri,
+            completion_position,
+            completion_context.clone(),
+        )
+        .await;
+        warmup_samples.push(serde_json::json!({
+            "step": format!("warmup_completion_{}", index + 1),
+            "request_id": request_id,
+            "elapsed_ms": started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+            "label_count": labels.len(),
+            "labels": labels,
+            "version": opened_version,
+        }));
+    }
+
+    let mut measured_samples = Vec::new();
+    for index in 0..MEASURE_REQUESTS {
+        let request_id = 37_100_100_i64 + index as i64;
+        let started = Instant::now();
+        let labels = lsp_completion_labels_with_request(
+            &mut service,
+            request_id,
+            &uri,
+            completion_position,
+            completion_context.clone(),
+        )
+        .await;
+        measured_samples.push(serde_json::json!({
+            "step": format!("measured_warm_completion_{}", index + 1),
+            "request_id": request_id,
+            "elapsed_ms": started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+            "label_count": labels.len(),
+            "labels": labels,
+            "version": opened_version,
+        }));
+    }
+
+    let completion_timeline = lsp_get_completion_timeline(&mut service, 37_100_900, 64).await;
+    let observability_metrics = lsp_get_observability_metrics(&mut service, 37_100_901).await;
+    let timeline_traces = completion_timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("completion timeline traces array");
+    let filtered_traces: Vec<serde_json::Value> = timeline_traces
+        .iter()
+        .filter(|trace| trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str()))
+        .cloned()
+        .collect();
+    assert!(
+        !filtered_traces.is_empty(),
+        "expected non-empty completion timeline traces for real conf_big module"
+    );
+
+    let histograms = observability_metrics
+        .get("histograms")
+        .and_then(|value| value.as_object())
+        .expect("metrics.histograms object");
+    let counters = observability_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+
+    let total_sample_count = WARMUP_REQUESTS + MEASURE_REQUESTS;
+    let trace_request_id_present_total = filtered_traces
+        .iter()
+        .filter(|trace| {
+            trace
+                .get("request_id")
+                .and_then(|value| value.as_str())
+                .is_some()
+        })
+        .count();
+    let trace_matching_mode = if trace_request_id_present_total > 0 {
+        "request_id"
+    } else {
+        "ordinal_by_filtered_uri_trace_order"
+    };
+    let fallback_trace_window: Vec<serde_json::Value> =
+        if filtered_traces.len() >= total_sample_count {
+            filtered_traces[filtered_traces.len() - total_sample_count..].to_vec()
+        } else {
+            filtered_traces.clone()
+        };
+
+    let enrich_samples = |samples: Vec<serde_json::Value>,
+                          sample_offset: usize|
+     -> Vec<serde_json::Value> {
+        samples
+                .into_iter()
+                .enumerate()
+                .map(|(sample_index, sample)| {
+                    let request_id_text = sample
+                        .get("request_id")
+                        .and_then(|value| value.as_i64())
+                        .map(|value| value.to_string());
+                    let trace = if trace_request_id_present_total > 0 {
+                        request_id_text.as_ref().and_then(|request_id| {
+                            filtered_traces.iter().find(|trace| {
+                                trace.get("request_id").and_then(|value| value.as_str())
+                                    == Some(request_id)
+                            })
+                        })
+                    } else {
+                        fallback_trace_window.get(sample_offset + sample_index)
+                    };
+                let trace_summary = trace.map(|trace| {
+                    serde_json::json!({
+                        "trace_id": trace.get("trace_id").and_then(|value| value.as_str()),
+                        "trigger_mode": trace.get("trigger_mode").and_then(|value| value.as_str()),
+                        "outcome": trace.get("outcome").and_then(|value| value.as_str()),
+                        "total_duration_ms": trace.get("total_duration_ms").and_then(|value| value.as_u64()),
+                        "dominant_stage": trace.get("dominant_stage").and_then(|value| value.as_str()),
+                        "prepare_guard_outcome": completion_timeline_prepare_detail_str(trace, "guard_outcome"),
+                        "prepare_outcome": completion_timeline_prepare_detail_str(trace, "outcome"),
+                        "prepare_wait_elapsed_ms": trace
+                            .get("prepare_details")
+                            .and_then(|value| value.get("wait_elapsed_ms"))
+                            .and_then(|value| value.as_u64()),
+                        "prepare_snapshot_elapsed_ms": trace
+                            .get("prepare_details")
+                            .and_then(|value| value.get("snapshot_elapsed_ms"))
+                            .and_then(|value| value.as_u64()),
+                        "turn_wait_ms": completion_timeline_trace_stage_duration_ms(trace, "turn_wait"),
+                        "prepare_stateful_ms": completion_timeline_trace_stage_duration_ms(trace, "prepare_stateful"),
+                        "wait_exact_type_index_ms": completion_timeline_trace_stage_duration_ms(trace, "wait_exact_type_index"),
+                        "query_bundle_ms": completion_timeline_trace_stage_duration_ms(trace, "query_bundle"),
+                        "collect_ms": completion_timeline_trace_stage_duration_ms(trace, "collect"),
+                        "response_build_ms": completion_timeline_trace_stage_duration_ms(trace, "response_build"),
+                    })
+                });
+                let mut sample_object = sample
+                    .as_object()
+                    .cloned()
+                    .expect("sample must be json object");
+                sample_object.insert(
+                    "trace".to_string(),
+                    trace_summary.unwrap_or_else(|| serde_json::json!(null)),
+                );
+                serde_json::Value::Object(sample_object)
+                })
+                .collect::<Vec<_>>()
+    };
+
+    let warmup_samples = enrich_samples(warmup_samples, 0);
+    let measured_samples = enrich_samples(measured_samples, WARMUP_REQUESTS);
+
+    let latest_trace_summaries = filtered_traces
+        .iter()
+        .rev()
+        .take(16)
+        .map(|trace| {
+            serde_json::json!({
+                "trace_id": trace.get("trace_id").and_then(|value| value.as_str()),
+                "request_id": trace.get("request_id").and_then(|value| value.as_str()),
+                "trigger_mode": trace.get("trigger_mode").and_then(|value| value.as_str()),
+                "outcome": trace.get("outcome").and_then(|value| value.as_str()),
+                "started_at_ms": trace.get("started_at_ms").and_then(|value| value.as_u64()),
+                "total_duration_ms": trace.get("total_duration_ms").and_then(|value| value.as_u64()),
+                "dominant_stage": trace.get("dominant_stage").and_then(|value| value.as_str()),
+                "prepare_guard_outcome": completion_timeline_prepare_detail_str(trace, "guard_outcome"),
+                "prepare_outcome": completion_timeline_prepare_detail_str(trace, "outcome"),
+                "prepare_wait_elapsed_ms": trace
+                    .get("prepare_details")
+                    .and_then(|value| value.get("wait_elapsed_ms"))
+                    .and_then(|value| value.as_u64()),
+                "prepare_snapshot_elapsed_ms": trace
+                    .get("prepare_details")
+                    .and_then(|value| value.get("snapshot_elapsed_ms"))
+                    .and_then(|value| value.as_u64()),
+                "turn_wait_ms": completion_timeline_trace_stage_duration_ms(trace, "turn_wait"),
+                "prepare_stateful_ms": completion_timeline_trace_stage_duration_ms(trace, "prepare_stateful"),
+                "wait_exact_type_index_ms": completion_timeline_trace_stage_duration_ms(trace, "wait_exact_type_index"),
+                "query_bundle_ms": completion_timeline_trace_stage_duration_ms(trace, "query_bundle"),
+                "collect_ms": completion_timeline_trace_stage_duration_ms(trace, "collect"),
+                "rank_ms": completion_timeline_trace_stage_duration_ms(trace, "rank"),
+                "response_build_ms": completion_timeline_trace_stage_duration_ms(trace, "response_build"),
+                "response_build_other_ms": completion_timeline_trace_stage_duration_ms(trace, "response_build_other"),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let completion_total = read_u64_metric(counters.get("completion_total"));
+    let fail_closed_total =
+        read_u64_metric(counters.get("intellisense_v2_completion_result_total_fail_closed"));
+    let cancelled_total =
+        read_u64_metric(counters.get("intellisense_v2_completion_result_total_cancelled"));
+    let ok_non_empty_total =
+        read_u64_metric(counters.get("intellisense_v2_completion_result_total_ok_non_empty"));
+    let ok_empty_total =
+        read_u64_metric(counters.get("intellisense_v2_completion_result_total_ok_empty"));
+    let deadline_total = read_u64_metric(
+        counters
+            .get("intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_deadline"),
+    );
+    let ready_total = read_u64_metric(
+        counters.get("intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_ready"),
+    );
+    let warmup_non_empty_samples = warmup_samples
+        .iter()
+        .filter(|sample| {
+            sample
+                .get("label_count")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0)
+                > 0
+        })
+        .count();
+    let measured_non_empty_samples = measured_samples
+        .iter()
+        .filter(|sample| {
+            sample
+                .get("label_count")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0)
+                > 0
+        })
+        .count();
+    let measured_ok_non_empty_traces = measured_samples
+        .iter()
+        .filter(|sample| {
+            sample
+                .get("trace")
+                .and_then(|trace| trace.get("outcome"))
+                .and_then(|value| value.as_str())
+                == Some("ok_non_empty")
+        })
+        .count();
+
+    let report = serde_json::json!({
+        "change_id": "refactor-v2-completion-dual-artifact-path",
+        "profile": PROFILE_NAME,
+        "schema_version": 1,
+        "configuration_path": conf_big_root,
+        "module_path": module_path,
+        "marker": "Объект.",
+        "request_plan": {
+            "cache_mode": "self_warmed_same_process",
+            "wait_for_current_revision": true,
+            "exact_type_index_seed_mode": "snapshot_precompute_current_revision",
+            "warmup_requests": WARMUP_REQUESTS,
+            "measured_requests": MEASURE_REQUESTS,
+            "completion_trigger_mode": "invoked",
+        },
+        "warm_cache_seed": exact_type_index_seed,
+        "warmup_samples": warmup_samples,
+        "measured_samples": measured_samples,
+        "summary": {
+            "completion_total": completion_total,
+            "trace_count_for_uri": filtered_traces.len(),
+            "ok_non_empty_total": ok_non_empty_total,
+            "ok_empty_total": ok_empty_total,
+            "fail_closed_total": fail_closed_total,
+            "cancelled_total": cancelled_total,
+            "deadline_total": deadline_total,
+            "ready_total": ready_total,
+            "fallback_unavailable_total": read_u64_metric(
+                counters.get("intellisense_v2_completion_fallback_unavailable_total")
+            ),
+            "interactive_wait_budget_exhausted_total": read_u64_metric(
+                counters.get("intellisense_v2_interactive_wait_budget_exhausted_total")
+            ),
+            "trace_matching_mode": trace_matching_mode,
+            "trace_request_id_present_total": trace_request_id_present_total,
+            "warmup_non_empty_samples": warmup_non_empty_samples,
+            "measured_non_empty_samples": measured_non_empty_samples,
+            "measured_ok_non_empty_traces": measured_ok_non_empty_traces,
+        },
+        "extension_like_key_latencies": {
+            "intellisense_v2_wait_for_file_version_diagnostics": histogram_metric_value_or_zero(
+                histograms,
+                "intellisense_v2_wait_for_file_version_diagnostics_ms",
+                None
+            ),
+            "intellisense_v2_syntax_diagnostics_query": histogram_metric_value_or_zero(
+                histograms,
+                "intellisense_v2_syntax_diagnostics_query_ms",
+                None
+            ),
+            "intellisense_v2_semantic_diagnostics_query": histogram_metric_value_or_zero(
+                histograms,
+                "intellisense_v2_semantic_diagnostics_query_ms",
+                None
+            ),
+            "intellisense_v2_wait_for_file_version_completion": histogram_metric_value_or_zero(
+                histograms,
+                "intellisense_v2_wait_for_file_version_completion_ms",
+                None
+            ),
+            "intellisense_v2_snapshot_completion": histogram_metric_value_or_zero(
+                histograms,
+                "intellisense_v2_snapshot_completion_ms",
+                None
+            ),
+            "intellisense_v2_ir_query_completion": histogram_metric_value_or_zero(
+                histograms,
+                "intellisense_v2_ir_query_completion_ms",
+                None
+            ),
+        },
+        "latest_trace_summaries": latest_trace_summaries,
+        "completion_timeline": {
+            "trace_count": filtered_traces.len(),
+            "selected_traces": filtered_traces,
+            "raw": completion_timeline,
+        },
+        "observability": {
+            "raw": observability_metrics,
+        }
+    });
+
+    let report_path = std::env::var("BSL_V2_REAL_CONF_BIG_WARM_CACHE_COMPLETION_PERF_REPORT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("tests")
+                .join("perf")
+                .join("reports")
+                .join("real-conf-big-warm-cache-completion-perf-live.json")
+        });
+    if let Some(parent) = report_path.parent() {
+        std::fs::create_dir_all(parent)
+            .expect("failed to create directory for p37 real conf_big perf report");
+    }
+    std::fs::write(
+        &report_path,
+        serde_json::to_string_pretty(&report).expect("serialize p37 real conf_big perf report"),
+    )
+    .expect("write p37 real conf_big perf report");
+    println!("{PROFILE_NAME}_path={}", report_path.display());
+
+    assert!(
+        measured_non_empty_samples == MEASURE_REQUESTS,
+        "expected all measured warm-cache samples to be non-empty, measured_non_empty_samples={}, measured_samples={measured_samples:?}",
+        measured_non_empty_samples
+    );
+    assert!(
+        measured_ok_non_empty_traces >= MEASURE_REQUESTS.saturating_sub(1),
+        "expected nearly all measured warm-cache traces to be ok_non_empty, measured_ok_non_empty_traces={}, measured_samples={measured_samples:?}",
+        measured_ok_non_empty_traces
+    );
+    assert!(
+        completion_total >= (WARMUP_REQUESTS + MEASURE_REQUESTS) as u64,
+        "expected completion_total >= collected request samples, completion_total={}, request_samples={}",
+        completion_total,
+        WARMUP_REQUESTS + MEASURE_REQUESTS
+    );
+
+    drop(server);
+    drop(service);
+    drain_task.abort();
 }

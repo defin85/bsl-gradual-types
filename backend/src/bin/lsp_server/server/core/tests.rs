@@ -9716,6 +9716,10 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
         "missing field `wait_budget_ms` in prepare_details"
     );
     assert!(
+        prepare_details.contains_key("guard_outcome"),
+        "missing field `guard_outcome` in prepare_details"
+    );
+    assert!(
         prepare_details.contains_key("min_file_version"),
         "missing field `min_file_version` in prepare_details"
     );

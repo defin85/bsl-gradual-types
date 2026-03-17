@@ -562,6 +562,9 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             if (typeof details.wait_budget_ms === 'number') {
                 bits.push('prepare_wait_budget=' + escapeHtml(details.wait_budget_ms) + 'ms');
             }
+            if (details.guard_outcome) {
+                bits.push('prepare_guard=' + escapeHtml(details.guard_outcome));
+            }
             if (details.outcome) {
                 bits.push('prepare_outcome=' + escapeHtml(details.outcome));
             }

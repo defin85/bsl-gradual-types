@@ -82,6 +82,9 @@ export function formatCompletionTimelineTraceForClipboard(
         if (typeof trace.prepare_details.wait_budget_ms === 'number') {
             detailsBits.push(`prepare_wait_budget_ms=${trace.prepare_details.wait_budget_ms}`);
         }
+        if (trace.prepare_details.guard_outcome) {
+            detailsBits.push(`prepare_guard_outcome=${trace.prepare_details.guard_outcome}`);
+        }
         if (trace.prepare_details.outcome) {
             detailsBits.push(`prepare_outcome=${trace.prepare_details.outcome}`);
         }

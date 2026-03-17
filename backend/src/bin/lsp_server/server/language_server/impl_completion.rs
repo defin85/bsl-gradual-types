@@ -19,6 +19,23 @@ impl CompletionTimelineStageStatus {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompletionPrepareGuardResult<T> {
+    Prepared(T),
+    TimedOut,
+    Aborted(&'static str),
+}
+
+impl<T> CompletionPrepareGuardResult<T> {
+    fn trace_outcome(&self) -> String {
+        match self {
+            Self::Prepared(_) => "prepared".to_string(),
+            Self::TimedOut => "timeout".to_string(),
+            Self::Aborted(reason) => format!("aborted:{reason}"),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct CompletionTimelineCapture {
     request_id: Option<String>,
@@ -169,6 +186,10 @@ impl CompletionTimelineCapture {
 
     fn set_prepare_outcome(&mut self, outcome: &str) {
         self.prepare_details_mut().outcome = Some(outcome.to_string());
+    }
+
+    fn set_prepare_guard_outcome(&mut self, outcome: impl Into<String>) {
+        self.prepare_details_mut().guard_outcome = Some(outcome.into());
     }
 
     fn set_prepare_observed_file_version(&mut self, observed_file_version: Option<i32>) {
@@ -350,7 +371,7 @@ async fn run_completion_prepare_guard<T, PF, AF>(
     prepare_future: PF,
     prepare_timeout: Option<std::time::Duration>,
     abort_future: Option<AF>,
-) -> Result<T, &'static str>
+) -> CompletionPrepareGuardResult<T>
 where
     PF: std::future::Future<Output = T>,
     AF: std::future::Future<Output = &'static str>,
@@ -362,26 +383,26 @@ where
             let mut abort_future = std::pin::pin!(abort_future);
             let mut timeout_sleep = std::pin::pin!(tokio::time::sleep(timeout));
             tokio::select! {
-                prepared = &mut prepare_future => Ok(prepared),
-                outcome = &mut abort_future => Err(outcome),
-                _ = &mut timeout_sleep => Err("wait_not_ready"),
+                prepared = &mut prepare_future => CompletionPrepareGuardResult::Prepared(prepared),
+                outcome = &mut abort_future => CompletionPrepareGuardResult::Aborted(outcome),
+                _ = &mut timeout_sleep => CompletionPrepareGuardResult::TimedOut,
             }
         }
         (Some(timeout), None) => {
             let mut timeout_sleep = std::pin::pin!(tokio::time::sleep(timeout));
             tokio::select! {
-                prepared = &mut prepare_future => Ok(prepared),
-                _ = &mut timeout_sleep => Err("wait_not_ready"),
+                prepared = &mut prepare_future => CompletionPrepareGuardResult::Prepared(prepared),
+                _ = &mut timeout_sleep => CompletionPrepareGuardResult::TimedOut,
             }
         }
         (None, Some(abort_future)) => {
             let mut abort_future = std::pin::pin!(abort_future);
             tokio::select! {
-                prepared = &mut prepare_future => Ok(prepared),
-                outcome = &mut abort_future => Err(outcome),
+                prepared = &mut prepare_future => CompletionPrepareGuardResult::Prepared(prepared),
+                outcome = &mut abort_future => CompletionPrepareGuardResult::Aborted(outcome),
             }
         }
-        (None, None) => Ok(prepare_future.await),
+        (None, None) => CompletionPrepareGuardResult::Prepared(prepare_future.await),
     }
 }
 
@@ -748,18 +769,29 @@ impl BslLanguageServer {
             }
 
             let prepared = match guarded_prepare {
-                Ok(prepared) => {
+                CompletionPrepareGuardResult::Prepared(prepared) => {
+                    timeline_capture.set_prepare_guard_outcome("prepared");
                     timeline_capture.push_completed_stage("prepare_stateful", prepare_elapsed);
                     prepared
                 }
-                Err(outcome) => {
+                CompletionPrepareGuardResult::TimedOut => {
+                    timeline_capture.set_prepare_guard_outcome("timeout");
+                    timeline_capture.set_prepare_outcome("wait_not_ready");
+                    self.coordinator
+                        .record_intellisense_v2_interactive_wait_budget_exhausted();
+                    self.coordinator
+                        .record_intellisense_v2_completion_fallback_unavailable();
+                    timeline_capture.push_stage(
+                        "prepare_stateful",
+                        CompletionTimelineStageStatus::Failed,
+                        prepare_elapsed,
+                    );
+                    completion_outcome = Some("wait_not_ready");
+                    break 'completion_flow Some(completion_incomplete_empty_response());
+                }
+                CompletionPrepareGuardResult::Aborted(outcome) => {
+                    timeline_capture.set_prepare_guard_outcome(format!("aborted:{outcome}"));
                     timeline_capture.set_prepare_outcome(outcome);
-                    if outcome == "wait_not_ready" {
-                        self.coordinator
-                            .record_intellisense_v2_interactive_wait_budget_exhausted();
-                        self.coordinator
-                            .record_intellisense_v2_completion_fallback_unavailable();
-                    }
                     let stage_status = match outcome {
                         "cancelled" | "superseded" => CompletionTimelineStageStatus::Cancelled,
                         _ => CompletionTimelineStageStatus::Failed,
@@ -1625,7 +1657,8 @@ mod tests {
         )
         .await;
 
-        assert_eq!(guarded, Err("wait_not_ready"));
+        assert!(matches!(guarded, CompletionPrepareGuardResult::TimedOut));
+        assert_eq!(guarded.trace_outcome(), "timeout");
     }
 
     #[tokio::test]
@@ -1643,6 +1676,26 @@ mod tests {
         )
         .await;
 
-        assert_eq!(guarded, Err("cancelled"));
+        assert!(matches!(
+            guarded,
+            CompletionPrepareGuardResult::Aborted("cancelled")
+        ));
+        assert_eq!(guarded.trace_outcome(), "aborted:cancelled");
+    }
+
+    #[tokio::test]
+    async fn prepare_guard_marks_completed_prepare_branch() {
+        let guarded = run_completion_prepare_guard(
+            async { 42_u32 },
+            Some(std::time::Duration::from_secs(1)),
+            Option::<std::future::Ready<&'static str>>::None,
+        )
+        .await;
+
+        match guarded {
+            CompletionPrepareGuardResult::Prepared(value) => assert_eq!(value, 42),
+            other => panic!("expected prepared branch, got {other:?}"),
+        }
+        assert_eq!(guarded.trace_outcome(), "prepared");
     }
 }

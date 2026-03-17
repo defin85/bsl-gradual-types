@@ -154,6 +154,8 @@ pub struct CompletionTimelinePrepareDetailsTrace {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wait_budget_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub guard_outcome: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub outcome: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min_file_version: Option<i32>,

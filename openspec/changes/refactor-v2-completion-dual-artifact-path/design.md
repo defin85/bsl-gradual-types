@@ -2,22 +2,28 @@
 
 Текущее состояние после последних perf-fix:
 - canonical `ExactSemanticArtifact` для representative real module (`examples/conf_big/.../Module.bsl`) больше не тратит десятки секунд на source recovery;
-- но даже после этого exact artifact остаётся порядка `1.1-1.5s`;
+- same-revision warm path уже здоров: live probe показывает стабильный `ok_non_empty` completion за единицы-десятки миллисекунд на одной и той же revision;
+- но `didChange -> completion` на каждой новой revision остаётся проблемным: representative `revision-churn` probe воспроизводит repeated `fail_closed`;
+- повторяются два failure mode:
+  - `prepare_stateful`/guard timeout ещё до usable current-revision prepare outcome;
+  - `prepare=ready`, но затем bounded `wait_exact_type_index` всё равно выбивает completion в `fail_closed`;
+- exact artifact даже после последних оптимизаций всё ещё заметно дороже interactive wait budget и не может считаться обязательной первой ступенью каждого нового completion после правки;
 - interactive wait budget для completion по умолчанию равен `120ms`;
-- первый current-revision member-access completion на real-module gate остаётся `fail_closed`, хотя hot path уже не должен ждать секунды на общий pipeline.
+- следовательно, проблема касается не только “первого completion после старта”, а любого completion после новой revision, если first response снова зависит от exact-only readiness.
 
 Это означает, что проблема стала архитектурной:
 - correctness contract требует current revision и запрещает stale substitute;
-- exact artifact остаётся слишком дорогим для first response;
+- exact artifact остаётся слишком дорогим как обязательный gate для first response на каждой новой revision;
+- даже healthy warm-cache steady-state не спасает, если каждый `didChange` снова возвращает completion в cold exact-only режим;
 - дальнейшее “ужимание exact в 120ms” — слишком рискованная и малореалистичная стратегия.
 
 ## Goals / Non-Goals
 
 - Goals:
-  - обеспечить current-revision non-empty first response для member-access completion на representative large module;
+  - обеспечить current-revision non-empty first response для member-access completion на representative large module не только на same-revision warm path, но и после каждой новой revision;
   - сохранить strict no-stale contract;
   - сохранить `hover`, `definition`, `signatureHelp`, `type-at-position` в exact-or-fail-closed режиме;
-  - сделать root-cause latency различимым через bounded observability.
+  - сделать root-cause latency различимым через bounded observability, отдельно для `prepare timeout` и `exact deadline`.
 
 - Non-Goals:
   - не вводить stale/degraded/discovery-backed semantic substitute;
@@ -28,6 +34,7 @@
 ## Architecture Drivers
 
 - Latency: первый completion response должен укладываться в UX-budget на больших реальных модулях.
+- Revision churn resilience: после новой requested revision completion не должен снова становиться effectively exact-only cold path.
 - Correctness: current revision MUST оставаться обязательной, stale semantic payload запрещён.
 - Maintainability: архитектура должна явно разделять fast completion path и full exact path.
 - Operability: observability должна показывать отдельные head/exact стадии и причины fail-closed.
@@ -60,7 +67,7 @@
 
 Вердикт: отклонено как основной путь.
 
-### Option C: Dual-artifact canonical completion path
+### Option C: Dual-artifact canonical completion path без split-prepare
 
 Идея:
 - ввести дешёвый `CompletionHeadArtifact`, строящийся только из canonical IR текущей revision;
@@ -77,7 +84,28 @@
 Минусы:
 - добавляет второй derived artifact и усложняет invalidation;
 - требует отдельного observability/scheduling контракта;
+- если сохранить старый prepare gate, completion может всё равно регулярно застревать до head-hit;
 - потребует явного reconciliation между head response и exact enrichment.
+
+Вердикт: недостаточно.
+
+### Option D: Dual-artifact + split-prepare current-revision path
+
+Идея:
+- ввести `CompletionHeadArtifact` и отдельно определить дешёвый `head-ready` prepare path;
+- публикация и готовность `CompletionHeadArtifact` не зависят от готовности `ExactSemanticArtifact`;
+- exact precompute остаётся отдельным background/current-revision artifact и может завершаться позже;
+- completion first response использует `head-or-exact-or-fail-closed`, а не `exact-or-fail-closed с дополнительным артефактом`.
+
+Плюсы:
+- закрывает именно observed проблему repeated misses после каждого `didChange`;
+- не ломает no-stale/current-revision contract;
+- оставляет exact truth для resolve и остальных interactive semantic операций;
+- делает acceptance критерии напрямую проверяемыми на `revision-churn` gate.
+
+Минусы:
+- усложняет lifecycle и observability сильнее, чем простое добавление второго artifact;
+- требует аккуратно ограничить scope `CompletionHeadArtifact`, чтобы не получить скрытый second exact path.
 
 Вердикт: рекомендуется.
 
@@ -94,6 +122,12 @@
 - invalidated по `(file_id, file_version, deps_id, settings_id)`;
 - не могут использовать stale payload другой revision.
 
+### Decision: Completion split-prepare отделяет `head-ready` от `exact-ready`
+
+Completion first-response path MUST иметь отдельный bounded `head-ready` prepare contract. Готовность `CompletionHeadArtifact` для текущей revision не должна зависеть от того, готов ли `ExactSemanticArtifact` той же revision.
+
+Иначе dual-artifact схема оставит completion effectively `exact-only` под `revision-churn`, что уже противоречит observed live evidence.
+
 ### Decision: CompletionHeadArtifact ограничивается first-response задачами
 
 `CompletionHeadArtifact` в первой фазе отвечает только за initial completion response, в первую очередь для member-access completion. Он НЕ становится общим semantic substitute для `hover`, `definition`, `type-at-position` или `diagnostics`.
@@ -105,8 +139,8 @@
 ### Decision: Wait semantics для completion становятся `head-or-exact-or-fail-closed`
 
 Completion request:
-1. ждёт bounded время current-revision canonical artifact;
-2. если ready `CompletionHeadArtifact`, возвращает current-revision response;
+1. ждёт bounded время current-revision `head-ready` или `exact-ready` path;
+2. если ready `CompletionHeadArtifact`, возвращает current-revision response без дополнительного exact wait;
 3. если ready `ExactSemanticArtifact`, может использовать exact сразу;
 4. если не ready ни один — отвечает fail-closed.
 
@@ -116,6 +150,16 @@ Completion request:
 - не плодить отдельные конкурирующие exact builds;
 - повышать приоритет exact-precompute относительно background-only работы;
 - экспортировать bounded observability для `waiter joined`, `exact upgraded`, `deadline hit`, `superseded`.
+
+При этом completion fast path не должен повторно становиться зависимым от exact-precompute на каждой новой revision.
+
+### Decision: Acceptance делится на same-revision warm и revision-churn gate
+
+Representative acceptance для completion MUST проверять два отдельных live режима:
+- `same-revision warm`, который подтверждает healthy steady-state;
+- `revision-churn`, который подтверждает usable first response после каждой новой requested revision.
+
+Только warm-cache gate без `didChange -> completion` больше не считается достаточным evidence для этого change.
 
 ## Proposed Architecture
 
@@ -136,8 +180,8 @@ Completion request:
 
 На `didOpen` / `didChange`:
 1. строится/обновляется canonical IR snapshot;
-2. из него в fast path публикуется `CompletionHeadArtifact`;
-3. exact precompute идёт отдельно и может завершиться позже.
+2. из него по отдельному дешёвому `head-ready` path публикуется `CompletionHeadArtifact`;
+3. exact precompute идёт отдельно, может быть debounce/coalesce-aware и может завершиться позже.
 
 На completion request:
 1. bounded wait на current-revision `CompletionHeadArtifact` или exact artifact;
@@ -146,10 +190,13 @@ Completion request:
    - улучшить последующие completion requests той же revision;
    - обслужить `completionItem/resolve` и другие exact consumers;
    - обновить observability как `head_to_exact_upgrade`.
+4. completion fast path не должен заходить в extra wait на exact artifact, если current-revision head уже ready.
 
 ### Observability
 
 Нужно различать как минимум:
+- `completion_prepare_head_ready`
+- `completion_prepare_head_timeout`
 - `completion_head_ready`
 - `completion_exact_ready`
 - `completion_head_hit`
@@ -157,11 +204,13 @@ Completion request:
 - `completion_head_to_exact_upgrade`
 - `completion_fail_closed_no_current_revision_artifact`
 - `completion_exact_wait_deadline`
+- `completion_revision_churn_fail_closed`
 
 ### Acceptance
 
 Representative gate должен мерить отдельно:
-- first-response availability;
+- same-revision warm availability;
+- revision-churn first-response availability;
 - head latency budget;
 - exact upgrade latency;
 - отсутствие stale substitute.

@@ -1,6 +1,6 @@
 ## MODIFIED Requirements
 
-### Requirement: IntelliSense v2 обеспечивает IDE‑grade completion по выражениям (MUST)
+### Requirement: IntelliSense v2 обеспечивает IDE-grade completion по выражениям (MUST)
 Система SHALL обеспечивать completion v2, который корректно работает для member access в выражениях и цепочках, включая неполный код:
 - `Идентификатор.`
 - `Вызов().`
@@ -19,11 +19,14 @@ Syntax extraction для неполного кода MAY использоват�
 - invalidated по `(file_version, deps_id, settings_id)`;
 - не использовать stale payload другой revision как substitute.
 
+`CompletionHeadArtifact` для текущей revision MUST быть publishable и queryable независимо от ready-state `ExactSemanticArtifact` той же revision. Completion MUST NOT оставаться effectively `exact-only` только потому, что exact artifact ещё не достроен после нового `didChange`.
+
 Если current-revision `CompletionHeadArtifact` и `ExactSemanticArtifact` недоступны, completion MUST работать fail-closed и MUST NOT синтезировать semantic candidates из stale cache, keyword fallback или альтернативного inference path.
 Система MUST NOT возвращать semantic candidates другой revision под видом current-revision completion ответа.
 
-#### Scenario: Первый completion может вернуться из current-revision completion head artifact
-- **GIVEN** exact semantic artifact текущей revision ещё не ready
+#### Scenario: Completion после новой revision может вернуться из current-revision completion head artifact
+- **GIVEN** пользователь только что создал новую requested revision через `didChange`
+- **AND** exact semantic artifact текущей revision ещё не ready
 - **AND** current-revision `CompletionHeadArtifact` уже ready
 - **WHEN** IDE запрашивает completion на позиции после `.`
 - **THEN** сервер возвращает semantic completion response из `CompletionHeadArtifact` той же revision
@@ -63,17 +66,26 @@ Snapshot с несовпадающими `deps_id` или `settings_id`, а та
 
 Дополнительно для completion:
 - completion MUST ждать bounded время current-revision `CompletionHeadArtifact` или `ExactSemanticArtifact`;
+- readiness/publish path для current-revision `CompletionHeadArtifact` MUST NOT блокироваться ожиданием ready exact semantic artifact той же revision;
 - если `CompletionHeadArtifact` ready внутри wait budget, completion MAY вернуть current-revision semantic response из него;
 - если `ExactSemanticArtifact` ready внутри wait budget, completion MAY использовать exact semantic response напрямую;
 - если внутри wait budget не ready ни один current-revision completion artifact, completion MUST завершиться fail-closed;
-- exact precompute MAY продолжаться после first response, но MUST NOT менять revision ответа задним числом и MUST NOT маскировать stale semantic path как acceptable substitute.
+- exact precompute MAY продолжаться после first response, но MUST NOT менять revision ответа задним числом, MUST NOT маскировать stale semantic path как acceptable substitute и MUST NOT превращать completion под `revision-churn` обратно в `exact-only` wait path, если head artifact уже ready.
 
-#### Scenario: Первый completion после правки использует current-revision head artifact без stale substitute
+#### Scenario: Completion после правки использует current-revision head artifact без stale substitute
 - **GIVEN** пользователь ввёл новую строку и `received_version=V+1`, но exact semantic artifact для `V+1` ещё не ready
 - **AND** current-revision `CompletionHeadArtifact` для `V+1` успел построиться в wait budget
 - **WHEN** IDE запрашивает completion
 - **THEN** сервер возвращает non-empty semantic completion response для версии `V+1`
 - **AND** не возвращает semantic payload версии `V` под видом текущего результата
+
+#### Scenario: Последовательные didChange не возвращают completion к exact-only зависимости
+- **GIVEN** пользователь последовательно создаёт новые requested revisions `V+1` и `V+2`
+- **AND** для `V+2` current-revision `CompletionHeadArtifact` ready внутри wait budget
+- **AND** `ExactSemanticArtifact` для `V+2` ещё не ready
+- **WHEN** IDE запрашивает completion на `V+2`
+- **THEN** сервер возвращает current-revision completion response из `CompletionHeadArtifact` для `V+2`
+- **AND** не продолжает ждать exact artifact только потому, что completion выполняется после очередного `didChange`
 
 #### Scenario: Нет current-revision completion artifacts в пределах wait budget
 - **GIVEN** requested версия ещё не ready ни по `CompletionHeadArtifact`, ни по exact semantic artifact
@@ -128,12 +140,13 @@ Acceptance для архитектурных изменений completion MUST 
 
 Этот gate MUST:
 - открывать реальный модуль из representative large configuration;
-- проверять warm current-revision member-access completion;
+- проверять отдельно `same-revision warm` member-access completion и `revision-churn` completion после нового `didChange` перед каждым measured sample;
 - отдельно учитывать first-response availability и exact upgrade latency;
-- fail-ить, если first warm completion снова деградирует в `fail_closed`, несмотря на наличие current-revision canonical fast path.
+- fail-ить, если completion после новой revision снова деградирует в `fail_closed`, несмотря на наличие current-revision canonical fast path.
 
 #### Scenario: Real-module gate ловит регрессию first-response availability
 - **GIVEN** representative real module из большой конфигурации открыт в live gate
-- **WHEN** выполняется warm current-revision member-access completion
+- **AND** gate применяет новый `didChange` перед каждым measured completion в `revision-churn` профиле
+- **WHEN** выполняется member-access completion
 - **THEN** gate требует `ok_non_empty` first response из current-revision canonical artifact
 - **AND** gate фиксирует exact upgrade отдельно, не маскируя им first-response availability

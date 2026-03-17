@@ -334,6 +334,8 @@ pub(crate) struct TypeIndexPrecomputeTaskV2 {
     pub supersession_key: TypeIndexPrecomputeSupersessionKeyV2,
     pub work_class: bsl_runtime::application::CpuWorkClass,
     pub phase: Arc<AtomicU8>,
+    pub active_requested_version: Arc<std::sync::atomic::AtomicI32>,
+    pub scheduled_at: Instant,
     pub handle: JoinHandle<()>,
 }
 

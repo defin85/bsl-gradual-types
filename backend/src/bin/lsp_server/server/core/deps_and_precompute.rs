@@ -67,11 +67,16 @@ impl TypeIndexPrecomputePhaseV2 {
     }
 }
 
+fn type_index_precompute_debounce_duration() -> Duration {
+    Duration::from_millis(25)
+}
+
 impl BslLanguageServer {
     fn spawn_type_index_precompute_task_v2(
         &self,
         supersession_key: super::super::TypeIndexPrecomputeSupersessionKeyV2,
         work_class: bsl_runtime::application::CpuWorkClass,
+        scheduled_at: Instant,
     ) -> super::super::TypeIndexPrecomputeTaskV2 {
         let task_id = self
             .next_type_index_precompute_task_id
@@ -79,20 +84,20 @@ impl BslLanguageServer {
         let phase = Arc::new(std::sync::atomic::AtomicU8::new(
             TypeIndexPrecomputePhaseV2::WaitingForVersion.as_u8(),
         ));
+        let active_requested_version = Arc::new(std::sync::atomic::AtomicI32::new(0));
         let phase_for_task = Arc::clone(&phase);
+        let active_requested_version_for_task = Arc::clone(&active_requested_version);
         let server = self.clone();
+        let file_id = supersession_key.file_id;
         let handle = tokio::spawn(async move {
-            let enqueued_at = Instant::now();
             server
-                .execute_type_index_precompute_once_v2(
-                    supersession_key,
+                .run_type_index_precompute_task_v2(
+                    file_id,
+                    task_id,
                     work_class,
                     Arc::clone(&phase_for_task),
-                    enqueued_at,
+                    Arc::clone(&active_requested_version_for_task),
                 )
-                .await;
-            server
-                .finalize_type_index_precompute_task_v2(supersession_key.file_id, task_id)
                 .await;
         });
 
@@ -101,6 +106,8 @@ impl BslLanguageServer {
             supersession_key,
             work_class,
             phase,
+            active_requested_version,
+            scheduled_at,
             handle,
         }
     }
@@ -230,16 +237,20 @@ impl BslLanguageServer {
             file_id,
             requested_version,
         };
+        let scheduled_at = Instant::now();
         let mut tasks = self.type_index_precompute_tasks_v2.lock().await;
-        if tasks
-            .get(&file_id)
-            .is_some_and(|task| task.supersession_key == supersession_key)
-        {
-            self.coordinator.record_intellisense_v2_type_index_reason(
-                bsl_analysis_v2::TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeQueueSaturated
-                    .as_str(),
-            );
-            return;
+        if let Some(task) = tasks.get_mut(&file_id) {
+            if task.supersession_key == supersession_key {
+                return;
+            }
+            if matches!(
+                task.work_class,
+                bsl_runtime::application::CpuWorkClass::Background
+            ) {
+                task.supersession_key = supersession_key;
+                task.scheduled_at = scheduled_at;
+                return;
+            }
         }
 
         if let Some(previous) = tasks.remove(&file_id) {
@@ -264,6 +275,7 @@ impl BslLanguageServer {
             self.spawn_type_index_precompute_task_v2(
                 supersession_key,
                 bsl_runtime::application::CpuWorkClass::Background,
+                scheduled_at,
             ),
         );
     }
@@ -412,10 +424,12 @@ impl BslLanguageServer {
             return TypeIndexPrecomputeWaiterActionV2::Joined;
         }
         let phase = TypeIndexPrecomputePhaseV2::from_atomic(task.phase.load(Ordering::Relaxed));
+        let active_requested_version = task.active_requested_version.load(Ordering::Relaxed);
         if matches!(
             phase,
             TypeIndexPrecomputePhaseV2::Computing | TypeIndexPrecomputePhaseV2::Completed
-        ) {
+        ) && (active_requested_version == expected_version || active_requested_version == 0)
+        {
             return TypeIndexPrecomputeWaiterActionV2::Joined;
         }
 
@@ -428,9 +442,91 @@ impl BslLanguageServer {
             self.spawn_type_index_precompute_task_v2(
                 previous.supersession_key,
                 bsl_runtime::application::CpuWorkClass::Interactive,
+                previous.scheduled_at,
             ),
         );
         TypeIndexPrecomputeWaiterActionV2::Promoted
+    }
+
+    async fn current_type_index_precompute_task_state_v2(
+        &self,
+        file_id: V2FileId,
+        task_id: u64,
+    ) -> Option<(super::super::TypeIndexPrecomputeSupersessionKeyV2, Instant)> {
+        let tasks = self.type_index_precompute_tasks_v2.lock().await;
+        let task = tasks.get(&file_id)?;
+        if task.task_id != task_id {
+            return None;
+        }
+        Some((task.supersession_key, task.scheduled_at))
+    }
+
+    async fn run_type_index_precompute_task_v2(
+        &self,
+        file_id: V2FileId,
+        task_id: u64,
+        work_class: bsl_runtime::application::CpuWorkClass,
+        phase: Arc<std::sync::atomic::AtomicU8>,
+        active_requested_version: Arc<std::sync::atomic::AtomicI32>,
+    ) {
+        loop {
+            let file_still_open = self
+                .latest_received_file_versions_v2
+                .read()
+                .await
+                .contains_key(&file_id);
+            if !file_still_open {
+                return;
+            }
+
+            let Some((supersession_key, scheduled_at)) = self
+                .current_type_index_precompute_task_state_v2(file_id, task_id)
+                .await
+            else {
+                return;
+            };
+
+            if matches!(
+                work_class,
+                bsl_runtime::application::CpuWorkClass::Background
+            ) {
+                let delay = type_index_precompute_debounce_duration();
+                if delay > Duration::ZERO {
+                    tokio::time::sleep(delay).await;
+                }
+                let Some((current_key, current_scheduled_at)) = self
+                    .current_type_index_precompute_task_state_v2(file_id, task_id)
+                    .await
+                else {
+                    return;
+                };
+                if current_key != supersession_key || current_scheduled_at != scheduled_at {
+                    continue;
+                }
+            }
+
+            active_requested_version.store(supersession_key.requested_version, Ordering::Relaxed);
+            self.execute_type_index_precompute_once_v2(
+                supersession_key,
+                work_class,
+                Arc::clone(&phase),
+                scheduled_at,
+            )
+            .await;
+            active_requested_version.store(0, Ordering::Relaxed);
+
+            let mut tasks = self.type_index_precompute_tasks_v2.lock().await;
+            let Some(task) = tasks.get(&file_id) else {
+                return;
+            };
+            if task.task_id != task_id {
+                return;
+            }
+            if task.supersession_key == supersession_key && task.work_class == work_class {
+                tasks.remove(&file_id);
+                return;
+            }
+        }
     }
 
     async fn type_index_precompute_checkpoint_v2(
@@ -679,16 +775,6 @@ impl BslLanguageServer {
                     "Event-driven type_index precompute task failed"
                 );
             }
-        }
-    }
-
-    async fn finalize_type_index_precompute_task_v2(&self, file_id: V2FileId, task_id: u64) {
-        let mut tasks = self.type_index_precompute_tasks_v2.lock().await;
-        if tasks
-            .get(&file_id)
-            .is_some_and(|task| task.task_id == task_id)
-        {
-            tasks.remove(&file_id);
         }
     }
 }

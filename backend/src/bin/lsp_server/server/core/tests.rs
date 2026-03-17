@@ -4261,6 +4261,115 @@ async fn p7_member_access_completion_does_not_backfill_from_runtime_index_snapsh
 }
 
 #[tokio::test]
+async fn p7_type_index_precompute_slot_coalesces_rapid_versions_without_respawn_or_cancel_fanout() {
+    const CANCELLED_REASON_KEY: &str =
+        "intellisense_v2_type_index_reason_total_reason_type_index_precompute_cancelled";
+
+    let cancelled_reason_total = |coordinator: &Arc<SystemCoordinator>| -> u64 {
+        let metrics = coordinator.observability_metrics();
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        read_u64_metric(counters.get(CANCELLED_REASON_KEY))
+    };
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (_service, socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move {
+        let mut socket = socket;
+        while let Some(_req) = socket.next().await {}
+    });
+
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+
+    let before_cancelled = cancelled_reason_total(&coordinator);
+    let file_id = bsl_analysis_v2::FileId(777);
+    let initial_version = 4;
+    let latest_version = 8_i32;
+    server
+        .latest_received_file_versions_v2
+        .write()
+        .await
+        .insert(file_id, latest_version);
+
+    let initial_task_id = 321_u64;
+    let initial_handle = tokio::spawn(std::future::pending::<()>());
+    let initial_phase = Arc::new(std::sync::atomic::AtomicU8::new(
+        super::deps_and_precompute::TypeIndexPrecomputePhaseV2::WaitingCpuPermit.as_u8(),
+    ));
+    {
+        let mut tasks = server.type_index_precompute_tasks_v2.lock().await;
+        tasks.insert(
+            file_id,
+            crate::server::TypeIndexPrecomputeTaskV2 {
+                task_id: initial_task_id,
+                supersession_key: crate::server::TypeIndexPrecomputeSupersessionKeyV2 {
+                    file_id,
+                    requested_version: initial_version,
+                },
+                work_class: bsl_runtime::application::CpuWorkClass::Background,
+                phase: Arc::clone(&initial_phase),
+                active_requested_version: Arc::new(std::sync::atomic::AtomicI32::new(0)),
+                scheduled_at: Instant::now(),
+                handle: initial_handle,
+            },
+        );
+    }
+
+    for version in (initial_version + 1)..=latest_version {
+        server
+            .schedule_type_index_precompute_v2(file_id, version)
+            .await;
+    }
+
+    {
+        let mut tasks = server.type_index_precompute_tasks_v2.lock().await;
+        let task = tasks
+            .get(&file_id)
+            .expect("coalesced type-index precompute task must remain registered");
+        assert_eq!(
+            task.task_id, initial_task_id,
+            "rapid reschedule burst must keep the same coordinated precompute slot instead of abort+respawn"
+        );
+        assert_eq!(
+            task.supersession_key.requested_version, latest_version,
+            "coalesced precompute slot must track the latest requested version"
+        );
+        assert_eq!(
+            task.work_class,
+            bsl_runtime::application::CpuWorkClass::Background,
+            "didChange reschedule burst must keep background work class until an interactive waiter explicitly promotes it"
+        );
+        task.handle.abort();
+        let _ = tasks.remove(&file_id);
+    }
+    let after_cancelled = cancelled_reason_total(&coordinator);
+    assert_eq!(
+        after_cancelled, before_cancelled,
+        "rapid reschedule burst must not emit type_index_precompute_cancelled fanout when the slot can coalesce in place"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
 async fn p7_waiting_completion_promotes_matching_type_index_precompute_to_interactive() {
     const FIXTURE: &str =
         "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
@@ -4447,6 +4556,8 @@ async fn p7_promote_type_index_precompute_replaces_matching_background_waiter() 
                 },
                 work_class: bsl_runtime::application::CpuWorkClass::Background,
                 phase: Arc::clone(&previous_phase),
+                active_requested_version: Arc::new(std::sync::atomic::AtomicI32::new(0)),
+                scheduled_at: Instant::now(),
                 handle: previous_handle,
             },
         );

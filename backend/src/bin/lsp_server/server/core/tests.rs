@@ -12240,6 +12240,46 @@ async fn replace_lsp_fixture_and_wait(
     wait_for_type_index_precompute_completion(server, file_id).await;
 }
 
+async fn lsp_append_text_change<S>(
+    service: &mut S,
+    uri: &Url,
+    current_text: &str,
+    version: i32,
+    appended_text: &str,
+) where
+    S: Service<Request, Response = Option<JsonRpcResponse>> + Send,
+    S::Future: Send,
+    S::Error: std::fmt::Debug,
+{
+    let end_position = utf16_end_position(current_text);
+    let did_change = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: Some(Range {
+                start: end_position,
+                end: end_position,
+            }),
+            range_length: None,
+            text: appended_text.to_string(),
+        }],
+    };
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+}
+
 async fn lsp_completion_labels_at<S>(service: &mut S, uri: &Url, position: Position) -> Vec<String>
 where
     S: Service<Request, Response = Option<JsonRpcResponse>> + Send,
@@ -16334,6 +16374,523 @@ async fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
         "expected completion_total >= collected request samples, completion_total={}, request_samples={}",
         completion_total,
         WARMUP_REQUESTS + MEASURE_REQUESTS
+    );
+
+    drop(server);
+    drop(service);
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
+    init_test_tracing();
+    let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
+    const PROFILE_NAME: &str = "p38_real_conf_big_revision_churn_completion_perf_report_live";
+    const WARMUP_REQUESTS: usize = 3;
+    const MEASURE_REQUESTS: usize = 4;
+
+    let Some(conf_big_root) = conf_big_root_for_tests() else {
+        if allow_fixture_skip {
+            eprintln!(
+                "skipping {PROFILE_NAME}: examples/conf_big fixture is missing and BSL_TEST_ALLOW_MISSING_CONF_BIG is set"
+            );
+            return;
+        }
+        panic!(
+            "examples/conf_big fixture is missing; set BSL_TEST_ALLOW_MISSING_CONF_BIG=1 to skip explicitly"
+        );
+    };
+
+    let module_path = conf_big_large_module_path_for_tests(&conf_big_root);
+    if !module_path.exists() {
+        if allow_fixture_skip {
+            eprintln!(
+                "skipping {PROFILE_NAME}: module fixture is missing and BSL_TEST_ALLOW_MISSING_CONF_BIG is set: {}",
+                module_path.display()
+            );
+            return;
+        }
+        panic!(
+            "conf_big module fixture is missing: {}; set BSL_TEST_ALLOW_MISSING_CONF_BIG=1 to skip explicitly",
+            module_path.display()
+        );
+    }
+
+    let module_text =
+        std::fs::read_to_string(&module_path).expect("read conf_big module text for p38 report");
+    let workspace_setup = ScaleAwareWorkspaceSetup {
+        platform_docs_archive: syntax_helper_path_for_tests(),
+        configuration_path: conf_big_root.clone(),
+        platform_version: "8.3.25".to_string(),
+    };
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+    prime_server_with_workspace_setup(&server, &workspace_setup, "p38_real_conf_big_live_setup")
+        .await;
+
+    let uri = Url::from_file_path(&module_path).expect("real conf_big module uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: module_text.clone(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    server.sync_v2_globals().await;
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    let opened_version = server
+        .latest_received_file_versions_v2
+        .read()
+        .await
+        .get(&file_id)
+        .copied()
+        .expect("latest received version for p38 opened file");
+    assert_eq!(
+        opened_version, 1,
+        "real conf_big fixture must open at version 1"
+    );
+    assert!(
+        server
+            .analysis_v2
+            .wait_for_file_version(file_id, opened_version)
+            .await,
+        "analysis runtime must catch up to opened real conf_big file version"
+    );
+    let exact_type_index_seed =
+        seed_exact_type_index_for_current_file_version(&server, file_id).await;
+    server.cancel_type_index_precompute_v2(file_id).await;
+
+    let completion_position = find_utf16_position_after_marker(&module_text, "Объект.");
+    let completion_context = Some(CompletionContext {
+        trigger_kind: CompletionTriggerKind::INVOKED,
+        trigger_character: None,
+    });
+
+    let mut current_text = module_text.clone();
+    let mut current_version = opened_version;
+
+    let mut warmup_samples = Vec::new();
+    for index in 0..WARMUP_REQUESTS {
+        let request_id = 38_100_000_i64 + index as i64;
+        let started = Instant::now();
+        let labels = lsp_completion_labels_with_request(
+            &mut service,
+            request_id,
+            &uri,
+            completion_position,
+            completion_context.clone(),
+        )
+        .await;
+        warmup_samples.push(serde_json::json!({
+            "step": format!("warmup_completion_{}", index + 1),
+            "request_id": request_id,
+            "elapsed_ms": started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+            "label_count": labels.len(),
+            "labels": labels,
+            "version": current_version,
+        }));
+    }
+
+    let metrics_before_measured = coordinator.observability_metrics();
+    let counters_before_measured = metrics_before_measured
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics_before_measured.counters object");
+
+    let mut measured_samples = Vec::new();
+    for index in 0..MEASURE_REQUESTS {
+        let appended_text = if index % 2 == 0 { " " } else { "\n" };
+        let next_version = current_version
+            .checked_add(1)
+            .expect("p38 revision churn version overflow");
+        lsp_append_text_change(
+            &mut service,
+            &uri,
+            &current_text,
+            next_version,
+            appended_text,
+        )
+        .await;
+        current_text.push_str(appended_text);
+        current_version = next_version;
+
+        let request_id = 38_100_100_i64 + index as i64;
+        let started = Instant::now();
+        let labels = lsp_completion_labels_with_request(
+            &mut service,
+            request_id,
+            &uri,
+            completion_position,
+            completion_context.clone(),
+        )
+        .await;
+        measured_samples.push(serde_json::json!({
+            "step": format!("measured_revision_churn_completion_{}", index + 1),
+            "request_id": request_id,
+            "elapsed_ms": started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+            "label_count": labels.len(),
+            "labels": labels,
+            "version": current_version,
+            "appended_text": appended_text,
+        }));
+    }
+
+    let completion_timeline = lsp_get_completion_timeline(&mut service, 38_100_900, 96).await;
+    let observability_metrics = lsp_get_observability_metrics(&mut service, 38_100_901).await;
+    let timeline_traces = completion_timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("completion timeline traces array");
+    let filtered_traces: Vec<serde_json::Value> = timeline_traces
+        .iter()
+        .filter(|trace| trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str()))
+        .cloned()
+        .collect();
+    assert!(
+        !filtered_traces.is_empty(),
+        "expected non-empty completion timeline traces for real conf_big module"
+    );
+
+    let histograms = observability_metrics
+        .get("histograms")
+        .and_then(|value| value.as_object())
+        .expect("metrics.histograms object");
+    let counters = observability_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+
+    let total_sample_count = WARMUP_REQUESTS + MEASURE_REQUESTS;
+    let trace_request_id_present_total = filtered_traces
+        .iter()
+        .filter(|trace| {
+            trace
+                .get("request_id")
+                .and_then(|value| value.as_str())
+                .is_some()
+        })
+        .count();
+    let trace_matching_mode = if trace_request_id_present_total > 0 {
+        "request_id"
+    } else {
+        "ordinal_by_filtered_uri_trace_order"
+    };
+    let fallback_trace_window: Vec<serde_json::Value> =
+        if filtered_traces.len() >= total_sample_count {
+            filtered_traces[filtered_traces.len() - total_sample_count..].to_vec()
+        } else {
+            filtered_traces.clone()
+        };
+
+    let enrich_samples = |samples: Vec<serde_json::Value>,
+                          sample_offset: usize|
+     -> Vec<serde_json::Value> {
+        samples
+            .into_iter()
+            .enumerate()
+            .map(|(sample_index, sample)| {
+                let request_id_text = sample
+                    .get("request_id")
+                    .and_then(|value| value.as_i64())
+                    .map(|value| value.to_string());
+                let trace = if trace_request_id_present_total > 0 {
+                    request_id_text.as_ref().and_then(|request_id| {
+                        filtered_traces.iter().find(|trace| {
+                            trace.get("request_id").and_then(|value| value.as_str())
+                                == Some(request_id)
+                        })
+                    })
+                } else {
+                    fallback_trace_window.get(sample_offset + sample_index)
+                };
+                let trace_summary = trace.map(|trace| {
+                    serde_json::json!({
+                        "trace_id": trace.get("trace_id").and_then(|value| value.as_str()),
+                        "request_id": trace.get("request_id").and_then(|value| value.as_str()),
+                        "trigger_mode": trace.get("trigger_mode").and_then(|value| value.as_str()),
+                        "outcome": trace.get("outcome").and_then(|value| value.as_str()),
+                        "total_duration_ms": trace.get("total_duration_ms").and_then(|value| value.as_u64()),
+                        "dominant_stage": trace.get("dominant_stage").and_then(|value| value.as_str()),
+                        "prepare_guard_outcome": completion_timeline_prepare_detail_str(trace, "guard_outcome"),
+                        "prepare_outcome": completion_timeline_prepare_detail_str(trace, "outcome"),
+                        "prepare_wait_elapsed_ms": trace
+                            .get("prepare_details")
+                            .and_then(|value| value.get("wait_elapsed_ms"))
+                            .and_then(|value| value.as_u64()),
+                        "prepare_snapshot_elapsed_ms": trace
+                            .get("prepare_details")
+                            .and_then(|value| value.get("snapshot_elapsed_ms"))
+                            .and_then(|value| value.as_u64()),
+                        "turn_wait_ms": completion_timeline_trace_stage_duration_ms(trace, "turn_wait"),
+                        "prepare_stateful_ms": completion_timeline_trace_stage_duration_ms(trace, "prepare_stateful"),
+                        "wait_exact_type_index_ms": completion_timeline_trace_stage_duration_ms(trace, "wait_exact_type_index"),
+                        "query_bundle_ms": completion_timeline_trace_stage_duration_ms(trace, "query_bundle"),
+                        "collect_ms": completion_timeline_trace_stage_duration_ms(trace, "collect"),
+                        "response_build_ms": completion_timeline_trace_stage_duration_ms(trace, "response_build"),
+                        "response_build_other_ms": completion_timeline_trace_stage_duration_ms(trace, "response_build_other"),
+                    })
+                });
+                let mut sample_object = sample
+                    .as_object()
+                    .cloned()
+                    .expect("sample must be json object");
+                sample_object.insert(
+                    "trace".to_string(),
+                    trace_summary.unwrap_or_else(|| serde_json::json!(null)),
+                );
+                serde_json::Value::Object(sample_object)
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let warmup_samples = enrich_samples(warmup_samples, 0);
+    let measured_samples = enrich_samples(measured_samples, WARMUP_REQUESTS);
+
+    let latest_trace_summaries = filtered_traces
+        .iter()
+        .rev()
+        .take(20)
+        .map(|trace| {
+            serde_json::json!({
+                "trace_id": trace.get("trace_id").and_then(|value| value.as_str()),
+                "request_id": trace.get("request_id").and_then(|value| value.as_str()),
+                "trigger_mode": trace.get("trigger_mode").and_then(|value| value.as_str()),
+                "outcome": trace.get("outcome").and_then(|value| value.as_str()),
+                "started_at_ms": trace.get("started_at_ms").and_then(|value| value.as_u64()),
+                "total_duration_ms": trace.get("total_duration_ms").and_then(|value| value.as_u64()),
+                "dominant_stage": trace.get("dominant_stage").and_then(|value| value.as_str()),
+                "prepare_guard_outcome": completion_timeline_prepare_detail_str(trace, "guard_outcome"),
+                "prepare_outcome": completion_timeline_prepare_detail_str(trace, "outcome"),
+                "prepare_wait_elapsed_ms": trace
+                    .get("prepare_details")
+                    .and_then(|value| value.get("wait_elapsed_ms"))
+                    .and_then(|value| value.as_u64()),
+                "prepare_snapshot_elapsed_ms": trace
+                    .get("prepare_details")
+                    .and_then(|value| value.get("snapshot_elapsed_ms"))
+                    .and_then(|value| value.as_u64()),
+                "turn_wait_ms": completion_timeline_trace_stage_duration_ms(trace, "turn_wait"),
+                "prepare_stateful_ms": completion_timeline_trace_stage_duration_ms(trace, "prepare_stateful"),
+                "wait_exact_type_index_ms": completion_timeline_trace_stage_duration_ms(trace, "wait_exact_type_index"),
+                "query_bundle_ms": completion_timeline_trace_stage_duration_ms(trace, "query_bundle"),
+                "collect_ms": completion_timeline_trace_stage_duration_ms(trace, "collect"),
+                "rank_ms": completion_timeline_trace_stage_duration_ms(trace, "rank"),
+                "response_build_ms": completion_timeline_trace_stage_duration_ms(trace, "response_build"),
+                "response_build_other_ms": completion_timeline_trace_stage_duration_ms(trace, "response_build_other"),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let counter_delta = |name: &str| -> u64 {
+        read_u64_metric(counters.get(name))
+            .saturating_sub(read_u64_metric(counters_before_measured.get(name)))
+    };
+
+    let measured_non_empty_samples = measured_samples
+        .iter()
+        .filter(|sample| {
+            sample
+                .get("label_count")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0)
+                > 0
+        })
+        .count();
+    let measured_ok_non_empty_traces = measured_samples
+        .iter()
+        .filter(|sample| {
+            sample
+                .get("trace")
+                .and_then(|trace| trace.get("outcome"))
+                .and_then(|value| value.as_str())
+                == Some("ok_non_empty")
+        })
+        .count();
+    let measured_fail_closed_traces = measured_samples
+        .iter()
+        .filter(|sample| {
+            sample
+                .get("trace")
+                .and_then(|trace| trace.get("outcome"))
+                .and_then(|value| value.as_str())
+                == Some("fail_closed")
+        })
+        .count();
+    let measured_trace_linked_samples = measured_samples
+        .iter()
+        .filter(|sample| sample.get("trace").is_some_and(|trace| !trace.is_null()))
+        .count();
+    let warmup_non_empty_samples = warmup_samples
+        .iter()
+        .filter(|sample| {
+            sample
+                .get("label_count")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0)
+                > 0
+        })
+        .count();
+
+    let report = serde_json::json!({
+        "change_id": "refactor-v2-completion-dual-artifact-path",
+        "profile": PROFILE_NAME,
+        "schema_version": 1,
+        "configuration_path": conf_big_root,
+        "module_path": module_path,
+        "marker": "Объект.",
+        "request_plan": {
+            "cache_mode": "self_warmed_then_revision_churn_same_process",
+            "wait_for_current_revision_before_seed": true,
+            "exact_type_index_seed_mode": "snapshot_precompute_current_revision",
+            "warmup_requests": WARMUP_REQUESTS,
+            "measured_requests": MEASURE_REQUESTS,
+            "completion_trigger_mode": "invoked",
+            "churn_before_each_measured_completion": true,
+            "churn_edit_kind": "append_at_eof",
+        },
+        "warm_cache_seed": exact_type_index_seed,
+        "warmup_samples": warmup_samples,
+        "measured_samples": measured_samples,
+        "summary": {
+            "trace_count_for_uri": filtered_traces.len(),
+            "trace_matching_mode": trace_matching_mode,
+            "trace_request_id_present_total": trace_request_id_present_total,
+            "warmup_non_empty_samples": warmup_non_empty_samples,
+            "measured_trace_linked_samples": measured_trace_linked_samples,
+            "measured_non_empty_samples": measured_non_empty_samples,
+            "measured_ok_non_empty_traces": measured_ok_non_empty_traces,
+            "measured_fail_closed_traces": measured_fail_closed_traces,
+            "measured_completion_total_delta": counter_delta("completion_total"),
+            "measured_ok_non_empty_total_delta": counter_delta("intellisense_v2_completion_result_total_ok_non_empty"),
+            "measured_ok_empty_total_delta": counter_delta("intellisense_v2_completion_result_total_ok_empty"),
+            "measured_fail_closed_total_delta": counter_delta("intellisense_v2_completion_result_total_fail_closed"),
+            "measured_cancelled_total_delta": counter_delta("intellisense_v2_completion_result_total_cancelled"),
+            "measured_deadline_total_delta": counter_delta("intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_deadline"),
+            "measured_ready_total_delta": counter_delta("intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_ready"),
+            "measured_no_matching_task_total_delta": counter_delta("intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_no_matching_task"),
+            "measured_task_present_wrong_version_total_delta": counter_delta("intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_task_present_wrong_version"),
+            "measured_observed_version_mismatch_total_delta": counter_delta("intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_observed_version_mismatch"),
+            "measured_fallback_unavailable_total_delta": counter_delta("intellisense_v2_completion_fallback_unavailable_total"),
+            "measured_interactive_wait_budget_exhausted_total_delta": counter_delta("intellisense_v2_interactive_wait_budget_exhausted_total"),
+        },
+        "extension_like_key_latencies": {
+            "intellisense_v2_wait_for_file_version_diagnostics": histogram_metric_value_or_zero(
+                histograms,
+                "intellisense_v2_wait_for_file_version_diagnostics_ms",
+                None
+            ),
+            "intellisense_v2_syntax_diagnostics_query": histogram_metric_value_or_zero(
+                histograms,
+                "intellisense_v2_syntax_diagnostics_query_ms",
+                None
+            ),
+            "intellisense_v2_semantic_diagnostics_query": histogram_metric_value_or_zero(
+                histograms,
+                "intellisense_v2_semantic_diagnostics_query_ms",
+                None
+            ),
+            "intellisense_v2_wait_for_file_version_completion": histogram_metric_value_or_zero(
+                histograms,
+                "intellisense_v2_wait_for_file_version_completion_ms",
+                None
+            ),
+            "intellisense_v2_snapshot_completion": histogram_metric_value_or_zero(
+                histograms,
+                "intellisense_v2_snapshot_completion_ms",
+                None
+            ),
+            "intellisense_v2_ir_query_completion": histogram_metric_value_or_zero(
+                histograms,
+                "intellisense_v2_ir_query_completion_ms",
+                None
+            ),
+        },
+        "latest_trace_summaries": latest_trace_summaries,
+        "completion_timeline": {
+            "trace_count": filtered_traces.len(),
+            "selected_traces": filtered_traces,
+            "raw": completion_timeline,
+        },
+        "observability": {
+            "raw": observability_metrics,
+        }
+    });
+
+    let report_path = std::env::var("BSL_V2_REAL_CONF_BIG_REVISION_CHURN_COMPLETION_PERF_REPORT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("tests")
+                .join("perf")
+                .join("reports")
+                .join("real-conf-big-revision-churn-completion-perf-live.json")
+        });
+    if let Some(parent) = report_path.parent() {
+        std::fs::create_dir_all(parent)
+            .expect("failed to create directory for p38 real conf_big perf report");
+    }
+    std::fs::write(
+        &report_path,
+        serde_json::to_string_pretty(&report).expect("serialize p38 real conf_big perf report"),
+    )
+    .expect("write p38 real conf_big perf report");
+    println!("{PROFILE_NAME}_path={}", report_path.display());
+
+    assert!(
+        trace_matching_mode == "request_id",
+        "expected request-context parity to expose JSON-RPC request ids in completion timeline, trace_matching_mode={}, trace_request_id_present_total={}, filtered_traces={filtered_traces:?}",
+        trace_matching_mode,
+        trace_request_id_present_total
+    );
+    assert!(
+        warmup_non_empty_samples == WARMUP_REQUESTS,
+        "expected baseline warm-cache samples to be non-empty before churn, warmup_non_empty_samples={}, warmup_samples={warmup_samples:?}",
+        warmup_non_empty_samples
+    );
+    assert!(
+        measured_trace_linked_samples == MEASURE_REQUESTS,
+        "expected every measured churn sample to link to a completion timeline trace, measured_trace_linked_samples={}, measured_samples={measured_samples:?}",
+        measured_trace_linked_samples
+    );
+    assert!(
+        counter_delta("completion_total") >= MEASURE_REQUESTS as u64,
+        "expected measured completion_total delta >= churn request samples, completion_total_delta={}, measured_requests={}",
+        counter_delta("completion_total"),
+        MEASURE_REQUESTS
     );
 
     drop(server);

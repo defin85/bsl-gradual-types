@@ -26,6 +26,7 @@ mod kinds;
 use kinds::{completion_kind_tag, map_completion_kind};
 
 const COMPLETION_CANDIDATE_ID_VERSION: u32 = 1;
+#[allow(dead_code)]
 const COMPLETION_RESOLVE_CONTEXT_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,6 +71,7 @@ enum CompletionCandidateIdPayload {
     },
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct CompletionResolveContextData {
     v: u32,
@@ -360,6 +362,7 @@ pub async fn handle_completion_resolve(
     item
 }
 
+#[allow(dead_code)]
 pub(crate) fn attach_completion_resolve_context(
     response: &mut CompletionResponse,
     file_uri: &Url,
@@ -384,6 +387,7 @@ pub(crate) fn attach_completion_resolve_context(
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn parse_completion_resolve_context(
     item: &CompletionItem,
 ) -> Option<CompletionResolveContextData> {
@@ -448,6 +452,7 @@ fn to_lsp_completion(
     }
 }
 
+#[allow(dead_code)]
 fn attach_completion_resolve_context_to_item(
     item: &mut CompletionItem,
     context: &CompletionResolveContextData,

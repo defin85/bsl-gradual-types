@@ -219,7 +219,7 @@ impl BslLanguageServer {
                         );
                         return Ok(None);
                     }
-                    let hover = handle_hover_v2(
+                    handle_hover_v2(
                         &analysis,
                         file_id,
                         file_content,
@@ -230,8 +230,7 @@ impl BslLanguageServer {
                         &uri,
                         &settings.hover,
                         include_flow_sensitive,
-                    );
-                    hover
+                    )
                 }
                 (None, _, _, _) | (Some(_), None, _, _) | (Some(_), Some(_), None, _) => {
                     super::helpers::record_lsp_interactive_fail_closed_reason(

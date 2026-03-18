@@ -13488,6 +13488,7 @@ async fn p33_form_module_object_completion_uses_current_revision_head_path_witho
     drain_task.abort();
 }
 
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn p33_form_module_head_path_skips_ir_query_delay_when_owner_hints_are_ready() {
     struct EnvVarGuard {
@@ -13630,6 +13631,7 @@ async fn p33_form_module_head_path_skips_ir_query_delay_when_owner_hints_are_rea
     drain_task.abort();
 }
 
+#[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn p33_completion_current_revision_head_ignores_did_change_inline_parse_delay() {
     struct EnvVarGuard {
@@ -13824,6 +13826,7 @@ async fn p33_completion_current_revision_head_ignores_did_change_inline_parse_de
     drain_task.abort();
 }
 
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn p33_completion_head_hit_then_upgrade_after_precompute_finish() {
     struct EnvVarGuard {
@@ -14033,6 +14036,7 @@ async fn p33_completion_head_hit_then_upgrade_after_precompute_finish() {
     drain_task.abort();
 }
 
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn p33_completion_head_hit_emits_exact_upgrade_when_background_exact_finishes() {
     struct EnvVarGuard {
@@ -14183,6 +14187,7 @@ async fn p33_completion_head_hit_emits_exact_upgrade_when_background_exact_finis
     drain_task.abort();
 }
 
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn p33_completion_head_and_exact_resolve_keep_candidate_id_stable_for_same_revision() {
     struct EnvVarGuard {
@@ -14356,6 +14361,7 @@ async fn p33_completion_head_and_exact_resolve_keep_candidate_id_stable_for_same
     drain_task.abort();
 }
 
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn p33_completion_resolve_stays_bound_to_origin_revision() {
     struct EnvVarGuard {
@@ -14529,6 +14535,7 @@ async fn p33_completion_resolve_stays_bound_to_origin_revision() {
     drain_task.abort();
 }
 
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn p33_completion_head_upgrade_perf_report() {
     struct EnvVarGuard {
@@ -15374,6 +15381,7 @@ fn dominant_stage_from_metrics(metrics: &serde_json::Value) -> serde_json::Value
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_scale_aware_profile(
     profile_name: &str,
     uri: Url,
@@ -17574,7 +17582,7 @@ async fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
                     .expect("sample must be json object");
                 sample_object.insert(
                     "trace".to_string(),
-                    trace_summary.unwrap_or_else(|| serde_json::json!(null)),
+                    trace_summary.unwrap_or(serde_json::json!(null)),
                 );
                 serde_json::Value::Object(sample_object)
                 })
@@ -18184,7 +18192,7 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
                     .expect("sample must be json object");
                 sample_object.insert(
                     "trace".to_string(),
-                    trace_summary.unwrap_or_else(|| serde_json::json!(null)),
+                    trace_summary.unwrap_or(serde_json::json!(null)),
                 );
                 serde_json::Value::Object(sample_object)
             })

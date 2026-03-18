@@ -27,6 +27,7 @@ enum CompletionPrepareGuardResult<T> {
 }
 
 impl<T> CompletionPrepareGuardResult<T> {
+    #[cfg(test)]
     fn trace_outcome(&self) -> String {
         match self {
             Self::Prepared(_) => "prepared".to_string(),

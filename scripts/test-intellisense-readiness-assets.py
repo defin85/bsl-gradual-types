@@ -15,7 +15,8 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         REPO_ROOT
         / "openspec"
         / "changes"
-        / "refactor-ir-canonical-semantic-pipeline"
+        / "archive"
+        / "2026-03-13-refactor-ir-canonical-semantic-pipeline"
         / "validation"
         / "quality-gates.json"
     )
@@ -49,7 +50,7 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
     REQUIRED_EXTENSION_SMOKE_SNIPPETS = [
         'npm --prefix "${ROOT_DIR}/vscode-extension" run compile:fast',
         "BSL_TEST_GREP=",
-        "Completion Probe (Schema|Recorder|Store) Test Suite",
+        "Completion Probe (Schema|Recorder|Runtime|Store) Test Suite",
         "Completion Timeline (Clipboard|Model|Webview Provider) Test Suite",
         "Client Options Test Suite",
         "getCompletionTimeline should work via executeCommand",

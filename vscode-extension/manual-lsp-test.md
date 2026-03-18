@@ -128,3 +128,18 @@ timeout 5s ./bin/lsp-server.exe 2>&1
 **Если видишь JSON с capabilities** → Сервер работает ✅
 **Если `Parse error`** → Content-Length неверный ❌
 **Если таймаут/crash** → Сервер не отвечает ❌
+
+---
+
+## Тест 7: Completion Timeline и Client Probe Feed
+
+```bash
+cd /path/to/bsl-gradual-types/vscode-extension
+npm run compile:fast
+BSL_TEST_GREP='Completion Probe (Schema|Recorder|Runtime|Store) Test Suite|Completion Timeline (Clipboard|Model|Webview Provider) Test Suite|Client Options Test Suite|getCompletionTimeline should work via executeCommand|getCompletionTimeline should fail-closed on Method not found' node ./out/test/runTest.js
+```
+
+**Ожидаемый результат**:
+- проходят focused extension-host тесты для `Completion Timeline` и `Client Probe Feed`;
+- transport hook (`Completion Probe Runtime`) входит в тот же smoke path, что и `run-intellisense-tests.sh smoke`;
+- `bsl.getCompletionTimeline` остаётся fail-closed и не смешивается с локальными client probes.

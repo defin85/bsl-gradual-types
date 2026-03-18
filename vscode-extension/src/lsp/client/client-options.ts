@@ -5,13 +5,18 @@ import {
     Trace
 } from 'vscode-languageclient/node';
 import { BslAnalyzerConfig } from '../../config/configHelper';
+import {
+    CompletionProbeRecorder,
+    getSharedCompletionProbeRecorder,
+} from '../../providers/completionProbeRecorder';
 
 /**
  * Строит LanguageClientOptions для LSP клиента
  * @param outputChannel Канал для логирования
  */
 export function buildClientOptions(
-    outputChannel: vscode.OutputChannel
+    outputChannel: vscode.OutputChannel,
+    completionProbeRecorder: CompletionProbeRecorder = getSharedCompletionProbeRecorder()
 ): LanguageClientOptions {
     const typeHintsEnabled = vscode.workspace
         .getConfiguration('bsl.typeHints')
@@ -64,7 +69,44 @@ export function buildClientOptions(
                     outputChannel.appendLine(`Configuration request: ${JSON.stringify(params)}`);
                     return next(params, token);
                 }
-            }
+            },
+            didChange: async (event, next) => {
+                completionProbeRecorder.recordTextDocumentDidChange(event);
+                await next(event);
+                completionProbeRecorder.recordTextDocumentDidChangeSent(event.document);
+            },
+            didClose: async (document, next) => {
+                await next(document);
+                completionProbeRecorder.recordTextDocumentDidClose(document);
+            },
+            provideCompletionItem: async (document, position, context, token, next) => {
+                const requestStartedAtMs = Date.now();
+
+                try {
+                    const result = await next(document, position, context, token);
+                    completionProbeRecorder.recordCompletionOutcome({
+                        document,
+                        position,
+                        context,
+                        result,
+                        requestStartedAtMs,
+                        requestCompletedAtMs: Date.now(),
+                        wasCancelled: false,
+                    });
+                    return result;
+                } catch (error) {
+                    completionProbeRecorder.recordCompletionOutcome({
+                        document,
+                        position,
+                        context,
+                        result: undefined,
+                        requestStartedAtMs,
+                        requestCompletedAtMs: Date.now(),
+                        wasCancelled: token.isCancellationRequested,
+                    });
+                    throw error;
+                }
+            },
         }
     };
 

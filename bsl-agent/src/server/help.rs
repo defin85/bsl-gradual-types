@@ -114,7 +114,7 @@ pub(super) fn build_mcp_help_response(
                         "include_flow_sensitive": true
                     }
                 }));
-                notes.push("Flow-sensitive is opt-in: include_flow_sensitive defaults to false. Responses include flow_sensitive_enabled (bool).".to_string());
+                notes.push("Flow-sensitive is opt-in: include_flow_sensitive defaults to false, but type-at-position remains exact-or-fail-closed. The flag only enables narrowing once the exact semantic artifact for the current revision is ready. Responses include flow_sensitive_enabled (bool).".to_string());
             }
             "bsl_members_start" => {
                 examples.push(serde_json::json!({

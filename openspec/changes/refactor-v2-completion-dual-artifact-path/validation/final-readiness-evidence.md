@@ -2,7 +2,7 @@
 
 ## Scope
 - change_id: `refactor-v2-completion-dual-artifact-path`
-- date (UTC): `2026-03-18T07:23:48+00:00`
+- date (UTC): `2026-03-18T11:05:25+00:00`
 
 ## Requirement -> Code -> Test
 
@@ -11,8 +11,12 @@
 - Code:
   - `backend/src/bin/lsp_server/server/language_server/impl_completion.rs`
   - `backend/src/bin/lsp_server/server/core.rs`
+  - `backend/src/bin/lsp_server/server/core/deps_and_precompute.rs`
+  - `backend/src/bin/lsp_server/server/language_server/impl_document_sync.rs`
+  - `backend/src/bin/lsp_server/handlers/text_document.rs`
   - `bsl-runtime/src/application/type_system/services/completion_service.rs`
   - `analysis-v2/src/derived_artifacts.rs`
+  - `analysis-v2/src/lib/host_runtime.rs`
 - Test evidence:
   - `cargo test -p bsl-backend --bin bsl-lsp-server p33_ -- --nocapture` -> `ok`
   - `cargo test -p bsl-backend --bin bsl-lsp-server p37_real_conf_big_warm_cache_completion_perf_report_live -- --nocapture` -> `ok`
@@ -25,6 +29,8 @@
 - Requirement: `openspec/changes/refactor-v2-completion-dual-artifact-path/specs/bsl-intellisense-v2/spec.md`
 - Code:
   - `analysis-v2/src/derived_artifacts.rs`
+  - `analysis-v2/src/lib.rs`
+  - `analysis-v2/src/lib/host_runtime.rs`
   - `backend/src/bin/lsp_server/server/language_server/helpers.rs`
   - `backend/src/bin/lsp_server/server/language_server/impl_completion.rs`
   - `bsl-runtime/src/application/type_system/services/completion_service.rs`
@@ -38,14 +44,17 @@
 - Code:
   - `backend/src/bin/lsp_server/server/language_server/impl_completion.rs`
   - `backend/src/bin/lsp_server/server/core.rs`
+  - `backend/src/bin/lsp_server/server/core/deps_and_precompute.rs`
+  - `backend/src/bin/lsp_server/server/language_server/impl_document_sync.rs`
 - Test evidence:
   - `cargo test -p bsl-backend --bin bsl-lsp-server p33_ -- --nocapture` -> `ok`
-  - Artifact: `backend/tests/perf/reports/completion-deadline-recovery-perf.json`
+  - Artifact: `backend/tests/perf/reports/completion-head-upgrade-perf.json`
   - Fresh report summary:
-    - `first_outcome=fail_closed`
-    - `deadline_total=1`
+    - `first_outcome=ok_non_empty`
+    - `head_hit_total=2`
+    - `head_to_exact_upgrade_total=1`
     - `second_outcome=ok_non_empty`
-    - `ready_total=1`
+    - `fail_closed_total=0`
 
 ### 4. Non-completion interactive semantics остаются exact-or-fail-closed
 - Requirement: `openspec/changes/refactor-v2-completion-dual-artifact-path/specs/bsl-intellisense-v2/spec.md`
@@ -57,20 +66,24 @@
   - `cargo test -p bsl-backend --bin bsl-lsp-server p7_hover_cache_miss_emits_bounded_fail_closed_reason -- --nocapture` -> `ok`
   - `cargo test -p bsl-backend --bin bsl-lsp-server p7_hover_and_definition_do_not_backfill_from_runtime_index_snapshot -- --nocapture` -> `ok`
   - `cargo test -p bsl-agent semantic_helpers_fail_closed_without_precomputed_type_index -- --nocapture` -> `ok`
+  - `cargo test -p bsl-agent type_at_position_remains_fail_closed_without_exact_artifact_even_with_flow_sensitive_opt_in -- --nocapture` -> `ok`
+  - `cargo test -p bsl-agent flow_sensitive_flags_are_explicit_in_mcp_responses -- --nocapture` -> `ok`
 
 ### 5. Latency budget защищается canonical fast path, а не fallback semantics
 - Requirement: `openspec/changes/refactor-v2-completion-dual-artifact-path/specs/bsl-intellisense-v2/spec.md`
 - Code:
   - `backend/src/bin/lsp_server/server/language_server/impl_completion.rs`
   - `backend/src/bin/lsp_server/server/core/tests.rs`
+  - `backend/src/bin/lsp_server/server/language_server/impl_document_sync.rs`
+  - `backend/src/bin/lsp_server/handlers/text_document.rs`
   - `bsl-runtime/src/system/basic_observability/tests.rs`
 - Test evidence:
   - `cargo test -p bsl-runtime completion_route_fail_closed_cause_and_upgrade_metrics_are_recorded -- --nocapture` -> `ok`
   - `cargo test -p bsl-backend --bin bsl-lsp-server p37_real_conf_big_warm_cache_completion_perf_report_live -- --nocapture` -> `ok`
   - `cargo test -p bsl-backend --bin bsl-lsp-server p38_real_conf_big_revision_churn_completion_perf_report_live -- --nocapture` -> `ok`
   - Fresh live summaries:
-    - warm `p95=8ms`, `head_hit_total=9`, `fail_closed_total=0`
-    - revision-churn `p95=19ms`, `measured_head_hit_traces=4`, `measured_fail_closed_traces=0`
+    - warm `p95=27ms`, `head_hit_total=9`, `fail_closed_total=0`, `query_bundle p95=0ms`
+    - revision-churn `p95=11ms`, `measured_non_empty_samples=4/4`, `measured_head_hit_traces=4`, `measured_fail_closed_traces=0`, `query_bundle p95=3ms`
 
 ### 6. Representative real-module gate является acceptance source of truth
 - Requirement: `openspec/changes/refactor-v2-completion-dual-artifact-path/specs/bsl-intellisense-v2/spec.md`
@@ -91,6 +104,8 @@
 - `cargo test -p bsl-backend --bin bsl-lsp-server p7_hover_cache_miss_emits_bounded_fail_closed_reason -- --nocapture` -> `ok`
 - `cargo test -p bsl-backend --bin bsl-lsp-server p7_hover_and_definition_do_not_backfill_from_runtime_index_snapshot -- --nocapture` -> `ok`
 - `cargo test -p bsl-agent semantic_helpers_fail_closed_without_precomputed_type_index -- --nocapture` -> `ok`
+- `cargo test -p bsl-agent type_at_position_remains_fail_closed_without_exact_artifact_even_with_flow_sensitive_opt_in -- --nocapture` -> `ok`
+- `cargo test -p bsl-agent flow_sensitive_flags_are_explicit_in_mcp_responses -- --nocapture` -> `ok`
 - `cargo test -p bsl-backend --bin bsl-lsp-server p37_real_conf_big_warm_cache_completion_perf_report_live -- --nocapture` -> `ok`
 - `cargo test -p bsl-backend --bin bsl-lsp-server p38_real_conf_big_revision_churn_completion_perf_report_live -- --nocapture` -> `ok`
 
@@ -106,7 +121,7 @@
   - `openspec/changes/refactor-v2-completion-dual-artifact-path/validation/cargo-test-bsl-backend-p37-real-conf-big-warm.log`
   - `openspec/changes/refactor-v2-completion-dual-artifact-path/validation/cargo-test-bsl-backend-p38-real-conf-big-revision-churn.log`
 - Generated reports:
-  - `backend/tests/perf/reports/completion-deadline-recovery-perf.json`
+  - `backend/tests/perf/reports/completion-head-upgrade-perf.json`
   - `backend/tests/perf/reports/real-conf-big-warm-cache-completion-perf-live.json`
   - `backend/tests/perf/reports/real-conf-big-revision-churn-completion-perf-live.json`
 

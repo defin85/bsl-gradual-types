@@ -2,7 +2,8 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use bsl_shared::ir::SemanticProgram;
+use bsl_shared::domain::types::TypeResolution;
+use bsl_shared::ir::{SemanticProgram, SemanticTypeEntry};
 
 use crate::type_inference_v2;
 use crate::{DepsSnapshotId, FileId, ParseSnapshot, SettingsId};
@@ -69,6 +70,34 @@ impl TypeIndexArtifactKey {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct CompletionHeadArtifactKey {
+    pub(crate) file_id: FileId,
+    pub(crate) file_version: i32,
+    pub(crate) deps_id: DepsSnapshotId,
+    pub(crate) settings_id: SettingsId,
+}
+
+impl CompletionHeadArtifactKey {
+    pub(crate) fn new(
+        file_id: FileId,
+        file_version: i32,
+        deps_id: DepsSnapshotId,
+        settings_id: SettingsId,
+    ) -> Self {
+        Self {
+            file_id,
+            file_version,
+            deps_id,
+            settings_id,
+        }
+    }
+
+    fn identity(&self) -> TypeIndexIdentity {
+        TypeIndexIdentity::new(self.deps_id.clone(), self.settings_id.clone())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct TypeIndexParseSnapshotMeta {
     pub(crate) incremental: bool,
@@ -104,6 +133,31 @@ pub(crate) struct TypeIndexArtifact {
     pub(crate) produced_at_millis: u128,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct CompletionHeadArtifact {
+    entries: Arc<Vec<SemanticTypeEntry>>,
+}
+
+impl CompletionHeadArtifact {
+    pub(crate) fn from_program(program: &SemanticProgram) -> Self {
+        Self {
+            entries: Arc::new(program.semantic_facts.type_entries.clone()),
+        }
+    }
+
+    pub(crate) fn type_at_byte_offset(&self, byte_offset: u32) -> Option<TypeResolution> {
+        let find = |offset: u32| {
+            self.entries
+                .iter()
+                .filter(|entry| entry.span.contains(offset))
+                .min_by_key(|entry| entry.span.len())
+                .map(|entry| entry.resolution.clone())
+        };
+
+        find(byte_offset).or_else(|| byte_offset.checked_sub(1).and_then(find))
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct TypeIndexStoreOutcome {
     pub(crate) evicted_per_file_window_total: u64,
@@ -113,12 +167,19 @@ pub(crate) struct TypeIndexStoreOutcome {
 #[derive(Clone, Default)]
 struct DerivedVersionArtifacts {
     ir_by_identity: HashMap<IrIdentity, Arc<SemanticProgram>>,
+    completion_head_by_identity: HashMap<TypeIndexIdentity, Arc<CompletionHeadArtifact>>,
     type_index_by_identity: HashMap<TypeIndexIdentity, Arc<TypeIndexArtifact>>,
 }
 
 impl DerivedVersionArtifacts {
     fn type_index_artifacts_count(&self) -> usize {
         self.type_index_by_identity.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.ir_by_identity.is_empty()
+            && self.completion_head_by_identity.is_empty()
+            && self.type_index_by_identity.is_empty()
     }
 }
 
@@ -175,6 +236,7 @@ impl DerivedArtifactsCache {
                     // IR versions remain window-based, while type_index retention
                     // is handled by per-identity count semantics.
                     artifacts.ir_by_identity.clear();
+                    artifacts.completion_head_by_identity.clear();
                     remove_version_entry = artifacts.type_index_by_identity.is_empty();
                 }
                 if remove_version_entry {
@@ -230,6 +292,19 @@ impl DerivedArtifactsCache {
             .get(&key.file_id)?
             .get(&key.file_version)?
             .type_index_by_identity
+            .get(&identity)
+            .cloned()
+    }
+
+    pub(crate) fn get_completion_head_exact(
+        &self,
+        key: &CompletionHeadArtifactKey,
+    ) -> Option<Arc<CompletionHeadArtifact>> {
+        let identity = key.identity();
+        self.by_file
+            .get(&key.file_id)?
+            .get(&key.file_version)?
+            .completion_head_by_identity
             .get(&identity)
             .cloned()
     }
@@ -292,6 +367,22 @@ impl DerivedArtifactsCache {
         outcome
     }
 
+    pub(crate) fn store_completion_head(
+        &mut self,
+        key: CompletionHeadArtifactKey,
+        artifact: Arc<CompletionHeadArtifact>,
+    ) {
+        let _ = self.retain_versions_for_file(key.file_id, key.file_version);
+        let identity = key.identity();
+        self.by_file
+            .entry(key.file_id)
+            .or_default()
+            .entry(key.file_version)
+            .or_default()
+            .completion_head_by_identity
+            .insert(identity, artifact);
+    }
+
     pub(crate) fn invalidate_type_index_for_deps(&mut self, deps_id: &DepsSnapshotId) -> u64 {
         let mut removed_total = 0_u64;
         for versioned in self.by_file.values_mut() {
@@ -313,6 +404,36 @@ impl DerivedArtifactsCache {
         removed_total
     }
 
+    pub(crate) fn invalidate_completion_head_for_deps(&mut self, deps_id: &DepsSnapshotId) -> u64 {
+        let mut removed_total = 0_u64;
+        let mut files_to_prune = Vec::new();
+        for (file_id, versioned) in &mut self.by_file {
+            let versions_to_prune: Vec<i32> = versioned
+                .iter_mut()
+                .filter_map(|(version, artifacts)| {
+                    let before = artifacts.completion_head_by_identity.len();
+                    artifacts
+                        .completion_head_by_identity
+                        .retain(|identity, _| &identity.deps_id == deps_id);
+                    let removed =
+                        before.saturating_sub(artifacts.completion_head_by_identity.len()) as u64;
+                    if removed > 0 {
+                        removed_total = removed_total.saturating_add(removed);
+                    }
+                    artifacts.is_empty().then_some(*version)
+                })
+                .collect();
+            for version in versions_to_prune {
+                versioned.remove(&version);
+            }
+            files_to_prune.push(*file_id);
+        }
+        for file_id in files_to_prune {
+            self.prune_empty_file_entry_if_needed(file_id);
+        }
+        removed_total
+    }
+
     pub(crate) fn invalidate_type_index_for_settings(&mut self, settings_id: &SettingsId) -> u64 {
         let mut removed_total = 0_u64;
         for versioned in self.by_file.values_mut() {
@@ -331,6 +452,39 @@ impl DerivedArtifactsCache {
         }
         self.latest_type_index_identity_by_file
             .retain(|_, identity| &identity.settings_id == settings_id);
+        removed_total
+    }
+
+    pub(crate) fn invalidate_completion_head_for_settings(
+        &mut self,
+        settings_id: &SettingsId,
+    ) -> u64 {
+        let mut removed_total = 0_u64;
+        let mut files_to_prune = Vec::new();
+        for (file_id, versioned) in &mut self.by_file {
+            let versions_to_prune: Vec<i32> = versioned
+                .iter_mut()
+                .filter_map(|(version, artifacts)| {
+                    let before = artifacts.completion_head_by_identity.len();
+                    artifacts
+                        .completion_head_by_identity
+                        .retain(|identity, _| &identity.settings_id == settings_id);
+                    let removed =
+                        before.saturating_sub(artifacts.completion_head_by_identity.len()) as u64;
+                    if removed > 0 {
+                        removed_total = removed_total.saturating_add(removed);
+                    }
+                    artifacts.is_empty().then_some(*version)
+                })
+                .collect();
+            for version in versions_to_prune {
+                versioned.remove(&version);
+            }
+            files_to_prune.push(*file_id);
+        }
+        for file_id in files_to_prune {
+            self.prune_empty_file_entry_if_needed(file_id);
+        }
         removed_total
     }
 
@@ -393,8 +547,7 @@ impl DerivedArtifactsCache {
                         self.type_index_artifacts_total.saturating_sub(1);
                     evicted = evicted.saturating_add(1);
                 }
-                remove_version_entry = artifacts.ir_by_identity.is_empty()
-                    && artifacts.type_index_by_identity.is_empty();
+                remove_version_entry = artifacts.is_empty();
             }
             if remove_version_entry {
                 versioned.remove(&version);
@@ -460,7 +613,7 @@ impl DerivedArtifactsCache {
             return false;
         }
         self.type_index_artifacts_total = self.type_index_artifacts_total.saturating_sub(1);
-        if artifacts.ir_by_identity.is_empty() && artifacts.type_index_by_identity.is_empty() {
+        if artifacts.is_empty() {
             versioned.remove(&candidate.file_version);
         }
         self.prune_empty_file_entry_if_needed(candidate.file_id);

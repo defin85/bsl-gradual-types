@@ -195,7 +195,7 @@ pub struct BslTypeAtPositionParams {
     pub session_id: String,
     pub file: FileRef,
     pub position: Position,
-    /// Opt-in: include flow-sensitive type narrowing (default: false).
+    /// Opt-in: include flow-sensitive type narrowing once exact semantic artifact is ready (default: false).
     #[serde(default)]
     pub include_flow_sensitive: bool,
 }

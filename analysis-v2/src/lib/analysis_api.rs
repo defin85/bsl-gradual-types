@@ -77,10 +77,21 @@ impl AnalysisV2 {
         settings_id: SettingsId,
         program: Arc<SemanticProgram>,
     ) {
-        self.derived_cache
+        let head_key = CompletionHeadArtifactKey::new(
+            file_id,
+            file_version,
+            deps_id.clone(),
+            settings_id.clone(),
+        );
+        let head_artifact = Arc::new(
+            crate::derived_artifacts::CompletionHeadArtifact::from_program(program.as_ref()),
+        );
+        let mut cache = self
+            .derived_cache
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .store_ir(file_id, file_version, deps_id, settings_id, program);
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        cache.store_ir(file_id, file_version, deps_id, settings_id, program);
+        cache.store_completion_head(head_key, head_artifact);
     }
 
     fn make_type_index_artifact_key(
@@ -94,6 +105,135 @@ impl AnalysisV2 {
             self.deps.id(&self.db).clone(),
             self.settings.id(&self.db).clone(),
         )
+    }
+
+    fn make_completion_head_artifact_key(
+        &self,
+        file_id: FileId,
+        file_version: i32,
+    ) -> CompletionHeadArtifactKey {
+        CompletionHeadArtifactKey::new(
+            file_id,
+            file_version,
+            self.deps.id(&self.db).clone(),
+            self.settings.id(&self.db).clone(),
+        )
+    }
+
+    fn current_completion_head_artifact(
+        &self,
+        file_id: FileId,
+    ) -> Cancellable<Option<Arc<crate::derived_artifacts::CompletionHeadArtifact>>> {
+        let Some(&file) = self.files.get(&file_id) else {
+            return Ok(None);
+        };
+
+        let file_version = file.version(&self.db);
+        let key = self.make_completion_head_artifact_key(file_id, file_version);
+        if let Some(artifact) = self
+            .derived_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get_completion_head_exact(&key)
+        {
+            return Ok(Some(artifact));
+        }
+        Ok(None)
+    }
+
+    pub fn try_publish_completion_head_from_parse_snapshot_reuse(
+        &self,
+        file_id: FileId,
+        expected_version: i32,
+        parse_snapshot: &ParseSnapshot,
+        current_text: &str,
+    ) -> Cancellable<bool> {
+        let Some(&file) = self.files.get(&file_id) else {
+            return Ok(false);
+        };
+
+        let file_version = file.version(&self.db);
+        if file_version != expected_version || parse_snapshot.file_version != expected_version {
+            return Ok(false);
+        }
+
+        let deps_id = self.deps.id(&self.db).clone();
+        let settings_id = self.settings.id(&self.db).clone();
+        let key = CompletionHeadArtifactKey::new(
+            file_id,
+            expected_version,
+            deps_id.clone(),
+            settings_id.clone(),
+        );
+        if self
+            .derived_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get_completion_head_exact(&key)
+            .is_some()
+        {
+            return Ok(true);
+        }
+
+        let Some(reused) = self.try_reuse_ir_from_previous_version(
+            file_id,
+            expected_version,
+            parse_snapshot,
+            current_text,
+            &deps_id,
+            &settings_id,
+        ) else {
+            return Ok(false);
+        };
+
+        self.remember_ir_artifact(file_id, expected_version, deps_id, settings_id, reused);
+        Ok(true)
+    }
+
+    pub fn try_publish_completion_head_from_previous_ir_reuse(
+        &self,
+        file_id: FileId,
+        expected_version: i32,
+        previous_version: i32,
+    ) -> Cancellable<bool> {
+        let Some(&file) = self.files.get(&file_id) else {
+            return Ok(false);
+        };
+
+        let file_version = file.version(&self.db);
+        if file_version != expected_version || previous_version >= expected_version {
+            return Ok(false);
+        }
+
+        let deps_id = self.deps.id(&self.db).clone();
+        let settings_id = self.settings.id(&self.db).clone();
+        let key = CompletionHeadArtifactKey::new(
+            file_id,
+            expected_version,
+            deps_id.clone(),
+            settings_id.clone(),
+        );
+        if self
+            .derived_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get_completion_head_exact(&key)
+            .is_some()
+        {
+            return Ok(true);
+        }
+
+        let Some(reused) = self
+            .derived_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get_ir(file_id, previous_version, &deps_id, &settings_id)
+        else {
+            return Ok(false);
+        };
+
+        self.remember_ir_artifact(file_id, expected_version, deps_id, settings_id, reused);
+        Ok(true)
     }
 
     pub fn precompute_type_index_for_file(
@@ -408,6 +548,31 @@ impl AnalysisV2 {
         Ok(cache
             .get_type_index_exact(&key)
             .is_some_and(|artifact| !artifact.parse_snapshot_meta.serve_only_blocked))
+    }
+
+    pub fn current_completion_head_ready(&self, file_id: FileId) -> Cancellable<bool> {
+        let Some(&file) = self.files.get(&file_id) else {
+            return Ok(false);
+        };
+
+        let file_version = file.version(&self.db);
+        let key = self.make_completion_head_artifact_key(file_id, file_version);
+        let cache = self
+            .derived_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        Ok(cache.get_completion_head_exact(&key).is_some())
+    }
+
+    pub fn completion_head_type_at_byte_offset(
+        &self,
+        file_id: FileId,
+        byte_offset: u32,
+    ) -> Cancellable<Option<TypeResolution>> {
+        Ok(self
+            .current_completion_head_artifact(file_id)?
+            .and_then(|artifact| artifact.type_at_byte_offset(byte_offset)))
     }
 
     fn current_type_index_exact(

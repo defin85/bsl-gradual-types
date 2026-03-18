@@ -437,6 +437,49 @@ fn semantic_helpers_fail_closed_without_precomputed_type_index() {
 }
 
 #[test]
+fn type_at_position_remains_fail_closed_without_exact_artifact_even_with_flow_sensitive_opt_in() {
+    const FAIL_CLOSED_REASON_KEY: &str =
+        "intellisense_v2_fail_closed_reason_total_origin_agent_operation_type_at_position_reason_missing_semantic_index";
+
+    let coordinator = Arc::new(bsl_runtime::system::SystemCoordinator::new());
+    let response = fail_closed_type_at_position_if_exact_unavailable(
+        coordinator.as_ref(),
+        17,
+        true,
+        false,
+    )
+    .expect("fail-closed response");
+
+    assert_eq!(response.analysis_revision, 17);
+    assert!(
+        response.flow_sensitive_enabled,
+        "response must preserve the requested flow-sensitive flag even on fail-closed"
+    );
+    assert!(response.type_info.is_none(), "type_info: {:?}", response.type_info);
+    assert!(response.node.is_none(), "node: {:?}", response.node);
+    assert!(
+        response.warnings.is_empty(),
+        "warnings: {:?}",
+        response.warnings
+    );
+    assert_eq!(
+        counter_value(&coordinator.observability_metrics(), FAIL_CLOSED_REASON_KEY),
+        1,
+        "flow-sensitive opt-in must still emit missing_semantic_index fail-closed reason"
+    );
+    assert!(
+        fail_closed_type_at_position_if_exact_unavailable(
+            coordinator.as_ref(),
+            17,
+            true,
+            true,
+        )
+        .is_none(),
+        "exact-ready path must not short-circuit to fail-closed"
+    );
+}
+
+#[test]
 fn collect_members_uses_exact_owner_hint_on_default_path() {
     use bsl_analysis_v2::{DepsSnapshotId, SemanticDeps};
     use bsl_runtime::system::{IndexSnapshot, IndexSnapshotId, SystemCoordinator};

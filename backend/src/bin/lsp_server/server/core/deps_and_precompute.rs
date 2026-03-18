@@ -21,6 +21,14 @@ impl ExactTypeIndexWaitOutcomeV2 {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CompletionArtifactWaitOutcomeV2 {
+    HeadReady,
+    ExactReady,
+    Deadline,
+    ObservedVersionMismatch,
+}
+
 #[cfg(test)]
 fn test_type_index_precompute_delay() -> Option<std::time::Duration> {
     std::env::var("BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS")
@@ -394,6 +402,48 @@ impl BslLanguageServer {
                     ExactTypeIndexWaitOutcomeV2::ObservedVersionMismatch
                 } else {
                     ExactTypeIndexWaitOutcomeV2::Deadline
+                };
+            }
+
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+    }
+
+    pub(crate) async fn wait_for_current_completion_artifact_ready_v2(
+        &self,
+        file_id: V2FileId,
+        expected_version: Option<i32>,
+        max_wait: std::time::Duration,
+    ) -> CompletionArtifactWaitOutcomeV2 {
+        let deadline = tokio::time::Instant::now() + max_wait;
+        loop {
+            let analysis = self.analysis_v2.snapshot().await;
+            let observed_version = analysis.file_version(file_id).ok().flatten();
+            let version_matches = expected_version
+                .map(|version| observed_version == Some(version))
+                .unwrap_or(true);
+            if version_matches
+                && analysis
+                    .current_completion_head_ready(file_id)
+                    .ok()
+                    .unwrap_or(false)
+            {
+                return CompletionArtifactWaitOutcomeV2::HeadReady;
+            }
+            if version_matches
+                && analysis
+                    .current_type_index_serve_only_ready(file_id)
+                    .ok()
+                    .unwrap_or(false)
+            {
+                return CompletionArtifactWaitOutcomeV2::ExactReady;
+            }
+
+            if tokio::time::Instant::now() >= deadline {
+                return if expected_version.is_some_and(|version| observed_version != Some(version)) {
+                    CompletionArtifactWaitOutcomeV2::ObservedVersionMismatch
+                } else {
+                    CompletionArtifactWaitOutcomeV2::Deadline
                 };
             }
 

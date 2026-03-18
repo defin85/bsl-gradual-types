@@ -2233,6 +2233,238 @@ fn current_type_index_serve_only_ready_rejects_fallback_snapshot_artifact() {
 }
 
 #[test]
+fn current_completion_head_ready_requires_current_revision_artifact() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(216);
+    let text: Arc<str> = Arc::from(
+        "Процедура Тест()\n\
+             ДляCompletion = (Новый Массив()).\n\
+             КонецПроцедуры",
+    );
+
+    host.apply_change(Change::SetFile {
+        file_id,
+        text: text.clone(),
+        version: 1,
+        path: Arc::from("completion-head-ready.bsl"),
+    });
+
+    let analysis = host.snapshot();
+    assert!(
+        !analysis
+            .current_completion_head_ready(file_id)
+            .expect("head ready before query"),
+        "completion head readiness must stay false before current-revision artifact is materialized"
+    );
+    assert_eq!(
+        analysis
+            .completion_head_type_at_byte_offset(file_id, marker_tail_offset(text.as_ref(), "Новый Массив()"))
+            .expect("completion head query before publish"),
+        None,
+        "completion head query must fail closed until current-revision artifact is explicitly published"
+    );
+    assert!(
+        !analysis
+            .current_completion_head_ready(file_id)
+            .expect("head ready after fail-closed query"),
+        "completion head readiness must stay false after a fail-closed query"
+    );
+
+    let _ = analysis.ir(file_id).expect("materialize current ir");
+    let resolution = analysis
+        .completion_head_type_at_byte_offset(file_id, marker_tail_offset(text.as_ref(), "Новый Массив()"))
+        .expect("completion head query after publish")
+        .expect("completion head resolution after publish");
+    assert_eq!(resolution.type_name(), "Массив<Неопределено>");
+    assert!(
+        analysis
+            .current_completion_head_ready(file_id)
+            .expect("head ready after publish"),
+        "completion head readiness must become true after current-revision artifact materialization"
+    );
+}
+
+#[test]
+fn completion_head_query_uses_current_revision_and_does_not_serve_stale_artifact() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(217);
+    let text_v1: Arc<str> = Arc::from(
+        "Процедура Тест()\n\
+             ДляCompletion = (Новый Массив()).\n\
+             КонецПроцедуры",
+    );
+    let text_v2: Arc<str> = Arc::from(
+        "Процедура Тест()\n\
+             ЛокМассив = Новый Массив;\n\
+             ЛокМассив.\n\
+             КонецПроцедуры",
+    );
+
+    host.apply_change(Change::SetFile {
+        file_id,
+        text: text_v1.clone(),
+        version: 1,
+        path: Arc::from("completion-head-stale-v1.bsl"),
+    });
+
+    let probe_v1 = marker_tail_offset(text_v1.as_ref(), "Новый Массив()");
+    let resolution_v1 = {
+        let analysis_v1 = host.snapshot();
+        let _ = analysis_v1.ir(file_id).expect("materialize v1 ir");
+        analysis_v1
+            .completion_head_type_at_byte_offset(file_id, probe_v1)
+            .expect("completion head query v1")
+            .expect("completion head resolution v1")
+    };
+    assert_eq!(resolution_v1.type_name(), "Массив<Неопределено>");
+
+    host.apply_change(Change::SetFile {
+        file_id,
+        text: text_v2.clone(),
+        version: 2,
+        path: Arc::from("completion-head-stale-v2.bsl"),
+    });
+
+    let analysis_v2 = host.snapshot();
+    assert!(
+        !analysis_v2
+            .current_completion_head_ready(file_id)
+            .expect("head ready after version switch"),
+        "new revision must invalidate previous completion head artifact"
+    );
+
+    let probe_v2 = text_v2
+        .match_indices("ЛокМассив")
+        .nth(1)
+        .map(|(idx, marker)| idx + marker.len() - 1)
+        .expect("second ЛокМассив occurrence")
+        .min(u32::MAX as usize) as u32;
+    assert_eq!(
+        analysis_v2
+            .completion_head_type_at_byte_offset(file_id, probe_v2)
+            .expect("completion head query v2"),
+        None,
+        "completion head query must use current revision and fail closed instead of serving stale v1 artifact"
+    );
+}
+
+#[test]
+fn deps_and_settings_switch_invalidate_completion_head_artifacts() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(218);
+    let text: Arc<str> = Arc::from(
+        "Procedure Test()\n\
+             x = 1;\n\
+             x = x + 1;\n\
+             EndProcedure",
+    );
+
+    host.apply_change(Change::SetFile {
+        file_id,
+        text: text.clone(),
+        version: 1,
+        path: Arc::from("completion-head-invalidation.bsl"),
+    });
+    let probe = marker_offset(text.as_ref(), "x = x + 1;");
+    {
+        let analysis = host.snapshot();
+        let _ = analysis.ir(file_id).expect("materialize completion head ir");
+        assert!(
+            analysis
+                .completion_head_type_at_byte_offset(file_id, probe)
+                .expect("completion head query after publish")
+                .is_some(),
+            "published completion head artifact must be queryable"
+        );
+    }
+
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("deps-head-new"),
+        deps: default_semantic_deps(),
+    });
+    assert!(
+        !host.snapshot()
+            .current_completion_head_ready(file_id)
+            .expect("head ready after deps switch"),
+        "deps switch must invalidate cached completion head artifact"
+    );
+
+    host.apply_change(Change::SetSettingsSnapshot {
+        settings_id: SettingsId::from_hash("settings-head-new"),
+        diagnostics_detail_level: DetailLevel::Detailed,
+    });
+    assert!(
+        !host.snapshot()
+            .current_completion_head_ready(file_id)
+            .expect("head ready after settings switch"),
+        "settings switch must invalidate cached completion head artifact"
+    );
+}
+
+#[test]
+fn completion_head_previous_version_ir_reuse_publishes_current_revision_artifact() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(219);
+    let text: Arc<str> = Arc::from(
+        "Процедура Тест()\n\
+             ДляCompletion = (Новый Массив()).\n\
+             КонецПроцедуры",
+    );
+
+    host.apply_change(Change::SetFile {
+        file_id,
+        text: text.clone(),
+        version: 1,
+        path: Arc::from("completion-head-reuse-v1.bsl"),
+    });
+    {
+        let analysis_v1 = host.snapshot();
+        let _ = analysis_v1.ir(file_id).expect("materialize v1 ir");
+        assert!(
+            analysis_v1
+                .current_completion_head_ready(file_id)
+                .expect("head ready for v1"),
+            "v1 head artifact must be ready after publish"
+        );
+    }
+
+    host.apply_change(Change::SetFile {
+        file_id,
+        text: text.clone(),
+        version: 2,
+        path: Arc::from("completion-head-reuse-v2.bsl"),
+    });
+
+    let analysis_v2 = host.snapshot();
+    assert!(
+        !analysis_v2
+            .current_completion_head_ready(file_id)
+            .expect("head ready before reuse"),
+        "new revision must start without a current head artifact"
+    );
+    assert!(
+        analysis_v2
+            .try_publish_completion_head_from_previous_ir_reuse(file_id, 2, 1)
+            .expect("reuse previous-version ir"),
+        "identical-text current revision must reuse previous-version canonical ir"
+    );
+    assert!(
+        analysis_v2
+            .current_completion_head_ready(file_id)
+            .expect("head ready after reuse"),
+        "reuse must publish a current-revision head artifact"
+    );
+    assert_eq!(
+        analysis_v2
+            .completion_head_type_at_byte_offset(file_id, marker_tail_offset(text.as_ref(), "Новый Массив()"))
+            .expect("completion head query after reuse")
+            .map(|resolution| resolution.type_name().to_string()),
+        Some("Массив<Неопределено>".to_string()),
+        "reused current-revision head artifact must stay queryable"
+    );
+}
+
+#[test]
 fn serve_only_accepts_exact_full_parse_snapshots_for_stateful_lsp_reasons() {
     for (file_id, reason, path) in [
         (

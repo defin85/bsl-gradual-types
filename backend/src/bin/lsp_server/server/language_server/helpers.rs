@@ -248,25 +248,13 @@ pub(super) fn completion_member_access_owner_type_hints_from_current_revision_he
     let Some(file_content) = analysis.file_text(file_id).ok().flatten() else {
         return Vec::new();
     };
-    let Ok(deps) = analysis.deps_data() else {
-        return Vec::new();
-    };
-    let Some(file_path) = analysis.file_path(file_id).ok().flatten() else {
-        return Vec::new();
-    };
-    let resolver = deps.resolver.clone().unwrap_or_else(|| {
-        Arc::new(bsl_shared::domain::resolver::TypeResolver::new(
-            deps.repository.clone(),
-        ))
-    });
 
-    bsl_runtime::application::completion_member_access_owner_type_hints_from_head_receiver(
+    bsl_runtime::application::completion_member_access_owner_type_hints_from_completion_head(
+        analysis,
+        file_id,
         file_content.as_ref(),
         position.line,
         position.character,
-        file_path.as_ref(),
-        resolver.as_ref(),
-        deps.repository.as_ref(),
     )
 }
 

@@ -210,6 +210,45 @@ fn completion_member_access_owner_type_hints_from_analysis_internal(
     resolutions
 }
 
+pub fn completion_member_access_owner_type_hints_from_completion_head(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    file_content: &str,
+    line: u32,
+    column: u32,
+) -> Vec<TypeResolution> {
+    let Some(receiver_spans) = extract_member_access_receiver_spans(file_content, line, column) else {
+        return Vec::new();
+    };
+
+    let mut resolutions = Vec::new();
+    for span in receiver_spans {
+        let mut probe_offsets = Vec::with_capacity(2);
+        if span.end > span.start {
+            probe_offsets.push(span.end.saturating_sub(1));
+        }
+        probe_offsets.push(span.start);
+
+        for offset in &probe_offsets {
+            let resolution = analysis
+                .completion_head_type_at_byte_offset(file_id, *offset)
+                .ok()
+                .flatten();
+            let Some(resolution) =
+                resolution.filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
+            else {
+                continue;
+            };
+            if !resolutions.contains(&resolution) {
+                resolutions.push(resolution);
+            }
+            break;
+        }
+    }
+
+    resolutions
+}
+
 pub fn completion_member_access_owner_type_hints_from_static_receiver(
     file_content: &str,
     line: u32,

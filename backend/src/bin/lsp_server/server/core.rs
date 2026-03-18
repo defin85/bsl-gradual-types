@@ -37,6 +37,7 @@ use super::{
 mod capability_registration;
 #[path = "core/deps_and_precompute.rs"]
 mod deps_and_precompute;
+pub(crate) use deps_and_precompute::CompletionArtifactWaitOutcomeV2;
 pub(crate) use deps_and_precompute::ExactTypeIndexWaitOutcomeV2;
 #[path = "core/diagnostics_runtime.rs"]
 mod diagnostics_runtime;

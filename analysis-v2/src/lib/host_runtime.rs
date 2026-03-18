@@ -54,6 +54,59 @@ impl Default for AnalysisHostV2 {
 }
 
 impl AnalysisHostV2 {
+    fn reuse_completion_head_from_previous_version(
+        &mut self,
+        file_id: FileId,
+        expected_version: i32,
+        previous_version: i32,
+    ) {
+        let Some(&file) = self.files.get(&file_id) else {
+            return;
+        };
+        let current_version = file.version(&self.db);
+        if current_version != expected_version || previous_version >= expected_version {
+            return;
+        }
+
+        let deps_id = self.deps.id(&self.db).clone();
+        let settings_id = self.settings.id(&self.db).clone();
+        let current_key = crate::derived_artifacts::CompletionHeadArtifactKey::new(
+            file_id,
+            expected_version,
+            deps_id.clone(),
+            settings_id.clone(),
+        );
+        let mut cache = self
+            .derived_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if cache.get_completion_head_exact(&current_key).is_some() {
+            return;
+        }
+        let Some(reused) = cache.get_ir(file_id, previous_version, &deps_id, &settings_id) else {
+            return;
+        };
+        let head_artifact = Arc::new(crate::derived_artifacts::CompletionHeadArtifact::from_program(
+            reused.as_ref(),
+        ));
+        cache.store_ir(
+            file_id,
+            expected_version,
+            deps_id,
+            settings_id.clone(),
+            reused,
+        );
+        cache.store_completion_head(
+            crate::derived_artifacts::CompletionHeadArtifactKey::new(
+                file_id,
+                expected_version,
+                self.deps.id(&self.db).clone(),
+                settings_id,
+            ),
+            head_artifact,
+        );
+    }
+
     pub fn apply_change(&mut self, change: Change) -> TypeIndexCacheChangeEffects {
         let mut effects = TypeIndexCacheChangeEffects::default();
         match change {
@@ -82,6 +135,17 @@ impl AnalysisHostV2 {
                 );
                 effects.evicted_per_file_window_total = outcome.evicted_per_file_window_total;
             }
+            Change::ReuseCompletionHeadFromPreviousVersion {
+                file_id,
+                expected_version,
+                previous_version,
+            } => {
+                self.reuse_completion_head_from_previous_version(
+                    file_id,
+                    expected_version,
+                    previous_version,
+                );
+            }
             Change::RemoveFile { file_id } => {
                 self.files.remove(&file_id);
                 self.parse_snapshots.remove(&file_id);
@@ -93,11 +157,13 @@ impl AnalysisHostV2 {
             Change::SetDepsSnapshot { deps_id, deps } => {
                 self.deps.set_id(&mut self.db).to(deps_id.clone());
                 self.deps.set_data(&mut self.db).to(DepsDataSnapshot(deps));
-                effects.invalidated_deps_total = self
+                let mut cache = self
                     .derived_cache
                     .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .invalidate_type_index_for_deps(&deps_id);
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                effects.invalidated_deps_total = cache
+                    .invalidate_type_index_for_deps(&deps_id)
+                    .saturating_add(cache.invalidate_completion_head_for_deps(&deps_id));
             }
             Change::SetSettingsSnapshot {
                 settings_id,
@@ -107,11 +173,13 @@ impl AnalysisHostV2 {
                 self.settings
                     .set_diagnostics_detail_level(&mut self.db)
                     .to(diagnostics_detail_level);
-                effects.invalidated_settings_total = self
+                let mut cache = self
                     .derived_cache
                     .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .invalidate_type_index_for_settings(&settings_id);
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                effects.invalidated_settings_total = cache
+                    .invalidate_type_index_for_settings(&settings_id)
+                    .saturating_add(cache.invalidate_completion_head_for_settings(&settings_id));
             }
         }
         effects
@@ -200,4 +268,3 @@ impl AnalysisHostV2 {
         self.snapshot()
     }
 }
-

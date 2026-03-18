@@ -113,6 +113,9 @@ impl IntellisenseV2Facade {
                                     Change::SetFileWithSnapshot { .. } => {
                                         Some("apply_change_set_file_with_snapshot")
                                     }
+                                    Change::ReuseCompletionHeadFromPreviousVersion { .. } => {
+                                        Some("apply_change_reuse_completion_head_from_previous_version")
+                                    }
                                     Change::RemoveFile { .. } => Some("apply_change_remove_file"),
                                     Change::SetSettingsSnapshot { .. } => {
                                         Some("apply_change_set_settings_snapshot")
@@ -137,6 +140,7 @@ impl IntellisenseV2Facade {
                                         applied_file_revisions.remove(file_id);
                                         changed_files.push(*file_id);
                                     }
+                                    Change::ReuseCompletionHeadFromPreviousVersion { .. } => {}
                                     Change::SetDepsSnapshot { .. } => {
                                         warn!("analysis_v2_runtime: ignoring SetDepsSnapshot in ApplyChanges; use ApplyDepsBundle to keep index_snapshot in sync");
                                         continue;

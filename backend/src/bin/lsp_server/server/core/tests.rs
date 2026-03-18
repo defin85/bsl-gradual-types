@@ -53,6 +53,15 @@ fn init_test_tracing() {
 static PRECOMPUTE_DELAY_ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> =
     std::sync::OnceLock::new();
 
+fn lock_test_env_mutex(
+    mutex: &'static std::sync::OnceLock<std::sync::Mutex<()>>,
+) -> std::sync::MutexGuard<'static, ()> {
+    mutex
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 const UNIFIED_STAGE_COUNTER_KEYS: &[&str] = &[
     "intellisense_v2_runtime_wait_for_file_version_queue_wait_total",
     "intellisense_v2_runtime_wait_for_file_version_exec_total",
@@ -13223,6 +13232,16 @@ async fn force_current_revision_without_exact_type_index(
         !exact_ready,
         "test setup must create current-revision semantic-index miss"
     );
+    let _ = server.analysis_v2.snapshot().await.ir(file_id);
+    assert!(
+        server
+            .analysis_v2
+            .snapshot()
+            .await
+            .current_completion_head_ready(file_id)
+            .expect("current_completion_head_ready"),
+        "test setup must publish current-revision completion head artifact"
+    );
 }
 
 #[tokio::test]
@@ -13806,7 +13825,7 @@ async fn p33_completion_current_revision_head_ignores_did_change_inline_parse_de
 }
 
 #[tokio::test]
-async fn p33_completion_exact_wait_deadline_then_recovery_after_precompute_finish() {
+async fn p33_completion_head_hit_then_upgrade_after_precompute_finish() {
     struct EnvVarGuard {
         key: &'static str,
         previous: Option<String>,
@@ -13833,10 +13852,7 @@ async fn p33_completion_exact_wait_deadline_then_recovery_after_precompute_finis
     const FIXTURE: &str =
         "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
 
-    let _env_lock = PRECOMPUTE_DELAY_ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("precompute delay env lock");
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK);
     let wait_budget_ms = bsl_runtime::system::global_runtime_config()
         .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
         .unwrap_or(120);
@@ -13932,16 +13948,12 @@ async fn p33_completion_exact_wait_deadline_then_recovery_after_precompute_finis
         lsp_completion_labels_at(&mut service, &uri, completion_position).await;
     let first_elapsed = first_started.elapsed();
     assert!(
-        first_completion_labels.is_empty(),
-        "first member-access completion must fail closed while matching exact precompute is still computing, labels={first_completion_labels:?}"
+        first_completion_labels.iter().any(|label| label == "Количество"),
+        "first member-access completion must serve typed-structure members from current-revision head while matching exact precompute is still computing, labels={first_completion_labels:?}"
     );
     assert!(
-        first_elapsed >= Duration::from_millis(wait_budget_ms.saturating_sub(30)),
-        "first fail-closed completion should spend the exact wait budget before returning (elapsed={first_elapsed:?}, budget_ms={wait_budget_ms})"
-    );
-    assert!(
-        first_elapsed <= Duration::from_millis(wait_budget_ms.saturating_add(300)),
-        "first fail-closed completion should stay bounded near exact wait budget (elapsed={first_elapsed:?}, budget_ms={wait_budget_ms})"
+        first_elapsed < Duration::from_millis(250),
+        "first head-path completion should stay bounded while exact precompute runs in background (elapsed={first_elapsed:?}, budget_ms={wait_budget_ms})"
     );
 
     wait_for_type_index_precompute_completion(&server, file_id).await;
@@ -13950,7 +13962,7 @@ async fn p33_completion_exact_wait_deadline_then_recovery_after_precompute_finis
         lsp_completion_labels_at(&mut service, &uri, completion_position).await;
     assert!(
         second_completion_labels.iter().any(|label| label == "Количество"),
-        "second member-access completion must recover typed-structure members once exact precompute finishes, labels={second_completion_labels:?}"
+        "member-access completion must keep typed-structure members available after exact precompute finishes, labels={second_completion_labels:?}"
     );
     let timeline = lsp_get_completion_timeline(&mut service, 402, 10).await;
     let traces = timeline
@@ -13959,17 +13971,19 @@ async fn p33_completion_exact_wait_deadline_then_recovery_after_precompute_finis
         .expect("completion timeline traces array");
     let first_trace = traces
         .get(traces.len().saturating_sub(2))
-        .expect("first exact-wait completion trace");
-    let second_trace = traces.last().expect("second exact-wait completion trace");
+        .expect("first head-hit completion trace");
+    let second_trace = traces.last().expect("second completion trace after exact precompute");
     assert_eq!(
-        completion_timeline_prepare_detail_str(first_trace, "fail_closed_cause"),
-        Some("exact_deadline"),
-        "fail-closed completion trace must expose bounded exact-deadline attribution, trace={first_trace:?}"
+        completion_timeline_prepare_detail_str(first_trace, "route"),
+        Some("head_hit"),
+        "first completion trace must expose current-revision head route while exact precompute is still computing, trace={first_trace:?}"
     );
-    assert_eq!(
-        completion_timeline_prepare_detail_str(second_trace, "route"),
-        Some("exact_hit"),
-        "recovered completion trace must expose exact-hit route after exact precompute finishes, trace={second_trace:?}"
+    assert!(
+        matches!(
+            completion_timeline_prepare_detail_str(second_trace, "route"),
+            Some("head_hit" | "exact_hit")
+        ),
+        "completion after exact precompute must stay on canonical head/exact route, trace={second_trace:?}"
     );
 
     let metrics = coordinator.observability_metrics();
@@ -13977,43 +13991,43 @@ async fn p33_completion_exact_wait_deadline_then_recovery_after_precompute_finis
         .get("counters")
         .and_then(|value| value.as_object())
         .expect("metrics.counters object");
-    assert!(
+    assert_eq!(
         read_u64_metric(
             counters.get(
                 "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_deadline"
             )
-        ) > 0,
-        "first completion must record exact-wait deadline outcome, counters={counters:?}"
+        ),
+        0,
+        "typed-structure head path must not regress into exact-deadline fail-closed, counters={counters:?}"
     );
     assert_eq!(
         read_u64_metric(
             counters.get("intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_no_matching_task")
         ),
         0,
-        "matching precompute recovery scenario must not degrade to no_matching_task, counters={counters:?}"
+        "typed-structure head path must not degrade to no_matching_task while exact precompute is present, counters={counters:?}"
     );
     assert_eq!(
         read_u64_metric(
             counters.get("intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_task_present_wrong_version")
         ),
         0,
-        "matching precompute recovery scenario must not report wrong_version, counters={counters:?}"
+        "typed-structure head path must not report wrong_version while serving current revision, counters={counters:?}"
     );
-    assert!(
-        read_u64_metric(
-            counters.get("intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_ready")
-        ) > 0,
-        "second completion must observe ready exact-wait outcome after precompute completion, counters={counters:?}"
-    );
-    assert!(
+    assert_eq!(
         read_u64_metric(
             counters.get("intellisense_v2_completion_fail_closed_cause_total_cause_exact_deadline")
-        ) > 0,
-        "first completion must attribute fail-closed completion to exact-deadline, counters={counters:?}"
+        ),
+        0,
+        "typed-structure head path must not attribute completion to exact-deadline once head artifact is available, counters={counters:?}"
     );
     assert!(
-        read_u64_metric(counters.get("intellisense_v2_completion_route_total_route_exact_hit")) > 0,
-        "recovered completion must record exact-hit route after exact precompute finishes, counters={counters:?}"
+        read_u64_metric(counters.get("intellisense_v2_completion_route_total_route_head_hit")) > 0,
+        "typed-structure head path must record head-hit route before exact upgrade, counters={counters:?}"
+    );
+    assert!(
+        read_u64_metric(counters.get("intellisense_v2_completion_head_to_exact_upgrade_total")) > 0,
+        "background exact precompute must still record head-to-exact upgrade for the same revision, counters={counters:?}"
     );
 
     drain_task.abort();
@@ -14046,10 +14060,7 @@ async fn p33_completion_head_hit_emits_exact_upgrade_when_background_exact_finis
 
     const FIXTURE: &str = "Процедура Тест()\n    Результат = (Новый Массив()).\nКонецПроцедуры\n";
 
-    let _env_lock = PRECOMPUTE_DELAY_ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("precompute delay env lock");
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK);
     let _precompute_delay_guard =
         EnvVarGuard::set("BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS", "200");
     let coordinator = Arc::new(SystemCoordinator::new());
@@ -14199,10 +14210,7 @@ async fn p33_completion_head_and_exact_resolve_keep_candidate_id_stable_for_same
 
     const FIXTURE: &str = "Процедура Тест()\n    Результат = (Новый Массив()).\nКонецПроцедуры\n";
 
-    let _env_lock = PRECOMPUTE_DELAY_ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("precompute delay env lock");
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK);
     let _precompute_delay_guard =
         EnvVarGuard::set("BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS", "200");
     let coordinator = Arc::new(SystemCoordinator::new());
@@ -14375,10 +14383,7 @@ async fn p33_completion_resolve_stays_bound_to_origin_revision() {
 
     const FIXTURE: &str = "Процедура Тест()\n    Результат = (Новый Массив()).\nКонецПроцедуры\n";
 
-    let _env_lock = PRECOMPUTE_DELAY_ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("precompute delay env lock");
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK);
     let _precompute_delay_guard =
         EnvVarGuard::set("BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS", "200");
     let coordinator = Arc::new(SystemCoordinator::new());
@@ -14525,7 +14530,7 @@ async fn p33_completion_resolve_stays_bound_to_origin_revision() {
 }
 
 #[tokio::test]
-async fn p33_completion_exact_wait_deadline_recovery_perf_report() {
+async fn p33_completion_head_upgrade_perf_report() {
     struct EnvVarGuard {
         key: &'static str,
         previous: Option<String>,
@@ -14551,12 +14556,9 @@ async fn p33_completion_exact_wait_deadline_recovery_perf_report() {
 
     const FIXTURE: &str =
         "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
-    const PROFILE_NAME: &str = "p33_completion_exact_wait_deadline_recovery_perf_report";
+    const PROFILE_NAME: &str = "p33_completion_head_upgrade_perf_report";
 
-    let _env_lock = PRECOMPUTE_DELAY_ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("precompute delay env lock");
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK);
     let wait_budget_ms = bsl_runtime::system::global_runtime_config()
         .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
         .unwrap_or(120);
@@ -14652,8 +14654,12 @@ async fn p33_completion_exact_wait_deadline_recovery_perf_report() {
         lsp_completion_labels_at(&mut service, &uri, completion_position).await;
     let first_elapsed_ms = first_started.elapsed().as_millis() as u64;
     assert!(
-        first_completion_labels.is_empty(),
-        "first member-access completion must fail closed while matching exact precompute is still computing, labels={first_completion_labels:?}"
+        first_completion_labels.iter().any(|label| label == "Количество"),
+        "first member-access completion must serve typed-structure members from current-revision head while matching exact precompute is still computing, labels={first_completion_labels:?}"
+    );
+    assert!(
+        first_elapsed_ms < 250,
+        "first head-path completion must stay bounded while exact precompute runs in background, elapsed_ms={first_elapsed_ms}"
     );
 
     wait_for_type_index_precompute_completion(&server, file_id).await;
@@ -14664,7 +14670,11 @@ async fn p33_completion_exact_wait_deadline_recovery_perf_report() {
     let second_elapsed_ms = second_started.elapsed().as_millis() as u64;
     assert!(
         second_completion_labels.iter().any(|label| label == "Количество"),
-        "second member-access completion must recover typed-structure members once exact precompute finishes, labels={second_completion_labels:?}"
+        "member-access completion must keep typed-structure members available after exact precompute finishes, labels={second_completion_labels:?}"
+    );
+    assert!(
+        second_elapsed_ms < 250,
+        "second completion must stay bounded after exact precompute finishes, elapsed_ms={second_elapsed_ms}"
     );
 
     let completion_timeline = lsp_get_completion_timeline(&mut service, 13321, 10).await;
@@ -14754,6 +14764,12 @@ async fn p33_completion_exact_wait_deadline_recovery_perf_report() {
         read_u64_metric(counters.get("intellisense_v2_completion_result_total_fail_closed"));
     let ok_non_empty_total =
         read_u64_metric(counters.get("intellisense_v2_completion_result_total_ok_non_empty"));
+    let head_hit_total =
+        read_u64_metric(counters.get("intellisense_v2_completion_route_total_route_head_hit"));
+    let exact_hit_total =
+        read_u64_metric(counters.get("intellisense_v2_completion_route_total_route_exact_hit"));
+    let head_to_exact_upgrade_total =
+        read_u64_metric(counters.get("intellisense_v2_completion_head_to_exact_upgrade_total"));
 
     let selected_observability = serde_json::json!({
         "completion_duration_ms": histogram_metric_value(histograms, "completion_duration_ms", None),
@@ -14787,6 +14803,9 @@ async fn p33_completion_exact_wait_deadline_recovery_perf_report() {
             "completion_stage_response_build_ms",
             None
         ),
+        "intellisense_v2_completion_route_total_route_head_hit": head_hit_total,
+        "intellisense_v2_completion_route_total_route_exact_hit": exact_hit_total,
+        "intellisense_v2_completion_head_to_exact_upgrade_total": head_to_exact_upgrade_total,
         "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_deadline": deadline_total,
         "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_ready": ready_total,
         "intellisense_v2_completion_fallback_unavailable_total": read_u64_metric(
@@ -14810,13 +14829,13 @@ async fn p33_completion_exact_wait_deadline_recovery_perf_report() {
         },
         "requests": {
             "first": {
-                "expected_behavior": "fail_closed_deadline",
+                "expected_behavior": "ok_non_empty_head_hit_while_exact_computes",
                 "elapsed_ms": first_elapsed_ms,
                 "label_count": first_completion_labels.len(),
                 "labels": first_completion_labels,
             },
             "second": {
-                "expected_behavior": "ok_non_empty_after_recovery",
+                "expected_behavior": "ok_non_empty_after_exact_upgrade",
                 "elapsed_ms": second_elapsed_ms,
                 "label_count": second_completion_labels.len(),
                 "labels": second_completion_labels,
@@ -14836,6 +14855,9 @@ async fn p33_completion_exact_wait_deadline_recovery_perf_report() {
             "second_wait_exact_type_index_ms": second_wait_exact_type_index_ms,
             "second_query_bundle_ms": second_query_bundle_ms,
             "second_collect_ms": second_collect_ms,
+            "head_hit_total": head_hit_total,
+            "exact_hit_total": exact_hit_total,
+            "head_to_exact_upgrade_total": head_to_exact_upgrade_total,
             "deadline_total": deadline_total,
             "ready_total": ready_total,
             "no_matching_task_total": no_matching_task_total,
@@ -14860,7 +14882,7 @@ async fn p33_completion_exact_wait_deadline_recovery_perf_report() {
                 .join("tests")
                 .join("perf")
                 .join("reports")
-                .join("completion-deadline-recovery-perf.json")
+                .join("completion-head-upgrade-perf.json")
         });
     if let Some(parent) = report_path.parent() {
         std::fs::create_dir_all(parent)
@@ -14875,13 +14897,25 @@ async fn p33_completion_exact_wait_deadline_recovery_perf_report() {
 
     assert_eq!(
         first_trace.get("outcome").and_then(|value| value.as_str()),
-        Some("fail_closed"),
-        "first perf trace must capture fail_closed outcome, trace={first_trace:?}"
+        Some("ok_non_empty"),
+        "first perf trace must capture ok_non_empty head response, trace={first_trace:?}"
     );
     assert_eq!(
         second_trace.get("outcome").and_then(|value| value.as_str()),
         Some("ok_non_empty"),
-        "second perf trace must capture recovery outcome, trace={second_trace:?}"
+        "second perf trace must capture post-upgrade completion outcome, trace={second_trace:?}"
+    );
+    assert_eq!(
+        completion_timeline_prepare_detail_str(first_trace, "route"),
+        Some("head_hit"),
+        "first perf trace must capture head-hit route while exact precompute is still computing, trace={first_trace:?}"
+    );
+    assert!(
+        matches!(
+            completion_timeline_prepare_detail_str(second_trace, "route"),
+            Some("head_hit" | "exact_hit")
+        ),
+        "second perf trace must stay on canonical head/exact route after upgrade, trace={second_trace:?}"
     );
 
     drain_task.abort();

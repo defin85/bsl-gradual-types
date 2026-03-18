@@ -15,7 +15,8 @@ mod derived_artifacts;
 mod implicit_bindings;
 mod type_inference_v2;
 use derived_artifacts::{
-    DerivedArtifactsCache, TypeIndexArtifact, TypeIndexArtifactKey, TypeIndexParseSnapshotMeta,
+    CompletionHeadArtifactKey, DerivedArtifactsCache, TypeIndexArtifact, TypeIndexArtifactKey,
+    TypeIndexParseSnapshotMeta,
     TypeIndexStoreOutcome,
 };
 
@@ -136,6 +137,11 @@ pub enum Change {
         version: i32,
         path: Arc<str>,
         parse_snapshot: ParseSnapshot,
+    },
+    ReuseCompletionHeadFromPreviousVersion {
+        file_id: FileId,
+        expected_version: i32,
+        previous_version: i32,
     },
     RemoveFile {
         file_id: FileId,

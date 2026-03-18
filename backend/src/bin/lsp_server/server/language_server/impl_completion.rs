@@ -922,17 +922,20 @@ impl BslLanguageServer {
                     }
 
                     let mut refreshed_snapshot_after_wait = None;
-                    let current_revision_head_owner_type_hints = if member_access_request {
-                        completion_member_access_owner_type_hints_from_current_revision_head(
-                            &prepared.snapshot.analysis,
-                            file_id,
-                            position,
+                    let exact_wait_budget =
+                        bsl_runtime::application::intellisense_v2::interactive_freshness_knobs(
+                            bsl_runtime::application::SemanticOperation::Completion,
+                            Some(self.coordinator.as_ref()),
                         )
-                    } else {
-                        Vec::new()
-                    };
-                    let head_route_candidate =
-                        member_access_request && !current_revision_head_owner_type_hints.is_empty();
+                        .map(|knobs| knobs.wait_budget)
+                        .unwrap_or_default();
+                    let mut head_ready = member_access_request
+                        && prepared
+                            .snapshot
+                            .analysis
+                            .current_completion_head_ready(file_id)
+                            .ok()
+                            .unwrap_or(false);
                     let exact_ready_before_wait = prepared
                         .snapshot
                         .analysis
@@ -940,14 +943,107 @@ impl BslLanguageServer {
                         .ok()
                         .unwrap_or(false);
                     let mut exact_hit_candidate = false;
-                    if member_access_request && current_revision_head_owner_type_hints.is_empty() {
-                        let exact_wait_budget =
-                            bsl_runtime::application::intellisense_v2::interactive_freshness_knobs(
-                                bsl_runtime::application::SemanticOperation::Completion,
-                                Some(self.coordinator.as_ref()),
+                    if member_access_request && !head_ready && !exact_ready_before_wait {
+                        if let Some(apply_age) = completion_apply_age_for_file(self, file_id).await
+                        {
+                            self.coordinator.record_completion_stage_latency(
+                                "exact_wait_apply_age_at_start",
+                                apply_age,
+                            );
+                        }
+                        let exact_wait_started = Instant::now();
+                        let artifact_wait_outcome = self
+                            .wait_for_current_completion_artifact_ready_v2(
+                                file_id,
+                                Some(expected_version),
+                                exact_wait_budget,
                             )
-                            .map(|knobs| knobs.wait_budget)
-                            .unwrap_or_default();
+                            .await;
+                        let exact_wait_elapsed = exact_wait_started.elapsed();
+                        self.coordinator.record_completion_stage_latency(
+                            "wait_exact_type_index",
+                            exact_wait_elapsed,
+                        );
+                        timeline_capture
+                            .push_completed_stage("wait_exact_type_index", exact_wait_elapsed);
+
+                        match artifact_wait_outcome {
+                            super::super::core::CompletionArtifactWaitOutcomeV2::HeadReady => {
+                                head_ready = true;
+                            }
+                            super::super::core::CompletionArtifactWaitOutcomeV2::ExactReady => {
+                                if let Some(apply_age) =
+                                    completion_apply_age_for_file(self, file_id).await
+                                {
+                                    self.coordinator.record_completion_stage_latency(
+                                        "exact_wait_apply_age_at_terminal",
+                                        apply_age,
+                                    );
+                                }
+                                self.coordinator
+                                    .record_intellisense_v2_completion_exact_type_index_wait_outcome(
+                                        super::super::core::ExactTypeIndexWaitOutcomeV2::Ready
+                                            .as_str(),
+                                    );
+                                exact_hit_candidate = true;
+                                refreshed_snapshot_after_wait =
+                                    Some(self.analysis_v2.snapshot_with_deps().await);
+                            }
+                            super::super::core::CompletionArtifactWaitOutcomeV2::Deadline
+                            | super::super::core::CompletionArtifactWaitOutcomeV2::ObservedVersionMismatch => {
+                                if let Some(apply_age) =
+                                    completion_apply_age_for_file(self, file_id).await
+                                {
+                                    self.coordinator.record_completion_stage_latency(
+                                        "exact_wait_apply_age_at_terminal",
+                                        apply_age,
+                                    );
+                                }
+                                let terminal_outcome = if matches!(
+                                    artifact_wait_outcome,
+                                    super::super::core::CompletionArtifactWaitOutcomeV2::ObservedVersionMismatch
+                                ) {
+                                    super::super::core::ExactTypeIndexWaitOutcomeV2::ObservedVersionMismatch
+                                } else {
+                                    super::super::core::ExactTypeIndexWaitOutcomeV2::Deadline
+                                };
+                                self.coordinator
+                                    .record_intellisense_v2_completion_exact_type_index_wait_outcome(
+                                        terminal_outcome.as_str(),
+                                    );
+                                if terminal_outcome
+                                    == super::super::core::ExactTypeIndexWaitOutcomeV2::Deadline
+                                {
+                                    timeline_capture.set_prepare_fail_closed_cause("exact_deadline");
+                                    self.coordinator
+                                        .record_intellisense_v2_completion_fail_closed_cause(
+                                            "exact_deadline",
+                                        );
+                                }
+                                self.coordinator
+                                    .record_intellisense_v2_completion_fallback_unavailable();
+                                completion_outcome.get_or_insert("wait_not_ready");
+                                break 'completion_flow Some(completion_empty_response(false));
+                            }
+                        }
+                    }
+                    let current_revision_head_owner_type_hints =
+                        if member_access_request && head_ready {
+                            completion_member_access_owner_type_hints_from_current_revision_head(
+                                &prepared.snapshot.analysis,
+                                file_id,
+                                position,
+                            )
+                        } else {
+                            Vec::new()
+                        };
+                    let head_route_candidate =
+                        member_access_request && !current_revision_head_owner_type_hints.is_empty();
+                    if member_access_request
+                        && current_revision_head_owner_type_hints.is_empty()
+                        && !exact_ready_before_wait
+                        && !exact_hit_candidate
+                    {
                         if let Some(apply_age) = completion_apply_age_for_file(self, file_id).await
                         {
                             self.coordinator.record_completion_stage_latency(

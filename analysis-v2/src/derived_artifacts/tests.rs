@@ -18,6 +18,12 @@ fn test_artifact(produced_at_millis: u128) -> Arc<TypeIndexArtifact> {
     })
 }
 
+fn head_artifact() -> Arc<CompletionHeadArtifact> {
+    Arc::new(CompletionHeadArtifact {
+        entries: Arc::new(Vec::new()),
+    })
+}
+
 #[test]
 fn type_index_retention_keeps_latest_two_versions_per_identity() {
     let mut cache = DerivedArtifactsCache::default();
@@ -117,4 +123,28 @@ fn ir_cache_distinguishes_settings_identity() {
             .expect("ir for settings B"),
         &program_b
     ));
+}
+
+#[test]
+fn completion_head_cache_distinguishes_settings_identity() {
+    let mut cache = DerivedArtifactsCache::default();
+    let file_id = FileId(9);
+    let deps_id = DepsSnapshotId::from_hash("deps-head-test");
+    let settings_a = SettingsId::from_hash("settings-a");
+    let settings_b = SettingsId::from_hash("settings-b");
+
+    let key_a = CompletionHeadArtifactKey::new(file_id, 1, deps_id.clone(), settings_a.clone());
+    let key_b = CompletionHeadArtifactKey::new(file_id, 1, deps_id.clone(), settings_b.clone());
+
+    cache.store_completion_head(key_a.clone(), head_artifact());
+    cache.store_completion_head(key_b.clone(), head_artifact());
+
+    assert!(
+        cache.get_completion_head_exact(&key_a).is_some(),
+        "completion head for settings A must remain addressable"
+    );
+    assert!(
+        cache.get_completion_head_exact(&key_b).is_some(),
+        "completion head for settings B must remain addressable"
+    );
 }

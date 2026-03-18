@@ -1,5 +1,31 @@
 use super::*;
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
+
+#[cfg(test)]
+static DID_CHANGE_PARSE_DELAY_ACTIVE: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(test)]
+async fn maybe_inject_did_change_parse_delay() {
+    if let Some(delay_ms) = std::env::var("BSL_TEST_DID_CHANGE_PARSE_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+    {
+        DID_CHANGE_PARSE_DELAY_ACTIVE.fetch_add(1, Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+        DID_CHANGE_PARSE_DELAY_ACTIVE.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+#[cfg(not(test))]
+async fn maybe_inject_did_change_parse_delay() {}
+
+#[cfg(test)]
+pub(super) fn did_change_inline_parse_delay_active_for_test() -> bool {
+    DID_CHANGE_PARSE_DELAY_ACTIVE.load(Ordering::SeqCst) > 0
+}
 
 impl BslLanguageServer {
     pub(super) async fn lsp_did_open(&self, params: DidOpenTextDocumentParams) {
@@ -314,6 +340,21 @@ impl BslLanguageServer {
                 text: updated_text.clone(),
             },
         );
+        self.latest_apply_enqueued_at_v2
+            .write()
+            .await
+            .insert(file_id, Instant::now());
+        // Publish current-revision text/version immediately so completion waiters do not sit
+        // behind synchronous parse work on the didChange path.
+        self.analysis_v2.apply_changes_interactive(
+            bsl_runtime::application::ObservabilityOrigin::Lsp,
+            vec![bsl_analysis_v2::Change::SetFile {
+                file_id,
+                text: updated_text.clone(),
+                version,
+                path: path.clone(),
+            }],
+        );
         let parse_snapshot = if large_churn_active {
             // Under large+churn we must not keep synchronous parse work on the didChange path.
             self.coordinator.record_intellisense_v2_parse_snapshot(
@@ -326,6 +367,7 @@ impl BslLanguageServer {
             );
             None
         } else {
+            maybe_inject_did_change_parse_delay().await;
             self.coordinator
                 .parser_coordinator()
                 .and_then(|parser| {
@@ -387,29 +429,18 @@ impl BslLanguageServer {
                     }
                 })
         };
-        self.latest_apply_enqueued_at_v2
-            .write()
-            .await
-            .insert(file_id, Instant::now());
-        self.analysis_v2.apply_changes_interactive(
-            bsl_runtime::application::ObservabilityOrigin::Lsp,
-            vec![if let Some(parse_snapshot) = parse_snapshot {
-                bsl_analysis_v2::Change::SetFileWithSnapshot {
+        if let Some(parse_snapshot) = parse_snapshot {
+            self.analysis_v2.apply_changes_interactive(
+                bsl_runtime::application::ObservabilityOrigin::Lsp,
+                vec![bsl_analysis_v2::Change::SetFileWithSnapshot {
                     file_id,
                     text: updated_text,
                     version,
                     path,
                     parse_snapshot,
-                }
-            } else {
-                bsl_analysis_v2::Change::SetFile {
-                    file_id,
-                    text: updated_text,
-                    version,
-                    path,
-                }
-            }],
-        );
+                }],
+            );
+        }
         self.schedule_type_index_precompute_v2(file_id, version)
             .await;
 

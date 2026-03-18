@@ -13,7 +13,13 @@ impl BslLanguageServer {
             let deps = if let Ok(resolve_uri) = Url::parse(&resolve_context.file_uri) {
                 if let Some(file_id) = self.get_file_id_v2(&resolve_uri).await {
                     let analysis = self.analysis_v2.snapshot().await;
-                    let current_file_version = analysis.file_version(file_id).ok().flatten();
+                    let current_file_version = self
+                        .latest_received_file_versions_v2
+                        .read()
+                        .await
+                        .get(&file_id)
+                        .copied()
+                        .or_else(|| analysis.file_version(file_id).ok().flatten());
                     let current_deps_id = analysis.deps_id().ok();
                     let current_settings_id = analysis.settings_id().ok();
                     let matches_context = current_file_version

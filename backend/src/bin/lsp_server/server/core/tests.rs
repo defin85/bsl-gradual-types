@@ -13611,6 +13611,200 @@ async fn p33_form_module_head_path_skips_ir_query_delay_when_owner_hints_are_rea
     drain_task.abort();
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn p33_completion_current_revision_head_ignores_did_change_inline_parse_delay() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    fn extract_completion_labels(
+        response: tower_lsp::lsp_types::CompletionResponse,
+    ) -> Vec<String> {
+        match response {
+            tower_lsp::lsp_types::CompletionResponse::Array(items) => {
+                items.into_iter().map(|item| item.label).collect()
+            }
+            tower_lsp::lsp_types::CompletionResponse::List(list) => {
+                list.items.into_iter().map(|item| item.label).collect()
+            }
+        }
+    }
+
+    const FIXTURE: &str = "Процедура Тест()\n    ДляCompletion = Объект.\nКонецПроцедуры\n";
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+    let _parse_delay_guard = EnvVarGuard::set("BSL_TEST_DID_CHANGE_PARSE_DELAY_MS", "1500");
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let uri = Url::parse("file:///Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl")
+        .expect("form module uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: FIXTURE.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    server.sync_v2_globals().await;
+
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    let did_change = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version: 2,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: None,
+            range_length: None,
+            text: FIXTURE.to_string(),
+        }],
+    };
+    let did_change_server = server.clone();
+    let did_change_handle = tokio::spawn(async move {
+        did_change_server.did_change(did_change).await;
+    });
+
+    tokio::time::timeout(Duration::from_millis(800), async {
+        loop {
+            if super::super::language_server::did_change_inline_parse_delay_active_for_test()
+                && server
+                    .latest_received_file_versions_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .copied()
+                    == Some(2)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("didChange must enter delayed inline parse window");
+    assert_eq!(
+        server
+            .analysis_v2
+            .file_revision_state(file_id)
+            .await
+            .map(|state| state.version),
+        Some(2),
+        "current-revision apply must reach analysis runtime before delayed inline parse completes"
+    );
+
+    let completion_position = find_utf16_position_after_marker(FIXTURE, "ДляCompletion = Объект.");
+    let started = Instant::now();
+    let completion_response = server
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: completion_position,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: Some(CompletionContext {
+                trigger_kind: CompletionTriggerKind::INVOKED,
+                trigger_character: None,
+            }),
+        })
+        .await
+        .expect("completion request")
+        .expect("completion response");
+    let elapsed = started.elapsed();
+    let completion_labels = extract_completion_labels(completion_response);
+    assert!(
+        completion_labels.iter().any(|label| label == "Ссылка"),
+        "current-revision head path must stay available while didChange inline parse is delayed, labels={completion_labels:?}"
+    );
+    assert!(
+        elapsed < Duration::from_millis(250),
+        "head-path completion must not wait for delayed didChange inline parse to finish (elapsed={elapsed:?})"
+    );
+    assert!(
+        !did_change_handle.is_finished(),
+        "completion must finish before delayed didChange inline parse completes"
+    );
+
+    did_change_handle.await.expect("didChange join");
+
+    let timeline = lsp_get_completion_timeline(&mut service, 405, 10).await;
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("completion timeline traces array");
+    let trace = traces
+        .last()
+        .expect("completion trace after delayed didChange inline parse");
+    assert_eq!(
+        completion_timeline_prepare_detail_str(trace, "route"),
+        Some("head_hit"),
+        "current-revision completion must still expose head_hit route while didChange parse remains in-flight, trace={trace:?}"
+    );
+
+    drain_task.abort();
+}
+
 #[tokio::test]
 async fn p33_completion_exact_wait_deadline_then_recovery_after_precompute_finish() {
     struct EnvVarGuard {

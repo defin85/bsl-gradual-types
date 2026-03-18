@@ -115,4 +115,51 @@ suite('Client Options Test Suite', () => {
             clock.restore();
         }
     });
+
+    test('default LanguageClient path records cancelled terminal state when token is cancelled before empty completion resolves', async () => {
+        const clock = sinon.useFakeTimers({ now: 1_700_000_030_000 });
+        const recorder = new CompletionProbeRecorder({
+            store: new CompletionProbeStore(4),
+        });
+        const outputChannel = {
+            appendLine: sinon.stub(),
+        } as unknown as vscode.OutputChannel;
+        const document = createDocument(11, 'Документы.');
+        const options = buildClientOptions(outputChannel, recorder);
+        const provideCompletionItem = options.middleware?.provideCompletionItem;
+        const cancellationSource = new vscode.CancellationTokenSource();
+
+        assert.ok(
+            provideCompletionItem,
+            'default client path must expose provideCompletionItem middleware'
+        );
+
+        try {
+            const result = await provideCompletionItem!(
+                document,
+                new vscode.Position(0, 'Документы.'.length),
+                {
+                    triggerKind: vscode.CompletionTriggerKind.Invoke,
+                    triggerCharacter: undefined,
+                },
+                cancellationSource.token,
+                async () => {
+                    await clock.tickAsync(5);
+                    cancellationSource.cancel();
+                    await clock.tickAsync(2);
+                    return [] as vscode.CompletionItem[];
+                }
+            );
+
+            assert.deepStrictEqual(result, []);
+
+            const snapshot = recorder.snapshot();
+            assert.strictEqual(snapshot.length, 1);
+            assert.strictEqual(snapshot[0].client_terminal_state, 'cancelled');
+            assert.strictEqual(snapshot[0].client_duration_ms, 7);
+        } finally {
+            clock.restore();
+            cancellationSource.dispose();
+        }
+    });
 });

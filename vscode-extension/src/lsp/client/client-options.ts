@@ -91,7 +91,7 @@ export function buildClientOptions(
                         result,
                         requestStartedAtMs,
                         requestCompletedAtMs: Date.now(),
-                        wasCancelled: false,
+                        wasCancelled: token.isCancellationRequested,
                     });
                     return result;
                 } catch (error) {

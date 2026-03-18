@@ -440,7 +440,8 @@ impl BslLanguageServer {
             }
 
             if tokio::time::Instant::now() >= deadline {
-                return if expected_version.is_some_and(|version| observed_version != Some(version)) {
+                return if expected_version.is_some_and(|version| observed_version != Some(version))
+                {
                     CompletionArtifactWaitOutcomeV2::ObservedVersionMismatch
                 } else {
                     CompletionArtifactWaitOutcomeV2::Deadline

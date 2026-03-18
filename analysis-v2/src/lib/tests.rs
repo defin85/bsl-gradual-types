@@ -2272,7 +2272,10 @@ fn current_completion_head_ready_requires_current_revision_artifact() {
 
     let _ = analysis.ir(file_id).expect("materialize current ir");
     let resolution = analysis
-        .completion_head_type_at_byte_offset(file_id, marker_tail_offset(text.as_ref(), "Новый Массив()"))
+        .completion_head_type_at_byte_offset(
+            file_id,
+            marker_tail_offset(text.as_ref(), "Новый Массив()"),
+        )
         .expect("completion head query after publish")
         .expect("completion head resolution after publish");
     assert_eq!(resolution.type_name(), "Массив<Неопределено>");
@@ -2368,7 +2371,9 @@ fn deps_and_settings_switch_invalidate_completion_head_artifacts() {
     let probe = marker_offset(text.as_ref(), "x = x + 1;");
     {
         let analysis = host.snapshot();
-        let _ = analysis.ir(file_id).expect("materialize completion head ir");
+        let _ = analysis
+            .ir(file_id)
+            .expect("materialize completion head ir");
         assert!(
             analysis
                 .completion_head_type_at_byte_offset(file_id, probe)
@@ -2383,7 +2388,8 @@ fn deps_and_settings_switch_invalidate_completion_head_artifacts() {
         deps: default_semantic_deps(),
     });
     assert!(
-        !host.snapshot()
+        !host
+            .snapshot()
             .current_completion_head_ready(file_id)
             .expect("head ready after deps switch"),
         "deps switch must invalidate cached completion head artifact"
@@ -2394,7 +2400,8 @@ fn deps_and_settings_switch_invalidate_completion_head_artifacts() {
         diagnostics_detail_level: DetailLevel::Detailed,
     });
     assert!(
-        !host.snapshot()
+        !host
+            .snapshot()
             .current_completion_head_ready(file_id)
             .expect("head ready after settings switch"),
         "settings switch must invalidate cached completion head artifact"
@@ -2456,7 +2463,10 @@ fn completion_head_previous_version_ir_reuse_publishes_current_revision_artifact
     );
     assert_eq!(
         analysis_v2
-            .completion_head_type_at_byte_offset(file_id, marker_tail_offset(text.as_ref(), "Новый Массив()"))
+            .completion_head_type_at_byte_offset(
+                file_id,
+                marker_tail_offset(text.as_ref(), "Новый Массив()")
+            )
             .expect("completion head query after reuse")
             .map(|resolution| resolution.type_name().to_string()),
         Some("Массив<Неопределено>".to_string()),

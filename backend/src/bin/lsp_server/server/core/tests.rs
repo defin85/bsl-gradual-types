@@ -13975,7 +13975,9 @@ async fn p33_completion_head_hit_then_upgrade_after_precompute_finish() {
     let first_trace = traces
         .get(traces.len().saturating_sub(2))
         .expect("first head-hit completion trace");
-    let second_trace = traces.last().expect("second completion trace after exact precompute");
+    let second_trace = traces
+        .last()
+        .expect("second completion trace after exact precompute");
     assert_eq!(
         completion_timeline_prepare_detail_str(first_trace, "route"),
         Some("head_hit"),

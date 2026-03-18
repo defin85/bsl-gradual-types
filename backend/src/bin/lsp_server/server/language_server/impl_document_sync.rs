@@ -169,27 +169,27 @@ impl BslLanguageServer {
             let coordinator = server.coordinator.clone();
             let path_for_parse = path.clone();
             let text_for_parse = text.clone();
-            let report = bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
-                bsl_runtime::application::CpuWorkClass::Background,
-                bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
-                Some(server.coordinator.as_ref()),
-                move || {
-                    coordinator.parser_coordinator().and_then(|parser| {
-                        parser
-                            .parse_incremental_with_report(
-                                PathBuf::from(path_for_parse.as_ref()),
-                                text_for_parse.to_string(),
-                                parser_edits,
-                            )
-                            .ok()
-                    })
-                },
-            )
-            .await
-            .ok()
-            .flatten();
-            let Some(report) = report
-            else {
+            let report =
+                bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
+                    bsl_runtime::application::CpuWorkClass::Background,
+                    bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                    Some(server.coordinator.as_ref()),
+                    move || {
+                        coordinator.parser_coordinator().and_then(|parser| {
+                            parser
+                                .parse_incremental_with_report(
+                                    PathBuf::from(path_for_parse.as_ref()),
+                                    text_for_parse.to_string(),
+                                    parser_edits,
+                                )
+                                .ok()
+                        })
+                    },
+                )
+                .await
+                .ok()
+                .flatten();
+            let Some(report) = report else {
                 return;
             };
 
@@ -469,7 +469,9 @@ impl BslLanguageServer {
         let tail_whitespace_append_previous_version =
             previous_shadow_state.as_ref().and_then(|state| {
                 let previous_text = state.text.as_ref();
-                if !updated_text.starts_with(previous_text) || updated_text.len() <= previous_text.len() {
+                if !updated_text.starts_with(previous_text)
+                    || updated_text.len() <= previous_text.len()
+                {
                     return None;
                 }
                 let suffix = &updated_text[previous_text.len()..];
@@ -528,7 +530,7 @@ impl BslLanguageServer {
                     .record_intellisense_v2_large_churn_transition(
                         bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
                         "exit",
-                );
+                    );
             }
         }
         let previous_analysis_for_identical_text_reuse =

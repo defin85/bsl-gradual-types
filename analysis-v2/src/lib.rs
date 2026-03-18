@@ -16,8 +16,7 @@ mod implicit_bindings;
 mod type_inference_v2;
 use derived_artifacts::{
     CompletionHeadArtifactKey, DerivedArtifactsCache, TypeIndexArtifact, TypeIndexArtifactKey,
-    TypeIndexParseSnapshotMeta,
-    TypeIndexStoreOutcome,
+    TypeIndexParseSnapshotMeta, TypeIndexStoreOutcome,
 };
 
 use bsl_diagnostics::{SemanticTypeHints, SemanticValidationVisitor};

@@ -217,7 +217,8 @@ pub fn completion_member_access_owner_type_hints_from_completion_head(
     line: u32,
     column: u32,
 ) -> Vec<TypeResolution> {
-    let Some(receiver_spans) = extract_member_access_receiver_spans(file_content, line, column) else {
+    let Some(receiver_spans) = extract_member_access_receiver_spans(file_content, line, column)
+    else {
         return Vec::new();
     };
 

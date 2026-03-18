@@ -20,7 +20,7 @@ REQUIRED_SURFACES = {
 }
 
 REQUIRED_LATEST_MAJORS = {
-    "lsp-completion-timeline": 4,
+    "lsp-completion-timeline": 5,
     "intellisense-perf-gate": 2,
     "observability-completion-v2": 4,
 }
@@ -97,6 +97,10 @@ REQUIRED_V4_TIMELINE_TRACE_FIELDS = {
     "stages",
 }
 
+REQUIRED_V5_TIMELINE_TRACE_FIELDS = REQUIRED_V4_TIMELINE_TRACE_FIELDS | {
+    "server_edge_details",
+}
+
 REQUIRED_V4_TIMELINE_PREPARE_DETAILS_FIELDS = {
     "wait_budget_ms",
     "guard_outcome",
@@ -135,6 +139,16 @@ REQUIRED_V4_TIMELINE_TURN_HOLDER_FIELDS = {
     "trigger_mode",
     "version_hint",
     "age_ms",
+}
+
+REQUIRED_V5_TIMELINE_SERVER_EDGE_DETAILS_FIELDS = {
+    "transport_received_at_ms",
+    "handler_entered_at_ms",
+    "response_sent_at_ms",
+    "cancel_observed_at_ms",
+    "transport_to_handler_wait_ms",
+    "server_handler_exec_ms",
+    "cancel_observed_after_handler_enter_ms",
 }
 
 REQUIRED_V4_COMPLETION_ROUTES = {
@@ -1038,6 +1052,54 @@ def validate_surface_contract(surface_dir: Path) -> None:
             ensure(
                 trace_fields == REQUIRED_V4_TIMELINE_TRACE_FIELDS,
                 f"{contract_path}: response.trace_fields must equal {sorted(REQUIRED_V4_TIMELINE_TRACE_FIELDS)}",
+            )
+            ensure(
+                prepare_details_fields == REQUIRED_V4_TIMELINE_PREPARE_DETAILS_FIELDS,
+                f"{contract_path}: response.prepare_details_fields must equal {sorted(REQUIRED_V4_TIMELINE_PREPARE_DETAILS_FIELDS)}",
+            )
+            ensure(
+                turn_attribution_fields == REQUIRED_V4_TIMELINE_TURN_ATTRIBUTION_FIELDS,
+                f"{contract_path}: response.turn_attribution_fields must equal {sorted(REQUIRED_V4_TIMELINE_TURN_ATTRIBUTION_FIELDS)}",
+            )
+            ensure(
+                turn_holder_fields == REQUIRED_V4_TIMELINE_TURN_HOLDER_FIELDS,
+                f"{contract_path}: response.turn_holder_fields must equal {sorted(REQUIRED_V4_TIMELINE_TURN_HOLDER_FIELDS)}",
+            )
+            ensure(
+                prepare_routes == REQUIRED_V4_COMPLETION_ROUTES,
+                f"{contract_path}: response.prepare_routes must equal {sorted(REQUIRED_V4_COMPLETION_ROUTES)}",
+            )
+            ensure(
+                prepare_fail_closed_causes == REQUIRED_V4_COMPLETION_FAIL_CLOSED_CAUSES,
+                f"{contract_path}: response.prepare_fail_closed_causes must equal {sorted(REQUIRED_V4_COMPLETION_FAIL_CLOSED_CAUSES)}",
+            )
+
+        if surface_dir.name == "lsp-completion-timeline" and major == 5:
+            response = contract.get("response")
+            ensure(isinstance(response, dict), f"{contract_path}: response must be object")
+            ensure(
+                response.get("version") == 3,
+                f"{contract_path}: response.version must equal 3",
+            )
+            outcomes = set(response.get("outcomes", []))
+            trace_fields = set(response.get("trace_fields", []))
+            server_edge_details_fields = set(response.get("server_edge_details_fields", []))
+            prepare_details_fields = set(response.get("prepare_details_fields", []))
+            turn_attribution_fields = set(response.get("turn_attribution_fields", []))
+            turn_holder_fields = set(response.get("turn_holder_fields", []))
+            prepare_routes = set(response.get("prepare_routes", []))
+            prepare_fail_closed_causes = set(response.get("prepare_fail_closed_causes", []))
+            ensure(
+                outcomes == REQUIRED_V3_TIMELINE_OUTCOMES,
+                f"{contract_path}: response.outcomes must equal {sorted(REQUIRED_V3_TIMELINE_OUTCOMES)}",
+            )
+            ensure(
+                trace_fields == REQUIRED_V5_TIMELINE_TRACE_FIELDS,
+                f"{contract_path}: response.trace_fields must equal {sorted(REQUIRED_V5_TIMELINE_TRACE_FIELDS)}",
+            )
+            ensure(
+                server_edge_details_fields == REQUIRED_V5_TIMELINE_SERVER_EDGE_DETAILS_FIELDS,
+                f"{contract_path}: response.server_edge_details_fields must equal {sorted(REQUIRED_V5_TIMELINE_SERVER_EDGE_DETAILS_FIELDS)}",
             )
             ensure(
                 prepare_details_fields == REQUIRED_V4_TIMELINE_PREPARE_DETAILS_FIELDS,

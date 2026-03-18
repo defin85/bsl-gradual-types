@@ -2070,6 +2070,19 @@ fn completion_owner_hint_metrics_are_exported_with_bounded_reasons() {
         "query_bundle_owner_hint_type_lookup_index_scan",
         std::time::Duration::from_millis(1),
     );
+    observability.record_completion_stage_latency(
+        "transport_to_handler_wait",
+        std::time::Duration::from_millis(6),
+    );
+    observability.record_completion_stage_latency(
+        "server_handler_exec",
+        std::time::Duration::from_millis(12),
+    );
+    observability.record_completion_stage_latency(
+        "cancel_observed_after_handler_enter",
+        std::time::Duration::from_millis(9),
+    );
+    observability.record_intellisense_v2_completion_cancel_observed();
 
     let exported = observability.get_metrics().export_metrics();
     let counters = counters(&exported);
@@ -2098,6 +2111,10 @@ fn completion_owner_hint_metrics_are_exported_with_bounded_reasons() {
             "owner-hint reason counter must be exported for {reason}"
         );
     }
+    assert!(
+        counter_value(counters, "intellisense_v2_completion_cancel_observed_total") > 0,
+        "completion cancel-observed counter must be exported"
+    );
     for (label, key) in [
         (
             "direct",
@@ -2220,6 +2237,21 @@ fn completion_owner_hint_metrics_are_exported_with_bounded_reasons() {
             "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_ms"
         ) > 0,
         "owner-hint index fetch histogram must be exported"
+    );
+    assert!(
+        histogram_count(histograms, "completion_stage_transport_to_handler_wait_ms") > 0,
+        "server-edge transport wait histogram must be exported"
+    );
+    assert!(
+        histogram_count(histograms, "completion_stage_server_handler_exec_ms") > 0,
+        "server-edge handler execution histogram must be exported"
+    );
+    assert!(
+        histogram_count(
+            histograms,
+            "completion_stage_cancel_observed_after_handler_enter_ms"
+        ) > 0,
+        "server-edge cancel observation histogram must be exported"
     );
     assert!(
         histogram_count(

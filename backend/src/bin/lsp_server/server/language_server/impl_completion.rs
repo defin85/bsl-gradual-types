@@ -58,6 +58,10 @@ struct CompletionTimelineCapture {
     uri: String,
     trigger_mode: String,
     started_at_ms: u64,
+    transport_received_at_ms: Option<u64>,
+    handler_entered_at_ms: Option<u64>,
+    response_sent_at_ms: Option<u64>,
+    cancel_observed_at_ms: Option<u64>,
     timeline_cursor_ms: u64,
     prepare_details: Option<crate::types::CompletionTimelinePrepareDetailsTrace>,
     turn_attribution: Option<crate::types::CompletionTimelineTurnAttributionTrace>,
@@ -79,6 +83,10 @@ impl CompletionTimelineCapture {
             uri: uri.to_string(),
             trigger_mode: trigger_mode.to_string(),
             started_at_ms,
+            transport_received_at_ms: None,
+            handler_entered_at_ms: Some(started_at_ms),
+            response_sent_at_ms: None,
+            cancel_observed_at_ms: None,
             timeline_cursor_ms: 0,
             prepare_details: None,
             turn_attribution: None,
@@ -183,6 +191,46 @@ impl CompletionTimelineCapture {
         self.turn_attribution = Some(attribution);
     }
 
+    fn set_transport_received_at_ms(&mut self, transport_received_at_ms: u64) {
+        self.transport_received_at_ms = Some(transport_received_at_ms);
+    }
+
+    #[cfg(test)]
+    fn set_handler_entered_at_ms(&mut self, handler_entered_at_ms: u64) {
+        self.handler_entered_at_ms = Some(handler_entered_at_ms);
+        self.started_at_ms = handler_entered_at_ms;
+    }
+
+    fn set_response_sent_at_ms(&mut self, response_sent_at_ms: u64) {
+        self.response_sent_at_ms = Some(response_sent_at_ms);
+    }
+
+    fn observe_cancel_at_ms(&mut self, cancel_observed_at_ms: u64) {
+        if self.cancel_observed_at_ms.is_none() {
+            self.cancel_observed_at_ms = Some(cancel_observed_at_ms);
+        }
+    }
+
+    fn server_edge_details_trace(
+        &self,
+    ) -> Option<crate::types::CompletionTimelineServerEdgeDetailsTrace> {
+        let transport_received_at_ms = self.transport_received_at_ms?;
+        let handler_entered_at_ms = self.handler_entered_at_ms?;
+        let response_sent_at_ms = self.response_sent_at_ms?;
+        let cancel_observed_at_ms = self.cancel_observed_at_ms;
+        Some(crate::types::CompletionTimelineServerEdgeDetailsTrace {
+            transport_received_at_ms,
+            handler_entered_at_ms,
+            response_sent_at_ms,
+            cancel_observed_at_ms,
+            transport_to_handler_wait_ms: handler_entered_at_ms
+                .saturating_sub(transport_received_at_ms),
+            server_handler_exec_ms: response_sent_at_ms.saturating_sub(handler_entered_at_ms),
+            cancel_observed_after_handler_enter_ms: cancel_observed_at_ms
+                .map(|cancel_at| cancel_at.saturating_sub(handler_entered_at_ms)),
+        })
+    }
+
     fn prepare_details_mut(&mut self) -> &mut crate::types::CompletionTimelinePrepareDetailsTrace {
         self.prepare_details.get_or_insert_with(Default::default)
     }
@@ -260,6 +308,7 @@ impl CompletionTimelineCapture {
             .filter(|stage| stage.status != "skipped")
             .max_by_key(|stage| stage.duration_ms)
             .map(|stage| stage.name.clone());
+        let server_edge_details = self.server_edge_details_trace();
 
         crate::types::CompletionTimelineTrace {
             trace_id,
@@ -271,6 +320,7 @@ impl CompletionTimelineCapture {
             total_duration_ms,
             dominant_stage,
             prepare_details: self.prepare_details,
+            server_edge_details,
             turn_attribution: self.turn_attribution,
             stages: self.stages,
         }
@@ -351,6 +401,15 @@ fn completion_prepare_error_outcome(
         bsl_runtime::application::SemanticOutcome::MissingDeps => "missing_deps",
         bsl_runtime::application::SemanticOutcome::Cancelled => "cancelled",
         _ => "wait_not_ready",
+    }
+}
+
+fn observe_cancelled_timeline_outcome(
+    timeline_capture: &mut CompletionTimelineCapture,
+    outcome: &str,
+) {
+    if outcome == "cancelled" {
+        timeline_capture.observe_cancel_at_ms(super::super::unix_timestamp_ms());
     }
 }
 
@@ -516,11 +575,16 @@ impl BslLanguageServer {
             shadow_internal_request,
         );
         let started = Instant::now();
+        let handler_entered_at_ms = super::super::unix_timestamp_ms();
         let mut timeline_capture = CompletionTimelineCapture::new(
             completion_request_id.clone(),
             &uri,
             trigger_mode,
-            super::super::unix_timestamp_ms(),
+            handler_entered_at_ms,
+        );
+        timeline_capture.set_transport_received_at_ms(
+            super::super::request_context::current_request_received_at_ms()
+                .unwrap_or(handler_entered_at_ms),
         );
         timeline_capture.set_prepare_min_file_version(version_hint);
         timeline_capture.set_prepare_shadow_version_at_start(
@@ -743,6 +807,7 @@ impl BslLanguageServer {
             )
             .await
             {
+                observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
                 completion_outcome = Some(outcome);
                 break 'completion_flow Some(completion_incomplete_empty_response());
             }
@@ -820,6 +885,7 @@ impl BslLanguageServer {
                 CompletionPrepareGuardResult::Aborted(outcome) => {
                     timeline_capture.set_prepare_guard_outcome(format!("aborted:{outcome}"));
                     timeline_capture.set_prepare_outcome(outcome);
+                    observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
                     let stage_status = match outcome {
                         "cancelled" | "superseded" => CompletionTimelineStageStatus::Cancelled,
                         _ => CompletionTimelineStageStatus::Failed,
@@ -855,6 +921,7 @@ impl BslLanguageServer {
                     )
                     .await
                     {
+                        observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
                         completion_outcome = Some(outcome);
                         break 'completion_flow Some(completion_incomplete_empty_response());
                     }
@@ -918,6 +985,7 @@ impl BslLanguageServer {
                     )
                     .await
                     {
+                        observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
                         completion_outcome = Some(outcome);
                         break 'completion_flow Some(completion_incomplete_empty_response());
                     }
@@ -1481,6 +1549,8 @@ impl BslLanguageServer {
                             if (ir_cancelled_after_retry || query_checkpoint_cancelled)
                                 && completion_outcome.is_none()
                             {
+                                timeline_capture
+                                    .observe_cancel_at_ms(super::super::unix_timestamp_ms());
                                 completion_outcome = Some("cancelled");
                             }
                             if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
@@ -1495,6 +1565,7 @@ impl BslLanguageServer {
                             )
                             .await
                             {
+                                observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
                                 completion_outcome = Some(outcome);
                                 break 'completion_flow Some(completion_incomplete_empty_response());
                             }
@@ -1573,6 +1644,7 @@ impl BslLanguageServer {
                     )
                     .await
                     {
+                        observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
                         completion_outcome = Some(outcome);
                         break 'completion_flow Some(completion_incomplete_empty_response());
                     }
@@ -1690,6 +1762,7 @@ impl BslLanguageServer {
                     )
                     .await
                     {
+                        observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
                         completion_outcome = Some(outcome);
                         break 'completion_flow Some(completion_incomplete_empty_response());
                     }
@@ -1705,6 +1778,7 @@ impl BslLanguageServer {
                     )
                     .await
                     {
+                        observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
                         completion_outcome = Some(outcome);
                         break 'completion_flow Some(completion_incomplete_empty_response());
                     }
@@ -1738,6 +1812,7 @@ impl BslLanguageServer {
         )
         .await
         {
+            observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
             completion_outcome = Some(outcome);
             completion = Some(completion_incomplete_empty_response());
         }
@@ -1763,6 +1838,7 @@ impl BslLanguageServer {
 
         let timeline_outcome =
             completion_public_timeline_outcome(completion_outcome.unwrap_or("ok_empty"));
+        observe_cancelled_timeline_outcome(&mut timeline_capture, timeline_outcome);
         if matches!(timeline_outcome, "ok_non_empty" | "ok_empty") {
             if let Some(route) = completion_route.take() {
                 match route.kind {
@@ -1791,6 +1867,33 @@ impl BslLanguageServer {
             }
         }
         timeline_capture.push_terminal_stage(timeline_outcome);
+        timeline_capture.set_response_sent_at_ms(super::super::unix_timestamp_ms());
+        if !shadow_internal_request {
+            if let Some(server_edge_details) = timeline_capture.server_edge_details_trace() {
+                self.coordinator.record_completion_stage_latency(
+                    "transport_to_handler_wait",
+                    std::time::Duration::from_millis(
+                        server_edge_details.transport_to_handler_wait_ms,
+                    ),
+                );
+                self.coordinator.record_completion_stage_latency(
+                    "server_handler_exec",
+                    std::time::Duration::from_millis(server_edge_details.server_handler_exec_ms),
+                );
+                if let Some(cancel_observed_after_handler_enter_ms) =
+                    server_edge_details.cancel_observed_after_handler_enter_ms
+                {
+                    self.coordinator.record_completion_stage_latency(
+                        "cancel_observed_after_handler_enter",
+                        std::time::Duration::from_millis(
+                            cancel_observed_after_handler_enter_ms,
+                        ),
+                    );
+                    self.coordinator
+                        .record_intellisense_v2_completion_cancel_observed();
+                }
+            }
+        }
         if !shadow_internal_request {
             let trace = timeline_capture.into_trace(
                 self.next_completion_timeline_trace_id(),
@@ -1906,6 +2009,53 @@ mod tests {
         assert_eq!(capture.stages.len(), 1);
         assert_eq!(capture.stages[0].name, "terminal");
         assert_eq!(capture.stages[0].status, "failed");
+    }
+
+    #[test]
+    fn server_edge_details_are_derived_from_transport_handler_and_response_timestamps() {
+        let mut capture = sample_capture();
+        capture.set_transport_received_at_ms(1_699_999_999_990);
+        capture.set_handler_entered_at_ms(1_700_000_000_000);
+        capture.set_response_sent_at_ms(1_700_000_000_025);
+
+        let trace = capture.into_trace(
+            "trace-server-edge".to_string(),
+            std::time::Duration::from_millis(25),
+            "ok_non_empty",
+        );
+        let details = trace
+            .server_edge_details
+            .expect("server_edge_details must be present");
+        assert_eq!(details.transport_received_at_ms, 1_699_999_999_990);
+        assert_eq!(details.handler_entered_at_ms, 1_700_000_000_000);
+        assert_eq!(details.response_sent_at_ms, 1_700_000_000_025);
+        assert_eq!(details.transport_to_handler_wait_ms, 10);
+        assert_eq!(details.server_handler_exec_ms, 25);
+        assert_eq!(details.cancel_observed_at_ms, None);
+        assert_eq!(details.cancel_observed_after_handler_enter_ms, None);
+    }
+
+    #[test]
+    fn server_edge_details_keep_first_cancel_observation_and_derive_late_cancel_delta() {
+        let mut capture = sample_capture();
+        capture.set_transport_received_at_ms(1_699_999_999_995);
+        capture.set_handler_entered_at_ms(1_700_000_000_000);
+        capture.observe_cancel_at_ms(1_700_000_000_012);
+        capture.observe_cancel_at_ms(1_700_000_000_018);
+        capture.set_response_sent_at_ms(1_700_000_000_030);
+
+        let trace = capture.into_trace(
+            "trace-cancel-edge".to_string(),
+            std::time::Duration::from_millis(30),
+            "cancelled",
+        );
+        let details = trace
+            .server_edge_details
+            .expect("server_edge_details must be present");
+        assert_eq!(details.transport_to_handler_wait_ms, 5);
+        assert_eq!(details.server_handler_exec_ms, 30);
+        assert_eq!(details.cancel_observed_at_ms, Some(1_700_000_000_012));
+        assert_eq!(details.cancel_observed_after_handler_enter_ms, Some(12));
     }
 
     #[test]

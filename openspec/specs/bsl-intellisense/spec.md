@@ -315,33 +315,29 @@ Observability completion UI MUST:
 - визуально выделять dominant stage (самый длительный server этап);
 - отображать статус каждого server этапа (`completed|cancelled|failed|skipped`);
 - явно маркировать `Client Probe Feed` как local-only debug data, не эквивалентные server timeline;
-- отображать в `Client Probe Feed`, когда они доступны, bounded cancellation diagnostics, transport-phase diagnostics, result-shape diagnostics и version-drift/overlap diagnostics.
+- отображать в `Client Probe Feed`, когда они доступны, bounded cancellation diagnostics, transport-phase diagnostics, result-shape diagnostics и version-drift/overlap diagnostics;
+- отображать в `Server Timeline`, когда они доступны, bounded server-edge transport/cancellation diagnostics из authoritative server trace.
 
 Observability completion UI MUST NOT:
 - реконструировать per-request server timeline из текстовых логов или агрегированных p50/p95/p99 метрик;
 - использовать `TreeDataProvider` как реализацию timeline capability;
 - подставлять отсутствующие server stages, routes или outcomes из client-side probe;
 - скрывать server trace только потому, что local probes отсутствуют;
-- выполнять trace-level correlation между server trace и local probes в рамках этого change.
+- выполнять trace-level correlation между server trace и local probes в рамках этого change;
+- подставлять server-edge diagnostics из client-side probe, если серверный payload их не содержит.
 
-#### Scenario: Пользователь отличает superseded cancel от пустого completion
-- **GIVEN** `Client Probe Feed` содержит отменённый probe и bounded cancellation diagnostics
+#### Scenario: Пользователь отличает queue-before-handler от долгого server execution
+- **GIVEN** authoritative `Server Timeline` trace содержит `server_edge_details`
 - **WHEN** пользователь открывает completion observability UI
-- **THEN** panel показывает `client_terminal_state=cancelled`
-- **AND** если доступен `cancel_reason_hint`, он отображается как local diagnostic hint
-- **AND** `Client Probe Feed` не подменяет этим hint server `outcome`
+- **THEN** panel показывает bounded server-edge diagnostics для `transport_to_handler_wait` и `server_handler_exec`
+- **AND** эти diagnostics остаются частью `Server Timeline`, а не `Client Probe Feed`
 
-#### Scenario: Пользователь видит transport-phase breakdown для длинного local probe
-- **GIVEN** `Client Probe Feed` содержит explicit transport-phase timestamps для completion probe
+#### Scenario: Legacy timeline payload без server-edge diagnostics остаётся читаемым
+- **GIVEN** connected server возвращает payload `version=2` без `server_edge_details`
 - **WHEN** пользователь открывает completion observability UI
-- **THEN** panel показывает enough-local diagnostics, чтобы отличить pre-send delay, LSP/in-flight wait и post-response overhead
-- **AND** эти client-side diagnostics остаются отдельными от `Server Timeline`
-
-#### Scenario: Пользователь видит version drift и overlap context без correlation guesswork
-- **GIVEN** completion probe пережил локальные правки, движение курсора или overlap с новыми completion probes
-- **WHEN** пользователь открывает completion observability UI
-- **THEN** `Client Probe Feed` показывает bounded version-drift/overlap diagnostics
-- **AND** UI не строит machine-join между этим probe и конкретным server trace
+- **THEN** extension продолжает показывать `Server Timeline` и `Client Probe Feed`
+- **AND** не пытается выдумывать отсутствующие server-edge diagnostics
+- **AND** отсутствие новых полей не ломает rendering/copy flow
 
 ### Requirement: Timeline panel деградирует предсказуемо с legacy LSP (MUST)
 Если подключённый LSP не поддерживает `bsl.getCompletionTimeline`, extension MUST fail-closed для server-side timeline capability:

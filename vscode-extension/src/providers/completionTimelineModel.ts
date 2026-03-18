@@ -2,6 +2,7 @@ import {
     CompletionTimelineFetchResult,
     CompletionTimelinePrepareDetailsTrace,
     CompletionTimelineResponse,
+    CompletionTimelineServerEdgeDetailsTrace,
     CompletionTimelineStageStatus,
     CompletionTimelineStageTrace,
     CompletionTimelineTurnAttributionTrace,
@@ -32,6 +33,7 @@ export interface CompletionTimelineTraceViewModel {
     unattributed_overhead_ms: number;
     dominant_stage?: string;
     prepare_details?: CompletionTimelinePrepareDetailsTrace;
+    server_edge_details?: CompletionTimelineServerEdgeDetailsTrace;
     turn_attribution?: CompletionTimelineTurnAttributionTrace;
     stages: CompletionTimelineStageViewModel[];
 }

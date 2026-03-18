@@ -182,7 +182,7 @@ suite('LSP Custom Requests Test Suite', () => {
 
                 if (command === 'bsl.getCompletionTimeline') {
                     return Promise.resolve({
-                        version: 2,
+                        version: 3,
                         traces: [
                             {
                                 trace_id: 'trace-1',
@@ -193,6 +193,13 @@ suite('LSP Custom Requests Test Suite', () => {
                                 started_at_ms: Date.now(),
                                 total_duration_ms: 18,
                                 dominant_stage: 'query_bundle',
+                                server_edge_details: {
+                                    transport_received_at_ms: 1_700_000_000_000,
+                                    handler_entered_at_ms: 1_700_000_000_001,
+                                    response_sent_at_ms: 1_700_000_000_018,
+                                    transport_to_handler_wait_ms: 1,
+                                    server_handler_exec_ms: 17
+                                },
                                 stages: [
                                     {
                                         name: 'query_bundle',
@@ -359,9 +366,10 @@ suite('LSP Custom Requests Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(result.response.version, 2);
+        assert.strictEqual(result.response.version, 3);
         assert.strictEqual(result.response.traces.length, 1);
         assert.strictEqual(result.response.traces[0].trace_id, 'trace-1');
+        assert.ok(result.response.traces[0].server_edge_details);
     });
 
     test('getCompletionTimeline should fail-closed on Method not found', async function() {

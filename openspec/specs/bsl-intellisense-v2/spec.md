@@ -1716,7 +1716,7 @@ Hardcoded foreign `change_id` в runtime/perf path MUST NOT использова
 - **AND** такой артефакт не может быть использован как cutover evidence
 
 ### Requirement: LSP предоставляет versioned per-request completion timeline контракт (MUST)
-LSP MUST предоставлять server-driven custom request `bsl.getCompletionTimeline` с contract version `2`.
+LSP MUST предоставлять server-driven custom request `bsl.getCompletionTimeline` с contract version `3`.
 
 Для VS Code extension в текущей архитектуре этот контракт MUST быть доступен через `workspace/executeCommand` с `command: bsl.getCompletionTimeline`.
 Per-request timeline payload MUST формироваться на стороне LSP и MUST NOT требовать клиентской реконструкции из логов или агрегированных observability-метрик.
@@ -1726,7 +1726,7 @@ VS Code extension MAY отображать отдельно captured local clien
 - MUST NOT подменять server-generated stages, routes, causes или outcomes;
 - MUST оставаться отдельным UI-level stream, а не частью LSP timeline contract.
 
-Контракт `v2` MUST включать:
+Контракт `v3` MUST включать:
 - `version` (числовой номер контракта);
 - `traces` (массив completion trace записей).
 
@@ -1736,6 +1736,7 @@ VS Code extension MAY отображать отдельно captured local clien
 - `dominant_stage`;
 - `prepare_details`;
 - `turn_attribution`;
+- optional `server_edge_details`;
 - `stages`.
 
 Если `prepare_details` присутствует, объект MUST оставаться bounded и MUST NOT вводить high-cardinality labels.
@@ -1743,23 +1744,40 @@ VS Code extension MAY отображать отдельно captured local clien
 - `route` со значениями только из bounded vocabulary `head_hit|exact_hit` либо `null`;
 - `fail_closed_cause` со значениями только из bounded vocabulary `prepare_timeout|exact_deadline` либо `null`.
 
+Если `server_edge_details` присутствует, объект MUST оставаться bounded и MUST включать:
+- `transport_received_at_ms`;
+- `handler_entered_at_ms`;
+- `response_sent_at_ms`;
+- optional `cancel_observed_at_ms`;
+- `transport_to_handler_wait_ms`;
+- `server_handler_exec_ms`;
+- optional `cancel_observed_after_handler_enter_ms`.
+
 Каждый stage entry MUST включать:
 - `name`;
 - `status` (`completed|cancelled|failed|skipped`);
 - `started_offset_ms`;
 - `duration_ms`.
 
+#### Scenario: Long empty completion trace несёт authoritative server-edge breakdown
+- **GIVEN** completion request завершился без items и без client-side correlation данных
+- **WHEN** клиент вызывает `bsl.getCompletionTimeline`
+- **THEN** server trace MAY содержать bounded `server_edge_details`
+- **AND** этих данных достаточно, чтобы отделить `transport_to_handler_wait` от `server_handler_exec`
+- **AND** existing `prepare_details` и `stages` остаются частью authoritative payload
+
+#### Scenario: Late cancellation trace фиксирует момент backend observation
+- **GIVEN** completion request был отменён уже после старта server handler
+- **WHEN** LSP формирует authoritative timeline trace
+- **THEN** trace MAY содержать `cancel_observed_at_ms`
+- **AND** trace MAY содержать `cancel_observed_after_handler_enter_ms`
+- **AND** payload не выдумывает client-side obsolete timestamp
+
 #### Scenario: Enriched local probes не меняют server timeline contract
 - **GIVEN** VS Code extension записала local probes с дополнительными cancellation, transport, result-shape и overlap/drift diagnostics
 - **WHEN** клиент вызывает `bsl.getCompletionTimeline`
-- **THEN** response остаётся server-generated payload contract `v2`
+- **THEN** response остаётся server-generated payload contract `v3`
 - **AND** enriched local probe stream не меняет version или shape LSP timeline response
-
-#### Scenario: Enriched local probes не подменяют server semantics
-- **GIVEN** `Client Probe Feed` показывает extended local diagnostics
-- **WHEN** пользователь анализирует completion observability
-- **THEN** server trace остаётся authoritative representation LSP payload
-- **AND** local diagnostics не подставляют server stages, routes, causes или outcomes
 
 ### Requirement: Timeline stage taxonomy bounded и совместима с completion observability (MUST)
 Stage names в per-request timeline MUST использовать bounded taxonomy, согласованную с completion stage observability.
@@ -2003,4 +2021,19 @@ Smoke/parity проверки MAY использоваться как допол
 - **WHEN** выполняется exact cross-consumer acceptance
 - **THEN** acceptance падает как semantic drift
 - **AND** smoke-level parity без этой проверки не считается достаточным evidence
+
+### Requirement: Completion transport/cancellation observability остаётся bounded и completion-specific (MUST)
+Server-side observability для transport/cancellation diagnostics MUST оставаться bounded и completion-specific.
+
+Instrumentation MUST:
+- записывать bounded latency samples для `transport_to_handler_wait`;
+- записывать bounded latency samples для `server_handler_exec`;
+- записывать bounded cancellation observability только для completion path;
+- не вводить high-cardinality metric labels или free-form cancellation reasons.
+
+#### Scenario: Cancellation observability не взрывает cardinality
+- **GIVEN** completion requests отменяются для разных документов и запросов
+- **WHEN** сервер пишет transport/cancellation observability
+- **THEN** новые metric keys остаются в fixed low-cardinality vocabulary
+- **AND** URI, snippets и произвольные reason strings не попадают в metric labels
 

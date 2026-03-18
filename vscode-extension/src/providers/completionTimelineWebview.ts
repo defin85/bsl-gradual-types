@@ -685,6 +685,31 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             return '<div class="overhead">' + bits.join(' | ') + '</div>';
         }
 
+        function renderServerEdgeDetails(trace) {
+            if (!trace.server_edge_details) {
+                return '';
+            }
+            const details = trace.server_edge_details;
+            const bits = [
+                'transport_received=' + escapeHtml(new Date(details.transport_received_at_ms).toLocaleTimeString()),
+                'handler_entered=' + escapeHtml(new Date(details.handler_entered_at_ms).toLocaleTimeString()),
+                'response_sent=' + escapeHtml(new Date(details.response_sent_at_ms).toLocaleTimeString()),
+                'transport_to_handler_wait=' + escapeHtml(details.transport_to_handler_wait_ms) + 'ms',
+                'server_handler_exec=' + escapeHtml(details.server_handler_exec_ms) + 'ms',
+            ];
+            if (typeof details.cancel_observed_at_ms === 'number') {
+                bits.push('cancel_observed=' + escapeHtml(new Date(details.cancel_observed_at_ms).toLocaleTimeString()));
+            }
+            if (typeof details.cancel_observed_after_handler_enter_ms === 'number') {
+                bits.push(
+                    'cancel_after_handler_enter=' +
+                    escapeHtml(details.cancel_observed_after_handler_enter_ms) +
+                    'ms'
+                );
+            }
+            return '<div class="overhead">' + bits.join(' | ') + '</div>';
+        }
+
         function renderTrace(trace) {
             const outcomeClass = outcomeBadgeClass(trace.outcome);
             const stageSegments = trace.stages.map((stage) => {
@@ -709,6 +734,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                     escapeHtml(trace.max_stage_end_ms) + 'ms)' +
                 '</div>'
                 : '';
+            const serverEdgeDetails = renderServerEdgeDetails(trace);
             const prepareDetails = renderPrepareDetails(trace);
             const turnAttribution = renderTurnAttribution(trace);
 
@@ -728,6 +754,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 '<div class="meta">request=' + escapeHtml(requestId) + ' | started=' + escapeHtml(startedAt) + '</div>' +
                 '<div class="timeline-track">' + stageSegments + '</div>' +
                 overhead +
+                serverEdgeDetails +
                 prepareDetails +
                 turnAttribution +
                 '<table class="stage-table"><tbody>' + stageRows + '</tbody></table>' +

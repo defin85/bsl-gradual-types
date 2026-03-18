@@ -9691,7 +9691,7 @@ async fn p22_get_completion_timeline_exposes_versioned_contract() {
             .get("version")
             .and_then(|value| value.as_u64())
             .expect("version"),
-        2
+        3
     );
     assert!(
         result
@@ -9809,6 +9809,7 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
         "total_duration_ms",
         "dominant_stage",
         "prepare_details",
+        "server_edge_details",
         "turn_attribution",
         "stages",
     ] {
@@ -9821,6 +9822,10 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
         .get("prepare_details")
         .and_then(|value| value.as_object())
         .expect("prepare_details object");
+    let server_edge_details = trace
+        .get("server_edge_details")
+        .and_then(|value| value.as_object())
+        .expect("server_edge_details object");
     assert!(
         prepare_details.contains_key("wait_budget_ms"),
         "missing field `wait_budget_ms` in prepare_details"
@@ -9840,6 +9845,56 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
     assert!(
         prepare_details.contains_key("min_file_version"),
         "missing field `min_file_version` in prepare_details"
+    );
+    for field in [
+        "transport_received_at_ms",
+        "handler_entered_at_ms",
+        "response_sent_at_ms",
+        "transport_to_handler_wait_ms",
+        "server_handler_exec_ms",
+    ] {
+        assert!(
+            server_edge_details.contains_key(field),
+            "missing field `{field}` in server_edge_details"
+        );
+    }
+    let transport_received_at_ms = server_edge_details
+        .get("transport_received_at_ms")
+        .and_then(|value| value.as_u64())
+        .expect("transport_received_at_ms");
+    let handler_entered_at_ms = server_edge_details
+        .get("handler_entered_at_ms")
+        .and_then(|value| value.as_u64())
+        .expect("handler_entered_at_ms");
+    let response_sent_at_ms = server_edge_details
+        .get("response_sent_at_ms")
+        .and_then(|value| value.as_u64())
+        .expect("response_sent_at_ms");
+    let transport_to_handler_wait_ms = server_edge_details
+        .get("transport_to_handler_wait_ms")
+        .and_then(|value| value.as_u64())
+        .expect("transport_to_handler_wait_ms");
+    let server_handler_exec_ms = server_edge_details
+        .get("server_handler_exec_ms")
+        .and_then(|value| value.as_u64())
+        .expect("server_handler_exec_ms");
+    assert!(
+        transport_received_at_ms <= handler_entered_at_ms,
+        "transport_received_at_ms must not exceed handler_entered_at_ms"
+    );
+    assert!(
+        handler_entered_at_ms <= response_sent_at_ms,
+        "handler_entered_at_ms must not exceed response_sent_at_ms"
+    );
+    assert_eq!(
+        transport_to_handler_wait_ms,
+        handler_entered_at_ms.saturating_sub(transport_received_at_ms),
+        "transport_to_handler_wait_ms must match timestamp delta"
+    );
+    assert_eq!(
+        server_handler_exec_ms,
+        response_sent_at_ms.saturating_sub(handler_entered_at_ms),
+        "server_handler_exec_ms must match timestamp delta"
     );
     let stages = trace
         .get("stages")

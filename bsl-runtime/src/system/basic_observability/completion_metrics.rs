@@ -144,6 +144,11 @@ impl BasicObservability {
             "query_bundle_deps_and_file_snapshot" => {
                 "completion_stage_query_bundle_deps_and_file_snapshot_ms"
             },
+            "transport_to_handler_wait" => "completion_stage_transport_to_handler_wait_ms",
+            "server_handler_exec" => "completion_stage_server_handler_exec_ms",
+            "cancel_observed_after_handler_enter" => {
+                "completion_stage_cancel_observed_after_handler_enter_ms"
+            }
             "response_build" => "completion_stage_response_build_ms",
             "cache_store" => "completion_stage_cache_store_ms",
             _ => "completion_stage_other_ms",
@@ -208,6 +213,11 @@ impl BasicObservability {
         let mode = normalize_completion_trigger_mode_label(mode);
         let key = format!("intellisense_v2_completion_trigger_mode_total_mode_{mode}");
         self.metrics.increment(&key);
+    }
+
+    pub fn record_intellisense_v2_completion_cancel_observed(&self) {
+        self.metrics
+            .increment("intellisense_v2_completion_cancel_observed_total");
     }
 
     pub fn record_intellisense_v2_completion_parity_drift(&self, mode: &str) {

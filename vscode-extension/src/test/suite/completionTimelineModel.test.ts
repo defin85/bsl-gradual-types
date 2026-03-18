@@ -41,7 +41,7 @@ function buildClientProbe(probeId: string, version: number, startedAtMs: number)
 suite('Completion Timeline Model Test Suite', () => {
     test('Mapping LSP timeline payload -> UI model', () => {
         const payload: CompletionTimelineResponse = {
-            version: 2,
+            version: 3,
             traces: [
                 {
                     trace_id: 'trace-42',
@@ -52,6 +52,13 @@ suite('Completion Timeline Model Test Suite', () => {
                     started_at_ms: 1_700_000_000_042,
                     total_duration_ms: 48,
                     dominant_stage: 'query_bundle',
+                    server_edge_details: {
+                        transport_received_at_ms: 1_700_000_000_040,
+                        handler_entered_at_ms: 1_700_000_000_042,
+                        response_sent_at_ms: 1_700_000_000_090,
+                        transport_to_handler_wait_ms: 2,
+                        server_handler_exec_ms: 48,
+                    },
                     prepare_details: {
                         wait_budget_ms: 120,
                         route: 'head_hit',
@@ -108,9 +115,17 @@ suite('Completion Timeline Model Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(state.version, 2);
+        assert.strictEqual(state.version, 3);
         assert.strictEqual(state.traces.length, 1);
         assert.strictEqual(state.traces[0].trace_id, 'trace-42');
+        assert.strictEqual(
+            state.traces[0].server_edge_details?.transport_to_handler_wait_ms,
+            2
+        );
+        assert.strictEqual(
+            state.traces[0].server_edge_details?.server_handler_exec_ms,
+            48
+        );
         assert.strictEqual(state.traces[0].prepare_details?.wait_budget_ms, 120);
         assert.strictEqual(state.traces[0].prepare_details?.route, 'head_hit');
         assert.strictEqual(state.traces[0].stages.length, 3);
@@ -127,6 +142,42 @@ suite('Completion Timeline Model Test Suite', () => {
         assert.ok(state.traces[0].stages.every((stage) => stage.width_percent >= 0));
         assert.ok(state.traces[0].stages.every((stage) => stage.duration_percent >= 0));
         assert.ok(state.average_trace, 'average trace should be available for non-empty payload');
+    });
+
+    test('Legacy v2 payload without server edge details remains readable', () => {
+        const payload = {
+            version: 2,
+            traces: [
+                {
+                    trace_id: 'trace-legacy',
+                    request_id: 'req-legacy',
+                    uri: 'file:///tmp/legacy.bsl',
+                    trigger_mode: 'invoked',
+                    outcome: 'ok_empty',
+                    started_at_ms: 1_700_000_000_010,
+                    total_duration_ms: 14,
+                    dominant_stage: 'query_bundle',
+                    stages: [
+                        {
+                            name: 'query_bundle',
+                            status: 'completed',
+                            started_offset_ms: 0,
+                            duration_ms: 14,
+                        },
+                    ],
+                },
+            ],
+        } as CompletionTimelineResponse;
+
+        const state = mapCompletionTimelineResponseToPanelState(payload);
+        assert.strictEqual(state.kind, 'ready');
+        if (state.kind !== 'ready') {
+            return;
+        }
+
+        assert.strictEqual(state.version, 2);
+        assert.strictEqual(state.traces[0].trace_id, 'trace-legacy');
+        assert.strictEqual(state.traces[0].server_edge_details, undefined);
     });
 
     test('Dominant stage highlight should fallback to max duration stage', () => {

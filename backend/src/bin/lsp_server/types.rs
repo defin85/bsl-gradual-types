@@ -176,6 +176,19 @@ pub struct CompletionTimelinePrepareDetailsTrace {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompletionTimelineServerEdgeDetailsTrace {
+    pub transport_received_at_ms: u64,
+    pub handler_entered_at_ms: u64,
+    pub response_sent_at_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cancel_observed_at_ms: Option<u64>,
+    pub transport_to_handler_wait_ms: u64,
+    pub server_handler_exec_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cancel_observed_after_handler_enter_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompletionTimelineTrace {
     pub trace_id: String,
     pub request_id: Option<String>,
@@ -187,6 +200,8 @@ pub struct CompletionTimelineTrace {
     pub dominant_stage: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prepare_details: Option<CompletionTimelinePrepareDetailsTrace>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_edge_details: Option<CompletionTimelineServerEdgeDetailsTrace>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_attribution: Option<CompletionTimelineTurnAttributionTrace>,
     pub stages: Vec<CompletionTimelineStageTrace>,

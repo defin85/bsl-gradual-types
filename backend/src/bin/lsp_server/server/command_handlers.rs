@@ -890,6 +890,7 @@ mod tests {
                 .max_by_key(|stage| stage.duration_ms)
                 .map(|stage| stage.name.clone()),
             prepare_details: None,
+            server_edge_details: None,
             turn_attribution: None,
             stages,
         }
@@ -913,7 +914,7 @@ mod tests {
             .handle_get_completion_timeline(crate::types::CompletionTimelineRequest::default())
             .await
             .expect("timeline response");
-        assert_eq!(response.version, 2);
+        assert_eq!(response.version, 3);
         assert_eq!(response.traces.len(), 200);
         assert_eq!(
             response.traces.first().map(|trace| trace.trace_id.as_str()),
@@ -960,6 +961,7 @@ mod tests {
         assert_eq!(trace.trace_id, "trace-b");
         assert_eq!(trace.request_id.as_deref(), Some("req-b"));
         assert_eq!(trace.outcome, "cancelled");
+        assert!(trace.server_edge_details.is_none());
         assert_eq!(trace.stages.len(), 1);
         assert_eq!(trace.stages[0].status, "cancelled");
     }

@@ -1,0 +1,116 @@
+{
+  "surface": "lsp-completion-timeline",
+  "major_version": 5,
+  "schema_version": 1,
+  "compatibility": {
+    "breaking_change_requires_major_bump": true,
+    "breaking_change_requires_migration_note": true
+  },
+  "request": {
+    "method": "workspace/executeCommand",
+    "command": "bsl.getCompletionTimeline",
+    "params_shape": {
+      "optional_fields": [
+        "limit",
+        "request_id"
+      ],
+      "limit_bounds": {
+        "minimum": 1,
+        "maximum": 200,
+        "default": 200
+      }
+    }
+  },
+  "response": {
+    "version": 3,
+    "retention_max_entries_default": 200,
+    "trace_fields": [
+      "trace_id",
+      "request_id",
+      "uri",
+      "trigger_mode",
+      "outcome",
+      "started_at_ms",
+      "total_duration_ms",
+      "dominant_stage",
+      "prepare_details",
+      "server_edge_details",
+      "turn_attribution",
+      "stages"
+    ],
+    "server_edge_details_fields": [
+      "transport_received_at_ms",
+      "handler_entered_at_ms",
+      "response_sent_at_ms",
+      "cancel_observed_at_ms",
+      "transport_to_handler_wait_ms",
+      "server_handler_exec_ms",
+      "cancel_observed_after_handler_enter_ms"
+    ],
+    "prepare_details_fields": [
+      "wait_budget_ms",
+      "guard_outcome",
+      "outcome",
+      "route",
+      "fail_closed_cause",
+      "min_file_version",
+      "shadow_version_at_start",
+      "observed_file_version",
+      "wait_elapsed_ms",
+      "snapshot_elapsed_ms",
+      "apply_age_at_start_ms",
+      "apply_age_at_terminal_ms"
+    ],
+    "turn_attribution_fields": [
+      "request_file_seq",
+      "request_epoch",
+      "queue_outcome",
+      "turn_wait_outcome",
+      "queue_capacity",
+      "queue_depth_before_enqueue",
+      "queue_depth_after_enqueue",
+      "queued_completion_ahead_count",
+      "did_change_ahead_count",
+      "active_completion_count",
+      "dropped_completion_file_seq",
+      "active_holder",
+      "queued_completion_ahead"
+    ],
+    "turn_holder_fields": [
+      "request_id",
+      "file_seq",
+      "request_epoch",
+      "trigger_mode",
+      "version_hint",
+      "age_ms"
+    ],
+    "stage_fields": [
+      "name",
+      "status",
+      "started_offset_ms",
+      "duration_ms"
+    ],
+    "stage_statuses": [
+      "completed",
+      "cancelled",
+      "failed",
+      "skipped"
+    ],
+    "prepare_routes": [
+      "head_hit",
+      "exact_hit"
+    ],
+    "prepare_fail_closed_causes": [
+      "prepare_timeout",
+      "exact_deadline"
+    ],
+    "outcomes": [
+      "ok_non_empty",
+      "ok_empty",
+      "fail_closed",
+      "cancelled",
+      "superseded",
+      "handler_error"
+    ]
+  }
+}

@@ -7,9 +7,20 @@ async fn current_request_id_is_none_outside_scope() {
 }
 
 #[tokio::test]
-async fn with_request_id_exposes_context_inside_scope() {
-    let scoped = with_request_id(Some("42".to_string()), async { current_request_id() }).await;
-    assert_eq!(scoped, Some("42".to_string()));
+async fn current_request_received_at_ms_is_none_outside_scope() {
+    assert_eq!(current_request_received_at_ms(), None);
+}
+
+#[tokio::test]
+async fn with_request_context_exposes_context_inside_scope() {
+    let scoped = with_request_context(
+        Some("42".to_string()),
+        Some(1_700_000_000_123),
+        async { (current_request_id(), current_request_received_at_ms()) },
+    )
+    .await;
+    assert_eq!(scoped.0, Some("42".to_string()));
+    assert_eq!(scoped.1, Some(1_700_000_000_123));
 }
 
 #[tokio::test]
@@ -18,7 +29,7 @@ async fn request_context_service_sets_jsonrpc_numeric_id() {
     struct CaptureService;
 
     impl Service<Request> for CaptureService {
-        type Response = Option<String>;
+        type Response = (Option<String>, Option<u64>);
         type Error = ();
         type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
@@ -27,14 +38,15 @@ async fn request_context_service_sets_jsonrpc_numeric_id() {
         }
 
         fn call(&mut self, _request: Request) -> Self::Future {
-            Box::pin(async move { Ok(current_request_id()) })
+            Box::pin(async move { Ok((current_request_id(), current_request_received_at_ms())) })
         }
     }
 
     let mut service = RequestContextService::new(CaptureService);
     let request = Request::build("workspace/symbol").id(9_i64).finish();
     let captured = service.call(request).await.expect("service call");
-    assert_eq!(captured, Some("9".to_string()));
+    assert_eq!(captured.0, Some("9".to_string()));
+    assert!(captured.1.is_some(), "request receive timestamp must be scoped");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -43,7 +55,7 @@ async fn request_context_service_does_not_propagate_request_id_to_spawned_handle
     struct SpawnedCaptureService;
 
     impl Service<Request> for SpawnedCaptureService {
-        type Response = Option<String>;
+        type Response = (Option<String>, Option<u64>);
         type Error = ();
         type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
@@ -53,7 +65,9 @@ async fn request_context_service_does_not_propagate_request_id_to_spawned_handle
 
         fn call(&mut self, _request: Request) -> Self::Future {
             Box::pin(async move {
-                let captured = tokio::spawn(async move { current_request_id() })
+                let captured = tokio::spawn(async move {
+                    (current_request_id(), current_request_received_at_ms())
+                })
                     .await
                     .expect("spawned capture join");
                 Ok(captured)
@@ -64,7 +78,8 @@ async fn request_context_service_does_not_propagate_request_id_to_spawned_handle
     let mut service = RequestContextService::new(SpawnedCaptureService);
     let request = Request::build("workspace/symbol").id(77_i64).finish();
     let captured = service.call(request).await.expect("service call");
-    assert_eq!(captured, None);
+    assert_eq!(captured.0, None);
+    assert_eq!(captured.1, None);
 }
 
 #[tokio::test]

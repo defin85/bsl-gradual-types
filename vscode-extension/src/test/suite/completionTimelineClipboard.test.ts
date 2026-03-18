@@ -9,7 +9,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
     function buildReadyState(): CompletionTimelinePanelState {
         return {
             kind: 'ready',
-            version: 2,
+            version: 3,
             updated_at_ms: 1_700_000_000_100,
             client_probe_feed: {
                 updated_at_ms: 1_700_000_000_100,
@@ -57,6 +57,15 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                     max_stage_end_ms: 28,
                     unattributed_overhead_ms: 2,
                     dominant_stage: 'query_bundle',
+                    server_edge_details: {
+                        transport_received_at_ms: 1_700_000_000_000,
+                        handler_entered_at_ms: 1_700_000_000_002,
+                        response_sent_at_ms: 1_700_000_000_030,
+                        cancel_observed_at_ms: 1_700_000_000_021,
+                        transport_to_handler_wait_ms: 2,
+                        server_handler_exec_ms: 28,
+                        cancel_observed_after_handler_enter_ms: 19,
+                    },
                     prepare_details: {
                         wait_budget_ms: 120,
                         guard_outcome: 'timeout',
@@ -148,8 +157,15 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('Completion Timeline | mode=all'));
         assert.ok(text!.includes('Server Timeline'));
         assert.ok(text!.includes('trace-1 (invoked)'));
+        assert.ok(text!.includes('contract=v3'));
         assert.ok(text!.includes('Client Probe Feed | local-only debug data'));
         assert.ok(text!.includes('probe-1 (trigger_character)'));
+        assert.ok(text!.includes('transport_received_at_ms=1700000000000'));
+        assert.ok(text!.includes('handler_entered_at_ms=1700000000002'));
+        assert.ok(text!.includes('response_sent_at_ms=1700000000030'));
+        assert.ok(text!.includes('transport_to_handler_wait_ms=2'));
+        assert.ok(text!.includes('server_handler_exec_ms=28'));
+        assert.ok(text!.includes('cancel_observed_after_handler_enter_ms=19'));
         assert.ok(text!.includes('document_version_at_terminal=10'));
         assert.ok(text!.includes('cancel_reason_hint=superseded_newer_version'));
         assert.ok(text!.includes('superseded_by_probe_id=probe-2'));

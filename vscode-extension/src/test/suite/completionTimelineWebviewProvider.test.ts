@@ -142,7 +142,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 2,
+                version: 3,
                 traces: [
                     {
                         trace_id: 'trace-copy',
@@ -153,6 +153,13 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                         started_at_ms: 1_700_000_000_000,
                         total_duration_ms: 10,
                         dominant_stage: 'query_bundle',
+                        server_edge_details: {
+                            transport_received_at_ms: 1_700_000_000_000,
+                            handler_entered_at_ms: 1_700_000_000_002,
+                            response_sent_at_ms: 1_700_000_000_010,
+                            transport_to_handler_wait_ms: 2,
+                            server_handler_exec_ms: 8,
+                        },
                         stages: [
                             {
                                 name: 'query_bundle',
@@ -201,7 +208,10 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const clipboardPayload = clipboardStub.firstCall.args[0];
         assert.ok(clipboardPayload.includes('Completion Timeline | mode=all'));
         assert.ok(clipboardPayload.includes('Server Timeline'));
+        assert.ok(clipboardPayload.includes('contract=v3'));
         assert.ok(clipboardPayload.includes('trace-copy (invoked)'));
+        assert.ok(clipboardPayload.includes('transport_to_handler_wait_ms=2'));
+        assert.ok(clipboardPayload.includes('server_handler_exec_ms=8'));
         assert.ok(clipboardPayload.includes('Client Probe Feed | local-only debug data'));
 
         const copyAck = postMessageStub.lastCall.args[0];

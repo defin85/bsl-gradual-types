@@ -48,6 +48,11 @@ impl SystemCoordinator {
             .record_intellisense_v2_completion_trigger_mode(mode);
     }
 
+    pub fn record_intellisense_v2_completion_cancel_observed(&self) {
+        self.observability
+            .record_intellisense_v2_completion_cancel_observed();
+    }
+
     pub fn record_intellisense_v2_completion_parity_drift(&self, mode: &str) {
         self.observability
             .record_intellisense_v2_completion_parity_drift(mode);

@@ -12,6 +12,10 @@ tokio::task_local! {
     static LSP_REQUEST_ID: Option<String>;
 }
 
+tokio::task_local! {
+    static LSP_REQUEST_RECEIVED_AT_MS: Option<u64>;
+}
+
 type CancelRequestHook = Arc<dyn Fn(String) + Send + Sync + 'static>;
 
 fn cancel_request_hook_cell() -> &'static Mutex<Option<CancelRequestHook>> {
@@ -155,6 +159,13 @@ pub(crate) fn current_request_id() -> Option<String> {
     LSP_REQUEST_ID.try_with(Clone::clone).ok().flatten()
 }
 
+pub(crate) fn current_request_received_at_ms() -> Option<u64> {
+    LSP_REQUEST_RECEIVED_AT_MS
+        .try_with(Clone::clone)
+        .ok()
+        .flatten()
+}
+
 pub(crate) fn set_cancel_request_hook(hook: Option<CancelRequestHook>) {
     let mut slot = cancel_request_hook_cell()
         .lock()
@@ -162,11 +173,20 @@ pub(crate) fn set_cancel_request_hook(hook: Option<CancelRequestHook>) {
     *slot = hook;
 }
 
-async fn with_request_id<F, T>(request_id: Option<String>, future: F) -> T
+async fn with_request_context<F, T>(
+    request_id: Option<String>,
+    request_received_at_ms: Option<u64>,
+    future: F,
+) -> T
 where
     F: Future<Output = T>,
 {
-    LSP_REQUEST_ID.scope(request_id, future).await
+    LSP_REQUEST_ID.scope(request_id, async move {
+        LSP_REQUEST_RECEIVED_AT_MS
+            .scope(request_received_at_ms, future)
+            .await
+    })
+    .await
 }
 
 fn request_id_from_jsonrpc_id(id: &Id) -> Option<String> {
@@ -240,8 +260,11 @@ where
         if let Some(request_id) = request_id.as_deref() {
             record_pending_completion_request_id(&request, request_id);
         }
+        let request_received_at_ms = Some(super::unix_timestamp_ms());
         let future = self.inner.call(request);
-        Box::pin(async move { with_request_id(request_id, future).await })
+        Box::pin(async move {
+            with_request_context(request_id, request_received_at_ms, future).await
+        })
     }
 }
 

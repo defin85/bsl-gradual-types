@@ -142,4 +142,5 @@ BSL_TEST_GREP='Completion Probe (Schema|Recorder|Runtime|Store) Test Suite|Compl
 **Ожидаемый результат**:
 - проходят focused extension-host тесты для `Completion Timeline` и `Client Probe Feed`;
 - transport hook (`Completion Probe Runtime`) входит в тот же smoke path, что и `run-intellisense-tests.sh smoke`;
+- `Server Timeline` на payload `version=3` показывает bounded server-edge diagnostics (`transport_to_handler_wait`, `server_handler_exec`, optional late-cancel fields), а legacy `version=2` остаётся читаемым без этих полей;
 - `bsl.getCompletionTimeline` остаётся fail-closed и не смешивается с локальными client probes.

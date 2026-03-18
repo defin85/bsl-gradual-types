@@ -541,6 +541,16 @@ export interface CompletionTimelinePrepareDetailsTrace {
     apply_age_at_terminal_ms?: number;
 }
 
+export interface CompletionTimelineServerEdgeDetailsTrace {
+    transport_received_at_ms: number;
+    handler_entered_at_ms: number;
+    response_sent_at_ms: number;
+    cancel_observed_at_ms?: number;
+    transport_to_handler_wait_ms: number;
+    server_handler_exec_ms: number;
+    cancel_observed_after_handler_enter_ms?: number;
+}
+
 export interface CompletionTimelineTrace {
     trace_id: string;
     request_id?: string;
@@ -551,6 +561,7 @@ export interface CompletionTimelineTrace {
     total_duration_ms: number;
     dominant_stage?: string;
     prepare_details?: CompletionTimelinePrepareDetailsTrace;
+    server_edge_details?: CompletionTimelineServerEdgeDetailsTrace;
     turn_attribution?: CompletionTimelineTurnAttributionTrace;
     stages: CompletionTimelineStageTrace[];
 }

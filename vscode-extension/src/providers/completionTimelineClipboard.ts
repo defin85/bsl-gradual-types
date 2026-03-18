@@ -75,6 +75,28 @@ export function formatCompletionTimelineTraceForClipboard(
             `unattributed_overhead=${trace.unattributed_overhead_ms}ms | max_stage_end=${trace.max_stage_end_ms}ms`
         );
     }
+    if (trace.server_edge_details) {
+        const detailsBits = [
+            `transport_received_at_ms=${trace.server_edge_details.transport_received_at_ms}`,
+            `handler_entered_at_ms=${trace.server_edge_details.handler_entered_at_ms}`,
+            `response_sent_at_ms=${trace.server_edge_details.response_sent_at_ms}`,
+            `transport_to_handler_wait_ms=${trace.server_edge_details.transport_to_handler_wait_ms}`,
+            `server_handler_exec_ms=${trace.server_edge_details.server_handler_exec_ms}`,
+        ];
+        if (typeof trace.server_edge_details.cancel_observed_at_ms === 'number') {
+            detailsBits.push(
+                `cancel_observed_at_ms=${trace.server_edge_details.cancel_observed_at_ms}`
+            );
+        }
+        if (
+            typeof trace.server_edge_details.cancel_observed_after_handler_enter_ms === 'number'
+        ) {
+            detailsBits.push(
+                `cancel_observed_after_handler_enter_ms=${trace.server_edge_details.cancel_observed_after_handler_enter_ms}`
+            );
+        }
+        lines.push(detailsBits.join(' | '));
+    }
     if (trace.prepare_details) {
         const detailsBits: string[] = [];
         if (typeof trace.prepare_details.wait_budget_ms === 'number') {

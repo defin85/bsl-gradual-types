@@ -70,4 +70,49 @@ suite('Client Options Test Suite', () => {
             clock.restore();
         }
     });
+
+    test('default LanguageClient path records error terminal state for non-cancelled completion failures', async () => {
+        const clock = sinon.useFakeTimers({ now: 1_700_000_020_000 });
+        const recorder = new CompletionProbeRecorder({
+            store: new CompletionProbeStore(4),
+        });
+        const outputChannel = {
+            appendLine: sinon.stub(),
+        } as unknown as vscode.OutputChannel;
+        const document = createDocument(10, 'Документы.');
+        const options = buildClientOptions(outputChannel, recorder);
+        const provideCompletionItem = options.middleware?.provideCompletionItem;
+
+        assert.ok(
+            provideCompletionItem,
+            'default client path must expose provideCompletionItem middleware'
+        );
+
+        try {
+            await assert.rejects(
+                async () =>
+                    provideCompletionItem!(
+                        document,
+                        new vscode.Position(0, 'Документы.'.length),
+                        {
+                            triggerKind: vscode.CompletionTriggerKind.TriggerCharacter,
+                            triggerCharacter: '.',
+                        },
+                        new vscode.CancellationTokenSource().token,
+                        async () => {
+                            await clock.tickAsync(5);
+                            throw new Error('server exploded');
+                        }
+                    ),
+                /server exploded/
+            );
+
+            const snapshot = recorder.snapshot();
+            assert.strictEqual(snapshot.length, 1);
+            assert.strictEqual(snapshot[0].client_terminal_state, 'error');
+            assert.strictEqual(snapshot[0].client_duration_ms, 5);
+        } finally {
+            clock.restore();
+        }
+    });
 });

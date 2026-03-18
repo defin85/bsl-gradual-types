@@ -102,6 +102,18 @@
 npm test
 ```
 
+### Фокусный smoke для Completion Timeline / Client Probe Feed
+```bash
+npm run compile:fast
+BSL_TEST_GREP='Completion Probe (Schema|Recorder|Store) Test Suite|Completion Timeline (Clipboard|Model|Webview Provider) Test Suite|Client Options Test Suite|getCompletionTimeline should work via executeCommand|getCompletionTimeline should fail-closed on Method not found' node ./out/test/runTest.js
+```
+
+Этот путь повторяет extension-side slice из `./scripts/run-intellisense-tests.sh smoke` и проверяет:
+- bounded/redacted probe schema и eviction;
+- wiring default `LanguageClient` path;
+- dual-view `Server Timeline` / `Client Probe Feed`;
+- fail-closed/executeCommand поведение `bsl.getCompletionTimeline`.
+
 ### С coverage (цель: 80%)
 ```bash
 npm run test:coverage

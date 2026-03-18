@@ -103,6 +103,7 @@ export function buildClientOptions(
                         requestStartedAtMs,
                         requestCompletedAtMs: Date.now(),
                         wasCancelled: token.isCancellationRequested,
+                        error,
                     });
                     throw error;
                 }

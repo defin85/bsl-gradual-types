@@ -30,6 +30,12 @@ export async function run(): Promise<void> {
         ui: 'tdd',
         color: true
     });
+    const grepPattern = process.env.BSL_TEST_GREP?.trim();
+
+    if (grepPattern) {
+        mocha.grep(new RegExp(grepPattern));
+        console.log(`[Test Setup] Applying BSL_TEST_GREP=${grepPattern}`);
+    }
 
     const testsRoot = path.resolve(__dirname, '..');
 

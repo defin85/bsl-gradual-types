@@ -82,4 +82,32 @@ suite('Completion Probe Recorder Test Suite', () => {
         assert.strictEqual(snapshot[0].client_terminal_state, 'cancelled');
         assert.strictEqual(snapshot[0].trigger_mode, 'invoked');
     });
+
+    test('records error terminal state for non-cancelled completion failures', () => {
+        let nowMs = 1_700_000_000_200;
+        const recorder = new CompletionProbeRecorder({
+            now: () => nowMs,
+            store: new CompletionProbeStore(4),
+        });
+        const document = createDocument(13, 'Справочники.Номенклатура');
+
+        recorder.recordCompletionOutcome({
+            document,
+            position: new vscode.Position(0, 'Справочники.Номенклатура'.length),
+            context: {
+                triggerKind: vscode.CompletionTriggerKind.Invoke,
+                triggerCharacter: undefined,
+            },
+            result: undefined,
+            requestStartedAtMs: nowMs,
+            requestCompletedAtMs: nowMs + 7,
+            wasCancelled: false,
+            error: new Error('completion failed'),
+        });
+
+        const snapshot = recorder.snapshot();
+        assert.strictEqual(snapshot.length, 1);
+        assert.strictEqual(snapshot[0].client_terminal_state, 'error');
+        assert.strictEqual(snapshot[0].client_duration_ms, 7);
+    });
 });

@@ -61,6 +61,16 @@ run_cross_adapter_smoke() {
   cargo test -p bsl-agent --test stdio_integration stdio_definition_revision_switch_does_not_return_stale_previous_revision_location -- --nocapture
 }
 
+run_extension_completion_observability_smoke() {
+  local grep_pattern='Completion Probe (Schema|Recorder|Store) Test Suite|Completion Timeline (Clipboard|Model|Webview Provider) Test Suite|Client Options Test Suite|getCompletionTimeline should work via executeCommand|getCompletionTimeline should fail-closed on Method not found'
+
+  npm --prefix "${ROOT_DIR}/vscode-extension" run compile:fast
+  (
+    cd "${ROOT_DIR}/vscode-extension"
+    BSL_TEST_GREP="${grep_pattern}" node ./out/test/runTest.js
+  )
+}
+
 run_smoke() {
   cargo test -p bsl-backend --lib completion_ranking
   cargo test -p bsl-backend --lib completion_service
@@ -70,6 +80,7 @@ run_smoke() {
   cargo test -p bsl-backend --test m8_completion_matrix_golden_v2_test
   cargo test -p bsl-backend --test lsp_incremental_completion_test
   run_cross_adapter_smoke
+  run_extension_completion_observability_smoke
   report_m8
 }
 

@@ -26,6 +26,7 @@ export interface CompletionProbeOutcomeInput {
     requestStartedAtMs: number;
     requestCompletedAtMs: number;
     wasCancelled: boolean;
+    error?: unknown;
 }
 
 const IDENTIFIER_TAIL_PATTERN = /[A-Za-zА-Яа-яЁё0-9_]+$/;
@@ -96,7 +97,11 @@ export class CompletionProbeRecorder {
             trigger_character: input.context.triggerCharacter,
             request_started_at_ms: requestStartedAtMs,
             request_completed_at_ms: requestCompletedAtMs,
-            client_terminal_state: classifyTerminalState(input.result, input.wasCancelled),
+            client_terminal_state: classifyTerminalState(
+                input.result,
+                input.wasCancelled,
+                input.error
+            ),
             time_since_last_local_edit_ms: computeExactDeltaMs(
                 localEditClock,
                 input.document.version,
@@ -154,14 +159,19 @@ function mapTriggerMode(context: vscode.CompletionContext): CompletionProbeTrigg
 
 function classifyTerminalState(
     result: vscode.CompletionItem[] | vscode.CompletionList | null | undefined,
-    wasCancelled: boolean
+    wasCancelled: boolean,
+    error?: unknown
 ): CompletionProbeTerminalState {
-    if (isNonEmptyCompletionResult(result)) {
-        return 'ok_non_empty';
-    }
-
     if (wasCancelled) {
         return 'cancelled';
+    }
+
+    if (error !== undefined && error !== null) {
+        return 'error';
+    }
+
+    if (isNonEmptyCompletionResult(result)) {
+        return 'ok_non_empty';
     }
 
     return 'ok_empty';

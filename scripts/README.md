@@ -354,7 +354,7 @@ uv run --with tiktoken python3 scripts/check-rust-file-llm-budget.py --report ar
 ```
 
 **Состав:**
-- `smoke`: completion/golden baseline + cross-adapter default-path selectors для LSP/runtime/web/MCP/CLI, включая anti-rescue invariants (no polluted-search backfill, no MCP parse-result semantic bypass), current-revision stale proofs для `hover` / `definition` / `type_at_position`, exact-index representative slices для `hover` / `signatureHelp` / `definition` и path-aware module-context/facet slices для Web и CLI.
+- `smoke`: completion/golden baseline + cross-adapter default-path selectors для LSP/runtime/web/MCP/CLI, включая anti-rescue invariants (no polluted-search backfill, no MCP parse-result semantic bypass), current-revision stale proofs для `hover` / `definition` / `type_at_position`, exact-index representative slices для `hover` / `signatureHelp` / `definition`, path-aware module-context/facet slices для Web и CLI, а также focused extension-host slice для `Completion Timeline` / `Client Probe Feed` (`Completion Probe*`, `Completion Timeline*`, `Client Options`, `getCompletionTimeline` fail-closed/executeCommand).
 - `full`: smoke + интеграционные тесты, которые загружают fixture конфигурации (например, `examples/conf/conf_test`).
 
 ---

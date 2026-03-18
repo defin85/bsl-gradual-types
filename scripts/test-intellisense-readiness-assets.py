@@ -46,6 +46,15 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
             "cli_inline_completion_preserves_object_module_binding_facets"
         ),
     ]
+    REQUIRED_EXTENSION_SMOKE_SNIPPETS = [
+        'npm --prefix "${ROOT_DIR}/vscode-extension" run compile:fast',
+        "BSL_TEST_GREP=",
+        "Completion Probe (Schema|Recorder|Store) Test Suite",
+        "Completion Timeline (Clipboard|Model|Webview Provider) Test Suite",
+        "Client Options Test Suite",
+        "getCompletionTimeline should work via executeCommand",
+        "getCompletionTimeline should fail-closed on Method not found",
+    ]
 
     def smoke_script_text(self) -> str:
         return self.SMOKE_SCRIPT.read_text(encoding="utf-8")
@@ -97,6 +106,21 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         self.assertFalse(
             missing,
             f"mandatory shipped smoke selectors are missing from run-intellisense-tests.sh: {missing}",
+        )
+
+    def test_shipped_smoke_script_covers_extension_completion_observability_slice(self) -> None:
+        smoke_text = self.smoke_script_text()
+        missing = [
+            snippet
+            for snippet in self.REQUIRED_EXTENSION_SMOKE_SNIPPETS
+            if snippet not in smoke_text
+        ]
+        self.assertFalse(
+            missing,
+            (
+                "run-intellisense-tests.sh smoke is missing the focused extension "
+                f"completion-observability slice: {missing}"
+            ),
         )
 
 

@@ -1,8 +1,11 @@
 import * as vscode from 'vscode';
 import {
     buildCompletionProbe,
+    CompletionProbeCancelReasonHint,
     CompletionProbe,
     CompletionProbeDidChangeDeltaMs,
+    CompletionProbeItemCountBucket,
+    CompletionProbeResultKind,
     CompletionProbeTerminalState,
     CompletionProbeTriggerMode,
 } from './completionProbe';
@@ -11,6 +14,41 @@ import { CompletionProbeStore } from './completionProbeStore';
 interface DocumentClock {
     version: number;
     timestampMs: number;
+}
+
+interface CursorClock {
+    sequence: number;
+}
+
+interface ActiveCompletionProbeSession {
+    probeId: string;
+    documentKey: string;
+    documentVersion: number;
+    requestStartedAtMs: number;
+    triggerMode: CompletionProbeTriggerMode;
+    triggerCharacter?: string;
+    isAfterDot: boolean;
+    identifierTailLength: number;
+    timeSinceLastLocalEditMs: number;
+    timeSinceLastDidChangeSentMs: CompletionProbeDidChangeDeltaMs;
+    startDidChangeCount: number;
+    startCursorSequence: number;
+    activeCompletionCountAtStart: number;
+    sameUriProbeOverlapCount: number;
+    newerProbeStartedBeforeTerminal: boolean;
+    cancelReasonHint: CompletionProbeCancelReasonHint;
+    supersededByProbeId?: string;
+    supersededAfterMs?: number;
+    lspRequestStartedAtMs: number;
+    lspResponseReceivedAtMs: number;
+}
+
+export interface CompletionProbeStartInput {
+    document: vscode.TextDocument;
+    position: vscode.Position;
+    context: vscode.CompletionContext;
+    token: vscode.CancellationToken;
+    requestStartedAtMs: number;
 }
 
 export interface CompletionProbeRecorderOptions {
@@ -25,6 +63,7 @@ export interface CompletionProbeOutcomeInput {
     result: vscode.CompletionItem[] | vscode.CompletionList | null | undefined;
     requestStartedAtMs: number;
     requestCompletedAtMs: number;
+    token?: vscode.CancellationToken;
     wasCancelled: boolean;
     error?: unknown;
 }
@@ -36,6 +75,10 @@ export class CompletionProbeRecorder {
     private readonly store: CompletionProbeStore;
     private readonly lastLocalEditByUri = new Map<string, DocumentClock>();
     private readonly lastDidChangeSentByUri = new Map<string, DocumentClock>();
+    private readonly didChangeCountByUri = new Map<string, number>();
+    private readonly cursorClockByUri = new Map<string, CursorClock>();
+    private readonly activeSessionsByToken = new Map<vscode.CancellationToken, ActiveCompletionProbeSession>();
+    private readonly activeSessionsByUri = new Map<string, ActiveCompletionProbeSession[]>();
     private nextProbeSequence = 1;
 
     constructor(options: CompletionProbeRecorderOptions = {}) {
@@ -62,10 +105,15 @@ export class CompletionProbeRecorder {
             return;
         }
 
-        this.lastLocalEditByUri.set(toDocumentKey(event.document), {
+        const documentKey = toDocumentKey(event.document);
+        this.lastLocalEditByUri.set(documentKey, {
             version: event.document.version,
             timestampMs: this.now(),
         });
+        this.didChangeCountByUri.set(
+            documentKey,
+            (this.didChangeCountByUri.get(documentKey) ?? 0) + 1
+        );
     }
 
     recordTextDocumentDidChangeSent(document: vscode.TextDocument): void {
@@ -79,43 +127,185 @@ export class CompletionProbeRecorder {
         const key = toDocumentKey(document);
         this.lastLocalEditByUri.delete(key);
         this.lastDidChangeSentByUri.delete(key);
+        this.didChangeCountByUri.delete(key);
+        this.cursorClockByUri.delete(key);
+    }
+
+    recordTextEditorSelectionChanged(editor: Pick<vscode.TextEditor, 'document'>): void {
+        const key = toDocumentKey(editor.document);
+        const current = this.cursorClockByUri.get(key);
+        this.cursorClockByUri.set(key, {
+            sequence: (current?.sequence ?? 0) + 1,
+        });
+    }
+
+    recordCompletionStarted(input: CompletionProbeStartInput): string {
+        const documentKey = toDocumentKey(input.document);
+        const requestStartedAtMs = clampTimestamp(input.requestStartedAtMs);
+        const localEditClock = this.lastLocalEditByUri.get(documentKey);
+        const didChangeClock = this.lastDidChangeSentByUri.get(documentKey);
+        const linePrefix = getLinePrefix(input.document, input.position);
+        const activeSessionsForUri = this.activeSessionsByUri.get(documentKey) ?? [];
+        const session: ActiveCompletionProbeSession = {
+            probeId: `probe-${this.nextProbeSequence++}`,
+            documentKey,
+            documentVersion: input.document.version,
+            requestStartedAtMs,
+            triggerMode: mapTriggerMode(input.context),
+            triggerCharacter: input.context.triggerCharacter ?? undefined,
+            isAfterDot: linePrefix.endsWith('.'),
+            identifierTailLength: measureIdentifierTailLength(linePrefix),
+            timeSinceLastLocalEditMs: computeExactDeltaMs(
+                localEditClock,
+                input.document.version,
+                requestStartedAtMs,
+                0
+            ),
+            timeSinceLastDidChangeSentMs: computeDidChangeDeltaMs(
+                didChangeClock,
+                input.document.version,
+                requestStartedAtMs
+            ),
+            startDidChangeCount: this.didChangeCountByUri.get(documentKey) ?? 0,
+            startCursorSequence: this.cursorClockByUri.get(documentKey)?.sequence ?? 0,
+            activeCompletionCountAtStart: this.activeSessionsByToken.size,
+            sameUriProbeOverlapCount: activeSessionsForUri.length,
+            newerProbeStartedBeforeTerminal: false,
+            cancelReasonHint: 'unknown',
+            lspRequestStartedAtMs: requestStartedAtMs,
+            lspResponseReceivedAtMs: requestStartedAtMs,
+        };
+
+        for (const activeSession of activeSessionsForUri) {
+            activeSession.newerProbeStartedBeforeTerminal = true;
+            activeSession.supersededByProbeId = session.probeId;
+            activeSession.supersededAfterMs = Math.max(
+                0,
+                requestStartedAtMs - activeSession.requestStartedAtMs
+            );
+            activeSession.cancelReasonHint =
+                session.documentVersion > activeSession.documentVersion
+                    ? 'superseded_newer_version'
+                    : 'superseded_same_version';
+        }
+
+        this.activeSessionsByToken.set(input.token, session);
+        this.activeSessionsByUri.set(documentKey, [...activeSessionsForUri, session]);
+        return session.probeId;
+    }
+
+    recordCompletionLspRequestStarted(
+        token: vscode.CancellationToken,
+        timestampMs: number = this.now()
+    ): void {
+        const session = this.activeSessionsByToken.get(token);
+        if (!session) {
+            return;
+        }
+
+        session.lspRequestStartedAtMs = clampTimestamp(timestampMs);
+    }
+
+    recordCompletionLspResponseReceived(
+        token: vscode.CancellationToken,
+        timestampMs: number = this.now()
+    ): void {
+        const session = this.activeSessionsByToken.get(token);
+        if (!session) {
+            return;
+        }
+
+        session.lspResponseReceivedAtMs = clampTimestamp(timestampMs);
     }
 
     recordCompletionOutcome(input: CompletionProbeOutcomeInput): CompletionProbe {
         const documentKey = toDocumentKey(input.document);
-        const requestStartedAtMs = clampTimestamp(input.requestStartedAtMs);
         const requestCompletedAtMs = clampTimestamp(input.requestCompletedAtMs);
+        const session = input.token
+            ? this.activeSessionsByToken.get(input.token)
+            : undefined;
+        const requestStartedAtMs = session
+            ? session.requestStartedAtMs
+            : clampTimestamp(input.requestStartedAtMs);
         const localEditClock = this.lastLocalEditByUri.get(documentKey);
         const didChangeClock = this.lastDidChangeSentByUri.get(documentKey);
         const linePrefix = getLinePrefix(input.document, input.position);
+        const didChangeCountAtTerminal = this.didChangeCountByUri.get(documentKey) ?? 0;
+        const cursorClockAtTerminal = this.cursorClockByUri.get(documentKey)?.sequence ?? 0;
+        const resultShape = classifyResultShape(input.result);
+        const cancelReasonHint = classifyCancelReasonHint(
+            session,
+            input.document.version,
+            didChangeCountAtTerminal,
+            cursorClockAtTerminal,
+            input.wasCancelled
+        );
 
         const probe = buildCompletionProbe({
-            probe_id: `probe-${this.nextProbeSequence++}`,
+            probe_id: session?.probeId ?? `probe-${this.nextProbeSequence++}`,
             uri: documentKey,
-            document_version: input.document.version,
-            trigger_mode: mapTriggerMode(input.context),
-            trigger_character: input.context.triggerCharacter,
+            document_version: session?.documentVersion ?? input.document.version,
+            document_version_at_terminal: input.document.version,
+            trigger_mode: session?.triggerMode ?? mapTriggerMode(input.context),
+            trigger_character: session?.triggerCharacter ?? input.context.triggerCharacter,
             request_started_at_ms: requestStartedAtMs,
+            lsp_request_started_at_ms: session?.lspRequestStartedAtMs ?? requestStartedAtMs,
+            lsp_response_received_at_ms:
+                session?.lspResponseReceivedAtMs ?? requestCompletedAtMs,
             request_completed_at_ms: requestCompletedAtMs,
             client_terminal_state: classifyTerminalState(
                 input.result,
                 input.wasCancelled,
                 input.error
             ),
-            time_since_last_local_edit_ms: computeExactDeltaMs(
-                localEditClock,
-                input.document.version,
-                requestStartedAtMs,
-                0
+            cancel_reason_hint: cancelReasonHint,
+            result_kind: resultShape.kind,
+            item_count_bucket: resultShape.itemCountBucket,
+            is_incomplete: resultShape.isIncomplete,
+            time_since_last_local_edit_ms:
+                session?.timeSinceLastLocalEditMs
+                ?? computeExactDeltaMs(
+                    localEditClock,
+                    input.document.version,
+                    requestStartedAtMs,
+                    0
+                ),
+            time_since_last_did_change_sent_ms:
+                session?.timeSinceLastDidChangeSentMs
+                ?? computeDidChangeDeltaMs(
+                    didChangeClock,
+                    input.document.version,
+                    requestStartedAtMs
+                ),
+            did_change_count_during_probe: Math.max(
+                0,
+                didChangeCountAtTerminal - (session?.startDidChangeCount ?? didChangeCountAtTerminal)
             ),
-            time_since_last_did_change_sent_ms: computeDidChangeDeltaMs(
-                didChangeClock,
-                input.document.version,
-                requestStartedAtMs
-            ),
-            is_after_dot: linePrefix.endsWith('.'),
-            identifier_tail_length: measureIdentifierTailLength(linePrefix),
+            cursor_moved_during_probe:
+                cursorClockAtTerminal > (session?.startCursorSequence ?? cursorClockAtTerminal),
+            active_completion_count_at_start: session?.activeCompletionCountAtStart ?? 0,
+            same_uri_probe_overlap_count: session?.sameUriProbeOverlapCount ?? 0,
+            newer_probe_started_before_terminal: session?.newerProbeStartedBeforeTerminal ?? false,
+            superseded_by_probe_id: session?.supersededByProbeId,
+            superseded_after_ms: session?.supersededAfterMs,
+            is_after_dot: session?.isAfterDot ?? linePrefix.endsWith('.'),
+            identifier_tail_length: session?.identifierTailLength ?? measureIdentifierTailLength(linePrefix),
         });
+
+        if (input.token) {
+            this.activeSessionsByToken.delete(input.token);
+        }
+        if (session) {
+            const activeSessionsForUri = this.activeSessionsByUri.get(session.documentKey) ?? [];
+            const nextActiveSessions = activeSessionsForUri.filter(
+                (activeSession) => activeSession.probeId !== session.probeId
+            );
+            if (nextActiveSessions.length === 0) {
+                this.activeSessionsByUri.delete(session.documentKey);
+            } else {
+                this.activeSessionsByUri.set(session.documentKey, nextActiveSessions);
+            }
+        }
 
         this.store.add(probe);
         return probe;
@@ -175,6 +365,74 @@ function classifyTerminalState(
     }
 
     return 'ok_empty';
+}
+
+function classifyResultShape(
+    result: vscode.CompletionItem[] | vscode.CompletionList | null | undefined
+): {
+    kind: CompletionProbeResultKind;
+    itemCountBucket: CompletionProbeItemCountBucket;
+    isIncomplete?: boolean;
+} {
+    if (Array.isArray(result)) {
+        return {
+            kind: result.length > 0 ? 'non_empty' : 'empty_array',
+            itemCountBucket: classifyItemCountBucket(result.length),
+        };
+    }
+
+    if (result && Array.isArray(result.items)) {
+        return {
+            kind: result.items.length > 0 ? 'non_empty' : 'empty_list',
+            itemCountBucket: classifyItemCountBucket(result.items.length),
+            isIncomplete: typeof result.isIncomplete === 'boolean' ? result.isIncomplete : undefined,
+        };
+    }
+
+    return {
+        kind: 'nullish',
+        itemCountBucket: '0',
+    };
+}
+
+function classifyItemCountBucket(count: number): CompletionProbeItemCountBucket {
+    if (count <= 0) {
+        return '0';
+    }
+    if (count <= 5) {
+        return '1_5';
+    }
+    if (count <= 20) {
+        return '6_20';
+    }
+    return '21_plus';
+}
+
+function classifyCancelReasonHint(
+    session: ActiveCompletionProbeSession | undefined,
+    documentVersionAtTerminal: number,
+    didChangeCountAtTerminal: number,
+    cursorClockAtTerminal: number,
+    wasCancelled: boolean
+): CompletionProbeCancelReasonHint {
+    if (!wasCancelled) {
+        return session?.cancelReasonHint ?? 'unknown';
+    }
+
+    if (session?.cancelReasonHint && session.cancelReasonHint !== 'unknown') {
+        return session.cancelReasonHint;
+    }
+
+    if (
+        session &&
+        (documentVersionAtTerminal !== session.documentVersion
+            || didChangeCountAtTerminal > session.startDidChangeCount
+            || cursorClockAtTerminal > session.startCursorSequence)
+    ) {
+        return 'editor_state_changed';
+    }
+
+    return 'unknown';
 }
 
 function isNonEmptyCompletionResult(

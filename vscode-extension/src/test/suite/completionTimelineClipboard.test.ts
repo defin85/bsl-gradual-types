@@ -18,14 +18,28 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                         probe_id: 'probe-1',
                         uri: 'file:///tmp/test1.bsl',
                         document_version: 9,
+                        document_version_at_terminal: 10,
                         trigger_mode: 'trigger_character',
                         trigger_character: '.',
                         request_started_at_ms: 1_700_000_000_090,
+                        lsp_request_started_at_ms: 1_700_000_000_091,
+                        lsp_response_received_at_ms: 1_700_000_000_098,
                         request_completed_at_ms: 1_700_000_000_100,
                         client_duration_ms: 10,
                         client_terminal_state: 'ok_non_empty',
+                        cancel_reason_hint: 'superseded_newer_version',
+                        result_kind: 'non_empty',
+                        item_count_bucket: '1_5',
+                        is_incomplete: false,
                         time_since_last_local_edit_ms: 21,
                         time_since_last_did_change_sent_ms: 8,
+                        did_change_count_during_probe: 1,
+                        cursor_moved_during_probe: true,
+                        active_completion_count_at_start: 1,
+                        same_uri_probe_overlap_count: 1,
+                        newer_probe_started_before_terminal: true,
+                        superseded_by_probe_id: 'probe-2',
+                        superseded_after_ms: 6,
                         is_after_dot: true,
                         identifier_tail_length: 0,
                     },
@@ -136,6 +150,16 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('trace-1 (invoked)'));
         assert.ok(text!.includes('Client Probe Feed | local-only debug data'));
         assert.ok(text!.includes('probe-1 (trigger_character)'));
+        assert.ok(text!.includes('document_version_at_terminal=10'));
+        assert.ok(text!.includes('cancel_reason_hint=superseded_newer_version'));
+        assert.ok(text!.includes('superseded_by_probe_id=probe-2'));
+        assert.ok(text!.includes('transport_dispatch_delta_ms=1'));
+        assert.ok(text!.includes('lsp_roundtrip_ms=7'));
+        assert.ok(text!.includes('client_post_response_ms=2'));
+        assert.ok(text!.includes('result_kind=non_empty | item_count_bucket=1_5 | is_incomplete=false'));
+        assert.ok(text!.includes('did_change_count_during_probe=1'));
+        assert.ok(text!.includes('cursor_moved_during_probe=true'));
+        assert.ok(text!.includes('same_uri_probe_overlap_count=1'));
         assert.ok(text!.includes('prepare_wait_budget_ms=120'));
         assert.ok(text!.includes('prepare_guard_outcome=timeout'));
         assert.ok(text!.includes('prepare_outcome=wait_not_ready'));
@@ -181,5 +205,6 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('Timeline unsupported'));
         assert.ok(text!.includes('Client Probe Feed | local-only debug data'));
         assert.ok(text!.includes('probe-1 (trigger_character)'));
+        assert.ok(text!.includes('cancel_reason_hint=superseded_newer_version'));
     });
 });

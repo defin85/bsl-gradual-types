@@ -11,14 +11,28 @@ function buildClientProbe(probeId: string, version: number, startedAtMs: number)
         probe_id: probeId,
         uri: 'file:///tmp/test.bsl',
         document_version: version,
+        document_version_at_terminal: version + 1,
         trigger_mode: 'trigger_character',
         trigger_character: '.',
         request_started_at_ms: startedAtMs,
+        lsp_request_started_at_ms: startedAtMs + 1,
+        lsp_response_received_at_ms: startedAtMs + 4,
         request_completed_at_ms: startedAtMs + 5,
         client_duration_ms: 5,
         client_terminal_state: 'ok_non_empty',
+        cancel_reason_hint: 'superseded_same_version',
+        result_kind: 'non_empty',
+        item_count_bucket: '1_5',
+        is_incomplete: false,
         time_since_last_local_edit_ms: 11,
         time_since_last_did_change_sent_ms: 7,
+        did_change_count_during_probe: 1,
+        cursor_moved_during_probe: true,
+        active_completion_count_at_start: 1,
+        same_uri_probe_overlap_count: 1,
+        newer_probe_started_before_terminal: true,
+        superseded_by_probe_id: `next-${probeId}`,
+        superseded_after_ms: 4,
         is_after_dot: true,
         identifier_tail_length: 0,
     };
@@ -107,6 +121,9 @@ suite('Completion Timeline Model Test Suite', () => {
             state.client_probe_feed.probes.map((probe) => probe.probe_id),
             ['probe-2', 'probe-1']
         );
+        assert.strictEqual(state.client_probe_feed.probes[0].cancel_reason_hint, 'superseded_same_version');
+        assert.strictEqual(state.client_probe_feed.probes[0].document_version_at_terminal, 9);
+        assert.strictEqual(state.client_probe_feed.probes[0].superseded_by_probe_id, 'next-probe-2');
         assert.ok(state.traces[0].stages.every((stage) => stage.width_percent >= 0));
         assert.ok(state.traces[0].stages.every((stage) => stage.duration_percent >= 0));
         assert.ok(state.average_trace, 'average trace should be available for non-empty payload');
@@ -256,5 +273,6 @@ suite('Completion Timeline Model Test Suite', () => {
         assert.ok(state.message.includes('bsl.getCompletionTimeline'));
         assert.strictEqual(state.client_probe_feed.probes.length, 1);
         assert.strictEqual(state.client_probe_feed.probes[0].probe_id, 'probe-legacy');
+        assert.strictEqual(state.client_probe_feed.probes[0].result_kind, 'non_empty');
     });
 });

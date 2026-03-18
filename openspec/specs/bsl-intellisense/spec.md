@@ -314,7 +314,8 @@ Observability completion UI MUST:
 - показывать total duration, outcome и список stage entries для выбранного server trace;
 - визуально выделять dominant stage (самый длительный server этап);
 - отображать статус каждого server этапа (`completed|cancelled|failed|skipped`);
-- явно маркировать `Client Probe Feed` как local-only debug data, не эквивалентные server timeline.
+- явно маркировать `Client Probe Feed` как local-only debug data, не эквивалентные server timeline;
+- отображать в `Client Probe Feed`, когда они доступны, bounded cancellation diagnostics, transport-phase diagnostics, result-shape diagnostics и version-drift/overlap diagnostics.
 
 Observability completion UI MUST NOT:
 - реконструировать per-request server timeline из текстовых логов или агрегированных p50/p95/p99 метрик;
@@ -323,36 +324,24 @@ Observability completion UI MUST NOT:
 - скрывать server trace только потому, что local probes отсутствуют;
 - выполнять trace-level correlation между server trace и local probes в рамках этого change.
 
-#### Scenario: Пользователь видит самый тяжёлый этап completion-запроса
-- **GIVEN** LSP вернул per-request completion trace со stage durations
-- **WHEN** пользователь открывает server timeline в Observability UI
-- **THEN** extension отображает этапы как визуальную временную шкалу с относительными длительностями
-- **AND** этап с максимальной длительностью явно помечен как dominant/slow
-- **AND** пользователю показаны `total_duration_ms` и `outcome` для конкретного server trace
-
-#### Scenario: Панель корректно показывает отменённый completion
-- **GIVEN** completion-запрос был отменён или superseded
-- **WHEN** extension получает trace с terminal non-success outcome
-- **THEN** `Server Timeline` отображает partial server timeline без фальшивого `completed` статуса
-- **AND** terminal outcome отражается как cancelled/superseded для этого trace
-
-#### Scenario: Timeline capability реализована только через webview и server-driven request
-- **GIVEN** пользователь открыл completion observability UI
-- **WHEN** extension обновляет server section панели
-- **THEN** server trace запрашивается через `workspace/executeCommand` с `command: bsl.getCompletionTimeline`
-- **AND** рендеринг выполняется в `webview` view, а не в `TreeDataProvider`
-
-#### Scenario: Client Probe Feed показывается отдельно от Server Timeline
-- **GIVEN** extension записала local client-side completion probes
+#### Scenario: Пользователь отличает superseded cancel от пустого completion
+- **GIVEN** `Client Probe Feed` содержит отменённый probe и bounded cancellation diagnostics
 - **WHEN** пользователь открывает completion observability UI
-- **THEN** panel показывает отдельный `Client Probe Feed`
-- **AND** local probes не встраиваются в server trace и не меняют `outcome` или `dominant_stage`
+- **THEN** panel показывает `client_terminal_state=cancelled`
+- **AND** если доступен `cancel_reason_hint`, он отображается как local diagnostic hint
+- **AND** `Client Probe Feed` не подменяет этим hint server `outcome`
 
-#### Scenario: Local probes не используются как суррогат server trace
-- **GIVEN** extension записала local probes
-- **WHEN** пользователь анализирует completion через Observability UI
-- **THEN** panel не строит общую причинно-следственную timeline из local probes и server traces
-- **AND** client-side данные остаются отдельным local-only debug stream
+#### Scenario: Пользователь видит transport-phase breakdown для длинного local probe
+- **GIVEN** `Client Probe Feed` содержит explicit transport-phase timestamps для completion probe
+- **WHEN** пользователь открывает completion observability UI
+- **THEN** panel показывает enough-local diagnostics, чтобы отличить pre-send delay, LSP/in-flight wait и post-response overhead
+- **AND** эти client-side diagnostics остаются отдельными от `Server Timeline`
+
+#### Scenario: Пользователь видит version drift и overlap context без correlation guesswork
+- **GIVEN** completion probe пережил локальные правки, движение курсора или overlap с новыми completion probes
+- **WHEN** пользователь открывает completion observability UI
+- **THEN** `Client Probe Feed` показывает bounded version-drift/overlap diagnostics
+- **AND** UI не строит machine-join между этим probe и конкретным server trace
 
 ### Requirement: Timeline panel деградирует предсказуемо с legacy LSP (MUST)
 Если подключённый LSP не поддерживает `bsl.getCompletionTimeline`, extension MUST fail-closed для server-side timeline capability:
@@ -376,39 +365,50 @@ Probe buffer MUST:
 - быть wired на default `LanguageClient` path, используемый обычной активацией extension;
 - использовать deterministic oldest-first eviction;
 - хранить только bounded/redacted probe fields;
-- оставаться session-local и in-memory only для MVP.
+- оставаться session-local и in-memory only.
 
 Каждый probe MUST включать только bounded metadata:
 - `probe_id`;
 - `uri`;
 - `document_version`;
+- `document_version_at_terminal`;
 - `trigger_mode` и optional `trigger_character`;
 - `request_started_at_ms`;
+- `request_completed_at_ms`;
+- explicit transport-phase milestones, достаточные для отделения client enter, LSP dispatch, LSP response receive и client terminal;
 - terminal status/result summary;
+- bounded `result_kind` vocabulary;
+- bounded `item_count_bucket`;
+- `is_incomplete`, только если этот сигнал доступен без guesswork;
 - `time_since_last_local_edit_ms`;
 - `time_since_last_did_change_sent_ms` либо явное значение `unknown`, если этот сигнал недоступен;
+- bounded cancellation diagnostics: `cancel_reason_hint` из vocabulary `superseded_same_version|superseded_newer_version|editor_state_changed|unknown`, optional `superseded_by_probe_id`, optional `superseded_after_ms`;
+- bounded overlap/drift diagnostics: `did_change_count_during_probe`, `cursor_moved_during_probe`, `active_completion_count_at_start`, `same_uri_probe_overlap_count`, `newer_probe_started_before_terminal`;
 - derived context flags вроде `is_after_dot` и `identifier_tail_length`.
 
 Probe buffer MUST NOT:
 - хранить raw document text, line prefixes или произвольные snippets;
 - хранить unbounded free-form labels;
-- требовать отдельного persistent telemetry pipeline в рамках этой capability.
+- требовать отдельного persistent telemetry pipeline в рамках этой capability;
+- требовать protocol-level `client_probe_id` или trace-level correlation с `Server Timeline`.
 
-#### Scenario: Default activation path записывает client-side completion probe
-- **GIVEN** extension активирован через обычный `initializeLspClient` path
-- **WHEN** пользователь вызывает completion в BSL документе
-- **THEN** extension записывает probe в bounded in-memory buffer
-- **AND** probe становится доступен для `Client Probe Feed`
+#### Scenario: Superseded completion probe получает bounded cancellation diagnostics
+- **GIVEN** completion probe был отменён после старта более нового completion probe на том же `uri`
+- **WHEN** extension завершает запись client-side probe
+- **THEN** probe содержит `client_terminal_state=cancelled`
+- **AND** probe содержит bounded `cancel_reason_hint`
+- **AND** если superseding probe известен локально, probe MAY содержать `superseded_by_probe_id` и `superseded_after_ms`
 
-#### Scenario: Переполнение probe buffer удаляет самый старый probe
-- **GIVEN** probe buffer уже заполнен до configured max entries
-- **WHEN** completion middleware записывает новый probe
-- **THEN** удаляется самый старый probe
-- **AND** новые probes остаются доступны в `Client Probe Feed`
+#### Scenario: Успешный пустой completion probe содержит result-shape и transport diagnostics
+- **GIVEN** completion probe завершился без cancellation и без items
+- **WHEN** extension записывает probe
+- **THEN** probe содержит bounded `result_kind` и `item_count_bucket`
+- **AND** probe содержит transport-phase milestones для локального разбора длительности
+- **AND** probe не требует реконструкции server timeline
 
-#### Scenario: Probe payload остаётся redacted и bounded
-- **GIVEN** completion вызван в документе с произвольным пользовательским кодом
-- **WHEN** extension записывает client-side probe
-- **THEN** probe содержит только bounded metadata и derived flags
-- **AND** probe не содержит raw source text или unbounded snippets
+#### Scenario: Probe фиксирует drift и overlap контекст во время жизни запроса
+- **GIVEN** во время completion probe произошли дополнительные правки, движение курсора или запуск новых completion probes на том же документе
+- **WHEN** extension завершает запись probe
+- **THEN** probe содержит bounded drift/overlap diagnostics
+- **AND** probe остаётся redacted и session-local
 

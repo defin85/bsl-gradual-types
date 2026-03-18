@@ -742,6 +742,18 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             const triggerCharacter = probe.trigger_character
                 ? ' | trigger_character=' + escapeHtml(probe.trigger_character)
                 : '';
+            const dispatchDeltaMs = Math.max(0, probe.lsp_request_started_at_ms - probe.request_started_at_ms);
+            const lspRoundtripMs = Math.max(0, probe.lsp_response_received_at_ms - probe.lsp_request_started_at_ms);
+            const postResponseMs = Math.max(0, probe.request_completed_at_ms - probe.lsp_response_received_at_ms);
+            const incompleteSuffix = typeof probe.is_incomplete === 'boolean'
+                ? ' | is_incomplete=' + escapeHtml(String(probe.is_incomplete))
+                : '';
+            const supersededSuffix = probe.superseded_by_probe_id
+                ? ' | superseded_by=' + escapeHtml(probe.superseded_by_probe_id)
+                : '';
+            const supersededAfterSuffix = typeof probe.superseded_after_ms === 'number'
+                ? ' | superseded_after=' + escapeHtml(probe.superseded_after_ms) + 'ms'
+                : '';
 
             return '<section class="probe">' +
                 '<div class="trace-header">' +
@@ -756,10 +768,16 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 '</div>' +
                 '<div class="meta">started=' + escapeHtml(new Date(probe.request_started_at_ms).toLocaleTimeString()) +
                     ' | uri=' + escapeHtml(probe.uri) +
-                    ' | version=' + escapeHtml(probe.document_version) + '</div>' +
+                    ' | version=' + escapeHtml(probe.document_version) +
+                    ' | terminal_version=' + escapeHtml(probe.document_version_at_terminal) + '</div>' +
                 '<div class="probe-grid">' +
                     '<div class="probe-cell"><strong>Local edit</strong><br>' + escapeHtml(probe.time_since_last_local_edit_ms) + 'ms</div>' +
                     '<div class="probe-cell"><strong>didChange sent</strong><br>' + escapeHtml(didChangeDelta) + '</div>' +
+                    '<div class="probe-cell"><strong>Transport</strong><br>dispatch=' + escapeHtml(dispatchDeltaMs) + 'ms | wait=' + escapeHtml(lspRoundtripMs) + 'ms | post=' + escapeHtml(postResponseMs) + 'ms</div>' +
+                    '<div class="probe-cell"><strong>Result</strong><br>' + escapeHtml(probe.result_kind) + ' | bucket=' + escapeHtml(probe.item_count_bucket) + incompleteSuffix + '</div>' +
+                    '<div class="probe-cell"><strong>Cancel hint</strong><br>' + escapeHtml(probe.cancel_reason_hint) + supersededSuffix + supersededAfterSuffix + '</div>' +
+                    '<div class="probe-cell"><strong>Drift</strong><br>did_change=' + escapeHtml(probe.did_change_count_during_probe) + ' | cursor_moved=' + escapeHtml(probe.cursor_moved_during_probe) + '</div>' +
+                    '<div class="probe-cell"><strong>Overlap</strong><br>active=' + escapeHtml(probe.active_completion_count_at_start) + ' | same_uri=' + escapeHtml(probe.same_uri_probe_overlap_count) + ' | newer=' + escapeHtml(probe.newer_probe_started_before_terminal) + '</div>' +
                     '<div class="probe-cell"><strong>After dot</strong><br>' + escapeHtml(probe.is_after_dot) + '</div>' +
                     '<div class="probe-cell"><strong>Identifier tail</strong><br>' + escapeHtml(probe.identifier_tail_length) + '</div>' +
                     '<div class="probe-cell"><strong>Trigger</strong><br>' + escapeHtml(probe.trigger_mode) + triggerCharacter + '</div>' +

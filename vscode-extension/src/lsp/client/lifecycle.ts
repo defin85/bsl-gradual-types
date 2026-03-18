@@ -15,8 +15,13 @@ import { handleServerStatus } from '../serverStatus';
 import { updateStatusBar, updateLspStatus } from '../progress';
 import { buildServerOptions } from './server-options';
 import { buildClientOptions } from './client-options';
+import {
+    instrumentCompletionProbeTransport,
+    registerCompletionProbeSelectionObserver,
+} from './completionProbeRuntime';
 import { setupProgressHandler } from './progress-handler';
 import { startHealthCheck, stopHealthCheck } from './health-check';
+import { getSharedCompletionProbeRecorder } from '../../providers/completionProbeRecorder';
 
 /**
  * Преобразует состояние LSP клиента в читаемую строку
@@ -33,6 +38,7 @@ function StateToString(state: State): string {
 /** Текущий LSP клиент */
 let client: LanguageClient | null = null;
 let completionTriggerWarningShown = false;
+let completionProbeSelectionDisposable: vscode.Disposable | undefined;
 
 /** Output channel для логирования */
 let outputChannel: vscode.OutputChannel;
@@ -89,7 +95,8 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
 
     // Build options
     const serverOptions = buildServerOptions(serverPath, outputChannel);
-    const clientOptions = buildClientOptions(outputChannel);
+    const completionProbeRecorder = getSharedCompletionProbeRecorder();
+    const clientOptions = buildClientOptions(outputChannel, completionProbeRecorder);
 
     if (serverMode === 'stdio') {
         outputChannel.appendLine(`Rust server logs: ${context.extensionPath}\\rust_lsp_server.log`);
@@ -102,6 +109,9 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
         serverOptions,
         clientOptions
     );
+    instrumentCompletionProbeTransport(client as unknown as { sendRequest: (...args: any[]) => Promise<unknown> }, completionProbeRecorder);
+    completionProbeSelectionDisposable?.dispose();
+    completionProbeSelectionDisposable = registerCompletionProbeSelectionObserver(completionProbeRecorder);
 
     // Добавляем обработчики состояния ПЕРЕД запуском
     setupStateChangeHandler(client, outputChannel);
@@ -141,6 +151,8 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
 export async function stopLanguageClient(): Promise<void> {
     // Останавливаем health check
     stopHealthCheck();
+    completionProbeSelectionDisposable?.dispose();
+    completionProbeSelectionDisposable = undefined;
 
     if (client) {
         outputChannel.appendLine('Stopping LSP client...');

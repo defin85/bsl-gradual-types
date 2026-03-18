@@ -81,6 +81,13 @@ export function buildClientOptions(
             },
             provideCompletionItem: async (document, position, context, token, next) => {
                 const requestStartedAtMs = Date.now();
+                completionProbeRecorder.recordCompletionStarted({
+                    document,
+                    position,
+                    context,
+                    token,
+                    requestStartedAtMs,
+                });
 
                 try {
                     const result = await next(document, position, context, token);
@@ -88,6 +95,7 @@ export function buildClientOptions(
                         document,
                         position,
                         context,
+                        token,
                         result,
                         requestStartedAtMs,
                         requestCompletedAtMs: Date.now(),
@@ -99,6 +107,7 @@ export function buildClientOptions(
                         document,
                         position,
                         context,
+                        token,
                         result: undefined,
                         requestStartedAtMs,
                         requestCompletedAtMs: Date.now(),

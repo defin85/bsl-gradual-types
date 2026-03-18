@@ -240,12 +240,36 @@ function formatClientProbeForClipboard(
     const didChangeDelta = probe.time_since_last_did_change_sent_ms === 'unknown'
         ? 'unknown'
         : `${probe.time_since_last_did_change_sent_ms}ms`;
+    const incompleteSuffix = typeof probe.is_incomplete === 'boolean'
+        ? ` | is_incomplete=${probe.is_incomplete}`
+        : '';
+    const supersededBySuffix = probe.superseded_by_probe_id
+        ? ` | superseded_by_probe_id=${probe.superseded_by_probe_id}`
+        : '';
+    const supersededAfterSuffix = typeof probe.superseded_after_ms === 'number'
+        ? ` | superseded_after_ms=${probe.superseded_after_ms}ms`
+        : '';
+    const dispatchDeltaMs = Math.max(
+        0,
+        probe.lsp_request_started_at_ms - probe.request_started_at_ms
+    );
+    const lspRoundtripMs = Math.max(
+        0,
+        probe.lsp_response_received_at_ms - probe.lsp_request_started_at_ms
+    );
+    const postResponseMs = Math.max(
+        0,
+        probe.request_completed_at_ms - probe.lsp_response_received_at_ms
+    );
 
     return [
         `${probe.probe_id} (${probe.trigger_mode})`,
-        `started=${new Date(probe.request_started_at_ms).toLocaleTimeString()} | uri=${probe.uri} | document_version=${probe.document_version}`,
-        `client_terminal_state=${probe.client_terminal_state} | client_duration=${probe.client_duration_ms}ms`,
-        `time_since_last_local_edit_ms=${probe.time_since_last_local_edit_ms} | time_since_last_did_change_sent_ms=${didChangeDelta}`,
+        `started=${new Date(probe.request_started_at_ms).toLocaleTimeString()} | uri=${probe.uri} | document_version=${probe.document_version} | document_version_at_terminal=${probe.document_version_at_terminal}`,
+        `client_terminal_state=${probe.client_terminal_state} | client_duration=${probe.client_duration_ms}ms | cancel_reason_hint=${probe.cancel_reason_hint}${supersededBySuffix}${supersededAfterSuffix}`,
+        `result_kind=${probe.result_kind} | item_count_bucket=${probe.item_count_bucket}${incompleteSuffix}`,
+        `transport_dispatch_delta_ms=${dispatchDeltaMs} | lsp_roundtrip_ms=${lspRoundtripMs} | client_post_response_ms=${postResponseMs}`,
+        `time_since_last_local_edit_ms=${probe.time_since_last_local_edit_ms} | time_since_last_did_change_sent_ms=${didChangeDelta} | did_change_count_during_probe=${probe.did_change_count_during_probe}`,
+        `cursor_moved_during_probe=${probe.cursor_moved_during_probe} | active_completion_count_at_start=${probe.active_completion_count_at_start} | same_uri_probe_overlap_count=${probe.same_uri_probe_overlap_count} | newer_probe_started_before_terminal=${probe.newer_probe_started_before_terminal}`,
         `is_after_dot=${probe.is_after_dot}${triggerCharacter} | identifier_tail_length=${probe.identifier_tail_length}`,
     ].join('\n');
 }

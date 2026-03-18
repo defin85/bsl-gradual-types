@@ -1721,7 +1721,7 @@ LSP MUST предоставлять server-driven custom request `bsl.getComplet
 Для VS Code extension в текущей архитектуре этот контракт MUST быть доступен через `workspace/executeCommand` с `command: bsl.getCompletionTimeline`.
 Per-request timeline payload MUST формироваться на стороне LSP и MUST NOT требовать клиентской реконструкции из логов или агрегированных observability-метрик.
 
-VS Code extension MAY отображать отдельно captured local client-side completion probes рядом с server trace, но такой local-only debug stream:
+VS Code extension MAY отображать отдельно captured local client-side completion probes рядом с server trace, и такой local-only debug stream MAY включать bounded cancellation hints, transport-phase diagnostics, result-shape diagnostics и overlap/drift diagnostics, но такой stream:
 - MUST NOT менять contract version или shape server-generated payload;
 - MUST NOT подменять server-generated stages, routes, causes или outcomes;
 - MUST оставаться отдельным UI-level stream, а не частью LSP timeline contract.
@@ -1749,43 +1749,17 @@ VS Code extension MAY отображать отдельно captured local clien
 - `started_offset_ms`;
 - `duration_ms`.
 
-#### Scenario: Клиент получает детерминированный timeline для завершённого completion
-- **GIVEN** completion-запрос успешно обработан
+#### Scenario: Enriched local probes не меняют server timeline contract
+- **GIVEN** VS Code extension записала local probes с дополнительными cancellation, transport, result-shape и overlap/drift diagnostics
 - **WHEN** клиент вызывает `bsl.getCompletionTimeline`
-- **THEN** response содержит trace со стадиями в порядке исполнения
-- **AND** `total_duration_ms` не меньше максимального stage end offset
-- **AND** `dominant_stage` совпадает с этапом максимальной длительности в trace
+- **THEN** response остаётся server-generated payload contract `v2`
+- **AND** enriched local probe stream не меняет version или shape LSP timeline response
 
-#### Scenario: Клиент получает корректный timeline для cancelled/superseded completion
-- **GIVEN** completion-запрос отменён или superseded до полного завершения pipeline
-- **WHEN** клиент вызывает `bsl.getCompletionTimeline`
-- **THEN** response содержит partial trace с terminal outcome cancelled/superseded
-- **AND** trace не маркируется как успешный completed
-
-#### Scenario: VS Code клиент получает timeline через `workspace/executeCommand`
-- **GIVEN** VS Code extension запрашивает completion timeline
-- **WHEN** клиент вызывает `workspace/executeCommand` с `command: bsl.getCompletionTimeline`
-- **THEN** LSP возвращает response контракта `v2` с server-generated traces
-- **AND** клиент не строит server timeline из текстовых логов или p95/p99 агрегатов
-
-#### Scenario: Local probe stream не меняет server trace semantics
-- **GIVEN** VS Code extension показывает рядом server timeline и local client-side probes
-- **WHEN** UI показывает completion observability details
-- **THEN** server trace остаётся неизменным representation LSP payload
-- **AND** client-side probe не подставляет отсутствующие server stages, routes или outcomes
-
-#### Scenario: Local probe stream не становится частью LSP timeline contract
-- **GIVEN** extension записала local client-side probes
-- **WHEN** пользователь открывает completion observability UI
-- **THEN** `bsl.getCompletionTimeline` продолжает возвращать только server-generated traces
-- **AND** local probe stream не меняет version или shape LSP timeline response
-
-#### Scenario: Timeline раскрывает bounded split-prepare routing без cardinality drift
-- **GIVEN** completion обслужен через current-revision `head` path или fail-closed exact wait
-- **WHEN** клиент читает `prepare_details` в trace
-- **THEN** `route` остаётся только в bounded vocabulary `head_hit|exact_hit` или `null`
-- **AND** `fail_closed_cause` остаётся только в bounded vocabulary `prepare_timeout|exact_deadline` или `null`
-- **AND** timeline не включает динамические route/cause labels
+#### Scenario: Enriched local probes не подменяют server semantics
+- **GIVEN** `Client Probe Feed` показывает extended local diagnostics
+- **WHEN** пользователь анализирует completion observability
+- **THEN** server trace остаётся authoritative representation LSP payload
+- **AND** local diagnostics не подставляют server stages, routes, causes или outcomes
 
 ### Requirement: Timeline stage taxonomy bounded и совместима с completion observability (MUST)
 Stage names в per-request timeline MUST использовать bounded taxonomy, согласованную с completion stage observability.

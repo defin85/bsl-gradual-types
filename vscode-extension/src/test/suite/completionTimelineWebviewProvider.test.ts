@@ -306,6 +306,14 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
             timelineStateMessage.state.client_probe_feed.probes[0].client_terminal_state,
             'ok_non_empty'
         );
+        assert.strictEqual(
+            timelineStateMessage.state.client_probe_feed.probes[0].result_kind,
+            'non_empty'
+        );
+        assert.strictEqual(
+            timelineStateMessage.state.client_probe_feed.probes[0].cancel_reason_hint,
+            'unknown'
+        );
 
         onDidDisposeEmitter.dispose();
         onDidReceiveMessageEmitter.dispose();

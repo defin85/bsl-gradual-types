@@ -64,6 +64,8 @@ export class ObservabilityProvider implements vscode.TreeDataProvider<BslOvervie
     private cachedMetrics: Record<string, unknown> | null = null;
     private lastFetchAt = 0;
     private lastSuccessAt = 0;
+    private lastFetchHadUsableMetrics = false;
+    private nextFetchAllowedAt = 0;
     private inflight: Promise<Record<string, unknown> | null> | null = null;
     private readonly ttlMs = 1000;
     private autoRefreshEnabled = true;
@@ -110,6 +112,7 @@ export class ObservabilityProvider implements vscode.TreeDataProvider<BslOvervie
         if (forceInvalidate) {
             this.cachedMetrics = null;
             this.lastFetchAt = 0;
+            this.nextFetchAllowedAt = 0;
         }
         this._onDidChangeTreeData.fire();
     }
@@ -386,7 +389,7 @@ export class ObservabilityProvider implements vscode.TreeDataProvider<BslOvervie
         }
 
         const now = Date.now();
-        if (this.cachedMetrics && now - this.lastFetchAt < this.ttlMs) {
+        if (now < this.nextFetchAllowedAt) {
             return this.cachedMetrics;
         }
 
@@ -396,14 +399,20 @@ export class ObservabilityProvider implements vscode.TreeDataProvider<BslOvervie
                     const metrics = asRecord(response?.metrics);
                     this.lastFetchAt = Date.now();
                     if (metrics) {
+                        this.lastFetchHadUsableMetrics = true;
                         this.cachedMetrics = metrics;
                         this.lastSuccessAt = this.lastFetchAt;
+                        this.nextFetchAllowedAt = this.lastFetchAt + this.getFetchCacheWindowMs();
                         return metrics;
                     }
+                    this.lastFetchHadUsableMetrics = false;
+                    this.nextFetchAllowedAt = this.lastFetchAt + this.getFetchCacheWindowMs();
                     return this.cachedMetrics;
                 })
                 .catch((error) => {
                     this.lastFetchAt = Date.now();
+                    this.lastFetchHadUsableMetrics = false;
+                    this.nextFetchAllowedAt = this.lastFetchAt + this.getFetchCacheWindowMs();
                     this.outputChannel.appendLine(`[Observability] Failed to fetch metrics: ${error}`);
                     return this.cachedMetrics;
                 })
@@ -433,8 +442,14 @@ export class ObservabilityProvider implements vscode.TreeDataProvider<BslOvervie
         }
 
         this.autoRefreshTimer = setInterval(() => {
-            this.refresh();
+            this.refresh(false);
         }, this.autoRefreshIntervalMs);
+    }
+
+    private getFetchCacheWindowMs(): number {
+        return this.lastFetchHadUsableMetrics
+            ? this.ttlMs
+            : Math.max(this.ttlMs, this.autoRefreshIntervalMs);
     }
 
     private stopAutoRefresh(): void {

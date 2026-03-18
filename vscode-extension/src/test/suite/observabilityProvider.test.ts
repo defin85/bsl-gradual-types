@@ -89,4 +89,52 @@ suite('Observability Provider Test Suite', () => {
             provider.dispose();
         }
     });
+
+    test('loadMetrics should cooldown null responses before retrying sidebar fetch', async () => {
+        const clock = sinon.useFakeTimers();
+        handleServerStatus({ loading: false });
+        const provider = new ObservabilityProvider(outputChannelStub);
+        (provider as any).stopAutoRefresh();
+        (provider as any).autoRefreshIntervalMs = 5000;
+
+        getObservabilityMetricsStub.resetBehavior();
+        getObservabilityMetricsStub.onFirstCall().resolves(null);
+        getObservabilityMetricsStub.onSecondCall().resolves({
+            metrics: {
+                uptime_seconds: 99,
+            },
+        } as any);
+        const cooldownMs = (provider as any).autoRefreshIntervalMs;
+
+        try {
+            let result = await (provider as any).loadMetrics();
+            assert.strictEqual(result, null);
+            assert.strictEqual(getObservabilityMetricsStub.callCount, 1);
+
+            result = await (provider as any).loadMetrics();
+            assert.strictEqual(result, null);
+            assert.strictEqual(
+                getObservabilityMetricsStub.callCount,
+                1,
+                'null response should be negatively cached during cooldown'
+            );
+
+            await clock.tickAsync(cooldownMs - 1);
+            result = await (provider as any).loadMetrics();
+            assert.strictEqual(result, null);
+            assert.strictEqual(
+                getObservabilityMetricsStub.callCount,
+                1,
+                'sidebar cooldown should still suppress retry before the interval expires'
+            );
+
+            await clock.tickAsync(1);
+            result = await (provider as any).loadMetrics();
+            assert.deepStrictEqual(result, { uptime_seconds: 99 });
+            assert.strictEqual(getObservabilityMetricsStub.callCount, 2);
+        } finally {
+            provider.dispose();
+            clock.restore();
+        }
+    });
 });

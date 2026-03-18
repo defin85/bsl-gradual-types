@@ -709,7 +709,11 @@ let observabilityMetricsUnsupportedNotified = false;
 const OBSERVABILITY_METRICS_TIMEOUT_MS = 1500;
 
 export async function getObservabilityMetrics(): Promise<ObservabilityMetricsResponse | null> {
-    return getObservabilityMetricsWithRequest();
+    return getObservabilityMetricsWithRequest({ shape: 'full' });
+}
+
+function shouldWarnOnObservabilityTimeout(request: ObservabilityMetricsRequest): boolean {
+    return request.shape !== 'sidebar';
 }
 
 export async function getObservabilityMetricsWithRequest(
@@ -750,9 +754,11 @@ export async function getObservabilityMetricsWithRequest(
             return null;
         }
         if (isTimeoutError(error)) {
-            logger.warn(
-                `[Observability] Request timed out after ${OBSERVABILITY_METRICS_TIMEOUT_MS}ms`
-            );
+            if (shouldWarnOnObservabilityTimeout(request)) {
+                logger.warn(
+                    `[Observability] Request timed out after ${OBSERVABILITY_METRICS_TIMEOUT_MS}ms`
+                );
+            }
             return null;
         }
         logger.error('Failed to get observability metrics', error);

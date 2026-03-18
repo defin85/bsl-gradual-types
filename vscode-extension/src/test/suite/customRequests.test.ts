@@ -14,6 +14,7 @@ import {
     incrementalUpdate,
     extractPlatformDocs
 } from '../../lsp/customRequests';
+import { logger } from '../../lsp/logger';
 
 /**
  * Тесты для LSP Custom Requests (Task 3 из Milestone 2.2)
@@ -384,11 +385,12 @@ suite('LSP Custom Requests Test Suite', () => {
         assert.strictEqual(sendRequestStub.callCount, callCountBefore);
     });
 
-    test('getObservabilityMetrics should timeout instead of hanging forever', async function() {
+    test('getObservabilityMetrics should warn on timeout for manual requests', async function() {
         this.timeout(5000);
 
         const clock = sinon.useFakeTimers();
         try {
+            const warnStub = sinon.stub(logger, 'warn');
             sendRequestStub.resetBehavior();
             sendRequestStub.callsFake((method: string, params: any) => {
                 if (method === 'workspace/executeCommand' && params?.command === 'bsl.getObservabilityMetrics') {
@@ -403,6 +405,37 @@ suite('LSP Custom Requests Test Suite', () => {
             const result = await promise;
             assert.strictEqual(result, null);
             assert.strictEqual(sendRequestStub.callCount, 1);
+            assert.strictEqual(warnStub.callCount, 1);
+            assert.strictEqual(
+                warnStub.firstCall.args[0],
+                '[Observability] Request timed out after 1500ms'
+            );
+        } finally {
+            clock.restore();
+        }
+    });
+
+    test('getObservabilityMetricsWithRequest should stay silent on timeout for sidebar requests', async function() {
+        this.timeout(5000);
+
+        const clock = sinon.useFakeTimers();
+        try {
+            const warnStub = sinon.stub(logger, 'warn');
+            sendRequestStub.resetBehavior();
+            sendRequestStub.callsFake((method: string, params: any) => {
+                if (method === 'workspace/executeCommand' && params?.command === 'bsl.getObservabilityMetrics') {
+                    return new Promise(() => {});
+                }
+                return Promise.resolve(null);
+            });
+
+            const promise = getObservabilityMetricsWithRequest({ shape: 'sidebar' });
+            await clock.tickAsync(5000);
+
+            const result = await promise;
+            assert.strictEqual(result, null);
+            assert.strictEqual(sendRequestStub.callCount, 1);
+            assert.strictEqual(warnStub.callCount, 0);
         } finally {
             clock.restore();
         }

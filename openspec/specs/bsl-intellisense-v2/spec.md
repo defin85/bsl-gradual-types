@@ -1721,6 +1721,11 @@ LSP MUST предоставлять server-driven custom request `bsl.getComplet
 Для VS Code extension в текущей архитектуре этот контракт MUST быть доступен через `workspace/executeCommand` с `command: bsl.getCompletionTimeline`.
 Per-request timeline payload MUST формироваться на стороне LSP и MUST NOT требовать клиентской реконструкции из логов или агрегированных observability-метрик.
 
+VS Code extension MAY отображать отдельно captured local client-side completion probes рядом с server trace, но такой local-only debug stream:
+- MUST NOT менять contract version или shape server-generated payload;
+- MUST NOT подменять server-generated stages, routes, causes или outcomes;
+- MUST оставаться отдельным UI-level stream, а не частью LSP timeline contract.
+
 Контракт `v2` MUST включать:
 - `version` (числовой номер контракта);
 - `traces` (массив completion trace записей).
@@ -1761,7 +1766,19 @@ Per-request timeline payload MUST формироваться на стороне
 - **GIVEN** VS Code extension запрашивает completion timeline
 - **WHEN** клиент вызывает `workspace/executeCommand` с `command: bsl.getCompletionTimeline`
 - **THEN** LSP возвращает response контракта `v2` с server-generated traces
-- **AND** клиент не строит timeline из текстовых логов или p95/p99 агрегатов
+- **AND** клиент не строит server timeline из текстовых логов или p95/p99 агрегатов
+
+#### Scenario: Local probe stream не меняет server trace semantics
+- **GIVEN** VS Code extension показывает рядом server timeline и local client-side probes
+- **WHEN** UI показывает completion observability details
+- **THEN** server trace остаётся неизменным representation LSP payload
+- **AND** client-side probe не подставляет отсутствующие server stages, routes или outcomes
+
+#### Scenario: Local probe stream не становится частью LSP timeline contract
+- **GIVEN** extension записала local client-side probes
+- **WHEN** пользователь открывает completion observability UI
+- **THEN** `bsl.getCompletionTimeline` продолжает возвращать только server-generated traces
+- **AND** local probe stream не меняет version или shape LSP timeline response
 
 #### Scenario: Timeline раскрывает bounded split-prepare routing без cardinality drift
 - **GIVEN** completion обслужен через current-revision `head` path или fail-closed exact wait
@@ -2012,3 +2029,4 @@ Smoke/parity проверки MAY использоваться как допол
 - **WHEN** выполняется exact cross-consumer acceptance
 - **THEN** acceptance падает как semantic drift
 - **AND** smoke-level parity без этой проверки не считается достаточным evidence
+

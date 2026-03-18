@@ -3,6 +3,10 @@ import * as sinon from 'sinon';
 import * as vscode from 'vscode';
 import { CompletionTimelineWebviewProvider } from '../../providers/completionTimelineWebview';
 import { CompletionTimelineFetchResult } from '../../lsp/customRequests';
+import {
+    getSharedCompletionProbeRecorder,
+    resetSharedCompletionProbeRecorderForTests,
+} from '../../providers/completionProbeRecorder';
 
 async function flushPromises(): Promise<void> {
     await Promise.resolve();
@@ -16,11 +20,14 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
     setup(() => {
         clock = sinon.useFakeTimers();
         provider = null;
+        resetSharedCompletionProbeRecorderForTests();
+        getSharedCompletionProbeRecorder().clear();
     });
 
     teardown(() => {
         provider?.dispose();
         provider = null;
+        resetSharedCompletionProbeRecorderForTests();
         clock.restore();
         sinon.restore();
     });
@@ -193,11 +200,112 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         assert.strictEqual(clipboardStub.callCount, 1);
         const clipboardPayload = clipboardStub.firstCall.args[0];
         assert.ok(clipboardPayload.includes('Completion Timeline | mode=all'));
+        assert.ok(clipboardPayload.includes('Server Timeline'));
         assert.ok(clipboardPayload.includes('trace-copy (invoked)'));
+        assert.ok(clipboardPayload.includes('Client Probe Feed | local-only debug data'));
 
         const copyAck = postMessageStub.lastCall.args[0];
         assert.strictEqual(copyAck.type, 'copyResult');
         assert.strictEqual(copyAck.ok, true);
+
+        onDidDisposeEmitter.dispose();
+        onDidReceiveMessageEmitter.dispose();
+        onDidChangeVisibilityEmitter.dispose();
+    });
+
+    test('webview content declares separate server and client sections', () => {
+        const outputChannel = {
+            appendLine: sinon.stub(),
+        } as unknown as vscode.OutputChannel;
+        provider = new CompletionTimelineWebviewProvider(outputChannel);
+
+        const onDidReceiveMessageEmitter = new vscode.EventEmitter<unknown>();
+        const onDidChangeVisibilityEmitter = new vscode.EventEmitter<void>();
+        const onDidDisposeEmitter = new vscode.EventEmitter<void>();
+        const webview = {
+            options: {},
+            html: '',
+            cspSource: 'vscode-webview://test',
+            onDidReceiveMessage: onDidReceiveMessageEmitter.event,
+            postMessage: sinon.stub().resolves(true),
+        } as unknown as vscode.Webview;
+        const webviewView = {
+            webview,
+            visible: false,
+            onDidChangeVisibility: onDidChangeVisibilityEmitter.event,
+            onDidDispose: onDidDisposeEmitter.event,
+        } as unknown as vscode.WebviewView;
+
+        provider.resolveWebviewView(webviewView);
+
+        assert.ok(webview.html.includes('Server Timeline'));
+        assert.ok(webview.html.includes('Client Probe Feed'));
+        assert.ok(webview.html.includes('Local-only debug data'));
+
+        onDidDisposeEmitter.dispose();
+        onDidReceiveMessageEmitter.dispose();
+        onDidChangeVisibilityEmitter.dispose();
+    });
+
+    test('refresh merges server trace and shared client probes without correlation', async () => {
+        const customRequestsModule = await import('../../lsp/customRequests');
+        sinon.stub(customRequestsModule, 'getCompletionTimeline').resolves({
+            kind: 'unsupported',
+        } as CompletionTimelineFetchResult);
+
+        const recorder = getSharedCompletionProbeRecorder();
+        recorder.clear();
+        recorder['recordCompletionOutcome']({
+            document: {
+                uri: vscode.Uri.parse('file:///tmp/probe.bsl'),
+                version: 4,
+                lineAt: () => ({ text: 'Документы.' }),
+            } as unknown as vscode.TextDocument,
+            position: new vscode.Position(0, 'Документы.'.length),
+            context: {
+                triggerKind: vscode.CompletionTriggerKind.TriggerCharacter,
+                triggerCharacter: '.',
+            },
+            result: [{ label: 'Форма' }] as vscode.CompletionItem[],
+            requestStartedAtMs: 1_700_000_000_010,
+            requestCompletedAtMs: 1_700_000_000_020,
+            wasCancelled: false,
+        });
+
+        const outputChannel = {
+            appendLine: sinon.stub(),
+        } as unknown as vscode.OutputChannel;
+        provider = new CompletionTimelineWebviewProvider(outputChannel);
+
+        const onDidReceiveMessageEmitter = new vscode.EventEmitter<unknown>();
+        const onDidChangeVisibilityEmitter = new vscode.EventEmitter<void>();
+        const onDidDisposeEmitter = new vscode.EventEmitter<void>();
+        const postMessageStub = sinon.stub().resolves(true);
+        const webview = {
+            options: {},
+            html: '',
+            cspSource: 'vscode-webview://test',
+            onDidReceiveMessage: onDidReceiveMessageEmitter.event,
+            postMessage: postMessageStub,
+        } as unknown as vscode.Webview;
+        const webviewView = {
+            webview,
+            visible: true,
+            onDidChangeVisibility: onDidChangeVisibilityEmitter.event,
+            onDidDispose: onDidDisposeEmitter.event,
+        } as unknown as vscode.WebviewView;
+
+        provider.resolveWebviewView(webviewView);
+        await flushPromises();
+
+        const timelineStateMessage = postMessageStub.firstCall.args[0];
+        assert.strictEqual(timelineStateMessage.type, 'timelineState');
+        assert.strictEqual(timelineStateMessage.state.kind, 'unsupported');
+        assert.strictEqual(timelineStateMessage.state.client_probe_feed.probes.length, 1);
+        assert.strictEqual(
+            timelineStateMessage.state.client_probe_feed.probes[0].client_terminal_state,
+            'ok_non_empty'
+        );
 
         onDidDisposeEmitter.dispose();
         onDidReceiveMessageEmitter.dispose();

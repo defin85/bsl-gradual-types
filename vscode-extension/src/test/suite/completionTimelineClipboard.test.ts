@@ -11,6 +11,26 @@ suite('Completion Timeline Clipboard Test Suite', () => {
             kind: 'ready',
             version: 2,
             updated_at_ms: 1_700_000_000_100,
+            client_probe_feed: {
+                updated_at_ms: 1_700_000_000_100,
+                probes: [
+                    {
+                        probe_id: 'probe-1',
+                        uri: 'file:///tmp/test1.bsl',
+                        document_version: 9,
+                        trigger_mode: 'trigger_character',
+                        trigger_character: '.',
+                        request_started_at_ms: 1_700_000_000_090,
+                        request_completed_at_ms: 1_700_000_000_100,
+                        client_duration_ms: 10,
+                        client_terminal_state: 'ok_non_empty',
+                        time_since_last_local_edit_ms: 21,
+                        time_since_last_did_change_sent_ms: 8,
+                        is_after_dot: true,
+                        identifier_tail_length: 0,
+                    },
+                ],
+            },
             traces: [
                 {
                     trace_id: 'trace-1',
@@ -112,7 +132,10 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         const text = formatVisibleCompletionTimelineForClipboard(buildReadyState(), 'all');
         assert.ok(text);
         assert.ok(text!.includes('Completion Timeline | mode=all'));
+        assert.ok(text!.includes('Server Timeline'));
         assert.ok(text!.includes('trace-1 (invoked)'));
+        assert.ok(text!.includes('Client Probe Feed | local-only debug data'));
+        assert.ok(text!.includes('probe-1 (trigger_character)'));
         assert.ok(text!.includes('prepare_wait_budget_ms=120'));
         assert.ok(text!.includes('prepare_guard_outcome=timeout'));
         assert.ok(text!.includes('prepare_outcome=wait_not_ready'));
@@ -121,6 +144,11 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('turn_request_file_seq=17'));
         assert.ok(text!.includes('active_holder | request=req-0'));
         assert.ok(text!.includes('query_bundle | completed'));
+        assert.ok(
+            text!.includes(
+                'Client probes are extension-local debug records and do not replace server timeline stages, routes, or outcomes.'
+            )
+        );
     });
 
     test('formatVisibleCompletionTimelineForClipboard should use average trace in average mode', () => {
@@ -136,5 +164,22 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text);
         assert.ok(text!.startsWith('trace-1 (invoked)'));
         assert.ok(!text!.includes('Completion Timeline | mode='));
+    });
+
+    test('formatVisibleCompletionTimelineForClipboard should keep client probes visible when server timeline is unsupported', () => {
+        const text = formatVisibleCompletionTimelineForClipboard(
+            {
+                kind: 'unsupported',
+                message: 'Timeline unsupported',
+                client_probe_feed: buildReadyState().client_probe_feed,
+            },
+            'all'
+        );
+
+        assert.ok(text);
+        assert.ok(text!.includes('Server Timeline'));
+        assert.ok(text!.includes('Timeline unsupported'));
+        assert.ok(text!.includes('Client Probe Feed | local-only debug data'));
+        assert.ok(text!.includes('probe-1 (trigger_character)'));
     });
 });

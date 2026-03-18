@@ -4,6 +4,25 @@ import {
     mapCompletionTimelineResponseToPanelState,
 } from '../../providers/completionTimelineModel';
 import { CompletionTimelineResponse } from '../../lsp/customRequests';
+import { CompletionProbe } from '../../providers/completionProbe';
+
+function buildClientProbe(probeId: string, version: number, startedAtMs: number): CompletionProbe {
+    return {
+        probe_id: probeId,
+        uri: 'file:///tmp/test.bsl',
+        document_version: version,
+        trigger_mode: 'trigger_character',
+        trigger_character: '.',
+        request_started_at_ms: startedAtMs,
+        request_completed_at_ms: startedAtMs + 5,
+        client_duration_ms: 5,
+        client_terminal_state: 'ok_non_empty',
+        time_since_last_local_edit_ms: 11,
+        time_since_last_did_change_sent_ms: 7,
+        is_after_dot: true,
+        identifier_tail_length: 0,
+    };
+}
 
 suite('Completion Timeline Model Test Suite', () => {
     test('Mapping LSP timeline payload -> UI model', () => {
@@ -60,8 +79,16 @@ suite('Completion Timeline Model Test Suite', () => {
                 },
             ],
         };
+        const clientProbes = [
+            buildClientProbe('probe-1', 7, 1_700_000_000_090),
+            buildClientProbe('probe-2', 8, 1_700_000_000_120),
+        ];
 
-        const state = mapCompletionTimelineResponseToPanelState(payload, 1_700_000_000_100);
+        const state = mapCompletionTimelineResponseToPanelState(
+            payload,
+            clientProbes,
+            1_700_000_000_100
+        );
         assert.strictEqual(state.kind, 'ready');
         if (state.kind !== 'ready') {
             return;
@@ -75,6 +102,11 @@ suite('Completion Timeline Model Test Suite', () => {
         assert.strictEqual(state.traces[0].stages.length, 3);
         assert.strictEqual(state.traces[0].turn_attribution?.queue_outcome, 'enqueued');
         assert.strictEqual(state.traces[0].turn_attribution?.active_holder?.file_seq, 41);
+        assert.strictEqual(state.client_probe_feed.updated_at_ms, 1_700_000_000_100);
+        assert.deepStrictEqual(
+            state.client_probe_feed.probes.map((probe) => probe.probe_id),
+            ['probe-2', 'probe-1']
+        );
         assert.ok(state.traces[0].stages.every((stage) => stage.width_percent >= 0));
         assert.ok(state.traces[0].stages.every((stage) => stage.duration_percent >= 0));
         assert.ok(state.average_trace, 'average trace should be available for non-empty payload');
@@ -212,11 +244,17 @@ suite('Completion Timeline Model Test Suite', () => {
     });
 
     test('Legacy unsupported path should map to explicit unsupported state', () => {
-        const state = mapCompletionTimelineFetchResultToPanelState({ kind: 'unsupported' });
+        const state = mapCompletionTimelineFetchResultToPanelState(
+            { kind: 'unsupported' },
+            [buildClientProbe('probe-legacy', 3, 1_700_000_000_100)],
+            1_700_000_000_120
+        );
         assert.strictEqual(state.kind, 'unsupported');
         if (state.kind !== 'unsupported') {
             return;
         }
         assert.ok(state.message.includes('bsl.getCompletionTimeline'));
+        assert.strictEqual(state.client_probe_feed.probes.length, 1);
+        assert.strictEqual(state.client_probe_feed.probes[0].probe_id, 'probe-legacy');
     });
 });

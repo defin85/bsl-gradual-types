@@ -1,4 +1,6 @@
 import {
+    CompletionProbeFeedViewModel,
+    CompletionProbeViewModel,
     CompletionTimelinePanelState,
     CompletionTimelineTraceViewModel,
 } from './completionTimelineModel';
@@ -9,26 +11,22 @@ export function formatVisibleCompletionTimelineForClipboard(
     state: CompletionTimelinePanelState,
     mode: CompletionTimelineClipboardMode
 ): string | null {
-    if (state.kind !== 'ready') {
-        return null;
-    }
-
-    const traces = mode === 'average'
-        ? (state.average_trace ? [state.average_trace] : [])
-        : state.traces;
-    if (traces.length === 0) {
-        return null;
-    }
-
     const header = [
         'Completion Timeline',
         `mode=${mode}`,
-        `updated=${new Date(state.updated_at_ms).toLocaleString()}`,
-        `contract=v${state.version}`,
+        `updated=${new Date(resolveUpdatedAtMs(state)).toLocaleString()}`,
     ].join(' | ');
 
-    return [header, ...traces.map(formatCompletionTimelineTraceForClipboard)]
-        .join('\n\n');
+    const sections = [
+        formatServerTimelineSectionForClipboard(state, mode),
+        formatClientProbeFeedForClipboard(state.client_probe_feed),
+    ].filter((section): section is string => Boolean(section));
+
+    if (sections.length === 0) {
+        return null;
+    }
+
+    return [header, ...sections].join('\n\n');
 }
 
 export function formatSelectedCompletionTraceForClipboard(
@@ -178,4 +176,76 @@ function formatTurnHolderLine(
         ? ` | version_hint=${holder.version_hint}`
         : '';
     return `${label} | request=${requestId} | file_seq=${holder?.file_seq} | epoch=${holder?.request_epoch} | trigger=${holder?.trigger_mode}${versionHint} | age=${holder?.age_ms}ms`;
+}
+
+function resolveUpdatedAtMs(state: CompletionTimelinePanelState): number {
+    if (state.kind === 'ready') {
+        return state.updated_at_ms;
+    }
+
+    return state.client_probe_feed.updated_at_ms;
+}
+
+function formatServerTimelineSectionForClipboard(
+    state: CompletionTimelinePanelState,
+    mode: CompletionTimelineClipboardMode
+): string | null {
+    const lines = ['Server Timeline'];
+
+    if (state.kind === 'unsupported') {
+        lines.push(state.message);
+        return lines.join('\n');
+    }
+
+    if (state.kind === 'error') {
+        lines.push(`Failed to load server timeline: ${state.message}`);
+        return lines.join('\n');
+    }
+
+    lines.push(`contract=v${state.version}`);
+    const traces = mode === 'average'
+        ? (state.average_trace ? [state.average_trace] : [])
+        : state.traces;
+    if (traces.length === 0) {
+        lines.push('No server traces visible.');
+        return lines.join('\n');
+    }
+
+    return [...lines, ...traces.map(formatCompletionTimelineTraceForClipboard)].join('\n\n');
+}
+
+function formatClientProbeFeedForClipboard(
+    feed: CompletionProbeFeedViewModel
+): string {
+    const lines = [
+        'Client Probe Feed | local-only debug data',
+        `updated=${new Date(feed.updated_at_ms).toLocaleString()}`,
+        'Client probes are extension-local debug records and do not replace server timeline stages, routes, or outcomes.',
+    ];
+
+    if (feed.probes.length === 0) {
+        lines.push('No client probes recorded yet.');
+        return lines.join('\n');
+    }
+
+    return [...lines, ...feed.probes.map(formatClientProbeForClipboard)].join('\n\n');
+}
+
+function formatClientProbeForClipboard(
+    probe: CompletionProbeViewModel
+): string {
+    const triggerCharacter = probe.trigger_character
+        ? ` | trigger_character=${probe.trigger_character}`
+        : '';
+    const didChangeDelta = probe.time_since_last_did_change_sent_ms === 'unknown'
+        ? 'unknown'
+        : `${probe.time_since_last_did_change_sent_ms}ms`;
+
+    return [
+        `${probe.probe_id} (${probe.trigger_mode})`,
+        `started=${new Date(probe.request_started_at_ms).toLocaleTimeString()} | uri=${probe.uri} | document_version=${probe.document_version}`,
+        `client_terminal_state=${probe.client_terminal_state} | client_duration=${probe.client_duration_ms}ms`,
+        `time_since_last_local_edit_ms=${probe.time_since_last_local_edit_ms} | time_since_last_did_change_sent_ms=${didChangeDelta}`,
+        `is_after_dot=${probe.is_after_dot}${triggerCharacter} | identifier_tail_length=${probe.identifier_tail_length}`,
+    ].join('\n');
 }

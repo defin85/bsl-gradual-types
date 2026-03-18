@@ -7,6 +7,7 @@ import {
     formatVisibleCompletionTimelineForClipboard,
 } from './completionTimelineClipboard';
 import { mapCompletionTimelineFetchResultToPanelState } from './completionTimelineModel';
+import { getSharedCompletionProbeRecorder } from './completionProbeRecorder';
 
 type CompletionTimelineWebviewMessage =
     | { type: 'ready' | 'refresh' }
@@ -126,9 +127,15 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
         }
 
         this.refreshInFlight = true;
+        const updatedAtMs = Date.now();
+        const clientProbes = getSharedCompletionProbeRecorder().snapshot();
         try {
             const fetchResult = await getCompletionTimeline({ limit: 50 });
-            const state = mapCompletionTimelineFetchResultToPanelState(fetchResult);
+            const state = mapCompletionTimelineFetchResultToPanelState(
+                fetchResult,
+                clientProbes,
+                updatedAtMs
+            );
             this.latestState = state;
             await this.view.webview.postMessage({
                 type: 'timelineState',
@@ -137,16 +144,18 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             this.outputChannel.appendLine(`❌ Completion Timeline refresh failed: ${message}`);
-            this.latestState = {
-                kind: 'error',
-                message,
-            };
-            await this.view.webview.postMessage({
-                type: 'timelineState',
-                state: {
+            const state = mapCompletionTimelineFetchResultToPanelState(
+                {
                     kind: 'error',
                     message,
                 },
+                clientProbes,
+                updatedAtMs
+            );
+            this.latestState = state;
+            await this.view.webview.postMessage({
+                type: 'timelineState',
+                state,
             });
         } finally {
             this.refreshInFlight = false;
@@ -395,6 +404,61 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             padding: 12px;
             color: var(--vscode-descriptionForeground);
         }
+        .section {
+            margin-bottom: 12px;
+        }
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 6px;
+            flex-wrap: wrap;
+        }
+        .section-title {
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .section-subtitle {
+            margin: 2px 0 0;
+            color: var(--vscode-descriptionForeground);
+        }
+        .section-pill {
+            border-radius: 999px;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-weight: 600;
+            background: color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent);
+            color: var(--vscode-focusBorder);
+        }
+        .probe-feed {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .probe {
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 8px;
+            padding: 8px;
+            background:
+                linear-gradient(
+                    180deg,
+                    color-mix(in srgb, var(--vscode-editor-background) 95%, var(--vscode-editor-foreground)),
+                    var(--vscode-editor-background)
+                );
+        }
+        .probe-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 4px 10px;
+            margin-top: 6px;
+        }
+        .probe-cell {
+            color: var(--vscode-descriptionForeground);
+        }
+        .probe-cell strong {
+            color: var(--vscode-editor-foreground);
+        }
     </style>
 </head>
 <body>
@@ -409,10 +473,30 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
         <span class="meta" id="updatedAt">Waiting for data...</span>
         <span class="meta" id="copyStatus" aria-live="polite"></span>
     </div>
-    <div id="root" class="placeholder">Loading completion timeline...</div>
+    <section class="section" aria-labelledby="serverTimelineTitle">
+        <div class="section-header">
+            <div>
+                <div class="section-title" id="serverTimelineTitle">Server Timeline</div>
+                <p class="section-subtitle">Authoritative server-driven completion timeline from <code>bsl.getCompletionTimeline</code>.</p>
+            </div>
+        </div>
+        <div id="serverRoot" class="placeholder">Loading completion timeline...</div>
+    </section>
+    <section class="section" aria-labelledby="clientProbeTitle">
+        <div class="section-header">
+            <div>
+                <div class="section-title" id="clientProbeTitle">Client Probe Feed</div>
+                <p class="section-subtitle">Local-only extension debug data for the client-side edge of completion.</p>
+            </div>
+            <span class="section-pill">Local-only debug data</span>
+        </div>
+        <p class="section-subtitle">Client probes never replace server stages, routes, or outcomes and are not correlated to a specific server trace in this MVP.</p>
+        <div id="clientRoot" class="placeholder">No client probes recorded yet.</div>
+    </section>
     <script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
-        const root = document.getElementById('root');
+        const serverRoot = document.getElementById('serverRoot');
+        const clientRoot = document.getElementById('clientRoot');
         const updatedAtNode = document.getElementById('updatedAt');
         const copyStatusNode = document.getElementById('copyStatus');
         const refreshButton = document.getElementById('refresh');
@@ -435,7 +519,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
         modeAverageButton.addEventListener('click', () => {
             setMode('average');
         });
-        root.addEventListener('click', (event) => {
+        serverRoot.addEventListener('click', (event) => {
             const target = event.target;
             if (!(target instanceof Element)) {
                 return;
@@ -650,6 +734,50 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             '</section>';
         }
 
+        function renderClientProbe(probe) {
+            const outcomeClass = outcomeBadgeClass(probe.client_terminal_state);
+            const didChangeDelta = probe.time_since_last_did_change_sent_ms === 'unknown'
+                ? 'unknown'
+                : probe.time_since_last_did_change_sent_ms + 'ms';
+            const triggerCharacter = probe.trigger_character
+                ? ' | trigger_character=' + escapeHtml(probe.trigger_character)
+                : '';
+
+            return '<section class="probe">' +
+                '<div class="trace-header">' +
+                    '<div>' +
+                        '<strong>' + escapeHtml(probe.probe_id) + '</strong>' +
+                        ' <span class="meta">(' + escapeHtml(probe.trigger_mode) + ')</span>' +
+                    '</div>' +
+                    '<div class="trace-actions">' +
+                        '<span class="badge ' + outcomeClass + '">' + escapeHtml(probe.client_terminal_state) + '</span>' +
+                        '<span class="meta">' + escapeHtml(probe.client_duration_ms) + 'ms</span>' +
+                    '</div>' +
+                '</div>' +
+                '<div class="meta">started=' + escapeHtml(new Date(probe.request_started_at_ms).toLocaleTimeString()) +
+                    ' | uri=' + escapeHtml(probe.uri) +
+                    ' | version=' + escapeHtml(probe.document_version) + '</div>' +
+                '<div class="probe-grid">' +
+                    '<div class="probe-cell"><strong>Local edit</strong><br>' + escapeHtml(probe.time_since_last_local_edit_ms) + 'ms</div>' +
+                    '<div class="probe-cell"><strong>didChange sent</strong><br>' + escapeHtml(didChangeDelta) + '</div>' +
+                    '<div class="probe-cell"><strong>After dot</strong><br>' + escapeHtml(probe.is_after_dot) + '</div>' +
+                    '<div class="probe-cell"><strong>Identifier tail</strong><br>' + escapeHtml(probe.identifier_tail_length) + '</div>' +
+                    '<div class="probe-cell"><strong>Trigger</strong><br>' + escapeHtml(probe.trigger_mode) + triggerCharacter + '</div>' +
+                '</div>' +
+            '</section>';
+        }
+
+        function renderClientProbeFeed(feed) {
+            if (!feed || !Array.isArray(feed.probes) || feed.probes.length === 0) {
+                clientRoot.innerHTML = '<div class="placeholder">No client probes recorded yet. Trigger completion in a BSL document to populate the local feed.</div>';
+                return;
+            }
+
+            clientRoot.innerHTML =
+                '<div class="meta">Updated ' + escapeHtml(new Date(feed.updated_at_ms).toLocaleTimeString()) + '</div>' +
+                '<div class="probe-feed">' + feed.probes.map(renderClientProbe).join('') + '</div>';
+        }
+
         function applyModeUi() {
             const allActive = currentMode === 'all';
             modeAllButton.classList.toggle('active', allActive);
@@ -670,17 +798,17 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             const traces = state.traces || [];
             if (currentMode === 'average') {
                 if (!state.average_trace) {
-                    root.innerHTML = '<div class="placeholder">No completion traces to average yet.</div>';
+                    serverRoot.innerHTML = '<div class="placeholder">No completion traces to average yet.</div>';
                 } else {
-                    root.innerHTML = renderTrace(state.average_trace);
+                    serverRoot.innerHTML = renderTrace(state.average_trace);
                 }
                 return;
             }
 
             if (traces.length === 0) {
-                root.innerHTML = '<div class="placeholder">No completion traces yet. Trigger completion to populate timeline.</div>';
+                serverRoot.innerHTML = '<div class="placeholder">No completion traces yet. Trigger completion to populate the server timeline.</div>';
             } else {
-                root.innerHTML = traces.map(renderTrace).join('');
+                serverRoot.innerHTML = traces.map(renderTrace).join('');
             }
         }
 
@@ -689,14 +817,16 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 return;
             }
 
+            renderClientProbeFeed(state.client_probe_feed);
+
             if (state.kind === 'unsupported') {
-                root.innerHTML = '<div class="placeholder">' + escapeHtml(state.message) + '</div>';
+                serverRoot.innerHTML = '<div class="placeholder">' + escapeHtml(state.message) + '</div>';
                 updatedAtNode.textContent = 'Timeline unsupported by current LSP server';
                 return;
             }
 
             if (state.kind === 'error') {
-                root.innerHTML = '<div class="placeholder">Failed to load timeline: ' + escapeHtml(state.message) + '</div>';
+                serverRoot.innerHTML = '<div class="placeholder">Failed to load timeline: ' + escapeHtml(state.message) + '</div>';
                 updatedAtNode.textContent = 'Last update failed';
                 return;
             }

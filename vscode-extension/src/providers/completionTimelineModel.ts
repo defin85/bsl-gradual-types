@@ -7,6 +7,7 @@ import {
     CompletionTimelineTurnAttributionTrace,
     CompletionTimelineTrace,
 } from '../lsp/customRequests';
+import { CompletionProbe } from './completionProbe';
 
 export const COMPLETION_TIMELINE_UNSUPPORTED_MESSAGE =
     'Connected LSP server does not support completion timeline (`bsl.getCompletionTimeline`). Update backend binary.';
@@ -35,16 +36,23 @@ export interface CompletionTimelineTraceViewModel {
     stages: CompletionTimelineStageViewModel[];
 }
 
+export interface CompletionProbeViewModel extends CompletionProbe {}
+
+export interface CompletionProbeFeedViewModel {
+    updated_at_ms: number;
+    probes: CompletionProbeViewModel[];
+}
+
 export type CompletionTimelinePanelState =
-    | {
+    | ({
         kind: 'ready';
         version: number;
         updated_at_ms: number;
         traces: CompletionTimelineTraceViewModel[];
         average_trace: CompletionTimelineTraceViewModel | null;
-    }
-    | { kind: 'unsupported'; message: string }
-    | { kind: 'error'; message: string };
+    } & { client_probe_feed: CompletionProbeFeedViewModel })
+    | ({ kind: 'unsupported'; message: string } & { client_probe_feed: CompletionProbeFeedViewModel })
+    | ({ kind: 'error'; message: string } & { client_probe_feed: CompletionProbeFeedViewModel });
 
 export function resolveDominantStageName(trace: CompletionTimelineTrace): string | undefined {
     if (trace.dominant_stage && trace.stages.some((stage) => stage.name === trace.dominant_stage)) {
@@ -238,8 +246,26 @@ function buildAverageTrace(
     };
 }
 
+function mapClientProbeFeed(
+    probes: CompletionProbe[],
+    updatedAtMs: number
+): CompletionProbeFeedViewModel {
+    return {
+        updated_at_ms: updatedAtMs,
+        probes: [...probes]
+            .sort((left, right) => {
+                if (right.request_started_at_ms !== left.request_started_at_ms) {
+                    return right.request_started_at_ms - left.request_started_at_ms;
+                }
+                return right.request_completed_at_ms - left.request_completed_at_ms;
+            })
+            .map((probe) => ({ ...probe })),
+    };
+}
+
 export function mapCompletionTimelineResponseToPanelState(
     response: CompletionTimelineResponse,
+    clientProbes: CompletionProbe[] = [],
     updatedAtMs: number = Date.now()
 ): CompletionTimelinePanelState {
     const traces = [...response.traces]
@@ -253,17 +279,20 @@ export function mapCompletionTimelineResponseToPanelState(
         updated_at_ms: updatedAtMs,
         traces,
         average_trace: averageTrace,
+        client_probe_feed: mapClientProbeFeed(clientProbes, updatedAtMs),
     };
 }
 
 export function mapCompletionTimelineFetchResultToPanelState(
     result: CompletionTimelineFetchResult,
+    clientProbes: CompletionProbe[] = [],
     updatedAtMs: number = Date.now()
 ): CompletionTimelinePanelState {
     if (result.kind === 'unsupported') {
         return {
             kind: 'unsupported',
             message: COMPLETION_TIMELINE_UNSUPPORTED_MESSAGE,
+            client_probe_feed: mapClientProbeFeed(clientProbes, updatedAtMs),
         };
     }
 
@@ -271,8 +300,9 @@ export function mapCompletionTimelineFetchResultToPanelState(
         return {
             kind: 'error',
             message: result.message,
+            client_probe_feed: mapClientProbeFeed(clientProbes, updatedAtMs),
         };
     }
 
-    return mapCompletionTimelineResponseToPanelState(result.response, updatedAtMs);
+    return mapCompletionTimelineResponseToPanelState(result.response, clientProbes, updatedAtMs);
 }

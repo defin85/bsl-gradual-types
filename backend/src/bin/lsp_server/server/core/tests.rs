@@ -50,6 +50,9 @@ fn init_test_tracing() {
     });
 }
 
+static PRECOMPUTE_DELAY_ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> =
+    std::sync::OnceLock::new();
+
 const UNIFIED_STAGE_COUNTER_KEYS: &[&str] = &[
     "intellisense_v2_runtime_wait_for_file_version_queue_wait_total",
     "intellisense_v2_runtime_wait_for_file_version_exec_total",
@@ -13636,8 +13639,18 @@ async fn p33_completion_exact_wait_deadline_then_recovery_after_precompute_finis
     const FIXTURE: &str =
         "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
 
-    let _precompute_delay_guard =
-        EnvVarGuard::set("BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS", "250");
+    let _env_lock = PRECOMPUTE_DELAY_ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("precompute delay env lock");
+    let wait_budget_ms = bsl_runtime::system::global_runtime_config()
+        .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
+        .unwrap_or(120);
+    let precompute_delay_ms = wait_budget_ms.saturating_add(500).max(400);
+    let _precompute_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS",
+        &precompute_delay_ms.to_string(),
+    );
     let coordinator = Arc::new(SystemCoordinator::new());
     let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
         Arc::new(std::sync::Mutex::new(None));
@@ -13720,10 +13733,6 @@ async fn p33_completion_exact_wait_deadline_then_recovery_after_precompute_finis
     .await;
 
     let completion_position = find_utf16_position_after_marker(FIXTURE, "ДляCompletion = S.");
-    let wait_budget_ms = bsl_runtime::system::global_runtime_config()
-        .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
-        .unwrap_or(120);
-
     let first_started = Instant::now();
     let first_completion_labels =
         lsp_completion_labels_at(&mut service, &uri, completion_position).await;
@@ -13843,6 +13852,10 @@ async fn p33_completion_head_hit_emits_exact_upgrade_when_background_exact_finis
 
     const FIXTURE: &str = "Процедура Тест()\n    Результат = (Новый Массив()).\nКонецПроцедуры\n";
 
+    let _env_lock = PRECOMPUTE_DELAY_ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("precompute delay env lock");
     let _precompute_delay_guard =
         EnvVarGuard::set("BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS", "200");
     let coordinator = Arc::new(SystemCoordinator::new());
@@ -13992,6 +14005,10 @@ async fn p33_completion_head_and_exact_resolve_keep_candidate_id_stable_for_same
 
     const FIXTURE: &str = "Процедура Тест()\n    Результат = (Новый Массив()).\nКонецПроцедуры\n";
 
+    let _env_lock = PRECOMPUTE_DELAY_ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("precompute delay env lock");
     let _precompute_delay_guard =
         EnvVarGuard::set("BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS", "200");
     let coordinator = Arc::new(SystemCoordinator::new());
@@ -14164,6 +14181,10 @@ async fn p33_completion_resolve_stays_bound_to_origin_revision() {
 
     const FIXTURE: &str = "Процедура Тест()\n    Результат = (Новый Массив()).\nКонецПроцедуры\n";
 
+    let _env_lock = PRECOMPUTE_DELAY_ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("precompute delay env lock");
     let _precompute_delay_guard =
         EnvVarGuard::set("BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS", "200");
     let coordinator = Arc::new(SystemCoordinator::new());
@@ -14338,7 +14359,14 @@ async fn p33_completion_exact_wait_deadline_recovery_perf_report() {
         "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
     const PROFILE_NAME: &str = "p33_completion_exact_wait_deadline_recovery_perf_report";
 
-    let precompute_delay_ms = 250_u64;
+    let _env_lock = PRECOMPUTE_DELAY_ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("precompute delay env lock");
+    let wait_budget_ms = bsl_runtime::system::global_runtime_config()
+        .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
+        .unwrap_or(120);
+    let precompute_delay_ms = wait_budget_ms.saturating_add(500).max(400);
     let _precompute_delay_guard = EnvVarGuard::set(
         "BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS",
         &precompute_delay_ms.to_string(),
@@ -14425,10 +14453,6 @@ async fn p33_completion_exact_wait_deadline_recovery_perf_report() {
     .await;
 
     let completion_position = find_utf16_position_after_marker(FIXTURE, "ДляCompletion = S.");
-    let wait_budget_ms = bsl_runtime::system::global_runtime_config()
-        .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
-        .unwrap_or(120);
-
     let first_started = Instant::now();
     let first_completion_labels =
         lsp_completion_labels_at(&mut service, &uri, completion_position).await;

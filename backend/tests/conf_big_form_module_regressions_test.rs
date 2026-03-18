@@ -2,6 +2,8 @@
 //! - `Элементы.<Имя>` резолвится по Form.xml (в т.ч. UsualGroup)
 //! - реквизиты формы (`<Attribute ...>`) доступны как идентификаторы с типом
 
+mod support;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -30,6 +32,17 @@ fn conf_big_root() -> Option<PathBuf> {
     candidates
         .into_iter()
         .find(|p| p.join("Configuration.xml").exists())
+}
+
+fn byte_offset_to_utf16_position(content: &str, offset: usize) -> (u32, u32) {
+    let prefix = &content[..offset];
+    let line = prefix.bytes().filter(|b| *b == b'\n').count() as u32;
+    let line_start = prefix.rfind('\n').map_or(0usize, |idx| idx + 1);
+    let column = content[line_start..offset]
+        .chars()
+        .map(|ch| ch.len_utf16())
+        .sum::<usize>() as u32;
+    (line, column)
 }
 
 #[test]
@@ -262,5 +275,52 @@ fn conf_big_form_module_attributes_and_elements_are_typed() {
         got_z.as_deref(),
         Some("ДокументСсылка.РеализацияТоваровУслуг"),
         "Expected `Объект.Ссылка` to resolve as typed document reference"
+    );
+}
+
+#[test]
+fn conf_big_form_module_common_module_receivers_are_resolved() {
+    let Some(root) = conf_big_root() else {
+        return;
+    };
+
+    let deps_bundle = support::deps_bundle_v2_for_paths(None, Some(root.as_path()), Some("8.3.25"));
+    let file_path =
+        "Documents/РеализацияТоваровУслуг/Forms/ФормаДокументаОбщая/Ext/Form/Module.bsl";
+    let original = std::fs::read_to_string(root.join(file_path)).expect("read form module file");
+    let probe = concat!(
+        "\nПроцедура __Probe_CommonModuleReceiver()\n",
+        "    Значение = РеализацияТоваровУслугФормы.СтрокаСсылкиПоказатьНаКарте();\n",
+        "КонецПроцедуры\n",
+    );
+    let content = format!("{original}{probe}");
+
+    let diagnostics =
+        support::semantic_diagnostics_for_code(deps_bundle.as_ref(), file_path, &content);
+    let diagnostic_messages = diagnostics
+        .iter()
+        .map(|diag| diag.message.clone())
+        .collect::<Vec<_>>();
+
+    assert!(
+        diagnostics.iter().all(|diag| {
+            !(diag.message.contains("Необъявленная переменная")
+                && diag.message.contains("РеализацияТоваровУслугФормы"))
+        }),
+        "unexpected undeclared diagnostics for common module receiver: {:?}",
+        diagnostic_messages
+    );
+
+    let receiver_offset = content
+        .rfind("РеализацияТоваровУслугФормы")
+        .expect("probe common module receiver");
+    let (line, column) = byte_offset_to_utf16_position(&content, receiver_offset);
+    let hover = support::hover_for_code(deps_bundle.as_ref(), file_path, &content, line, column)
+        .expect("hover for common module receiver");
+
+    assert!(
+        hover.contains("ОбщиеМодули.РеализацияТоваровУслугФормы"),
+        "expected common module receiver hover to expose its canonical type, got:\n{}",
+        hover
     );
 }

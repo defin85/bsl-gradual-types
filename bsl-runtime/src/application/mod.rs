@@ -17,8 +17,9 @@ pub use intellisense_v2::{
     CpuWorkClass, DeferredHeavyDiagnosticsReason, DiagnosticsDisposition, DiagnosticsExecutionPlan,
     DiagnosticsProfile, DiagnosticsTrigger, ExecutionContext, ExecutionSettings,
     IntellisenseV2Facade, ObservabilityMetricKind, ObservabilityOrigin, ObservabilityStage,
-    PreparedOperationSnapshot, RuntimePerfKnobs, ScaleAwareDiagnosticsKnobs, SemanticOperation,
-    SemanticOutcome, SemanticSnapshot, SingleflightQueryError,
+    PrepareStatefulProgress, PrepareStatefulProgressSnapshot, PreparedOperationSnapshot,
+    RuntimePerfKnobs, ScaleAwareDiagnosticsKnobs, SemanticOperation, SemanticOutcome,
+    SemanticSnapshot, SingleflightQueryError,
 };
 pub use type_system::get_completion_with_semantic_program;
 pub use type_system::get_completion_with_semantic_program_snapshot;

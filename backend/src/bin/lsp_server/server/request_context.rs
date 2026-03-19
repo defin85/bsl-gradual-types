@@ -181,12 +181,13 @@ async fn with_request_context<F, T>(
 where
     F: Future<Output = T>,
 {
-    LSP_REQUEST_ID.scope(request_id, async move {
-        LSP_REQUEST_RECEIVED_AT_MS
-            .scope(request_received_at_ms, future)
-            .await
-    })
-    .await
+    LSP_REQUEST_ID
+        .scope(request_id, async move {
+            LSP_REQUEST_RECEIVED_AT_MS
+                .scope(request_received_at_ms, future)
+                .await
+        })
+        .await
 }
 
 fn request_id_from_jsonrpc_id(id: &Id) -> Option<String> {
@@ -262,9 +263,9 @@ where
         }
         let request_received_at_ms = Some(super::unix_timestamp_ms());
         let future = self.inner.call(request);
-        Box::pin(async move {
-            with_request_context(request_id, request_received_at_ms, future).await
-        })
+        Box::pin(
+            async move { with_request_context(request_id, request_received_at_ms, future).await },
+        )
     }
 }
 

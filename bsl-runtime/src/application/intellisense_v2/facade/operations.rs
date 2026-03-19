@@ -41,6 +41,16 @@ impl IntellisenseV2Facade {
         context: &ExecutionContext,
         observability: Option<&SystemCoordinator>,
     ) -> Result<PreparedOperationSnapshot, SemanticOutcome> {
+        self.prepare_stateful_operation_with_progress(context, observability, None)
+            .await
+    }
+
+    pub async fn prepare_stateful_operation_with_progress(
+        &self,
+        context: &ExecutionContext,
+        observability: Option<&SystemCoordinator>,
+        progress: Option<&PrepareStatefulProgress>,
+    ) -> Result<PreparedOperationSnapshot, SemanticOutcome> {
         let interactive_knobs = interactive_freshness_knobs(context.operation, observability);
         let fastpath_preconditions = completion_fastpath_preconditions(
             context.operation,
@@ -54,6 +64,9 @@ impl IntellisenseV2Facade {
         let stale_served = false;
 
         let wait_elapsed = if let Some(min_file_version) = context.min_file_version {
+            if let Some(progress) = progress {
+                progress.mark_phase("wait_for_file_version");
+            }
             let started = Instant::now();
             let wait_ok = if let Some(knobs) = interactive_knobs {
                 match tokio::time::timeout(
@@ -94,7 +107,13 @@ impl IntellisenseV2Facade {
                     elapsed,
                 );
             }
+            if let Some(progress) = progress {
+                progress.mark_wait_completed();
+            }
             if !wait_ok {
+                if let Some(progress) = progress {
+                    progress.mark_phase("stale_version");
+                }
                 return Err(SemanticOutcome::StaleVersion);
             }
             Some(elapsed)
@@ -102,10 +121,17 @@ impl IntellisenseV2Facade {
             None
         };
 
+        if let Some(progress) = progress {
+            progress.mark_phase("snapshot_with_deps");
+        }
         let snapshot_started = Instant::now();
         let (analysis, index_snapshot, deps_id) = self
             .snapshot_with_deps_with_priority(context.origin, queue_priority)
             .await;
+        if let Some(progress) = progress {
+            progress.mark_snapshot_completed();
+            progress.mark_phase("deps_guard");
+        }
 
         if let Some(expected_deps_id) = context.expected_deps_id.as_ref() {
             if expected_deps_id != &deps_id {
@@ -116,6 +142,9 @@ impl IntellisenseV2Facade {
                         context.completion_mode,
                         snapshot_started.elapsed(),
                     );
+                }
+                if let Some(progress) = progress {
+                    progress.mark_phase("missing_deps");
                 }
                 return Err(SemanticOutcome::MissingDeps);
             }
@@ -152,6 +181,9 @@ impl IntellisenseV2Facade {
                                     snapshot_started.elapsed(),
                                 );
                         }
+                        if let Some(progress) = progress {
+                            progress.mark_phase("stale_version");
+                        }
                         return Err(SemanticOutcome::StaleVersion);
                     }
                 } else {
@@ -164,6 +196,9 @@ impl IntellisenseV2Facade {
                             snapshot_started.elapsed(),
                         );
                     }
+                    if let Some(progress) = progress {
+                        progress.mark_phase("stale_version");
+                    }
                     return Err(SemanticOutcome::StaleVersion);
                 }
             } else if observed_file_version.is_some_and(|version| version < min_file_version) {
@@ -175,11 +210,17 @@ impl IntellisenseV2Facade {
                         snapshot_started.elapsed(),
                     );
                 }
+                if let Some(progress) = progress {
+                    progress.mark_phase("stale_version");
+                }
                 return Err(SemanticOutcome::StaleVersion);
             }
         }
 
         if Self::should_eager_warm_exact_type_index(context) {
+            if let Some(progress) = progress {
+                progress.mark_phase("exact_type_index_warm");
+            }
             if let Some(file_version) = observed_file_version {
                 let exact_ready = analysis
                     .current_type_index_serve_only_ready(context.file_id)
@@ -227,6 +268,9 @@ impl IntellisenseV2Facade {
                 context.completion_mode,
                 snapshot_elapsed,
             );
+        }
+        if let Some(progress) = progress {
+            progress.mark_phase("ready");
         }
 
         Ok(PreparedOperationSnapshot {

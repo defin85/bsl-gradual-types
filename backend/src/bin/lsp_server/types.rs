@@ -135,6 +135,8 @@ pub struct CompletionTimelineTurnAttributionTrace {
     pub queue_outcome: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_wait_outcome: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dispatcher_resolution_latency_ms: Option<u64>,
     pub queue_capacity: usize,
     pub queue_depth_before_enqueue: usize,
     pub queue_depth_after_enqueue: usize,
@@ -147,6 +149,34 @@ pub struct CompletionTimelineTurnAttributionTrace {
     pub active_holder: Option<CompletionTimelineTurnHolderTrace>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub queued_completion_ahead: Option<CompletionTimelineTurnHolderTrace>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CompletionTimelinePrepareProgressTrace {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phase: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phase_started_offset_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wait_completed_offset_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot_completed_offset_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CompletionTimelineExactWaitDetailsTrace {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub head_ready_before_wait: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exact_ready_before_wait: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_revision_head_owner_hints_ready: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_wait_outcome: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub type_index_wait_outcome: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub type_index_waiter_action: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -173,6 +203,10 @@ pub struct CompletionTimelinePrepareDetailsTrace {
     pub apply_age_at_start_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub apply_age_at_terminal_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress: Option<CompletionTimelinePrepareProgressTrace>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exact_wait: Option<CompletionTimelineExactWaitDetailsTrace>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -914,7 +914,7 @@ mod tests {
             .handle_get_completion_timeline(crate::types::CompletionTimelineRequest::default())
             .await
             .expect("timeline response");
-        assert_eq!(response.version, 3);
+        assert_eq!(response.version, 4);
         assert_eq!(response.traces.len(), 200);
         assert_eq!(
             response.traces.first().map(|trace| trace.trace_id.as_str()),

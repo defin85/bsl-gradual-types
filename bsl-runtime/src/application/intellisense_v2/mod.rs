@@ -7,8 +7,9 @@ mod policy;
 
 pub use facade::{
     CancellationPolicy, ExecutionContext, ExecutionSettings, IntellisenseV2Facade,
-    ObservabilityMetricKind, ObservabilityOrigin, ObservabilityStage, PreparedOperationSnapshot,
-    SemanticOperation, SemanticOutcome, SemanticSnapshot, SingleflightQueryError,
+    ObservabilityMetricKind, ObservabilityOrigin, ObservabilityStage, PrepareStatefulProgress,
+    PrepareStatefulProgressSnapshot, PreparedOperationSnapshot, SemanticOperation, SemanticOutcome,
+    SemanticSnapshot, SingleflightQueryError,
 };
 pub use policy::{
     classify_optional_query, completion_fastpath_preconditions,

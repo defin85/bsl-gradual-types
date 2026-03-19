@@ -288,6 +288,59 @@ impl CompletionTimelineCapture {
             apply_age.map(CompletionTimelineCapture::duration_to_ms);
     }
 
+    fn set_prepare_progress_snapshot(
+        &mut self,
+        progress: &bsl_runtime::application::PrepareStatefulProgressSnapshot,
+    ) {
+        let progress_trace = self
+            .prepare_details_mut()
+            .progress
+            .get_or_insert_with(Default::default);
+        progress_trace.phase = progress.phase.map(str::to_string);
+        progress_trace.phase_started_offset_ms = progress
+            .phase_started_offset
+            .map(CompletionTimelineCapture::duration_to_ms);
+        progress_trace.wait_completed_offset_ms = progress
+            .wait_completed_offset
+            .map(CompletionTimelineCapture::duration_to_ms);
+        progress_trace.snapshot_completed_offset_ms = progress
+            .snapshot_completed_offset
+            .map(CompletionTimelineCapture::duration_to_ms);
+    }
+
+    fn exact_wait_details_mut(
+        &mut self,
+    ) -> &mut crate::types::CompletionTimelineExactWaitDetailsTrace {
+        self.prepare_details_mut()
+            .exact_wait
+            .get_or_insert_with(Default::default)
+    }
+
+    fn set_exact_wait_head_ready_before_wait(&mut self, ready: bool) {
+        self.exact_wait_details_mut().head_ready_before_wait = Some(ready);
+    }
+
+    fn set_exact_wait_exact_ready_before_wait(&mut self, ready: bool) {
+        self.exact_wait_details_mut().exact_ready_before_wait = Some(ready);
+    }
+
+    fn set_exact_wait_current_revision_head_owner_hints_ready(&mut self, ready: bool) {
+        self.exact_wait_details_mut()
+            .current_revision_head_owner_hints_ready = Some(ready);
+    }
+
+    fn set_exact_wait_artifact_outcome(&mut self, outcome: &str) {
+        self.exact_wait_details_mut().artifact_wait_outcome = Some(outcome.to_string());
+    }
+
+    fn set_exact_wait_type_index_outcome(&mut self, outcome: &str) {
+        self.exact_wait_details_mut().type_index_wait_outcome = Some(outcome.to_string());
+    }
+
+    fn set_exact_wait_type_index_waiter_action(&mut self, action: &str) {
+        self.exact_wait_details_mut().type_index_waiter_action = Some(action.to_string());
+    }
+
     fn into_trace(
         self,
         trace_id: String,
@@ -348,6 +401,7 @@ fn dispatch_attribution_to_trace(
         request_epoch: attribution.request_epoch,
         queue_outcome: attribution.queue_outcome.as_str().to_string(),
         turn_wait_outcome: None,
+        dispatcher_resolution_latency_ms: None,
         queue_capacity: attribution.queue_capacity,
         queue_depth_before_enqueue: attribution.queue_depth_before_enqueue,
         queue_depth_after_enqueue: attribution.queue_depth_after_enqueue,
@@ -669,14 +723,18 @@ impl BslLanguageServer {
                     super::super::completion_dispatcher::CompletionTurnOutcome::QueueRejected
                 } else if let Some(turn_waiter) = completion_dispatch.turn_waiter {
                     let turn_wait_started = Instant::now();
-                    let turn_outcome = turn_waiter.wait().await;
+                    let turn_resolution = turn_waiter.wait().await;
                     let turn_wait_elapsed = turn_wait_started.elapsed();
                     self.coordinator
                         .record_completion_stage_latency("turn_wait", turn_wait_elapsed);
                     timeline_capture.push_completed_stage("turn_wait", turn_wait_elapsed);
                     completion_dispatch_attribution.turn_wait_outcome =
-                        Some(turn_outcome.as_str().to_string());
-                    turn_outcome
+                        Some(turn_resolution.outcome.as_str().to_string());
+                    completion_dispatch_attribution.dispatcher_resolution_latency_ms =
+                        turn_resolution
+                            .dispatcher_resolution_latency
+                            .map(CompletionTimelineCapture::duration_to_ms);
+                    turn_resolution.outcome
                 } else {
                     completion_dispatch_attribution.turn_wait_outcome = Some(
                         super::super::completion_dispatcher::CompletionTurnOutcome::QueueRejected
@@ -836,19 +894,22 @@ impl BslLanguageServer {
                     &mut cancel_event_emitted,
                 )
             });
+            let prepare_progress = bsl_runtime::application::PrepareStatefulProgress::new();
             let guarded_prepare = run_completion_prepare_guard(
-                self.prepare_lsp_stateful_operation_v2_with_completion_mode(
+                self.prepare_lsp_stateful_operation_v2_with_completion_mode_and_progress(
                     &uri,
                     file_id,
                     bsl_runtime::application::SemanticOperation::Completion,
                     include_flow_sensitive,
                     Some(completion_observability_mode),
+                    Some(&prepare_progress),
                 ),
                 prepare_timeout,
                 prepare_abort,
             )
             .await;
             let prepare_elapsed = prepare_started.elapsed();
+            timeline_capture.set_prepare_progress_snapshot(&prepare_progress.snapshot());
             self.coordinator
                 .record_completion_stage_latency("prepare_stateful", prepare_elapsed);
             let prepare_apply_age_at_terminal = completion_apply_age_for_file(self, file_id).await;
@@ -1011,6 +1072,11 @@ impl BslLanguageServer {
                         .current_type_index_serve_only_ready(file_id)
                         .ok()
                         .unwrap_or(false);
+                    if member_access_request {
+                        timeline_capture.set_exact_wait_head_ready_before_wait(head_ready);
+                        timeline_capture
+                            .set_exact_wait_exact_ready_before_wait(exact_ready_before_wait);
+                    }
                     let mut exact_hit_candidate = false;
                     if member_access_request && !head_ready && !exact_ready_before_wait {
                         if let Some(apply_age) = completion_apply_age_for_file(self, file_id).await
@@ -1038,9 +1104,17 @@ impl BslLanguageServer {
 
                         match artifact_wait_outcome {
                             super::super::core::CompletionArtifactWaitOutcomeV2::HeadReady => {
+                                timeline_capture.set_exact_wait_artifact_outcome(
+                                    super::super::core::CompletionArtifactWaitOutcomeV2::HeadReady
+                                        .as_str(),
+                                );
                                 head_ready = true;
                             }
                             super::super::core::CompletionArtifactWaitOutcomeV2::ExactReady => {
+                                timeline_capture.set_exact_wait_artifact_outcome(
+                                    super::super::core::CompletionArtifactWaitOutcomeV2::ExactReady
+                                        .as_str(),
+                                );
                                 if let Some(apply_age) =
                                     completion_apply_age_for_file(self, file_id).await
                                 {
@@ -1060,6 +1134,8 @@ impl BslLanguageServer {
                             }
                             super::super::core::CompletionArtifactWaitOutcomeV2::Deadline
                             | super::super::core::CompletionArtifactWaitOutcomeV2::ObservedVersionMismatch => {
+                                timeline_capture
+                                    .set_exact_wait_artifact_outcome(artifact_wait_outcome.as_str());
                                 if let Some(apply_age) =
                                     completion_apply_age_for_file(self, file_id).await
                                 {
@@ -1108,6 +1184,11 @@ impl BslLanguageServer {
                         };
                     let head_route_candidate =
                         member_access_request && !current_revision_head_owner_type_hints.is_empty();
+                    if member_access_request {
+                        timeline_capture.set_exact_wait_current_revision_head_owner_hints_ready(
+                            !current_revision_head_owner_type_hints.is_empty(),
+                        );
+                    }
                     if member_access_request
                         && current_revision_head_owner_type_hints.is_empty()
                         && !exact_ready_before_wait
@@ -1121,7 +1202,7 @@ impl BslLanguageServer {
                             );
                         }
                         let exact_wait_started = Instant::now();
-                        let exact_wait_outcome = self
+                        let exact_wait = self
                             .wait_for_current_type_index_serve_only_ready_v2(
                                 file_id,
                                 Some(expected_version),
@@ -1135,8 +1216,13 @@ impl BslLanguageServer {
                         );
                         timeline_capture
                             .push_completed_stage("wait_exact_type_index", exact_wait_elapsed);
+                        timeline_capture
+                            .set_exact_wait_type_index_outcome(exact_wait.outcome.as_str());
+                        timeline_capture.set_exact_wait_type_index_waiter_action(
+                            exact_wait.waiter_action.as_str(),
+                        );
 
-                        if exact_wait_outcome
+                        if exact_wait.outcome
                             != super::super::core::ExactTypeIndexWaitOutcomeV2::Ready
                         {
                             if let Some(apply_age) =
@@ -1149,9 +1235,9 @@ impl BslLanguageServer {
                             }
                             self.coordinator
                                 .record_intellisense_v2_completion_exact_type_index_wait_outcome(
-                                    exact_wait_outcome.as_str(),
+                                    exact_wait.outcome.as_str(),
                                 );
-                            if exact_wait_outcome
+                            if exact_wait.outcome
                                 == super::super::core::ExactTypeIndexWaitOutcomeV2::Deadline
                             {
                                 timeline_capture.set_prepare_fail_closed_cause("exact_deadline");
@@ -1885,9 +1971,7 @@ impl BslLanguageServer {
                 {
                     self.coordinator.record_completion_stage_latency(
                         "cancel_observed_after_handler_enter",
-                        std::time::Duration::from_millis(
-                            cancel_observed_after_handler_enter_ms,
-                        ),
+                        std::time::Duration::from_millis(cancel_observed_after_handler_enter_ms),
                     );
                     self.coordinator
                         .record_intellisense_v2_completion_cancel_observed();

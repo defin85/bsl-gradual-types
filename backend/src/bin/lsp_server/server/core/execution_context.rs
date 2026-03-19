@@ -131,13 +131,14 @@ impl BslLanguageServer {
         .await
     }
 
-    pub(crate) async fn prepare_lsp_stateful_operation_v2_with_completion_mode(
+    pub(crate) async fn prepare_lsp_stateful_operation_v2_with_completion_mode_and_progress(
         &self,
         uri: &Url,
         file_id: V2FileId,
         operation: bsl_runtime::application::SemanticOperation,
         flow_sensitive: bool,
         completion_mode: Option<&'static str>,
+        progress: Option<&bsl_runtime::application::PrepareStatefulProgress>,
     ) -> Result<
         (
             bsl_runtime::application::ExecutionContext,
@@ -168,9 +169,6 @@ impl BslLanguageServer {
                     }
                 };
 
-                // Disk fallback must not block the async LSP request thread; otherwise the
-                // outer interactive wait budget guard cannot fire until fs::read_to_string
-                // returns.
                 let path_for_read = path.clone();
                 let file_content = match tokio::task::spawn_blocking(move || {
                     read_bsl_file(&path_for_read)
@@ -236,9 +234,39 @@ impl BslLanguageServer {
             .await;
         let prepared = self
             .analysis_v2
-            .prepare_stateful_operation(&context, Some(self.coordinator.as_ref()))
+            .prepare_stateful_operation_with_progress(
+                &context,
+                Some(self.coordinator.as_ref()),
+                progress,
+            )
             .await?;
 
         Ok((context, prepared, min_file_version))
+    }
+
+    pub(crate) async fn prepare_lsp_stateful_operation_v2_with_completion_mode(
+        &self,
+        uri: &Url,
+        file_id: V2FileId,
+        operation: bsl_runtime::application::SemanticOperation,
+        flow_sensitive: bool,
+        completion_mode: Option<&'static str>,
+    ) -> Result<
+        (
+            bsl_runtime::application::ExecutionContext,
+            bsl_runtime::application::PreparedOperationSnapshot,
+            i32,
+        ),
+        bsl_runtime::application::SemanticOutcome,
+    > {
+        self.prepare_lsp_stateful_operation_v2_with_completion_mode_and_progress(
+            uri,
+            file_id,
+            operation,
+            flow_sensitive,
+            completion_mode,
+            None,
+        )
+        .await
     }
 }

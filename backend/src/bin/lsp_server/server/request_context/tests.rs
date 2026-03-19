@@ -13,11 +13,9 @@ async fn current_request_received_at_ms_is_none_outside_scope() {
 
 #[tokio::test]
 async fn with_request_context_exposes_context_inside_scope() {
-    let scoped = with_request_context(
-        Some("42".to_string()),
-        Some(1_700_000_000_123),
-        async { (current_request_id(), current_request_received_at_ms()) },
-    )
+    let scoped = with_request_context(Some("42".to_string()), Some(1_700_000_000_123), async {
+        (current_request_id(), current_request_received_at_ms())
+    })
     .await;
     assert_eq!(scoped.0, Some("42".to_string()));
     assert_eq!(scoped.1, Some(1_700_000_000_123));
@@ -46,7 +44,10 @@ async fn request_context_service_sets_jsonrpc_numeric_id() {
     let request = Request::build("workspace/symbol").id(9_i64).finish();
     let captured = service.call(request).await.expect("service call");
     assert_eq!(captured.0, Some("9".to_string()));
-    assert!(captured.1.is_some(), "request receive timestamp must be scoped");
+    assert!(
+        captured.1.is_some(),
+        "request receive timestamp must be scoped"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -68,8 +69,8 @@ async fn request_context_service_does_not_propagate_request_id_to_spawned_handle
                 let captured = tokio::spawn(async move {
                     (current_request_id(), current_request_received_at_ms())
                 })
-                    .await
-                    .expect("spawned capture join");
+                .await
+                .expect("spawned capture join");
                 Ok(captured)
             })
         }

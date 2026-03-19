@@ -9691,7 +9691,7 @@ async fn p22_get_completion_timeline_exposes_versioned_contract() {
             .get("version")
             .and_then(|value| value.as_u64())
             .expect("version"),
-        3
+        4
     );
     assert!(
         result
@@ -9846,6 +9846,14 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
         prepare_details.contains_key("min_file_version"),
         "missing field `min_file_version` in prepare_details"
     );
+    assert!(
+        prepare_details.contains_key("progress"),
+        "prepare_details must expose prepare progress details in v4 contract"
+    );
+    assert!(
+        prepare_details.contains_key("exact_wait"),
+        "prepare_details must expose exact wait details in v4 contract"
+    );
     for field in [
         "transport_received_at_ms",
         "handler_entered_at_ms",
@@ -9931,6 +9939,10 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
             "missing field `{field}` in turn_attribution"
         );
     }
+    assert!(
+        turn_attribution.contains_key("dispatcher_resolution_latency_ms"),
+        "missing field `dispatcher_resolution_latency_ms` in turn_attribution"
+    );
 
     drain_task.abort();
 }

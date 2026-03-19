@@ -395,7 +395,11 @@ async fn request_epoch_advances_only_for_completion_requests() {
     )
     .await
     .expect("turn waiter timeout");
-    assert_eq!(completion_outcome, CompletionTurnOutcome::Ready);
+    assert_eq!(completion_outcome.outcome, CompletionTurnOutcome::Ready);
+    assert!(
+        completion_outcome.dispatcher_resolution_latency.is_some(),
+        "ready turn resolution must carry dispatcher latency metadata"
+    );
 
     let cancel = registry.emit_cancel(file_id, "42".to_string()).await;
     assert_eq!(cancel.file_seq, 4);
@@ -463,7 +467,10 @@ async fn newer_turn_request_supersedes_pending_stale_request_before_start() {
     )
     .await
     .expect("first waiter timeout");
-    assert_eq!(first_outcome, CompletionTurnOutcome::SupersededBeforeStart);
+    assert_eq!(
+        first_outcome.outcome,
+        CompletionTurnOutcome::SupersededBeforeStart
+    );
 
     let second_outcome = tokio::time::timeout(
         Duration::from_millis(200),
@@ -471,7 +478,11 @@ async fn newer_turn_request_supersedes_pending_stale_request_before_start() {
     )
     .await
     .expect("second waiter timeout");
-    assert_eq!(second_outcome, CompletionTurnOutcome::Ready);
+    assert_eq!(second_outcome.outcome, CompletionTurnOutcome::Ready);
+    assert!(
+        second_outcome.dispatcher_resolution_latency.is_some(),
+        "ready turn resolution must include dispatcher latency metadata"
+    );
 
     let close = registry.close_file_dispatcher(file_id).await;
     assert!(close.is_some());

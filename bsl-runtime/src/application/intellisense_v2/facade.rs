@@ -184,6 +184,83 @@ pub enum ObservabilityMetricKind {
     HistogramMs,
 }
 
+#[derive(Debug, Clone, Default)]
+struct PrepareStatefulProgressState {
+    phase: Option<&'static str>,
+    phase_started_offset: Option<Duration>,
+    wait_completed_offset: Option<Duration>,
+    snapshot_completed_offset: Option<Duration>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PrepareStatefulProgressSnapshot {
+    pub phase: Option<&'static str>,
+    pub phase_started_offset: Option<Duration>,
+    pub wait_completed_offset: Option<Duration>,
+    pub snapshot_completed_offset: Option<Duration>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PrepareStatefulProgress {
+    started_at: Instant,
+    inner: Arc<std::sync::Mutex<PrepareStatefulProgressState>>,
+}
+
+impl Default for PrepareStatefulProgress {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PrepareStatefulProgress {
+    pub fn new() -> Self {
+        Self {
+            started_at: Instant::now(),
+            inner: Arc::new(std::sync::Mutex::new(
+                PrepareStatefulProgressState::default(),
+            )),
+        }
+    }
+
+    pub fn mark_phase(&self, phase: &'static str) {
+        let mut state = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.phase = Some(phase);
+        state.phase_started_offset = Some(self.started_at.elapsed());
+    }
+
+    pub fn mark_wait_completed(&self) {
+        let mut state = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.wait_completed_offset = Some(self.started_at.elapsed());
+    }
+
+    pub fn mark_snapshot_completed(&self) {
+        let mut state = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.snapshot_completed_offset = Some(self.started_at.elapsed());
+    }
+
+    pub fn snapshot(&self) -> PrepareStatefulProgressSnapshot {
+        let state = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        PrepareStatefulProgressSnapshot {
+            phase: state.phase,
+            phase_started_offset: state.phase_started_offset,
+            wait_completed_offset: state.wait_completed_offset,
+            snapshot_completed_offset: state.snapshot_completed_offset,
+        }
+    }
+}
+
 /// Shared snapshot payload consumed by semantic operations.
 pub struct SemanticSnapshot {
     pub analysis: AnalysisV2,

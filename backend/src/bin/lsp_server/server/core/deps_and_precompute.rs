@@ -29,6 +29,17 @@ pub(crate) enum CompletionArtifactWaitOutcomeV2 {
     ObservedVersionMismatch,
 }
 
+impl CompletionArtifactWaitOutcomeV2 {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::HeadReady => "head_ready",
+            Self::ExactReady => "exact_ready",
+            Self::Deadline => "deadline",
+            Self::ObservedVersionMismatch => "observed_version_mismatch",
+        }
+    }
+}
+
 #[cfg(test)]
 fn test_type_index_precompute_delay() -> Option<std::time::Duration> {
     std::env::var("BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS")
@@ -44,10 +55,26 @@ fn test_type_index_precompute_delay() -> Option<std::time::Duration> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum TypeIndexPrecomputeWaiterActionV2 {
+pub(crate) enum TypeIndexPrecomputeWaiterActionV2 {
     None,
     Joined,
     Promoted,
+}
+
+impl TypeIndexPrecomputeWaiterActionV2 {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Joined => "joined",
+            Self::Promoted => "promoted",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ExactTypeIndexWaitTraceV2 {
+    pub outcome: ExactTypeIndexWaitOutcomeV2,
+    pub waiter_action: TypeIndexPrecomputeWaiterActionV2,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -329,7 +356,7 @@ impl BslLanguageServer {
         file_id: V2FileId,
         expected_version: Option<i32>,
         max_wait: std::time::Duration,
-    ) -> ExactTypeIndexWaitOutcomeV2 {
+    ) -> ExactTypeIndexWaitTraceV2 {
         let deadline = tokio::time::Instant::now() + max_wait;
         let mut waiter_action = TypeIndexPrecomputeWaiterActionV2::None;
         loop {
@@ -345,7 +372,10 @@ impl BslLanguageServer {
                     self.coordinator
                         .record_intellisense_v2_completion_exact_type_index_wait_ready_after_wait();
                 }
-                return ExactTypeIndexWaitOutcomeV2::Ready;
+                return ExactTypeIndexWaitTraceV2 {
+                    outcome: ExactTypeIndexWaitOutcomeV2::Ready,
+                    waiter_action,
+                };
             }
 
             if matches!(waiter_action, TypeIndexPrecomputeWaiterActionV2::None) {
@@ -386,22 +416,31 @@ impl BslLanguageServer {
                 }
             };
             if matches!(matching_task_state, MatchingTaskState::WrongVersion) {
-                return ExactTypeIndexWaitOutcomeV2::TaskPresentWrongVersion;
+                return ExactTypeIndexWaitTraceV2 {
+                    outcome: ExactTypeIndexWaitOutcomeV2::TaskPresentWrongVersion,
+                    waiter_action,
+                };
             }
             let observed_version_mismatch =
                 expected_version.is_some_and(|version| observed_version != Some(version));
             if matches!(matching_task_state, MatchingTaskState::Missing) {
-                return if observed_version_mismatch {
-                    ExactTypeIndexWaitOutcomeV2::ObservedVersionMismatch
-                } else {
-                    ExactTypeIndexWaitOutcomeV2::NoMatchingTask
+                return ExactTypeIndexWaitTraceV2 {
+                    outcome: if observed_version_mismatch {
+                        ExactTypeIndexWaitOutcomeV2::ObservedVersionMismatch
+                    } else {
+                        ExactTypeIndexWaitOutcomeV2::NoMatchingTask
+                    },
+                    waiter_action,
                 };
             }
             if tokio::time::Instant::now() >= deadline {
-                return if observed_version_mismatch {
-                    ExactTypeIndexWaitOutcomeV2::ObservedVersionMismatch
-                } else {
-                    ExactTypeIndexWaitOutcomeV2::Deadline
+                return ExactTypeIndexWaitTraceV2 {
+                    outcome: if observed_version_mismatch {
+                        ExactTypeIndexWaitOutcomeV2::ObservedVersionMismatch
+                    } else {
+                        ExactTypeIndexWaitOutcomeV2::Deadline
+                    },
+                    waiter_action,
                 };
             }
 

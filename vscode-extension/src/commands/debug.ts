@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { CommandHandler } from '../types';
 import { getLanguageClient, startLanguageClient, stopLanguageClient } from '../lsp';
+import { resetObservabilityCapabilityCaches } from '../lsp/customRequests';
 import { updateStatusBar } from '../lsp/progress';
 
 /**
@@ -17,6 +18,7 @@ export function registerDebugCommands(
         outputChannel.appendLine('Restarting LSP server...');
 
         try {
+            resetObservabilityCapabilityCaches();
             await stopLanguageClient();
 
             outputChannel.appendLine('Starting new LSP client...');

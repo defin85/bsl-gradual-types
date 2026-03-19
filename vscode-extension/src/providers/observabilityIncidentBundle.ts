@@ -1,4 +1,7 @@
-import { CompletionTimelineFetchResult, ObservabilityMetricsResponse } from '../lsp/customRequests';
+import {
+    CompletionTimelineFetchResult,
+    ObservabilityMetricsFetchResult,
+} from '../lsp/customRequests';
 import { CompletionProbe } from './completionProbe';
 
 const BUNDLE_FORMAT = 'bsl-observability-incident/v1';
@@ -18,7 +21,7 @@ export interface ObservabilityIncidentBundleInput {
     completionTimeline: CompletionTimelineFetchResult;
     completionTraceLimit: number;
     clientProbes: CompletionProbe[];
-    observabilityMetrics: ObservabilityMetricsResponse | null;
+    observabilityMetrics: ObservabilityMetricsFetchResult;
 }
 
 export interface ObservabilityIncidentBundleFile {
@@ -188,21 +191,30 @@ function buildClientProbeSource(
 }
 
 function buildObservabilityMetricsSource(
-    observabilityMetrics: ObservabilityMetricsResponse | null,
+    observabilityMetrics: ObservabilityMetricsFetchResult,
     rawAttachments: ObservabilityIncidentBundleReport['raw_attachments'],
     gaps: string[],
     files: ObservabilityIncidentBundleFile[]
 ): ObservabilityIncidentBundleSource {
-    if (!observabilityMetrics) {
-        gaps.push('Observability metrics snapshot is unavailable for this bundle.');
+    if (observabilityMetrics.kind === 'unsupported') {
+        gaps.push('Observability metrics snapshot is unsupported by the connected server.');
         return {
             classification: 'cumulative_metrics_snapshot',
-            status: 'unavailable',
-            message: 'Metrics request returned no snapshot.',
+            status: 'unsupported',
+            message: 'Connected server does not support bsl.getObservabilityMetrics.',
         };
     }
 
-    const metrics = asRecord(observabilityMetrics.metrics);
+    if (observabilityMetrics.kind === 'error') {
+        gaps.push(`Observability metrics snapshot is unavailable for this bundle: ${observabilityMetrics.message}`);
+        return {
+            classification: 'cumulative_metrics_snapshot',
+            status: 'unavailable',
+            message: observabilityMetrics.message,
+        };
+    }
+
+    const metrics = asRecord(observabilityMetrics.response.metrics);
     rawAttachments.push({
         path: OBSERVABILITY_METRICS_RAW_PATH,
         section: 'observability_metrics',
@@ -210,7 +222,7 @@ function buildObservabilityMetricsSource(
     });
     files.push({
         relativePath: OBSERVABILITY_METRICS_RAW_PATH,
-        contents: `${JSON.stringify(observabilityMetrics, null, 2)}\n`,
+        contents: `${JSON.stringify(observabilityMetrics.response, null, 2)}\n`,
     });
     return {
         classification: 'cumulative_metrics_snapshot',
@@ -330,11 +342,14 @@ function renderBulletSection(values: string[]): string[] {
 }
 
 function getHistogramPercentile(
-    observabilityMetrics: ObservabilityMetricsResponse | null,
+    observabilityMetrics: ObservabilityMetricsFetchResult,
     histogramName: string,
     percentile: 'p50' | 'p95' | 'p99'
 ): number | null {
-    const metrics = asRecord(observabilityMetrics?.metrics);
+    if (observabilityMetrics.kind !== 'ok') {
+        return null;
+    }
+    const metrics = asRecord(observabilityMetrics.response.metrics);
     const histograms = asRecord(metrics?.histograms);
     const histogram = asRecord(histograms?.[histogramName]);
     const value = histogram?.[percentile];

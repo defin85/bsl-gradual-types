@@ -487,6 +487,11 @@ export interface ObservabilityMetricsRequest {
     shape?: 'full' | 'sidebar';
 }
 
+export type ObservabilityMetricsFetchResult =
+    | { kind: 'ok'; response: ObservabilityMetricsResponse }
+    | { kind: 'unsupported' }
+    | { kind: 'error'; message: string };
+
 export type CompletionTimelineStageStatus = 'completed' | 'cancelled' | 'failed' | 'skipped';
 
 export interface CompletionTimelineRequest {
@@ -719,6 +724,12 @@ let observabilityMetricsUnsupported = false;
 let observabilityMetricsUnsupportedNotified = false;
 const OBSERVABILITY_METRICS_TIMEOUT_MS = 1500;
 
+export function resetObservabilityCapabilityCaches(): void {
+    observabilityMetricsUnsupported = false;
+    observabilityMetricsUnsupportedNotified = false;
+    completionTimelineUnsupported = false;
+}
+
 export async function getObservabilityMetrics(): Promise<ObservabilityMetricsResponse | null> {
     return getObservabilityMetricsWithRequest({ shape: 'full' });
 }
@@ -727,17 +738,17 @@ function shouldWarnOnObservabilityTimeout(request: ObservabilityMetricsRequest):
     return request.shape !== 'sidebar';
 }
 
-export async function getObservabilityMetricsWithRequest(
+export async function getObservabilityMetricsFetchResult(
     request: ObservabilityMetricsRequest = {}
-): Promise<ObservabilityMetricsResponse | null> {
+): Promise<ObservabilityMetricsFetchResult> {
     if (observabilityMetricsUnsupported) {
-        return null;
+        return { kind: 'unsupported' };
     }
 
     const client = (await import('./client')).getLanguageClient();
     if (!client) {
         logger.warn('[Observability] LSP client not available');
-        return null;
+        return { kind: 'error', message: 'LSP client not available' };
     }
 
     try {
@@ -750,7 +761,10 @@ export async function getObservabilityMetricsWithRequest(
             OBSERVABILITY_METRICS_TIMEOUT_MS,
             'Observability request'
         );
-        return result as ObservabilityMetricsResponse || null;
+        return {
+            kind: 'ok',
+            response: result as ObservabilityMetricsResponse || { metrics: null },
+        };
     } catch (error) {
         if (isMethodNotFoundError(error)) {
             observabilityMetricsUnsupported = true;
@@ -762,19 +776,28 @@ export async function getObservabilityMetricsWithRequest(
                     'BSL Analyzer: LSP server does not support observability metrics yet. Please обновите бинарник.'
                 );
             }
-            return null;
+            return { kind: 'unsupported' };
         }
         if (isTimeoutError(error)) {
+            const message = `Observability request timed out after ${OBSERVABILITY_METRICS_TIMEOUT_MS}ms`;
             if (shouldWarnOnObservabilityTimeout(request)) {
-                logger.warn(
-                    `[Observability] Request timed out after ${OBSERVABILITY_METRICS_TIMEOUT_MS}ms`
-                );
+                logger.warn(`[Observability] Request timed out after ${OBSERVABILITY_METRICS_TIMEOUT_MS}ms`);
             }
-            return null;
+            return { kind: 'error', message };
         }
         logger.error('Failed to get observability metrics', error);
-        return null;
+        return {
+            kind: 'error',
+            message: error instanceof Error ? error.message : String(error),
+        };
     }
+}
+
+export async function getObservabilityMetricsWithRequest(
+    request: ObservabilityMetricsRequest = {}
+): Promise<ObservabilityMetricsResponse | null> {
+    const result = await getObservabilityMetricsFetchResult(request);
+    return result.kind === 'ok' ? result.response : null;
 }
 
 let completionTimelineUnsupported = false;
@@ -783,7 +806,7 @@ let completionTimelineUnsupported = false;
  * Сброс кэша совместимости timeline-контракта (используется только в тестах).
  */
 export function resetCompletionTimelineSupportCacheForTests(): void {
-    completionTimelineUnsupported = false;
+    resetObservabilityCapabilityCaches();
 }
 
 /**

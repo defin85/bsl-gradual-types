@@ -136,11 +136,13 @@ timeout 5s ./bin/lsp-server.exe 2>&1
 ```bash
 cd /path/to/bsl-gradual-types/vscode-extension
 npm run compile:fast
-BSL_TEST_GREP='Completion Probe (Schema|Recorder|Runtime|Store) Test Suite|Completion Timeline (Clipboard|Model|Webview Provider) Test Suite|Client Options Test Suite|getCompletionTimeline should work via executeCommand|getCompletionTimeline should fail-closed on Method not found' node ./out/test/runTest.js
+BSL_TEST_GREP='Completion Probe (Schema|Recorder|Runtime|Store) Test Suite|Completion Timeline (Clipboard|Model|Webview Provider) Test Suite|Client Options Test Suite|Observability Incident Bundle Test Suite|Observability Commands Test Suite|getCompletionTimeline should work via executeCommand|getCompletionTimeline should fail-closed on Method not found|getObservabilityMetricsFetchResult should preserve unsupported capability until reset|getObservabilityMetricsFetchResult should return unavailable error on timeout' node ./out/test/runTest.js
 ```
 
 **Ожидаемый результат**:
 - проходят focused extension-host тесты для `Completion Timeline` и `Client Probe Feed`;
+- тот же smoke slice покрывает `Observability Incident Bundle` export, partial-export semantics и actual command file export path;
 - transport hook (`Completion Probe Runtime`) входит в тот же smoke path, что и `run-intellisense-tests.sh smoke`;
 - `Server Timeline` на payload `version=3` показывает bounded server-edge diagnostics (`transport_to_handler_wait`, `server_handler_exec`, optional late-cancel fields), а legacy `version=2` остаётся читаемым без этих полей;
-- `bsl.getCompletionTimeline` остаётся fail-closed и не смешивается с локальными client probes.
+- `bsl.getCompletionTimeline` остаётся fail-closed и не смешивается с локальными client probes;
+- export bundle сохраняет `summary.md`, `incident.json` и `raw/*` attachments без использования truncated Output dump как источника.

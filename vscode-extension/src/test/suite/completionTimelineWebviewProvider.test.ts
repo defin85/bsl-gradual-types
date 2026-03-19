@@ -260,9 +260,33 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
 
     test('exportBundle message should execute shared export command', async () => {
         const customRequestsModule = await import('../../lsp/customRequests');
-        sinon.stub(customRequestsModule, 'getCompletionTimeline').resolves({
-            kind: 'unsupported',
-        } as CompletionTimelineFetchResult);
+        const timelinePayload: CompletionTimelineFetchResult = {
+            kind: 'ok',
+            response: {
+                version: 4,
+                traces: [
+                    {
+                        trace_id: 'trace-export',
+                        request_id: 'req-export',
+                        uri: 'file:///tmp/export.bsl',
+                        trigger_mode: 'invoked',
+                        outcome: 'ok_non_empty',
+                        started_at_ms: 1_700_000_000_000,
+                        total_duration_ms: 10,
+                        dominant_stage: 'query_bundle',
+                        stages: [
+                            {
+                                name: 'query_bundle',
+                                status: 'completed',
+                                started_offset_ms: 0,
+                                duration_ms: 10,
+                            },
+                        ],
+                    },
+                ],
+            },
+        };
+        sinon.stub(customRequestsModule, 'getCompletionTimeline').resolves(timelinePayload);
         const executeCommandStub = sinon.stub(vscode.commands, 'executeCommand').resolves(undefined);
 
         const outputChannel = {
@@ -294,7 +318,15 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         await flushPromises();
 
         assert.strictEqual(executeCommandStub.callCount, 1);
-        assert.deepStrictEqual(executeCommandStub.firstCall.args, ['bslAnalyzer.exportObservabilityIncidentBundle']);
+        assert.strictEqual(
+            executeCommandStub.firstCall.args[0],
+            'bslAnalyzer.exportObservabilityIncidentBundle'
+        );
+        assert.deepStrictEqual(executeCommandStub.firstCall.args[1], {
+            capturedAtMs: clock.now,
+            completionTimeline: timelinePayload,
+            clientProbes: [],
+        });
 
         onDidDisposeEmitter.dispose();
         onDidReceiveMessageEmitter.dispose();

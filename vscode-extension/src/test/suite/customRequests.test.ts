@@ -6,9 +6,10 @@ import {
     buildIndex,
     getIndexState,
     getObservabilityMetrics,
+    getObservabilityMetricsFetchResult,
     getObservabilityMetricsWithRequest,
     getCompletionTimeline,
-    resetCompletionTimelineSupportCacheForTests,
+    resetObservabilityCapabilityCaches,
     validateMethod,
     checkTypeCompatibility,
     incrementalUpdate,
@@ -297,13 +298,13 @@ suite('LSP Custom Requests Test Suite', () => {
             sinon.stub(clientModule as any, 'sendCustomRequest').callsFake(sendCustomRequestStub);
         }
 
-        resetCompletionTimelineSupportCacheForTests();
+        resetObservabilityCapabilityCaches();
     });
 
     teardown(() => {
         // Восстановить все stubs
         sinon.restore();
-        resetCompletionTimelineSupportCacheForTests();
+        resetObservabilityCapabilityCaches();
     });
 
     /**
@@ -391,6 +392,96 @@ suite('LSP Custom Requests Test Suite', () => {
         const second = await getCompletionTimeline({ limit: 1 });
         assert.strictEqual(second.kind, 'unsupported');
         assert.strictEqual(sendRequestStub.callCount, callCountBefore);
+    });
+
+    test('resetObservabilityCapabilityCaches should clear completion timeline unsupported cache', async function() {
+        this.timeout(5000);
+
+        sendRequestStub.resetBehavior();
+        sendRequestStub.onFirstCall().rejects({ code: -32601, message: 'Method not found' });
+        sendRequestStub.onSecondCall().resolves({
+            version: 4,
+            traces: [],
+        });
+
+        const first = await getCompletionTimeline({ limit: 1 });
+        assert.strictEqual(first.kind, 'unsupported');
+
+        const callCountBeforeCachedRetry = sendRequestStub.callCount;
+        const second = await getCompletionTimeline({ limit: 1 });
+        assert.strictEqual(second.kind, 'unsupported');
+        assert.strictEqual(sendRequestStub.callCount, callCountBeforeCachedRetry);
+
+        resetObservabilityCapabilityCaches();
+
+        const third = await getCompletionTimeline({ limit: 1 });
+        assert.strictEqual(third.kind, 'ok');
+        assert.strictEqual(sendRequestStub.callCount, callCountBeforeCachedRetry + 1);
+    });
+
+    test('getObservabilityMetricsFetchResult should preserve unsupported capability until reset', async function() {
+        this.timeout(5000);
+
+        sendRequestStub.resetBehavior();
+        sendRequestStub.callsFake((method: string, params: any) => {
+            if (method === 'workspace/executeCommand' && params?.command === 'bsl.getObservabilityMetrics') {
+                return Promise.reject({ code: -32601, message: 'Method not found' });
+            }
+            return Promise.resolve(null);
+        });
+
+        const first = await getObservabilityMetricsFetchResult();
+        assert.strictEqual(first.kind, 'unsupported');
+
+        const callCountBeforeCachedRetry = sendRequestStub.callCount;
+        const second = await getObservabilityMetricsFetchResult();
+        assert.strictEqual(second.kind, 'unsupported');
+        assert.strictEqual(sendRequestStub.callCount, callCountBeforeCachedRetry);
+
+        resetObservabilityCapabilityCaches();
+        sendRequestStub.resetBehavior();
+        sendRequestStub.callsFake((method: string, params: any) => {
+            if (method === 'workspace/executeCommand' && params?.command === 'bsl.getObservabilityMetrics') {
+                return Promise.resolve({
+                    metrics: {
+                        uptime_seconds: 64,
+                    },
+                });
+            }
+            return Promise.resolve(null);
+        });
+
+        const third = await getObservabilityMetricsFetchResult();
+        assert.strictEqual(third.kind, 'ok');
+        if (third.kind === 'ok') {
+            assert.strictEqual(third.response.metrics.uptime_seconds, 64);
+        }
+    });
+
+    test('getObservabilityMetricsFetchResult should return unavailable error on timeout', async function() {
+        this.timeout(5000);
+
+        const clock = sinon.useFakeTimers();
+        try {
+            sendRequestStub.resetBehavior();
+            sendRequestStub.callsFake((method: string, params: any) => {
+                if (method === 'workspace/executeCommand' && params?.command === 'bsl.getObservabilityMetrics') {
+                    return new Promise(() => {});
+                }
+                return Promise.resolve(null);
+            });
+
+            const promise = getObservabilityMetricsFetchResult();
+            await clock.tickAsync(5000);
+
+            const result = await promise;
+            assert.strictEqual(result.kind, 'error');
+            if (result.kind === 'error') {
+                assert.ok(result.message.includes('timed out'));
+            }
+        } finally {
+            clock.restore();
+        }
     });
 
     test('getObservabilityMetrics should warn on timeout for manual requests', async function() {

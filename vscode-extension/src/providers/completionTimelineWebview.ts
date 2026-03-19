@@ -1,12 +1,13 @@
 import * as vscode from 'vscode';
 import { BslAnalyzerConfig } from '../config/configHelper';
-import { getCompletionTimeline } from '../lsp/customRequests';
+import { CompletionTimelineFetchResult, getCompletionTimeline } from '../lsp/customRequests';
 import {
     CompletionTimelineClipboardMode,
     formatSelectedCompletionTraceForClipboard,
     formatVisibleCompletionTimelineForClipboard,
 } from './completionTimelineClipboard';
 import { mapCompletionTimelineFetchResultToPanelState } from './completionTimelineModel';
+import { CompletionProbe } from './completionProbe';
 import { getSharedCompletionProbeRecorder } from './completionProbeRecorder';
 
 type CompletionTimelineWebviewMessage =
@@ -48,6 +49,13 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
     private readonly disposables: vscode.Disposable[] = [];
     private latestState:
         | ReturnType<typeof mapCompletionTimelineFetchResultToPanelState>
+        | null = null;
+    private latestExportCapture:
+        | {
+            capturedAtMs: number;
+            completionTimeline: CompletionTimelineFetchResult;
+            clientProbes: CompletionProbe[];
+        }
         | null = null;
 
     constructor(
@@ -142,6 +150,11 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 updatedAtMs
             );
             this.latestState = state;
+            this.latestExportCapture = {
+                capturedAtMs: updatedAtMs,
+                completionTimeline: fetchResult,
+                clientProbes,
+            };
             await this.view.webview.postMessage({
                 type: 'timelineState',
                 state,
@@ -158,6 +171,14 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 updatedAtMs
             );
             this.latestState = state;
+            this.latestExportCapture = {
+                capturedAtMs: updatedAtMs,
+                completionTimeline: {
+                    kind: 'error',
+                    message,
+                },
+                clientProbes,
+            };
             await this.view.webview.postMessage({
                 type: 'timelineState',
                 state,
@@ -179,7 +200,10 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
         }
 
         if (parsedMessage.type === 'exportBundle') {
-            await vscode.commands.executeCommand('bslAnalyzer.exportObservabilityIncidentBundle');
+            await vscode.commands.executeCommand(
+                'bslAnalyzer.exportObservabilityIncidentBundle',
+                this.latestExportCapture ?? undefined
+            );
             return;
         }
 

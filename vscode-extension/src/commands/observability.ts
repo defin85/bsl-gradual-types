@@ -1,9 +1,16 @@
 import * as vscode from 'vscode';
 import { CommandHandler } from '../types';
 import { getLanguageClient } from '../lsp';
-import { getCompletionTimeline, getObservabilityMetrics } from '../lsp/customRequests';
+import {
+    CompletionTimelineFetchResult,
+    ObservabilityMetricsFetchResult,
+    getCompletionTimeline,
+    getObservabilityMetrics,
+    getObservabilityMetricsFetchResult,
+} from '../lsp/customRequests';
 import { getSharedCompletionProbeRecorder } from '../providers/completionProbeRecorder';
 import { buildObservabilityIncidentBundle } from '../providers/observabilityIncidentBundle';
+import { CompletionProbe } from '../providers/completionProbe';
 
 function tryGet(obj: any, path: string): any {
     const parts = path.split('.');
@@ -22,6 +29,65 @@ function fmtMs(value: any): string {
 
 const COMPLETION_TIMELINE_EXPORT_LIMIT = 50;
 const textEncoder = new TextEncoder();
+
+export interface ObservabilityIncidentBundleExportCapture {
+    capturedAtMs?: number;
+    completionTimeline?: CompletionTimelineFetchResult;
+    clientProbes?: CompletionProbe[];
+    observabilityMetrics?: ObservabilityMetricsFetchResult;
+}
+
+function asExportCapture(value: unknown): ObservabilityIncidentBundleExportCapture | undefined {
+    if (!value || typeof value !== 'object') {
+        return undefined;
+    }
+    return value as ObservabilityIncidentBundleExportCapture;
+}
+
+async function exportObservabilityIncidentBundleToFolder(
+    targetFolder: vscode.Uri,
+    outputChannel: vscode.OutputChannel,
+    capture: ObservabilityIncidentBundleExportCapture = {}
+): Promise<void> {
+    const capturedAtMs = capture.capturedAtMs ?? Date.now();
+    const clientProbes = capture.clientProbes ?? getSharedCompletionProbeRecorder().snapshot();
+    const completionTimelinePromise = capture.completionTimeline
+        ? Promise.resolve(capture.completionTimeline)
+        : getCompletionTimeline({ limit: COMPLETION_TIMELINE_EXPORT_LIMIT });
+    const observabilityMetricsPromise = capture.observabilityMetrics
+        ? Promise.resolve(capture.observabilityMetrics)
+        : getObservabilityMetricsFetchResult({ shape: 'full' });
+    const [completionTimeline, observabilityMetrics] = await Promise.all([
+        completionTimelinePromise,
+        observabilityMetricsPromise,
+    ]);
+
+    const bundle = buildObservabilityIncidentBundle({
+        capturedAtMs,
+        completionTimeline,
+        completionTraceLimit: COMPLETION_TIMELINE_EXPORT_LIMIT,
+        clientProbes,
+        observabilityMetrics,
+    });
+
+    const bundleRoot = vscode.Uri.joinPath(targetFolder, bundle.folderName);
+    await vscode.workspace.fs.createDirectory(bundleRoot);
+    for (const file of bundle.files) {
+        const segments = file.relativePath.split('/');
+        const fileUri = vscode.Uri.joinPath(bundleRoot, ...segments);
+        if (segments.length > 1) {
+            await vscode.workspace.fs.createDirectory(
+                vscode.Uri.joinPath(bundleRoot, ...segments.slice(0, -1))
+            );
+        }
+        await vscode.workspace.fs.writeFile(fileUri, textEncoder.encode(file.contents));
+    }
+
+    outputChannel.appendLine(`[Observability] Incident bundle exported to ${bundleRoot.fsPath}`);
+    void vscode.window.showInformationMessage(
+        `Observability incident bundle exported to ${bundleRoot.fsPath}`
+    );
+}
 
 /**
  * Register observability/diagnostic commands.
@@ -86,7 +152,7 @@ export function registerObservabilityCommands(
         outputChannel.appendLine('===================================================');
     });
 
-    safeRegisterCommand('bslAnalyzer.exportObservabilityIncidentBundle', async () => {
+    safeRegisterCommand('bslAnalyzer.exportObservabilityIncidentBundle', async (...args: unknown[]) => {
         const targetFolder = await vscode.window.showOpenDialog({
             canSelectFiles: false,
             canSelectFolders: true,
@@ -97,38 +163,11 @@ export function registerObservabilityCommands(
             return;
         }
 
-        const capturedAtMs = Date.now();
         try {
-            const clientProbes = getSharedCompletionProbeRecorder().snapshot();
-            const [completionTimeline, observabilityMetrics] = await Promise.all([
-                getCompletionTimeline({ limit: COMPLETION_TIMELINE_EXPORT_LIMIT }),
-                getObservabilityMetrics(),
-            ]);
-
-            const bundle = buildObservabilityIncidentBundle({
-                capturedAtMs,
-                completionTimeline,
-                completionTraceLimit: COMPLETION_TIMELINE_EXPORT_LIMIT,
-                clientProbes,
-                observabilityMetrics,
-            });
-
-            const bundleRoot = vscode.Uri.joinPath(targetFolder[0], bundle.folderName);
-            await vscode.workspace.fs.createDirectory(bundleRoot);
-            for (const file of bundle.files) {
-                const segments = file.relativePath.split('/');
-                const fileUri = vscode.Uri.joinPath(bundleRoot, ...segments);
-                if (segments.length > 1) {
-                    await vscode.workspace.fs.createDirectory(
-                        vscode.Uri.joinPath(bundleRoot, ...segments.slice(0, -1))
-                    );
-                }
-                await vscode.workspace.fs.writeFile(fileUri, textEncoder.encode(file.contents));
-            }
-
-            outputChannel.appendLine(`[Observability] Incident bundle exported to ${bundleRoot.fsPath}`);
-            void vscode.window.showInformationMessage(
-                `Observability incident bundle exported to ${bundleRoot.fsPath}`
+            await exportObservabilityIncidentBundleToFolder(
+                targetFolder[0],
+                outputChannel,
+                asExportCapture(args[0]) ?? {}
             );
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);

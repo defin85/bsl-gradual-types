@@ -26,4 +26,5 @@
   - [x] partial bundle при недоступных metrics
   - [x] deterministic file names / schema shape
 - [x] 3.2 Подготовить traceability `Requirement -> Code -> Test` для export bundle capability.
+  - [x] checked-in artifact: `validation/traceability.md`
 - [x] 3.3 Прогнать `openspec validate add-observability-incident-bundle-export --strict --no-interactive`.

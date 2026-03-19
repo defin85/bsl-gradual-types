@@ -105,7 +105,7 @@ npm test
 ### Фокусный smoke для Completion Timeline / Client Probe Feed
 ```bash
 npm run compile:fast
-BSL_TEST_GREP='Completion Probe (Schema|Recorder|Runtime|Store) Test Suite|Completion Timeline (Clipboard|Model|Webview Provider) Test Suite|Client Options Test Suite|getCompletionTimeline should work via executeCommand|getCompletionTimeline should fail-closed on Method not found' node ./out/test/runTest.js
+BSL_TEST_GREP='Completion Probe (Schema|Recorder|Runtime|Store) Test Suite|Completion Timeline (Clipboard|Model|Webview Provider) Test Suite|Client Options Test Suite|Observability Incident Bundle Test Suite|Observability Commands Test Suite|getCompletionTimeline should work via executeCommand|getCompletionTimeline should fail-closed on Method not found|getObservabilityMetricsFetchResult should preserve unsupported capability until reset|getObservabilityMetricsFetchResult should return unavailable error on timeout' node ./out/test/runTest.js
 ```
 
 Этот путь повторяет extension-side slice из `./scripts/run-intellisense-tests.sh smoke` и проверяет:
@@ -114,7 +114,10 @@ BSL_TEST_GREP='Completion Probe (Schema|Recorder|Runtime|Store) Test Suite|Compl
 - wiring default `LanguageClient` path;
 - dual-view `Server Timeline` / `Client Probe Feed`;
 - rendering/export для `Server Timeline` с `response.version=3` и bounded `server_edge_details`, плюс backward-compatible чтение legacy `version=2` payload;
-- fail-closed/executeCommand поведение `bsl.getCompletionTimeline`.
+- fail-closed/executeCommand поведение `bsl.getCompletionTimeline`;
+- truthful `unsupported` vs `unavailable` semantics для observability metrics export;
+- actual command export path для `bslAnalyzer.exportObservabilityIncidentBundle`, включая запись `summary.md`, `incident.json` и `raw/*`;
+- reuse текущего Completion Timeline snapshot при экспорте из webview, без принудительного fresh refetch этого источника.
 
 ### С coverage (цель: 80%)
 ```bash

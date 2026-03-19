@@ -1,5 +1,9 @@
 import * as assert from 'assert';
-import { CompletionTimelineFetchResult, ObservabilityMetricsResponse } from '../../lsp/customRequests';
+import {
+    CompletionTimelineFetchResult,
+    ObservabilityMetricsFetchResult,
+    ObservabilityMetricsResponse,
+} from '../../lsp/customRequests';
 import { CompletionProbe } from '../../providers/completionProbe';
 import { buildObservabilityIncidentBundle } from '../../providers/observabilityIncidentBundle';
 
@@ -92,16 +96,19 @@ suite('Observability Incident Bundle Test Suite', () => {
         };
     }
 
-    function sampleMetrics(): ObservabilityMetricsResponse {
+    function sampleMetrics(): ObservabilityMetricsFetchResult {
         return {
-            metrics: {
-                uptime_seconds: 184,
-                histograms: {
-                    intellisense_v2_semantic_diagnostics_query_ms: {
-                        p95: 3374,
+            kind: 'ok',
+            response: {
+                metrics: {
+                    uptime_seconds: 184,
+                    histograms: {
+                        intellisense_v2_semantic_diagnostics_query_ms: {
+                            p95: 3374,
+                        },
                     },
                 },
-            },
+            } as ObservabilityMetricsResponse,
         };
     }
 
@@ -161,7 +168,10 @@ suite('Observability Incident Bundle Test Suite', () => {
             completionTimeline: sampleTimeline(),
             completionTraceLimit: 50,
             clientProbes: [],
-            observabilityMetrics: null,
+            observabilityMetrics: {
+                kind: 'error',
+                message: 'Observability request timed out after 1500ms',
+            },
         });
 
         assert.strictEqual(bundle.incidentReport.sources.observability_metrics.status, 'unavailable');
@@ -171,5 +181,45 @@ suite('Observability Incident Bundle Test Suite', () => {
             'missing metrics must not reuse stale output dumps as raw evidence'
         );
         assert.ok(bundle.summaryMarkdown.includes('status=unavailable'));
+    });
+
+    test('unsupported metrics should stay partial and be marked as unsupported', () => {
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: sampleTimeline(),
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: {
+                kind: 'unsupported',
+            },
+        });
+
+        assert.strictEqual(bundle.incidentReport.sources.observability_metrics.status, 'unsupported');
+        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('unsupported')));
+        assert.ok(
+            !bundle.files.some((file) => file.relativePath === 'raw/observability_metrics.json'),
+            'unsupported metrics must not produce a fake raw attachment'
+        );
+        assert.ok(bundle.summaryMarkdown.includes('status=unsupported'));
+    });
+
+    test('completion timeline error should mark authoritative server trace as unavailable', () => {
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: {
+                kind: 'error',
+                message: 'LSP client not available',
+            },
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'unavailable');
+        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('LSP client not available')));
+        assert.ok(
+            !bundle.files.some((file) => file.relativePath === 'raw/completion_timeline.json'),
+            'unavailable server timeline must not create a fake raw attachment'
+        );
     });
 });

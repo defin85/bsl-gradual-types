@@ -22,6 +22,7 @@ import {
 import { setupProgressHandler } from './progress-handler';
 import { startHealthCheck, stopHealthCheck } from './health-check';
 import { getSharedCompletionProbeRecorder } from '../../providers/completionProbeRecorder';
+import { resetObservabilityCapabilityCaches } from '../customRequests';
 
 /**
  * Преобразует состояние LSP клиента в читаемую строку
@@ -55,6 +56,7 @@ export function initializeLifecycle(channel: vscode.OutputChannel): void {
  * Запускает LSP сервер
  */
 export async function startLanguageClient(context: vscode.ExtensionContext): Promise<void> {
+    resetObservabilityCapabilityCaches();
     const serverMode = BslAnalyzerConfig.serverMode;
 
     // Используем getBinaryPath для получения пути к LSP серверу

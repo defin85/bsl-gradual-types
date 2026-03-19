@@ -142,7 +142,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 3,
+                version: 5,
                 traces: [
                     {
                         trace_id: 'trace-copy',
@@ -157,8 +157,33 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                             transport_received_at_ms: 1_700_000_000_000,
                             handler_entered_at_ms: 1_700_000_000_002,
                             response_sent_at_ms: 1_700_000_000_010,
-                            transport_to_handler_wait_ms: 2,
+                            transport_to_handler_wait_ms: 12,
                             server_handler_exec_ms: 8,
+                        },
+                        prepare_details: {
+                            fail_closed_cause: 'prepare_timeout',
+                            progress: {
+                                phase: 'wait_for_file_version',
+                            },
+                            wait_for_file_version_runtime: {
+                                queue_wait_ms: 3,
+                                exec_ms: 1,
+                                wake_wait_ms: 40,
+                                resolution: 'waiter',
+                            },
+                        },
+                        turn_attribution: {
+                            request_file_seq: 1,
+                            request_epoch: 1,
+                            queue_outcome: 'enqueued',
+                            dispatcher_resolution_latency_ms: 4,
+                            queue_capacity: 256,
+                            queue_depth_before_enqueue: 0,
+                            queue_depth_after_enqueue: 1,
+                            queued_completion_ahead_count: 0,
+                            did_change_ahead_count: 0,
+                            active_completion_count: 0,
+                            dropped_completion_file_seq: [],
                         },
                         stages: [
                             {
@@ -208,10 +233,13 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const clipboardPayload = clipboardStub.firstCall.args[0];
         assert.ok(clipboardPayload.includes('Completion Timeline | mode=all'));
         assert.ok(clipboardPayload.includes('Server Timeline'));
-        assert.ok(clipboardPayload.includes('contract=v3'));
+        assert.ok(clipboardPayload.includes('contract=v5'));
         assert.ok(clipboardPayload.includes('trace-copy (invoked)'));
-        assert.ok(clipboardPayload.includes('transport_to_handler_wait_ms=2'));
+        assert.ok(clipboardPayload.includes('transport_to_handler_wait_ms=12'));
         assert.ok(clipboardPayload.includes('server_handler_exec_ms=8'));
+        assert.ok(clipboardPayload.includes('bottleneck_verdict=ingress_dominant'));
+        assert.ok(clipboardPayload.includes('bottleneck_verdict=prepare_timeout@wait_for_file_version'));
+        assert.ok(clipboardPayload.includes('dispatcher_resolution_latency_ms=4'));
         assert.ok(clipboardPayload.includes('Client Probe Feed | local-only debug data'));
 
         const copyAck = postMessageStub.lastCall.args[0];
@@ -263,7 +291,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 4,
+                version: 5,
                 traces: [
                     {
                         trace_id: 'trace-export',

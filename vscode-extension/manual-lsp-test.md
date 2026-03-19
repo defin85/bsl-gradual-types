@@ -143,6 +143,8 @@ BSL_TEST_GREP='Completion Probe (Schema|Recorder|Runtime|Store) Test Suite|Compl
 - проходят focused extension-host тесты для `Completion Timeline` и `Client Probe Feed`;
 - тот же smoke slice покрывает `Observability Incident Bundle` export, partial-export semantics и actual command file export path;
 - transport hook (`Completion Probe Runtime`) входит в тот же smoke path, что и `run-intellisense-tests.sh smoke`;
-- `Server Timeline` на payload `version=3` показывает bounded server-edge diagnostics (`transport_to_handler_wait`, `server_handler_exec`, optional late-cancel fields), а legacy `version=2` остаётся читаемым без этих полей;
+- `Server Timeline` на payload `version=5` показывает bounded bottleneck drilldown (`dispatcher_resolution_latency_ms`, `prepare_progress`, `wait_for_file_version_runtime`, `snapshot_with_deps_runtime`, bounded `exact_wait` waiter/task-state);
 - `bsl.getCompletionTimeline` остаётся fail-closed и не смешивается с локальными client probes;
+- clipboard/webview/incident summary выносят verdict'ы вроде `ingress_dominant`, `prepare_timeout@wait_for_file_version` и `exact_deadline | waiter_action=... | task_state=...` без чтения raw JSON;
+- при более старом backend payload `v4` extension деградирует явно и не выдумывает отсутствующие `v5` поля;
 - export bundle сохраняет `summary.md`, `incident.json` и `raw/*` attachments без использования truncated Output dump как источника.

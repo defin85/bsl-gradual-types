@@ -61,6 +61,15 @@ run_cross_adapter_smoke() {
   cargo test -p bsl-agent --test stdio_integration stdio_definition_revision_switch_does_not_return_stale_previous_revision_location -- --nocapture
 }
 
+run_completion_timeline_drilldown_smoke() {
+  cargo test -p bsl-runtime wait_for_file_version_runtime_trace_distinguishes_immediate_and_waiter_paths -- --nocapture
+  cargo test -p bsl-runtime snapshot_with_deps_runtime_trace_exposes_queue_and_exec_latency -- --nocapture
+  cargo test -p bsl-backend --bin bsl-lsp-server p22_get_completion_timeline_exposes_versioned_contract -- --nocapture
+  cargo test -p bsl-backend --bin bsl-lsp-server p22_get_completion_timeline_contains_completion_trace -- --nocapture
+  cargo test -p bsl-backend --bin bsl-lsp-server prepare_runtime_drilldown_is_serialised_into_trace -- --nocapture
+  cargo test -p bsl-backend --bin bsl-lsp-server exact_wait_task_state_drilldown_is_serialised_into_trace -- --nocapture
+}
+
 run_extension_completion_observability_smoke() {
   local grep_pattern='Completion Probe (Schema|Recorder|Runtime|Store) Test Suite|Completion Timeline (Clipboard|Model|Webview Provider) Test Suite|Client Options Test Suite|Observability Incident Bundle Test Suite|Observability Commands Test Suite|getCompletionTimeline should work via executeCommand|getCompletionTimeline should fail-closed on Method not found|getObservabilityMetricsFetchResult should preserve unsupported capability until reset|getObservabilityMetricsFetchResult should return unavailable error on timeout'
 
@@ -80,6 +89,7 @@ run_smoke() {
   cargo test -p bsl-backend --test m8_completion_matrix_golden_v2_test
   cargo test -p bsl-backend --test lsp_incremental_completion_test
   run_cross_adapter_smoke
+  run_completion_timeline_drilldown_smoke
   run_extension_completion_observability_smoke
   report_m8
 }

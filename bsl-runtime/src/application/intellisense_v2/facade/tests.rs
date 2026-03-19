@@ -136,6 +136,7 @@ async fn interactive_apply_changes_preempts_background_backlog_for_wait_for_file
     .expect(
         "interactive apply_changes should let interactive wait_for_file_version complete before background backlog drains",
     );
+    let wait_result = wait_result.ready;
     assert!(
         wait_result,
         "wait_for_file_version should observe the interactively enqueued revision"
@@ -147,6 +148,78 @@ async fn interactive_apply_changes_preempts_background_backlog_for_wait_for_file
             .expect("background sleeper ack timeout")
             .expect("background sleeper ack");
     }
+
+    runtime.shutdown_for_test().await;
+}
+
+#[tokio::test]
+async fn wait_for_file_version_runtime_trace_distinguishes_immediate_and_waiter_paths() {
+    let runtime = IntellisenseV2Facade::new(
+        AnalysisHostV2::default(),
+        Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p7"))),
+        None,
+    );
+    let file_id = FileId(20);
+
+    runtime.apply_changes_interactive(
+        ObservabilityOrigin::Lsp,
+        vec![Change::SetFile {
+            file_id,
+            text: Arc::from("x = 1;"),
+            version: 7,
+            path: Arc::from("wait_runtime_immediate.bsl"),
+        }],
+    );
+
+    let immediate = runtime
+        .wait_for_file_version_with_priority(
+            ObservabilityOrigin::Lsp,
+            RuntimeQueuePriority::Interactive,
+            file_id,
+            7,
+        )
+        .await;
+    assert!(immediate.ready, "immediate wait must succeed");
+    assert_eq!(
+        immediate.trace.resolution,
+        Some(WaitForFileVersionResolutionKind::Immediate)
+    );
+    assert!(immediate.trace.queue_wait_elapsed.is_some());
+    assert!(immediate.trace.exec_elapsed.is_some());
+    assert_eq!(immediate.trace.wake_wait_elapsed, None);
+
+    let waiter_task = tokio::spawn({
+        let runtime = runtime.clone();
+        async move {
+            runtime
+                .wait_for_file_version_with_priority(
+                    ObservabilityOrigin::Lsp,
+                    RuntimeQueuePriority::Interactive,
+                    file_id,
+                    8,
+                )
+                .await
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    runtime.apply_changes(vec![Change::SetFile {
+        file_id,
+        text: Arc::from("x = 2;"),
+        version: 8,
+        path: Arc::from("wait_runtime_waiter.bsl"),
+    }]);
+    let waiter = timeout(Duration::from_secs(1), waiter_task)
+        .await
+        .expect("waiter task timeout")
+        .expect("waiter task join");
+    assert!(waiter.ready, "waiter path must succeed after apply");
+    assert_eq!(
+        waiter.trace.resolution,
+        Some(WaitForFileVersionResolutionKind::Waiter)
+    );
+    assert!(waiter.trace.queue_wait_elapsed.is_some());
+    assert!(waiter.trace.exec_elapsed.is_some());
+    assert!(waiter.trace.wake_wait_elapsed.is_some());
 
     runtime.shutdown_for_test().await;
 }
@@ -322,6 +395,26 @@ async fn p8_snapshot_with_deps_is_atomic() {
     assert_eq!(deps_id.as_str(), "deps_new");
     assert_eq!(index_snapshot.id.as_str(), "index_new");
     assert_eq!(analysis.deps_id().unwrap().as_str(), "deps_new");
+
+    runtime.shutdown_for_test().await;
+}
+
+#[tokio::test]
+async fn snapshot_with_deps_runtime_trace_exposes_queue_and_exec_latency() {
+    let runtime = IntellisenseV2Facade::new(
+        AnalysisHostV2::default(),
+        make_index_snapshot("snapshot_with_deps_runtime"),
+        None,
+    );
+
+    let snapshot = runtime
+        .snapshot_with_deps_with_priority(
+            ObservabilityOrigin::Lsp,
+            RuntimeQueuePriority::Interactive,
+        )
+        .await;
+    assert!(snapshot.trace.queue_wait_elapsed.is_some());
+    assert!(snapshot.trace.exec_elapsed.is_some());
 
     runtime.shutdown_for_test().await;
 }

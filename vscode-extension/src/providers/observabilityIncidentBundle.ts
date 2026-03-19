@@ -3,6 +3,10 @@ import {
     ObservabilityMetricsFetchResult,
 } from '../lsp/customRequests';
 import { CompletionProbe } from './completionProbe';
+import {
+    buildCompletionTraceBottleneckVerdicts,
+    derivePrepareTimeoutSubphase,
+} from './completionTimelineDrilldown';
 
 const BUNDLE_FORMAT = 'bsl-observability-incident/v1';
 const COMPLETION_TIMELINE_RAW_PATH = 'raw/completion_timeline.json';
@@ -133,6 +137,11 @@ function buildCompletionTimelineSource(
     files: ObservabilityIncidentBundleFile[]
 ): ObservabilityIncidentBundleSource {
     if (completionTimeline.kind === 'ok') {
+        if (completionTimeline.response.version < 5) {
+            gaps.push(
+                `Completion timeline contract v${completionTimeline.response.version} does not include all v5 bottleneck drilldown fields; missing verdict details are unavailable by design.`
+            );
+        }
         rawAttachments.push({
             path: COMPLETION_TIMELINE_RAW_PATH,
             section: 'completion_timeline',
@@ -236,6 +245,11 @@ function deriveFindings(input: ObservabilityIncidentBundleInput): string[] {
     const findings: string[] = [];
     if (input.completionTimeline.kind === 'ok') {
         const traces = input.completionTimeline.response.traces;
+        if (input.completionTimeline.response.version < 5) {
+            findings.push(
+                `Completion timeline contract v${input.completionTimeline.response.version} is available, but v5 bottleneck drilldown details may be unavailable.`
+            );
+        }
         const transportWaitDominantCount = traces.filter((trace) => {
             const transportWait = trace.server_edge_details?.transport_to_handler_wait_ms;
             const handlerExec = trace.server_edge_details?.server_handler_exec_ms;
@@ -248,12 +262,29 @@ function deriveFindings(input: ObservabilityIncidentBundleInput): string[] {
             );
         }
 
-        if (traces.some((trace) => trace.prepare_details?.fail_closed_cause === 'prepare_timeout')) {
-            findings.push('prepare_timeout was observed in the captured completion timeline.');
+        const prepareTimeoutTraces = traces.filter(
+            (trace) => trace.prepare_details?.fail_closed_cause === 'prepare_timeout'
+        );
+        if (prepareTimeoutTraces.length > 0) {
+            const subphases = new Set(
+                prepareTimeoutTraces.map((trace) =>
+                    derivePrepareTimeoutSubphase(trace.prepare_details) ?? 'unavailable'
+                )
+            );
+            findings.push(
+                `prepare_timeout was observed in ${prepareTimeoutTraces.length} completion trace(s): ${[...subphases].join(', ')}.`
+            );
         }
 
-        if (traces.some((trace) => trace.prepare_details?.fail_closed_cause === 'exact_deadline')) {
-            findings.push('exact_deadline was observed after prepare completed.');
+        const exactDeadlineFindings = traces
+            .filter((trace) => trace.prepare_details?.fail_closed_cause === 'exact_deadline')
+            .map((trace) => buildCompletionTraceBottleneckVerdicts(trace))
+            .flat()
+            .filter((verdict) => verdict.startsWith('exact_deadline'));
+        if (exactDeadlineFindings.length > 0) {
+            findings.push(
+                `exact_deadline was observed after prepare completed: ${[...new Set(exactDeadlineFindings)].join('; ')}.`
+            );
         }
 
         if (findings.length === 0) {

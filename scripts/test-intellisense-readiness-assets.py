@@ -60,6 +60,14 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         "getObservabilityMetricsFetchResult should preserve unsupported capability until reset",
         "getObservabilityMetricsFetchResult should return unavailable error on timeout",
     ]
+    REQUIRED_COMPLETION_TIMELINE_DRILLDOWN_SELECTORS = [
+        "wait_for_file_version_runtime_trace_distinguishes_immediate_and_waiter_paths",
+        "snapshot_with_deps_runtime_trace_exposes_queue_and_exec_latency",
+        "p22_get_completion_timeline_exposes_versioned_contract",
+        "p22_get_completion_timeline_contains_completion_trace",
+        "prepare_runtime_drilldown_is_serialised_into_trace",
+        "exact_wait_task_state_drilldown_is_serialised_into_trace",
+    ]
 
     def smoke_script_text(self) -> str:
         return self.SMOKE_SCRIPT.read_text(encoding="utf-8")
@@ -125,6 +133,21 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
             (
                 "run-intellisense-tests.sh smoke is missing the focused extension "
                 f"completion-observability slice: {missing}"
+            ),
+        )
+
+    def test_shipped_smoke_script_covers_completion_timeline_drilldown_contract_slice(self) -> None:
+        smoke_text = self.smoke_script_text()
+        missing = [
+            selector
+            for selector in self.REQUIRED_COMPLETION_TIMELINE_DRILLDOWN_SELECTORS
+            if selector not in smoke_text
+        ]
+        self.assertFalse(
+            missing,
+            (
+                "run-intellisense-tests.sh smoke is missing the completion-timeline "
+                f"drilldown contract slice: {missing}"
             ),
         )
 

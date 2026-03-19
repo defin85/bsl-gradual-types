@@ -9,7 +9,8 @@ pub use facade::{
     CancellationPolicy, ExecutionContext, ExecutionSettings, IntellisenseV2Facade,
     ObservabilityMetricKind, ObservabilityOrigin, ObservabilityStage, PrepareStatefulProgress,
     PrepareStatefulProgressSnapshot, PreparedOperationSnapshot, SemanticOperation, SemanticOutcome,
-    SemanticSnapshot, SingleflightQueryError,
+    SemanticSnapshot, SingleflightQueryError, SnapshotWithDepsRuntimeTrace,
+    WaitForFileVersionResolutionKind, WaitForFileVersionRuntimeTrace,
 };
 pub use policy::{
     classify_optional_query, completion_fastpath_preconditions,

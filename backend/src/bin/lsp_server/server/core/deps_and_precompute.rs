@@ -72,13 +72,32 @@ impl TypeIndexPrecomputeWaiterActionV2 {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ExactTypeIndexWaitTraceV2 {
-    pub outcome: ExactTypeIndexWaitOutcomeV2,
-    pub waiter_action: TypeIndexPrecomputeWaiterActionV2,
+pub(crate) enum ExactTypeIndexMatchingTaskStateV2 {
+    Matching,
+    WrongVersion,
+    Missing,
+}
+
+impl ExactTypeIndexMatchingTaskStateV2 {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Matching => "matching",
+            Self::WrongVersion => "wrong_version",
+            Self::Missing => "missing",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum TypeIndexPrecomputePhaseV2 {
+pub(crate) struct ExactTypeIndexWaitTraceV2 {
+    pub outcome: ExactTypeIndexWaitOutcomeV2,
+    pub waiter_action: TypeIndexPrecomputeWaiterActionV2,
+    pub matching_task_state: Option<ExactTypeIndexMatchingTaskStateV2>,
+    pub task_phase: Option<TypeIndexPrecomputePhaseV2>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TypeIndexPrecomputePhaseV2 {
     WaitingForVersion = 1,
     Snapshotting = 2,
     WaitingCpuPermit = 3,
@@ -87,6 +106,16 @@ pub(super) enum TypeIndexPrecomputePhaseV2 {
 }
 
 impl TypeIndexPrecomputePhaseV2 {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::WaitingForVersion => "waiting_for_version",
+            Self::Snapshotting => "snapshotting",
+            Self::WaitingCpuPermit => "waiting_cpu_permit",
+            Self::Computing => "computing",
+            Self::Completed => "completed",
+        }
+    }
+
     pub(super) fn as_u8(self) -> u8 {
         self as u8
     }
@@ -100,6 +129,12 @@ impl TypeIndexPrecomputePhaseV2 {
             _ => Self::Completed,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ExactTypeIndexMatchingTaskTraceV2 {
+    matching_task_state: ExactTypeIndexMatchingTaskStateV2,
+    task_phase: Option<TypeIndexPrecomputePhaseV2>,
 }
 
 fn type_index_precompute_debounce_duration() -> Duration {
@@ -368,6 +403,9 @@ impl BslLanguageServer {
                     .current_type_index_serve_only_ready(file_id)
                     .unwrap_or(false);
             if exact_ready {
+                let matching_task_trace = self
+                    .current_exact_wait_matching_task_trace_v2(file_id, expected_version)
+                    .await;
                 if !matches!(waiter_action, TypeIndexPrecomputeWaiterActionV2::None) {
                     self.coordinator
                         .record_intellisense_v2_completion_exact_type_index_wait_ready_after_wait();
@@ -375,6 +413,8 @@ impl BslLanguageServer {
                 return ExactTypeIndexWaitTraceV2 {
                     outcome: ExactTypeIndexWaitOutcomeV2::Ready,
                     waiter_action,
+                    matching_task_state: Some(matching_task_trace.matching_task_state),
+                    task_phase: matching_task_trace.task_phase,
                 };
             }
 
@@ -393,37 +433,26 @@ impl BslLanguageServer {
                 }
             }
 
-            enum MatchingTaskState {
-                Matching,
-                WrongVersion,
-                Missing,
-            }
-
-            let matching_task_state = {
-                let tasks = self.type_index_precompute_tasks_v2.lock().await;
-                match tasks.get(&file_id) {
-                    Some(task) => {
-                        if expected_version
-                            .map(|version| task.supersession_key.requested_version == version)
-                            .unwrap_or(true)
-                        {
-                            MatchingTaskState::Matching
-                        } else {
-                            MatchingTaskState::WrongVersion
-                        }
-                    }
-                    None => MatchingTaskState::Missing,
-                }
-            };
-            if matches!(matching_task_state, MatchingTaskState::WrongVersion) {
+            let matching_task_trace = self
+                .current_exact_wait_matching_task_trace_v2(file_id, expected_version)
+                .await;
+            if matches!(
+                matching_task_trace.matching_task_state,
+                ExactTypeIndexMatchingTaskStateV2::WrongVersion
+            ) {
                 return ExactTypeIndexWaitTraceV2 {
                     outcome: ExactTypeIndexWaitOutcomeV2::TaskPresentWrongVersion,
                     waiter_action,
+                    matching_task_state: Some(matching_task_trace.matching_task_state),
+                    task_phase: matching_task_trace.task_phase,
                 };
             }
             let observed_version_mismatch =
                 expected_version.is_some_and(|version| observed_version != Some(version));
-            if matches!(matching_task_state, MatchingTaskState::Missing) {
+            if matches!(
+                matching_task_trace.matching_task_state,
+                ExactTypeIndexMatchingTaskStateV2::Missing
+            ) {
                 return ExactTypeIndexWaitTraceV2 {
                     outcome: if observed_version_mismatch {
                         ExactTypeIndexWaitOutcomeV2::ObservedVersionMismatch
@@ -431,6 +460,8 @@ impl BslLanguageServer {
                         ExactTypeIndexWaitOutcomeV2::NoMatchingTask
                     },
                     waiter_action,
+                    matching_task_state: Some(matching_task_trace.matching_task_state),
+                    task_phase: matching_task_trace.task_phase,
                 };
             }
             if tokio::time::Instant::now() >= deadline {
@@ -441,6 +472,8 @@ impl BslLanguageServer {
                         ExactTypeIndexWaitOutcomeV2::Deadline
                     },
                     waiter_action,
+                    matching_task_state: Some(matching_task_trace.matching_task_state),
+                    task_phase: matching_task_trace.task_phase,
                 };
             }
 
@@ -536,6 +569,36 @@ impl BslLanguageServer {
             ),
         );
         TypeIndexPrecomputeWaiterActionV2::Promoted
+    }
+
+    async fn current_exact_wait_matching_task_trace_v2(
+        &self,
+        file_id: V2FileId,
+        expected_version: Option<i32>,
+    ) -> ExactTypeIndexMatchingTaskTraceV2 {
+        let tasks = self.type_index_precompute_tasks_v2.lock().await;
+        match tasks.get(&file_id) {
+            Some(task) => {
+                let matching_task_state = if expected_version
+                    .map(|version| task.supersession_key.requested_version == version)
+                    .unwrap_or(true)
+                {
+                    ExactTypeIndexMatchingTaskStateV2::Matching
+                } else {
+                    ExactTypeIndexMatchingTaskStateV2::WrongVersion
+                };
+                ExactTypeIndexMatchingTaskTraceV2 {
+                    matching_task_state,
+                    task_phase: Some(TypeIndexPrecomputePhaseV2::from_atomic(
+                        task.phase.load(Ordering::Relaxed),
+                    )),
+                }
+            }
+            None => ExactTypeIndexMatchingTaskTraceV2 {
+                matching_task_state: ExactTypeIndexMatchingTaskStateV2::Missing,
+                task_phase: None,
+            },
+        }
     }
 
     async fn current_type_index_precompute_task_state_v2(

@@ -28,10 +28,13 @@ impl IntellisenseV2Facade {
 
     pub async fn snapshot_for_operation(&self, operation: SemanticOperation) -> SemanticSnapshot {
         let queue_priority = RuntimeQueuePriority::for_operation(operation);
-        let (analysis, _index_snapshot, deps_id) = self
+        let snapshot_with_deps = self
             .snapshot_with_deps_with_priority(ObservabilityOrigin::Runtime, queue_priority)
             .await;
-        SemanticSnapshot { analysis, deps_id }
+        SemanticSnapshot {
+            analysis: snapshot_with_deps.analysis,
+            deps_id: snapshot_with_deps.deps_id,
+        }
     }
 
     /// Canonical stateful operation preparation for adapters:
@@ -63,12 +66,14 @@ impl IntellisenseV2Facade {
         let mut wait_budget_exhausted = false;
         let stale_served = false;
 
-        let wait_elapsed = if let Some(min_file_version) = context.min_file_version {
+        let (wait_elapsed, wait_for_file_version_runtime) = if let Some(min_file_version) =
+            context.min_file_version
+        {
             if let Some(progress) = progress {
                 progress.mark_phase("wait_for_file_version");
             }
             let started = Instant::now();
-            let wait_ok = if let Some(knobs) = interactive_knobs {
+            let wait_result = if let Some(knobs) = interactive_knobs {
                 match tokio::time::timeout(
                     knobs.wait_budget,
                     self.wait_for_file_version_with_priority(
@@ -80,23 +85,25 @@ impl IntellisenseV2Facade {
                 )
                 .await
                 {
-                    Ok(wait_ok) => wait_ok,
+                    Ok(wait_result) => Some(wait_result),
                     Err(_) => {
                         wait_budget_exhausted = true;
                         if let Some(coordinator) = observability {
                             coordinator.record_intellisense_v2_interactive_wait_budget_exhausted();
                         }
-                        true
+                        None
                     }
                 }
             } else {
-                self.wait_for_file_version_with_priority(
-                    context.origin,
-                    queue_priority,
-                    context.file_id,
-                    min_file_version,
+                Some(
+                    self.wait_for_file_version_with_priority(
+                        context.origin,
+                        queue_priority,
+                        context.file_id,
+                        min_file_version,
+                    )
+                    .await,
                 )
-                .await
             };
             let elapsed = started.elapsed();
             if let Some(coordinator) = observability {
@@ -110,24 +117,32 @@ impl IntellisenseV2Facade {
             if let Some(progress) = progress {
                 progress.mark_wait_completed();
             }
+            let wait_ok = wait_result
+                .as_ref()
+                .map(|reply| reply.ready)
+                .unwrap_or(true);
             if !wait_ok {
                 if let Some(progress) = progress {
                     progress.mark_phase("stale_version");
                 }
                 return Err(SemanticOutcome::StaleVersion);
             }
-            Some(elapsed)
+            (Some(elapsed), wait_result.map(|reply| reply.trace))
         } else {
-            None
+            (None, None)
         };
 
         if let Some(progress) = progress {
             progress.mark_phase("snapshot_with_deps");
         }
         let snapshot_started = Instant::now();
-        let (analysis, index_snapshot, deps_id) = self
+        let snapshot_with_deps = self
             .snapshot_with_deps_with_priority(context.origin, queue_priority)
             .await;
+        let snapshot_with_deps_runtime = snapshot_with_deps.trace;
+        let analysis = snapshot_with_deps.analysis;
+        let index_snapshot = snapshot_with_deps.index_snapshot;
+        let deps_id = snapshot_with_deps.deps_id;
         if let Some(progress) = progress {
             progress.mark_snapshot_completed();
             progress.mark_phase("deps_guard");
@@ -278,6 +293,8 @@ impl IntellisenseV2Facade {
             index_snapshot,
             wait_elapsed,
             snapshot_elapsed,
+            wait_for_file_version_runtime,
+            snapshot_with_deps_runtime,
             wait_budget_exhausted,
             stale_served,
             completion_churn_fastpath_active: fastpath_preconditions.churn_aware_fastpath_active(),
@@ -337,6 +354,8 @@ impl IntellisenseV2Facade {
             index_snapshot,
             wait_elapsed: None,
             snapshot_elapsed,
+            wait_for_file_version_runtime: None,
+            snapshot_with_deps_runtime: SnapshotWithDepsRuntimeTrace::default(),
             wait_budget_exhausted: false,
             stale_served: false,
             completion_churn_fastpath_active: false,

@@ -113,7 +113,8 @@ BSL_TEST_GREP='Completion Probe (Schema|Recorder|Runtime|Store) Test Suite|Compl
 - runtime transport hook и selection observer для client probes;
 - wiring default `LanguageClient` path;
 - dual-view `Server Timeline` / `Client Probe Feed`;
-- rendering/export для `Server Timeline` с `response.version=3` и bounded `server_edge_details`, плюс backward-compatible чтение legacy `version=2` payload;
+- rendering/export для `Server Timeline` с `response.version=5`, bounded bottleneck drilldown (`dispatcher_resolution_latency_ms`, `prepare_progress`, `wait_for_file_version_runtime`, `snapshot_with_deps_runtime`, bounded `exact_wait`) и human-readable verdict projection;
+- graceful degradation для backend payload `v4` без выдумывания отсутствующих `v5` полей;
 - fail-closed/executeCommand поведение `bsl.getCompletionTimeline`;
 - truthful `unsupported` vs `unavailable` semantics для observability metrics export;
 - actual command export path для `bslAnalyzer.exportObservabilityIncidentBundle`, включая запись `summary.md`, `incident.json` и `raw/*`;

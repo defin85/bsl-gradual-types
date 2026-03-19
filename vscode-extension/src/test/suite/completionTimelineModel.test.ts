@@ -41,7 +41,7 @@ function buildClientProbe(probeId: string, version: number, startedAtMs: number)
 suite('Completion Timeline Model Test Suite', () => {
     test('Mapping LSP timeline payload -> UI model', () => {
         const payload: CompletionTimelineResponse = {
-            version: 3,
+            version: 5,
             traces: [
                 {
                     trace_id: 'trace-42',
@@ -70,12 +70,31 @@ suite('Completion Timeline Model Test Suite', () => {
                         snapshot_elapsed_ms: 4,
                         apply_age_at_start_ms: 9,
                         apply_age_at_terminal_ms: 13,
+                        progress: {
+                            phase: 'ready',
+                            snapshot_completed_offset_ms: 16,
+                        },
+                        wait_for_file_version_runtime: {
+                            queue_wait_ms: 1,
+                            exec_ms: 2,
+                            resolution: 'immediate',
+                        },
+                        snapshot_with_deps_runtime: {
+                            queue_wait_ms: 3,
+                            exec_ms: 4,
+                        },
+                        exact_wait: {
+                            type_index_waiter_action: 'joined',
+                            matching_task_state: 'matching',
+                            task_phase: 'computing',
+                        },
                     },
                     turn_attribution: {
                         request_file_seq: 42,
                         request_epoch: 7,
                         queue_outcome: 'enqueued',
                         turn_wait_outcome: 'ready',
+                        dispatcher_resolution_latency_ms: 5,
                         queue_capacity: 256,
                         queue_depth_before_enqueue: 1,
                         queue_depth_after_enqueue: 2,
@@ -115,7 +134,7 @@ suite('Completion Timeline Model Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(state.version, 3);
+        assert.strictEqual(state.version, 5);
         assert.strictEqual(state.traces.length, 1);
         assert.strictEqual(state.traces[0].trace_id, 'trace-42');
         assert.strictEqual(
@@ -128,8 +147,20 @@ suite('Completion Timeline Model Test Suite', () => {
         );
         assert.strictEqual(state.traces[0].prepare_details?.wait_budget_ms, 120);
         assert.strictEqual(state.traces[0].prepare_details?.route, 'head_hit');
+        assert.strictEqual(
+            state.traces[0].prepare_details?.wait_for_file_version_runtime?.resolution,
+            'immediate'
+        );
+        assert.strictEqual(
+            state.traces[0].prepare_details?.exact_wait?.task_phase,
+            'computing'
+        );
         assert.strictEqual(state.traces[0].stages.length, 3);
         assert.strictEqual(state.traces[0].turn_attribution?.queue_outcome, 'enqueued');
+        assert.strictEqual(
+            state.traces[0].turn_attribution?.dispatcher_resolution_latency_ms,
+            5
+        );
         assert.strictEqual(state.traces[0].turn_attribution?.active_holder?.file_seq, 41);
         assert.strictEqual(state.client_probe_feed.updated_at_ms, 1_700_000_000_100);
         assert.deepStrictEqual(

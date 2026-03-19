@@ -164,6 +164,18 @@ pub struct CompletionTimelinePrepareProgressTrace {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CompletionTimelinePrepareRuntimeTrace {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue_wait_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exec_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wake_wait_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CompletionTimelineExactWaitDetailsTrace {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub head_ready_before_wait: Option<bool>,
@@ -177,6 +189,10 @@ pub struct CompletionTimelineExactWaitDetailsTrace {
     pub type_index_wait_outcome: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub type_index_waiter_action: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matching_task_state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_phase: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -205,6 +221,10 @@ pub struct CompletionTimelinePrepareDetailsTrace {
     pub apply_age_at_terminal_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub progress: Option<CompletionTimelinePrepareProgressTrace>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wait_for_file_version_runtime: Option<CompletionTimelinePrepareRuntimeTrace>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot_with_deps_runtime: Option<CompletionTimelinePrepareRuntimeTrace>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exact_wait: Option<CompletionTimelineExactWaitDetailsTrace>,
 }

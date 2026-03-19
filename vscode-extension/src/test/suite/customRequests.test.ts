@@ -183,7 +183,7 @@ suite('LSP Custom Requests Test Suite', () => {
 
                 if (command === 'bsl.getCompletionTimeline') {
                     return Promise.resolve({
-                        version: 3,
+                        version: 5,
                         traces: [
                             {
                                 trace_id: 'trace-1',
@@ -194,6 +194,26 @@ suite('LSP Custom Requests Test Suite', () => {
                                 started_at_ms: Date.now(),
                                 total_duration_ms: 18,
                                 dominant_stage: 'query_bundle',
+                                prepare_details: {
+                                    progress: {
+                                        phase: 'wait_for_file_version',
+                                    },
+                                    wait_for_file_version_runtime: {
+                                        queue_wait_ms: 1,
+                                        exec_ms: 2,
+                                        wake_wait_ms: 3,
+                                        resolution: 'waiter',
+                                    },
+                                    snapshot_with_deps_runtime: {
+                                        queue_wait_ms: 4,
+                                        exec_ms: 5,
+                                    },
+                                    exact_wait: {
+                                        type_index_waiter_action: 'joined',
+                                        matching_task_state: 'matching',
+                                        task_phase: 'computing',
+                                    },
+                                },
                                 server_edge_details: {
                                     transport_received_at_ms: 1_700_000_000_000,
                                     handler_entered_at_ms: 1_700_000_000_001,
@@ -367,10 +387,14 @@ suite('LSP Custom Requests Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(result.response.version, 3);
+        assert.strictEqual(result.response.version, 5);
         assert.strictEqual(result.response.traces.length, 1);
         assert.strictEqual(result.response.traces[0].trace_id, 'trace-1');
         assert.ok(result.response.traces[0].server_edge_details);
+        assert.strictEqual(
+            result.response.traces[0].prepare_details?.wait_for_file_version_runtime?.resolution,
+            'waiter'
+        );
     });
 
     test('getCompletionTimeline should fail-closed on Method not found', async function() {
@@ -400,7 +424,7 @@ suite('LSP Custom Requests Test Suite', () => {
         sendRequestStub.resetBehavior();
         sendRequestStub.onFirstCall().rejects({ code: -32601, message: 'Method not found' });
         sendRequestStub.onSecondCall().resolves({
-            version: 4,
+            version: 5,
             traces: [],
         });
 

@@ -4,6 +4,13 @@ import {
     CompletionTimelinePanelState,
     CompletionTimelineTraceViewModel,
 } from './completionTimelineModel';
+import {
+    buildCompletionTraceBottleneckVerdicts,
+    formatDispatcherAttributionTrace,
+    formatExactWaitTrace,
+    formatPrepareProgressTrace,
+    formatPrepareRuntimeTrace,
+} from './completionTimelineDrilldown';
 
 export type CompletionTimelineClipboardMode = 'all' | 'average';
 
@@ -148,6 +155,32 @@ export function formatCompletionTimelineTraceForClipboard(
         if (detailsBits.length > 0) {
             lines.push(detailsBits.join(' | '));
         }
+        const bottleneckVerdicts = buildCompletionTraceBottleneckVerdicts(trace);
+        for (const verdict of bottleneckVerdicts) {
+            lines.push(`bottleneck_verdict=${verdict}`);
+        }
+        const progressTrace = formatPrepareProgressTrace(trace.prepare_details.progress);
+        if (progressTrace) {
+            lines.push(progressTrace);
+        }
+        const waitRuntimeTrace = formatPrepareRuntimeTrace(
+            'wait_for_file_version_runtime',
+            trace.prepare_details.wait_for_file_version_runtime
+        );
+        if (waitRuntimeTrace) {
+            lines.push(waitRuntimeTrace);
+        }
+        const snapshotRuntimeTrace = formatPrepareRuntimeTrace(
+            'snapshot_with_deps_runtime',
+            trace.prepare_details.snapshot_with_deps_runtime
+        );
+        if (snapshotRuntimeTrace) {
+            lines.push(snapshotRuntimeTrace);
+        }
+        const exactWaitTrace = formatExactWaitTrace(trace.prepare_details.exact_wait);
+        if (exactWaitTrace) {
+            lines.push(exactWaitTrace);
+        }
     }
     if (trace.turn_attribution) {
         const turn = trace.turn_attribution;
@@ -162,6 +195,10 @@ export function formatCompletionTimelineTraceForClipboard(
         ];
         if (turn.turn_wait_outcome) {
             turnBits.push(`turn_wait_outcome=${turn.turn_wait_outcome}`);
+        }
+        const dispatcherTrace = formatDispatcherAttributionTrace(turn);
+        if (dispatcherTrace) {
+            turnBits.push(dispatcherTrace);
         }
         if (turn.dropped_completion_file_seq.length > 0) {
             turnBits.push(`dropped_completion_file_seq=${turn.dropped_completion_file_seq.join(',')}`);

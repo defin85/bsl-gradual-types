@@ -101,7 +101,7 @@ pub(crate) type CompletionParityKeyV2 = (V2FileId, i32, u32, u32);
 pub(crate) type CompletionParityStoreV2 =
     Arc<RwLock<HashMap<CompletionParityKeyV2, CompletionParityStateV2>>>;
 
-pub(crate) const COMPLETION_TIMELINE_VERSION: u32 = 4;
+pub(crate) const COMPLETION_TIMELINE_VERSION: u32 = 5;
 pub(crate) const COMPLETION_TIMELINE_MAX_ENTRIES: usize = 200;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -660,11 +660,15 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             const waitOutcome = turn.turn_wait_outcome
                 ? ' | turn_wait=' + escapeHtml(turn.turn_wait_outcome)
                 : '';
+            const dispatcherLatency = typeof turn.dispatcher_resolution_latency_ms === 'number'
+                ? ' | dispatcher_resolution_latency=' + escapeHtml(turn.dispatcher_resolution_latency_ms) + 'ms'
+                : '';
             return '<div class="overhead">' +
                 'Turn attribution: file_seq=' + escapeHtml(turn.request_file_seq) +
                 ' | epoch=' + escapeHtml(turn.request_epoch) +
                 ' | queue_outcome=' + escapeHtml(turn.queue_outcome) +
                 waitOutcome +
+                dispatcherLatency +
                 ' | queue=' + escapeHtml(turn.queue_depth_before_enqueue) + '->' +
                 escapeHtml(turn.queue_depth_after_enqueue) + '/' + escapeHtml(turn.queue_capacity) +
                 ' | queued_completion_ahead=' + escapeHtml(turn.queued_completion_ahead_count) +
@@ -674,6 +678,139 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             '</div>' +
             renderTurnHolder('Active holder', turn.active_holder) +
             renderTurnHolder('Queued ahead', turn.queued_completion_ahead);
+        }
+
+        function derivePrepareTimeoutSubphase(details) {
+            if (!details || details.fail_closed_cause !== 'prepare_timeout') {
+                return null;
+            }
+            const phase = details.progress?.phase;
+            if (phase === 'wait_for_file_version') {
+                return 'wait_for_file_version';
+            }
+            if (
+                phase === 'snapshot_with_deps' ||
+                phase === 'deps_guard' ||
+                (
+                    typeof details.progress?.wait_completed_offset_ms === 'number' &&
+                    typeof details.progress?.snapshot_completed_offset_ms !== 'number'
+                )
+            ) {
+                return 'snapshot_with_deps';
+            }
+            return 'unavailable';
+        }
+
+        function renderPrepareProgress(progress) {
+            if (!progress) {
+                return '';
+            }
+            const bits = [];
+            if (progress.phase) {
+                bits.push('phase=' + escapeHtml(progress.phase));
+            }
+            if (typeof progress.phase_started_offset_ms === 'number') {
+                bits.push('phase_started_offset=' + escapeHtml(progress.phase_started_offset_ms) + 'ms');
+            }
+            if (typeof progress.wait_completed_offset_ms === 'number') {
+                bits.push('wait_completed_offset=' + escapeHtml(progress.wait_completed_offset_ms) + 'ms');
+            }
+            if (typeof progress.snapshot_completed_offset_ms === 'number') {
+                bits.push('snapshot_completed_offset=' + escapeHtml(progress.snapshot_completed_offset_ms) + 'ms');
+            }
+            if (bits.length === 0) {
+                return '';
+            }
+            return '<div class="overhead">Prepare progress: ' + bits.join(' | ') + '</div>';
+        }
+
+        function renderPrepareRuntime(label, trace) {
+            if (!trace) {
+                return '';
+            }
+            const bits = [];
+            if (typeof trace.queue_wait_ms === 'number') {
+                bits.push('queue_wait=' + escapeHtml(trace.queue_wait_ms) + 'ms');
+            }
+            if (typeof trace.exec_ms === 'number') {
+                bits.push('exec=' + escapeHtml(trace.exec_ms) + 'ms');
+            }
+            if (typeof trace.wake_wait_ms === 'number') {
+                bits.push('wake_wait=' + escapeHtml(trace.wake_wait_ms) + 'ms');
+            }
+            if (trace.resolution) {
+                bits.push('resolution=' + escapeHtml(trace.resolution));
+            }
+            if (bits.length === 0) {
+                return '';
+            }
+            return '<div class="overhead">' + escapeHtml(label) + ': ' + bits.join(' | ') + '</div>';
+        }
+
+        function renderExactWait(details) {
+            if (!details) {
+                return '';
+            }
+            const bits = [];
+            if (typeof details.head_ready_before_wait === 'boolean') {
+                bits.push('head_ready_before_wait=' + escapeHtml(details.head_ready_before_wait));
+            }
+            if (typeof details.exact_ready_before_wait === 'boolean') {
+                bits.push('exact_ready_before_wait=' + escapeHtml(details.exact_ready_before_wait));
+            }
+            if (typeof details.current_revision_head_owner_hints_ready === 'boolean') {
+                bits.push('current_revision_head_owner_hints_ready=' + escapeHtml(details.current_revision_head_owner_hints_ready));
+            }
+            if (details.artifact_wait_outcome) {
+                bits.push('artifact_wait_outcome=' + escapeHtml(details.artifact_wait_outcome));
+            }
+            if (details.type_index_wait_outcome) {
+                bits.push('type_index_wait_outcome=' + escapeHtml(details.type_index_wait_outcome));
+            }
+            if (details.type_index_waiter_action) {
+                bits.push('type_index_waiter_action=' + escapeHtml(details.type_index_waiter_action));
+            }
+            if (details.matching_task_state) {
+                bits.push('matching_task_state=' + escapeHtml(details.matching_task_state));
+            }
+            if (details.task_phase) {
+                bits.push('task_phase=' + escapeHtml(details.task_phase));
+            }
+            if (bits.length === 0) {
+                return '';
+            }
+            return '<div class="overhead">Exact wait: ' + bits.join(' | ') + '</div>';
+        }
+
+        function buildBottleneckVerdicts(trace) {
+            const verdicts = [];
+            const transportWait = trace.server_edge_details?.transport_to_handler_wait_ms;
+            const handlerExec = trace.server_edge_details?.server_handler_exec_ms;
+            if (
+                typeof transportWait === 'number' &&
+                typeof handlerExec === 'number' &&
+                transportWait > handlerExec
+            ) {
+                verdicts.push('ingress_dominant');
+            }
+            const prepareTimeoutSubphase = derivePrepareTimeoutSubphase(trace.prepare_details);
+            if (prepareTimeoutSubphase) {
+                verdicts.push('prepare_timeout@' + prepareTimeoutSubphase);
+            }
+            if (trace.prepare_details?.fail_closed_cause === 'exact_deadline') {
+                const exactWait = trace.prepare_details.exact_wait;
+                let suffix = 'task_state=unavailable';
+                if (exactWait?.matching_task_state && exactWait?.task_phase) {
+                    suffix = 'task_state=' + exactWait.matching_task_state + ':' + exactWait.task_phase;
+                } else if (exactWait?.matching_task_state) {
+                    suffix = 'task_state=' + exactWait.matching_task_state;
+                }
+                if (exactWait?.type_index_waiter_action) {
+                    suffix = 'waiter_action=' + exactWait.type_index_waiter_action + ' | ' + suffix;
+                }
+                verdicts.push('exact_deadline | ' + suffix);
+            }
+            return verdicts;
         }
 
         function renderPrepareDetails(trace) {
@@ -719,9 +856,26 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 bits.push('apply_age_terminal=' + escapeHtml(details.apply_age_at_terminal_ms) + 'ms');
             }
             if (bits.length === 0) {
-                return '';
+                return [
+                    ...buildBottleneckVerdicts(trace).map((verdict) =>
+                        '<div class="overhead">Bottleneck: ' + escapeHtml(verdict) + '</div>'
+                    ),
+                    renderPrepareProgress(details.progress),
+                    renderPrepareRuntime('wait_for_file_version_runtime', details.wait_for_file_version_runtime),
+                    renderPrepareRuntime('snapshot_with_deps_runtime', details.snapshot_with_deps_runtime),
+                    renderExactWait(details.exact_wait),
+                ].filter(Boolean).join('');
             }
-            return '<div class="overhead">' + bits.join(' | ') + '</div>';
+            return [
+                '<div class="overhead">' + bits.join(' | ') + '</div>',
+                ...buildBottleneckVerdicts(trace).map((verdict) =>
+                    '<div class="overhead">Bottleneck: ' + escapeHtml(verdict) + '</div>'
+                ),
+                renderPrepareProgress(details.progress),
+                renderPrepareRuntime('wait_for_file_version_runtime', details.wait_for_file_version_runtime),
+                renderPrepareRuntime('snapshot_with_deps_runtime', details.snapshot_with_deps_runtime),
+                renderExactWait(details.exact_wait),
+            ].filter(Boolean).join('');
         }
 
         function renderServerEdgeDetails(trace) {

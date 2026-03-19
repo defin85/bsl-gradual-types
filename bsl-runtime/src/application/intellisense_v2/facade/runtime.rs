@@ -47,7 +47,20 @@ impl IntellisenseV2Facade {
                                             exec_elapsed,
                                         );
                                     }
-                                    let _ = waiter.reply.send(false);
+                                    let wake_wait_elapsed = waiter.started_waiting_at.elapsed();
+                                    let exec_started = Instant::now();
+                                    let exec_elapsed = exec_started.elapsed();
+                                    let _ = waiter.reply.send(WaitForFileVersionReply {
+                                        ready: false,
+                                        trace: WaitForFileVersionRuntimeTrace {
+                                            queue_wait_elapsed: Some(waiter.queue_wait_elapsed),
+                                            exec_elapsed: Some(exec_elapsed),
+                                            wake_wait_elapsed: Some(wake_wait_elapsed),
+                                            resolution: Some(
+                                                WaitForFileVersionResolutionKind::Waiter,
+                                            ),
+                                        },
+                                    });
                                 }
                                 Some(version) if version >= waiter.min_version => {
                                     let exec_elapsed = waiter.started_waiting_at.elapsed();
@@ -62,7 +75,20 @@ impl IntellisenseV2Facade {
                                             exec_elapsed,
                                         );
                                     }
-                                    let _ = waiter.reply.send(true);
+                                    let wake_wait_elapsed = waiter.started_waiting_at.elapsed();
+                                    let exec_started = Instant::now();
+                                    let exec_elapsed = exec_started.elapsed();
+                                    let _ = waiter.reply.send(WaitForFileVersionReply {
+                                        ready: true,
+                                        trace: WaitForFileVersionRuntimeTrace {
+                                            queue_wait_elapsed: Some(waiter.queue_wait_elapsed),
+                                            exec_elapsed: Some(exec_elapsed),
+                                            wake_wait_elapsed: Some(wake_wait_elapsed),
+                                            resolution: Some(
+                                                WaitForFileVersionResolutionKind::Waiter,
+                                            ),
+                                        },
+                                    });
                                 }
                                 Some(_) => still_waiting.push(waiter),
                             }
@@ -254,12 +280,23 @@ impl IntellisenseV2Facade {
                             }
 
                             let exec_started = Instant::now();
-                            let response = (
-                                host.snapshot(),
-                                index_snapshot.clone(),
-                                current_deps_id.clone(),
-                            );
+                            let response = GetSnapshotWithDepsReply {
+                                analysis: host.snapshot(),
+                                index_snapshot: index_snapshot.clone(),
+                                deps_id: current_deps_id.clone(),
+                                trace: SnapshotWithDepsRuntimeTrace {
+                                    queue_wait_elapsed: Some(queue_wait_elapsed),
+                                    exec_elapsed: None,
+                                },
+                            };
                             let exec_elapsed = exec_started.elapsed();
+                            let response = GetSnapshotWithDepsReply {
+                                trace: SnapshotWithDepsRuntimeTrace {
+                                    exec_elapsed: Some(exec_elapsed),
+                                    ..response.trace
+                                },
+                                ..response
+                            };
                             if let Some(coordinator) = &observability {
                                 coordinator.record_intellisense_v2_runtime_exec_latency(
                                     "snapshot_with_deps",
@@ -296,8 +333,18 @@ impl IntellisenseV2Facade {
                             match applied_file_revisions.get(&file_id).map(|state| state.version) {
                                 Some(version) if version >= min_version => {
                                     let exec_started = Instant::now();
-                                    let _ = reply.send(true);
                                     let exec_elapsed = exec_started.elapsed();
+                                    let _ = reply.send(WaitForFileVersionReply {
+                                        ready: true,
+                                        trace: WaitForFileVersionRuntimeTrace {
+                                            queue_wait_elapsed: Some(queue_wait_elapsed),
+                                            exec_elapsed: Some(exec_elapsed),
+                                            wake_wait_elapsed: None,
+                                            resolution: Some(
+                                                WaitForFileVersionResolutionKind::Immediate,
+                                            ),
+                                        },
+                                    });
                                     if let Some(coordinator) = &observability {
                                         coordinator.record_intellisense_v2_runtime_exec_latency(
                                             "wait_for_file_version",
@@ -314,6 +361,7 @@ impl IntellisenseV2Facade {
                                     waiters.entry(file_id).or_default().push(PendingWaiter {
                                         min_version,
                                         reply,
+                                        queue_wait_elapsed,
                                         started_waiting_at: Instant::now(),
                                         origin,
                                         priority: queue_priority,
@@ -349,7 +397,20 @@ impl IntellisenseV2Facade {
                                             exec_elapsed,
                                         );
                                     }
-                                    let _ = waiter.reply.send(false);
+                                    let wake_wait_elapsed = waiter.started_waiting_at.elapsed();
+                                    let exec_started = Instant::now();
+                                    let exec_elapsed = exec_started.elapsed();
+                                    let _ = waiter.reply.send(WaitForFileVersionReply {
+                                        ready: false,
+                                        trace: WaitForFileVersionRuntimeTrace {
+                                            queue_wait_elapsed: Some(waiter.queue_wait_elapsed),
+                                            exec_elapsed: Some(exec_elapsed),
+                                            wake_wait_elapsed: Some(wake_wait_elapsed),
+                                            resolution: Some(
+                                                WaitForFileVersionResolutionKind::Waiter,
+                                            ),
+                                        },
+                                    });
                                 }
                             }
                             let _ = ack.send(());
@@ -472,19 +533,21 @@ impl IntellisenseV2Facade {
     }
 
     pub async fn snapshot_with_deps(&self) -> (AnalysisV2, Arc<IndexSnapshot>, DepsSnapshotId) {
-        self.snapshot_with_deps_with_priority(
-            ObservabilityOrigin::Runtime,
-            RuntimeQueuePriority::Background,
-        )
-        .await
+        let reply = self
+            .snapshot_with_deps_with_priority(
+                ObservabilityOrigin::Runtime,
+                RuntimeQueuePriority::Background,
+            )
+            .await;
+        (reply.analysis, reply.index_snapshot, reply.deps_id)
     }
 
     pub(super) async fn snapshot_with_deps_with_priority(
         &self,
         origin: ObservabilityOrigin,
         priority: RuntimeQueuePriority,
-    ) -> (AnalysisV2, Arc<IndexSnapshot>, DepsSnapshotId) {
-        let (reply, rx) = oneshot::channel::<(AnalysisV2, Arc<IndexSnapshot>, DepsSnapshotId)>();
+    ) -> GetSnapshotWithDepsReply {
+        let (reply, rx) = oneshot::channel::<GetSnapshotWithDepsReply>();
         if self
             .send_command_with_priority(
                 priority,
@@ -499,22 +562,24 @@ impl IntellisenseV2Facade {
             warn!(
                 "analysis_v2_runtime: failed to send GetSnapshotWithDeps (writer thread is gone)"
             );
-            return (
-                AnalysisHostV2::default().snapshot(),
-                Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash(""))),
-                DepsSnapshotId::from_hash(""),
-            );
+            return GetSnapshotWithDepsReply {
+                analysis: AnalysisHostV2::default().snapshot(),
+                index_snapshot: Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash(""))),
+                deps_id: DepsSnapshotId::from_hash(""),
+                trace: SnapshotWithDepsRuntimeTrace::default(),
+            };
         }
 
         match rx.await {
-            Ok(tuple) => tuple,
+            Ok(reply) => reply,
             Err(_) => {
                 warn!("analysis_v2_runtime: GetSnapshotWithDeps response cancelled");
-                (
-                    AnalysisHostV2::default().snapshot(),
-                    Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash(""))),
-                    DepsSnapshotId::from_hash(""),
-                )
+                GetSnapshotWithDepsReply {
+                    analysis: AnalysisHostV2::default().snapshot(),
+                    index_snapshot: Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash(""))),
+                    deps_id: DepsSnapshotId::from_hash(""),
+                    trace: SnapshotWithDepsRuntimeTrace::default(),
+                }
             }
         }
     }
@@ -530,6 +595,7 @@ impl IntellisenseV2Facade {
             min_version,
         )
         .await
+        .ready
     }
 
     pub(super) async fn wait_for_file_version_with_priority(
@@ -538,8 +604,8 @@ impl IntellisenseV2Facade {
         priority: RuntimeQueuePriority,
         file_id: FileId,
         min_version: i32,
-    ) -> bool {
-        let (reply, rx) = oneshot::channel::<bool>();
+    ) -> WaitForFileVersionReply {
+        let (reply, rx) = oneshot::channel::<WaitForFileVersionReply>();
         if self
             .send_command_with_priority(
                 priority,
@@ -554,9 +620,21 @@ impl IntellisenseV2Facade {
             .is_err()
         {
             warn!("analysis_v2_runtime: failed to send WaitForFileVersion (writer thread is gone)");
-            return false;
+            return WaitForFileVersionReply {
+                ready: false,
+                trace: WaitForFileVersionRuntimeTrace::default(),
+            };
         }
-        rx.await.unwrap_or(false)
+        match rx.await {
+            Ok(reply) => reply,
+            Err(_) => {
+                warn!("analysis_v2_runtime: WaitForFileVersion response cancelled");
+                WaitForFileVersionReply {
+                    ready: false,
+                    trace: WaitForFileVersionRuntimeTrace::default(),
+                }
+            }
+        }
     }
 
     pub async fn file_revision_state(&self, file_id: FileId) -> Option<FileRevisionState> {

@@ -520,6 +520,7 @@ export interface CompletionTimelineTurnAttributionTrace {
     request_epoch: number;
     queue_outcome: string;
     turn_wait_outcome?: string;
+    dispatcher_resolution_latency_ms?: number;
     queue_capacity: number;
     queue_depth_before_enqueue: number;
     queue_depth_after_enqueue: number;
@@ -529,6 +530,31 @@ export interface CompletionTimelineTurnAttributionTrace {
     dropped_completion_file_seq: number[];
     active_holder?: CompletionTimelineTurnHolderTrace;
     queued_completion_ahead?: CompletionTimelineTurnHolderTrace;
+}
+
+export interface CompletionTimelinePrepareProgressTrace {
+    phase?: string;
+    phase_started_offset_ms?: number;
+    wait_completed_offset_ms?: number;
+    snapshot_completed_offset_ms?: number;
+}
+
+export interface CompletionTimelinePrepareRuntimeTrace {
+    queue_wait_ms?: number;
+    exec_ms?: number;
+    wake_wait_ms?: number;
+    resolution?: string;
+}
+
+export interface CompletionTimelineExactWaitDetailsTrace {
+    head_ready_before_wait?: boolean;
+    exact_ready_before_wait?: boolean;
+    current_revision_head_owner_hints_ready?: boolean;
+    artifact_wait_outcome?: string;
+    type_index_wait_outcome?: string;
+    type_index_waiter_action?: string;
+    matching_task_state?: string;
+    task_phase?: string;
 }
 
 export interface CompletionTimelinePrepareDetailsTrace {
@@ -544,6 +570,10 @@ export interface CompletionTimelinePrepareDetailsTrace {
     snapshot_elapsed_ms?: number;
     apply_age_at_start_ms?: number;
     apply_age_at_terminal_ms?: number;
+    progress?: CompletionTimelinePrepareProgressTrace;
+    wait_for_file_version_runtime?: CompletionTimelinePrepareRuntimeTrace;
+    snapshot_with_deps_runtime?: CompletionTimelinePrepareRuntimeTrace;
+    exact_wait?: CompletionTimelineExactWaitDetailsTrace;
 }
 
 export interface CompletionTimelineServerEdgeDetailsTrace {

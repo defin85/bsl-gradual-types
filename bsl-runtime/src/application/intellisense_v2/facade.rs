@@ -273,10 +273,41 @@ pub struct PreparedOperationSnapshot {
     pub index_snapshot: Arc<IndexSnapshot>,
     pub wait_elapsed: Option<Duration>,
     pub snapshot_elapsed: Duration,
+    pub wait_for_file_version_runtime: Option<WaitForFileVersionRuntimeTrace>,
+    pub snapshot_with_deps_runtime: SnapshotWithDepsRuntimeTrace,
     pub wait_budget_exhausted: bool,
     pub stale_served: bool,
     pub completion_churn_fastpath_active: bool,
     pub observed_file_version: Option<i32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WaitForFileVersionResolutionKind {
+    Immediate,
+    Waiter,
+}
+
+impl WaitForFileVersionResolutionKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Immediate => "immediate",
+            Self::Waiter => "waiter",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct WaitForFileVersionRuntimeTrace {
+    pub queue_wait_elapsed: Option<Duration>,
+    pub exec_elapsed: Option<Duration>,
+    pub wake_wait_elapsed: Option<Duration>,
+    pub resolution: Option<WaitForFileVersionResolutionKind>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SnapshotWithDepsRuntimeTrace {
+    pub queue_wait_elapsed: Option<Duration>,
+    pub exec_elapsed: Option<Duration>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -315,14 +346,14 @@ enum Command {
     GetSnapshotWithDeps {
         origin: ObservabilityOrigin,
         enqueued_at: Instant,
-        reply: oneshot::Sender<(AnalysisV2, Arc<IndexSnapshot>, DepsSnapshotId)>,
+        reply: oneshot::Sender<GetSnapshotWithDepsReply>,
     },
     WaitForFileVersion {
         origin: ObservabilityOrigin,
         enqueued_at: Instant,
         file_id: FileId,
         min_version: i32,
-        reply: oneshot::Sender<bool>,
+        reply: oneshot::Sender<WaitForFileVersionReply>,
     },
     GetFileRevisionState {
         file_id: FileId,
@@ -492,10 +523,24 @@ mod runtime;
 
 struct PendingWaiter {
     min_version: i32,
-    reply: oneshot::Sender<bool>,
+    reply: oneshot::Sender<WaitForFileVersionReply>,
+    queue_wait_elapsed: Duration,
     started_waiting_at: Instant,
     origin: ObservabilityOrigin,
     priority: RuntimeQueuePriority,
+}
+
+struct GetSnapshotWithDepsReply {
+    analysis: AnalysisV2,
+    index_snapshot: Arc<IndexSnapshot>,
+    deps_id: DepsSnapshotId,
+    trace: SnapshotWithDepsRuntimeTrace,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct WaitForFileVersionReply {
+    ready: bool,
+    trace: WaitForFileVersionRuntimeTrace,
 }
 
 #[cfg(test)]

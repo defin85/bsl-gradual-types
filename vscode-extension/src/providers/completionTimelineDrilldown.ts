@@ -1,0 +1,165 @@
+import {
+    CompletionTimelineExactWaitDetailsTrace,
+    CompletionTimelinePrepareDetailsTrace,
+    CompletionTimelinePrepareProgressTrace,
+    CompletionTimelinePrepareRuntimeTrace,
+    CompletionTimelineTrace,
+    CompletionTimelineTurnAttributionTrace,
+} from '../lsp/customRequests';
+
+export function derivePrepareTimeoutSubphase(
+    details?: CompletionTimelinePrepareDetailsTrace
+): 'wait_for_file_version' | 'snapshot_with_deps' | 'unavailable' | null {
+    if (details?.fail_closed_cause !== 'prepare_timeout') {
+        return null;
+    }
+
+    const phase = details.progress?.phase;
+    if (phase === 'wait_for_file_version') {
+        return 'wait_for_file_version';
+    }
+    if (
+        phase === 'snapshot_with_deps' ||
+        phase === 'deps_guard' ||
+        (
+            typeof details.progress?.wait_completed_offset_ms === 'number' &&
+            typeof details.progress?.snapshot_completed_offset_ms !== 'number'
+        )
+    ) {
+        return 'snapshot_with_deps';
+    }
+
+    return 'unavailable';
+}
+
+export function buildCompletionTraceBottleneckVerdicts(
+    trace: Pick<
+        CompletionTimelineTrace,
+        'prepare_details' | 'server_edge_details' | 'turn_attribution'
+    >
+): string[] {
+    const verdicts: string[] = [];
+    const transportWait = trace.server_edge_details?.transport_to_handler_wait_ms;
+    const handlerExec = trace.server_edge_details?.server_handler_exec_ms;
+    if (
+        typeof transportWait === 'number' &&
+        typeof handlerExec === 'number' &&
+        transportWait > handlerExec
+    ) {
+        verdicts.push('ingress_dominant');
+    }
+
+    const prepareTimeoutSubphase = derivePrepareTimeoutSubphase(trace.prepare_details);
+    if (prepareTimeoutSubphase) {
+        verdicts.push(`prepare_timeout@${prepareTimeoutSubphase}`);
+    }
+
+    if (trace.prepare_details?.fail_closed_cause === 'exact_deadline') {
+        const stateSummary = formatExactWaitStateSummary(trace.prepare_details.exact_wait);
+        verdicts.push(stateSummary ? `exact_deadline | ${stateSummary}` : 'exact_deadline');
+    }
+
+    return verdicts;
+}
+
+export function formatPrepareProgressTrace(
+    progress?: CompletionTimelinePrepareProgressTrace
+): string | null {
+    if (!progress) {
+        return null;
+    }
+    const bits = ['prepare_progress'];
+    pushNumberFact(bits, 'phase_started_offset_ms', progress.phase_started_offset_ms);
+    pushNumberFact(bits, 'wait_completed_offset_ms', progress.wait_completed_offset_ms);
+    pushNumberFact(bits, 'snapshot_completed_offset_ms', progress.snapshot_completed_offset_ms);
+    if (progress.phase) {
+        bits.splice(1, 0, `phase=${progress.phase}`);
+    }
+    return bits.length > 1 ? bits.join(' | ') : null;
+}
+
+export function formatPrepareRuntimeTrace(
+    label: 'wait_for_file_version_runtime' | 'snapshot_with_deps_runtime',
+    trace?: CompletionTimelinePrepareRuntimeTrace
+): string | null {
+    if (!trace) {
+        return null;
+    }
+    const bits: string[] = [label];
+    pushNumberFact(bits, 'queue_wait_ms', trace.queue_wait_ms);
+    pushNumberFact(bits, 'exec_ms', trace.exec_ms);
+    pushNumberFact(bits, 'wake_wait_ms', trace.wake_wait_ms);
+    if (trace.resolution) {
+        bits.push(`resolution=${trace.resolution}`);
+    }
+    return bits.length > 1 ? bits.join(' | ') : null;
+}
+
+export function formatExactWaitTrace(
+    exactWait?: CompletionTimelineExactWaitDetailsTrace
+): string | null {
+    if (!exactWait) {
+        return null;
+    }
+    const bits = ['exact_wait'];
+    pushBooleanFact(bits, 'head_ready_before_wait', exactWait.head_ready_before_wait);
+    pushBooleanFact(bits, 'exact_ready_before_wait', exactWait.exact_ready_before_wait);
+    pushBooleanFact(
+        bits,
+        'current_revision_head_owner_hints_ready',
+        exactWait.current_revision_head_owner_hints_ready
+    );
+    pushStringFact(bits, 'artifact_wait_outcome', exactWait.artifact_wait_outcome);
+    pushStringFact(bits, 'type_index_wait_outcome', exactWait.type_index_wait_outcome);
+    pushStringFact(bits, 'type_index_waiter_action', exactWait.type_index_waiter_action);
+    pushStringFact(bits, 'matching_task_state', exactWait.matching_task_state);
+    pushStringFact(bits, 'task_phase', exactWait.task_phase);
+    return bits.length > 1 ? bits.join(' | ') : null;
+}
+
+export function formatDispatcherAttributionTrace(
+    turnAttribution?: CompletionTimelineTurnAttributionTrace
+): string | null {
+    if (typeof turnAttribution?.dispatcher_resolution_latency_ms !== 'number') {
+        return null;
+    }
+    return `dispatcher_resolution_latency_ms=${turnAttribution.dispatcher_resolution_latency_ms}`;
+}
+
+function formatExactWaitStateSummary(
+    exactWait?: CompletionTimelineExactWaitDetailsTrace
+): string | null {
+    if (!exactWait) {
+        return 'task_state=unavailable';
+    }
+    const bits: string[] = [];
+    if (exactWait.type_index_waiter_action) {
+        bits.push(`waiter_action=${exactWait.type_index_waiter_action}`);
+    }
+    if (exactWait.matching_task_state && exactWait.task_phase) {
+        bits.push(`task_state=${exactWait.matching_task_state}:${exactWait.task_phase}`);
+    } else if (exactWait.matching_task_state) {
+        bits.push(`task_state=${exactWait.matching_task_state}`);
+    } else {
+        bits.push('task_state=unavailable');
+    }
+    return bits.join(' | ');
+}
+
+function pushNumberFact(bits: string[], key: string, value: number | undefined): void {
+    if (typeof value === 'number') {
+        bits.push(`${key}=${value}`);
+    }
+}
+
+function pushBooleanFact(bits: string[], key: string, value: boolean | undefined): void {
+    if (typeof value === 'boolean') {
+        bits.push(`${key}=${value}`);
+    }
+}
+
+function pushStringFact(bits: string[], key: string, value: string | undefined): void {
+    if (value) {
+        bits.push(`${key}=${value}`);
+    }
+}

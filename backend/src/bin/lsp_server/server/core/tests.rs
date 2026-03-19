@@ -9691,7 +9691,7 @@ async fn p22_get_completion_timeline_exposes_versioned_contract() {
             .get("version")
             .and_then(|value| value.as_u64())
             .expect("version"),
-        4
+        5
     );
     assert!(
         result
@@ -9848,11 +9848,19 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
     );
     assert!(
         prepare_details.contains_key("progress"),
-        "prepare_details must expose prepare progress details in v4 contract"
+        "prepare_details must expose prepare progress details in v5 contract"
+    );
+    assert!(
+        prepare_details.contains_key("wait_for_file_version_runtime"),
+        "prepare_details must expose wait_for_file_version runtime drilldown in v5 contract"
+    );
+    assert!(
+        prepare_details.contains_key("snapshot_with_deps_runtime"),
+        "prepare_details must expose snapshot_with_deps runtime drilldown in v5 contract"
     );
     assert!(
         prepare_details.contains_key("exact_wait"),
-        "prepare_details must expose exact wait details in v4 contract"
+        "prepare_details must expose exact wait details in v5 contract"
     );
     for field in [
         "transport_received_at_ms",

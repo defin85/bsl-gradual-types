@@ -308,6 +308,47 @@ impl CompletionTimelineCapture {
             .map(CompletionTimelineCapture::duration_to_ms);
     }
 
+    fn set_prepare_wait_for_file_version_runtime(
+        &mut self,
+        trace: Option<bsl_runtime::application::WaitForFileVersionRuntimeTrace>,
+    ) {
+        let Some(trace) = trace else {
+            return;
+        };
+        self.prepare_details_mut().wait_for_file_version_runtime =
+            Some(crate::types::CompletionTimelinePrepareRuntimeTrace {
+                queue_wait_ms: trace
+                    .queue_wait_elapsed
+                    .map(CompletionTimelineCapture::duration_to_ms),
+                exec_ms: trace
+                    .exec_elapsed
+                    .map(CompletionTimelineCapture::duration_to_ms),
+                wake_wait_ms: trace
+                    .wake_wait_elapsed
+                    .map(CompletionTimelineCapture::duration_to_ms),
+                resolution: trace
+                    .resolution
+                    .map(|resolution| resolution.as_str().to_string()),
+            });
+    }
+
+    fn set_prepare_snapshot_with_deps_runtime(
+        &mut self,
+        trace: bsl_runtime::application::SnapshotWithDepsRuntimeTrace,
+    ) {
+        self.prepare_details_mut().snapshot_with_deps_runtime =
+            Some(crate::types::CompletionTimelinePrepareRuntimeTrace {
+                queue_wait_ms: trace
+                    .queue_wait_elapsed
+                    .map(CompletionTimelineCapture::duration_to_ms),
+                exec_ms: trace
+                    .exec_elapsed
+                    .map(CompletionTimelineCapture::duration_to_ms),
+                wake_wait_ms: None,
+                resolution: None,
+            });
+    }
+
     fn exact_wait_details_mut(
         &mut self,
     ) -> &mut crate::types::CompletionTimelineExactWaitDetailsTrace {
@@ -339,6 +380,14 @@ impl CompletionTimelineCapture {
 
     fn set_exact_wait_type_index_waiter_action(&mut self, action: &str) {
         self.exact_wait_details_mut().type_index_waiter_action = Some(action.to_string());
+    }
+
+    fn set_exact_wait_matching_task_state(&mut self, state: &str) {
+        self.exact_wait_details_mut().matching_task_state = Some(state.to_string());
+    }
+
+    fn set_exact_wait_task_phase(&mut self, phase: &str) {
+        self.exact_wait_details_mut().task_phase = Some(phase.to_string());
     }
 
     fn into_trace(
@@ -970,6 +1019,12 @@ impl BslLanguageServer {
                     );
                     timeline_capture.set_prepare_wait_elapsed(prepared.wait_elapsed);
                     timeline_capture.set_prepare_snapshot_elapsed(prepared.snapshot_elapsed);
+                    timeline_capture.set_prepare_wait_for_file_version_runtime(
+                        prepared.wait_for_file_version_runtime,
+                    );
+                    timeline_capture.set_prepare_snapshot_with_deps_runtime(
+                        prepared.snapshot_with_deps_runtime,
+                    );
                     if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
                         event_driven_guards_enabled,
                         self,
@@ -1221,6 +1276,13 @@ impl BslLanguageServer {
                         timeline_capture.set_exact_wait_type_index_waiter_action(
                             exact_wait.waiter_action.as_str(),
                         );
+                        if let Some(matching_task_state) = exact_wait.matching_task_state {
+                            timeline_capture
+                                .set_exact_wait_matching_task_state(matching_task_state.as_str());
+                        }
+                        if let Some(task_phase) = exact_wait.task_phase {
+                            timeline_capture.set_exact_wait_task_phase(task_phase.as_str());
+                        }
 
                         if exact_wait.outcome
                             != super::super::core::ExactTypeIndexWaitOutcomeV2::Ready
@@ -2140,6 +2202,79 @@ mod tests {
         assert_eq!(details.server_handler_exec_ms, 30);
         assert_eq!(details.cancel_observed_at_ms, Some(1_700_000_000_012));
         assert_eq!(details.cancel_observed_after_handler_enter_ms, Some(12));
+    }
+
+    #[test]
+    fn prepare_runtime_drilldown_is_serialised_into_trace() {
+        let mut capture = sample_capture();
+        capture.set_prepare_wait_for_file_version_runtime(Some(
+            bsl_runtime::application::WaitForFileVersionRuntimeTrace {
+                queue_wait_elapsed: Some(std::time::Duration::from_millis(11)),
+                exec_elapsed: Some(std::time::Duration::from_millis(2)),
+                wake_wait_elapsed: Some(std::time::Duration::from_millis(97)),
+                resolution: Some(
+                    bsl_runtime::application::WaitForFileVersionResolutionKind::Waiter,
+                ),
+            },
+        ));
+        capture.set_prepare_snapshot_with_deps_runtime(
+            bsl_runtime::application::SnapshotWithDepsRuntimeTrace {
+                queue_wait_elapsed: Some(std::time::Duration::from_millis(5)),
+                exec_elapsed: Some(std::time::Duration::from_millis(7)),
+            },
+        );
+
+        let trace = capture.into_trace(
+            "trace-prepare-runtime".to_string(),
+            std::time::Duration::from_millis(25),
+            "ok_non_empty",
+        );
+        let prepare_details = trace
+            .prepare_details
+            .expect("prepare_details must be present");
+        let wait_runtime = prepare_details
+            .wait_for_file_version_runtime
+            .expect("wait runtime must be present");
+        assert_eq!(wait_runtime.queue_wait_ms, Some(11));
+        assert_eq!(wait_runtime.exec_ms, Some(2));
+        assert_eq!(wait_runtime.wake_wait_ms, Some(97));
+        assert_eq!(wait_runtime.resolution.as_deref(), Some("waiter"));
+        let snapshot_runtime = prepare_details
+            .snapshot_with_deps_runtime
+            .expect("snapshot runtime must be present");
+        assert_eq!(snapshot_runtime.queue_wait_ms, Some(5));
+        assert_eq!(snapshot_runtime.exec_ms, Some(7));
+        assert_eq!(snapshot_runtime.wake_wait_ms, None);
+        assert_eq!(snapshot_runtime.resolution, None);
+    }
+
+    #[test]
+    fn exact_wait_task_state_drilldown_is_serialised_into_trace() {
+        let mut capture = sample_capture();
+        capture.set_exact_wait_type_index_outcome("deadline");
+        capture.set_exact_wait_type_index_waiter_action("promoted");
+        capture.set_exact_wait_matching_task_state("matching");
+        capture.set_exact_wait_task_phase("waiting_cpu_permit");
+
+        let trace = capture.into_trace(
+            "trace-exact-wait".to_string(),
+            std::time::Duration::from_millis(25),
+            "fail_closed",
+        );
+        let exact_wait = trace
+            .prepare_details
+            .and_then(|prepare| prepare.exact_wait)
+            .expect("exact_wait must be present");
+        assert_eq!(
+            exact_wait.type_index_wait_outcome.as_deref(),
+            Some("deadline")
+        );
+        assert_eq!(
+            exact_wait.type_index_waiter_action.as_deref(),
+            Some("promoted")
+        );
+        assert_eq!(exact_wait.matching_task_state.as_deref(), Some("matching"));
+        assert_eq!(exact_wait.task_phase.as_deref(), Some("waiting_cpu_permit"));
     }
 
     #[test]

@@ -1,7 +1,9 @@
 import * as vscode from 'vscode';
 import { CommandHandler } from '../types';
 import { getLanguageClient } from '../lsp';
-import { getObservabilityMetrics } from '../lsp/customRequests';
+import { getCompletionTimeline, getObservabilityMetrics } from '../lsp/customRequests';
+import { getSharedCompletionProbeRecorder } from '../providers/completionProbeRecorder';
+import { buildObservabilityIncidentBundle } from '../providers/observabilityIncidentBundle';
 
 function tryGet(obj: any, path: string): any {
     const parts = path.split('.');
@@ -17,6 +19,9 @@ function fmtMs(value: any): string {
     if (typeof value !== 'number') return '-';
     return `${Math.round(value)}ms`;
 }
+
+const COMPLETION_TIMELINE_EXPORT_LIMIT = 50;
+const textEncoder = new TextEncoder();
 
 /**
  * Register observability/diagnostic commands.
@@ -80,5 +85,55 @@ export function registerObservabilityCommands(
 
         outputChannel.appendLine('===================================================');
     });
-}
 
+    safeRegisterCommand('bslAnalyzer.exportObservabilityIncidentBundle', async () => {
+        const targetFolder = await vscode.window.showOpenDialog({
+            canSelectFiles: false,
+            canSelectFolders: true,
+            canSelectMany: false,
+            openLabel: 'Export incident bundle here',
+        });
+        if (!targetFolder || targetFolder.length === 0) {
+            return;
+        }
+
+        const capturedAtMs = Date.now();
+        try {
+            const clientProbes = getSharedCompletionProbeRecorder().snapshot();
+            const [completionTimeline, observabilityMetrics] = await Promise.all([
+                getCompletionTimeline({ limit: COMPLETION_TIMELINE_EXPORT_LIMIT }),
+                getObservabilityMetrics(),
+            ]);
+
+            const bundle = buildObservabilityIncidentBundle({
+                capturedAtMs,
+                completionTimeline,
+                completionTraceLimit: COMPLETION_TIMELINE_EXPORT_LIMIT,
+                clientProbes,
+                observabilityMetrics,
+            });
+
+            const bundleRoot = vscode.Uri.joinPath(targetFolder[0], bundle.folderName);
+            await vscode.workspace.fs.createDirectory(bundleRoot);
+            for (const file of bundle.files) {
+                const segments = file.relativePath.split('/');
+                const fileUri = vscode.Uri.joinPath(bundleRoot, ...segments);
+                if (segments.length > 1) {
+                    await vscode.workspace.fs.createDirectory(
+                        vscode.Uri.joinPath(bundleRoot, ...segments.slice(0, -1))
+                    );
+                }
+                await vscode.workspace.fs.writeFile(fileUri, textEncoder.encode(file.contents));
+            }
+
+            outputChannel.appendLine(`[Observability] Incident bundle exported to ${bundleRoot.fsPath}`);
+            void vscode.window.showInformationMessage(
+                `Observability incident bundle exported to ${bundleRoot.fsPath}`
+            );
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            outputChannel.appendLine(`[Observability] Incident bundle export failed: ${message}`);
+            void vscode.window.showErrorMessage(`Failed to export observability incident bundle: ${message}`);
+        }
+    });
+}

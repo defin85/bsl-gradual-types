@@ -137,4 +137,18 @@ suite('Observability Provider Test Suite', () => {
             clock.restore();
         }
     });
+
+    test('actions should expose export incident bundle command', async () => {
+        const provider = new ObservabilityProvider(outputChannelStub);
+
+        try {
+            const items = await (provider as any).getActionItems();
+            const exportItem = items.find((item: any) =>
+                item.command?.command === 'bslAnalyzer.exportObservabilityIncidentBundle'
+            );
+            assert.ok(exportItem, 'export bundle action should be present in the Observability actions section');
+        } finally {
+            provider.dispose();
+        }
+    });
 });

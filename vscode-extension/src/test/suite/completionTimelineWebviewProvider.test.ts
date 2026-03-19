@@ -251,6 +251,50 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         assert.ok(webview.html.includes('Server Timeline'));
         assert.ok(webview.html.includes('Client Probe Feed'));
         assert.ok(webview.html.includes('Local-only debug data'));
+        assert.ok(webview.html.includes('Export bundle'));
+
+        onDidDisposeEmitter.dispose();
+        onDidReceiveMessageEmitter.dispose();
+        onDidChangeVisibilityEmitter.dispose();
+    });
+
+    test('exportBundle message should execute shared export command', async () => {
+        const customRequestsModule = await import('../../lsp/customRequests');
+        sinon.stub(customRequestsModule, 'getCompletionTimeline').resolves({
+            kind: 'unsupported',
+        } as CompletionTimelineFetchResult);
+        const executeCommandStub = sinon.stub(vscode.commands, 'executeCommand').resolves(undefined);
+
+        const outputChannel = {
+            appendLine: sinon.stub(),
+        } as unknown as vscode.OutputChannel;
+        provider = new CompletionTimelineWebviewProvider(outputChannel);
+
+        const onDidReceiveMessageEmitter = new vscode.EventEmitter<unknown>();
+        const onDidChangeVisibilityEmitter = new vscode.EventEmitter<void>();
+        const onDidDisposeEmitter = new vscode.EventEmitter<void>();
+        const webview = {
+            options: {},
+            html: '',
+            cspSource: 'vscode-webview://test',
+            onDidReceiveMessage: onDidReceiveMessageEmitter.event,
+            postMessage: sinon.stub().resolves(true),
+        } as unknown as vscode.Webview;
+        const webviewView = {
+            webview,
+            visible: true,
+            onDidChangeVisibility: onDidChangeVisibilityEmitter.event,
+            onDidDispose: onDidDisposeEmitter.event,
+        } as unknown as vscode.WebviewView;
+
+        provider.resolveWebviewView(webviewView);
+        await flushPromises();
+
+        onDidReceiveMessageEmitter.fire({ type: 'exportBundle' });
+        await flushPromises();
+
+        assert.strictEqual(executeCommandStub.callCount, 1);
+        assert.deepStrictEqual(executeCommandStub.firstCall.args, ['bslAnalyzer.exportObservabilityIncidentBundle']);
 
         onDidDisposeEmitter.dispose();
         onDidReceiveMessageEmitter.dispose();

@@ -11,6 +11,7 @@ import { getSharedCompletionProbeRecorder } from './completionProbeRecorder';
 
 type CompletionTimelineWebviewMessage =
     | { type: 'ready' | 'refresh' }
+    | { type: 'exportBundle' }
     | { type: 'copyVisible'; mode: CompletionTimelineClipboardMode }
     | { type: 'copyTrace'; trace_id: string };
 
@@ -21,7 +22,11 @@ function asCompletionTimelineWebviewMessage(
         return null;
     }
     const record = value as Record<string, unknown>;
-    if (record.type === 'ready' || record.type === 'refresh') {
+    if (
+        record.type === 'ready' ||
+        record.type === 'refresh' ||
+        record.type === 'exportBundle'
+    ) {
         return { type: record.type };
     }
     if (
@@ -170,6 +175,11 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
 
         if (parsedMessage.type === 'ready' || parsedMessage.type === 'refresh') {
             await this.refreshInternal();
+            return;
+        }
+
+        if (parsedMessage.type === 'exportBundle') {
+            await vscode.commands.executeCommand('bslAnalyzer.exportObservabilityIncidentBundle');
             return;
         }
 
@@ -469,6 +479,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             <button class="mode-button" id="modeAverage" role="tab" aria-selected="false">Averaged</button>
         </div>
         <button class="copy" id="copyVisible">Copy visible</button>
+        <button class="copy" id="exportBundle">Export bundle</button>
         <span class="toolbar-spacer"></span>
         <span class="meta" id="updatedAt">Waiting for data...</span>
         <span class="meta" id="copyStatus" aria-live="polite"></span>
@@ -501,6 +512,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
         const copyStatusNode = document.getElementById('copyStatus');
         const refreshButton = document.getElementById('refresh');
         const copyVisibleButton = document.getElementById('copyVisible');
+        const exportBundleButton = document.getElementById('exportBundle');
         const modeAllButton = document.getElementById('modeAll');
         const modeAverageButton = document.getElementById('modeAverage');
         let currentMode = 'all';
@@ -512,6 +524,9 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
         });
         copyVisibleButton.addEventListener('click', () => {
             vscode.postMessage({ type: 'copyVisible', mode: currentMode });
+        });
+        exportBundleButton.addEventListener('click', () => {
+            vscode.postMessage({ type: 'exportBundle' });
         });
         modeAllButton.addEventListener('click', () => {
             setMode('all');

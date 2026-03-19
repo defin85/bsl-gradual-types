@@ -585,6 +585,12 @@
                 "icon": "$(pulse)"
             },
             {
+                "command": "bslAnalyzer.exportObservabilityIncidentBundle",
+                "title": "Export Observability Incident Bundle",
+                "category": "BSL Debug",
+                "icon": "$(export)"
+            },
+            {
                 "command": "bslAnalyzer.reindexNow",
                 "title": "Reindex Now",
                 "category": "BSL Index",
@@ -782,6 +788,9 @@
                 },
                 {
                     "command": "bslAnalyzer.toggleObservabilityCompactMode"
+                },
+                {
+                    "command": "bslAnalyzer.exportObservabilityIncidentBundle"
                 },
                 {
                     "command": "bslAnalyzer.searchType"

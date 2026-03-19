@@ -1,0 +1,357 @@
+import { CompletionTimelineFetchResult, ObservabilityMetricsResponse } from '../lsp/customRequests';
+import { CompletionProbe } from './completionProbe';
+
+const BUNDLE_FORMAT = 'bsl-observability-incident/v1';
+const COMPLETION_TIMELINE_RAW_PATH = 'raw/completion_timeline.json';
+const CLIENT_PROBES_RAW_PATH = 'raw/client_probes.json';
+const OBSERVABILITY_METRICS_RAW_PATH = 'raw/observability_metrics.json';
+
+type IncidentSourceStatus = 'available' | 'unsupported' | 'unavailable';
+
+type IncidentSourceClassification =
+    | 'authoritative_server_trace'
+    | 'local_only_client_probes'
+    | 'cumulative_metrics_snapshot';
+
+export interface ObservabilityIncidentBundleInput {
+    capturedAtMs: number;
+    completionTimeline: CompletionTimelineFetchResult;
+    completionTraceLimit: number;
+    clientProbes: CompletionProbe[];
+    observabilityMetrics: ObservabilityMetricsResponse | null;
+}
+
+export interface ObservabilityIncidentBundleFile {
+    relativePath: string;
+    contents: string;
+}
+
+export interface ObservabilityIncidentBundleSource {
+    classification: IncidentSourceClassification;
+    status: IncidentSourceStatus;
+    raw_attachment?: string;
+    trace_count?: number;
+    probe_count?: number;
+    contract_version?: number;
+    uptime_seconds?: number;
+    message?: string;
+}
+
+export interface ObservabilityIncidentBundleReport {
+    bundle_format: string;
+    captured_at: string;
+    request_window: {
+        completion_trace_limit: number;
+    };
+    sources: {
+        completion_timeline: ObservabilityIncidentBundleSource;
+        client_probes: ObservabilityIncidentBundleSource;
+        observability_metrics: ObservabilityIncidentBundleSource;
+    };
+    findings: string[];
+    gaps: string[];
+    raw_attachments: Array<{
+        path: string;
+        section: 'completion_timeline' | 'client_probes' | 'observability_metrics';
+        classification: IncidentSourceClassification;
+    }>;
+}
+
+export interface ObservabilityIncidentBundle {
+    folderName: string;
+    files: ObservabilityIncidentBundleFile[];
+    incidentReport: ObservabilityIncidentBundleReport;
+    summaryMarkdown: string;
+}
+
+export function buildObservabilityIncidentBundle(
+    input: ObservabilityIncidentBundleInput
+): ObservabilityIncidentBundle {
+    const capturedAtIso = new Date(input.capturedAtMs).toISOString();
+    const rawAttachments: ObservabilityIncidentBundleReport['raw_attachments'] = [];
+    const files: ObservabilityIncidentBundleFile[] = [];
+    const gaps: string[] = [];
+    const findings = deriveFindings(input);
+
+    const completionTimelineSource = buildCompletionTimelineSource(
+        input.completionTimeline,
+        rawAttachments,
+        gaps,
+        files
+    );
+    const clientProbesSource = buildClientProbeSource(input.clientProbes, rawAttachments, files);
+    const observabilityMetricsSource = buildObservabilityMetricsSource(
+        input.observabilityMetrics,
+        rawAttachments,
+        gaps,
+        files
+    );
+
+    const incidentReport: ObservabilityIncidentBundleReport = {
+        bundle_format: BUNDLE_FORMAT,
+        captured_at: capturedAtIso,
+        request_window: {
+            completion_trace_limit: input.completionTraceLimit,
+        },
+        sources: {
+            completion_timeline: completionTimelineSource,
+            client_probes: clientProbesSource,
+            observability_metrics: observabilityMetricsSource,
+        },
+        findings: findings.length > 0 ? findings : ['No derived bottleneck heuristic matched this capture window.'],
+        gaps,
+        raw_attachments: rawAttachments,
+    };
+
+    const summaryMarkdown = renderSummaryMarkdown(incidentReport);
+    files.unshift(
+        {
+            relativePath: 'summary.md',
+            contents: summaryMarkdown,
+        },
+        {
+            relativePath: 'incident.json',
+            contents: `${JSON.stringify(incidentReport, null, 2)}\n`,
+        }
+    );
+
+    return {
+        folderName: buildBundleFolderName(input.capturedAtMs),
+        files,
+        incidentReport,
+        summaryMarkdown,
+    };
+}
+
+function buildCompletionTimelineSource(
+    completionTimeline: CompletionTimelineFetchResult,
+    rawAttachments: ObservabilityIncidentBundleReport['raw_attachments'],
+    gaps: string[],
+    files: ObservabilityIncidentBundleFile[]
+): ObservabilityIncidentBundleSource {
+    if (completionTimeline.kind === 'ok') {
+        rawAttachments.push({
+            path: COMPLETION_TIMELINE_RAW_PATH,
+            section: 'completion_timeline',
+            classification: 'authoritative_server_trace',
+        });
+        files.push({
+            relativePath: COMPLETION_TIMELINE_RAW_PATH,
+            contents: `${JSON.stringify(completionTimeline.response, null, 2)}\n`,
+        });
+        return {
+            classification: 'authoritative_server_trace',
+            status: 'available',
+            raw_attachment: COMPLETION_TIMELINE_RAW_PATH,
+            trace_count: completionTimeline.response.traces.length,
+            contract_version: completionTimeline.response.version,
+        };
+    }
+
+    if (completionTimeline.kind === 'unsupported') {
+        gaps.push('Completion timeline is unsupported by the connected server.');
+        return {
+            classification: 'authoritative_server_trace',
+            status: 'unsupported',
+            message: 'Connected server does not support bsl.getCompletionTimeline.',
+        };
+    }
+
+    gaps.push(`Completion timeline is unavailable: ${completionTimeline.message}`);
+    return {
+        classification: 'authoritative_server_trace',
+        status: 'unavailable',
+        message: completionTimeline.message,
+    };
+}
+
+function buildClientProbeSource(
+    clientProbes: CompletionProbe[],
+    rawAttachments: ObservabilityIncidentBundleReport['raw_attachments'],
+    files: ObservabilityIncidentBundleFile[]
+): ObservabilityIncidentBundleSource {
+    rawAttachments.push({
+        path: CLIENT_PROBES_RAW_PATH,
+        section: 'client_probes',
+        classification: 'local_only_client_probes',
+    });
+    files.push({
+        relativePath: CLIENT_PROBES_RAW_PATH,
+        contents: `${JSON.stringify(clientProbes, null, 2)}\n`,
+    });
+    return {
+        classification: 'local_only_client_probes',
+        status: 'available',
+        raw_attachment: CLIENT_PROBES_RAW_PATH,
+        probe_count: clientProbes.length,
+    };
+}
+
+function buildObservabilityMetricsSource(
+    observabilityMetrics: ObservabilityMetricsResponse | null,
+    rawAttachments: ObservabilityIncidentBundleReport['raw_attachments'],
+    gaps: string[],
+    files: ObservabilityIncidentBundleFile[]
+): ObservabilityIncidentBundleSource {
+    if (!observabilityMetrics) {
+        gaps.push('Observability metrics snapshot is unavailable for this bundle.');
+        return {
+            classification: 'cumulative_metrics_snapshot',
+            status: 'unavailable',
+            message: 'Metrics request returned no snapshot.',
+        };
+    }
+
+    const metrics = asRecord(observabilityMetrics.metrics);
+    rawAttachments.push({
+        path: OBSERVABILITY_METRICS_RAW_PATH,
+        section: 'observability_metrics',
+        classification: 'cumulative_metrics_snapshot',
+    });
+    files.push({
+        relativePath: OBSERVABILITY_METRICS_RAW_PATH,
+        contents: `${JSON.stringify(observabilityMetrics, null, 2)}\n`,
+    });
+    return {
+        classification: 'cumulative_metrics_snapshot',
+        status: 'available',
+        raw_attachment: OBSERVABILITY_METRICS_RAW_PATH,
+        uptime_seconds: typeof metrics?.uptime_seconds === 'number' ? metrics.uptime_seconds : undefined,
+    };
+}
+
+function deriveFindings(input: ObservabilityIncidentBundleInput): string[] {
+    const findings: string[] = [];
+    if (input.completionTimeline.kind === 'ok') {
+        const traces = input.completionTimeline.response.traces;
+        const transportWaitDominantCount = traces.filter((trace) => {
+            const transportWait = trace.server_edge_details?.transport_to_handler_wait_ms;
+            const handlerExec = trace.server_edge_details?.server_handler_exec_ms;
+            return typeof transportWait === 'number' && typeof handlerExec === 'number' && transportWait > handlerExec;
+        }).length;
+
+        if (transportWaitDominantCount > 0) {
+            findings.push(
+                `${transportWaitDominantCount} completion trace(s) spent more time waiting before handler entry than inside the server handler.`
+            );
+        }
+
+        if (traces.some((trace) => trace.prepare_details?.fail_closed_cause === 'prepare_timeout')) {
+            findings.push('prepare_timeout was observed in the captured completion timeline.');
+        }
+
+        if (traces.some((trace) => trace.prepare_details?.fail_closed_cause === 'exact_deadline')) {
+            findings.push('exact_deadline was observed after prepare completed.');
+        }
+
+        if (findings.length === 0) {
+            findings.push(`${traces.length} completion trace(s) were captured from the authoritative server timeline.`);
+        }
+    } else if (input.clientProbes.length > 0) {
+        findings.push('Bundle contains local client probes but no authoritative server trace for the current capture window.');
+    }
+
+    const semanticDiagnosticsP95 = getHistogramPercentile(
+        input.observabilityMetrics,
+        'intellisense_v2_semantic_diagnostics_query_ms',
+        'p95'
+    );
+    if (semanticDiagnosticsP95 !== null) {
+        findings.push(`semantic diagnostics p95=${Math.round(semanticDiagnosticsP95)}ms in the captured metrics snapshot.`);
+    }
+
+    return findings;
+}
+
+function renderSummaryMarkdown(report: ObservabilityIncidentBundleReport): string {
+    const lines: string[] = [
+        '# Observability Incident Bundle',
+        '',
+        `Captured at: ${report.captured_at}`,
+        `Bundle format: ${report.bundle_format}`,
+        `Completion trace limit: ${report.request_window.completion_trace_limit}`,
+        '',
+        '## Source Status',
+        renderSourceStatusLine('Completion timeline', report.sources.completion_timeline),
+        renderSourceStatusLine('Client probes', report.sources.client_probes),
+        renderSourceStatusLine('Observability metrics', report.sources.observability_metrics),
+        '',
+        '## Findings',
+        ...renderBulletSection(report.findings),
+        '',
+        '## Gaps',
+        ...renderBulletSection(
+            report.gaps.length > 0 ? report.gaps : ['No gaps were recorded for this bundle.']
+        ),
+        '',
+        '## Raw Attachments',
+        ...renderBulletSection(report.raw_attachments.map((attachment) => attachment.path)),
+        '',
+        '## Notes',
+        '- Completion timeline is the only authoritative server trace in this bundle.',
+        '- Client probes are local-only extension data and never substitute server stages, routes, or outcomes.',
+        '- Observability metrics are cumulative process snapshots, not per-request traces.',
+        '',
+    ];
+    return lines.join('\n');
+}
+
+function renderSourceStatusLine(
+    label: string,
+    source: ObservabilityIncidentBundleSource
+): string {
+    const details: string[] = [
+        `status=${source.status}`,
+        `classification=${source.classification}`,
+    ];
+    if (typeof source.trace_count === 'number') {
+        details.push(`trace_count=${source.trace_count}`);
+    }
+    if (typeof source.probe_count === 'number') {
+        details.push(`probe_count=${source.probe_count}`);
+    }
+    if (typeof source.contract_version === 'number') {
+        details.push(`contract=v${source.contract_version}`);
+    }
+    if (typeof source.uptime_seconds === 'number') {
+        details.push(`uptime_seconds=${source.uptime_seconds}`);
+    }
+    if (source.raw_attachment) {
+        details.push(`raw=${source.raw_attachment}`);
+    }
+    if (source.message) {
+        details.push(`message=${source.message}`);
+    }
+    return `- ${label}: ${details.join(' | ')}`;
+}
+
+function renderBulletSection(values: string[]): string[] {
+    return values.map((value) => `- ${value}`);
+}
+
+function getHistogramPercentile(
+    observabilityMetrics: ObservabilityMetricsResponse | null,
+    histogramName: string,
+    percentile: 'p50' | 'p95' | 'p99'
+): number | null {
+    const metrics = asRecord(observabilityMetrics?.metrics);
+    const histograms = asRecord(metrics?.histograms);
+    const histogram = asRecord(histograms?.[histogramName]);
+    const value = histogram?.[percentile];
+    return typeof value === 'number' ? value : null;
+}
+
+function asRecord(value: unknown): Record<string, any> | null {
+    if (!value || typeof value !== 'object') {
+        return null;
+    }
+    return value as Record<string, any>;
+}
+
+function buildBundleFolderName(capturedAtMs: number): string {
+    const suffix = new Date(capturedAtMs)
+        .toISOString()
+        .replace(/:/g, '-')
+        .replace(/\.\d{3}Z$/, 'Z');
+    return `bsl-observability-incident-${suffix}`;
+}

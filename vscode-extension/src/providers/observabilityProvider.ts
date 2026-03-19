@@ -373,6 +373,13 @@ export class ObservabilityProvider implements vscode.TreeDataProvider<BslOvervie
         };
         compactToggleItem.iconPath = new vscode.ThemeIcon(this.compactModeEnabled ? 'list-tree' : 'list-flat');
 
+        const exportItem = new BslOverviewItem('Export Incident Bundle', vscode.TreeItemCollapsibleState.None);
+        exportItem.command = {
+            command: 'bslAnalyzer.exportObservabilityIncidentBundle',
+            title: 'Export Observability Incident Bundle',
+        };
+        exportItem.iconPath = new vscode.ThemeIcon('export');
+
         const dumpItem = new BslOverviewItem('Dump Raw Metrics to Output', vscode.TreeItemCollapsibleState.None);
         dumpItem.command = {
             command: 'bslAnalyzer.dumpLspMetrics',
@@ -380,7 +387,7 @@ export class ObservabilityProvider implements vscode.TreeDataProvider<BslOvervie
         };
         dumpItem.iconPath = new vscode.ThemeIcon('output');
 
-        return Promise.resolve([refreshItem, toggleItem, compactToggleItem, dumpItem]);
+        return Promise.resolve([refreshItem, toggleItem, compactToggleItem, exportItem, dumpItem]);
     }
 
     private async loadMetrics(): Promise<Record<string, unknown> | null> {

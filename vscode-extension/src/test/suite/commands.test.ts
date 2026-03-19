@@ -39,6 +39,11 @@ suite('Commands Test Suite', () => {
         assert.ok(commands.includes('bslAnalyzer.restartServer'));
     });
 
+    test('Command: exportObservabilityIncidentBundle should exist', async () => {
+        const commands = await vscode.commands.getCommands();
+        assert.ok(commands.includes('bslAnalyzer.exportObservabilityIncidentBundle'));
+    });
+
     test('Command: refresh commands should exist', async () => {
         const refreshCommands = [
             'bslAnalyzer.refreshOverview',

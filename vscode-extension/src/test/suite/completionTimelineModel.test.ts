@@ -41,7 +41,7 @@ function buildClientProbe(probeId: string, version: number, startedAtMs: number)
 suite('Completion Timeline Model Test Suite', () => {
     test('Mapping LSP timeline payload -> UI model', () => {
         const payload: CompletionTimelineResponse = {
-            version: 5,
+            version: 6,
             traces: [
                 {
                     trace_id: 'trace-42',
@@ -134,7 +134,7 @@ suite('Completion Timeline Model Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(state.version, 5);
+        assert.strictEqual(state.version, 6);
         assert.strictEqual(state.traces.length, 1);
         assert.strictEqual(state.traces[0].trace_id, 'trace-42');
         assert.strictEqual(

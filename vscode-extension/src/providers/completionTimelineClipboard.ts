@@ -7,9 +7,11 @@ import {
 import {
     buildCompletionTraceBottleneckVerdicts,
     formatDispatcherAttributionTrace,
+    formatExactArtifactPollTrace,
     formatExactWaitTrace,
     formatPrepareProgressTrace,
     formatPrepareRuntimeTrace,
+    formatPrepareTimeoutAttributionTrace,
 } from './completionTimelineDrilldown';
 
 export type CompletionTimelineClipboardMode = 'all' | 'average';
@@ -85,8 +87,17 @@ export function formatCompletionTimelineTraceForClipboard(
     if (trace.server_edge_details) {
         const detailsBits = [
             `transport_received_at_ms=${trace.server_edge_details.transport_received_at_ms}`,
+            ...(typeof trace.server_edge_details.method_entered_at_ms === 'number'
+                ? [`method_entered_at_ms=${trace.server_edge_details.method_entered_at_ms}`]
+                : []),
             `handler_entered_at_ms=${trace.server_edge_details.handler_entered_at_ms}`,
             `response_sent_at_ms=${trace.server_edge_details.response_sent_at_ms}`,
+            ...(typeof trace.server_edge_details.transport_to_method_wait_ms === 'number'
+                ? [`transport_to_method_wait_ms=${trace.server_edge_details.transport_to_method_wait_ms}`]
+                : []),
+            ...(typeof trace.server_edge_details.method_prelude_exec_ms === 'number'
+                ? [`method_prelude_exec_ms=${trace.server_edge_details.method_prelude_exec_ms}`]
+                : []),
             `transport_to_handler_wait_ms=${trace.server_edge_details.transport_to_handler_wait_ms}`,
             `server_handler_exec_ms=${trace.server_edge_details.server_handler_exec_ms}`,
         ];
@@ -177,9 +188,21 @@ export function formatCompletionTimelineTraceForClipboard(
         if (snapshotRuntimeTrace) {
             lines.push(snapshotRuntimeTrace);
         }
+        const timeoutAttributionTrace = formatPrepareTimeoutAttributionTrace(
+            trace.prepare_details.timeout_attribution
+        );
+        if (timeoutAttributionTrace) {
+            lines.push(timeoutAttributionTrace);
+        }
         const exactWaitTrace = formatExactWaitTrace(trace.prepare_details.exact_wait);
         if (exactWaitTrace) {
             lines.push(exactWaitTrace);
+        }
+        const artifactPollTrace = formatExactArtifactPollTrace(
+            trace.prepare_details.exact_wait?.artifact_poll
+        );
+        if (artifactPollTrace) {
+            lines.push(artifactPollTrace);
         }
     }
     if (trace.turn_attribution) {

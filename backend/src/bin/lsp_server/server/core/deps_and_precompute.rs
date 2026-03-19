@@ -40,6 +40,21 @@ impl CompletionArtifactWaitOutcomeV2 {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CompletionArtifactPollTraceV2 {
+    pub poll_count: u64,
+    pub poll_elapsed: Duration,
+    pub observed_file_version: Option<i32>,
+    pub head_ready: Option<bool>,
+    pub exact_ready: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CompletionArtifactWaitTraceV2 {
+    pub outcome: CompletionArtifactWaitOutcomeV2,
+    pub poll_trace: CompletionArtifactPollTraceV2,
+}
+
 #[cfg(test)]
 fn test_type_index_precompute_delay() -> Option<std::time::Duration> {
     std::env::var("BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS")
@@ -486,37 +501,56 @@ impl BslLanguageServer {
         file_id: V2FileId,
         expected_version: Option<i32>,
         max_wait: std::time::Duration,
-    ) -> CompletionArtifactWaitOutcomeV2 {
+    ) -> CompletionArtifactWaitTraceV2 {
         let deadline = tokio::time::Instant::now() + max_wait;
+        let started = Instant::now();
+        let mut poll_count = 0_u64;
         loop {
             let analysis = self.analysis_v2.snapshot().await;
             let observed_version = analysis.file_version(file_id).ok().flatten();
             let version_matches = expected_version
                 .map(|version| observed_version == Some(version))
                 .unwrap_or(true);
-            if version_matches
-                && analysis
-                    .current_completion_head_ready(file_id)
-                    .ok()
-                    .unwrap_or(false)
-            {
-                return CompletionArtifactWaitOutcomeV2::HeadReady;
+            poll_count = poll_count.saturating_add(1);
+            let head_ready = analysis
+                .current_completion_head_ready(file_id)
+                .ok()
+                .unwrap_or(false);
+            let exact_ready = analysis
+                .current_type_index_serve_only_ready(file_id)
+                .ok()
+                .unwrap_or(false);
+            let poll_trace = CompletionArtifactPollTraceV2 {
+                poll_count,
+                poll_elapsed: started.elapsed(),
+                observed_file_version: observed_version,
+                head_ready: Some(head_ready),
+                exact_ready: Some(exact_ready),
+            };
+
+            if version_matches && head_ready {
+                return CompletionArtifactWaitTraceV2 {
+                    outcome: CompletionArtifactWaitOutcomeV2::HeadReady,
+                    poll_trace,
+                };
             }
-            if version_matches
-                && analysis
-                    .current_type_index_serve_only_ready(file_id)
-                    .ok()
-                    .unwrap_or(false)
-            {
-                return CompletionArtifactWaitOutcomeV2::ExactReady;
+            if version_matches && exact_ready {
+                return CompletionArtifactWaitTraceV2 {
+                    outcome: CompletionArtifactWaitOutcomeV2::ExactReady,
+                    poll_trace,
+                };
             }
 
             if tokio::time::Instant::now() >= deadline {
-                return if expected_version.is_some_and(|version| observed_version != Some(version))
-                {
-                    CompletionArtifactWaitOutcomeV2::ObservedVersionMismatch
-                } else {
-                    CompletionArtifactWaitOutcomeV2::Deadline
+                return CompletionArtifactWaitTraceV2 {
+                    outcome: if expected_version
+                        .is_some_and(|version| observed_version != Some(version))
+                    {
+                        CompletionArtifactWaitOutcomeV2::ObservedVersionMismatch
+                    } else {
+                        CompletionArtifactWaitOutcomeV2::Deadline
+                    },
+                    poll_trace,
                 };
             }
 

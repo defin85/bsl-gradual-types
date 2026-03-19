@@ -1806,6 +1806,95 @@ async fn interactive_prepare_timeout_rejects_preexisting_snapshot_and_stays_boun
 }
 
 #[tokio::test]
+async fn interactive_wait_budget_timeout_can_still_report_timeout_attribution_on_success() {
+    let file_id = FileId(113);
+    let deps_id = DepsSnapshotId::from_hash("deps_wait_budget_success");
+    let settings_id = SettingsId::from_hash("settings_wait_budget_success");
+
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: deps_id.clone(),
+        deps: make_deps(),
+    });
+    host.apply_change(Change::SetSettingsSnapshot {
+        settings_id: settings_id.clone(),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+    let runtime = IntellisenseV2Facade::new(
+        host,
+        Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p10"))),
+        None,
+    );
+    runtime.apply_changes(vec![Change::SetFile {
+        file_id,
+        text: Arc::from("x = 1;"),
+        version: 5,
+        path: Arc::from("wait_budget_success.bsl"),
+    }]);
+    let _ = runtime.snapshot().await;
+
+    let wait_budget_ms = crate::system::global_runtime_config()
+        .get_u64(crate::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
+        .unwrap_or(120);
+    let blocker = runtime.enqueue_test_sleep(
+        RuntimeQueuePriority::Interactive,
+        Duration::from_millis(wait_budget_ms.saturating_add(40)),
+    );
+
+    let context = ExecutionContext {
+        origin: ObservabilityOrigin::Lsp,
+        operation: SemanticOperation::Completion,
+        completion_mode: None,
+        completion_large_churn_active: false,
+        file_id,
+        min_file_version: Some(5),
+        expected_deps_id: Some(deps_id),
+        flow_sensitive: false,
+        settings: ExecutionSettings {
+            settings_id,
+            diagnostics_detail_level: DetailLevel::Full,
+        },
+        cancellation: CancellationPolicy::BestEffort,
+    };
+
+    let prepared = runtime
+        .prepare_stateful_operation(&context, None)
+        .await
+        .expect("prepare_stateful_operation should still succeed after timeout budget exhaustion");
+    timeout(Duration::from_secs(1), blocker)
+        .await
+        .expect("interactive sleep ack timeout")
+        .expect("interactive sleep ack");
+
+    assert!(
+        prepared.wait_budget_exhausted,
+        "wait budget must be exhausted for this path"
+    );
+    let timeout_attribution = prepared
+        .timeout_attribution
+        .expect("timeout attribution must be captured on exhausted wait budget");
+    assert_eq!(
+        timeout_attribution.source,
+        PrepareTimeoutSourceKind::InteractiveWaitBudget
+    );
+    assert_eq!(timeout_attribution.phase, "wait_for_file_version");
+    assert_eq!(
+        timeout_attribution.budget,
+        Duration::from_millis(wait_budget_ms)
+    );
+    assert!(
+        timeout_attribution.elapsed >= timeout_attribution.budget,
+        "elapsed must not be smaller than configured wait budget"
+    );
+    assert!(
+        timeout_attribution.overshoot > Duration::ZERO,
+        "overshoot must be positive when timeout wakes late"
+    );
+
+    runtime.shutdown_for_test().await;
+}
+
+#[tokio::test]
 async fn interactive_prepare_completion_reports_missing_deps_before_stale_acceptance() {
     let file_id = FileId(112);
     let deps_id_actual = DepsSnapshotId::from_hash("deps_actual");

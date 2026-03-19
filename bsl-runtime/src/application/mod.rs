@@ -17,10 +17,11 @@ pub use intellisense_v2::{
     CpuWorkClass, DeferredHeavyDiagnosticsReason, DiagnosticsDisposition, DiagnosticsExecutionPlan,
     DiagnosticsProfile, DiagnosticsTrigger, ExecutionContext, ExecutionSettings,
     IntellisenseV2Facade, ObservabilityMetricKind, ObservabilityOrigin, ObservabilityStage,
-    PrepareStatefulProgress, PrepareStatefulProgressSnapshot, PreparedOperationSnapshot,
-    RuntimePerfKnobs, ScaleAwareDiagnosticsKnobs, SemanticOperation, SemanticOutcome,
-    SemanticSnapshot, SingleflightQueryError, SnapshotWithDepsRuntimeTrace,
-    WaitForFileVersionResolutionKind, WaitForFileVersionRuntimeTrace,
+    PrepareStatefulProgress, PrepareStatefulProgressSnapshot, PrepareTimeoutAttributionTrace,
+    PrepareTimeoutSourceKind, PreparedOperationSnapshot, RuntimePerfKnobs,
+    ScaleAwareDiagnosticsKnobs, SemanticOperation, SemanticOutcome, SemanticSnapshot,
+    SingleflightQueryError, SnapshotWithDepsRuntimeTrace, WaitForFileVersionResolutionKind,
+    WaitForFileVersionRuntimeTrace,
 };
 pub use type_system::get_completion_with_semantic_program;
 pub use type_system::get_completion_with_semantic_program_snapshot;

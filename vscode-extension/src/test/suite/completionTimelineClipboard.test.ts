@@ -9,7 +9,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
     function buildReadyState(): CompletionTimelinePanelState {
         return {
             kind: 'ready',
-            version: 5,
+            version: 6,
             updated_at_ms: 1_700_000_000_100,
             client_probe_feed: {
                 updated_at_ms: 1_700_000_000_100,
@@ -59,9 +59,12 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                     dominant_stage: 'query_bundle',
                     server_edge_details: {
                         transport_received_at_ms: 1_699_999_999_960,
+                        method_entered_at_ms: 1_700_000_000_000,
                         handler_entered_at_ms: 1_700_000_000_002,
                         response_sent_at_ms: 1_700_000_000_030,
                         cancel_observed_at_ms: 1_700_000_000_021,
+                        transport_to_method_wait_ms: 40,
+                        method_prelude_exec_ms: 2,
                         transport_to_handler_wait_ms: 42,
                         server_handler_exec_ms: 28,
                         cancel_observed_after_handler_enter_ms: 19,
@@ -71,12 +74,19 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                         guard_outcome: 'timeout',
                         outcome: 'wait_not_ready',
                         route: 'exact_hit',
-                        fail_closed_cause: 'exact_deadline',
+                        fail_closed_cause: 'prepare_timeout',
                         min_file_version: 9,
                         shadow_version_at_start: 9,
                         observed_file_version: 8,
                         apply_age_at_start_ms: 3001,
                         apply_age_at_terminal_ms: 3088,
+                        timeout_attribution: {
+                            source: 'prepare_guard',
+                            phase: 'wait_for_file_version',
+                            budget_ms: 120,
+                            elapsed_ms: 2996,
+                            overshoot_ms: 2876,
+                        },
                         progress: {
                             phase: 'wait_for_file_version',
                             phase_started_offset_ms: 0,
@@ -90,13 +100,6 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                         snapshot_with_deps_runtime: {
                             queue_wait_ms: 3,
                             exec_ms: 5,
-                        },
-                        exact_wait: {
-                            artifact_wait_outcome: 'deadline',
-                            type_index_wait_outcome: 'deadline',
-                            type_index_waiter_action: 'promoted',
-                            matching_task_state: 'matching',
-                            task_phase: 'waiting_cpu_permit',
                         },
                     },
                     turn_attribution: {
@@ -179,12 +182,15 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('Completion Timeline | mode=all'));
         assert.ok(text!.includes('Server Timeline'));
         assert.ok(text!.includes('trace-1 (invoked)'));
-        assert.ok(text!.includes('contract=v5'));
+        assert.ok(text!.includes('contract=v6'));
         assert.ok(text!.includes('Client Probe Feed | local-only debug data'));
         assert.ok(text!.includes('probe-1 (trigger_character)'));
         assert.ok(text!.includes('transport_received_at_ms=1699999999960'));
+        assert.ok(text!.includes('method_entered_at_ms=1700000000000'));
         assert.ok(text!.includes('handler_entered_at_ms=1700000000002'));
         assert.ok(text!.includes('response_sent_at_ms=1700000000030'));
+        assert.ok(text!.includes('transport_to_method_wait_ms=40'));
+        assert.ok(text!.includes('method_prelude_exec_ms=2'));
         assert.ok(text!.includes('transport_to_handler_wait_ms=42'));
         assert.ok(text!.includes('server_handler_exec_ms=28'));
         assert.ok(text!.includes('cancel_observed_after_handler_enter_ms=19'));
@@ -202,13 +208,13 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('prepare_guard_outcome=timeout'));
         assert.ok(text!.includes('prepare_outcome=wait_not_ready'));
         assert.ok(text!.includes('completion_route=exact_hit'));
-        assert.ok(text!.includes('fail_closed_cause=exact_deadline'));
-        assert.ok(text!.includes('bottleneck_verdict=ingress_dominant'));
-        assert.ok(text!.includes('bottleneck_verdict=exact_deadline | waiter_action=promoted | task_state=matching:waiting_cpu_permit'));
+        assert.ok(text!.includes('fail_closed_cause=prepare_timeout'));
+        assert.ok(text!.includes('bottleneck_verdict=ingress_before_method_entry'));
+        assert.ok(text!.includes('bottleneck_verdict=prepare_timeout@prepare_guard'));
+        assert.ok(text!.includes('timeout_attribution | source=prepare_guard | phase=wait_for_file_version | budget_ms=120 | elapsed_ms=2996 | overshoot_ms=2876'));
         assert.ok(text!.includes('prepare_progress | phase=wait_for_file_version'));
         assert.ok(text!.includes('wait_for_file_version_runtime | queue_wait_ms=7 | exec_ms=2 | wake_wait_ms=90 | resolution=waiter'));
         assert.ok(text!.includes('snapshot_with_deps_runtime | queue_wait_ms=3 | exec_ms=5'));
-        assert.ok(text!.includes('exact_wait | artifact_wait_outcome=deadline | type_index_wait_outcome=deadline | type_index_waiter_action=promoted | matching_task_state=matching | task_phase=waiting_cpu_permit'));
         assert.ok(text!.includes('turn_request_file_seq=17'));
         assert.ok(text!.includes('dispatcher_resolution_latency_ms=4'));
         assert.ok(text!.includes('active_holder | request=req-0'));

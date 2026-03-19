@@ -193,6 +193,29 @@ pub struct CompletionTimelineExactWaitDetailsTrace {
     pub matching_task_state: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub task_phase: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_poll: Option<CompletionTimelineExactArtifactPollTrace>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CompletionTimelineExactArtifactPollTrace {
+    pub poll_count: u64,
+    pub poll_elapsed_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed_file_version: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub head_ready: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exact_ready: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompletionTimelinePrepareTimeoutAttributionTrace {
+    pub source: String,
+    pub phase: String,
+    pub budget_ms: u64,
+    pub elapsed_ms: u64,
+    pub overshoot_ms: u64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -225,6 +248,7 @@ pub struct CompletionTimelinePrepareDetailsTrace {
     pub wait_for_file_version_runtime: Option<CompletionTimelinePrepareRuntimeTrace>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub snapshot_with_deps_runtime: Option<CompletionTimelinePrepareRuntimeTrace>,
+    pub timeout_attribution: Option<CompletionTimelinePrepareTimeoutAttributionTrace>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exact_wait: Option<CompletionTimelineExactWaitDetailsTrace>,
 }
@@ -232,10 +256,16 @@ pub struct CompletionTimelinePrepareDetailsTrace {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompletionTimelineServerEdgeDetailsTrace {
     pub transport_received_at_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub method_entered_at_ms: Option<u64>,
     pub handler_entered_at_ms: u64,
     pub response_sent_at_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cancel_observed_at_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transport_to_method_wait_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub method_prelude_exec_ms: Option<u64>,
     pub transport_to_handler_wait_ms: u64,
     pub server_handler_exec_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]

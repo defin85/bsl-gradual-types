@@ -3,10 +3,7 @@ import {
     ObservabilityMetricsFetchResult,
 } from '../lsp/customRequests';
 import { CompletionProbe } from './completionProbe';
-import {
-    buildCompletionTraceBottleneckVerdicts,
-    derivePrepareTimeoutSubphase,
-} from './completionTimelineDrilldown';
+import { buildCompletionTraceBottleneckVerdicts } from './completionTimelineDrilldown';
 
 const BUNDLE_FORMAT = 'bsl-observability-incident/v1';
 const COMPLETION_TIMELINE_RAW_PATH = 'raw/completion_timeline.json';
@@ -137,9 +134,9 @@ function buildCompletionTimelineSource(
     files: ObservabilityIncidentBundleFile[]
 ): ObservabilityIncidentBundleSource {
     if (completionTimeline.kind === 'ok') {
-        if (completionTimeline.response.version < 5) {
+        if (completionTimeline.response.version < 6) {
             gaps.push(
-                `Completion timeline contract v${completionTimeline.response.version} does not include all v5 bottleneck drilldown fields; missing verdict details are unavailable by design.`
+                `Completion timeline contract v${completionTimeline.response.version} does not include all v6 root-cause attribution fields; missing verdict details are unavailable by design.`
             );
         }
         rawAttachments.push({
@@ -245,20 +242,26 @@ function deriveFindings(input: ObservabilityIncidentBundleInput): string[] {
     const findings: string[] = [];
     if (input.completionTimeline.kind === 'ok') {
         const traces = input.completionTimeline.response.traces;
-        if (input.completionTimeline.response.version < 5) {
+        if (input.completionTimeline.response.version < 6) {
             findings.push(
-                `Completion timeline contract v${input.completionTimeline.response.version} is available, but v5 bottleneck drilldown details may be unavailable.`
+                `Completion timeline contract v${input.completionTimeline.response.version} is available, but v6 root-cause attribution details may be unavailable.`
             );
         }
-        const transportWaitDominantCount = traces.filter((trace) => {
-            const transportWait = trace.server_edge_details?.transport_to_handler_wait_ms;
-            const handlerExec = trace.server_edge_details?.server_handler_exec_ms;
-            return typeof transportWait === 'number' && typeof handlerExec === 'number' && transportWait > handlerExec;
-        }).length;
-
-        if (transportWaitDominantCount > 0) {
+        const ingressBeforeMethodCount = traces.filter((trace) =>
+            buildCompletionTraceBottleneckVerdicts(trace).includes('ingress_before_method_entry')
+        ).length;
+        if (ingressBeforeMethodCount > 0) {
             findings.push(
-                `${transportWaitDominantCount} completion trace(s) spent more time waiting before handler entry than inside the server handler.`
+                `${ingressBeforeMethodCount} completion trace(s) were bottlenecked before method entry.`
+            );
+        }
+
+        const handlerPreludeDominantCount = traces.filter((trace) =>
+            buildCompletionTraceBottleneckVerdicts(trace).includes('handler_prelude_dominant')
+        ).length;
+        if (handlerPreludeDominantCount > 0) {
+            findings.push(
+                `${handlerPreludeDominantCount} completion trace(s) were bottlenecked inside handler prelude before completion stages started.`
             );
         }
 
@@ -266,13 +269,14 @@ function deriveFindings(input: ObservabilityIncidentBundleInput): string[] {
             (trace) => trace.prepare_details?.fail_closed_cause === 'prepare_timeout'
         );
         if (prepareTimeoutTraces.length > 0) {
-            const subphases = new Set(
-                prepareTimeoutTraces.map((trace) =>
-                    derivePrepareTimeoutSubphase(trace.prepare_details) ?? 'unavailable'
-                )
+            const verdicts = new Set(
+                prepareTimeoutTraces
+                    .map((trace) => buildCompletionTraceBottleneckVerdicts(trace))
+                    .flat()
+                    .filter((verdict) => verdict.startsWith('prepare_timeout@'))
             );
             findings.push(
-                `prepare_timeout was observed in ${prepareTimeoutTraces.length} completion trace(s): ${[...subphases].join(', ')}.`
+                `prepare_timeout was observed in ${prepareTimeoutTraces.length} completion trace(s): ${[...verdicts].join(', ')}.`
             );
         }
 

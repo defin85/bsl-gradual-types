@@ -275,10 +275,52 @@ pub struct PreparedOperationSnapshot {
     pub snapshot_elapsed: Duration,
     pub wait_for_file_version_runtime: Option<WaitForFileVersionRuntimeTrace>,
     pub snapshot_with_deps_runtime: SnapshotWithDepsRuntimeTrace,
+    pub timeout_attribution: Option<PrepareTimeoutAttributionTrace>,
     pub wait_budget_exhausted: bool,
     pub stale_served: bool,
     pub completion_churn_fastpath_active: bool,
     pub observed_file_version: Option<i32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrepareTimeoutSourceKind {
+    PrepareGuard,
+    InteractiveWaitBudget,
+}
+
+impl PrepareTimeoutSourceKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::PrepareGuard => "prepare_guard",
+            Self::InteractiveWaitBudget => "interactive_wait_budget",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PrepareTimeoutAttributionTrace {
+    pub source: PrepareTimeoutSourceKind,
+    pub phase: &'static str,
+    pub budget: Duration,
+    pub elapsed: Duration,
+    pub overshoot: Duration,
+}
+
+impl PrepareTimeoutAttributionTrace {
+    pub fn new(
+        source: PrepareTimeoutSourceKind,
+        phase: &'static str,
+        budget: Duration,
+        elapsed: Duration,
+    ) -> Self {
+        Self {
+            source,
+            phase,
+            budget,
+            elapsed,
+            overshoot: elapsed.saturating_sub(budget),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

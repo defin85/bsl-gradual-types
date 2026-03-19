@@ -105,7 +105,7 @@ npm test
 ### Фокусный smoke для Completion Timeline / Client Probe Feed
 ```bash
 npm run compile:fast
-BSL_TEST_GREP='Completion Probe (Schema|Recorder|Runtime|Store) Test Suite|Completion Timeline (Clipboard|Model|Webview Provider) Test Suite|Client Options Test Suite|Observability Incident Bundle Test Suite|Observability Commands Test Suite|getCompletionTimeline should work via executeCommand|getCompletionTimeline should fail-closed on Method not found|getObservabilityMetricsFetchResult should preserve unsupported capability until reset|getObservabilityMetricsFetchResult should return unavailable error on timeout' node ./out/test/runTest.js
+BSL_TEST_GREP='Completion Probe (Schema|Recorder|Runtime|Store) Test Suite|Completion Timeline (Clipboard|Drilldown|Model|Webview Provider) Test Suite|Client Options Test Suite|Observability Incident Bundle Test Suite|Observability Commands Test Suite|getCompletionTimeline should work via executeCommand|getCompletionTimeline should fail-closed on Method not found|getObservabilityMetricsFetchResult should preserve unsupported capability until reset|getObservabilityMetricsFetchResult should return unavailable error on timeout' node ./out/test/runTest.js
 ```
 
 Этот путь повторяет extension-side slice из `./scripts/run-intellisense-tests.sh smoke` и проверяет:
@@ -113,8 +113,8 @@ BSL_TEST_GREP='Completion Probe (Schema|Recorder|Runtime|Store) Test Suite|Compl
 - runtime transport hook и selection observer для client probes;
 - wiring default `LanguageClient` path;
 - dual-view `Server Timeline` / `Client Probe Feed`;
-- rendering/export для `Server Timeline` с `response.version=5`, bounded bottleneck drilldown (`dispatcher_resolution_latency_ms`, `prepare_progress`, `wait_for_file_version_runtime`, `snapshot_with_deps_runtime`, bounded `exact_wait`) и human-readable verdict projection;
-- graceful degradation для backend payload `v4` без выдумывания отсутствующих `v5` полей;
+- rendering/export для `Server Timeline` с `response.version=6`, bounded root-cause attribution (`method_entered` split, `dispatcher_resolution_latency_ms`, `prepare_progress`, `wait_for_file_version_runtime`, `snapshot_with_deps_runtime`, `timeout_attribution`, bounded `exact_wait` и `artifact_poll`) и human-readable verdict projection;
+- graceful degradation для backend payload `v5` без выдумывания отсутствующих `v6` полей;
 - fail-closed/executeCommand поведение `bsl.getCompletionTimeline`;
 - truthful `unsupported` vs `unavailable` semantics для observability metrics export;
 - actual command export path для `bslAnalyzer.exportObservabilityIncidentBundle`, включая запись `summary.md`, `incident.json` и `raw/*`;

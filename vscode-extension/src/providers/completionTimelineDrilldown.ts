@@ -1,8 +1,10 @@
 import {
+    CompletionTimelineExactArtifactPollTrace,
     CompletionTimelineExactWaitDetailsTrace,
     CompletionTimelinePrepareDetailsTrace,
     CompletionTimelinePrepareProgressTrace,
     CompletionTimelinePrepareRuntimeTrace,
+    CompletionTimelinePrepareTimeoutAttributionTrace,
     CompletionTimelineTrace,
     CompletionTimelineTurnAttributionTrace,
 } from '../lsp/customRequests';
@@ -39,24 +41,50 @@ export function buildCompletionTraceBottleneckVerdicts(
     >
 ): string[] {
     const verdicts: string[] = [];
-    const transportWait = trace.server_edge_details?.transport_to_handler_wait_ms;
-    const handlerExec = trace.server_edge_details?.server_handler_exec_ms;
+    const transportToMethodWait = trace.server_edge_details?.transport_to_method_wait_ms;
+    const methodPreludeExec = trace.server_edge_details?.method_prelude_exec_ms;
     if (
-        typeof transportWait === 'number' &&
-        typeof handlerExec === 'number' &&
-        transportWait > handlerExec
+        typeof transportToMethodWait === 'number' &&
+        typeof methodPreludeExec === 'number'
     ) {
-        verdicts.push('ingress_dominant');
+        if (transportToMethodWait >= methodPreludeExec) {
+            verdicts.push('ingress_before_method_entry');
+        } else {
+            verdicts.push('handler_prelude_dominant');
+        }
+    } else {
+        const transportWait = trace.server_edge_details?.transport_to_handler_wait_ms;
+        const handlerExec = trace.server_edge_details?.server_handler_exec_ms;
+        if (
+            typeof transportWait === 'number' &&
+            typeof handlerExec === 'number' &&
+            transportWait > handlerExec
+        ) {
+            verdicts.push('ingress_dominant');
+        }
     }
 
-    const prepareTimeoutSubphase = derivePrepareTimeoutSubphase(trace.prepare_details);
-    if (prepareTimeoutSubphase) {
-        verdicts.push(`prepare_timeout@${prepareTimeoutSubphase}`);
+    if (trace.prepare_details?.fail_closed_cause === 'prepare_timeout') {
+        const timeoutSource = trace.prepare_details.timeout_attribution?.source;
+        if (timeoutSource) {
+            verdicts.push(`prepare_timeout@${timeoutSource}`);
+        } else {
+            const prepareTimeoutSubphase = derivePrepareTimeoutSubphase(trace.prepare_details);
+            if (prepareTimeoutSubphase && prepareTimeoutSubphase !== 'unavailable') {
+                verdicts.push(`prepare_timeout@${prepareTimeoutSubphase}`);
+            } else {
+                verdicts.push('prepare_timeout@wait_for_file_version');
+            }
+        }
     }
 
     if (trace.prepare_details?.fail_closed_cause === 'exact_deadline') {
-        const stateSummary = formatExactWaitStateSummary(trace.prepare_details.exact_wait);
-        verdicts.push(stateSummary ? `exact_deadline | ${stateSummary}` : 'exact_deadline');
+        if (trace.prepare_details.exact_wait?.artifact_poll) {
+            verdicts.push('exact_deadline@artifact_poll');
+        } else {
+            const stateSummary = formatExactWaitStateSummary(trace.prepare_details.exact_wait);
+            verdicts.push(stateSummary ? `exact_deadline | ${stateSummary}` : 'exact_deadline');
+        }
     }
 
     return verdicts;
@@ -95,6 +123,22 @@ export function formatPrepareRuntimeTrace(
     return bits.length > 1 ? bits.join(' | ') : null;
 }
 
+export function formatPrepareTimeoutAttributionTrace(
+    trace?: CompletionTimelinePrepareTimeoutAttributionTrace
+): string | null {
+    if (!trace) {
+        return null;
+    }
+    return [
+        'timeout_attribution',
+        `source=${trace.source}`,
+        `phase=${trace.phase}`,
+        `budget_ms=${trace.budget_ms}`,
+        `elapsed_ms=${trace.elapsed_ms}`,
+        `overshoot_ms=${trace.overshoot_ms}`,
+    ].join(' | ');
+}
+
 export function formatExactWaitTrace(
     exactWait?: CompletionTimelineExactWaitDetailsTrace
 ): string | null {
@@ -115,6 +159,23 @@ export function formatExactWaitTrace(
     pushStringFact(bits, 'matching_task_state', exactWait.matching_task_state);
     pushStringFact(bits, 'task_phase', exactWait.task_phase);
     return bits.length > 1 ? bits.join(' | ') : null;
+}
+
+export function formatExactArtifactPollTrace(
+    trace?: CompletionTimelineExactArtifactPollTrace
+): string | null {
+    if (!trace) {
+        return null;
+    }
+    const bits = [
+        'artifact_poll',
+        `poll_count=${trace.poll_count}`,
+        `poll_elapsed_ms=${trace.poll_elapsed_ms}`,
+    ];
+    pushNumberFact(bits, 'observed_file_version', trace.observed_file_version);
+    pushBooleanFact(bits, 'head_ready', trace.head_ready);
+    pushBooleanFact(bits, 'exact_ready', trace.exact_ready);
+    return bits.join(' | ');
 }
 
 export function formatDispatcherAttributionTrace(

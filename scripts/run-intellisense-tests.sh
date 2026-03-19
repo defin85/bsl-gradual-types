@@ -64,14 +64,18 @@ run_cross_adapter_smoke() {
 run_completion_timeline_drilldown_smoke() {
   cargo test -p bsl-runtime wait_for_file_version_runtime_trace_distinguishes_immediate_and_waiter_paths -- --nocapture
   cargo test -p bsl-runtime snapshot_with_deps_runtime_trace_exposes_queue_and_exec_latency -- --nocapture
+  cargo test -p bsl-runtime interactive_wait_budget_timeout_can_still_report_timeout_attribution_on_success -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server p22_get_completion_timeline_exposes_versioned_contract -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server p22_get_completion_timeline_contains_completion_trace -- --nocapture
+  cargo test -p bsl-backend --bin bsl-lsp-server server_edge_details_are_derived_from_transport_handler_and_response_timestamps -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server prepare_runtime_drilldown_is_serialised_into_trace -- --nocapture
+  cargo test -p bsl-backend --bin bsl-lsp-server prepare_timeout_attribution_is_serialised_into_trace -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server exact_wait_task_state_drilldown_is_serialised_into_trace -- --nocapture
+  cargo test -p bsl-backend --bin bsl-lsp-server exact_wait_artifact_poll_is_serialised_into_trace -- --nocapture
 }
 
 run_extension_completion_observability_smoke() {
-  local grep_pattern='Completion Probe (Schema|Recorder|Runtime|Store) Test Suite|Completion Timeline (Clipboard|Model|Webview Provider) Test Suite|Client Options Test Suite|Observability Incident Bundle Test Suite|Observability Commands Test Suite|getCompletionTimeline should work via executeCommand|getCompletionTimeline should fail-closed on Method not found|getObservabilityMetricsFetchResult should preserve unsupported capability until reset|getObservabilityMetricsFetchResult should return unavailable error on timeout'
+  local grep_pattern='Completion Probe (Schema|Recorder|Runtime|Store) Test Suite|Completion Timeline (Clipboard|Drilldown|Model|Webview Provider) Test Suite|Client Options Test Suite|Observability Incident Bundle Test Suite|Observability Commands Test Suite|getCompletionTimeline should work via executeCommand|getCompletionTimeline should fail-closed on Method not found|getObservabilityMetricsFetchResult should preserve unsupported capability until reset|getObservabilityMetricsFetchResult should return unavailable error on timeout'
 
   npm --prefix "${ROOT_DIR}/vscode-extension" run compile:fast
   (

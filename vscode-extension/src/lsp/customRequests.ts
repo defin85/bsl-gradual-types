@@ -546,6 +546,22 @@ export interface CompletionTimelinePrepareRuntimeTrace {
     resolution?: string;
 }
 
+export interface CompletionTimelinePrepareTimeoutAttributionTrace {
+    source: string;
+    phase: string;
+    budget_ms: number;
+    elapsed_ms: number;
+    overshoot_ms: number;
+}
+
+export interface CompletionTimelineExactArtifactPollTrace {
+    poll_count: number;
+    poll_elapsed_ms: number;
+    observed_file_version?: number;
+    head_ready?: boolean;
+    exact_ready?: boolean;
+}
+
 export interface CompletionTimelineExactWaitDetailsTrace {
     head_ready_before_wait?: boolean;
     exact_ready_before_wait?: boolean;
@@ -555,6 +571,7 @@ export interface CompletionTimelineExactWaitDetailsTrace {
     type_index_waiter_action?: string;
     matching_task_state?: string;
     task_phase?: string;
+    artifact_poll?: CompletionTimelineExactArtifactPollTrace;
 }
 
 export interface CompletionTimelinePrepareDetailsTrace {
@@ -573,14 +590,18 @@ export interface CompletionTimelinePrepareDetailsTrace {
     progress?: CompletionTimelinePrepareProgressTrace;
     wait_for_file_version_runtime?: CompletionTimelinePrepareRuntimeTrace;
     snapshot_with_deps_runtime?: CompletionTimelinePrepareRuntimeTrace;
+    timeout_attribution?: CompletionTimelinePrepareTimeoutAttributionTrace;
     exact_wait?: CompletionTimelineExactWaitDetailsTrace;
 }
 
 export interface CompletionTimelineServerEdgeDetailsTrace {
     transport_received_at_ms: number;
+    method_entered_at_ms?: number;
     handler_entered_at_ms: number;
     response_sent_at_ms: number;
     cancel_observed_at_ms?: number;
+    transport_to_method_wait_ms?: number;
+    method_prelude_exec_ms?: number;
     transport_to_handler_wait_ms: number;
     server_handler_exec_ms: number;
     cancel_observed_after_handler_enter_ms?: number;

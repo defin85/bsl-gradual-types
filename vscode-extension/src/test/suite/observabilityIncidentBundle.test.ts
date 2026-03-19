@@ -40,7 +40,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 5,
+                version: 6,
                 traces: [
                     {
                         trace_id: 'trace-1',
@@ -54,6 +54,13 @@ suite('Observability Incident Bundle Test Suite', () => {
                         prepare_details: {
                             fail_closed_cause: 'exact_deadline',
                             exact_wait: {
+                                artifact_poll: {
+                                    poll_count: 14,
+                                    poll_elapsed_ms: 155,
+                                    observed_file_version: 9,
+                                    head_ready: false,
+                                    exact_ready: false,
+                                },
                                 type_index_waiter_action: 'promoted',
                                 matching_task_state: 'matching',
                                 task_phase: 'waiting_cpu_permit',
@@ -86,6 +93,13 @@ suite('Observability Incident Bundle Test Suite', () => {
                         dominant_stage: 'prepare_stateful',
                         prepare_details: {
                             fail_closed_cause: 'prepare_timeout',
+                            timeout_attribution: {
+                                source: 'prepare_guard',
+                                phase: 'wait_for_file_version',
+                                budget_ms: 120,
+                                elapsed_ms: 2996,
+                                overshoot_ms: 2876,
+                            },
                             progress: {
                                 phase: 'wait_for_file_version',
                             },
@@ -141,11 +155,11 @@ suite('Observability Incident Bundle Test Suite', () => {
             ]
         );
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'available');
-        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 5);
+        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 6);
         assert.strictEqual(bundle.incidentReport.sources.client_probes.probe_count, 1);
         assert.strictEqual(bundle.incidentReport.sources.observability_metrics.uptime_seconds, 184);
-        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('prepare_timeout was observed in 1 completion trace(s): wait_for_file_version')));
-        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('exact_deadline was observed after prepare completed: exact_deadline | waiter_action=promoted | task_state=matching:waiting_cpu_permit')));
+        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('prepare_timeout was observed in 1 completion trace(s): prepare_timeout@prepare_guard')));
+        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('exact_deadline was observed after prepare completed: exact_deadline@artifact_poll')));
         assert.ok(
             bundle.incidentReport.findings.some((finding) => finding.includes('semantic diagnostics p95=3374ms'))
         );
@@ -170,14 +184,19 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.summaryMarkdown.includes('status=unsupported'));
     });
 
-    test('v4 completion timeline should stay valid and mark v5 drilldown details as unavailable', () => {
+    test('v5 completion timeline should stay valid and mark v6 root-cause details as unavailable', () => {
         const timeline = sampleTimeline();
         if (timeline.kind !== 'ok') {
             throw new Error('expected ok timeline fixture');
         }
-        timeline.response.version = 4;
+        timeline.response.version = 5;
         timeline.response.traces[0].prepare_details = {
             fail_closed_cause: 'exact_deadline',
+            exact_wait: {
+                type_index_waiter_action: 'promoted',
+                matching_task_state: 'matching',
+                task_phase: 'waiting_cpu_permit',
+            },
         };
         timeline.response.traces[1].prepare_details = {
             fail_closed_cause: 'prepare_timeout',
@@ -191,10 +210,10 @@ suite('Observability Incident Bundle Test Suite', () => {
             observabilityMetrics: sampleMetrics(),
         });
 
-        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('contract v4')));
-        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('contract v4')));
-        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('prepare_timeout was observed in 1 completion trace(s): unavailable')));
-        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('task_state=unavailable')));
+        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('contract v5')));
+        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('contract v5')));
+        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('prepare_timeout was observed in 1 completion trace(s): prepare_timeout@wait_for_file_version')));
+        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('waiter_action=promoted')));
     });
 
     test('missing metrics should keep available sections and mark metrics gap explicitly', () => {

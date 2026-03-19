@@ -9691,7 +9691,7 @@ async fn p22_get_completion_timeline_exposes_versioned_contract() {
             .get("version")
             .and_then(|value| value.as_u64())
             .expect("version"),
-        5
+        6
     );
     assert!(
         result
@@ -9862,10 +9862,17 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
         prepare_details.contains_key("exact_wait"),
         "prepare_details must expose exact wait details in v5 contract"
     );
+    assert!(
+        prepare_details.contains_key("timeout_attribution"),
+        "prepare_details must expose timeout attribution details in v6 contract"
+    );
     for field in [
         "transport_received_at_ms",
+        "method_entered_at_ms",
         "handler_entered_at_ms",
         "response_sent_at_ms",
+        "transport_to_method_wait_ms",
+        "method_prelude_exec_ms",
         "transport_to_handler_wait_ms",
         "server_handler_exec_ms",
     ] {
@@ -9882,10 +9889,22 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
         .get("handler_entered_at_ms")
         .and_then(|value| value.as_u64())
         .expect("handler_entered_at_ms");
+    let method_entered_at_ms = server_edge_details
+        .get("method_entered_at_ms")
+        .and_then(|value| value.as_u64())
+        .expect("method_entered_at_ms");
     let response_sent_at_ms = server_edge_details
         .get("response_sent_at_ms")
         .and_then(|value| value.as_u64())
         .expect("response_sent_at_ms");
+    let transport_to_method_wait_ms = server_edge_details
+        .get("transport_to_method_wait_ms")
+        .and_then(|value| value.as_u64())
+        .expect("transport_to_method_wait_ms");
+    let method_prelude_exec_ms = server_edge_details
+        .get("method_prelude_exec_ms")
+        .and_then(|value| value.as_u64())
+        .expect("method_prelude_exec_ms");
     let transport_to_handler_wait_ms = server_edge_details
         .get("transport_to_handler_wait_ms")
         .and_then(|value| value.as_u64())
@@ -9899,8 +9918,26 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
         "transport_received_at_ms must not exceed handler_entered_at_ms"
     );
     assert!(
+        transport_received_at_ms <= method_entered_at_ms,
+        "transport_received_at_ms must not exceed method_entered_at_ms"
+    );
+    assert!(
+        method_entered_at_ms <= handler_entered_at_ms,
+        "method_entered_at_ms must not exceed handler_entered_at_ms"
+    );
+    assert!(
         handler_entered_at_ms <= response_sent_at_ms,
         "handler_entered_at_ms must not exceed response_sent_at_ms"
+    );
+    assert_eq!(
+        transport_to_method_wait_ms,
+        method_entered_at_ms.saturating_sub(transport_received_at_ms),
+        "transport_to_method_wait_ms must match timestamp delta"
+    );
+    assert_eq!(
+        method_prelude_exec_ms,
+        handler_entered_at_ms.saturating_sub(method_entered_at_ms),
+        "method_prelude_exec_ms must match timestamp delta"
     );
     assert_eq!(
         transport_to_handler_wait_ms,

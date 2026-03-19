@@ -65,6 +65,7 @@ impl IntellisenseV2Facade {
         let queue_priority = RuntimeQueuePriority::for_operation(context.operation);
         let mut wait_budget_exhausted = false;
         let stale_served = false;
+        let mut timeout_attribution = None;
 
         let (wait_elapsed, wait_for_file_version_runtime) = if let Some(min_file_version) =
             context.min_file_version
@@ -106,6 +107,16 @@ impl IntellisenseV2Facade {
                 )
             };
             let elapsed = started.elapsed();
+            if wait_budget_exhausted {
+                if let Some(knobs) = interactive_knobs {
+                    timeout_attribution = Some(PrepareTimeoutAttributionTrace::new(
+                        PrepareTimeoutSourceKind::InteractiveWaitBudget,
+                        "wait_for_file_version",
+                        knobs.wait_budget,
+                        elapsed,
+                    ));
+                }
+            }
             if let Some(coordinator) = observability {
                 coordinator.record_intellisense_v2_wait_for_file_version_with_origin_and_mode(
                     context.origin.as_str(),
@@ -295,6 +306,7 @@ impl IntellisenseV2Facade {
             snapshot_elapsed,
             wait_for_file_version_runtime,
             snapshot_with_deps_runtime,
+            timeout_attribution,
             wait_budget_exhausted,
             stale_served,
             completion_churn_fastpath_active: fastpath_preconditions.churn_aware_fastpath_active(),
@@ -356,6 +368,7 @@ impl IntellisenseV2Facade {
             snapshot_elapsed,
             wait_for_file_version_runtime: None,
             snapshot_with_deps_runtime: SnapshotWithDepsRuntimeTrace::default(),
+            timeout_attribution: None,
             wait_budget_exhausted: false,
             stale_served: false,
             completion_churn_fastpath_active: false,

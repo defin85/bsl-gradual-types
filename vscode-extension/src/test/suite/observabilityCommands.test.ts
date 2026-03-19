@@ -45,7 +45,7 @@ suite('Observability Commands Test Suite', () => {
         sinon.stub(customRequestsModule, 'getCompletionTimeline').resolves({
             kind: 'ok',
             response: {
-                version: 5,
+                version: 6,
                 traces: [],
             },
         });

@@ -51,7 +51,7 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         'npm --prefix "${ROOT_DIR}/vscode-extension" run compile:fast',
         "BSL_TEST_GREP=",
         "Completion Probe (Schema|Recorder|Runtime|Store) Test Suite",
-        "Completion Timeline (Clipboard|Model|Webview Provider) Test Suite",
+        "Completion Timeline (Clipboard|Drilldown|Model|Webview Provider) Test Suite",
         "Client Options Test Suite",
         "Observability Incident Bundle Test Suite",
         "Observability Commands Test Suite",
@@ -63,10 +63,14 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
     REQUIRED_COMPLETION_TIMELINE_DRILLDOWN_SELECTORS = [
         "wait_for_file_version_runtime_trace_distinguishes_immediate_and_waiter_paths",
         "snapshot_with_deps_runtime_trace_exposes_queue_and_exec_latency",
+        "interactive_wait_budget_timeout_can_still_report_timeout_attribution_on_success",
         "p22_get_completion_timeline_exposes_versioned_contract",
         "p22_get_completion_timeline_contains_completion_trace",
+        "server_edge_details_are_derived_from_transport_handler_and_response_timestamps",
         "prepare_runtime_drilldown_is_serialised_into_trace",
+        "prepare_timeout_attribution_is_serialised_into_trace",
         "exact_wait_task_state_drilldown_is_serialised_into_trace",
+        "exact_wait_artifact_poll_is_serialised_into_trace",
     ]
 
     def smoke_script_text(self) -> str:

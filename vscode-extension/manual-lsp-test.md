@@ -136,15 +136,15 @@ timeout 5s ./bin/lsp-server.exe 2>&1
 ```bash
 cd /path/to/bsl-gradual-types/vscode-extension
 npm run compile:fast
-BSL_TEST_GREP='Completion Probe (Schema|Recorder|Runtime|Store) Test Suite|Completion Timeline (Clipboard|Model|Webview Provider) Test Suite|Client Options Test Suite|Observability Incident Bundle Test Suite|Observability Commands Test Suite|getCompletionTimeline should work via executeCommand|getCompletionTimeline should fail-closed on Method not found|getObservabilityMetricsFetchResult should preserve unsupported capability until reset|getObservabilityMetricsFetchResult should return unavailable error on timeout' node ./out/test/runTest.js
+BSL_TEST_GREP='Completion Probe (Schema|Recorder|Runtime|Store) Test Suite|Completion Timeline (Clipboard|Drilldown|Model|Webview Provider) Test Suite|Client Options Test Suite|Observability Incident Bundle Test Suite|Observability Commands Test Suite|getCompletionTimeline should work via executeCommand|getCompletionTimeline should fail-closed on Method not found|getObservabilityMetricsFetchResult should preserve unsupported capability until reset|getObservabilityMetricsFetchResult should return unavailable error on timeout' node ./out/test/runTest.js
 ```
 
 **Ожидаемый результат**:
 - проходят focused extension-host тесты для `Completion Timeline` и `Client Probe Feed`;
 - тот же smoke slice покрывает `Observability Incident Bundle` export, partial-export semantics и actual command file export path;
 - transport hook (`Completion Probe Runtime`) входит в тот же smoke path, что и `run-intellisense-tests.sh smoke`;
-- `Server Timeline` на payload `version=5` показывает bounded bottleneck drilldown (`dispatcher_resolution_latency_ms`, `prepare_progress`, `wait_for_file_version_runtime`, `snapshot_with_deps_runtime`, bounded `exact_wait` waiter/task-state);
+- `Server Timeline` на payload `version=6` показывает bounded root-cause attribution (`method_entered` split, `dispatcher_resolution_latency_ms`, `prepare_progress`, `wait_for_file_version_runtime`, `snapshot_with_deps_runtime`, `timeout_attribution`, bounded `exact_wait` waiter/task-state и `artifact_poll`);
 - `bsl.getCompletionTimeline` остаётся fail-closed и не смешивается с локальными client probes;
-- clipboard/webview/incident summary выносят verdict'ы вроде `ingress_dominant`, `prepare_timeout@wait_for_file_version` и `exact_deadline | waiter_action=... | task_state=...` без чтения raw JSON;
-- при более старом backend payload `v4` extension деградирует явно и не выдумывает отсутствующие `v5` поля;
+- clipboard/webview/incident summary выносят verdict'ы вроде `ingress_before_method_entry`, `handler_prelude_dominant`, `prepare_timeout@prepare_guard` и `exact_deadline@artifact_poll` без чтения raw JSON;
+- при более старом backend payload `v5` extension деградирует явно и не выдумывает отсутствующие `v6` поля;
 - export bundle сохраняет `summary.md`, `incident.json` и `raw/*` attachments без использования truncated Output dump как источника.

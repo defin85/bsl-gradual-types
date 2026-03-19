@@ -747,6 +747,18 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             return '<div class="overhead">' + escapeHtml(label) + ': ' + bits.join(' | ') + '</div>';
         }
 
+        function renderPrepareTimeoutAttribution(trace) {
+            if (!trace) {
+                return '';
+            }
+            return '<div class="overhead">timeout_attribution | source=' + escapeHtml(trace.source) +
+                ' | phase=' + escapeHtml(trace.phase) +
+                ' | budget_ms=' + escapeHtml(trace.budget_ms) +
+                ' | elapsed_ms=' + escapeHtml(trace.elapsed_ms) +
+                ' | overshoot_ms=' + escapeHtml(trace.overshoot_ms) +
+            '</div>';
+        }
+
         function renderExactWait(details) {
             if (!details) {
                 return '';
@@ -782,33 +794,76 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             return '<div class="overhead">Exact wait: ' + bits.join(' | ') + '</div>';
         }
 
+        function renderArtifactPoll(trace) {
+            if (!trace) {
+                return '';
+            }
+            const bits = [
+                'poll_count=' + escapeHtml(trace.poll_count),
+                'poll_elapsed_ms=' + escapeHtml(trace.poll_elapsed_ms),
+            ];
+            if (typeof trace.observed_file_version === 'number') {
+                bits.push('observed_file_version=' + escapeHtml(trace.observed_file_version));
+            }
+            if (typeof trace.head_ready === 'boolean') {
+                bits.push('head_ready=' + escapeHtml(trace.head_ready));
+            }
+            if (typeof trace.exact_ready === 'boolean') {
+                bits.push('exact_ready=' + escapeHtml(trace.exact_ready));
+            }
+            return '<div class="overhead">Artifact poll: ' + bits.join(' | ') + '</div>';
+        }
+
         function buildBottleneckVerdicts(trace) {
             const verdicts = [];
-            const transportWait = trace.server_edge_details?.transport_to_handler_wait_ms;
-            const handlerExec = trace.server_edge_details?.server_handler_exec_ms;
+            const transportToMethodWait = trace.server_edge_details?.transport_to_method_wait_ms;
+            const methodPreludeExec = trace.server_edge_details?.method_prelude_exec_ms;
             if (
-                typeof transportWait === 'number' &&
-                typeof handlerExec === 'number' &&
-                transportWait > handlerExec
+                typeof transportToMethodWait === 'number' &&
+                typeof methodPreludeExec === 'number'
             ) {
-                verdicts.push('ingress_dominant');
+                if (transportToMethodWait >= methodPreludeExec) {
+                    verdicts.push('ingress_before_method_entry');
+                } else {
+                    verdicts.push('handler_prelude_dominant');
+                }
+            } else {
+                const transportWait = trace.server_edge_details?.transport_to_handler_wait_ms;
+                const handlerExec = trace.server_edge_details?.server_handler_exec_ms;
+                if (
+                    typeof transportWait === 'number' &&
+                    typeof handlerExec === 'number' &&
+                    transportWait > handlerExec
+                ) {
+                    verdicts.push('ingress_dominant');
+                }
             }
-            const prepareTimeoutSubphase = derivePrepareTimeoutSubphase(trace.prepare_details);
-            if (prepareTimeoutSubphase) {
-                verdicts.push('prepare_timeout@' + prepareTimeoutSubphase);
+            if (trace.prepare_details?.fail_closed_cause === 'prepare_timeout') {
+                if (trace.prepare_details.timeout_attribution?.source) {
+                    verdicts.push('prepare_timeout@' + trace.prepare_details.timeout_attribution.source);
+                } else {
+                    const prepareTimeoutSubphase = derivePrepareTimeoutSubphase(trace.prepare_details);
+                    if (prepareTimeoutSubphase) {
+                        verdicts.push('prepare_timeout@' + prepareTimeoutSubphase);
+                    }
+                }
             }
             if (trace.prepare_details?.fail_closed_cause === 'exact_deadline') {
-                const exactWait = trace.prepare_details.exact_wait;
-                let suffix = 'task_state=unavailable';
-                if (exactWait?.matching_task_state && exactWait?.task_phase) {
-                    suffix = 'task_state=' + exactWait.matching_task_state + ':' + exactWait.task_phase;
-                } else if (exactWait?.matching_task_state) {
-                    suffix = 'task_state=' + exactWait.matching_task_state;
+                if (trace.prepare_details.exact_wait?.artifact_poll) {
+                    verdicts.push('exact_deadline@artifact_poll');
+                } else {
+                    const exactWait = trace.prepare_details.exact_wait;
+                    let suffix = 'task_state=unavailable';
+                    if (exactWait?.matching_task_state && exactWait?.task_phase) {
+                        suffix = 'task_state=' + exactWait.matching_task_state + ':' + exactWait.task_phase;
+                    } else if (exactWait?.matching_task_state) {
+                        suffix = 'task_state=' + exactWait.matching_task_state;
+                    }
+                    if (exactWait?.type_index_waiter_action) {
+                        suffix = 'waiter_action=' + exactWait.type_index_waiter_action + ' | ' + suffix;
+                    }
+                    verdicts.push('exact_deadline | ' + suffix);
                 }
-                if (exactWait?.type_index_waiter_action) {
-                    suffix = 'waiter_action=' + exactWait.type_index_waiter_action + ' | ' + suffix;
-                }
-                verdicts.push('exact_deadline | ' + suffix);
             }
             return verdicts;
         }
@@ -863,7 +918,9 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                     renderPrepareProgress(details.progress),
                     renderPrepareRuntime('wait_for_file_version_runtime', details.wait_for_file_version_runtime),
                     renderPrepareRuntime('snapshot_with_deps_runtime', details.snapshot_with_deps_runtime),
+                    renderPrepareTimeoutAttribution(details.timeout_attribution),
                     renderExactWait(details.exact_wait),
+                    renderArtifactPoll(details.exact_wait?.artifact_poll),
                 ].filter(Boolean).join('');
             }
             return [
@@ -874,7 +931,9 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 renderPrepareProgress(details.progress),
                 renderPrepareRuntime('wait_for_file_version_runtime', details.wait_for_file_version_runtime),
                 renderPrepareRuntime('snapshot_with_deps_runtime', details.snapshot_with_deps_runtime),
+                renderPrepareTimeoutAttribution(details.timeout_attribution),
                 renderExactWait(details.exact_wait),
+                renderArtifactPoll(details.exact_wait?.artifact_poll),
             ].filter(Boolean).join('');
         }
 
@@ -885,8 +944,17 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             const details = trace.server_edge_details;
             const bits = [
                 'transport_received=' + escapeHtml(new Date(details.transport_received_at_ms).toLocaleTimeString()),
+                ...(typeof details.method_entered_at_ms === 'number'
+                    ? ['method_entered=' + escapeHtml(new Date(details.method_entered_at_ms).toLocaleTimeString())]
+                    : []),
                 'handler_entered=' + escapeHtml(new Date(details.handler_entered_at_ms).toLocaleTimeString()),
                 'response_sent=' + escapeHtml(new Date(details.response_sent_at_ms).toLocaleTimeString()),
+                ...(typeof details.transport_to_method_wait_ms === 'number'
+                    ? ['transport_to_method_wait=' + escapeHtml(details.transport_to_method_wait_ms) + 'ms']
+                    : []),
+                ...(typeof details.method_prelude_exec_ms === 'number'
+                    ? ['method_prelude_exec=' + escapeHtml(details.method_prelude_exec_ms) + 'ms']
+                    : []),
                 'transport_to_handler_wait=' + escapeHtml(details.transport_to_handler_wait_ms) + 'ms',
                 'server_handler_exec=' + escapeHtml(details.server_handler_exec_ms) + 'ms',
             ];

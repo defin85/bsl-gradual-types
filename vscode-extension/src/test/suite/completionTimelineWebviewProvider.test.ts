@@ -142,7 +142,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 5,
+                version: 6,
                 traces: [
                     {
                         trace_id: 'trace-copy',
@@ -155,13 +155,23 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                         dominant_stage: 'query_bundle',
                         server_edge_details: {
                             transport_received_at_ms: 1_700_000_000_000,
-                            handler_entered_at_ms: 1_700_000_000_002,
-                            response_sent_at_ms: 1_700_000_000_010,
-                            transport_to_handler_wait_ms: 12,
+                            method_entered_at_ms: 1_700_000_000_004,
+                            handler_entered_at_ms: 1_700_000_000_008,
+                            response_sent_at_ms: 1_700_000_000_016,
+                            transport_to_method_wait_ms: 4,
+                            method_prelude_exec_ms: 4,
+                            transport_to_handler_wait_ms: 8,
                             server_handler_exec_ms: 8,
                         },
                         prepare_details: {
                             fail_closed_cause: 'prepare_timeout',
+                            timeout_attribution: {
+                                source: 'prepare_guard',
+                                phase: 'wait_for_file_version',
+                                budget_ms: 120,
+                                elapsed_ms: 2996,
+                                overshoot_ms: 2876,
+                            },
                             progress: {
                                 phase: 'wait_for_file_version',
                             },
@@ -233,12 +243,20 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const clipboardPayload = clipboardStub.firstCall.args[0];
         assert.ok(clipboardPayload.includes('Completion Timeline | mode=all'));
         assert.ok(clipboardPayload.includes('Server Timeline'));
-        assert.ok(clipboardPayload.includes('contract=v5'));
+        assert.ok(clipboardPayload.includes('contract=v6'));
         assert.ok(clipboardPayload.includes('trace-copy (invoked)'));
-        assert.ok(clipboardPayload.includes('transport_to_handler_wait_ms=12'));
+        assert.ok(clipboardPayload.includes('method_entered_at_ms=1700000000004'));
+        assert.ok(clipboardPayload.includes('transport_to_method_wait_ms=4'));
+        assert.ok(clipboardPayload.includes('method_prelude_exec_ms=4'));
+        assert.ok(clipboardPayload.includes('transport_to_handler_wait_ms=8'));
         assert.ok(clipboardPayload.includes('server_handler_exec_ms=8'));
-        assert.ok(clipboardPayload.includes('bottleneck_verdict=ingress_dominant'));
-        assert.ok(clipboardPayload.includes('bottleneck_verdict=prepare_timeout@wait_for_file_version'));
+        assert.ok(clipboardPayload.includes('bottleneck_verdict=ingress_before_method_entry'));
+        assert.ok(clipboardPayload.includes('bottleneck_verdict=prepare_timeout@prepare_guard'));
+        assert.ok(
+            clipboardPayload.includes(
+                'timeout_attribution | source=prepare_guard | phase=wait_for_file_version | budget_ms=120 | elapsed_ms=2996 | overshoot_ms=2876'
+            )
+        );
         assert.ok(clipboardPayload.includes('dispatcher_resolution_latency_ms=4'));
         assert.ok(clipboardPayload.includes('Client Probe Feed | local-only debug data'));
 
@@ -291,7 +309,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 5,
+                version: 6,
                 traces: [
                     {
                         trace_id: 'trace-export',

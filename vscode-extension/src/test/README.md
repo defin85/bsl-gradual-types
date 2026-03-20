@@ -114,6 +114,7 @@ BSL_TEST_GREP='Completion Probe (Schema|Recorder|Runtime|Store) Test Suite|Compl
 - wiring default `LanguageClient` path;
 - dual-view `Server Timeline` / `Client Probe Feed`;
 - rendering/export для `Server Timeline` с `response.version=8`, bounded root-cause attribution (`service_scope_entered` split, `transport_to_service_scope_wait_ms`, `service_scope_to_method_wait_ms`, bounded `pre_method_attribution_provenance`, `dispatcher_resolution_latency_ms`, `prepare_progress`, `wait_for_file_version_runtime`, `snapshot_with_deps_runtime`, `snapshot_with_deps_timeout_runtime`, `timeout_attribution`, bounded `exact_wait` и `artifact_poll`) и truthful ingress verdict projection (`server_before_method_entry_dominant` только при `same_request_authoritative`, `client_before_transport_dominant`, `handler_prelude_dominant`);
+- `average` mode остаётся synthetic и поэтому явно помечает trustworthy `v8` pre-method attribution provenance как unavailable by design, не inventing strong ingress verdicts;
 - graceful degradation для backend payload `v7` без выдумывания отсутствующего `v8` provenance;
 - fail-closed/executeCommand поведение `bsl.getCompletionTimeline`;
 - truthful `unsupported` vs `unavailable` semantics для observability metrics export;

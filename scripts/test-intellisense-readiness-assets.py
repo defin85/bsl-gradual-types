@@ -75,6 +75,7 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         "exact_wait_task_state_drilldown_is_serialised_into_trace",
         "exact_wait_artifact_poll_is_serialised_into_trace",
         "overlapping_completion_request_context_can_be_taken_by_request_id_out_of_order",
+        "pre_method_attribution_provenance_stays_fail_closed_for_overlapping_completion",
     ]
 
     def smoke_script_text(self) -> str:

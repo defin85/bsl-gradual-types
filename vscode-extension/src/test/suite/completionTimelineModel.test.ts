@@ -150,6 +150,10 @@ suite('Completion Timeline Model Test Suite', () => {
         assert.strictEqual(state.traces.length, 1);
         assert.strictEqual(state.traces[0].trace_id, 'trace-42');
         assert.strictEqual(
+            state.traces[0].server_edge_details?.pre_method_attribution_provenance,
+            'same_request_authoritative'
+        );
+        assert.strictEqual(
             state.traces[0].server_edge_details?.transport_to_service_scope_wait_ms,
             1
         );

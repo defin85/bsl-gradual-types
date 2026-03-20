@@ -397,6 +397,10 @@ suite('LSP Custom Requests Test Suite', () => {
         assert.strictEqual(result.response.traces[0].trace_id, 'trace-1');
         assert.ok(result.response.traces[0].server_edge_details);
         assert.strictEqual(
+            result.response.traces[0].server_edge_details?.pre_method_attribution_provenance,
+            'same_request_authoritative'
+        );
+        assert.strictEqual(
             result.response.traces[0].server_edge_details?.transport_to_service_scope_wait_ms,
             1
         );

@@ -26,6 +26,7 @@
   - Code: `backend/src/bin/lsp_server/server/request_context.rs`
   - Code: `backend/src/bin/lsp_server/server/language_server/impl_completion.rs`
   - Test: `backend/src/bin/lsp_server/server/request_context/tests.rs::overlapping_completion_request_context_can_be_taken_by_request_id_out_of_order`
+  - Test: `backend/src/bin/lsp_server/server/language_server/impl_completion.rs::pre_method_attribution_provenance_stays_fail_closed_for_overlapping_completion`
 
 ### Requirement: Existing completion surfaces различают strong и weak pre-method attribution без invented findings
 - Typed client contract принимает `v8` provenance и не реконструирует его локально:
@@ -37,13 +38,17 @@
   - Test: `vscode-extension/src/test/suite/completionTimelineDrilldown.test.ts::buildCompletionTraceBottleneckVerdicts should fail-closed for weak pre-method provenance`
   - Test: `vscode-extension/src/test/suite/completionTimelineDrilldown.test.ts::buildCompletionTraceBottleneckVerdicts should require strong provenance for client ingress verdict`
 - Clipboard/panel показывают provenance рядом с pre-method split и явно деградируют на `v7`:
+  - Code: `vscode-extension/src/providers/completionTimelineModel.ts`
   - Code: `vscode-extension/src/providers/completionTimelineClipboard.ts`
   - Code: `vscode-extension/src/providers/completionTimelineWebview.ts`
   - Test: `vscode-extension/src/test/suite/completionTimelineClipboard.test.ts::formatVisibleCompletionTimelineForClipboard should include header and visible traces`
+  - Test: `vscode-extension/src/test/suite/completionTimelineClipboard.test.ts::formatVisibleCompletionTimelineForClipboard should keep synthetic average traces fail-closed for provenance`
   - Test: `vscode-extension/src/test/suite/completionTimelineClipboard.test.ts::formatVisibleCompletionTimelineForClipboard should mark v7 payload as missing v8 provenance by design`
   - Test: `vscode-extension/src/test/suite/completionTimelineWebviewProvider.test.ts::copyVisible message should write current visible traces to clipboard`
+  - Test: `vscode-extension/src/test/suite/completionTimelineWebviewProvider.test.ts::copyVisible message should mark average mode traces as synthetic provenance`
   - Test: `vscode-extension/src/test/suite/completionTimelineWebviewProvider.test.ts::webview content declares separate server and client sections`
   - Test: `vscode-extension/src/test/suite/completionTimelineModel.test.ts::Mapping LSP timeline payload -> UI model`
+  - Test: `vscode-extension/src/test/suite/completionTimelineModel.test.ts::Average trace provenance notice should mark averaged traces as synthetic`
 - Incident bundle request summary сохраняет bounded provenance, а findings не агрегируют weak attribution как сильный ingress bottleneck:
   - Code: `vscode-extension/src/providers/observabilityIncidentBundleRequests.ts`
   - Code: `vscode-extension/src/providers/observabilityIncidentBundle.ts`

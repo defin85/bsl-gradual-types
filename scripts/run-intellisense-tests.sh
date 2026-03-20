@@ -76,6 +76,7 @@ run_completion_timeline_drilldown_smoke() {
   cargo test -p bsl-backend --bin bsl-lsp-server exact_wait_task_state_drilldown_is_serialised_into_trace -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server exact_wait_artifact_poll_is_serialised_into_trace -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server overlapping_completion_request_context_can_be_taken_by_request_id_out_of_order -- --nocapture
+  cargo test -p bsl-backend --bin bsl-lsp-server pre_method_attribution_provenance_stays_fail_closed_for_overlapping_completion -- --nocapture
 }
 
 run_extension_completion_observability_smoke() {

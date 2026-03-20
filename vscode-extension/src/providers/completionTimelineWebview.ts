@@ -6,7 +6,10 @@ import {
     formatSelectedCompletionTraceForClipboard,
     formatVisibleCompletionTimelineForClipboard,
 } from './completionTimelineClipboard';
-import { getAverageTraceProvenanceNotice, mapCompletionTimelineFetchResultToPanelState } from './completionTimelineModel';
+import {
+    AVERAGE_TRACE_PROVENANCE_NOTICE,
+    mapCompletionTimelineFetchResultToPanelState,
+} from './completionTimelineModel';
 import { CompletionProbe } from './completionProbe';
 import { getSharedCompletionProbeRecorder } from './completionProbeRecorder';
 
@@ -542,6 +545,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
         let currentMode = 'all';
         let latestReadyState = null;
         let copyStatusTimer = null;
+        const averageTraceProvenanceNotice = ${JSON.stringify(AVERAGE_TRACE_PROVENANCE_NOTICE)};
 
         refreshButton.addEventListener('click', () => {
             vscode.postMessage({ type: 'refresh' });
@@ -609,6 +613,13 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 terminal: 'Финальный terminal-чекпоинт outcome (ok/cancelled/failed).',
             };
             return dictionary[stageName] || ('Pipeline stage: ' + stageName);
+        }
+
+        function getAverageTraceProvenanceNoticeForTrace(trace) {
+            if (trace?.trigger_mode !== 'averaged') {
+                return null;
+            }
+            return averageTraceProvenanceNotice;
         }
 
         function renderStageRow(stage) {
@@ -1018,7 +1029,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                     escapeHtml(trace.max_stage_end_ms) + 'ms)' +
                 '</div>'
                 : '';
-            const averageTraceNotice = getAverageTraceProvenanceNotice(trace);
+            const averageTraceNotice = getAverageTraceProvenanceNoticeForTrace(trace);
             const serverEdgeDetails = renderServerEdgeDetails(trace);
             const prepareDetails = renderPrepareDetails(trace);
             const turnAttribution = renderTurnAttribution(trace);

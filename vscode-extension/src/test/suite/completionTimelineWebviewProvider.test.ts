@@ -1,5 +1,6 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
+import * as vm from 'vm';
 import * as vscode from 'vscode';
 import { CompletionTimelineWebviewProvider } from '../../providers/completionTimelineWebview';
 import { CompletionTimelineFetchResult } from '../../lsp/customRequests';
@@ -11,6 +12,113 @@ import {
 async function flushPromises(): Promise<void> {
     await Promise.resolve();
     await Promise.resolve();
+}
+
+class FakeWebviewElement {
+    innerHTML = '';
+    textContent = '';
+    style: Record<string, string> = {};
+    private readonly attrs = new Map<string, string>();
+    readonly classList = {
+        toggle: () => undefined,
+    };
+
+    addEventListener(): void {
+        // No-op for inline render harness.
+    }
+
+    setAttribute(name: string, value: string): void {
+        this.attrs.set(name, value);
+    }
+
+    getAttribute(name: string): string | null {
+        return this.attrs.get(name) ?? null;
+    }
+
+    closest(): null {
+        return null;
+    }
+}
+
+function extractInlineWebviewScript(html: string): string {
+    const scriptStart = html.indexOf('<script nonce=');
+    assert.notStrictEqual(scriptStart, -1, 'expected webview html to include inline script');
+    const contentStart = html.indexOf('>', scriptStart);
+    assert.notStrictEqual(contentStart, -1, 'expected script start tag to terminate');
+    const scriptEnd = html.indexOf('</script>', contentStart) !== -1
+        ? html.indexOf('</script>', contentStart)
+        : html.indexOf('<\\/script>', contentStart);
+    assert.notStrictEqual(scriptEnd, -1, 'expected inline script terminator');
+    return html.slice(contentStart + 1, scriptEnd);
+}
+
+function renderTimelineStateInInlineWebview(
+    html: string,
+    state: unknown
+): {
+    serverHtml: string;
+    clientHtml: string;
+    updatedText: string;
+} {
+    const elements = new Map(
+        [
+            'serverRoot',
+            'clientRoot',
+            'updatedAt',
+            'copyStatus',
+            'refresh',
+            'copyVisible',
+            'exportBundle',
+            'modeAll',
+            'modeAverage',
+        ].map((id) => [id, new FakeWebviewElement()])
+    );
+    const messageHandlers: Array<(event: { data: unknown }) => void> = [];
+    const context = {
+        console,
+        acquireVsCodeApi: () => ({
+            postMessage: () => undefined,
+        }),
+        document: {
+            getElementById: (id: string) => elements.get(id) ?? null,
+        },
+        window: {
+            addEventListener: (type: string, handler: (event: { data: unknown }) => void) => {
+                if (type === 'message') {
+                    messageHandlers.push(handler);
+                }
+            },
+        },
+        Element: FakeWebviewElement,
+        setTimeout,
+        clearTimeout,
+        Date,
+        Math,
+        String,
+        Array,
+        Object,
+        JSON,
+    };
+
+    vm.createContext(context);
+    vm.runInContext(extractInlineWebviewScript(html), context, {
+        filename: 'completionTimelineWebview.inline.js',
+    });
+
+    const messageHandler = messageHandlers.at(-1);
+    assert.ok(messageHandler, 'expected inline webview script to register a message handler');
+    messageHandler?.({
+        data: {
+            type: 'timelineState',
+            state,
+        },
+    });
+
+    return {
+        serverHtml: elements.get('serverRoot')?.innerHTML ?? '',
+        clientHtml: elements.get('clientRoot')?.innerHTML ?? '',
+        updatedText: elements.get('updatedAt')?.textContent ?? '',
+    };
 }
 
 suite('Completion Timeline Webview Provider Test Suite', () => {
@@ -452,6 +560,83 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         assert.ok(webview.html.includes('snapshot_with_deps_timeout_runtime'));
         assert.ok(
             webview.html.includes('v8 trustworthy pre-method attribution provenance is unavailable by design on this payload.')
+        );
+
+        onDidDisposeEmitter.dispose();
+        onDidReceiveMessageEmitter.dispose();
+        onDidChangeVisibilityEmitter.dispose();
+    });
+
+    test('inline webview script renders non-empty server timeline state', async () => {
+        const customRequestsModule = await import('../../lsp/customRequests');
+        const timelinePayload: CompletionTimelineFetchResult = {
+            kind: 'ok',
+            response: {
+                version: 8,
+                traces: [
+                    {
+                        trace_id: 'trace-inline',
+                        request_id: 'req-inline',
+                        uri: 'file:///tmp/inline.bsl',
+                        trigger_mode: 'invoked',
+                        outcome: 'ok_non_empty',
+                        started_at_ms: 1_700_000_000_000,
+                        total_duration_ms: 10,
+                        dominant_stage: 'query_bundle',
+                        stages: [
+                            {
+                                name: 'query_bundle',
+                                status: 'completed',
+                                started_offset_ms: 0,
+                                duration_ms: 10,
+                            },
+                        ],
+                    },
+                ],
+            },
+        };
+        sinon.stub(customRequestsModule, 'getCompletionTimeline').resolves(timelinePayload);
+
+        const outputChannel = {
+            appendLine: sinon.stub(),
+        } as unknown as vscode.OutputChannel;
+        provider = new CompletionTimelineWebviewProvider(outputChannel);
+
+        const onDidReceiveMessageEmitter = new vscode.EventEmitter<unknown>();
+        const onDidChangeVisibilityEmitter = new vscode.EventEmitter<void>();
+        const onDidDisposeEmitter = new vscode.EventEmitter<void>();
+        const postMessageStub = sinon.stub().resolves(true);
+        const webview = {
+            options: {},
+            html: '',
+            cspSource: 'vscode-webview://test',
+            onDidReceiveMessage: onDidReceiveMessageEmitter.event,
+            postMessage: postMessageStub,
+        } as unknown as vscode.Webview;
+        const webviewView = {
+            webview,
+            visible: true,
+            onDidChangeVisibility: onDidChangeVisibilityEmitter.event,
+            onDidDispose: onDidDisposeEmitter.event,
+        } as unknown as vscode.WebviewView;
+
+        provider.resolveWebviewView(webviewView);
+        await flushPromises();
+
+        const timelineStateMessage = postMessageStub.firstCall.args[0];
+        assert.strictEqual(timelineStateMessage.type, 'timelineState');
+        assert.strictEqual(timelineStateMessage.state.kind, 'ready');
+
+        const rendered = renderTimelineStateInInlineWebview(
+            webview.html,
+            timelineStateMessage.state
+        );
+
+        assert.ok(rendered.serverHtml.includes('trace-inline'));
+        assert.ok(rendered.updatedText.includes('contract v8'));
+        assert.ok(
+            rendered.clientHtml.includes('No client probes recorded yet'),
+            'expected empty client feed placeholder to remain intact'
         );
 
         onDidDisposeEmitter.dispose();

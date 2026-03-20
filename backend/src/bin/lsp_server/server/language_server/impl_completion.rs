@@ -2470,6 +2470,10 @@ mod tests {
             ),
             "best_effort_fallback"
         );
+        assert_eq!(
+            derive_pre_method_attribution_provenance(None, None, None, None),
+            "unavailable"
+        );
 
         let mut capture = sample_capture();
         capture.set_transport_received_at_ms(1_700_000_000_100);

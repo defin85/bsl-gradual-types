@@ -4,6 +4,14 @@ import {
 } from '../lsp/customRequests';
 import { CompletionProbe } from './completionProbe';
 import { buildCompletionTraceBottleneckVerdicts } from './completionTimelineDrilldown';
+import {
+    ObservabilityIncidentCaptureScope,
+    ObservabilityIncidentRequestSection,
+    ObservabilityIncidentRequestSummary,
+    buildObservabilityIncidentRequestSection,
+    renderRequestScopeLine,
+    renderRequestSummaryLines,
+} from './observabilityIncidentBundleRequests';
 
 const BUNDLE_FORMAT = 'bsl-observability-incident/v1';
 const COMPLETION_TIMELINE_RAW_PATH = 'raw/completion_timeline.json';
@@ -44,9 +52,12 @@ export interface ObservabilityIncidentBundleSource {
 export interface ObservabilityIncidentBundleReport {
     bundle_format: string;
     captured_at: string;
+    capture_scope: ObservabilityIncidentCaptureScope;
     request_window: {
         completion_trace_limit: number;
+        request_count: number;
     };
+    requests: ObservabilityIncidentRequestSummary[];
     sources: {
         completion_timeline: ObservabilityIncidentBundleSource;
         client_probes: ObservabilityIncidentBundleSource;
@@ -75,6 +86,10 @@ export function buildObservabilityIncidentBundle(
     const rawAttachments: ObservabilityIncidentBundleReport['raw_attachments'] = [];
     const files: ObservabilityIncidentBundleFile[] = [];
     const gaps: string[] = [];
+    const requestSection = buildObservabilityIncidentRequestSection(
+        input.completionTimeline,
+        input.clientProbes
+    );
     const findings = deriveFindings(input);
 
     const completionTimelineSource = buildCompletionTimelineSource(
@@ -94,16 +109,19 @@ export function buildObservabilityIncidentBundle(
     const incidentReport: ObservabilityIncidentBundleReport = {
         bundle_format: BUNDLE_FORMAT,
         captured_at: capturedAtIso,
+        capture_scope: requestSection.captureScope,
         request_window: {
             completion_trace_limit: input.completionTraceLimit,
+            request_count: requestSection.requestCount,
         },
+        requests: requestSection.requests,
         sources: {
             completion_timeline: completionTimelineSource,
             client_probes: clientProbesSource,
             observability_metrics: observabilityMetricsSource,
         },
         findings: findings.length > 0 ? findings : ['No derived bottleneck heuristic matched this capture window.'],
-        gaps,
+        gaps: [...gaps, ...requestSection.gaps],
         raw_attachments: rawAttachments,
     };
 
@@ -240,6 +258,10 @@ function buildObservabilityMetricsSource(
 
 function deriveFindings(input: ObservabilityIncidentBundleInput): string[] {
     const findings: string[] = [];
+    const requestSection = buildObservabilityIncidentRequestSection(
+        input.completionTimeline,
+        input.clientProbes
+    );
     if (input.completionTimeline.kind === 'ok') {
         const traces = input.completionTimeline.response.traces;
         if (input.completionTimeline.response.version < 6) {
@@ -298,6 +320,15 @@ function deriveFindings(input: ObservabilityIncidentBundleInput): string[] {
         findings.push('Bundle contains local client probes but no authoritative server trace for the current capture window.');
     }
 
+    const ambiguousCorrelationCount = requestSection.requests.filter(
+        (request) => request.client_correlation.status === 'ambiguous'
+    ).length;
+    if (ambiguousCorrelationCount > 0) {
+        findings.push(
+            `client/server correlation was ambiguous for ${ambiguousCorrelationCount} completion trace(s) in this capture window.`
+        );
+    }
+
     const semanticDiagnosticsP95 = getHistogramPercentile(
         input.observabilityMetrics,
         'intellisense_v2_semantic_diagnostics_query_ms',
@@ -317,6 +348,22 @@ function renderSummaryMarkdown(report: ObservabilityIncidentBundleReport): strin
         `Captured at: ${report.captured_at}`,
         `Bundle format: ${report.bundle_format}`,
         `Completion trace limit: ${report.request_window.completion_trace_limit}`,
+        '',
+        '## Request Scope',
+        renderRequestScopeLine({
+            captureScope: report.capture_scope,
+            requestCount: report.request_window.request_count,
+            requests: report.requests,
+            gaps: [],
+        }),
+        '',
+        '## Request Summary',
+        ...renderRequestSummaryLines({
+            captureScope: report.capture_scope,
+            requestCount: report.request_window.request_count,
+            requests: report.requests,
+            gaps: [],
+        }),
         '',
         '## Source Status',
         renderSourceStatusLine('Completion timeline', report.sources.completion_timeline),

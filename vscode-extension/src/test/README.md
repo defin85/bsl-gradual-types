@@ -118,6 +118,7 @@ BSL_TEST_GREP='Completion Probe (Schema|Recorder|Runtime|Store) Test Suite|Compl
 - fail-closed/executeCommand поведение `bsl.getCompletionTimeline`;
 - truthful `unsupported` vs `unavailable` semantics для observability metrics export;
 - actual command export path для `bslAnalyzer.exportObservabilityIncidentBundle`, включая запись `summary.md`, `incident.json` и `raw/*`;
+- request-centric handoff для incident bundle: `capture_scope`, `request_count`, bounded request list и deterministic probe-to-trace correlation только при неамбигуозном сопоставлении;
 - reuse текущего Completion Timeline snapshot при экспорте из webview, без принудительного fresh refetch этого источника.
 
 ### С coverage (цель: 80%)

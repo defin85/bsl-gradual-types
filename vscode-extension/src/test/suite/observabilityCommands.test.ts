@@ -82,6 +82,9 @@ suite('Observability Commands Test Suite', () => {
             rawDirEntries.sort(),
             ['client_probes.json', 'completion_timeline.json', 'observability_metrics.json']
         );
+        assert.deepStrictEqual(incident.capture_scope, { kind: 'empty' });
+        assert.strictEqual(incident.request_window.request_count, 0);
+        assert.deepStrictEqual(incident.requests, []);
         assert.strictEqual(incident.sources.completion_timeline.status, 'available');
         assert.strictEqual(incident.sources.observability_metrics.status, 'available');
     });
@@ -128,6 +131,9 @@ suite('Observability Commands Test Suite', () => {
         assert.strictEqual(bundleFolders.length, 1, 'export should create exactly one bundle folder');
         const bundleRoot = path.join(tempRootDir, bundleFolders[0]);
         const incident = JSON.parse(await fs.readFile(path.join(bundleRoot, 'incident.json'), 'utf8'));
+        assert.deepStrictEqual(incident.capture_scope, { kind: 'unavailable' });
+        assert.strictEqual(incident.request_window.request_count, 0);
+        assert.deepStrictEqual(incident.requests, []);
         assert.strictEqual(incident.sources.completion_timeline.status, 'unsupported');
         assert.strictEqual(incident.sources.observability_metrics.status, 'unsupported');
     });

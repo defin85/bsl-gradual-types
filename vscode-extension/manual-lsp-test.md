@@ -147,4 +147,5 @@ BSL_TEST_GREP='Completion Probe (Schema|Recorder|Runtime|Store) Test Suite|Compl
 - `bsl.getCompletionTimeline` остаётся fail-closed и не смешивается с локальными client probes;
 - clipboard/webview/incident summary выносят verdict'ы вроде `ingress_before_method_entry`, `handler_prelude_dominant`, `prepare_timeout@prepare_guard` и `exact_deadline@artifact_poll` без чтения raw JSON;
 - при более старом backend payload `v5` extension деградирует явно и не выдумывает отсутствующие `v6` поля;
-- export bundle сохраняет `summary.md`, `incident.json` и `raw/*` attachments без использования truncated Output dump как источника.
+- export bundle сохраняет `summary.md`, `incident.json` и `raw/*` attachments без использования truncated Output dump как источника;
+- `incident.json` и `summary.md` выражают request-centric handoff: `capture_scope`, `request_count`, bounded request list и explicit `correlation=correlated|unavailable|ambiguous` без guessed probe/trace pairs.

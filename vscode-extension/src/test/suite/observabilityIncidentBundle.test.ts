@@ -8,7 +8,7 @@ import { CompletionProbe } from '../../providers/completionProbe';
 import { buildObservabilityIncidentBundle } from '../../providers/observabilityIncidentBundle';
 
 suite('Observability Incident Bundle Test Suite', () => {
-    function sampleProbe(): CompletionProbe {
+    function sampleProbe(overrides: Partial<CompletionProbe> = {}): CompletionProbe {
         return {
             probe_id: 'probe-1',
             uri: 'file:///tmp/test.bsl',
@@ -33,6 +33,7 @@ suite('Observability Incident Bundle Test Suite', () => {
             newer_probe_started_before_terminal: false,
             is_after_dot: true,
             identifier_tail_length: 0,
+            ...overrides,
         };
     }
 
@@ -68,8 +69,11 @@ suite('Observability Incident Bundle Test Suite', () => {
                         },
                         server_edge_details: {
                             transport_received_at_ms: 1_700_000_000_000,
+                            method_entered_at_ms: 1_700_000_003_000,
                             handler_entered_at_ms: 1_700_000_003_000,
                             response_sent_at_ms: 1_700_000_003_172,
+                            transport_to_method_wait_ms: 3000,
+                            method_prelude_exec_ms: 0,
                             transport_to_handler_wait_ms: 3000,
                             server_handler_exec_ms: 172,
                         },
@@ -104,6 +108,16 @@ suite('Observability Incident Bundle Test Suite', () => {
                                 phase: 'wait_for_file_version',
                             },
                         },
+                        server_edge_details: {
+                            transport_received_at_ms: 1_700_000_010_010,
+                            method_entered_at_ms: 1_700_000_010_015,
+                            handler_entered_at_ms: 1_700_000_010_015,
+                            response_sent_at_ms: 1_700_000_012_996,
+                            transport_to_method_wait_ms: 5,
+                            method_prelude_exec_ms: 0,
+                            transport_to_handler_wait_ms: 5,
+                            server_handler_exec_ms: 2981,
+                        },
                         stages: [
                             {
                                 name: 'prepare_stateful',
@@ -134,12 +148,31 @@ suite('Observability Incident Bundle Test Suite', () => {
         };
     }
 
-    test('happy path bundle should contain summary, incident and all raw attachments', () => {
+    test('happy path bundle should contain request-centric incident report and all raw attachments', () => {
         const bundle = buildObservabilityIncidentBundle({
             capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
             completionTimeline: sampleTimeline(),
             completionTraceLimit: 50,
-            clientProbes: [sampleProbe()],
+            clientProbes: [
+                sampleProbe({
+                    probe_id: 'probe-1',
+                    trigger_mode: 'invoked',
+                    request_started_at_ms: 1_700_000_000_000,
+                    lsp_request_started_at_ms: 1_700_000_000_000,
+                    lsp_response_received_at_ms: 1_700_000_003_173,
+                    request_completed_at_ms: 1_700_000_003_174,
+                    client_duration_ms: 3174,
+                }),
+                sampleProbe({
+                    probe_id: 'probe-2',
+                    trigger_mode: 'invoked',
+                    request_started_at_ms: 1_700_000_010_010,
+                    lsp_request_started_at_ms: 1_700_000_010_010,
+                    lsp_response_received_at_ms: 1_700_000_012_997,
+                    request_completed_at_ms: 1_700_000_012_999,
+                    client_duration_ms: 2989,
+                }),
+            ],
             observabilityMetrics: sampleMetrics(),
         });
 
@@ -156,13 +189,33 @@ suite('Observability Incident Bundle Test Suite', () => {
         );
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'available');
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 6);
-        assert.strictEqual(bundle.incidentReport.sources.client_probes.probe_count, 1);
+        assert.strictEqual(bundle.incidentReport.sources.client_probes.probe_count, 2);
         assert.strictEqual(bundle.incidentReport.sources.observability_metrics.uptime_seconds, 184);
+        assert.deepStrictEqual(bundle.incidentReport.capture_scope, {
+            kind: 'single_uri',
+            uri: 'file:///tmp/test.bsl',
+            uri_count: 1,
+        });
+        assert.strictEqual(bundle.incidentReport.request_window.request_count, 2);
+        assert.strictEqual(bundle.incidentReport.requests.length, 2);
+        assert.ok(bundle.incidentReport.requests[0].bottleneck_verdicts.includes('exact_deadline@artifact_poll'));
+        assert.ok(bundle.incidentReport.requests[0].bottleneck_verdicts.includes('ingress_before_method_entry'));
+        assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.status, 'correlated');
+        assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.probe_id, 'probe-1');
+        assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.client_to_transport_wait_ms, 0);
+        assert.strictEqual(bundle.incidentReport.requests[1].prepare_timeout?.source, 'prepare_guard');
+        assert.strictEqual(bundle.incidentReport.requests[1].client_correlation?.status, 'correlated');
+        assert.strictEqual(bundle.incidentReport.requests[1].client_correlation?.probe_id, 'probe-2');
         assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('prepare_timeout was observed in 1 completion trace(s): prepare_timeout@prepare_guard')));
         assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('exact_deadline was observed after prepare completed: exact_deadline@artifact_poll')));
         assert.ok(
             bundle.incidentReport.findings.some((finding) => finding.includes('semantic diagnostics p95=3374ms'))
         );
+        assert.ok(bundle.summaryMarkdown.includes('## Request Scope'));
+        assert.ok(bundle.summaryMarkdown.includes('scope=single_uri | uri=file:///tmp/test.bsl | request_count=2'));
+        assert.ok(bundle.summaryMarkdown.includes('## Request Summary'));
+        assert.ok(bundle.summaryMarkdown.includes('trace-1 | request=req-1'));
+        assert.ok(bundle.summaryMarkdown.includes('correlation=correlated:probe-1'));
         assert.ok(bundle.summaryMarkdown.includes('raw/completion_timeline.json'));
     });
 
@@ -214,6 +267,8 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('contract v5')));
         assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('prepare_timeout was observed in 1 completion trace(s): prepare_timeout@wait_for_file_version')));
         assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('waiter_action=promoted')));
+        assert.strictEqual(bundle.incidentReport.request_window.request_count, 2);
+        assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.status, 'unavailable');
     });
 
     test('missing metrics should keep available sections and mark metrics gap explicitly', () => {
@@ -275,5 +330,54 @@ suite('Observability Incident Bundle Test Suite', () => {
             !bundle.files.some((file) => file.relativePath === 'raw/completion_timeline.json'),
             'unavailable server timeline must not create a fake raw attachment'
         );
+        assert.deepStrictEqual(bundle.incidentReport.capture_scope, {
+            kind: 'unavailable',
+        });
+        assert.strictEqual(bundle.incidentReport.request_window.request_count, 0);
+        assert.deepStrictEqual(bundle.incidentReport.requests, []);
+    });
+
+    test('ambiguous correlation should keep request summary server-centric and record a gap', () => {
+        const timeline = sampleTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok timeline fixture');
+        }
+        timeline.response.traces = [timeline.response.traces[0]];
+
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: timeline,
+            completionTraceLimit: 50,
+            clientProbes: [
+                sampleProbe({
+                    probe_id: 'probe-1',
+                    trigger_mode: 'invoked',
+                    request_started_at_ms: 1_700_000_000_000,
+                    lsp_request_started_at_ms: 1_700_000_000_000,
+                    lsp_response_received_at_ms: 1_700_000_003_173,
+                    request_completed_at_ms: 1_700_000_003_174,
+                    client_duration_ms: 3174,
+                }),
+                sampleProbe({
+                    probe_id: 'probe-2',
+                    trigger_mode: 'invoked',
+                    request_started_at_ms: 1_700_000_000_001,
+                    lsp_request_started_at_ms: 1_700_000_000_001,
+                    lsp_response_received_at_ms: 1_700_000_003_171,
+                    request_completed_at_ms: 1_700_000_003_175,
+                    client_duration_ms: 3174,
+                }),
+            ],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.strictEqual(bundle.incidentReport.requests.length, 1);
+        assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.status, 'ambiguous');
+        assert.strictEqual(
+            bundle.incidentReport.requests[0].client_correlation?.reason,
+            'multiple_probe_candidates'
+        );
+        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('ambiguous')));
+        assert.ok(bundle.summaryMarkdown.includes('correlation=ambiguous:multiple_probe_candidates'));
     });
 });

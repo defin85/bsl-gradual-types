@@ -209,7 +209,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('prepare_outcome=wait_not_ready'));
         assert.ok(text!.includes('completion_route=exact_hit'));
         assert.ok(text!.includes('fail_closed_cause=prepare_timeout'));
-        assert.ok(text!.includes('bottleneck_verdict=ingress_before_method_entry'));
+        assert.ok(text!.includes('bottleneck_verdict=server_before_method_entry_dominant'));
         assert.ok(text!.includes('bottleneck_verdict=prepare_timeout@prepare_guard'));
         assert.ok(text!.includes('timeout_attribution | source=prepare_guard | phase=wait_for_file_version | budget_ms=120 | elapsed_ms=2996 | overshoot_ms=2876'));
         assert.ok(text!.includes('prepare_progress | phase=wait_for_file_version'));

@@ -2,6 +2,42 @@ import * as assert from 'assert';
 import { buildCompletionTraceBottleneckVerdicts } from '../../providers/completionTimelineDrilldown';
 
 suite('Completion Timeline Drilldown Test Suite', () => {
+    test('buildCompletionTraceBottleneckVerdicts should not mark hot path with zero ingress or prelude wait', () => {
+        const verdicts = buildCompletionTraceBottleneckVerdicts({
+            server_edge_details: {
+                transport_received_at_ms: 1,
+                method_entered_at_ms: 1,
+                handler_entered_at_ms: 1,
+                response_sent_at_ms: 5,
+                transport_to_method_wait_ms: 0,
+                method_prelude_exec_ms: 0,
+                transport_to_handler_wait_ms: 0,
+                server_handler_exec_ms: 4,
+            },
+        });
+
+        assert.ok(!verdicts.includes('server_before_method_entry_dominant'));
+        assert.ok(!verdicts.includes('handler_prelude_dominant'));
+    });
+
+    test('buildCompletionTraceBottleneckVerdicts should distinguish server wait before method entry dominance', () => {
+        const verdicts = buildCompletionTraceBottleneckVerdicts({
+            server_edge_details: {
+                transport_received_at_ms: 1,
+                method_entered_at_ms: 41,
+                handler_entered_at_ms: 43,
+                response_sent_at_ms: 61,
+                transport_to_method_wait_ms: 40,
+                method_prelude_exec_ms: 2,
+                transport_to_handler_wait_ms: 42,
+                server_handler_exec_ms: 18,
+            },
+        });
+
+        assert.ok(verdicts.includes('server_before_method_entry_dominant'));
+        assert.ok(!verdicts.includes('handler_prelude_dominant'));
+    });
+
     test('buildCompletionTraceBottleneckVerdicts should distinguish handler prelude dominance', () => {
         const verdicts = buildCompletionTraceBottleneckVerdicts({
             server_edge_details: {
@@ -17,6 +53,7 @@ suite('Completion Timeline Drilldown Test Suite', () => {
         });
 
         assert.ok(verdicts.includes('handler_prelude_dominant'));
+        assert.ok(!verdicts.includes('server_before_method_entry_dominant'));
     });
 
     test('buildCompletionTraceBottleneckVerdicts should prefer timeout source when v6 attribution is available', () => {

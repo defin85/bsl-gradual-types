@@ -199,7 +199,8 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.strictEqual(bundle.incidentReport.request_window.request_count, 2);
         assert.strictEqual(bundle.incidentReport.requests.length, 2);
         assert.ok(bundle.incidentReport.requests[0].bottleneck_verdicts.includes('exact_deadline@artifact_poll'));
-        assert.ok(bundle.incidentReport.requests[0].bottleneck_verdicts.includes('ingress_before_method_entry'));
+        assert.ok(bundle.incidentReport.requests[0].bottleneck_verdicts.includes('server_before_method_entry_dominant'));
+        assert.ok(!bundle.incidentReport.requests[0].bottleneck_verdicts.includes('client_before_transport_dominant'));
         assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.status, 'correlated');
         assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.probe_id, 'probe-1');
         assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.client_to_transport_wait_ms, 0);
@@ -269,6 +270,60 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('waiter_action=promoted')));
         assert.strictEqual(bundle.incidentReport.request_window.request_count, 2);
         assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.status, 'unavailable');
+        assert.ok(!bundle.incidentReport.requests[0].bottleneck_verdicts.includes('client_before_transport_dominant'));
+    });
+
+    test('correlated request should expose client-before-transport verdict when client wait dominates', () => {
+        const timeline = sampleTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok timeline fixture');
+        }
+        timeline.response.traces = [
+            {
+                ...timeline.response.traces[0],
+                server_edge_details: {
+                    transport_received_at_ms: 1_700_000_000_100,
+                    method_entered_at_ms: 1_700_000_000_140,
+                    handler_entered_at_ms: 1_700_000_000_140,
+                    response_sent_at_ms: 1_700_000_000_220,
+                    transport_to_method_wait_ms: 40,
+                    method_prelude_exec_ms: 0,
+                    transport_to_handler_wait_ms: 40,
+                    server_handler_exec_ms: 80,
+                },
+            },
+        ];
+
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: timeline,
+            completionTraceLimit: 50,
+            clientProbes: [
+                sampleProbe({
+                    probe_id: 'probe-client',
+                    trigger_mode: 'invoked',
+                    request_started_at_ms: 1_700_000_000_000,
+                    lsp_request_started_at_ms: 1_700_000_000_000,
+                    lsp_response_received_at_ms: 1_700_000_000_221,
+                    request_completed_at_ms: 1_700_000_000_222,
+                    client_duration_ms: 222,
+                }),
+            ],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(bundle.incidentReport.requests[0].bottleneck_verdicts.includes('client_before_transport_dominant'));
+        assert.ok(bundle.incidentReport.requests[0].bottleneck_verdicts.includes('server_before_method_entry_dominant'));
+        assert.ok(
+            bundle.incidentReport.findings.some((finding) =>
+                finding.includes('client-side ingress dominated 1 completion trace(s)')
+            )
+        );
+        assert.ok(
+            bundle.incidentReport.findings.some((finding) =>
+                finding.includes('server-side ingress before method entry dominated 1 completion trace(s)')
+            )
+        );
     });
 
     test('missing metrics should keep available sections and mark metrics gap explicitly', () => {

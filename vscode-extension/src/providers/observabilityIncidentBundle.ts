@@ -90,7 +90,7 @@ export function buildObservabilityIncidentBundle(
         input.completionTimeline,
         input.clientProbes
     );
-    const findings = deriveFindings(input);
+    const findings = deriveFindings(input, requestSection);
 
     const completionTimelineSource = buildCompletionTimelineSource(
         input.completionTimeline,
@@ -256,12 +256,11 @@ function buildObservabilityMetricsSource(
     };
 }
 
-function deriveFindings(input: ObservabilityIncidentBundleInput): string[] {
+function deriveFindings(
+    input: ObservabilityIncidentBundleInput,
+    requestSection: ObservabilityIncidentRequestSection
+): string[] {
     const findings: string[] = [];
-    const requestSection = buildObservabilityIncidentRequestSection(
-        input.completionTimeline,
-        input.clientProbes
-    );
     if (input.completionTimeline.kind === 'ok') {
         const traces = input.completionTimeline.response.traces;
         if (input.completionTimeline.response.version < 6) {
@@ -269,17 +268,26 @@ function deriveFindings(input: ObservabilityIncidentBundleInput): string[] {
                 `Completion timeline contract v${input.completionTimeline.response.version} is available, but v6 root-cause attribution details may be unavailable.`
             );
         }
-        const ingressBeforeMethodCount = traces.filter((trace) =>
-            buildCompletionTraceBottleneckVerdicts(trace).includes('ingress_before_method_entry')
+        const serverBeforeMethodCount = requestSection.requests.filter((request) =>
+            request.bottleneck_verdicts.includes('server_before_method_entry_dominant')
         ).length;
-        if (ingressBeforeMethodCount > 0) {
+        if (serverBeforeMethodCount > 0) {
             findings.push(
-                `${ingressBeforeMethodCount} completion trace(s) were bottlenecked before method entry.`
+                `server-side ingress before method entry dominated ${serverBeforeMethodCount} completion trace(s).`
             );
         }
 
-        const handlerPreludeDominantCount = traces.filter((trace) =>
-            buildCompletionTraceBottleneckVerdicts(trace).includes('handler_prelude_dominant')
+        const clientBeforeTransportCount = requestSection.requests.filter((request) =>
+            request.bottleneck_verdicts.includes('client_before_transport_dominant')
+        ).length;
+        if (clientBeforeTransportCount > 0) {
+            findings.push(
+                `client-side ingress dominated ${clientBeforeTransportCount} completion trace(s).`
+            );
+        }
+
+        const handlerPreludeDominantCount = requestSection.requests.filter((request) =>
+            request.bottleneck_verdicts.includes('handler_prelude_dominant')
         ).length;
         if (handlerPreludeDominantCount > 0) {
             findings.push(

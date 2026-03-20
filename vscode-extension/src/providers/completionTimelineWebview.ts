@@ -822,20 +822,10 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 typeof transportToMethodWait === 'number' &&
                 typeof methodPreludeExec === 'number'
             ) {
-                if (transportToMethodWait >= methodPreludeExec) {
-                    verdicts.push('ingress_before_method_entry');
-                } else {
+                if (transportToMethodWait > 0 && transportToMethodWait > methodPreludeExec) {
+                    verdicts.push('server_before_method_entry_dominant');
+                } else if (methodPreludeExec > 0 && methodPreludeExec > transportToMethodWait) {
                     verdicts.push('handler_prelude_dominant');
-                }
-            } else {
-                const transportWait = trace.server_edge_details?.transport_to_handler_wait_ms;
-                const handlerExec = trace.server_edge_details?.server_handler_exec_ms;
-                if (
-                    typeof transportWait === 'number' &&
-                    typeof handlerExec === 'number' &&
-                    transportWait > handlerExec
-                ) {
-                    verdicts.push('ingress_dominant');
                 }
             }
             if (trace.prepare_details?.fail_closed_cause === 'prepare_timeout') {

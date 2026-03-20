@@ -9,6 +9,11 @@ import {
     CompletionTimelineTurnAttributionTrace,
 } from '../lsp/customRequests';
 
+export interface CompletionTraceClientIngressSupplement {
+    correlation_status: 'correlated' | 'unavailable' | 'ambiguous';
+    client_to_transport_wait_ms?: number;
+}
+
 export function derivePrepareTimeoutSubphase(
     details?: CompletionTimelinePrepareDetailsTrace
 ): 'wait_for_file_version' | 'snapshot_with_deps' | 'unavailable' | null {
@@ -38,7 +43,8 @@ export function buildCompletionTraceBottleneckVerdicts(
     trace: Pick<
         CompletionTimelineTrace,
         'prepare_details' | 'server_edge_details' | 'turn_attribution'
-    >
+    >,
+    clientIngress?: CompletionTraceClientIngressSupplement
 ): string[] {
     const verdicts: string[] = [];
     const transportToMethodWait = trace.server_edge_details?.transport_to_method_wait_ms;
@@ -47,21 +53,33 @@ export function buildCompletionTraceBottleneckVerdicts(
         typeof transportToMethodWait === 'number' &&
         typeof methodPreludeExec === 'number'
     ) {
-        if (transportToMethodWait >= methodPreludeExec) {
-            verdicts.push('ingress_before_method_entry');
-        } else {
+        if (
+            transportToMethodWait > 0 &&
+            transportToMethodWait > methodPreludeExec
+        ) {
+            verdicts.push('server_before_method_entry_dominant');
+        } else if (
+            methodPreludeExec > 0 &&
+            methodPreludeExec > transportToMethodWait
+        ) {
             verdicts.push('handler_prelude_dominant');
         }
-    } else {
-        const transportWait = trace.server_edge_details?.transport_to_handler_wait_ms;
-        const handlerExec = trace.server_edge_details?.server_handler_exec_ms;
-        if (
-            typeof transportWait === 'number' &&
-            typeof handlerExec === 'number' &&
-            transportWait > handlerExec
-        ) {
-            verdicts.push('ingress_dominant');
-        }
+    }
+
+    if (
+        clientIngress?.correlation_status === 'correlated' &&
+        typeof clientIngress.client_to_transport_wait_ms === 'number' &&
+        clientIngress.client_to_transport_wait_ms > 0 &&
+        (
+            typeof transportToMethodWait !== 'number' ||
+            clientIngress.client_to_transport_wait_ms > transportToMethodWait
+        ) &&
+        (
+            typeof methodPreludeExec !== 'number' ||
+            clientIngress.client_to_transport_wait_ms > methodPreludeExec
+        )
+    ) {
+        verdicts.push('client_before_transport_dominant');
     }
 
     if (trace.prepare_details?.fail_closed_cause === 'prepare_timeout') {

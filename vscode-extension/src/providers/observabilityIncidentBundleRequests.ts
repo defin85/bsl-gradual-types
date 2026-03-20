@@ -6,7 +6,10 @@ import {
     CompletionTimelineTrace,
 } from '../lsp/customRequests';
 import { CompletionProbe, CompletionProbeTerminalState } from './completionProbe';
-import { buildCompletionTraceBottleneckVerdicts } from './completionTimelineDrilldown';
+import {
+    CompletionTraceClientIngressSupplement,
+    buildCompletionTraceBottleneckVerdicts,
+} from './completionTimelineDrilldown';
 
 const PROBE_TRACE_RESPONSE_MATCH_WINDOW_MS = 5;
 const MAX_SUMMARY_REQUESTS = 5;
@@ -108,7 +111,10 @@ export function buildObservabilityIncidentRequestSection(
             transport_to_method_wait_ms: trace.server_edge_details?.transport_to_method_wait_ms,
             method_prelude_exec_ms: trace.server_edge_details?.method_prelude_exec_ms,
             server_handler_exec_ms: trace.server_edge_details?.server_handler_exec_ms,
-            bottleneck_verdicts: buildCompletionTraceBottleneckVerdicts(trace),
+            bottleneck_verdicts: buildCompletionTraceBottleneckVerdicts(
+                trace,
+                asClientIngressSupplement(clientCorrelation)
+            ),
             prepare_timeout: trace.prepare_details?.fail_closed_cause === 'prepare_timeout'
                 ? trace.prepare_details.timeout_attribution
                 : undefined,
@@ -124,6 +130,15 @@ export function buildObservabilityIncidentRequestSection(
         requestCount: traces.length,
         requests,
         gaps,
+    };
+}
+
+function asClientIngressSupplement(
+    correlation: ObservabilityIncidentClientCorrelation
+): CompletionTraceClientIngressSupplement {
+    return {
+        correlation_status: correlation.status,
+        client_to_transport_wait_ms: correlation.client_to_transport_wait_ms,
     };
 }
 

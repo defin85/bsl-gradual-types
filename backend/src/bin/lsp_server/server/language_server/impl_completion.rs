@@ -565,6 +565,25 @@ fn dispatch_attribution_to_trace(
     }
 }
 
+fn derive_pre_method_attribution_provenance(
+    current_request_id: Option<&str>,
+    current_request_received_at_ms: Option<u64>,
+    exact_request_context: Option<&super::super::request_context::PendingCompletionRequestContext>,
+    fallback_request_context: Option<
+        &super::super::request_context::PendingCompletionRequestContext,
+    >,
+) -> &'static str {
+    if current_request_id.is_some() && current_request_received_at_ms.is_some() {
+        "same_request_authoritative"
+    } else if exact_request_context.is_some() {
+        "same_request_authoritative"
+    } else if fallback_request_context.is_some() {
+        "best_effort_fallback"
+    } else {
+        "unavailable"
+    }
+}
+
 fn completion_public_timeline_outcome(outcome: &str) -> &'static str {
     match outcome {
         "ok_non_empty" => "ok_non_empty",
@@ -806,16 +825,12 @@ impl BslLanguageServer {
             method_entered_at_ms,
             handler_entered_at_ms,
         );
-        let pre_method_attribution_provenance =
-            if current_request_id.is_some() && current_request_received_at_ms.is_some() {
-                "same_request_authoritative"
-            } else if exact_request_context.is_some() {
-                "same_request_authoritative"
-            } else if fallback_request_context.is_some() {
-                "best_effort_fallback"
-            } else {
-                "unavailable"
-            };
+        let pre_method_attribution_provenance = derive_pre_method_attribution_provenance(
+            current_request_id.as_deref(),
+            current_request_received_at_ms,
+            exact_request_context.as_ref(),
+            fallback_request_context.as_ref(),
+        );
         timeline_capture.set_pre_method_attribution_provenance(pre_method_attribution_provenance);
         timeline_capture.set_transport_received_at_ms(
             current_request_received_at_ms
@@ -2239,6 +2254,7 @@ impl BslLanguageServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::server::request_context;
     use std::future::pending;
     use tower_lsp::lsp_types::Url;
 
@@ -2419,6 +2435,61 @@ mod tests {
         assert_eq!(
             details.pre_method_attribution_provenance,
             "same_request_authoritative"
+        );
+    }
+
+    #[test]
+    fn pre_method_attribution_provenance_stays_fail_closed_for_overlapping_completion() {
+        let uri = Url::parse("file:///request_context_overlap_provenance.bsl").expect("url");
+        let position = tower_lsp::lsp_types::Position::new(8, 4);
+        request_context::record_completion_request_id_for_testing(&uri, position, "req-1");
+        request_context::record_completion_request_id_for_testing(&uri, position, "req-2");
+
+        let second_request_context =
+            request_context::take_completion_request_context_by_request_id("req-2")
+                .expect("second request context");
+        let first_request_context =
+            request_context::take_completion_request_context(&uri, position)
+                .expect("first request context");
+
+        assert_eq!(
+            derive_pre_method_attribution_provenance(
+                Some("req-2"),
+                Some(1_700_000_000_020),
+                Some(&second_request_context),
+                None,
+            ),
+            "same_request_authoritative"
+        );
+        assert_eq!(
+            derive_pre_method_attribution_provenance(
+                None,
+                None,
+                None,
+                Some(&first_request_context)
+            ),
+            "best_effort_fallback"
+        );
+
+        let mut capture = sample_capture();
+        capture.set_transport_received_at_ms(1_700_000_000_100);
+        capture.set_service_scope_entered_at_ms(1_700_000_000_104);
+        capture.set_method_entered_at_ms(1_700_000_000_140);
+        capture.set_handler_entered_at_ms(1_700_000_000_141);
+        capture.set_response_sent_at_ms(1_700_000_000_220);
+        capture.set_pre_method_attribution_provenance("best_effort_fallback");
+
+        let trace = capture.into_trace(
+            "trace-overlap-provenance".to_string(),
+            std::time::Duration::from_millis(120),
+            "ok_non_empty",
+        );
+        let details = trace
+            .server_edge_details
+            .expect("server_edge_details must be present");
+        assert_eq!(
+            details.pre_method_attribution_provenance,
+            "best_effort_fallback"
         );
     }
 

@@ -20,7 +20,8 @@ pub use intellisense_v2::{
     PrepareStatefulProgress, PrepareStatefulProgressSnapshot, PrepareTimeoutAttributionTrace,
     PrepareTimeoutSourceKind, PreparedOperationSnapshot, RuntimePerfKnobs,
     ScaleAwareDiagnosticsKnobs, SemanticOperation, SemanticOutcome, SemanticSnapshot,
-    SingleflightQueryError, SnapshotWithDepsRuntimeTrace, WaitForFileVersionResolutionKind,
+    SingleflightQueryError, SnapshotWithDepsRuntimeTrace, SnapshotWithDepsTimeoutResolutionKind,
+    SnapshotWithDepsTimeoutRuntimeTrace, WaitForFileVersionResolutionKind,
     WaitForFileVersionRuntimeTrace,
 };
 pub use type_system::get_completion_with_semantic_program;

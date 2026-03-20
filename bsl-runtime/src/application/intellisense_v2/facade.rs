@@ -190,6 +190,7 @@ struct PrepareStatefulProgressState {
     phase_started_offset: Option<Duration>,
     wait_completed_offset: Option<Duration>,
     snapshot_completed_offset: Option<Duration>,
+    snapshot_with_deps_timeout_runtime: Option<SnapshotWithDepsTimeoutRuntimeProgressState>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -198,6 +199,7 @@ pub struct PrepareStatefulProgressSnapshot {
     pub phase_started_offset: Option<Duration>,
     pub wait_completed_offset: Option<Duration>,
     pub snapshot_completed_offset: Option<Duration>,
+    pub snapshot_with_deps_timeout_runtime: Option<SnapshotWithDepsTimeoutRuntimeTrace>,
 }
 
 #[derive(Debug, Clone)]
@@ -229,6 +231,9 @@ impl PrepareStatefulProgress {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         state.phase = Some(phase);
         state.phase_started_offset = Some(self.started_at.elapsed());
+        if phase != "snapshot_with_deps" {
+            state.snapshot_with_deps_timeout_runtime = None;
+        }
     }
 
     pub fn mark_wait_completed(&self) {
@@ -247,6 +252,53 @@ impl PrepareStatefulProgress {
         state.snapshot_completed_offset = Some(self.started_at.elapsed());
     }
 
+    pub fn mark_snapshot_with_deps_queue_wait(&self) {
+        let mut state = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.snapshot_with_deps_timeout_runtime =
+            Some(SnapshotWithDepsTimeoutRuntimeProgressState::queue_wait());
+    }
+
+    pub fn mark_snapshot_with_deps_exec_started(&self, queue_wait_elapsed: Duration) {
+        let mut state = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.snapshot_with_deps_timeout_runtime =
+            Some(SnapshotWithDepsTimeoutRuntimeProgressState::exec(
+                queue_wait_elapsed,
+                self.started_at.elapsed(),
+            ));
+    }
+
+    pub fn mark_snapshot_with_deps_wake_wait(
+        &self,
+        queue_wait_elapsed: Duration,
+        exec_elapsed: Duration,
+    ) {
+        let mut state = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.snapshot_with_deps_timeout_runtime =
+            Some(SnapshotWithDepsTimeoutRuntimeProgressState::wake_wait(
+                queue_wait_elapsed,
+                exec_elapsed,
+                self.started_at.elapsed(),
+            ));
+    }
+
+    pub fn mark_snapshot_with_deps_timeout_runtime_unavailable(&self) {
+        let mut state = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.snapshot_with_deps_timeout_runtime =
+            Some(SnapshotWithDepsTimeoutRuntimeProgressState::unavailable());
+    }
+
     pub fn snapshot(&self) -> PrepareStatefulProgressSnapshot {
         let state = self
             .inner
@@ -257,6 +309,9 @@ impl PrepareStatefulProgress {
             phase_started_offset: state.phase_started_offset,
             wait_completed_offset: state.wait_completed_offset,
             snapshot_completed_offset: state.snapshot_completed_offset,
+            snapshot_with_deps_timeout_runtime: state
+                .snapshot_with_deps_timeout_runtime
+                .map(|runtime| runtime.to_trace(self.started_at, &state)),
         }
     }
 }
@@ -352,6 +407,128 @@ pub struct SnapshotWithDepsRuntimeTrace {
     pub exec_elapsed: Option<Duration>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapshotWithDepsTimeoutResolutionKind {
+    QueueWait,
+    Exec,
+    WakeWait,
+    Unavailable,
+}
+
+impl SnapshotWithDepsTimeoutResolutionKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::QueueWait => "queue_wait",
+            Self::Exec => "exec",
+            Self::WakeWait => "wake_wait",
+            Self::Unavailable => "unavailable",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SnapshotWithDepsTimeoutRuntimeTrace {
+    pub queue_wait_elapsed: Option<Duration>,
+    pub exec_elapsed: Option<Duration>,
+    pub wake_wait_elapsed: Option<Duration>,
+    pub resolution: SnapshotWithDepsTimeoutResolutionKind,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SnapshotWithDepsTimeoutRuntimeProgressState {
+    resolution: SnapshotWithDepsTimeoutResolutionKind,
+    queue_wait_elapsed: Option<Duration>,
+    exec_started_offset: Option<Duration>,
+    exec_elapsed: Option<Duration>,
+    wake_wait_started_offset: Option<Duration>,
+}
+
+impl SnapshotWithDepsTimeoutRuntimeProgressState {
+    fn queue_wait() -> Self {
+        Self {
+            resolution: SnapshotWithDepsTimeoutResolutionKind::QueueWait,
+            queue_wait_elapsed: None,
+            exec_started_offset: None,
+            exec_elapsed: None,
+            wake_wait_started_offset: None,
+        }
+    }
+
+    fn exec(queue_wait_elapsed: Duration, exec_started_offset: Duration) -> Self {
+        Self {
+            resolution: SnapshotWithDepsTimeoutResolutionKind::Exec,
+            queue_wait_elapsed: Some(queue_wait_elapsed),
+            exec_started_offset: Some(exec_started_offset),
+            exec_elapsed: None,
+            wake_wait_started_offset: None,
+        }
+    }
+
+    fn wake_wait(
+        queue_wait_elapsed: Duration,
+        exec_elapsed: Duration,
+        wake_wait_started_offset: Duration,
+    ) -> Self {
+        Self {
+            resolution: SnapshotWithDepsTimeoutResolutionKind::WakeWait,
+            queue_wait_elapsed: Some(queue_wait_elapsed),
+            exec_started_offset: None,
+            exec_elapsed: Some(exec_elapsed),
+            wake_wait_started_offset: Some(wake_wait_started_offset),
+        }
+    }
+
+    fn unavailable() -> Self {
+        Self {
+            resolution: SnapshotWithDepsTimeoutResolutionKind::Unavailable,
+            queue_wait_elapsed: None,
+            exec_started_offset: None,
+            exec_elapsed: None,
+            wake_wait_started_offset: None,
+        }
+    }
+
+    fn to_trace(
+        self,
+        started_at: Instant,
+        state: &PrepareStatefulProgressState,
+    ) -> SnapshotWithDepsTimeoutRuntimeTrace {
+        let now_offset = started_at.elapsed();
+        let queue_wait_elapsed = match (self.queue_wait_elapsed, state.phase_started_offset) {
+            (Some(value), _) => Some(value),
+            (None, Some(phase_started_offset))
+                if self.resolution == SnapshotWithDepsTimeoutResolutionKind::QueueWait =>
+            {
+                Some(now_offset.saturating_sub(phase_started_offset))
+            }
+            _ => None,
+        };
+        let exec_elapsed = match (self.exec_elapsed, self.exec_started_offset) {
+            (Some(value), _) => Some(value),
+            (None, Some(exec_started_offset))
+                if self.resolution == SnapshotWithDepsTimeoutResolutionKind::Exec =>
+            {
+                Some(now_offset.saturating_sub(exec_started_offset))
+            }
+            _ => None,
+        };
+        let wake_wait_elapsed = match self.wake_wait_started_offset {
+            Some(wake_wait_started_offset)
+                if self.resolution == SnapshotWithDepsTimeoutResolutionKind::WakeWait =>
+            {
+                Some(now_offset.saturating_sub(wake_wait_started_offset))
+            }
+            _ => None,
+        };
+        SnapshotWithDepsTimeoutRuntimeTrace {
+            queue_wait_elapsed,
+            exec_elapsed,
+            wake_wait_elapsed,
+            resolution: self.resolution,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct FileRevisionState {
     pub version: i32,
@@ -388,6 +565,7 @@ enum Command {
     GetSnapshotWithDeps {
         origin: ObservabilityOrigin,
         enqueued_at: Instant,
+        progress: Option<PrepareStatefulProgress>,
         reply: oneshot::Sender<GetSnapshotWithDepsReply>,
     },
     WaitForFileVersion {

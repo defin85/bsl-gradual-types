@@ -411,6 +411,7 @@ async fn snapshot_with_deps_runtime_trace_exposes_queue_and_exec_latency() {
         .snapshot_with_deps_with_priority(
             ObservabilityOrigin::Lsp,
             RuntimeQueuePriority::Interactive,
+            None,
         )
         .await;
     assert!(snapshot.trace.queue_wait_elapsed.is_some());
@@ -1890,6 +1891,86 @@ async fn interactive_wait_budget_timeout_can_still_report_timeout_attribution_on
         timeout_attribution.overshoot > Duration::ZERO,
         "overshoot must be positive when timeout wakes late"
     );
+
+    runtime.shutdown_for_test().await;
+}
+
+#[tokio::test]
+async fn snapshot_with_deps_timeout_can_report_queue_wait_runtime_split_via_progress() {
+    let file_id = FileId(114);
+    let deps_id = DepsSnapshotId::from_hash("deps_snapshot_timeout_queue_wait");
+    let settings_id = SettingsId::from_hash("settings_snapshot_timeout_queue_wait");
+
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: deps_id.clone(),
+        deps: make_deps(),
+    });
+    host.apply_change(Change::SetSettingsSnapshot {
+        settings_id: settings_id.clone(),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+    let runtime = IntellisenseV2Facade::new(
+        host,
+        Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p11"))),
+        None,
+    );
+    runtime.apply_changes(vec![Change::SetFile {
+        file_id,
+        text: Arc::from("x = 1;"),
+        version: 5,
+        path: Arc::from("snapshot_timeout_queue_wait.bsl"),
+    }]);
+
+    let blocker = runtime.enqueue_test_sleep(
+        RuntimeQueuePriority::Interactive,
+        Duration::from_millis(200),
+    );
+    let progress = PrepareStatefulProgress::new();
+    let context = ExecutionContext {
+        origin: ObservabilityOrigin::Lsp,
+        operation: SemanticOperation::Completion,
+        completion_mode: None,
+        completion_large_churn_active: false,
+        file_id,
+        min_file_version: None,
+        expected_deps_id: Some(deps_id),
+        flow_sensitive: false,
+        settings: ExecutionSettings {
+            settings_id,
+            diagnostics_detail_level: DetailLevel::Full,
+        },
+        cancellation: CancellationPolicy::BestEffort,
+    };
+
+    let result = tokio::time::timeout(
+        Duration::from_millis(40),
+        runtime.prepare_stateful_operation_with_progress(&context, None, Some(&progress)),
+    )
+    .await;
+    assert!(
+        result.is_err(),
+        "outer timeout must fire while snapshot_with_deps is still queued"
+    );
+    let progress_snapshot = progress.snapshot();
+    timeout(Duration::from_secs(1), blocker)
+        .await
+        .expect("interactive sleep ack timeout")
+        .expect("interactive sleep ack");
+
+    let snapshot_timeout_runtime = progress_snapshot
+        .snapshot_with_deps_timeout_runtime
+        .expect("snapshot timeout runtime must be captured on timeout");
+    assert_eq!(
+        snapshot_timeout_runtime.resolution,
+        SnapshotWithDepsTimeoutResolutionKind::QueueWait
+    );
+    assert!(
+        snapshot_timeout_runtime.queue_wait_elapsed.is_some(),
+        "queue_wait resolution must carry bounded queue wait elapsed"
+    );
+    assert_eq!(snapshot_timeout_runtime.exec_elapsed, None);
+    assert_eq!(snapshot_timeout_runtime.wake_wait_elapsed, None);
 
     runtime.shutdown_for_test().await;
 }

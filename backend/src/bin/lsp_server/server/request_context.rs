@@ -16,6 +16,10 @@ tokio::task_local! {
     static LSP_REQUEST_RECEIVED_AT_MS: Option<u64>;
 }
 
+tokio::task_local! {
+    static LSP_REQUEST_SERVICE_SCOPE_ENTERED_AT_MS: Option<u64>;
+}
+
 type CancelRequestHook = Arc<dyn Fn(String) + Send + Sync + 'static>;
 
 fn cancel_request_hook_cell() -> &'static Mutex<Option<CancelRequestHook>> {
@@ -33,7 +37,21 @@ struct CompletionRequestKey {
 #[derive(Debug, Default)]
 struct PendingCompletionRequestIds {
     by_key: HashMap<CompletionRequestKey, VecDeque<String>>,
-    by_request_id: HashMap<String, CompletionRequestKey>,
+    by_request_id: HashMap<String, PendingCompletionRequestEntry>,
+}
+
+#[derive(Debug)]
+struct PendingCompletionRequestEntry {
+    key: CompletionRequestKey,
+    request_received_at_ms: Option<u64>,
+    service_scope_entered_at_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PendingCompletionRequestContext {
+    pub(crate) request_id: String,
+    pub(crate) request_received_at_ms: Option<u64>,
+    pub(crate) service_scope_entered_at_ms: Option<u64>,
 }
 
 fn pending_completion_request_ids_cell() -> &'static Mutex<PendingCompletionRequestIds> {
@@ -51,7 +69,11 @@ fn completion_request_key(params: &CompletionParams) -> CompletionRequestKey {
     }
 }
 
-fn record_pending_completion_request_id(request: &Request, request_id: &str) {
+fn record_pending_completion_request_id(
+    request: &Request,
+    request_id: &str,
+    request_received_at_ms: Option<u64>,
+) {
     if request.method() != "textDocument/completion" {
         return;
     }
@@ -66,31 +88,47 @@ fn record_pending_completion_request_id(request: &Request, request_id: &str) {
     let mut pending = pending_completion_request_ids_cell()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if let Some(old_key) = pending
-        .by_request_id
-        .insert(request_id.clone(), key.clone())
-    {
-        if let Some(old_queue) = pending.by_key.get_mut(&old_key) {
+    if let Some(old_entry) = pending.by_request_id.insert(
+        request_id.clone(),
+        PendingCompletionRequestEntry {
+            key: key.clone(),
+            request_received_at_ms,
+            service_scope_entered_at_ms: None,
+        },
+    ) {
+        if let Some(old_queue) = pending.by_key.get_mut(&old_entry.key) {
             old_queue.retain(|queued| queued != &request_id);
             if old_queue.is_empty() {
-                pending.by_key.remove(&old_key);
+                pending.by_key.remove(&old_entry.key);
             }
         }
     }
     pending.by_key.entry(key).or_default().push_back(request_id);
 }
 
+fn record_pending_completion_service_scope_entered_at_ms(
+    request_id: &str,
+    service_scope_entered_at_ms: u64,
+) {
+    let mut pending = pending_completion_request_ids_cell()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(entry) = pending.by_request_id.get_mut(request_id) {
+        entry.service_scope_entered_at_ms = Some(service_scope_entered_at_ms);
+    }
+}
+
 fn remove_pending_completion_request_id(request_id: &str) {
     let mut pending = pending_completion_request_ids_cell()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let Some(key) = pending.by_request_id.remove(request_id) else {
+    let Some(entry) = pending.by_request_id.remove(request_id) else {
         return;
     };
-    if let Some(queue) = pending.by_key.get_mut(&key) {
+    if let Some(queue) = pending.by_key.get_mut(&entry.key) {
         queue.retain(|queued| queued != request_id);
         if queue.is_empty() {
-            pending.by_key.remove(&key);
+            pending.by_key.remove(&entry.key);
         }
     }
 }
@@ -110,14 +148,18 @@ pub(crate) fn record_completion_request_id_for_testing(
     let mut pending = pending_completion_request_ids_cell()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if let Some(old_key) = pending
-        .by_request_id
-        .insert(request_id.clone(), key.clone())
-    {
-        if let Some(old_queue) = pending.by_key.get_mut(&old_key) {
+    if let Some(old_entry) = pending.by_request_id.insert(
+        request_id.clone(),
+        PendingCompletionRequestEntry {
+            key: key.clone(),
+            request_received_at_ms: None,
+            service_scope_entered_at_ms: None,
+        },
+    ) {
+        if let Some(old_queue) = pending.by_key.get_mut(&old_entry.key) {
             old_queue.retain(|queued| queued != &request_id);
             if old_queue.is_empty() {
-                pending.by_key.remove(&old_key);
+                pending.by_key.remove(&old_entry.key);
             }
         }
     }
@@ -125,6 +167,13 @@ pub(crate) fn record_completion_request_id_for_testing(
 }
 
 pub(crate) fn take_completion_request_id(uri: &Url, position: Position) -> Option<String> {
+    take_completion_request_context(uri, position).map(|context| context.request_id)
+}
+
+pub(crate) fn take_completion_request_context(
+    uri: &Url,
+    position: Position,
+) -> Option<PendingCompletionRequestContext> {
     let key = CompletionRequestKey {
         uri: uri.to_string(),
         line: position.line,
@@ -142,7 +191,7 @@ pub(crate) fn take_completion_request_id(uri: &Url, position: Position) -> Optio
             pending.by_key.remove(&key);
             return None;
         };
-        if pending.by_request_id.remove(&request_id).is_some() {
+        if let Some(entry) = pending.by_request_id.remove(&request_id) {
             let empty = pending
                 .by_key
                 .get(&key)
@@ -150,7 +199,11 @@ pub(crate) fn take_completion_request_id(uri: &Url, position: Position) -> Optio
             if empty {
                 pending.by_key.remove(&key);
             }
-            return Some(request_id);
+            return Some(PendingCompletionRequestContext {
+                request_id,
+                request_received_at_ms: entry.request_received_at_ms,
+                service_scope_entered_at_ms: entry.service_scope_entered_at_ms,
+            });
         }
     }
 }
@@ -166,6 +219,13 @@ pub(crate) fn current_request_received_at_ms() -> Option<u64> {
         .flatten()
 }
 
+pub(crate) fn current_request_service_scope_entered_at_ms() -> Option<u64> {
+    LSP_REQUEST_SERVICE_SCOPE_ENTERED_AT_MS
+        .try_with(Clone::clone)
+        .ok()
+        .flatten()
+}
+
 pub(crate) fn set_cancel_request_hook(hook: Option<CancelRequestHook>) {
     let mut slot = cancel_request_hook_cell()
         .lock()
@@ -176,6 +236,7 @@ pub(crate) fn set_cancel_request_hook(hook: Option<CancelRequestHook>) {
 async fn with_request_context<F, T>(
     request_id: Option<String>,
     request_received_at_ms: Option<u64>,
+    service_scope_entered_at_ms: Option<u64>,
     future: F,
 ) -> T
 where
@@ -184,7 +245,11 @@ where
     LSP_REQUEST_ID
         .scope(request_id, async move {
             LSP_REQUEST_RECEIVED_AT_MS
-                .scope(request_received_at_ms, future)
+                .scope(request_received_at_ms, async move {
+                    LSP_REQUEST_SERVICE_SCOPE_ENTERED_AT_MS
+                        .scope(service_scope_entered_at_ms, future)
+                        .await
+                })
                 .await
         })
         .await
@@ -258,14 +323,29 @@ where
             notify_cancel_request_hook(request_id);
         }
         let request_id = request_id_from_request(&request);
-        if let Some(request_id) = request_id.as_deref() {
-            record_pending_completion_request_id(&request, request_id);
-        }
         let request_received_at_ms = Some(super::unix_timestamp_ms());
+        if let Some(request_id) = request_id.as_deref() {
+            record_pending_completion_request_id(&request, request_id, request_received_at_ms);
+        }
         let future = self.inner.call(request);
-        Box::pin(
-            async move { with_request_context(request_id, request_received_at_ms, future).await },
-        )
+        Box::pin(async move {
+            let service_scope_entered_at_ms = Some(super::unix_timestamp_ms());
+            if let (Some(request_id), Some(service_scope_entered_at_ms)) =
+                (request_id.as_deref(), service_scope_entered_at_ms)
+            {
+                record_pending_completion_service_scope_entered_at_ms(
+                    request_id,
+                    service_scope_entered_at_ms,
+                );
+            }
+            with_request_context(
+                request_id,
+                request_received_at_ms,
+                service_scope_entered_at_ms,
+                future,
+            )
+            .await
+        })
     }
 }
 

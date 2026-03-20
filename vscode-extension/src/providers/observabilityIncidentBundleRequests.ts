@@ -2,6 +2,7 @@ import {
     CompletionTimelineExactArtifactPollTrace,
     CompletionTimelineExactWaitDetailsTrace,
     CompletionTimelineFetchResult,
+    CompletionTimelinePrepareRuntimeTrace,
     CompletionTimelinePrepareTimeoutAttributionTrace,
     CompletionTimelineTrace,
 } from '../lsp/customRequests';
@@ -56,11 +57,14 @@ export interface ObservabilityIncidentRequestSummary {
     total_duration_ms: number;
     dominant_stage?: string;
     transport_to_handler_wait_ms?: number;
+    transport_to_service_scope_wait_ms?: number;
+    service_scope_to_method_wait_ms?: number;
     transport_to_method_wait_ms?: number;
     method_prelude_exec_ms?: number;
     server_handler_exec_ms?: number;
     bottleneck_verdicts: string[];
     prepare_timeout?: CompletionTimelinePrepareTimeoutAttributionTrace;
+    snapshot_with_deps_timeout_runtime?: CompletionTimelinePrepareRuntimeTrace;
     exact_deadline?: ObservabilityIncidentExactDeadlineSummary;
     client_correlation: ObservabilityIncidentClientCorrelation;
 }
@@ -108,6 +112,10 @@ export function buildObservabilityIncidentRequestSection(
             total_duration_ms: trace.total_duration_ms,
             dominant_stage: trace.dominant_stage,
             transport_to_handler_wait_ms: trace.server_edge_details?.transport_to_handler_wait_ms,
+            transport_to_service_scope_wait_ms:
+                trace.server_edge_details?.transport_to_service_scope_wait_ms,
+            service_scope_to_method_wait_ms:
+                trace.server_edge_details?.service_scope_to_method_wait_ms,
             transport_to_method_wait_ms: trace.server_edge_details?.transport_to_method_wait_ms,
             method_prelude_exec_ms: trace.server_edge_details?.method_prelude_exec_ms,
             server_handler_exec_ms: trace.server_edge_details?.server_handler_exec_ms,
@@ -118,6 +126,10 @@ export function buildObservabilityIncidentRequestSection(
             prepare_timeout: trace.prepare_details?.fail_closed_cause === 'prepare_timeout'
                 ? trace.prepare_details.timeout_attribution
                 : undefined,
+            snapshot_with_deps_timeout_runtime:
+                trace.prepare_details?.fail_closed_cause === 'prepare_timeout'
+                    ? trace.prepare_details.snapshot_with_deps_timeout_runtime
+                    : undefined,
             exact_deadline: trace.prepare_details?.fail_closed_cause === 'exact_deadline'
                 ? buildExactDeadlineSummary(trace.prepare_details.exact_wait)
                 : undefined,
@@ -172,6 +184,12 @@ export function renderRequestSummaryLines(section: ObservabilityIncidentRequestS
             typeof request.transport_to_handler_wait_ms === 'number'
                 ? `transport_to_handler_wait_ms=${request.transport_to_handler_wait_ms}`
                 : undefined,
+            typeof request.transport_to_service_scope_wait_ms === 'number'
+                ? `transport_to_service_scope_wait_ms=${request.transport_to_service_scope_wait_ms}`
+                : undefined,
+            typeof request.service_scope_to_method_wait_ms === 'number'
+                ? `service_scope_to_method_wait_ms=${request.service_scope_to_method_wait_ms}`
+                : undefined,
             typeof request.transport_to_method_wait_ms === 'number'
                 ? `transport_to_method_wait_ms=${request.transport_to_method_wait_ms}`
                 : undefined,
@@ -181,6 +199,7 @@ export function renderRequestSummaryLines(section: ObservabilityIncidentRequestS
             typeof request.server_handler_exec_ms === 'number'
                 ? `server_handler_exec_ms=${request.server_handler_exec_ms}`
                 : undefined,
+            formatSnapshotTimeoutRuntimeForSummary(request.snapshot_with_deps_timeout_runtime),
             formatCorrelationForSummary(request.client_correlation),
         ].filter((value): value is string => Boolean(value));
 
@@ -303,4 +322,23 @@ function formatCorrelationForSummary(correlation: ObservabilityIncidentClientCor
         default:
             return `correlation=unavailable:${correlation.reason}`;
     }
+}
+
+function formatSnapshotTimeoutRuntimeForSummary(
+    runtime: CompletionTimelinePrepareRuntimeTrace | undefined
+): string | undefined {
+    if (!runtime?.resolution) {
+        return undefined;
+    }
+    const details = [`snapshot_with_deps_timeout_runtime=${runtime.resolution}`];
+    if (typeof runtime.queue_wait_ms === 'number') {
+        details.push(`queue_wait_ms=${runtime.queue_wait_ms}`);
+    }
+    if (typeof runtime.exec_ms === 'number') {
+        details.push(`exec_ms=${runtime.exec_ms}`);
+    }
+    if (typeof runtime.wake_wait_ms === 'number') {
+        details.push(`wake_wait_ms=${runtime.wake_wait_ms}`);
+    }
+    return details.join('|');
 }

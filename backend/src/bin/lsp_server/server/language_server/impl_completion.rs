@@ -59,6 +59,7 @@ struct CompletionTimelineCapture {
     trigger_mode: String,
     started_at_ms: u64,
     transport_received_at_ms: Option<u64>,
+    service_scope_entered_at_ms: Option<u64>,
     method_entered_at_ms: Option<u64>,
     handler_entered_at_ms: Option<u64>,
     response_sent_at_ms: Option<u64>,
@@ -91,6 +92,7 @@ impl CompletionTimelineCapture {
             trigger_mode: trigger_mode.to_string(),
             started_at_ms: method_entered_at_ms,
             transport_received_at_ms: None,
+            service_scope_entered_at_ms: None,
             method_entered_at_ms: Some(method_entered_at_ms),
             handler_entered_at_ms: Some(handler_entered_at_ms),
             response_sent_at_ms: None,
@@ -203,6 +205,10 @@ impl CompletionTimelineCapture {
         self.transport_received_at_ms = Some(transport_received_at_ms);
     }
 
+    fn set_service_scope_entered_at_ms(&mut self, service_scope_entered_at_ms: u64) {
+        self.service_scope_entered_at_ms = Some(service_scope_entered_at_ms);
+    }
+
     #[cfg(test)]
     fn set_method_entered_at_ms(&mut self, method_entered_at_ms: u64) {
         self.method_entered_at_ms = Some(method_entered_at_ms);
@@ -228,16 +234,28 @@ impl CompletionTimelineCapture {
         &self,
     ) -> Option<crate::types::CompletionTimelineServerEdgeDetailsTrace> {
         let transport_received_at_ms = self.transport_received_at_ms?;
+        let service_scope_entered_at_ms = self.service_scope_entered_at_ms;
         let method_entered_at_ms = self.method_entered_at_ms;
         let handler_entered_at_ms = self.handler_entered_at_ms?;
         let response_sent_at_ms = self.response_sent_at_ms?;
         let cancel_observed_at_ms = self.cancel_observed_at_ms;
         Some(crate::types::CompletionTimelineServerEdgeDetailsTrace {
             transport_received_at_ms,
+            service_scope_entered_at_ms,
             method_entered_at_ms,
             handler_entered_at_ms,
             response_sent_at_ms,
             cancel_observed_at_ms,
+            transport_to_service_scope_wait_ms: service_scope_entered_at_ms.map(
+                |service_scope_entered_at_ms| {
+                    service_scope_entered_at_ms.saturating_sub(transport_received_at_ms)
+                },
+            ),
+            service_scope_to_method_wait_ms: service_scope_entered_at_ms
+                .zip(method_entered_at_ms)
+                .map(|(service_scope_entered_at_ms, method_entered_at_ms)| {
+                    method_entered_at_ms.saturating_sub(service_scope_entered_at_ms)
+                }),
             transport_to_method_wait_ms: method_entered_at_ms.map(|method_entered_at_ms| {
                 method_entered_at_ms.saturating_sub(transport_received_at_ms)
             }),
@@ -368,6 +386,28 @@ impl CompletionTimelineCapture {
                 wake_wait_ms: None,
                 resolution: None,
             });
+    }
+
+    fn set_prepare_snapshot_with_deps_timeout_runtime(
+        &mut self,
+        trace: Option<bsl_runtime::application::SnapshotWithDepsTimeoutRuntimeTrace>,
+    ) {
+        self.prepare_details_mut()
+            .snapshot_with_deps_timeout_runtime =
+            trace.map(
+                |trace| crate::types::CompletionTimelinePrepareRuntimeTrace {
+                    queue_wait_ms: trace
+                        .queue_wait_elapsed
+                        .map(CompletionTimelineCapture::duration_to_ms),
+                    exec_ms: trace
+                        .exec_elapsed
+                        .map(CompletionTimelineCapture::duration_to_ms),
+                    wake_wait_ms: trace
+                        .wake_wait_elapsed
+                        .map(CompletionTimelineCapture::duration_to_ms),
+                    resolution: Some(trace.resolution.as_str().to_string()),
+                },
+            );
     }
 
     fn set_prepare_timeout_attribution(
@@ -668,8 +708,14 @@ impl BslLanguageServer {
         let trigger_char_hint = completion_trigger_character(params.context.as_ref());
         let shadow_internal_request =
             completion_is_shadow_internal_request(params.context.as_ref());
-        let completion_request_id = super::super::request_context::current_request_id()
-            .or_else(|| super::super::request_context::take_completion_request_id(&uri, position));
+        let pending_request_context =
+            super::super::request_context::take_completion_request_context(&uri, position);
+        let completion_request_id =
+            super::super::request_context::current_request_id().or_else(|| {
+                pending_request_context
+                    .as_ref()
+                    .map(|context| context.request_id.clone())
+            });
         if !shadow_internal_request {
             self.coordinator
                 .record_intellisense_v2_completion_trigger_mode(trigger_mode);
@@ -739,8 +785,24 @@ impl BslLanguageServer {
         );
         timeline_capture.set_transport_received_at_ms(
             super::super::request_context::current_request_received_at_ms()
+                .or_else(|| {
+                    pending_request_context
+                        .as_ref()
+                        .and_then(|context| context.request_received_at_ms)
+                })
                 .unwrap_or(method_entered_at_ms),
         );
+        if let Some(service_scope_entered_at_ms) =
+            super::super::request_context::current_request_service_scope_entered_at_ms().or_else(
+                || {
+                    pending_request_context
+                        .as_ref()
+                        .and_then(|context| context.service_scope_entered_at_ms)
+                },
+            )
+        {
+            timeline_capture.set_service_scope_entered_at_ms(service_scope_entered_at_ms);
+        }
         timeline_capture.set_prepare_min_file_version(version_hint);
         timeline_capture.set_prepare_shadow_version_at_start(
             self.latest_document_shadow_state_v2
@@ -1031,6 +1093,22 @@ impl BslLanguageServer {
                     timeline_capture.set_prepare_guard_outcome("timeout");
                     timeline_capture.set_prepare_outcome("wait_not_ready");
                     timeline_capture.set_prepare_fail_closed_cause("prepare_timeout");
+                    if let Some(timeout_runtime) =
+                        prepare_progress_snapshot.snapshot_with_deps_timeout_runtime
+                    {
+                        timeline_capture
+                            .set_prepare_snapshot_with_deps_timeout_runtime(Some(timeout_runtime));
+                    } else if prepare_progress_snapshot.phase == Some("snapshot_with_deps") {
+                        timeline_capture.set_prepare_snapshot_with_deps_timeout_runtime(Some(
+                            bsl_runtime::application::SnapshotWithDepsTimeoutRuntimeTrace {
+                                queue_wait_elapsed: None,
+                                exec_elapsed: None,
+                                wake_wait_elapsed: None,
+                                resolution:
+                                    bsl_runtime::application::SnapshotWithDepsTimeoutResolutionKind::Unavailable,
+                            },
+                        ));
+                    }
                     if let Some(prepare_timeout) = prepare_timeout {
                         timeline_capture.set_prepare_timeout_attribution(
                             bsl_runtime::application::PrepareTimeoutAttributionTrace::new(
@@ -2235,6 +2313,7 @@ mod tests {
     fn server_edge_details_are_derived_from_transport_handler_and_response_timestamps() {
         let mut capture = sample_capture();
         capture.set_transport_received_at_ms(1_699_999_999_990);
+        capture.set_service_scope_entered_at_ms(1_699_999_999_992);
         capture.set_method_entered_at_ms(1_699_999_999_995);
         capture.set_handler_entered_at_ms(1_700_000_000_000);
         capture.set_response_sent_at_ms(1_700_000_000_025);
@@ -2248,9 +2327,12 @@ mod tests {
             .server_edge_details
             .expect("server_edge_details must be present");
         assert_eq!(details.transport_received_at_ms, 1_699_999_999_990);
+        assert_eq!(details.service_scope_entered_at_ms, Some(1_699_999_999_992));
         assert_eq!(details.method_entered_at_ms, Some(1_699_999_999_995));
         assert_eq!(details.handler_entered_at_ms, 1_700_000_000_000);
         assert_eq!(details.response_sent_at_ms, 1_700_000_000_025);
+        assert_eq!(details.transport_to_service_scope_wait_ms, Some(2));
+        assert_eq!(details.service_scope_to_method_wait_ms, Some(3));
         assert_eq!(details.transport_to_method_wait_ms, Some(5));
         assert_eq!(details.method_prelude_exec_ms, Some(5));
         assert_eq!(details.transport_to_handler_wait_ms, 10);
@@ -2263,6 +2345,7 @@ mod tests {
     fn server_edge_details_keep_first_cancel_observation_and_derive_late_cancel_delta() {
         let mut capture = sample_capture();
         capture.set_transport_received_at_ms(1_699_999_999_995);
+        capture.set_service_scope_entered_at_ms(1_699_999_999_996);
         capture.set_method_entered_at_ms(1_699_999_999_998);
         capture.set_handler_entered_at_ms(1_700_000_000_000);
         capture.observe_cancel_at_ms(1_700_000_000_012);
@@ -2277,6 +2360,8 @@ mod tests {
         let details = trace
             .server_edge_details
             .expect("server_edge_details must be present");
+        assert_eq!(details.transport_to_service_scope_wait_ms, Some(1));
+        assert_eq!(details.service_scope_to_method_wait_ms, Some(2));
         assert_eq!(details.transport_to_method_wait_ms, Some(3));
         assert_eq!(details.method_prelude_exec_ms, Some(2));
         assert_eq!(details.transport_to_handler_wait_ms, 5);
@@ -2327,6 +2412,37 @@ mod tests {
         assert_eq!(snapshot_runtime.exec_ms, Some(7));
         assert_eq!(snapshot_runtime.wake_wait_ms, None);
         assert_eq!(snapshot_runtime.resolution, None);
+    }
+
+    #[test]
+    fn snapshot_timeout_runtime_is_serialised_into_trace() {
+        let mut capture = sample_capture();
+        capture.set_prepare_snapshot_with_deps_timeout_runtime(Some(
+            bsl_runtime::application::SnapshotWithDepsTimeoutRuntimeTrace {
+                queue_wait_elapsed: Some(std::time::Duration::from_millis(19)),
+                exec_elapsed: Some(std::time::Duration::from_millis(87)),
+                wake_wait_elapsed: Some(std::time::Duration::from_millis(401)),
+                resolution:
+                    bsl_runtime::application::SnapshotWithDepsTimeoutResolutionKind::WakeWait,
+            },
+        ));
+
+        let trace = capture.into_trace(
+            "trace-snapshot-timeout-runtime".to_string(),
+            std::time::Duration::from_millis(507),
+            "fail_closed",
+        );
+        let snapshot_timeout_runtime = trace
+            .prepare_details
+            .and_then(|prepare| prepare.snapshot_with_deps_timeout_runtime)
+            .expect("snapshot_with_deps_timeout_runtime must be present");
+        assert_eq!(snapshot_timeout_runtime.queue_wait_ms, Some(19));
+        assert_eq!(snapshot_timeout_runtime.exec_ms, Some(87));
+        assert_eq!(snapshot_timeout_runtime.wake_wait_ms, Some(401));
+        assert_eq!(
+            snapshot_timeout_runtime.resolution.as_deref(),
+            Some("wake_wait")
+        );
     }
 
     #[test]

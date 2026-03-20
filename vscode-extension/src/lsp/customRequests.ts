@@ -590,16 +590,20 @@ export interface CompletionTimelinePrepareDetailsTrace {
     progress?: CompletionTimelinePrepareProgressTrace;
     wait_for_file_version_runtime?: CompletionTimelinePrepareRuntimeTrace;
     snapshot_with_deps_runtime?: CompletionTimelinePrepareRuntimeTrace;
+    snapshot_with_deps_timeout_runtime?: CompletionTimelinePrepareRuntimeTrace;
     timeout_attribution?: CompletionTimelinePrepareTimeoutAttributionTrace;
     exact_wait?: CompletionTimelineExactWaitDetailsTrace;
 }
 
 export interface CompletionTimelineServerEdgeDetailsTrace {
     transport_received_at_ms: number;
+    service_scope_entered_at_ms?: number;
     method_entered_at_ms?: number;
     handler_entered_at_ms: number;
     response_sent_at_ms: number;
     cancel_observed_at_ms?: number;
+    transport_to_service_scope_wait_ms?: number;
+    service_scope_to_method_wait_ms?: number;
     transport_to_method_wait_ms?: number;
     method_prelude_exec_ms?: number;
     transport_to_handler_wait_ms: number;

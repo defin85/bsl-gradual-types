@@ -125,7 +125,10 @@ export function formatPrepareProgressTrace(
 }
 
 export function formatPrepareRuntimeTrace(
-    label: 'wait_for_file_version_runtime' | 'snapshot_with_deps_runtime',
+    label:
+        | 'wait_for_file_version_runtime'
+        | 'snapshot_with_deps_runtime'
+        | 'snapshot_with_deps_timeout_runtime',
     trace?: CompletionTimelinePrepareRuntimeTrace
 ): string | null {
     if (!trace) {

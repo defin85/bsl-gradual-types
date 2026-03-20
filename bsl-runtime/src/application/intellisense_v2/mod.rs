@@ -10,7 +10,8 @@ pub use facade::{
     ObservabilityMetricKind, ObservabilityOrigin, ObservabilityStage, PrepareStatefulProgress,
     PrepareStatefulProgressSnapshot, PrepareTimeoutAttributionTrace, PrepareTimeoutSourceKind,
     PreparedOperationSnapshot, SemanticOperation, SemanticOutcome, SemanticSnapshot,
-    SingleflightQueryError, SnapshotWithDepsRuntimeTrace, WaitForFileVersionResolutionKind,
+    SingleflightQueryError, SnapshotWithDepsRuntimeTrace, SnapshotWithDepsTimeoutResolutionKind,
+    SnapshotWithDepsTimeoutRuntimeTrace, WaitForFileVersionResolutionKind,
     WaitForFileVersionRuntimeTrace,
 };
 pub use policy::{

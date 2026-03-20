@@ -248,6 +248,8 @@ pub struct CompletionTimelinePrepareDetailsTrace {
     pub wait_for_file_version_runtime: Option<CompletionTimelinePrepareRuntimeTrace>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub snapshot_with_deps_runtime: Option<CompletionTimelinePrepareRuntimeTrace>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot_with_deps_timeout_runtime: Option<CompletionTimelinePrepareRuntimeTrace>,
     pub timeout_attribution: Option<CompletionTimelinePrepareTimeoutAttributionTrace>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exact_wait: Option<CompletionTimelineExactWaitDetailsTrace>,
@@ -257,11 +259,17 @@ pub struct CompletionTimelinePrepareDetailsTrace {
 pub struct CompletionTimelineServerEdgeDetailsTrace {
     pub transport_received_at_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_scope_entered_at_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub method_entered_at_ms: Option<u64>,
     pub handler_entered_at_ms: u64,
     pub response_sent_at_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cancel_observed_at_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transport_to_service_scope_wait_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_scope_to_method_wait_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transport_to_method_wait_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]

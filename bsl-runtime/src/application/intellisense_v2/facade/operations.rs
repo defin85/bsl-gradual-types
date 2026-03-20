@@ -29,7 +29,7 @@ impl IntellisenseV2Facade {
     pub async fn snapshot_for_operation(&self, operation: SemanticOperation) -> SemanticSnapshot {
         let queue_priority = RuntimeQueuePriority::for_operation(operation);
         let snapshot_with_deps = self
-            .snapshot_with_deps_with_priority(ObservabilityOrigin::Runtime, queue_priority)
+            .snapshot_with_deps_with_priority(ObservabilityOrigin::Runtime, queue_priority, None)
             .await;
         SemanticSnapshot {
             analysis: snapshot_with_deps.analysis,
@@ -145,10 +145,11 @@ impl IntellisenseV2Facade {
 
         if let Some(progress) = progress {
             progress.mark_phase("snapshot_with_deps");
+            progress.mark_snapshot_with_deps_queue_wait();
         }
         let snapshot_started = Instant::now();
         let snapshot_with_deps = self
-            .snapshot_with_deps_with_priority(context.origin, queue_priority)
+            .snapshot_with_deps_with_priority(context.origin, queue_priority, progress.cloned())
             .await;
         let snapshot_with_deps_runtime = snapshot_with_deps.trace;
         let analysis = snapshot_with_deps.analysis;

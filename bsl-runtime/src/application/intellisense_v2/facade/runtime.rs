@@ -264,6 +264,7 @@ impl IntellisenseV2Facade {
                         Command::GetSnapshotWithDeps {
                             origin,
                             enqueued_at,
+                            progress,
                             reply,
                         } => {
                             let queue_wait_elapsed = enqueued_at.elapsed();
@@ -277,6 +278,9 @@ impl IntellisenseV2Facade {
                                     queue_priority.as_work_class(),
                                     queue_wait_elapsed,
                                 );
+                            }
+                            if let Some(progress) = progress.as_ref() {
+                                progress.mark_snapshot_with_deps_exec_started(queue_wait_elapsed);
                             }
 
                             let exec_started = Instant::now();
@@ -305,6 +309,12 @@ impl IntellisenseV2Facade {
                                 coordinator.record_intellisense_v2_runtime_exec_class_latency_with_origin(
                                     origin.as_str(),
                                     queue_priority.as_work_class(),
+                                    exec_elapsed,
+                                );
+                            }
+                            if let Some(progress) = progress.as_ref() {
+                                progress.mark_snapshot_with_deps_wake_wait(
+                                    queue_wait_elapsed,
                                     exec_elapsed,
                                 );
                             }
@@ -537,6 +547,7 @@ impl IntellisenseV2Facade {
             .snapshot_with_deps_with_priority(
                 ObservabilityOrigin::Runtime,
                 RuntimeQueuePriority::Background,
+                None,
             )
             .await;
         (reply.analysis, reply.index_snapshot, reply.deps_id)
@@ -546,6 +557,7 @@ impl IntellisenseV2Facade {
         &self,
         origin: ObservabilityOrigin,
         priority: RuntimeQueuePriority,
+        progress: Option<PrepareStatefulProgress>,
     ) -> GetSnapshotWithDepsReply {
         let (reply, rx) = oneshot::channel::<GetSnapshotWithDepsReply>();
         if self
@@ -554,6 +566,7 @@ impl IntellisenseV2Facade {
                 Command::GetSnapshotWithDeps {
                     origin,
                     enqueued_at: Instant::now(),
+                    progress,
                     reply,
                 },
             )

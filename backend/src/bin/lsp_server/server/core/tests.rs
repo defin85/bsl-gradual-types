@@ -998,11 +998,12 @@ fn assert_drilldown_stage_metrics_for_origin(payload: &serde_json::Value, origin
 async fn p6_fast_did_change_series_publish_diagnostics_is_monotonic() {
     let coordinator = Arc::new(SystemCoordinator::new());
 
-    let (mut service, mut socket) = LspService::build({
+    let (service, mut socket) = LspService::build({
         let coordinator = coordinator.clone();
         move |client| BslLanguageServer::new(client, coordinator.clone())
     })
     .finish();
+    let mut service = crate::server::request_context::RequestContextService::new(service);
 
     let (published_tx, mut published_rx) =
         tokio::sync::mpsc::unbounded_channel::<tower_lsp::lsp_types::PublishDiagnosticsParams>();
@@ -1377,11 +1378,12 @@ async fn p6_type_index_precompute_slot_tracks_latest_version_and_clears_on_did_c
 async fn p6_did_close_records_client_cancel_for_inflight_diagnostics() {
     let coordinator = Arc::new(SystemCoordinator::new());
 
-    let (mut service, mut socket) = LspService::build({
+    let (service, mut socket) = LspService::build({
         let coordinator = coordinator.clone();
         move |client| BslLanguageServer::new(client, coordinator.clone())
     })
     .finish();
+    let mut service = crate::server::request_context::RequestContextService::new(service);
 
     let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
 
@@ -9691,7 +9693,7 @@ async fn p22_get_completion_timeline_exposes_versioned_contract() {
             .get("version")
             .and_then(|value| value.as_u64())
             .expect("version"),
-        6
+        7
     );
     assert!(
         result
@@ -9868,7 +9870,6 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
     );
     for field in [
         "transport_received_at_ms",
-        "method_entered_at_ms",
         "handler_entered_at_ms",
         "response_sent_at_ms",
         "transport_to_method_wait_ms",
@@ -9891,8 +9892,7 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
         .expect("handler_entered_at_ms");
     let method_entered_at_ms = server_edge_details
         .get("method_entered_at_ms")
-        .and_then(|value| value.as_u64())
-        .expect("method_entered_at_ms");
+        .and_then(|value| value.as_u64());
     let response_sent_at_ms = server_edge_details
         .get("response_sent_at_ms")
         .and_then(|value| value.as_u64())
@@ -9917,27 +9917,82 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
         transport_received_at_ms <= handler_entered_at_ms,
         "transport_received_at_ms must not exceed handler_entered_at_ms"
     );
-    assert!(
-        transport_received_at_ms <= method_entered_at_ms,
-        "transport_received_at_ms must not exceed method_entered_at_ms"
-    );
-    assert!(
-        method_entered_at_ms <= handler_entered_at_ms,
-        "method_entered_at_ms must not exceed handler_entered_at_ms"
-    );
+    if let Some(method_entered_at_ms) = method_entered_at_ms {
+        assert!(
+            transport_received_at_ms <= method_entered_at_ms,
+            "transport_received_at_ms must not exceed method_entered_at_ms"
+        );
+        assert!(
+            method_entered_at_ms <= handler_entered_at_ms,
+            "method_entered_at_ms must not exceed handler_entered_at_ms"
+        );
+        assert_eq!(
+            transport_to_method_wait_ms,
+            method_entered_at_ms.saturating_sub(transport_received_at_ms),
+            "transport_to_method_wait_ms must match timestamp delta"
+        );
+        assert_eq!(
+            method_prelude_exec_ms,
+            handler_entered_at_ms.saturating_sub(method_entered_at_ms),
+            "method_prelude_exec_ms must match timestamp delta"
+        );
+        if let Some(service_scope_entered_at_ms) = server_edge_details
+            .get("service_scope_entered_at_ms")
+            .and_then(|value| value.as_u64())
+        {
+            let transport_to_service_scope_wait_ms = server_edge_details
+                .get("transport_to_service_scope_wait_ms")
+                .and_then(|value| value.as_u64())
+                .expect("transport_to_service_scope_wait_ms");
+            let service_scope_to_method_wait_ms = server_edge_details
+                .get("service_scope_to_method_wait_ms")
+                .and_then(|value| value.as_u64())
+                .expect("service_scope_to_method_wait_ms");
+            assert!(
+                transport_received_at_ms <= service_scope_entered_at_ms,
+                "transport_received_at_ms must not exceed service_scope_entered_at_ms"
+            );
+            assert!(
+                service_scope_entered_at_ms <= method_entered_at_ms,
+                "service_scope_entered_at_ms must not exceed method_entered_at_ms"
+            );
+            assert_eq!(
+                transport_to_service_scope_wait_ms,
+                service_scope_entered_at_ms.saturating_sub(transport_received_at_ms),
+                "transport_to_service_scope_wait_ms must match timestamp delta"
+            );
+            assert_eq!(
+                service_scope_to_method_wait_ms,
+                method_entered_at_ms.saturating_sub(service_scope_entered_at_ms),
+                "service_scope_to_method_wait_ms must match timestamp delta"
+            );
+        } else {
+            assert!(
+                !server_edge_details.contains_key("transport_to_service_scope_wait_ms"),
+                "transport_to_service_scope_wait_ms must not be fabricated when service_scope_entered_at_ms is absent"
+            );
+            assert!(
+                !server_edge_details.contains_key("service_scope_to_method_wait_ms"),
+                "service_scope_to_method_wait_ms must not be fabricated when service_scope_entered_at_ms is absent"
+            );
+        }
+    } else {
+        assert!(
+            !server_edge_details.contains_key("service_scope_entered_at_ms"),
+            "service_scope_entered_at_ms must not be present when method_entered_at_ms is absent"
+        );
+        assert!(
+            !server_edge_details.contains_key("transport_to_service_scope_wait_ms"),
+            "transport_to_service_scope_wait_ms must not be present when method_entered_at_ms is absent"
+        );
+        assert!(
+            !server_edge_details.contains_key("service_scope_to_method_wait_ms"),
+            "service_scope_to_method_wait_ms must not be present when method_entered_at_ms is absent"
+        );
+    }
     assert!(
         handler_entered_at_ms <= response_sent_at_ms,
         "handler_entered_at_ms must not exceed response_sent_at_ms"
-    );
-    assert_eq!(
-        transport_to_method_wait_ms,
-        method_entered_at_ms.saturating_sub(transport_received_at_ms),
-        "transport_to_method_wait_ms must match timestamp delta"
-    );
-    assert_eq!(
-        method_prelude_exec_ms,
-        handler_entered_at_ms.saturating_sub(method_entered_at_ms),
-        "method_prelude_exec_ms must match timestamp delta"
     );
     assert_eq!(
         transport_to_handler_wait_ms,

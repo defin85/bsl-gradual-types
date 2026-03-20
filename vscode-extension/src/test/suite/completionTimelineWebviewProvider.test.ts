@@ -142,7 +142,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 6,
+                version: 7,
                 traces: [
                     {
                         trace_id: 'trace-copy',
@@ -155,9 +155,12 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                         dominant_stage: 'query_bundle',
                         server_edge_details: {
                             transport_received_at_ms: 1_700_000_000_000,
+                            service_scope_entered_at_ms: 1_700_000_000_002,
                             method_entered_at_ms: 1_700_000_000_005,
                             handler_entered_at_ms: 1_700_000_000_009,
                             response_sent_at_ms: 1_700_000_000_016,
+                            transport_to_service_scope_wait_ms: 2,
+                            service_scope_to_method_wait_ms: 3,
                             transport_to_method_wait_ms: 5,
                             method_prelude_exec_ms: 4,
                             transport_to_handler_wait_ms: 9,
@@ -180,6 +183,12 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                                 exec_ms: 1,
                                 wake_wait_ms: 40,
                                 resolution: 'waiter',
+                            },
+                            snapshot_with_deps_timeout_runtime: {
+                                queue_wait_ms: 11,
+                                exec_ms: 17,
+                                wake_wait_ms: 2870,
+                                resolution: 'wake_wait',
                             },
                         },
                         turn_attribution: {
@@ -243,9 +252,12 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const clipboardPayload = clipboardStub.firstCall.args[0];
         assert.ok(clipboardPayload.includes('Completion Timeline | mode=all'));
         assert.ok(clipboardPayload.includes('Server Timeline'));
-        assert.ok(clipboardPayload.includes('contract=v6'));
+        assert.ok(clipboardPayload.includes('contract=v7'));
         assert.ok(clipboardPayload.includes('trace-copy (invoked)'));
+        assert.ok(clipboardPayload.includes('service_scope_entered_at_ms=1700000000002'));
         assert.ok(clipboardPayload.includes('method_entered_at_ms=1700000000005'));
+        assert.ok(clipboardPayload.includes('transport_to_service_scope_wait_ms=2'));
+        assert.ok(clipboardPayload.includes('service_scope_to_method_wait_ms=3'));
         assert.ok(clipboardPayload.includes('transport_to_method_wait_ms=5'));
         assert.ok(clipboardPayload.includes('method_prelude_exec_ms=4'));
         assert.ok(clipboardPayload.includes('transport_to_handler_wait_ms=9'));
@@ -258,6 +270,11 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
             )
         );
         assert.ok(clipboardPayload.includes('dispatcher_resolution_latency_ms=4'));
+        assert.ok(
+            clipboardPayload.includes(
+                'snapshot_with_deps_timeout_runtime | queue_wait_ms=11 | exec_ms=17 | wake_wait_ms=2870 | resolution=wake_wait'
+            )
+        );
         assert.ok(clipboardPayload.includes('Client Probe Feed | local-only debug data'));
 
         const copyAck = postMessageStub.lastCall.args[0];
@@ -298,6 +315,11 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         assert.ok(webview.html.includes('Client Probe Feed'));
         assert.ok(webview.html.includes('Local-only debug data'));
         assert.ok(webview.html.includes('Export bundle'));
+        assert.ok(webview.html.includes('service_scope_entered='));
+        assert.ok(webview.html.includes('snapshot_with_deps_timeout_runtime'));
+        assert.ok(
+            webview.html.includes('v7 pre-method and snapshot overshoot attribution fields are unavailable by design on this payload.')
+        );
 
         onDidDisposeEmitter.dispose();
         onDidReceiveMessageEmitter.dispose();
@@ -309,7 +331,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 6,
+                version: 7,
                 traces: [
                     {
                         trace_id: 'trace-export',

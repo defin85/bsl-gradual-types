@@ -759,6 +759,13 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             '</div>';
         }
 
+        function renderV7AvailabilityNotice(contractVersion) {
+            if (typeof contractVersion !== 'number' || contractVersion >= 7) {
+                return '';
+            }
+            return '<div class="placeholder">v7 pre-method and snapshot overshoot attribution fields are unavailable by design on this payload.</div>';
+        }
+
         function renderExactWait(details) {
             if (!details) {
                 return '';
@@ -908,6 +915,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                     renderPrepareProgress(details.progress),
                     renderPrepareRuntime('wait_for_file_version_runtime', details.wait_for_file_version_runtime),
                     renderPrepareRuntime('snapshot_with_deps_runtime', details.snapshot_with_deps_runtime),
+                    renderPrepareRuntime('snapshot_with_deps_timeout_runtime', details.snapshot_with_deps_timeout_runtime),
                     renderPrepareTimeoutAttribution(details.timeout_attribution),
                     renderExactWait(details.exact_wait),
                     renderArtifactPoll(details.exact_wait?.artifact_poll),
@@ -921,6 +929,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 renderPrepareProgress(details.progress),
                 renderPrepareRuntime('wait_for_file_version_runtime', details.wait_for_file_version_runtime),
                 renderPrepareRuntime('snapshot_with_deps_runtime', details.snapshot_with_deps_runtime),
+                renderPrepareRuntime('snapshot_with_deps_timeout_runtime', details.snapshot_with_deps_timeout_runtime),
                 renderPrepareTimeoutAttribution(details.timeout_attribution),
                 renderExactWait(details.exact_wait),
                 renderArtifactPoll(details.exact_wait?.artifact_poll),
@@ -934,11 +943,20 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             const details = trace.server_edge_details;
             const bits = [
                 'transport_received=' + escapeHtml(new Date(details.transport_received_at_ms).toLocaleTimeString()),
+                ...(typeof details.service_scope_entered_at_ms === 'number'
+                    ? ['service_scope_entered=' + escapeHtml(new Date(details.service_scope_entered_at_ms).toLocaleTimeString())]
+                    : []),
                 ...(typeof details.method_entered_at_ms === 'number'
                     ? ['method_entered=' + escapeHtml(new Date(details.method_entered_at_ms).toLocaleTimeString())]
                     : []),
                 'handler_entered=' + escapeHtml(new Date(details.handler_entered_at_ms).toLocaleTimeString()),
                 'response_sent=' + escapeHtml(new Date(details.response_sent_at_ms).toLocaleTimeString()),
+                ...(typeof details.transport_to_service_scope_wait_ms === 'number'
+                    ? ['transport_to_service_scope_wait=' + escapeHtml(details.transport_to_service_scope_wait_ms) + 'ms']
+                    : []),
+                ...(typeof details.service_scope_to_method_wait_ms === 'number'
+                    ? ['service_scope_to_method_wait=' + escapeHtml(details.service_scope_to_method_wait_ms) + 'ms']
+                    : []),
                 ...(typeof details.transport_to_method_wait_ms === 'number'
                     ? ['transport_to_method_wait=' + escapeHtml(details.transport_to_method_wait_ms) + 'ms']
                     : []),
@@ -1094,17 +1112,21 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             const traces = state.traces || [];
             if (currentMode === 'average') {
                 if (!state.average_trace) {
-                    serverRoot.innerHTML = '<div class="placeholder">No completion traces to average yet.</div>';
+                    serverRoot.innerHTML = renderV7AvailabilityNotice(state.version) +
+                        '<div class="placeholder">No completion traces to average yet.</div>';
                 } else {
-                    serverRoot.innerHTML = renderTrace(state.average_trace);
+                    serverRoot.innerHTML = renderV7AvailabilityNotice(state.version) +
+                        renderTrace(state.average_trace);
                 }
                 return;
             }
 
             if (traces.length === 0) {
-                serverRoot.innerHTML = '<div class="placeholder">No completion traces yet. Trigger completion to populate the server timeline.</div>';
+                serverRoot.innerHTML = renderV7AvailabilityNotice(state.version) +
+                    '<div class="placeholder">No completion traces yet. Trigger completion to populate the server timeline.</div>';
             } else {
-                serverRoot.innerHTML = traces.map(renderTrace).join('');
+                serverRoot.innerHTML = renderV7AvailabilityNotice(state.version) +
+                    traces.map(renderTrace).join('');
             }
         }
 
@@ -1131,7 +1153,8 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 latestReadyState = state;
                 renderReadyState(state);
                 updatedAtNode.textContent = 'Updated ' + new Date(state.updated_at_ms).toLocaleTimeString() +
-                    ' | contract v' + state.version;
+                    ' | contract v' + state.version +
+                    (state.version < 7 ? ' | v7 fields unavailable by design' : '');
             }
         }
 

@@ -152,9 +152,9 @@ function buildCompletionTimelineSource(
     files: ObservabilityIncidentBundleFile[]
 ): ObservabilityIncidentBundleSource {
     if (completionTimeline.kind === 'ok') {
-        if (completionTimeline.response.version < 6) {
+        if (completionTimeline.response.version < 7) {
             gaps.push(
-                `Completion timeline contract v${completionTimeline.response.version} does not include all v6 root-cause attribution fields; missing verdict details are unavailable by design.`
+                `Completion timeline contract v${completionTimeline.response.version} does not include all v7 pre-method and snapshot overshoot attribution fields; those facts are unavailable by design.`
             );
         }
         rawAttachments.push({
@@ -263,9 +263,9 @@ function deriveFindings(
     const findings: string[] = [];
     if (input.completionTimeline.kind === 'ok') {
         const traces = input.completionTimeline.response.traces;
-        if (input.completionTimeline.response.version < 6) {
+        if (input.completionTimeline.response.version < 7) {
             findings.push(
-                `Completion timeline contract v${input.completionTimeline.response.version} is available, but v6 root-cause attribution details may be unavailable.`
+                `Completion timeline contract v${input.completionTimeline.response.version} is available, but v7 pre-method and snapshot overshoot attribution details are unavailable by design.`
             );
         }
         const serverBeforeMethodCount = requestSection.requests.filter((request) =>

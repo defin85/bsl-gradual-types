@@ -41,7 +41,7 @@ function buildClientProbe(probeId: string, version: number, startedAtMs: number)
 suite('Completion Timeline Model Test Suite', () => {
     test('Mapping LSP timeline payload -> UI model', () => {
         const payload: CompletionTimelineResponse = {
-            version: 6,
+            version: 7,
             traces: [
                 {
                     trace_id: 'trace-42',
@@ -54,8 +54,12 @@ suite('Completion Timeline Model Test Suite', () => {
                     dominant_stage: 'query_bundle',
                     server_edge_details: {
                         transport_received_at_ms: 1_700_000_000_040,
+                        service_scope_entered_at_ms: 1_700_000_000_041,
+                        method_entered_at_ms: 1_700_000_000_042,
                         handler_entered_at_ms: 1_700_000_000_042,
                         response_sent_at_ms: 1_700_000_000_090,
+                        transport_to_service_scope_wait_ms: 1,
+                        service_scope_to_method_wait_ms: 1,
                         transport_to_handler_wait_ms: 2,
                         server_handler_exec_ms: 48,
                     },
@@ -82,6 +86,12 @@ suite('Completion Timeline Model Test Suite', () => {
                         snapshot_with_deps_runtime: {
                             queue_wait_ms: 3,
                             exec_ms: 4,
+                        },
+                        snapshot_with_deps_timeout_runtime: {
+                            queue_wait_ms: 6,
+                            exec_ms: 7,
+                            wake_wait_ms: 8,
+                            resolution: 'wake_wait',
                         },
                         exact_wait: {
                             type_index_waiter_action: 'joined',
@@ -134,9 +144,17 @@ suite('Completion Timeline Model Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(state.version, 6);
+        assert.strictEqual(state.version, 7);
         assert.strictEqual(state.traces.length, 1);
         assert.strictEqual(state.traces[0].trace_id, 'trace-42');
+        assert.strictEqual(
+            state.traces[0].server_edge_details?.transport_to_service_scope_wait_ms,
+            1
+        );
+        assert.strictEqual(
+            state.traces[0].server_edge_details?.service_scope_to_method_wait_ms,
+            1
+        );
         assert.strictEqual(
             state.traces[0].server_edge_details?.transport_to_handler_wait_ms,
             2
@@ -150,6 +168,10 @@ suite('Completion Timeline Model Test Suite', () => {
         assert.strictEqual(
             state.traces[0].prepare_details?.wait_for_file_version_runtime?.resolution,
             'immediate'
+        );
+        assert.strictEqual(
+            state.traces[0].prepare_details?.snapshot_with_deps_timeout_runtime?.resolution,
+            'wake_wait'
         );
         assert.strictEqual(
             state.traces[0].prepare_details?.exact_wait?.task_phase,

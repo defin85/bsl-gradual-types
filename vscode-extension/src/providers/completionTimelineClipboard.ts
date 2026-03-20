@@ -87,11 +87,20 @@ export function formatCompletionTimelineTraceForClipboard(
     if (trace.server_edge_details) {
         const detailsBits = [
             `transport_received_at_ms=${trace.server_edge_details.transport_received_at_ms}`,
+            ...(typeof trace.server_edge_details.service_scope_entered_at_ms === 'number'
+                ? [`service_scope_entered_at_ms=${trace.server_edge_details.service_scope_entered_at_ms}`]
+                : []),
             ...(typeof trace.server_edge_details.method_entered_at_ms === 'number'
                 ? [`method_entered_at_ms=${trace.server_edge_details.method_entered_at_ms}`]
                 : []),
             `handler_entered_at_ms=${trace.server_edge_details.handler_entered_at_ms}`,
             `response_sent_at_ms=${trace.server_edge_details.response_sent_at_ms}`,
+            ...(typeof trace.server_edge_details.transport_to_service_scope_wait_ms === 'number'
+                ? [`transport_to_service_scope_wait_ms=${trace.server_edge_details.transport_to_service_scope_wait_ms}`]
+                : []),
+            ...(typeof trace.server_edge_details.service_scope_to_method_wait_ms === 'number'
+                ? [`service_scope_to_method_wait_ms=${trace.server_edge_details.service_scope_to_method_wait_ms}`]
+                : []),
             ...(typeof trace.server_edge_details.transport_to_method_wait_ms === 'number'
                 ? [`transport_to_method_wait_ms=${trace.server_edge_details.transport_to_method_wait_ms}`]
                 : []),
@@ -187,6 +196,13 @@ export function formatCompletionTimelineTraceForClipboard(
         );
         if (snapshotRuntimeTrace) {
             lines.push(snapshotRuntimeTrace);
+        }
+        const snapshotTimeoutRuntimeTrace = formatPrepareRuntimeTrace(
+            'snapshot_with_deps_timeout_runtime',
+            trace.prepare_details.snapshot_with_deps_timeout_runtime
+        );
+        if (snapshotTimeoutRuntimeTrace) {
+            lines.push(snapshotTimeoutRuntimeTrace);
         }
         const timeoutAttributionTrace = formatPrepareTimeoutAttributionTrace(
             trace.prepare_details.timeout_attribution
@@ -285,6 +301,9 @@ function formatServerTimelineSectionForClipboard(
     }
 
     lines.push(`contract=v${state.version}`);
+    if (state.version < 7) {
+        lines.push('v7 pre-method and snapshot overshoot attribution fields are unavailable by design on this payload.');
+    }
     const traces = mode === 'average'
         ? (state.average_trace ? [state.average_trace] : [])
         : state.traces;

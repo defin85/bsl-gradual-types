@@ -41,7 +41,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 6,
+                version: 7,
                 traces: [
                     {
                         trace_id: 'trace-1',
@@ -69,9 +69,12 @@ suite('Observability Incident Bundle Test Suite', () => {
                         },
                         server_edge_details: {
                             transport_received_at_ms: 1_700_000_000_000,
+                            service_scope_entered_at_ms: 1_700_000_002_000,
                             method_entered_at_ms: 1_700_000_003_000,
                             handler_entered_at_ms: 1_700_000_003_000,
                             response_sent_at_ms: 1_700_000_003_172,
+                            transport_to_service_scope_wait_ms: 2000,
+                            service_scope_to_method_wait_ms: 1000,
                             transport_to_method_wait_ms: 3000,
                             method_prelude_exec_ms: 0,
                             transport_to_handler_wait_ms: 3000,
@@ -99,13 +102,20 @@ suite('Observability Incident Bundle Test Suite', () => {
                             fail_closed_cause: 'prepare_timeout',
                             timeout_attribution: {
                                 source: 'prepare_guard',
-                                phase: 'wait_for_file_version',
+                                phase: 'snapshot_with_deps',
                                 budget_ms: 120,
                                 elapsed_ms: 2996,
                                 overshoot_ms: 2876,
                             },
                             progress: {
-                                phase: 'wait_for_file_version',
+                                phase: 'snapshot_with_deps',
+                                wait_completed_offset_ms: 19,
+                            },
+                            snapshot_with_deps_timeout_runtime: {
+                                queue_wait_ms: 17,
+                                exec_ms: 22,
+                                wake_wait_ms: 2837,
+                                resolution: 'wake_wait',
                             },
                         },
                         server_edge_details: {
@@ -188,7 +198,7 @@ suite('Observability Incident Bundle Test Suite', () => {
             ]
         );
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'available');
-        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 6);
+        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 7);
         assert.strictEqual(bundle.incidentReport.sources.client_probes.probe_count, 2);
         assert.strictEqual(bundle.incidentReport.sources.observability_metrics.uptime_seconds, 184);
         assert.deepStrictEqual(bundle.incidentReport.capture_scope, {
@@ -204,7 +214,13 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.status, 'correlated');
         assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.probe_id, 'probe-1');
         assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.client_to_transport_wait_ms, 0);
+        assert.strictEqual(bundle.incidentReport.requests[0].transport_to_service_scope_wait_ms, 2000);
+        assert.strictEqual(bundle.incidentReport.requests[0].service_scope_to_method_wait_ms, 1000);
         assert.strictEqual(bundle.incidentReport.requests[1].prepare_timeout?.source, 'prepare_guard');
+        assert.strictEqual(
+            bundle.incidentReport.requests[1].snapshot_with_deps_timeout_runtime?.resolution,
+            'wake_wait'
+        );
         assert.strictEqual(bundle.incidentReport.requests[1].client_correlation?.status, 'correlated');
         assert.strictEqual(bundle.incidentReport.requests[1].client_correlation?.probe_id, 'probe-2');
         assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('prepare_timeout was observed in 1 completion trace(s): prepare_timeout@prepare_guard')));
@@ -216,6 +232,13 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.summaryMarkdown.includes('scope=single_uri | uri=file:///tmp/test.bsl | request_count=2'));
         assert.ok(bundle.summaryMarkdown.includes('## Request Summary'));
         assert.ok(bundle.summaryMarkdown.includes('trace-1 | request=req-1'));
+        assert.ok(bundle.summaryMarkdown.includes('transport_to_service_scope_wait_ms=2000'));
+        assert.ok(bundle.summaryMarkdown.includes('service_scope_to_method_wait_ms=1000'));
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'snapshot_with_deps_timeout_runtime=wake_wait|queue_wait_ms=17|exec_ms=22|wake_wait_ms=2837'
+            )
+        );
         assert.ok(bundle.summaryMarkdown.includes('correlation=correlated:probe-1'));
         assert.ok(bundle.summaryMarkdown.includes('raw/completion_timeline.json'));
     });
@@ -238,22 +261,34 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.summaryMarkdown.includes('status=unsupported'));
     });
 
-    test('v5 completion timeline should stay valid and mark v6 root-cause details as unavailable', () => {
+    test('v6 completion timeline should stay valid and mark v7 pre-method and snapshot overshoot details as unavailable', () => {
         const timeline = sampleTimeline();
         if (timeline.kind !== 'ok') {
             throw new Error('expected ok timeline fixture');
         }
-        timeline.response.version = 5;
-        timeline.response.traces[0].prepare_details = {
-            fail_closed_cause: 'exact_deadline',
-            exact_wait: {
-                type_index_waiter_action: 'promoted',
-                matching_task_state: 'matching',
-                task_phase: 'waiting_cpu_permit',
-            },
+        timeline.response.version = 6;
+        timeline.response.traces[0].server_edge_details = {
+            transport_received_at_ms: 1_700_000_000_000,
+            method_entered_at_ms: 1_700_000_003_000,
+            handler_entered_at_ms: 1_700_000_003_000,
+            response_sent_at_ms: 1_700_000_003_172,
+            transport_to_method_wait_ms: 3000,
+            method_prelude_exec_ms: 0,
+            transport_to_handler_wait_ms: 3000,
+            server_handler_exec_ms: 172,
         };
         timeline.response.traces[1].prepare_details = {
             fail_closed_cause: 'prepare_timeout',
+            timeout_attribution: {
+                source: 'prepare_guard',
+                phase: 'snapshot_with_deps',
+                budget_ms: 120,
+                elapsed_ms: 2996,
+                overshoot_ms: 2876,
+            },
+            progress: {
+                phase: 'snapshot_with_deps',
+            },
         };
 
         const bundle = buildObservabilityIncidentBundle({
@@ -264,11 +299,12 @@ suite('Observability Incident Bundle Test Suite', () => {
             observabilityMetrics: sampleMetrics(),
         });
 
-        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('contract v5')));
-        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('contract v5')));
-        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('prepare_timeout was observed in 1 completion trace(s): prepare_timeout@wait_for_file_version')));
-        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('waiter_action=promoted')));
+        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('contract v6')));
+        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('contract v6')));
+        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('prepare_timeout was observed in 1 completion trace(s): prepare_timeout@prepare_guard')));
         assert.strictEqual(bundle.incidentReport.request_window.request_count, 2);
+        assert.strictEqual(bundle.incidentReport.requests[0].transport_to_service_scope_wait_ms, undefined);
+        assert.strictEqual(bundle.incidentReport.requests[1].snapshot_with_deps_timeout_runtime, undefined);
         assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.status, 'unavailable');
         assert.ok(!bundle.incidentReport.requests[0].bottleneck_verdicts.includes('client_before_transport_dominant'));
     });

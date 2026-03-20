@@ -56,6 +56,20 @@ export type CompletionTimelinePanelState =
     | ({ kind: 'unsupported'; message: string } & { client_probe_feed: CompletionProbeFeedViewModel })
     | ({ kind: 'error'; message: string } & { client_probe_feed: CompletionProbeFeedViewModel });
 
+
+export const AVERAGE_TRACE_PROVENANCE_NOTICE =
+    'Average trace is synthetic; v8 trustworthy pre-method attribution provenance is unavailable by design.';
+
+export function getAverageTraceProvenanceNotice(
+    trace: Pick<CompletionTimelineTraceViewModel, 'trigger_mode'> | null | undefined
+): string | null {
+    if (trace?.trigger_mode !== 'averaged') {
+        return null;
+    }
+
+    return AVERAGE_TRACE_PROVENANCE_NOTICE;
+}
+
 export function resolveDominantStageName(trace: CompletionTimelineTrace): string | undefined {
     if (trace.dominant_stage && trace.stages.some((stage) => stage.name === trace.dominant_stage)) {
         return trace.dominant_stage;

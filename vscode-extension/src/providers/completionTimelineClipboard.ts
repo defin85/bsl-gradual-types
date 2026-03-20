@@ -3,6 +3,7 @@ import {
     CompletionProbeViewModel,
     CompletionTimelinePanelState,
     CompletionTimelineTraceViewModel,
+    getAverageTraceProvenanceNotice,
 } from './completionTimelineModel';
 import {
     buildCompletionTraceBottleneckVerdicts,
@@ -84,6 +85,11 @@ export function formatCompletionTimelineTraceForClipboard(
             `unattributed_overhead=${trace.unattributed_overhead_ms}ms | max_stage_end=${trace.max_stage_end_ms}ms`
         );
     }
+    const averageTraceNotice = getAverageTraceProvenanceNotice(trace);
+    if (averageTraceNotice) {
+        lines.push(averageTraceNotice);
+    }
+
     if (trace.server_edge_details) {
         const detailsBits = [
             `transport_received_at_ms=${trace.server_edge_details.transport_received_at_ms}`,

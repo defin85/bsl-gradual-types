@@ -1,5 +1,6 @@
 import * as assert from 'assert';
 import {
+    getAverageTraceProvenanceNotice,
     mapCompletionTimelineFetchResultToPanelState,
     mapCompletionTimelineResponseToPanelState,
 } from '../../providers/completionTimelineModel';
@@ -363,6 +364,23 @@ suite('Completion Timeline Model Test Suite', () => {
         assert.ok(query);
         assert.strictEqual(prepare!.duration_ms, 15);
         assert.strictEqual(query!.duration_ms, 25);
+    });
+
+    test('Average trace provenance notice should mark averaged traces as synthetic', () => {
+        assert.strictEqual(
+            getAverageTraceProvenanceNotice({
+                trace_id: 'average(2)',
+                trigger_mode: 'averaged',
+            } as never),
+            'Average trace is synthetic; v8 trustworthy pre-method attribution provenance is unavailable by design.'
+        );
+        assert.strictEqual(
+            getAverageTraceProvenanceNotice({
+                trace_id: 'trace-1',
+                trigger_mode: 'invoked',
+            } as never),
+            null
+        );
     });
 
     test('Legacy unsupported path should map to explicit unsupported state', () => {

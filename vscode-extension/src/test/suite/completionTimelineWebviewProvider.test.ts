@@ -288,6 +288,137 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         onDidChangeVisibilityEmitter.dispose();
     });
 
+    test('copyVisible message should mark average mode traces as synthetic provenance', async () => {
+        const customRequestsModule = await import('../../lsp/customRequests');
+        const timelinePayload: CompletionTimelineFetchResult = {
+            kind: 'ok',
+            response: {
+                version: 8,
+                traces: [
+                    {
+                        trace_id: 'trace-copy',
+                        request_id: 'req-copy',
+                        uri: 'file:///tmp/test.bsl',
+                        trigger_mode: 'invoked',
+                        outcome: 'ok_non_empty',
+                        started_at_ms: 1_700_000_000_000,
+                        total_duration_ms: 10,
+                        dominant_stage: 'query_bundle',
+                        server_edge_details: {
+                            transport_received_at_ms: 1_700_000_000_000,
+                            pre_method_attribution_provenance: 'same_request_authoritative',
+                            service_scope_entered_at_ms: 1_700_000_000_002,
+                            method_entered_at_ms: 1_700_000_000_005,
+                            handler_entered_at_ms: 1_700_000_000_009,
+                            response_sent_at_ms: 1_700_000_000_016,
+                            transport_to_service_scope_wait_ms: 2,
+                            service_scope_to_method_wait_ms: 3,
+                            transport_to_method_wait_ms: 5,
+                            method_prelude_exec_ms: 4,
+                            transport_to_handler_wait_ms: 9,
+                            server_handler_exec_ms: 7,
+                        },
+                        prepare_details: {
+                            fail_closed_cause: 'prepare_timeout',
+                            timeout_attribution: {
+                                source: 'prepare_guard',
+                                phase: 'wait_for_file_version',
+                                budget_ms: 120,
+                                elapsed_ms: 2996,
+                                overshoot_ms: 2876,
+                            },
+                            progress: {
+                                phase: 'wait_for_file_version',
+                            },
+                            wait_for_file_version_runtime: {
+                                queue_wait_ms: 3,
+                                exec_ms: 1,
+                                wake_wait_ms: 40,
+                                resolution: 'waiter',
+                            },
+                            snapshot_with_deps_timeout_runtime: {
+                                queue_wait_ms: 11,
+                                exec_ms: 17,
+                                wake_wait_ms: 2870,
+                                resolution: 'wake_wait',
+                            },
+                        },
+                        turn_attribution: {
+                            request_file_seq: 1,
+                            request_epoch: 1,
+                            queue_outcome: 'enqueued',
+                            dispatcher_resolution_latency_ms: 4,
+                            queue_capacity: 256,
+                            queue_depth_before_enqueue: 0,
+                            queue_depth_after_enqueue: 1,
+                            queued_completion_ahead_count: 0,
+                            did_change_ahead_count: 0,
+                            active_completion_count: 0,
+                            dropped_completion_file_seq: [],
+                        },
+                        stages: [
+                            {
+                                name: 'query_bundle',
+                                status: 'completed',
+                                started_offset_ms: 0,
+                                duration_ms: 10,
+                            },
+                        ],
+                    },
+                ],
+            },
+        };
+        sinon.stub(customRequestsModule, 'getCompletionTimeline').resolves(timelinePayload);
+        const clipboardStub = sinon.stub().resolves();
+
+        const outputChannel = {
+            appendLine: sinon.stub(),
+        } as unknown as vscode.OutputChannel;
+        provider = new CompletionTimelineWebviewProvider(outputChannel, clipboardStub);
+
+        const onDidReceiveMessageEmitter = new vscode.EventEmitter<unknown>();
+        const onDidChangeVisibilityEmitter = new vscode.EventEmitter<void>();
+        const onDidDisposeEmitter = new vscode.EventEmitter<void>();
+        const postMessageStub = sinon.stub().resolves(true);
+        const webview = {
+            options: {},
+            html: '',
+            cspSource: 'vscode-webview://test',
+            onDidReceiveMessage: onDidReceiveMessageEmitter.event,
+            postMessage: postMessageStub,
+        } as unknown as vscode.Webview;
+        const webviewView = {
+            webview,
+            visible: true,
+            onDidChangeVisibility: onDidChangeVisibilityEmitter.event,
+            onDidDispose: onDidDisposeEmitter.event,
+        } as unknown as vscode.WebviewView;
+
+        provider.resolveWebviewView(webviewView);
+        await flushPromises();
+
+        onDidReceiveMessageEmitter.fire({ type: 'copyVisible', mode: 'average' });
+        await flushPromises();
+
+        assert.strictEqual(clipboardStub.callCount, 1);
+        const clipboardPayload = clipboardStub.firstCall.args[0];
+        assert.ok(clipboardPayload.includes('Completion Timeline | mode=average'));
+        assert.ok(
+            clipboardPayload.includes(
+                'Average trace is synthetic; v8 trustworthy pre-method attribution provenance is unavailable by design.'
+            )
+        );
+        assert.ok(!clipboardPayload.includes('bottleneck_verdict=server_before_method_entry_dominant'));
+
+        const copyAck = postMessageStub.lastCall.args[0];
+        assert.strictEqual(copyAck.type, 'copyResult');
+        assert.strictEqual(copyAck.ok, true);
+
+        onDidDisposeEmitter.dispose();
+        onDidReceiveMessageEmitter.dispose();
+        onDidChangeVisibilityEmitter.dispose();
+    });
+
     test('webview content declares separate server and client sections', () => {
         const outputChannel = {
             appendLine: sinon.stub(),

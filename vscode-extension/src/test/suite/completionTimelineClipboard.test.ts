@@ -247,6 +247,12 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text);
         assert.ok(text!.includes('Completion Timeline | mode=average'));
         assert.ok(text!.includes('average(1) (averaged) | sample=1'));
+        assert.ok(
+            text!.includes(
+                'Average trace is synthetic; v8 trustworthy pre-method attribution provenance is unavailable by design.'
+            )
+        );
+        assert.ok(!text!.includes('bottleneck_verdict=server_before_method_entry_dominant'));
         assert.ok(!text!.includes('trace-1 (invoked)'));
     });
 

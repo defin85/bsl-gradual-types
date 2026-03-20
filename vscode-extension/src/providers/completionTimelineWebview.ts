@@ -6,7 +6,7 @@ import {
     formatSelectedCompletionTraceForClipboard,
     formatVisibleCompletionTimelineForClipboard,
 } from './completionTimelineClipboard';
-import { mapCompletionTimelineFetchResultToPanelState } from './completionTimelineModel';
+import { getAverageTraceProvenanceNotice, mapCompletionTimelineFetchResultToPanelState } from './completionTimelineModel';
 import { CompletionProbe } from './completionProbe';
 import { getSharedCompletionProbeRecorder } from './completionProbeRecorder';
 
@@ -1018,6 +1018,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                     escapeHtml(trace.max_stage_end_ms) + 'ms)' +
                 '</div>'
                 : '';
+            const averageTraceNotice = getAverageTraceProvenanceNotice(trace);
             const serverEdgeDetails = renderServerEdgeDetails(trace);
             const prepareDetails = renderPrepareDetails(trace);
             const turnAttribution = renderTurnAttribution(trace);
@@ -1037,6 +1038,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 '</div>' +
                 '<div class="meta">request=' + escapeHtml(requestId) + ' | started=' + escapeHtml(startedAt) + '</div>' +
                 '<div class="timeline-track">' + stageSegments + '</div>' +
+                (averageTraceNotice ? '<div class="placeholder">' + escapeHtml(averageTraceNotice) + '</div>' : '') +
                 overhead +
                 serverEdgeDetails +
                 prepareDetails +

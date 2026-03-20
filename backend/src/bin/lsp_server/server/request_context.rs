@@ -166,6 +166,7 @@ pub(crate) fn record_completion_request_id_for_testing(
     pending.by_key.entry(key).or_default().push_back(request_id);
 }
 
+#[cfg(test)]
 pub(crate) fn take_completion_request_id(uri: &Url, position: Position) -> Option<String> {
     take_completion_request_context(uri, position).map(|context| context.request_id)
 }

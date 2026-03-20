@@ -2,6 +2,7 @@ import {
     CompletionTimelineExactArtifactPollTrace,
     CompletionTimelineExactWaitDetailsTrace,
     CompletionTimelineFetchResult,
+    CompletionTimelinePreMethodAttributionProvenance,
     CompletionTimelinePrepareRuntimeTrace,
     CompletionTimelinePrepareTimeoutAttributionTrace,
     CompletionTimelineTrace,
@@ -56,6 +57,7 @@ export interface ObservabilityIncidentRequestSummary {
     outcome: string;
     total_duration_ms: number;
     dominant_stage?: string;
+    pre_method_attribution_provenance?: CompletionTimelinePreMethodAttributionProvenance;
     transport_to_handler_wait_ms?: number;
     transport_to_service_scope_wait_ms?: number;
     service_scope_to_method_wait_ms?: number;
@@ -111,6 +113,8 @@ export function buildObservabilityIncidentRequestSection(
             outcome: trace.outcome,
             total_duration_ms: trace.total_duration_ms,
             dominant_stage: trace.dominant_stage,
+            pre_method_attribution_provenance:
+                trace.server_edge_details?.pre_method_attribution_provenance,
             transport_to_handler_wait_ms: trace.server_edge_details?.transport_to_handler_wait_ms,
             transport_to_service_scope_wait_ms:
                 trace.server_edge_details?.transport_to_service_scope_wait_ms,
@@ -180,6 +184,9 @@ export function renderRequestSummaryLines(section: ObservabilityIncidentRequestS
             request.dominant_stage ? `dominant=${request.dominant_stage}` : undefined,
             request.bottleneck_verdicts.length > 0
                 ? `verdicts=${request.bottleneck_verdicts.join(',')}`
+                : undefined,
+            request.pre_method_attribution_provenance
+                ? `pre_method_provenance=${request.pre_method_attribution_provenance}`
                 : undefined,
             typeof request.transport_to_handler_wait_ms === 'number'
                 ? `transport_to_handler_wait_ms=${request.transport_to_handler_wait_ms}`

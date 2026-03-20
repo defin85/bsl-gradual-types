@@ -759,11 +759,17 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             '</div>';
         }
 
-        function renderV7AvailabilityNotice(contractVersion) {
-            if (typeof contractVersion !== 'number' || contractVersion >= 7) {
+        function renderContractAvailabilityNotice(contractVersion) {
+            if (typeof contractVersion !== 'number') {
                 return '';
             }
-            return '<div class="placeholder">v7 pre-method and snapshot overshoot attribution fields are unavailable by design on this payload.</div>';
+            if (contractVersion < 7) {
+                return '<div class="placeholder">v7 pre-method and snapshot overshoot attribution fields are unavailable by design on this payload.</div>';
+            }
+            if (contractVersion < 8) {
+                return '<div class="placeholder">v8 trustworthy pre-method attribution provenance is unavailable by design on this payload.</div>';
+            }
+            return '';
         }
 
         function renderExactWait(details) {
@@ -825,11 +831,17 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             const verdicts = [];
             const transportToMethodWait = trace.server_edge_details?.transport_to_method_wait_ms;
             const methodPreludeExec = trace.server_edge_details?.method_prelude_exec_ms;
+            const strongPreMethodAttribution =
+                trace.server_edge_details?.pre_method_attribution_provenance === 'same_request_authoritative';
             if (
                 typeof transportToMethodWait === 'number' &&
                 typeof methodPreludeExec === 'number'
             ) {
-                if (transportToMethodWait > 0 && transportToMethodWait > methodPreludeExec) {
+                if (
+                    strongPreMethodAttribution &&
+                    transportToMethodWait > 0 &&
+                    transportToMethodWait > methodPreludeExec
+                ) {
                     verdicts.push('server_before_method_entry_dominant');
                 } else if (methodPreludeExec > 0 && methodPreludeExec > transportToMethodWait) {
                     verdicts.push('handler_prelude_dominant');
@@ -943,6 +955,9 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             const details = trace.server_edge_details;
             const bits = [
                 'transport_received=' + escapeHtml(new Date(details.transport_received_at_ms).toLocaleTimeString()),
+                ...(details.pre_method_attribution_provenance
+                    ? ['pre_method_provenance=' + escapeHtml(details.pre_method_attribution_provenance)]
+                    : []),
                 ...(typeof details.service_scope_entered_at_ms === 'number'
                     ? ['service_scope_entered=' + escapeHtml(new Date(details.service_scope_entered_at_ms).toLocaleTimeString())]
                     : []),
@@ -1112,20 +1127,20 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             const traces = state.traces || [];
             if (currentMode === 'average') {
                 if (!state.average_trace) {
-                    serverRoot.innerHTML = renderV7AvailabilityNotice(state.version) +
+                    serverRoot.innerHTML = renderContractAvailabilityNotice(state.version) +
                         '<div class="placeholder">No completion traces to average yet.</div>';
                 } else {
-                    serverRoot.innerHTML = renderV7AvailabilityNotice(state.version) +
+                    serverRoot.innerHTML = renderContractAvailabilityNotice(state.version) +
                         renderTrace(state.average_trace);
                 }
                 return;
             }
 
             if (traces.length === 0) {
-                serverRoot.innerHTML = renderV7AvailabilityNotice(state.version) +
+                serverRoot.innerHTML = renderContractAvailabilityNotice(state.version) +
                     '<div class="placeholder">No completion traces yet. Trigger completion to populate the server timeline.</div>';
             } else {
-                serverRoot.innerHTML = renderV7AvailabilityNotice(state.version) +
+                serverRoot.innerHTML = renderContractAvailabilityNotice(state.version) +
                     traces.map(renderTrace).join('');
             }
         }
@@ -1154,7 +1169,11 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 renderReadyState(state);
                 updatedAtNode.textContent = 'Updated ' + new Date(state.updated_at_ms).toLocaleTimeString() +
                     ' | contract v' + state.version +
-                    (state.version < 7 ? ' | v7 fields unavailable by design' : '');
+                    (state.version < 7
+                        ? ' | v7 fields unavailable by design'
+                        : state.version < 8
+                            ? ' | v8 provenance unavailable by design'
+                            : '');
             }
         }
 

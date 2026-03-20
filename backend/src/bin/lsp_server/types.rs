@@ -258,6 +258,7 @@ pub struct CompletionTimelinePrepareDetailsTrace {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompletionTimelineServerEdgeDetailsTrace {
     pub transport_received_at_ms: u64,
+    pub pre_method_attribution_provenance: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service_scope_entered_at_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]

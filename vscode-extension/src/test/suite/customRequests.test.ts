@@ -183,7 +183,7 @@ suite('LSP Custom Requests Test Suite', () => {
 
                 if (command === 'bsl.getCompletionTimeline') {
                     return Promise.resolve({
-                        version: 7,
+                        version: 8,
                         traces: [
                             {
                                 trace_id: 'trace-1',
@@ -216,6 +216,7 @@ suite('LSP Custom Requests Test Suite', () => {
                                 },
                                 server_edge_details: {
                                     transport_received_at_ms: 1_700_000_000_000,
+                                    pre_method_attribution_provenance: 'same_request_authoritative',
                                     service_scope_entered_at_ms: 1_700_000_000_001,
                                     method_entered_at_ms: 1_700_000_000_002,
                                     handler_entered_at_ms: 1_700_000_000_003,
@@ -391,7 +392,7 @@ suite('LSP Custom Requests Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(result.response.version, 7);
+        assert.strictEqual(result.response.version, 8);
         assert.strictEqual(result.response.traces.length, 1);
         assert.strictEqual(result.response.traces[0].trace_id, 'trace-1');
         assert.ok(result.response.traces[0].server_edge_details);
@@ -436,7 +437,7 @@ suite('LSP Custom Requests Test Suite', () => {
         sendRequestStub.resetBehavior();
         sendRequestStub.onFirstCall().rejects({ code: -32601, message: 'Method not found' });
         sendRequestStub.onSecondCall().resolves({
-            version: 7,
+            version: 8,
             traces: [],
         });
 

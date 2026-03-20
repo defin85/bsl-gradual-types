@@ -59,6 +59,7 @@ struct CompletionTimelineCapture {
     trigger_mode: String,
     started_at_ms: u64,
     transport_received_at_ms: Option<u64>,
+    pre_method_attribution_provenance: Option<String>,
     service_scope_entered_at_ms: Option<u64>,
     method_entered_at_ms: Option<u64>,
     handler_entered_at_ms: Option<u64>,
@@ -92,6 +93,7 @@ impl CompletionTimelineCapture {
             trigger_mode: trigger_mode.to_string(),
             started_at_ms: method_entered_at_ms,
             transport_received_at_ms: None,
+            pre_method_attribution_provenance: None,
             service_scope_entered_at_ms: None,
             method_entered_at_ms: Some(method_entered_at_ms),
             handler_entered_at_ms: Some(handler_entered_at_ms),
@@ -205,6 +207,10 @@ impl CompletionTimelineCapture {
         self.transport_received_at_ms = Some(transport_received_at_ms);
     }
 
+    fn set_pre_method_attribution_provenance(&mut self, provenance: impl Into<String>) {
+        self.pre_method_attribution_provenance = Some(provenance.into());
+    }
+
     fn set_service_scope_entered_at_ms(&mut self, service_scope_entered_at_ms: u64) {
         self.service_scope_entered_at_ms = Some(service_scope_entered_at_ms);
     }
@@ -241,6 +247,10 @@ impl CompletionTimelineCapture {
         let cancel_observed_at_ms = self.cancel_observed_at_ms;
         Some(crate::types::CompletionTimelineServerEdgeDetailsTrace {
             transport_received_at_ms,
+            pre_method_attribution_provenance: self
+                .pre_method_attribution_provenance
+                .clone()
+                .unwrap_or_else(|| "unavailable".to_string()),
             service_scope_entered_at_ms,
             method_entered_at_ms,
             handler_entered_at_ms,
@@ -708,14 +718,27 @@ impl BslLanguageServer {
         let trigger_char_hint = completion_trigger_character(params.context.as_ref());
         let shadow_internal_request =
             completion_is_shadow_internal_request(params.context.as_ref());
-        let pending_request_context =
-            super::super::request_context::take_completion_request_context(&uri, position);
-        let completion_request_id =
-            super::super::request_context::current_request_id().or_else(|| {
-                pending_request_context
-                    .as_ref()
-                    .map(|context| context.request_id.clone())
-            });
+        let current_request_id = super::super::request_context::current_request_id();
+        let current_request_received_at_ms =
+            super::super::request_context::current_request_received_at_ms();
+        let current_request_service_scope_entered_at_ms =
+            super::super::request_context::current_request_service_scope_entered_at_ms();
+        let exact_request_context = current_request_id.as_deref().and_then(|request_id| {
+            super::super::request_context::take_completion_request_context_by_request_id(request_id)
+        });
+        let fallback_request_context = if current_request_id.is_none() {
+            super::super::request_context::take_completion_request_context(&uri, position)
+        } else {
+            None
+        };
+        let pending_request_context = exact_request_context
+            .as_ref()
+            .or(fallback_request_context.as_ref());
+        let completion_request_id = current_request_id.clone().or_else(|| {
+            pending_request_context
+                .as_ref()
+                .map(|context| context.request_id.clone())
+        });
         if !shadow_internal_request {
             self.coordinator
                 .record_intellisense_v2_completion_trigger_mode(trigger_mode);
@@ -783,23 +806,28 @@ impl BslLanguageServer {
             method_entered_at_ms,
             handler_entered_at_ms,
         );
+        let pre_method_attribution_provenance =
+            if current_request_id.is_some() && current_request_received_at_ms.is_some() {
+                "same_request_authoritative"
+            } else if exact_request_context.is_some() {
+                "same_request_authoritative"
+            } else if fallback_request_context.is_some() {
+                "best_effort_fallback"
+            } else {
+                "unavailable"
+            };
+        timeline_capture.set_pre_method_attribution_provenance(pre_method_attribution_provenance);
         timeline_capture.set_transport_received_at_ms(
-            super::super::request_context::current_request_received_at_ms()
+            current_request_received_at_ms
                 .or_else(|| {
-                    pending_request_context
-                        .as_ref()
-                        .and_then(|context| context.request_received_at_ms)
+                    pending_request_context.and_then(|context| context.request_received_at_ms)
                 })
                 .unwrap_or(method_entered_at_ms),
         );
-        if let Some(service_scope_entered_at_ms) =
-            super::super::request_context::current_request_service_scope_entered_at_ms().or_else(
-                || {
-                    pending_request_context
-                        .as_ref()
-                        .and_then(|context| context.service_scope_entered_at_ms)
-                },
-            )
+        if let Some(service_scope_entered_at_ms) = current_request_service_scope_entered_at_ms
+            .or_else(|| {
+                pending_request_context.and_then(|context| context.service_scope_entered_at_ms)
+            })
         {
             timeline_capture.set_service_scope_entered_at_ms(service_scope_entered_at_ms);
         }
@@ -2368,6 +2396,30 @@ mod tests {
         assert_eq!(details.server_handler_exec_ms, 30);
         assert_eq!(details.cancel_observed_at_ms, Some(1_700_000_000_012));
         assert_eq!(details.cancel_observed_after_handler_enter_ms, Some(12));
+    }
+
+    #[test]
+    fn server_edge_details_include_pre_method_attribution_provenance() {
+        let mut capture = sample_capture();
+        capture.set_transport_received_at_ms(1_699_999_999_995);
+        capture.set_service_scope_entered_at_ms(1_699_999_999_996);
+        capture.set_method_entered_at_ms(1_699_999_999_998);
+        capture.set_handler_entered_at_ms(1_700_000_000_000);
+        capture.set_response_sent_at_ms(1_700_000_000_030);
+        capture.set_pre_method_attribution_provenance("same_request_authoritative");
+
+        let trace = capture.into_trace(
+            "trace-pre-method-provenance".to_string(),
+            std::time::Duration::from_millis(30),
+            "ok_non_empty",
+        );
+        let details = trace
+            .server_edge_details
+            .expect("server_edge_details must be present");
+        assert_eq!(
+            details.pre_method_attribution_provenance,
+            "same_request_authoritative"
+        );
     }
 
     #[test]

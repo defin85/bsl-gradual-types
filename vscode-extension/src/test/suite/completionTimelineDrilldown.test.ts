@@ -24,6 +24,7 @@ suite('Completion Timeline Drilldown Test Suite', () => {
         const verdicts = buildCompletionTraceBottleneckVerdicts({
             server_edge_details: {
                 transport_received_at_ms: 1,
+                pre_method_attribution_provenance: 'same_request_authoritative',
                 method_entered_at_ms: 41,
                 handler_entered_at_ms: 43,
                 response_sent_at_ms: 61,
@@ -36,6 +37,24 @@ suite('Completion Timeline Drilldown Test Suite', () => {
 
         assert.ok(verdicts.includes('server_before_method_entry_dominant'));
         assert.ok(!verdicts.includes('handler_prelude_dominant'));
+    });
+
+    test('buildCompletionTraceBottleneckVerdicts should fail-closed for weak pre-method provenance', () => {
+        const verdicts = buildCompletionTraceBottleneckVerdicts({
+            server_edge_details: {
+                transport_received_at_ms: 1,
+                pre_method_attribution_provenance: 'best_effort_fallback',
+                method_entered_at_ms: 41,
+                handler_entered_at_ms: 43,
+                response_sent_at_ms: 61,
+                transport_to_method_wait_ms: 40,
+                method_prelude_exec_ms: 2,
+                transport_to_handler_wait_ms: 42,
+                server_handler_exec_ms: 18,
+            },
+        });
+
+        assert.ok(!verdicts.includes('server_before_method_entry_dominant'));
     });
 
     test('buildCompletionTraceBottleneckVerdicts should distinguish handler prelude dominance', () => {
@@ -93,5 +112,26 @@ suite('Completion Timeline Drilldown Test Suite', () => {
         });
 
         assert.ok(verdicts.includes('exact_deadline@artifact_poll'));
+    });
+
+    test('buildCompletionTraceBottleneckVerdicts should require strong provenance for client ingress verdict', () => {
+        const verdicts = buildCompletionTraceBottleneckVerdicts({
+            server_edge_details: {
+                transport_received_at_ms: 100,
+                pre_method_attribution_provenance: 'best_effort_fallback',
+                method_entered_at_ms: 140,
+                handler_entered_at_ms: 140,
+                response_sent_at_ms: 220,
+                transport_to_method_wait_ms: 40,
+                method_prelude_exec_ms: 0,
+                transport_to_handler_wait_ms: 40,
+                server_handler_exec_ms: 80,
+            },
+        }, {
+            correlation_status: 'correlated',
+            client_to_transport_wait_ms: 90,
+        });
+
+        assert.ok(!verdicts.includes('client_before_transport_dominant'));
     });
 });

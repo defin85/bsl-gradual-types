@@ -142,7 +142,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 7,
+                version: 8,
                 traces: [
                     {
                         trace_id: 'trace-copy',
@@ -155,6 +155,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                         dominant_stage: 'query_bundle',
                         server_edge_details: {
                             transport_received_at_ms: 1_700_000_000_000,
+                            pre_method_attribution_provenance: 'same_request_authoritative',
                             service_scope_entered_at_ms: 1_700_000_000_002,
                             method_entered_at_ms: 1_700_000_000_005,
                             handler_entered_at_ms: 1_700_000_000_009,
@@ -252,8 +253,9 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const clipboardPayload = clipboardStub.firstCall.args[0];
         assert.ok(clipboardPayload.includes('Completion Timeline | mode=all'));
         assert.ok(clipboardPayload.includes('Server Timeline'));
-        assert.ok(clipboardPayload.includes('contract=v7'));
+        assert.ok(clipboardPayload.includes('contract=v8'));
         assert.ok(clipboardPayload.includes('trace-copy (invoked)'));
+        assert.ok(clipboardPayload.includes('pre_method_attribution_provenance=same_request_authoritative'));
         assert.ok(clipboardPayload.includes('service_scope_entered_at_ms=1700000000002'));
         assert.ok(clipboardPayload.includes('method_entered_at_ms=1700000000005'));
         assert.ok(clipboardPayload.includes('transport_to_service_scope_wait_ms=2'));
@@ -318,7 +320,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         assert.ok(webview.html.includes('service_scope_entered='));
         assert.ok(webview.html.includes('snapshot_with_deps_timeout_runtime'));
         assert.ok(
-            webview.html.includes('v7 pre-method and snapshot overshoot attribution fields are unavailable by design on this payload.')
+            webview.html.includes('v8 trustworthy pre-method attribution provenance is unavailable by design on this payload.')
         );
 
         onDidDisposeEmitter.dispose();
@@ -331,7 +333,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 7,
+                version: 8,
                 traces: [
                     {
                         trace_id: 'trace-export',

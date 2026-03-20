@@ -156,6 +156,10 @@ function buildCompletionTimelineSource(
             gaps.push(
                 `Completion timeline contract v${completionTimeline.response.version} does not include all v7 pre-method and snapshot overshoot attribution fields; those facts are unavailable by design.`
             );
+        } else if (completionTimeline.response.version < 8) {
+            gaps.push(
+                `Completion timeline contract v${completionTimeline.response.version} does not include trustworthy v8 pre-method attribution provenance; strong ingress findings are unavailable by design.`
+            );
         }
         rawAttachments.push({
             path: COMPLETION_TIMELINE_RAW_PATH,
@@ -266,6 +270,10 @@ function deriveFindings(
         if (input.completionTimeline.response.version < 7) {
             findings.push(
                 `Completion timeline contract v${input.completionTimeline.response.version} is available, but v7 pre-method and snapshot overshoot attribution details are unavailable by design.`
+            );
+        } else if (input.completionTimeline.response.version < 8) {
+            findings.push(
+                `Completion timeline contract v${input.completionTimeline.response.version} is available, but trustworthy v8 pre-method attribution provenance is unavailable by design.`
             );
         }
         const serverBeforeMethodCount = requestSection.requests.filter((request) =>

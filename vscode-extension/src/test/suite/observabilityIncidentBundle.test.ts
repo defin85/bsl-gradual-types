@@ -41,7 +41,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 7,
+                version: 8,
                 traces: [
                     {
                         trace_id: 'trace-1',
@@ -69,6 +69,7 @@ suite('Observability Incident Bundle Test Suite', () => {
                         },
                         server_edge_details: {
                             transport_received_at_ms: 1_700_000_000_000,
+                            pre_method_attribution_provenance: 'same_request_authoritative',
                             service_scope_entered_at_ms: 1_700_000_002_000,
                             method_entered_at_ms: 1_700_000_003_000,
                             handler_entered_at_ms: 1_700_000_003_000,
@@ -120,6 +121,7 @@ suite('Observability Incident Bundle Test Suite', () => {
                         },
                         server_edge_details: {
                             transport_received_at_ms: 1_700_000_010_010,
+                            pre_method_attribution_provenance: 'same_request_authoritative',
                             method_entered_at_ms: 1_700_000_010_015,
                             handler_entered_at_ms: 1_700_000_010_015,
                             response_sent_at_ms: 1_700_000_012_996,
@@ -198,7 +200,7 @@ suite('Observability Incident Bundle Test Suite', () => {
             ]
         );
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'available');
-        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 7);
+        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 8);
         assert.strictEqual(bundle.incidentReport.sources.client_probes.probe_count, 2);
         assert.strictEqual(bundle.incidentReport.sources.observability_metrics.uptime_seconds, 184);
         assert.deepStrictEqual(bundle.incidentReport.capture_scope, {
@@ -232,6 +234,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.summaryMarkdown.includes('scope=single_uri | uri=file:///tmp/test.bsl | request_count=2'));
         assert.ok(bundle.summaryMarkdown.includes('## Request Summary'));
         assert.ok(bundle.summaryMarkdown.includes('trace-1 | request=req-1'));
+        assert.ok(bundle.summaryMarkdown.includes('pre_method_provenance=same_request_authoritative'));
         assert.ok(bundle.summaryMarkdown.includes('transport_to_service_scope_wait_ms=2000'));
         assert.ok(bundle.summaryMarkdown.includes('service_scope_to_method_wait_ms=1000'));
         assert.ok(
@@ -261,12 +264,12 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.summaryMarkdown.includes('status=unsupported'));
     });
 
-    test('v6 completion timeline should stay valid and mark v7 pre-method and snapshot overshoot details as unavailable', () => {
+    test('v7 completion timeline should stay valid and mark v8 provenance details as unavailable', () => {
         const timeline = sampleTimeline();
         if (timeline.kind !== 'ok') {
             throw new Error('expected ok timeline fixture');
         }
-        timeline.response.version = 6;
+        timeline.response.version = 7;
         timeline.response.traces[0].server_edge_details = {
             transport_received_at_ms: 1_700_000_000_000,
             method_entered_at_ms: 1_700_000_003_000,
@@ -299,13 +302,14 @@ suite('Observability Incident Bundle Test Suite', () => {
             observabilityMetrics: sampleMetrics(),
         });
 
-        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('contract v6')));
-        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('contract v6')));
+        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('contract v7')));
+        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('contract v7')));
         assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('prepare_timeout was observed in 1 completion trace(s): prepare_timeout@prepare_guard')));
         assert.strictEqual(bundle.incidentReport.request_window.request_count, 2);
-        assert.strictEqual(bundle.incidentReport.requests[0].transport_to_service_scope_wait_ms, undefined);
+        assert.strictEqual(bundle.incidentReport.requests[0].pre_method_attribution_provenance, undefined);
         assert.strictEqual(bundle.incidentReport.requests[1].snapshot_with_deps_timeout_runtime, undefined);
         assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.status, 'unavailable');
+        assert.ok(!bundle.incidentReport.requests[0].bottleneck_verdicts.includes('server_before_method_entry_dominant'));
         assert.ok(!bundle.incidentReport.requests[0].bottleneck_verdicts.includes('client_before_transport_dominant'));
     });
 
@@ -319,6 +323,7 @@ suite('Observability Incident Bundle Test Suite', () => {
                 ...timeline.response.traces[0],
                 server_edge_details: {
                     transport_received_at_ms: 1_700_000_000_100,
+                    pre_method_attribution_provenance: 'same_request_authoritative',
                     method_entered_at_ms: 1_700_000_000_140,
                     handler_entered_at_ms: 1_700_000_000_140,
                     response_sent_at_ms: 1_700_000_000_220,
@@ -360,6 +365,65 @@ suite('Observability Incident Bundle Test Suite', () => {
                 finding.includes('server-side ingress before method entry dominated 1 completion trace(s)')
             )
         );
+    });
+
+    test('best-effort pre-method provenance should stay visible but not aggregate as strong ingress finding', () => {
+        const timeline = sampleTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok timeline fixture');
+        }
+        timeline.response.traces = [
+            {
+                ...timeline.response.traces[0],
+                server_edge_details: {
+                    transport_received_at_ms: 1_700_000_000_100,
+                    pre_method_attribution_provenance: 'best_effort_fallback',
+                    method_entered_at_ms: 1_700_000_000_140,
+                    handler_entered_at_ms: 1_700_000_000_140,
+                    response_sent_at_ms: 1_700_000_000_220,
+                    transport_to_method_wait_ms: 40,
+                    method_prelude_exec_ms: 0,
+                    transport_to_handler_wait_ms: 40,
+                    server_handler_exec_ms: 80,
+                },
+            },
+        ];
+
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: timeline,
+            completionTraceLimit: 50,
+            clientProbes: [
+                sampleProbe({
+                    probe_id: 'probe-best-effort',
+                    trigger_mode: 'invoked',
+                    request_started_at_ms: 1_700_000_000_000,
+                    lsp_request_started_at_ms: 1_700_000_000_000,
+                    lsp_response_received_at_ms: 1_700_000_000_221,
+                    request_completed_at_ms: 1_700_000_000_222,
+                    client_duration_ms: 222,
+                }),
+            ],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.strictEqual(
+            bundle.incidentReport.requests[0].pre_method_attribution_provenance,
+            'best_effort_fallback'
+        );
+        assert.ok(!bundle.incidentReport.requests[0].bottleneck_verdicts.includes('server_before_method_entry_dominant'));
+        assert.ok(!bundle.incidentReport.requests[0].bottleneck_verdicts.includes('client_before_transport_dominant'));
+        assert.ok(
+            !bundle.incidentReport.findings.some((finding) =>
+                finding.includes('server-side ingress before method entry dominated')
+            )
+        );
+        assert.ok(
+            !bundle.incidentReport.findings.some((finding) =>
+                finding.includes('client-side ingress dominated')
+            )
+        );
+        assert.ok(bundle.summaryMarkdown.includes('pre_method_provenance=best_effort_fallback'));
     });
 
     test('missing metrics should keep available sections and mark metrics gap explicitly', () => {

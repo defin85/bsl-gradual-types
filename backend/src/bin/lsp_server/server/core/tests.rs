@@ -9693,7 +9693,7 @@ async fn p22_get_completion_timeline_exposes_versioned_contract() {
             .get("version")
             .and_then(|value| value.as_u64())
             .expect("version"),
-        7
+        8
     );
     assert!(
         result
@@ -9870,6 +9870,7 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
     );
     for field in [
         "transport_received_at_ms",
+        "pre_method_attribution_provenance",
         "handler_entered_at_ms",
         "response_sent_at_ms",
         "transport_to_method_wait_ms",
@@ -9886,6 +9887,10 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
         .get("transport_received_at_ms")
         .and_then(|value| value.as_u64())
         .expect("transport_received_at_ms");
+    let pre_method_attribution_provenance = server_edge_details
+        .get("pre_method_attribution_provenance")
+        .and_then(|value| value.as_str())
+        .expect("pre_method_attribution_provenance");
     let handler_entered_at_ms = server_edge_details
         .get("handler_entered_at_ms")
         .and_then(|value| value.as_u64())
@@ -9913,6 +9918,13 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
         .get("server_handler_exec_ms")
         .and_then(|value| value.as_u64())
         .expect("server_handler_exec_ms");
+    assert!(
+        matches!(
+            pre_method_attribution_provenance,
+            "same_request_authoritative" | "best_effort_fallback" | "unavailable"
+        ),
+        "unexpected pre_method_attribution_provenance={pre_method_attribution_provenance}"
+    );
     assert!(
         transport_received_at_ms <= handler_entered_at_ms,
         "transport_received_at_ms must not exceed handler_entered_at_ms"

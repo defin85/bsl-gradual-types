@@ -68,11 +68,13 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         "p22_get_completion_timeline_exposes_versioned_contract",
         "p22_get_completion_timeline_contains_completion_trace",
         "server_edge_details_are_derived_from_transport_handler_and_response_timestamps",
+        "server_edge_details_include_pre_method_attribution_provenance",
         "prepare_runtime_drilldown_is_serialised_into_trace",
         "prepare_timeout_attribution_is_serialised_into_trace",
         "snapshot_timeout_runtime_is_serialised_into_trace",
         "exact_wait_task_state_drilldown_is_serialised_into_trace",
         "exact_wait_artifact_poll_is_serialised_into_trace",
+        "overlapping_completion_request_context_can_be_taken_by_request_id_out_of_order",
     ]
 
     def smoke_script_text(self) -> str:

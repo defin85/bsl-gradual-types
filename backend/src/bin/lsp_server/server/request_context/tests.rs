@@ -247,6 +247,49 @@ fn completion_request_id_is_recorded_and_taken_by_position_key() {
 }
 
 #[test]
+fn overlapping_completion_request_context_can_be_taken_by_request_id_out_of_order() {
+    let uri = Url::parse("file:///request_context_overlap.bsl").expect("url");
+    let position = Position::new(8, 4);
+    let first_request_id = "req-1";
+    let second_request_id = "req-2";
+    let first_request = Request::build("textDocument/completion")
+        .id(first_request_id)
+        .params(json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": position.line, "character": position.character },
+        }))
+        .finish();
+    let second_request = Request::build("textDocument/completion")
+        .id(second_request_id)
+        .params(json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": position.line, "character": position.character },
+        }))
+        .finish();
+
+    record_pending_completion_request_id(&first_request, first_request_id, Some(1_700_000_000_010));
+    record_pending_completion_service_scope_entered_at_ms(first_request_id, 1_700_000_000_012);
+    record_pending_completion_request_id(
+        &second_request,
+        second_request_id,
+        Some(1_700_000_000_020),
+    );
+    record_pending_completion_service_scope_entered_at_ms(second_request_id, 1_700_000_000_021);
+
+    let second = take_completion_request_context_by_request_id(second_request_id)
+        .expect("second request should be taken by request id");
+    assert_eq!(second.request_id, second_request_id);
+    assert_eq!(second.request_received_at_ms, Some(1_700_000_000_020));
+    assert_eq!(second.service_scope_entered_at_ms, Some(1_700_000_000_021));
+
+    let first = take_completion_request_context(&uri, position)
+        .expect("first request should remain available by position");
+    assert_eq!(first.request_id, first_request_id);
+    assert_eq!(first.request_received_at_ms, Some(1_700_000_000_010));
+    assert_eq!(first.service_scope_entered_at_ms, Some(1_700_000_000_012));
+}
+
+#[test]
 fn pending_completion_request_is_removed_when_cancelled_before_take() {
     let uri = Url::parse("file:///request_context_cancelled.bsl").expect("url");
     let request_id = "req-cancel";

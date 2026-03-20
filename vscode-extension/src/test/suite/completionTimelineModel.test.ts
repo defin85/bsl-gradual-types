@@ -41,7 +41,7 @@ function buildClientProbe(probeId: string, version: number, startedAtMs: number)
 suite('Completion Timeline Model Test Suite', () => {
     test('Mapping LSP timeline payload -> UI model', () => {
         const payload: CompletionTimelineResponse = {
-            version: 7,
+            version: 8,
             traces: [
                 {
                     trace_id: 'trace-42',
@@ -54,6 +54,7 @@ suite('Completion Timeline Model Test Suite', () => {
                     dominant_stage: 'query_bundle',
                     server_edge_details: {
                         transport_received_at_ms: 1_700_000_000_040,
+                        pre_method_attribution_provenance: 'same_request_authoritative',
                         service_scope_entered_at_ms: 1_700_000_000_041,
                         method_entered_at_ms: 1_700_000_000_042,
                         handler_entered_at_ms: 1_700_000_000_042,
@@ -144,7 +145,7 @@ suite('Completion Timeline Model Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(state.version, 7);
+        assert.strictEqual(state.version, 8);
         assert.strictEqual(state.traces.length, 1);
         assert.strictEqual(state.traces[0].trace_id, 'trace-42');
         assert.strictEqual(

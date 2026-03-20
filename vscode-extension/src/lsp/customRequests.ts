@@ -554,6 +554,11 @@ export interface CompletionTimelinePrepareTimeoutAttributionTrace {
     overshoot_ms: number;
 }
 
+export type CompletionTimelinePreMethodAttributionProvenance =
+    | 'same_request_authoritative'
+    | 'best_effort_fallback'
+    | 'unavailable';
+
 export interface CompletionTimelineExactArtifactPollTrace {
     poll_count: number;
     poll_elapsed_ms: number;
@@ -597,6 +602,7 @@ export interface CompletionTimelinePrepareDetailsTrace {
 
 export interface CompletionTimelineServerEdgeDetailsTrace {
     transport_received_at_ms: number;
+    pre_method_attribution_provenance?: CompletionTimelinePreMethodAttributionProvenance;
     service_scope_entered_at_ms?: number;
     method_entered_at_ms?: number;
     handler_entered_at_ms: number;

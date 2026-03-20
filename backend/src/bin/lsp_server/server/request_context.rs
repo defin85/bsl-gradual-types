@@ -170,6 +170,26 @@ pub(crate) fn take_completion_request_id(uri: &Url, position: Position) -> Optio
     take_completion_request_context(uri, position).map(|context| context.request_id)
 }
 
+pub(crate) fn take_completion_request_context_by_request_id(
+    request_id: &str,
+) -> Option<PendingCompletionRequestContext> {
+    let mut pending = pending_completion_request_ids_cell()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let entry = pending.by_request_id.remove(request_id)?;
+    if let Some(queue) = pending.by_key.get_mut(&entry.key) {
+        queue.retain(|queued| queued != request_id);
+        if queue.is_empty() {
+            pending.by_key.remove(&entry.key);
+        }
+    }
+    Some(PendingCompletionRequestContext {
+        request_id: request_id.to_string(),
+        request_received_at_ms: entry.request_received_at_ms,
+        service_scope_entered_at_ms: entry.service_scope_entered_at_ms,
+    })
+}
+
 pub(crate) fn take_completion_request_context(
     uri: &Url,
     position: Position,

@@ -1,6 +1,7 @@
 import {
     CompletionTimelineExactArtifactPollTrace,
     CompletionTimelineExactWaitDetailsTrace,
+    CompletionTimelinePreMethodAttributionProvenance,
     CompletionTimelinePrepareDetailsTrace,
     CompletionTimelinePrepareProgressTrace,
     CompletionTimelinePrepareRuntimeTrace,
@@ -12,6 +13,18 @@ import {
 export interface CompletionTraceClientIngressSupplement {
     correlation_status: 'correlated' | 'unavailable' | 'ambiguous';
     client_to_transport_wait_ms?: number;
+}
+
+export function getPreMethodAttributionProvenance(
+    trace: Pick<CompletionTimelineTrace, 'server_edge_details'>
+): CompletionTimelinePreMethodAttributionProvenance | undefined {
+    return trace.server_edge_details?.pre_method_attribution_provenance;
+}
+
+export function hasStrongPreMethodAttribution(
+    trace: Pick<CompletionTimelineTrace, 'server_edge_details'>
+): boolean {
+    return getPreMethodAttributionProvenance(trace) === 'same_request_authoritative';
 }
 
 export function derivePrepareTimeoutSubphase(
@@ -49,11 +62,13 @@ export function buildCompletionTraceBottleneckVerdicts(
     const verdicts: string[] = [];
     const transportToMethodWait = trace.server_edge_details?.transport_to_method_wait_ms;
     const methodPreludeExec = trace.server_edge_details?.method_prelude_exec_ms;
+    const strongPreMethodAttribution = hasStrongPreMethodAttribution(trace);
     if (
         typeof transportToMethodWait === 'number' &&
         typeof methodPreludeExec === 'number'
     ) {
         if (
+            strongPreMethodAttribution &&
             transportToMethodWait > 0 &&
             transportToMethodWait > methodPreludeExec
         ) {
@@ -67,6 +82,7 @@ export function buildCompletionTraceBottleneckVerdicts(
     }
 
     if (
+        strongPreMethodAttribution &&
         clientIngress?.correlation_status === 'correlated' &&
         typeof clientIngress.client_to_transport_wait_ms === 'number' &&
         clientIngress.client_to_transport_wait_ms > 0 &&

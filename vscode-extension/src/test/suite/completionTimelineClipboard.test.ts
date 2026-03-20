@@ -9,7 +9,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
     function buildReadyState(): CompletionTimelinePanelState {
         return {
             kind: 'ready',
-            version: 7,
+            version: 8,
             updated_at_ms: 1_700_000_000_100,
             client_probe_feed: {
                 updated_at_ms: 1_700_000_000_100,
@@ -59,6 +59,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                     dominant_stage: 'query_bundle',
                     server_edge_details: {
                         transport_received_at_ms: 1_699_999_999_960,
+                        pre_method_attribution_provenance: 'same_request_authoritative',
                         service_scope_entered_at_ms: 1_699_999_999_988,
                         method_entered_at_ms: 1_700_000_000_000,
                         handler_entered_at_ms: 1_700_000_000_002,
@@ -192,10 +193,11 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('Completion Timeline | mode=all'));
         assert.ok(text!.includes('Server Timeline'));
         assert.ok(text!.includes('trace-1 (invoked)'));
-        assert.ok(text!.includes('contract=v7'));
+        assert.ok(text!.includes('contract=v8'));
         assert.ok(text!.includes('Client Probe Feed | local-only debug data'));
         assert.ok(text!.includes('probe-1 (trigger_character)'));
         assert.ok(text!.includes('transport_received_at_ms=1699999999960'));
+        assert.ok(text!.includes('pre_method_attribution_provenance=same_request_authoritative'));
         assert.ok(text!.includes('service_scope_entered_at_ms=1699999999988'));
         assert.ok(text!.includes('method_entered_at_ms=1700000000000'));
         assert.ok(text!.includes('handler_entered_at_ms=1700000000002'));
@@ -248,12 +250,12 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(!text!.includes('trace-1 (invoked)'));
     });
 
-    test('formatVisibleCompletionTimelineForClipboard should mark v6 payload as missing v7 fields by design', () => {
+    test('formatVisibleCompletionTimelineForClipboard should mark v7 payload as missing v8 provenance by design', () => {
         const state = buildReadyState();
         if (state.kind !== 'ready') {
             throw new Error('expected ready state fixture');
         }
-        state.version = 6;
+        state.version = 7;
         state.traces[0].server_edge_details = {
             transport_received_at_ms: 1_699_999_999_960,
             method_entered_at_ms: 1_700_000_000_000,
@@ -273,14 +275,15 @@ suite('Completion Timeline Clipboard Test Suite', () => {
 
         const text = formatVisibleCompletionTimelineForClipboard(state, 'all');
         assert.ok(text);
-        assert.ok(text!.includes('contract=v6'));
+        assert.ok(text!.includes('contract=v7'));
         assert.ok(
             text!.includes(
-                'v7 pre-method and snapshot overshoot attribution fields are unavailable by design on this payload.'
+                'v8 trustworthy pre-method attribution provenance is unavailable by design on this payload.'
             )
         );
-        assert.ok(!text!.includes('service_scope_entered_at_ms='));
-        assert.ok(!text!.includes('snapshot_with_deps_timeout_runtime |'));
+        assert.ok(text!.includes('transport_to_method_wait_ms=40'));
+        assert.ok(!text!.includes('pre_method_attribution_provenance='));
+        assert.ok(!text!.includes('bottleneck_verdict=server_before_method_entry_dominant'));
     });
 
     test('formatSelectedCompletionTraceForClipboard should return single requested trace', () => {

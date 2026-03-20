@@ -69,11 +69,13 @@ run_completion_timeline_drilldown_smoke() {
   cargo test -p bsl-backend --bin bsl-lsp-server p22_get_completion_timeline_exposes_versioned_contract -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server p22_get_completion_timeline_contains_completion_trace -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server server_edge_details_are_derived_from_transport_handler_and_response_timestamps -- --nocapture
+  cargo test -p bsl-backend --bin bsl-lsp-server server_edge_details_include_pre_method_attribution_provenance -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server prepare_runtime_drilldown_is_serialised_into_trace -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server prepare_timeout_attribution_is_serialised_into_trace -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server snapshot_timeout_runtime_is_serialised_into_trace -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server exact_wait_task_state_drilldown_is_serialised_into_trace -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server exact_wait_artifact_poll_is_serialised_into_trace -- --nocapture
+  cargo test -p bsl-backend --bin bsl-lsp-server overlapping_completion_request_context_can_be_taken_by_request_id_out_of_order -- --nocapture
 }
 
 run_extension_completion_observability_smoke() {

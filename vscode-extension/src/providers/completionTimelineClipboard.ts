@@ -87,6 +87,9 @@ export function formatCompletionTimelineTraceForClipboard(
     if (trace.server_edge_details) {
         const detailsBits = [
             `transport_received_at_ms=${trace.server_edge_details.transport_received_at_ms}`,
+            ...(trace.server_edge_details.pre_method_attribution_provenance
+                ? [`pre_method_attribution_provenance=${trace.server_edge_details.pre_method_attribution_provenance}`]
+                : []),
             ...(typeof trace.server_edge_details.service_scope_entered_at_ms === 'number'
                 ? [`service_scope_entered_at_ms=${trace.server_edge_details.service_scope_entered_at_ms}`]
                 : []),
@@ -303,6 +306,8 @@ function formatServerTimelineSectionForClipboard(
     lines.push(`contract=v${state.version}`);
     if (state.version < 7) {
         lines.push('v7 pre-method and snapshot overshoot attribution fields are unavailable by design on this payload.');
+    } else if (state.version < 8) {
+        lines.push('v8 trustworthy pre-method attribution provenance is unavailable by design on this payload.');
     }
     const traces = mode === 'average'
         ? (state.average_trace ? [state.average_trace] : [])

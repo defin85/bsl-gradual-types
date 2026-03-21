@@ -9693,7 +9693,7 @@ async fn p22_get_completion_timeline_exposes_versioned_contract() {
             .get("version")
             .and_then(|value| value.as_u64())
             .expect("version"),
-        9
+        10
     );
     assert!(
         result
@@ -9870,6 +9870,7 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
     );
     for field in [
         "transport_received_at_ms",
+        "transport_received_at_ms_provenance",
         "pre_method_attribution_provenance",
         "handler_entered_at_ms",
         "response_sent_at_ms",
@@ -9887,6 +9888,10 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
         .get("transport_received_at_ms")
         .and_then(|value| value.as_u64())
         .expect("transport_received_at_ms");
+    let transport_received_at_ms_provenance = server_edge_details
+        .get("transport_received_at_ms_provenance")
+        .and_then(|value| value.as_str())
+        .expect("transport_received_at_ms_provenance");
     let pre_method_attribution_provenance = server_edge_details
         .get("pre_method_attribution_provenance")
         .and_then(|value| value.as_str())
@@ -9920,6 +9925,13 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
         .expect("server_handler_exec_ms");
     assert!(
         matches!(
+            transport_received_at_ms_provenance,
+            "request_context_call_entry" | "jsonrpc_dispatch_received"
+        ),
+        "unexpected transport_received_at_ms_provenance={transport_received_at_ms_provenance}"
+    );
+    assert!(
+        matches!(
             pre_method_attribution_provenance,
             "same_request_authoritative" | "best_effort_fallback" | "unavailable"
         ),
@@ -9943,6 +9955,45 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
             method_entered_at_ms.saturating_sub(transport_received_at_ms),
             "transport_to_method_wait_ms must match timestamp delta"
         );
+        if let Some(jsonrpc_dispatch_received_at_ms) = server_edge_details
+            .get("jsonrpc_dispatch_received_at_ms")
+            .and_then(|value| value.as_u64())
+        {
+            let dispatch_to_request_context_wait_ms = server_edge_details
+                .get("dispatch_to_request_context_wait_ms")
+                .and_then(|value| value.as_u64())
+                .expect("dispatch_to_request_context_wait_ms");
+            assert_eq!(
+                transport_received_at_ms_provenance,
+                "jsonrpc_dispatch_received",
+                "jsonrpc dispatch timestamp must align with provenance"
+            );
+            assert_eq!(
+                transport_received_at_ms,
+                jsonrpc_dispatch_received_at_ms,
+                "transport_received_at_ms must equal jsonrpc dispatch timestamp when provenance is jsonrpc_dispatch_received"
+            );
+            assert!(
+                transport_received_at_ms <= method_entered_at_ms,
+                "jsonrpc dispatch timestamp must not exceed method_entered_at_ms"
+            );
+            assert_eq!(
+                dispatch_to_request_context_wait_ms
+                    <= transport_to_method_wait_ms,
+                true,
+                "dispatch_to_request_context_wait_ms must not exceed transport_to_method_wait_ms"
+            );
+        } else {
+            assert_eq!(
+                transport_received_at_ms_provenance,
+                "request_context_call_entry",
+                "missing jsonrpc dispatch timestamp must fall back to request_context_call_entry provenance"
+            );
+            assert!(
+                !server_edge_details.contains_key("dispatch_to_request_context_wait_ms"),
+                "dispatch_to_request_context_wait_ms must not be fabricated when jsonrpc_dispatch_received_at_ms is absent"
+            );
+        }
         assert_eq!(
             method_prelude_exec_ms,
             handler_entered_at_ms.saturating_sub(method_entered_at_ms),

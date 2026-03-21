@@ -258,6 +258,9 @@ pub struct CompletionTimelinePrepareDetailsTrace {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompletionTimelineServerEdgeDetailsTrace {
     pub transport_received_at_ms: u64,
+    pub transport_received_at_ms_provenance: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jsonrpc_dispatch_received_at_ms: Option<u64>,
     pub pre_method_attribution_provenance: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service_future_created_at_ms: Option<u64>,
@@ -269,6 +272,8 @@ pub struct CompletionTimelineServerEdgeDetailsTrace {
     pub response_sent_at_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cancel_observed_at_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dispatch_to_request_context_wait_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transport_to_service_future_wait_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]

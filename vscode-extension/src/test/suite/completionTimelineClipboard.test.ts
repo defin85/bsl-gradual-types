@@ -9,7 +9,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
     function buildReadyState(): CompletionTimelinePanelState {
         return {
             kind: 'ready',
-            version: 9,
+            version: 10,
             updated_at_ms: 1_700_000_000_100,
             client_probe_feed: {
                 updated_at_ms: 1_700_000_000_100,
@@ -59,6 +59,8 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                     dominant_stage: 'query_bundle',
                     server_edge_details: {
                         transport_received_at_ms: 1_699_999_999_960,
+                        transport_received_at_ms_provenance: 'jsonrpc_dispatch_received',
+                        jsonrpc_dispatch_received_at_ms: 1_699_999_999_960,
                         service_future_created_at_ms: 1_699_999_999_972,
                         pre_method_attribution_provenance: 'same_request_authoritative',
                         service_scope_entered_at_ms: 1_699_999_999_988,
@@ -66,6 +68,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                         handler_entered_at_ms: 1_700_000_000_002,
                         response_sent_at_ms: 1_700_000_000_030,
                         cancel_observed_at_ms: 1_700_000_000_021,
+                        dispatch_to_request_context_wait_ms: 4,
                         transport_to_service_future_wait_ms: 12,
                         service_future_to_scope_wait_ms: 16,
                         transport_to_service_scope_wait_ms: 28,
@@ -196,16 +199,19 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('Completion Timeline | mode=all'));
         assert.ok(text!.includes('Server Timeline'));
         assert.ok(text!.includes('trace-1 (invoked)'));
-        assert.ok(text!.includes('contract=v9'));
+        assert.ok(text!.includes('contract=v10'));
         assert.ok(text!.includes('Client Probe Feed | local-only debug data'));
         assert.ok(text!.includes('probe-1 (trigger_character)'));
         assert.ok(text!.includes('transport_received_at_ms=1699999999960'));
+        assert.ok(text!.includes('transport_received_at_ms_provenance=jsonrpc_dispatch_received'));
+        assert.ok(text!.includes('jsonrpc_dispatch_received_at_ms=1699999999960'));
         assert.ok(text!.includes('service_future_created_at_ms=1699999999972'));
         assert.ok(text!.includes('pre_method_attribution_provenance=same_request_authoritative'));
         assert.ok(text!.includes('service_scope_entered_at_ms=1699999999988'));
         assert.ok(text!.includes('method_entered_at_ms=1700000000000'));
         assert.ok(text!.includes('handler_entered_at_ms=1700000000002'));
         assert.ok(text!.includes('response_sent_at_ms=1700000000030'));
+        assert.ok(text!.includes('dispatch_to_request_context_wait_ms=4'));
         assert.ok(text!.includes('transport_to_service_future_wait_ms=12'));
         assert.ok(text!.includes('service_future_to_scope_wait_ms=16'));
         assert.ok(text!.includes('transport_to_service_scope_wait_ms=28'));
@@ -255,37 +261,40 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('average(1) (averaged) | sample=1'));
         assert.ok(
             text!.includes(
-                'Average trace is synthetic; v8 trustworthy pre-method attribution provenance and v9 pre-service-scope split are unavailable by design.'
+                'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, and v10 dispatch split are unavailable by design.'
             )
         );
         assert.ok(!text!.includes('bottleneck_verdict=server_before_method_entry_dominant'));
         assert.ok(!text!.includes('trace-1 (invoked)'));
     });
 
-    test('formatVisibleCompletionTimelineForClipboard should mark v8 payload as missing v9 split by design', () => {
+    test('formatVisibleCompletionTimelineForClipboard should mark v9 payload as missing v10 dispatch split by design', () => {
         const state = buildReadyState();
         if (state.kind !== 'ready') {
             throw new Error('expected ready state fixture');
         }
-        state.version = 8;
+        state.version = 9;
         state.traces[0].server_edge_details = {
             ...state.traces[0].server_edge_details!,
-            service_future_created_at_ms: undefined,
-            transport_to_service_future_wait_ms: undefined,
-            service_future_to_scope_wait_ms: undefined,
+            transport_received_at_ms_provenance: undefined,
+            jsonrpc_dispatch_received_at_ms: undefined,
+            dispatch_to_request_context_wait_ms: undefined,
         };
 
         const text = formatVisibleCompletionTimelineForClipboard(state, 'all');
         assert.ok(text);
-        assert.ok(text!.includes('contract=v8'));
+        assert.ok(text!.includes('contract=v9'));
         assert.ok(
             text!.includes(
-                'v9 pre-service-scope split is unavailable by design on this payload.'
+                'v10 dispatch split is unavailable by design on this payload.'
             )
         );
-        assert.ok(!text!.includes('service_future_created_at_ms='));
-        assert.ok(!text!.includes('transport_to_service_future_wait_ms='));
-        assert.ok(!text!.includes('service_future_to_scope_wait_ms='));
+        assert.ok(text!.includes('service_future_created_at_ms=1699999999972'));
+        assert.ok(text!.includes('transport_to_service_future_wait_ms=12'));
+        assert.ok(text!.includes('service_future_to_scope_wait_ms=16'));
+        assert.ok(!text!.includes('transport_received_at_ms_provenance='));
+        assert.ok(!text!.includes('jsonrpc_dispatch_received_at_ms='));
+        assert.ok(!text!.includes('dispatch_to_request_context_wait_ms='));
     });
 
     test('formatVisibleCompletionTimelineForClipboard should mark v7 payload as missing v8 provenance by design', () => {
@@ -296,6 +305,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         state.version = 7;
         state.traces[0].server_edge_details = {
             transport_received_at_ms: 1_699_999_999_960,
+            transport_received_at_ms_provenance: undefined,
             method_entered_at_ms: 1_700_000_000_000,
             handler_entered_at_ms: 1_700_000_000_002,
             response_sent_at_ms: 1_700_000_000_030,
@@ -322,6 +332,11 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(
             text!.includes(
                 'v9 pre-service-scope split is unavailable by design on this payload.'
+            )
+        );
+        assert.ok(
+            text!.includes(
+                'v10 dispatch split is unavailable by design on this payload.'
             )
         );
         assert.ok(text!.includes('transport_to_method_wait_ms=40'));

@@ -1342,8 +1342,8 @@ fn completion_v2_contract_matches_runtime_transport_and_trigger_modes() {
 }
 
 #[test]
-fn completion_timeline_v6_contract_matches_current_runtime_payload_shape() {
-    let contract = contract_json("lsp-completion-timeline/v6/contract.json");
+fn completion_timeline_v7_contract_matches_current_runtime_payload_shape() {
+    let contract = contract_json("lsp-completion-timeline/v7/contract.json");
     let response = contract
         .get("response")
         .and_then(|value| value.as_object())
@@ -1354,7 +1354,7 @@ fn completion_timeline_v6_contract_matches_current_runtime_payload_shape() {
             .get("version")
             .and_then(|value| value.as_u64())
             .expect("response.version"),
-        9,
+        10,
         "timeline contract must match current runtime response.version"
     );
 
@@ -1549,6 +1549,7 @@ fn completion_timeline_v6_contract_matches_current_runtime_payload_shape() {
         .collect();
     let expected_server_edge_details_fields: BTreeSet<String> = [
         "transport_received_at_ms",
+        "transport_received_at_ms_provenance",
         "pre_method_attribution_provenance",
         "service_future_created_at_ms",
         "service_scope_entered_at_ms",
@@ -1556,6 +1557,8 @@ fn completion_timeline_v6_contract_matches_current_runtime_payload_shape() {
         "handler_entered_at_ms",
         "response_sent_at_ms",
         "cancel_observed_at_ms",
+        "jsonrpc_dispatch_received_at_ms",
+        "dispatch_to_request_context_wait_ms",
         "transport_to_service_future_wait_ms",
         "service_future_to_scope_wait_ms",
         "transport_to_service_scope_wait_ms",

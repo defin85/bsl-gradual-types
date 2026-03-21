@@ -22,16 +22,23 @@ async fn current_request_service_future_created_at_ms_is_none_outside_scope() {
 }
 
 #[tokio::test]
+async fn current_request_jsonrpc_dispatch_received_at_ms_is_none_outside_scope() {
+    assert_eq!(current_request_jsonrpc_dispatch_received_at_ms(), None);
+}
+
+#[tokio::test]
 async fn with_request_context_exposes_context_inside_scope() {
     let scoped = with_request_context(
         Some("42".to_string()),
         Some(1_700_000_000_123),
+        Some(1_700_000_000_122),
         Some(1_700_000_000_124),
         Some(1_700_000_000_125),
         async {
             (
                 current_request_id(),
                 current_request_received_at_ms(),
+                current_request_jsonrpc_dispatch_received_at_ms(),
                 current_request_service_future_created_at_ms(),
                 current_request_service_scope_entered_at_ms(),
             )
@@ -40,8 +47,9 @@ async fn with_request_context_exposes_context_inside_scope() {
     .await;
     assert_eq!(scoped.0, Some("42".to_string()));
     assert_eq!(scoped.1, Some(1_700_000_000_123));
-    assert_eq!(scoped.2, Some(1_700_000_000_124));
-    assert_eq!(scoped.3, Some(1_700_000_000_125));
+    assert_eq!(scoped.2, Some(1_700_000_000_122));
+    assert_eq!(scoped.3, Some(1_700_000_000_124));
+    assert_eq!(scoped.4, Some(1_700_000_000_125));
 }
 
 #[tokio::test]
@@ -240,6 +248,65 @@ async fn request_context_service_records_completion_context_for_position_lookup(
     assert!(
         captured.service_scope_entered_at_ms.unwrap()
             >= captured.service_future_created_at_ms.unwrap()
+    );
+}
+
+#[tokio::test]
+async fn dispatch_context_service_records_completion_context_for_position_lookup() {
+    #[derive(Clone, Debug)]
+    struct TakeCaptureService {
+        uri: Url,
+        position: Position,
+    }
+
+    impl Service<Request> for TakeCaptureService {
+        type Response = Option<PendingCompletionRequestContext>;
+        type Error = ();
+        type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _request: Request) -> Self::Future {
+            let uri = self.uri.clone();
+            let position = self.position;
+            Box::pin(async move { Ok(take_completion_request_context(&uri, position)) })
+        }
+    }
+
+    let uri = Url::parse("file:///dispatch_context_service_record_context.bsl").expect("url");
+    let position = Position::new(6, 9);
+    let mut service =
+        DispatchContextService::new(RequestContextService::new(TakeCaptureService {
+            uri: uri.clone(),
+            position,
+        }));
+    let completion_params = CompletionParams {
+        text_document_position: tower_lsp::lsp_types::TextDocumentPositionParams {
+            text_document: tower_lsp::lsp_types::TextDocumentIdentifier { uri: uri.clone() },
+            position,
+        },
+        work_done_progress_params: tower_lsp::lsp_types::WorkDoneProgressParams::default(),
+        partial_result_params: tower_lsp::lsp_types::PartialResultParams::default(),
+        context: None,
+    };
+    let request = Request::build("textDocument/completion")
+        .id("req-dispatch-context")
+        .params(serde_json::to_value(completion_params).expect("CompletionParams"))
+        .finish();
+
+    let captured = service.call(request).await.expect("service call");
+    let captured = captured.expect("captured request context");
+    assert_eq!(captured.request_id, "req-dispatch-context");
+    assert!(captured.jsonrpc_dispatch_received_at_ms.is_some());
+    assert!(captured.request_received_at_ms.is_some());
+    assert!(captured.service_future_created_at_ms.is_some());
+    assert!(
+        captured.jsonrpc_dispatch_received_at_ms.unwrap() <= captured.request_received_at_ms.unwrap()
+    );
+    assert!(
+        captured.request_received_at_ms.unwrap() <= captured.service_future_created_at_ms.unwrap()
     );
 }
 

@@ -5,6 +5,7 @@ import {
     CompletionTimelinePreMethodAttributionProvenance,
     CompletionTimelinePrepareRuntimeTrace,
     CompletionTimelinePrepareTimeoutAttributionTrace,
+    CompletionTimelineTransportReceivedAtMsProvenance,
     CompletionTimelineTrace,
 } from '../lsp/customRequests';
 import { CompletionProbe, CompletionProbeTerminalState } from './completionProbe';
@@ -57,9 +58,12 @@ export interface ObservabilityIncidentRequestSummary {
     outcome: string;
     total_duration_ms: number;
     dominant_stage?: string;
+    transport_received_at_ms_provenance?: CompletionTimelineTransportReceivedAtMsProvenance;
+    jsonrpc_dispatch_received_at_ms?: number;
     service_future_created_at_ms?: number;
     pre_method_attribution_provenance?: CompletionTimelinePreMethodAttributionProvenance;
     transport_to_handler_wait_ms?: number;
+    dispatch_to_request_context_wait_ms?: number;
     transport_to_service_future_wait_ms?: number;
     service_future_to_scope_wait_ms?: number;
     transport_to_service_scope_wait_ms?: number;
@@ -116,11 +120,17 @@ export function buildObservabilityIncidentRequestSection(
             outcome: trace.outcome,
             total_duration_ms: trace.total_duration_ms,
             dominant_stage: trace.dominant_stage,
+            transport_received_at_ms_provenance:
+                trace.server_edge_details?.transport_received_at_ms_provenance,
+            jsonrpc_dispatch_received_at_ms:
+                trace.server_edge_details?.jsonrpc_dispatch_received_at_ms,
             service_future_created_at_ms:
                 trace.server_edge_details?.service_future_created_at_ms,
             pre_method_attribution_provenance:
                 trace.server_edge_details?.pre_method_attribution_provenance,
             transport_to_handler_wait_ms: trace.server_edge_details?.transport_to_handler_wait_ms,
+            dispatch_to_request_context_wait_ms:
+                trace.server_edge_details?.dispatch_to_request_context_wait_ms,
             transport_to_service_future_wait_ms:
                 trace.server_edge_details?.transport_to_service_future_wait_ms,
             service_future_to_scope_wait_ms:
@@ -194,6 +204,12 @@ export function renderRequestSummaryLines(section: ObservabilityIncidentRequestS
             request.bottleneck_verdicts.length > 0
                 ? `verdicts=${request.bottleneck_verdicts.join(',')}`
                 : undefined,
+            request.transport_received_at_ms_provenance
+                ? `transport_received_at_ms_provenance=${request.transport_received_at_ms_provenance}`
+                : undefined,
+            typeof request.jsonrpc_dispatch_received_at_ms === 'number'
+                ? `jsonrpc_dispatch_received_at_ms=${request.jsonrpc_dispatch_received_at_ms}`
+                : undefined,
             typeof request.service_future_created_at_ms === 'number'
                 ? `service_future_created_at_ms=${request.service_future_created_at_ms}`
                 : undefined,
@@ -202,6 +218,9 @@ export function renderRequestSummaryLines(section: ObservabilityIncidentRequestS
                 : undefined,
             typeof request.transport_to_handler_wait_ms === 'number'
                 ? `transport_to_handler_wait_ms=${request.transport_to_handler_wait_ms}`
+                : undefined,
+            typeof request.dispatch_to_request_context_wait_ms === 'number'
+                ? `dispatch_to_request_context_wait_ms=${request.dispatch_to_request_context_wait_ms}`
                 : undefined,
             typeof request.transport_to_service_future_wait_ms === 'number'
                 ? `transport_to_service_future_wait_ms=${request.transport_to_service_future_wait_ms}`

@@ -59,6 +59,9 @@ struct CompletionTimelineCapture {
     trigger_mode: String,
     started_at_ms: u64,
     transport_received_at_ms: Option<u64>,
+    transport_received_at_ms_provenance: Option<String>,
+    jsonrpc_dispatch_received_at_ms: Option<u64>,
+    request_context_call_entered_at_ms: Option<u64>,
     pre_method_attribution_provenance: Option<String>,
     service_future_created_at_ms: Option<u64>,
     service_scope_entered_at_ms: Option<u64>,
@@ -94,6 +97,9 @@ impl CompletionTimelineCapture {
             trigger_mode: trigger_mode.to_string(),
             started_at_ms: method_entered_at_ms,
             transport_received_at_ms: None,
+            transport_received_at_ms_provenance: None,
+            jsonrpc_dispatch_received_at_ms: None,
+            request_context_call_entered_at_ms: None,
             pre_method_attribution_provenance: None,
             service_future_created_at_ms: None,
             service_scope_entered_at_ms: None,
@@ -209,6 +215,18 @@ impl CompletionTimelineCapture {
         self.transport_received_at_ms = Some(transport_received_at_ms);
     }
 
+    fn set_transport_received_at_ms_provenance(&mut self, provenance: impl Into<String>) {
+        self.transport_received_at_ms_provenance = Some(provenance.into());
+    }
+
+    fn set_jsonrpc_dispatch_received_at_ms(&mut self, jsonrpc_dispatch_received_at_ms: u64) {
+        self.jsonrpc_dispatch_received_at_ms = Some(jsonrpc_dispatch_received_at_ms);
+    }
+
+    fn set_request_context_call_entered_at_ms(&mut self, request_context_call_entered_at_ms: u64) {
+        self.request_context_call_entered_at_ms = Some(request_context_call_entered_at_ms);
+    }
+
     fn set_pre_method_attribution_provenance(&mut self, provenance: impl Into<String>) {
         self.pre_method_attribution_provenance = Some(provenance.into());
     }
@@ -246,6 +264,12 @@ impl CompletionTimelineCapture {
         &self,
     ) -> Option<crate::types::CompletionTimelineServerEdgeDetailsTrace> {
         let transport_received_at_ms = self.transport_received_at_ms?;
+        let transport_received_at_ms_provenance = self
+            .transport_received_at_ms_provenance
+            .clone()
+            .unwrap_or_else(|| "request_context_call_entry".to_string());
+        let jsonrpc_dispatch_received_at_ms = self.jsonrpc_dispatch_received_at_ms;
+        let request_context_call_entered_at_ms = self.request_context_call_entered_at_ms;
         let service_future_created_at_ms = self.service_future_created_at_ms;
         let service_scope_entered_at_ms = self.service_scope_entered_at_ms;
         let method_entered_at_ms = self.method_entered_at_ms;
@@ -254,6 +278,8 @@ impl CompletionTimelineCapture {
         let cancel_observed_at_ms = self.cancel_observed_at_ms;
         Some(crate::types::CompletionTimelineServerEdgeDetailsTrace {
             transport_received_at_ms,
+            transport_received_at_ms_provenance,
+            jsonrpc_dispatch_received_at_ms,
             pre_method_attribution_provenance: self
                 .pre_method_attribution_provenance
                 .clone()
@@ -264,6 +290,17 @@ impl CompletionTimelineCapture {
             handler_entered_at_ms,
             response_sent_at_ms,
             cancel_observed_at_ms,
+            dispatch_to_request_context_wait_ms: jsonrpc_dispatch_received_at_ms
+                .zip(request_context_call_entered_at_ms)
+                .map(
+                    |(
+                        jsonrpc_dispatch_received_at_ms,
+                        request_context_call_entered_at_ms,
+                    )| {
+                        request_context_call_entered_at_ms
+                            .saturating_sub(jsonrpc_dispatch_received_at_ms)
+                    },
+                ),
             transport_to_service_future_wait_ms: service_future_created_at_ms.map(
                 |service_future_created_at_ms| {
                     service_future_created_at_ms.saturating_sub(transport_received_at_ms)
@@ -758,6 +795,8 @@ impl BslLanguageServer {
         let current_request_id = super::super::request_context::current_request_id();
         let current_request_received_at_ms =
             super::super::request_context::current_request_received_at_ms();
+        let current_request_jsonrpc_dispatch_received_at_ms =
+            super::super::request_context::current_request_jsonrpc_dispatch_received_at_ms();
         let current_request_service_future_created_at_ms =
             super::super::request_context::current_request_service_future_created_at_ms();
         let current_request_service_scope_entered_at_ms =
@@ -852,13 +891,32 @@ impl BslLanguageServer {
             fallback_request_context.as_ref(),
         );
         timeline_capture.set_pre_method_attribution_provenance(pre_method_attribution_provenance);
-        timeline_capture.set_transport_received_at_ms(
-            current_request_received_at_ms
-                .or_else(|| {
-                    pending_request_context.and_then(|context| context.request_received_at_ms)
-                })
-                .unwrap_or(method_entered_at_ms),
-        );
+        let request_context_call_entered_at_ms = current_request_received_at_ms.or_else(|| {
+            pending_request_context.and_then(|context| context.request_received_at_ms)
+        });
+        if let Some(request_context_call_entered_at_ms) = request_context_call_entered_at_ms {
+            timeline_capture
+                .set_request_context_call_entered_at_ms(request_context_call_entered_at_ms);
+        }
+        if let Some(jsonrpc_dispatch_received_at_ms) =
+            current_request_jsonrpc_dispatch_received_at_ms.or_else(|| {
+                pending_request_context
+                    .and_then(|context| context.jsonrpc_dispatch_received_at_ms)
+            })
+        {
+            timeline_capture.set_transport_received_at_ms_provenance(
+                "jsonrpc_dispatch_received",
+            );
+            timeline_capture
+                .set_jsonrpc_dispatch_received_at_ms(jsonrpc_dispatch_received_at_ms);
+            timeline_capture.set_transport_received_at_ms(jsonrpc_dispatch_received_at_ms);
+        } else {
+            timeline_capture
+                .set_transport_received_at_ms_provenance("request_context_call_entry");
+            timeline_capture.set_transport_received_at_ms(
+                request_context_call_entered_at_ms.unwrap_or(method_entered_at_ms),
+            );
+        }
         if let Some(service_future_created_at_ms) =
             current_request_service_future_created_at_ms.or_else(|| {
                 pending_request_context.and_then(|context| context.service_future_created_at_ms)
@@ -2384,6 +2442,7 @@ mod tests {
     fn server_edge_details_are_derived_from_transport_handler_and_response_timestamps() {
         let mut capture = sample_capture();
         capture.set_transport_received_at_ms(1_699_999_999_990);
+        capture.set_transport_received_at_ms_provenance("request_context_call_entry");
         capture.set_service_future_created_at_ms(1_699_999_999_991);
         capture.set_service_scope_entered_at_ms(1_699_999_999_992);
         capture.set_method_entered_at_ms(1_699_999_999_995);
@@ -2399,6 +2458,12 @@ mod tests {
             .server_edge_details
             .expect("server_edge_details must be present");
         assert_eq!(details.transport_received_at_ms, 1_699_999_999_990);
+        assert_eq!(
+            details.transport_received_at_ms_provenance,
+            "request_context_call_entry"
+        );
+        assert_eq!(details.jsonrpc_dispatch_received_at_ms, None);
+        assert_eq!(details.dispatch_to_request_context_wait_ms, None);
         assert_eq!(details.service_future_created_at_ms, Some(1_699_999_999_991));
         assert_eq!(details.service_scope_entered_at_ms, Some(1_699_999_999_992));
         assert_eq!(details.method_entered_at_ms, Some(1_699_999_999_995));
@@ -2420,6 +2485,7 @@ mod tests {
     fn server_edge_details_keep_first_cancel_observation_and_derive_late_cancel_delta() {
         let mut capture = sample_capture();
         capture.set_transport_received_at_ms(1_699_999_999_995);
+        capture.set_transport_received_at_ms_provenance("request_context_call_entry");
         capture.set_service_future_created_at_ms(1_699_999_999_995);
         capture.set_service_scope_entered_at_ms(1_699_999_999_996);
         capture.set_method_entered_at_ms(1_699_999_999_998);
@@ -2452,6 +2518,7 @@ mod tests {
     fn server_edge_details_do_not_fabricate_service_future_split_when_timestamp_is_absent() {
         let mut capture = sample_capture();
         capture.set_transport_received_at_ms(1_699_999_999_995);
+        capture.set_transport_received_at_ms_provenance("request_context_call_entry");
         capture.set_service_scope_entered_at_ms(1_699_999_999_996);
         capture.set_method_entered_at_ms(1_699_999_999_998);
         capture.set_handler_entered_at_ms(1_700_000_000_000);
@@ -2474,6 +2541,7 @@ mod tests {
     fn server_edge_details_include_pre_method_attribution_provenance() {
         let mut capture = sample_capture();
         capture.set_transport_received_at_ms(1_699_999_999_995);
+        capture.set_transport_received_at_ms_provenance("request_context_call_entry");
         capture.set_service_scope_entered_at_ms(1_699_999_999_996);
         capture.set_method_entered_at_ms(1_699_999_999_998);
         capture.set_handler_entered_at_ms(1_700_000_000_000);
@@ -2492,6 +2560,40 @@ mod tests {
             details.pre_method_attribution_provenance,
             "same_request_authoritative"
         );
+    }
+
+    #[test]
+    fn server_edge_details_use_outer_dispatch_timestamp_as_transport_anchor_when_available() {
+        let mut capture = sample_capture();
+        capture.set_transport_received_at_ms(1_699_999_999_990);
+        capture.set_transport_received_at_ms_provenance("jsonrpc_dispatch_received");
+        capture.set_jsonrpc_dispatch_received_at_ms(1_699_999_999_990);
+        capture.set_request_context_call_entered_at_ms(1_699_999_999_992);
+        capture.set_service_future_created_at_ms(1_699_999_999_995);
+        capture.set_service_scope_entered_at_ms(1_699_999_999_999);
+        capture.set_method_entered_at_ms(1_700_000_000_004);
+        capture.set_handler_entered_at_ms(1_700_000_000_006);
+        capture.set_response_sent_at_ms(1_700_000_000_020);
+
+        let trace = capture.into_trace(
+            "trace-jsonrpc-dispatch-edge".to_string(),
+            std::time::Duration::from_millis(30),
+            "ok_non_empty",
+        );
+        let details = trace
+            .server_edge_details
+            .expect("server_edge_details must be present");
+        assert_eq!(details.transport_received_at_ms, 1_699_999_999_990);
+        assert_eq!(
+            details.transport_received_at_ms_provenance,
+            "jsonrpc_dispatch_received"
+        );
+        assert_eq!(details.jsonrpc_dispatch_received_at_ms, Some(1_699_999_999_990));
+        assert_eq!(details.dispatch_to_request_context_wait_ms, Some(2));
+        assert_eq!(details.transport_to_service_future_wait_ms, Some(5));
+        assert_eq!(details.service_future_to_scope_wait_ms, Some(4));
+        assert_eq!(details.transport_to_service_scope_wait_ms, Some(9));
+        assert_eq!(details.transport_to_method_wait_ms, Some(14));
     }
 
     #[test]
@@ -2533,6 +2635,7 @@ mod tests {
 
         let mut capture = sample_capture();
         capture.set_transport_received_at_ms(1_700_000_000_100);
+        capture.set_transport_received_at_ms_provenance("request_context_call_entry");
         capture.set_service_scope_entered_at_ms(1_700_000_000_104);
         capture.set_method_entered_at_ms(1_700_000_000_140);
         capture.set_handler_entered_at_ms(1_700_000_000_141);

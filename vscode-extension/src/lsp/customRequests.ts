@@ -559,6 +559,10 @@ export type CompletionTimelinePreMethodAttributionProvenance =
     | 'best_effort_fallback'
     | 'unavailable';
 
+export type CompletionTimelineTransportReceivedAtMsProvenance =
+    | 'request_context_call_entry'
+    | 'jsonrpc_dispatch_received';
+
 export interface CompletionTimelineExactArtifactPollTrace {
     poll_count: number;
     poll_elapsed_ms: number;
@@ -602,6 +606,8 @@ export interface CompletionTimelinePrepareDetailsTrace {
 
 export interface CompletionTimelineServerEdgeDetailsTrace {
     transport_received_at_ms: number;
+    transport_received_at_ms_provenance?: CompletionTimelineTransportReceivedAtMsProvenance;
+    jsonrpc_dispatch_received_at_ms?: number;
     service_future_created_at_ms?: number;
     pre_method_attribution_provenance?: CompletionTimelinePreMethodAttributionProvenance;
     service_scope_entered_at_ms?: number;
@@ -609,6 +615,7 @@ export interface CompletionTimelineServerEdgeDetailsTrace {
     handler_entered_at_ms: number;
     response_sent_at_ms: number;
     cancel_observed_at_ms?: number;
+    dispatch_to_request_context_wait_ms?: number;
     transport_to_service_future_wait_ms?: number;
     service_future_to_scope_wait_ms?: number;
     transport_to_service_scope_wait_ms?: number;

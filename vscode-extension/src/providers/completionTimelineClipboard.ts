@@ -93,6 +93,12 @@ export function formatCompletionTimelineTraceForClipboard(
     if (trace.server_edge_details) {
         const detailsBits = [
             `transport_received_at_ms=${trace.server_edge_details.transport_received_at_ms}`,
+            ...(trace.server_edge_details.transport_received_at_ms_provenance
+                ? [`transport_received_at_ms_provenance=${trace.server_edge_details.transport_received_at_ms_provenance}`]
+                : []),
+            ...(typeof trace.server_edge_details.jsonrpc_dispatch_received_at_ms === 'number'
+                ? [`jsonrpc_dispatch_received_at_ms=${trace.server_edge_details.jsonrpc_dispatch_received_at_ms}`]
+                : []),
             ...(typeof trace.server_edge_details.service_future_created_at_ms === 'number'
                 ? [`service_future_created_at_ms=${trace.server_edge_details.service_future_created_at_ms}`]
                 : []),
@@ -109,6 +115,9 @@ export function formatCompletionTimelineTraceForClipboard(
             `response_sent_at_ms=${trace.server_edge_details.response_sent_at_ms}`,
             ...(typeof trace.server_edge_details.transport_to_service_scope_wait_ms === 'number'
                 ? [`transport_to_service_scope_wait_ms=${trace.server_edge_details.transport_to_service_scope_wait_ms}`]
+                : []),
+            ...(typeof trace.server_edge_details.dispatch_to_request_context_wait_ms === 'number'
+                ? [`dispatch_to_request_context_wait_ms=${trace.server_edge_details.dispatch_to_request_context_wait_ms}`]
                 : []),
             ...(typeof trace.server_edge_details.transport_to_service_future_wait_ms === 'number'
                 ? [`transport_to_service_future_wait_ms=${trace.server_edge_details.transport_to_service_future_wait_ms}`]
@@ -327,6 +336,9 @@ function formatServerTimelineSectionForClipboard(
     }
     if (state.version < 9) {
         lines.push('v9 pre-service-scope split is unavailable by design on this payload.');
+    }
+    if (state.version < 10) {
+        lines.push('v10 dispatch split is unavailable by design on this payload.');
     }
     const traces = mode === 'average'
         ? (state.average_trace ? [state.average_trace] : [])

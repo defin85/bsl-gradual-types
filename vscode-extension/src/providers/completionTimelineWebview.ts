@@ -784,6 +784,9 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             if (contractVersion < 9) {
                 notices.push('v9 pre-service-scope split is unavailable by design on this payload.');
             }
+            if (contractVersion < 10) {
+                notices.push('v10 dispatch split is unavailable by design on this payload.');
+            }
             return notices.map((notice) => '<div class="placeholder">' + escapeHtml(notice) + '</div>').join('');
         }
 
@@ -970,6 +973,12 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             const details = trace.server_edge_details;
             const bits = [
                 'transport_received=' + escapeHtml(new Date(details.transport_received_at_ms).toLocaleTimeString()),
+                ...(details.transport_received_at_ms_provenance
+                    ? ['transport_received_provenance=' + escapeHtml(details.transport_received_at_ms_provenance)]
+                    : []),
+                ...(typeof details.jsonrpc_dispatch_received_at_ms === 'number'
+                    ? ['jsonrpc_dispatch_received=' + escapeHtml(new Date(details.jsonrpc_dispatch_received_at_ms).toLocaleTimeString())]
+                    : []),
                 ...(typeof details.service_future_created_at_ms === 'number'
                     ? ['service_future_created=' + escapeHtml(new Date(details.service_future_created_at_ms).toLocaleTimeString())]
                     : []),
@@ -992,6 +1001,9 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                     : []),
                 ...(typeof details.transport_to_service_scope_wait_ms === 'number'
                     ? ['transport_to_service_scope_wait=' + escapeHtml(details.transport_to_service_scope_wait_ms) + 'ms']
+                    : []),
+                ...(typeof details.dispatch_to_request_context_wait_ms === 'number'
+                    ? ['dispatch_to_request_context_wait=' + escapeHtml(details.dispatch_to_request_context_wait_ms) + 'ms']
                     : []),
                 ...(typeof details.service_scope_to_method_wait_ms === 'number'
                     ? ['service_scope_to_method_wait=' + escapeHtml(details.service_scope_to_method_wait_ms) + 'ms']

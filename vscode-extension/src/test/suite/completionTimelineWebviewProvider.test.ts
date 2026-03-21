@@ -250,7 +250,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 9,
+                version: 10,
                 traces: [
                     {
                         trace_id: 'trace-copy',
@@ -263,12 +263,15 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                         dominant_stage: 'query_bundle',
                         server_edge_details: {
                             transport_received_at_ms: 1_700_000_000_000,
+                            transport_received_at_ms_provenance: 'jsonrpc_dispatch_received',
+                            jsonrpc_dispatch_received_at_ms: 1_700_000_000_000,
                             service_future_created_at_ms: 1_700_000_000_001,
                             pre_method_attribution_provenance: 'same_request_authoritative',
                             service_scope_entered_at_ms: 1_700_000_000_002,
                             method_entered_at_ms: 1_700_000_000_005,
                             handler_entered_at_ms: 1_700_000_000_009,
                             response_sent_at_ms: 1_700_000_000_016,
+                            dispatch_to_request_context_wait_ms: 0,
                             transport_to_service_future_wait_ms: 1,
                             service_future_to_scope_wait_ms: 1,
                             transport_to_service_scope_wait_ms: 2,
@@ -364,12 +367,15 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const clipboardPayload = clipboardStub.firstCall.args[0];
         assert.ok(clipboardPayload.includes('Completion Timeline | mode=all'));
         assert.ok(clipboardPayload.includes('Server Timeline'));
-        assert.ok(clipboardPayload.includes('contract=v9'));
+        assert.ok(clipboardPayload.includes('contract=v10'));
         assert.ok(clipboardPayload.includes('trace-copy (invoked)'));
+        assert.ok(clipboardPayload.includes('transport_received_at_ms_provenance=jsonrpc_dispatch_received'));
+        assert.ok(clipboardPayload.includes('jsonrpc_dispatch_received_at_ms=1700000000000'));
         assert.ok(clipboardPayload.includes('service_future_created_at_ms=1700000000001'));
         assert.ok(clipboardPayload.includes('pre_method_attribution_provenance=same_request_authoritative'));
         assert.ok(clipboardPayload.includes('service_scope_entered_at_ms=1700000000002'));
         assert.ok(clipboardPayload.includes('method_entered_at_ms=1700000000005'));
+        assert.ok(clipboardPayload.includes('dispatch_to_request_context_wait_ms=0'));
         assert.ok(clipboardPayload.includes('transport_to_service_future_wait_ms=1'));
         assert.ok(clipboardPayload.includes('service_future_to_scope_wait_ms=1'));
         assert.ok(clipboardPayload.includes('transport_to_service_scope_wait_ms=2'));
@@ -407,7 +413,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 9,
+                version: 10,
                 traces: [
                     {
                         trace_id: 'trace-copy',
@@ -420,12 +426,15 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                         dominant_stage: 'query_bundle',
                         server_edge_details: {
                             transport_received_at_ms: 1_700_000_000_000,
+                            transport_received_at_ms_provenance: 'jsonrpc_dispatch_received',
+                            jsonrpc_dispatch_received_at_ms: 1_700_000_000_000,
                             service_future_created_at_ms: 1_700_000_000_001,
                             pre_method_attribution_provenance: 'same_request_authoritative',
                             service_scope_entered_at_ms: 1_700_000_000_002,
                             method_entered_at_ms: 1_700_000_000_005,
                             handler_entered_at_ms: 1_700_000_000_009,
                             response_sent_at_ms: 1_700_000_000_016,
+                            dispatch_to_request_context_wait_ms: 0,
                             transport_to_service_future_wait_ms: 1,
                             service_future_to_scope_wait_ms: 1,
                             transport_to_service_scope_wait_ms: 2,
@@ -522,7 +531,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         assert.ok(clipboardPayload.includes('Completion Timeline | mode=average'));
         assert.ok(
             clipboardPayload.includes(
-                'Average trace is synthetic; v8 trustworthy pre-method attribution provenance and v9 pre-service-scope split are unavailable by design.'
+                'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, and v10 dispatch split are unavailable by design.'
             )
         );
         assert.ok(!clipboardPayload.includes('bottleneck_verdict=server_before_method_entry_dominant'));
@@ -570,6 +579,9 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         assert.ok(
             webview.html.includes('v9 pre-service-scope split is unavailable by design on this payload.')
         );
+        assert.ok(
+            webview.html.includes('v10 dispatch split is unavailable by design on this payload.')
+        );
 
         onDidDisposeEmitter.dispose();
         onDidReceiveMessageEmitter.dispose();
@@ -581,7 +593,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 9,
+                version: 10,
                 traces: [
                     {
                         trace_id: 'trace-inline',
@@ -642,11 +654,101 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         );
 
         assert.ok(rendered.serverHtml.includes('trace-inline'));
-        assert.ok(rendered.updatedText.includes('contract v9'));
+        assert.ok(rendered.updatedText.includes('contract v10'));
         assert.ok(
             rendered.clientHtml.includes('No client probes recorded yet'),
             'expected empty client feed placeholder to remain intact'
         );
+
+        onDidDisposeEmitter.dispose();
+        onDidReceiveMessageEmitter.dispose();
+        onDidChangeVisibilityEmitter.dispose();
+    });
+
+    test('inline webview script should mark v9 payload as missing v10 dispatch split by design', () => {
+        const outputChannel = {
+            appendLine: sinon.stub(),
+        } as unknown as vscode.OutputChannel;
+        provider = new CompletionTimelineWebviewProvider(outputChannel);
+
+        const onDidReceiveMessageEmitter = new vscode.EventEmitter<unknown>();
+        const onDidChangeVisibilityEmitter = new vscode.EventEmitter<void>();
+        const onDidDisposeEmitter = new vscode.EventEmitter<void>();
+        const webview = {
+            options: {},
+            html: '',
+            cspSource: 'vscode-webview://test',
+            onDidReceiveMessage: onDidReceiveMessageEmitter.event,
+            postMessage: sinon.stub().resolves(true),
+        } as unknown as vscode.Webview;
+        const webviewView = {
+            webview,
+            visible: false,
+            onDidChangeVisibility: onDidChangeVisibilityEmitter.event,
+            onDidDispose: onDidDisposeEmitter.event,
+        } as unknown as vscode.WebviewView;
+
+        provider.resolveWebviewView(webviewView);
+
+        const rendered = renderTimelineStateInInlineWebview(webview.html, {
+            kind: 'ready',
+            version: 9,
+            updated_at_ms: 1_700_000_000_100,
+            traces: [
+                {
+                    trace_id: 'trace-v9',
+                    request_id: 'req-v9',
+                    uri: 'file:///tmp/v9.bsl',
+                    trigger_mode: 'invoked',
+                    outcome: 'ok_non_empty',
+                    started_at_ms: 1_700_000_000_000,
+                    total_duration_ms: 10,
+                    max_stage_end_ms: 10,
+                    unattributed_overhead_ms: 0,
+                    dominant_stage: 'query_bundle',
+                    server_edge_details: {
+                        transport_received_at_ms: 1_700_000_000_000,
+                        service_future_created_at_ms: 1_700_000_000_001,
+                        pre_method_attribution_provenance: 'same_request_authoritative',
+                        service_scope_entered_at_ms: 1_700_000_000_002,
+                        method_entered_at_ms: 1_700_000_000_005,
+                        handler_entered_at_ms: 1_700_000_000_009,
+                        response_sent_at_ms: 1_700_000_000_016,
+                        transport_to_service_future_wait_ms: 1,
+                        service_future_to_scope_wait_ms: 1,
+                        transport_to_service_scope_wait_ms: 2,
+                        service_scope_to_method_wait_ms: 3,
+                        transport_to_method_wait_ms: 5,
+                        method_prelude_exec_ms: 4,
+                        transport_to_handler_wait_ms: 9,
+                        server_handler_exec_ms: 7,
+                    },
+                    stages: [
+                        {
+                            name: 'query_bundle',
+                            status: 'completed',
+                            started_offset_ms: 0,
+                            end_offset_ms: 10,
+                            duration_ms: 10,
+                            width_percent: 100,
+                            duration_percent: 100,
+                            is_dominant: true,
+                        },
+                    ],
+                },
+            ],
+            average_trace: null,
+            client_probe_feed: {
+                updated_at_ms: 1_700_000_000_100,
+                probes: [],
+            },
+        });
+
+        assert.ok(rendered.serverHtml.includes('v10 dispatch split is unavailable by design on this payload.'));
+        assert.ok(rendered.serverHtml.includes('service_future_created='));
+        assert.ok(!rendered.serverHtml.includes('transport_received_provenance='));
+        assert.ok(!rendered.serverHtml.includes('jsonrpc_dispatch_received='));
+        assert.ok(!rendered.serverHtml.includes('dispatch_to_request_context_wait='));
 
         onDidDisposeEmitter.dispose();
         onDidReceiveMessageEmitter.dispose();
@@ -658,7 +760,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 9,
+                version: 10,
                 traces: [
                     {
                         trace_id: 'trace-export',

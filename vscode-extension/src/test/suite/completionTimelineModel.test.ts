@@ -42,7 +42,7 @@ function buildClientProbe(probeId: string, version: number, startedAtMs: number)
 suite('Completion Timeline Model Test Suite', () => {
     test('Mapping LSP timeline payload -> UI model', () => {
         const payload: CompletionTimelineResponse = {
-            version: 9,
+            version: 10,
             traces: [
                 {
                     trace_id: 'trace-42',
@@ -55,12 +55,15 @@ suite('Completion Timeline Model Test Suite', () => {
                     dominant_stage: 'query_bundle',
                     server_edge_details: {
                         transport_received_at_ms: 1_700_000_000_040,
+                        transport_received_at_ms_provenance: 'jsonrpc_dispatch_received',
+                        jsonrpc_dispatch_received_at_ms: 1_700_000_000_040,
                         service_future_created_at_ms: 1_700_000_000_040,
                         pre_method_attribution_provenance: 'same_request_authoritative',
                         service_scope_entered_at_ms: 1_700_000_000_041,
                         method_entered_at_ms: 1_700_000_000_042,
                         handler_entered_at_ms: 1_700_000_000_042,
                         response_sent_at_ms: 1_700_000_000_090,
+                        dispatch_to_request_context_wait_ms: 0,
                         transport_to_service_future_wait_ms: 0,
                         service_future_to_scope_wait_ms: 1,
                         transport_to_service_scope_wait_ms: 1,
@@ -149,9 +152,17 @@ suite('Completion Timeline Model Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(state.version, 9);
+        assert.strictEqual(state.version, 10);
         assert.strictEqual(state.traces.length, 1);
         assert.strictEqual(state.traces[0].trace_id, 'trace-42');
+        assert.strictEqual(
+            state.traces[0].server_edge_details?.transport_received_at_ms_provenance,
+            'jsonrpc_dispatch_received'
+        );
+        assert.strictEqual(
+            state.traces[0].server_edge_details?.jsonrpc_dispatch_received_at_ms,
+            1_700_000_000_040
+        );
         assert.strictEqual(
             state.traces[0].server_edge_details?.service_future_created_at_ms,
             1_700_000_000_040
@@ -167,6 +178,10 @@ suite('Completion Timeline Model Test Suite', () => {
         assert.strictEqual(
             state.traces[0].server_edge_details?.service_future_to_scope_wait_ms,
             1
+        );
+        assert.strictEqual(
+            state.traces[0].server_edge_details?.dispatch_to_request_context_wait_ms,
+            0
         );
         assert.strictEqual(
             state.traces[0].server_edge_details?.transport_to_service_scope_wait_ms,
@@ -391,7 +406,7 @@ suite('Completion Timeline Model Test Suite', () => {
                 trace_id: 'average(2)',
                 trigger_mode: 'averaged',
             } as never),
-            'Average trace is synthetic; v8 trustworthy pre-method attribution provenance and v9 pre-service-scope split are unavailable by design.'
+            'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, and v10 dispatch split are unavailable by design.'
         );
         assert.strictEqual(
             getAverageTraceProvenanceNotice({

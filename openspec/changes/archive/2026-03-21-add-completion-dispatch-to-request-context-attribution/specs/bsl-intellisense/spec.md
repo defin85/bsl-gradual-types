@@ -1,6 +1,6 @@
 ## MODIFIED Requirements
 
-### Requirement: Existing completion surfaces переносят `v10` dispatch split без invented data (MUST)
+### Requirement: Existing completion surfaces переносят `v9` pre-service-scope split без invented data (MUST)
 Completion Timeline panel, clipboard export и request-centric incident bundle summary MUST переносить `v10` dispatch split в человекочитаемом виде.
 
 Human-readable projection MUST:

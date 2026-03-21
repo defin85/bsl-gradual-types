@@ -60,6 +60,8 @@
 - Shipped smoke path:
   - Code: `scripts/run-intellisense-tests.sh`
   - Test: `scripts/test-intellisense-readiness-assets.py`
+  - Smoke selector: `backend/src/bin/lsp_server/server/request_context/tests.rs::dispatch_context_service_records_completion_context_for_position_lookup`
+  - Smoke selector: `backend/src/bin/lsp_server/server/language_server/impl_completion.rs::server_edge_details_use_outer_dispatch_timestamp_as_transport_anchor_when_available`
 - Canonical OpenSpec truth после фиксации change:
   - Spec delta: `openspec/changes/add-completion-dispatch-to-request-context-attribution/specs/bsl-intellisense-v2/spec.md`
   - Command: `openspec archive add-completion-dispatch-to-request-context-attribution --yes`

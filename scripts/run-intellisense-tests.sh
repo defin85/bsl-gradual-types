@@ -68,8 +68,10 @@ run_completion_timeline_drilldown_smoke() {
   cargo test -p bsl-runtime snapshot_with_deps_timeout_can_report_queue_wait_runtime_split_via_progress -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server p22_get_completion_timeline_exposes_versioned_contract -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server p22_get_completion_timeline_contains_completion_trace -- --nocapture
+  cargo test -p bsl-backend --bin bsl-lsp-server dispatch_context_service_records_completion_context_for_position_lookup -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server server_edge_details_are_derived_from_transport_handler_and_response_timestamps -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server server_edge_details_include_pre_method_attribution_provenance -- --nocapture
+  cargo test -p bsl-backend --bin bsl-lsp-server server_edge_details_use_outer_dispatch_timestamp_as_transport_anchor_when_available -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server prepare_runtime_drilldown_is_serialised_into_trace -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server prepare_timeout_attribution_is_serialised_into_trace -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server snapshot_timeout_runtime_is_serialised_into_trace -- --nocapture

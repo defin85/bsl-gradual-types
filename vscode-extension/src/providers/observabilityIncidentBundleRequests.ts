@@ -57,8 +57,11 @@ export interface ObservabilityIncidentRequestSummary {
     outcome: string;
     total_duration_ms: number;
     dominant_stage?: string;
+    service_future_created_at_ms?: number;
     pre_method_attribution_provenance?: CompletionTimelinePreMethodAttributionProvenance;
     transport_to_handler_wait_ms?: number;
+    transport_to_service_future_wait_ms?: number;
+    service_future_to_scope_wait_ms?: number;
     transport_to_service_scope_wait_ms?: number;
     service_scope_to_method_wait_ms?: number;
     transport_to_method_wait_ms?: number;
@@ -113,9 +116,15 @@ export function buildObservabilityIncidentRequestSection(
             outcome: trace.outcome,
             total_duration_ms: trace.total_duration_ms,
             dominant_stage: trace.dominant_stage,
+            service_future_created_at_ms:
+                trace.server_edge_details?.service_future_created_at_ms,
             pre_method_attribution_provenance:
                 trace.server_edge_details?.pre_method_attribution_provenance,
             transport_to_handler_wait_ms: trace.server_edge_details?.transport_to_handler_wait_ms,
+            transport_to_service_future_wait_ms:
+                trace.server_edge_details?.transport_to_service_future_wait_ms,
+            service_future_to_scope_wait_ms:
+                trace.server_edge_details?.service_future_to_scope_wait_ms,
             transport_to_service_scope_wait_ms:
                 trace.server_edge_details?.transport_to_service_scope_wait_ms,
             service_scope_to_method_wait_ms:
@@ -185,11 +194,20 @@ export function renderRequestSummaryLines(section: ObservabilityIncidentRequestS
             request.bottleneck_verdicts.length > 0
                 ? `verdicts=${request.bottleneck_verdicts.join(',')}`
                 : undefined,
+            typeof request.service_future_created_at_ms === 'number'
+                ? `service_future_created_at_ms=${request.service_future_created_at_ms}`
+                : undefined,
             request.pre_method_attribution_provenance
                 ? `pre_method_provenance=${request.pre_method_attribution_provenance}`
                 : undefined,
             typeof request.transport_to_handler_wait_ms === 'number'
                 ? `transport_to_handler_wait_ms=${request.transport_to_handler_wait_ms}`
+                : undefined,
+            typeof request.transport_to_service_future_wait_ms === 'number'
+                ? `transport_to_service_future_wait_ms=${request.transport_to_service_future_wait_ms}`
+                : undefined,
+            typeof request.service_future_to_scope_wait_ms === 'number'
+                ? `service_future_to_scope_wait_ms=${request.service_future_to_scope_wait_ms}`
                 : undefined,
             typeof request.transport_to_service_scope_wait_ms === 'number'
                 ? `transport_to_service_scope_wait_ms=${request.transport_to_service_scope_wait_ms}`

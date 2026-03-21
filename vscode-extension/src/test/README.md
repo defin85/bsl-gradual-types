@@ -113,13 +113,13 @@ BSL_TEST_GREP='Completion Probe (Schema|Recorder|Runtime|Store) Test Suite|Compl
 - runtime transport hook и selection observer для client probes;
 - wiring default `LanguageClient` path;
 - dual-view `Server Timeline` / `Client Probe Feed`;
-- rendering/export для `Server Timeline` с `response.version=8`, bounded root-cause attribution (`service_scope_entered` split, `transport_to_service_scope_wait_ms`, `service_scope_to_method_wait_ms`, bounded `pre_method_attribution_provenance`, `dispatcher_resolution_latency_ms`, `prepare_progress`, `wait_for_file_version_runtime`, `snapshot_with_deps_runtime`, `snapshot_with_deps_timeout_runtime`, `timeout_attribution`, bounded `exact_wait` и `artifact_poll`) и truthful ingress verdict projection (`server_before_method_entry_dominant` только при `same_request_authoritative`, `client_before_transport_dominant`, `handler_prelude_dominant`);
-- `average` mode остаётся synthetic и поэтому явно помечает trustworthy `v8` pre-method attribution provenance как unavailable by design, не inventing strong ingress verdicts;
-- graceful degradation для backend payload `v7` без выдумывания отсутствующего `v8` provenance;
+- rendering/export для `Server Timeline` с `response.version=9`, bounded root-cause attribution (`service_future_created_at_ms`, `transport_to_service_future_wait_ms`, `service_future_to_scope_wait_ms`, существующие `transport_to_service_scope_wait_ms`, `service_scope_to_method_wait_ms`, bounded `pre_method_attribution_provenance`, `dispatcher_resolution_latency_ms`, `prepare_progress`, `wait_for_file_version_runtime`, `snapshot_with_deps_runtime`, `snapshot_with_deps_timeout_runtime`, `timeout_attribution`, bounded `exact_wait` и `artifact_poll`) и truthful ingress verdict projection (`server_before_method_entry_dominant` только при `same_request_authoritative`, `client_before_transport_dominant`, `handler_prelude_dominant`);
+- `average` mode остаётся synthetic и поэтому явно помечает trustworthy `v8` pre-method attribution provenance и `v9` pre-service-scope split как unavailable by design, не inventing strong ingress verdicts;
+- graceful degradation для backend payload `v8`/`v7` без выдумывания отсутствующих `v9`/`v8` полей;
 - fail-closed/executeCommand поведение `bsl.getCompletionTimeline`;
 - truthful `unsupported` vs `unavailable` semantics для observability metrics export;
 - actual command export path для `bslAnalyzer.exportObservabilityIncidentBundle`, включая запись `summary.md`, `incident.json` и `raw/*`;
-- request-centric handoff для incident bundle: `capture_scope`, `request_count`, bounded request list и deterministic probe-to-trace correlation только при неамбигуозном сопоставлении;
+- request-centric handoff для incident bundle: `capture_scope`, `request_count`, bounded request list, bounded `service_future_created` split и deterministic probe-to-trace correlation только при неамбигуозном сопоставлении;
 - reuse текущего Completion Timeline snapshot при экспорте из webview, без принудительного fresh refetch этого источника.
 
 ### С coverage (цель: 80%)

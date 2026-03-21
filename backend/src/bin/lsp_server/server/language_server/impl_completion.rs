@@ -60,6 +60,7 @@ struct CompletionTimelineCapture {
     started_at_ms: u64,
     transport_received_at_ms: Option<u64>,
     pre_method_attribution_provenance: Option<String>,
+    service_future_created_at_ms: Option<u64>,
     service_scope_entered_at_ms: Option<u64>,
     method_entered_at_ms: Option<u64>,
     handler_entered_at_ms: Option<u64>,
@@ -94,6 +95,7 @@ impl CompletionTimelineCapture {
             started_at_ms: method_entered_at_ms,
             transport_received_at_ms: None,
             pre_method_attribution_provenance: None,
+            service_future_created_at_ms: None,
             service_scope_entered_at_ms: None,
             method_entered_at_ms: Some(method_entered_at_ms),
             handler_entered_at_ms: Some(handler_entered_at_ms),
@@ -211,6 +213,10 @@ impl CompletionTimelineCapture {
         self.pre_method_attribution_provenance = Some(provenance.into());
     }
 
+    fn set_service_future_created_at_ms(&mut self, service_future_created_at_ms: u64) {
+        self.service_future_created_at_ms = Some(service_future_created_at_ms);
+    }
+
     fn set_service_scope_entered_at_ms(&mut self, service_scope_entered_at_ms: u64) {
         self.service_scope_entered_at_ms = Some(service_scope_entered_at_ms);
     }
@@ -240,6 +246,7 @@ impl CompletionTimelineCapture {
         &self,
     ) -> Option<crate::types::CompletionTimelineServerEdgeDetailsTrace> {
         let transport_received_at_ms = self.transport_received_at_ms?;
+        let service_future_created_at_ms = self.service_future_created_at_ms;
         let service_scope_entered_at_ms = self.service_scope_entered_at_ms;
         let method_entered_at_ms = self.method_entered_at_ms;
         let handler_entered_at_ms = self.handler_entered_at_ms?;
@@ -251,11 +258,22 @@ impl CompletionTimelineCapture {
                 .pre_method_attribution_provenance
                 .clone()
                 .unwrap_or_else(|| "unavailable".to_string()),
+            service_future_created_at_ms,
             service_scope_entered_at_ms,
             method_entered_at_ms,
             handler_entered_at_ms,
             response_sent_at_ms,
             cancel_observed_at_ms,
+            transport_to_service_future_wait_ms: service_future_created_at_ms.map(
+                |service_future_created_at_ms| {
+                    service_future_created_at_ms.saturating_sub(transport_received_at_ms)
+                },
+            ),
+            service_future_to_scope_wait_ms: service_future_created_at_ms
+                .zip(service_scope_entered_at_ms)
+                .map(|(service_future_created_at_ms, service_scope_entered_at_ms)| {
+                    service_scope_entered_at_ms.saturating_sub(service_future_created_at_ms)
+                }),
             transport_to_service_scope_wait_ms: service_scope_entered_at_ms.map(
                 |service_scope_entered_at_ms| {
                     service_scope_entered_at_ms.saturating_sub(transport_received_at_ms)
@@ -740,6 +758,8 @@ impl BslLanguageServer {
         let current_request_id = super::super::request_context::current_request_id();
         let current_request_received_at_ms =
             super::super::request_context::current_request_received_at_ms();
+        let current_request_service_future_created_at_ms =
+            super::super::request_context::current_request_service_future_created_at_ms();
         let current_request_service_scope_entered_at_ms =
             super::super::request_context::current_request_service_scope_entered_at_ms();
         let exact_request_context = current_request_id.as_deref().and_then(|request_id| {
@@ -839,6 +859,13 @@ impl BslLanguageServer {
                 })
                 .unwrap_or(method_entered_at_ms),
         );
+        if let Some(service_future_created_at_ms) =
+            current_request_service_future_created_at_ms.or_else(|| {
+                pending_request_context.and_then(|context| context.service_future_created_at_ms)
+            })
+        {
+            timeline_capture.set_service_future_created_at_ms(service_future_created_at_ms);
+        }
         if let Some(service_scope_entered_at_ms) = current_request_service_scope_entered_at_ms
             .or_else(|| {
                 pending_request_context.and_then(|context| context.service_scope_entered_at_ms)
@@ -2357,6 +2384,7 @@ mod tests {
     fn server_edge_details_are_derived_from_transport_handler_and_response_timestamps() {
         let mut capture = sample_capture();
         capture.set_transport_received_at_ms(1_699_999_999_990);
+        capture.set_service_future_created_at_ms(1_699_999_999_991);
         capture.set_service_scope_entered_at_ms(1_699_999_999_992);
         capture.set_method_entered_at_ms(1_699_999_999_995);
         capture.set_handler_entered_at_ms(1_700_000_000_000);
@@ -2371,10 +2399,13 @@ mod tests {
             .server_edge_details
             .expect("server_edge_details must be present");
         assert_eq!(details.transport_received_at_ms, 1_699_999_999_990);
+        assert_eq!(details.service_future_created_at_ms, Some(1_699_999_999_991));
         assert_eq!(details.service_scope_entered_at_ms, Some(1_699_999_999_992));
         assert_eq!(details.method_entered_at_ms, Some(1_699_999_999_995));
         assert_eq!(details.handler_entered_at_ms, 1_700_000_000_000);
         assert_eq!(details.response_sent_at_ms, 1_700_000_000_025);
+        assert_eq!(details.transport_to_service_future_wait_ms, Some(1));
+        assert_eq!(details.service_future_to_scope_wait_ms, Some(1));
         assert_eq!(details.transport_to_service_scope_wait_ms, Some(2));
         assert_eq!(details.service_scope_to_method_wait_ms, Some(3));
         assert_eq!(details.transport_to_method_wait_ms, Some(5));
@@ -2389,6 +2420,7 @@ mod tests {
     fn server_edge_details_keep_first_cancel_observation_and_derive_late_cancel_delta() {
         let mut capture = sample_capture();
         capture.set_transport_received_at_ms(1_699_999_999_995);
+        capture.set_service_future_created_at_ms(1_699_999_999_995);
         capture.set_service_scope_entered_at_ms(1_699_999_999_996);
         capture.set_method_entered_at_ms(1_699_999_999_998);
         capture.set_handler_entered_at_ms(1_700_000_000_000);
@@ -2404,6 +2436,8 @@ mod tests {
         let details = trace
             .server_edge_details
             .expect("server_edge_details must be present");
+        assert_eq!(details.transport_to_service_future_wait_ms, Some(0));
+        assert_eq!(details.service_future_to_scope_wait_ms, Some(1));
         assert_eq!(details.transport_to_service_scope_wait_ms, Some(1));
         assert_eq!(details.service_scope_to_method_wait_ms, Some(2));
         assert_eq!(details.transport_to_method_wait_ms, Some(3));
@@ -2412,6 +2446,28 @@ mod tests {
         assert_eq!(details.server_handler_exec_ms, 30);
         assert_eq!(details.cancel_observed_at_ms, Some(1_700_000_000_012));
         assert_eq!(details.cancel_observed_after_handler_enter_ms, Some(12));
+    }
+
+    #[test]
+    fn server_edge_details_do_not_fabricate_service_future_split_when_timestamp_is_absent() {
+        let mut capture = sample_capture();
+        capture.set_transport_received_at_ms(1_699_999_999_995);
+        capture.set_service_scope_entered_at_ms(1_699_999_999_996);
+        capture.set_method_entered_at_ms(1_699_999_999_998);
+        capture.set_handler_entered_at_ms(1_700_000_000_000);
+        capture.set_response_sent_at_ms(1_700_000_000_030);
+
+        let trace = capture.into_trace(
+            "trace-no-service-future-split".to_string(),
+            std::time::Duration::from_millis(30),
+            "ok_non_empty",
+        );
+        let details = trace
+            .server_edge_details
+            .expect("server_edge_details must be present");
+        assert_eq!(details.service_future_created_at_ms, None);
+        assert_eq!(details.transport_to_service_future_wait_ms, None);
+        assert_eq!(details.service_future_to_scope_wait_ms, None);
     }
 
     #[test]

@@ -17,6 +17,10 @@ tokio::task_local! {
 }
 
 tokio::task_local! {
+    static LSP_REQUEST_SERVICE_FUTURE_CREATED_AT_MS: Option<u64>;
+}
+
+tokio::task_local! {
     static LSP_REQUEST_SERVICE_SCOPE_ENTERED_AT_MS: Option<u64>;
 }
 
@@ -44,6 +48,7 @@ struct PendingCompletionRequestIds {
 struct PendingCompletionRequestEntry {
     key: CompletionRequestKey,
     request_received_at_ms: Option<u64>,
+    service_future_created_at_ms: Option<u64>,
     service_scope_entered_at_ms: Option<u64>,
 }
 
@@ -51,6 +56,7 @@ struct PendingCompletionRequestEntry {
 pub(crate) struct PendingCompletionRequestContext {
     pub(crate) request_id: String,
     pub(crate) request_received_at_ms: Option<u64>,
+    pub(crate) service_future_created_at_ms: Option<u64>,
     pub(crate) service_scope_entered_at_ms: Option<u64>,
 }
 
@@ -93,6 +99,7 @@ fn record_pending_completion_request_id(
         PendingCompletionRequestEntry {
             key: key.clone(),
             request_received_at_ms,
+            service_future_created_at_ms: None,
             service_scope_entered_at_ms: None,
         },
     ) {
@@ -104,6 +111,18 @@ fn record_pending_completion_request_id(
         }
     }
     pending.by_key.entry(key).or_default().push_back(request_id);
+}
+
+fn record_pending_completion_service_future_created_at_ms(
+    request_id: &str,
+    service_future_created_at_ms: u64,
+) {
+    let mut pending = pending_completion_request_ids_cell()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(entry) = pending.by_request_id.get_mut(request_id) {
+        entry.service_future_created_at_ms = Some(service_future_created_at_ms);
+    }
 }
 
 fn record_pending_completion_service_scope_entered_at_ms(
@@ -153,6 +172,7 @@ pub(crate) fn record_completion_request_id_for_testing(
         PendingCompletionRequestEntry {
             key: key.clone(),
             request_received_at_ms: None,
+            service_future_created_at_ms: None,
             service_scope_entered_at_ms: None,
         },
     ) {
@@ -187,6 +207,7 @@ pub(crate) fn take_completion_request_context_by_request_id(
     Some(PendingCompletionRequestContext {
         request_id: request_id.to_string(),
         request_received_at_ms: entry.request_received_at_ms,
+        service_future_created_at_ms: entry.service_future_created_at_ms,
         service_scope_entered_at_ms: entry.service_scope_entered_at_ms,
     })
 }
@@ -223,6 +244,7 @@ pub(crate) fn take_completion_request_context(
             return Some(PendingCompletionRequestContext {
                 request_id,
                 request_received_at_ms: entry.request_received_at_ms,
+                service_future_created_at_ms: entry.service_future_created_at_ms,
                 service_scope_entered_at_ms: entry.service_scope_entered_at_ms,
             });
         }
@@ -235,6 +257,13 @@ pub(crate) fn current_request_id() -> Option<String> {
 
 pub(crate) fn current_request_received_at_ms() -> Option<u64> {
     LSP_REQUEST_RECEIVED_AT_MS
+        .try_with(Clone::clone)
+        .ok()
+        .flatten()
+}
+
+pub(crate) fn current_request_service_future_created_at_ms() -> Option<u64> {
+    LSP_REQUEST_SERVICE_FUTURE_CREATED_AT_MS
         .try_with(Clone::clone)
         .ok()
         .flatten()
@@ -257,6 +286,7 @@ pub(crate) fn set_cancel_request_hook(hook: Option<CancelRequestHook>) {
 async fn with_request_context<F, T>(
     request_id: Option<String>,
     request_received_at_ms: Option<u64>,
+    service_future_created_at_ms: Option<u64>,
     service_scope_entered_at_ms: Option<u64>,
     future: F,
 ) -> T
@@ -267,8 +297,12 @@ where
         .scope(request_id, async move {
             LSP_REQUEST_RECEIVED_AT_MS
                 .scope(request_received_at_ms, async move {
-                    LSP_REQUEST_SERVICE_SCOPE_ENTERED_AT_MS
-                        .scope(service_scope_entered_at_ms, future)
+                    LSP_REQUEST_SERVICE_FUTURE_CREATED_AT_MS
+                        .scope(service_future_created_at_ms, async move {
+                            LSP_REQUEST_SERVICE_SCOPE_ENTERED_AT_MS
+                                .scope(service_scope_entered_at_ms, future)
+                                .await
+                        })
                         .await
                 })
                 .await
@@ -349,6 +383,15 @@ where
             record_pending_completion_request_id(&request, request_id, request_received_at_ms);
         }
         let future = self.inner.call(request);
+        let service_future_created_at_ms = Some(super::unix_timestamp_ms());
+        if let (Some(request_id), Some(service_future_created_at_ms)) =
+            (request_id.as_deref(), service_future_created_at_ms)
+        {
+            record_pending_completion_service_future_created_at_ms(
+                request_id,
+                service_future_created_at_ms,
+            );
+        }
         Box::pin(async move {
             let service_scope_entered_at_ms = Some(super::unix_timestamp_ms());
             if let (Some(request_id), Some(service_scope_entered_at_ms)) =
@@ -362,6 +405,7 @@ where
             with_request_context(
                 request_id,
                 request_received_at_ms,
+                service_future_created_at_ms,
                 service_scope_entered_at_ms,
                 future,
             )

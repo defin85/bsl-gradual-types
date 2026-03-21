@@ -9693,7 +9693,7 @@ async fn p22_get_completion_timeline_exposes_versioned_contract() {
             .get("version")
             .and_then(|value| value.as_u64())
             .expect("version"),
-        8
+        9
     );
     assert!(
         result
@@ -9952,6 +9952,18 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
             .get("service_scope_entered_at_ms")
             .and_then(|value| value.as_u64())
         {
+            let service_future_created_at_ms = server_edge_details
+                .get("service_future_created_at_ms")
+                .and_then(|value| value.as_u64())
+                .expect("service_future_created_at_ms");
+            let transport_to_service_future_wait_ms = server_edge_details
+                .get("transport_to_service_future_wait_ms")
+                .and_then(|value| value.as_u64())
+                .expect("transport_to_service_future_wait_ms");
+            let service_future_to_scope_wait_ms = server_edge_details
+                .get("service_future_to_scope_wait_ms")
+                .and_then(|value| value.as_u64())
+                .expect("service_future_to_scope_wait_ms");
             let transport_to_service_scope_wait_ms = server_edge_details
                 .get("transport_to_service_scope_wait_ms")
                 .and_then(|value| value.as_u64())
@@ -9965,8 +9977,26 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
                 "transport_received_at_ms must not exceed service_scope_entered_at_ms"
             );
             assert!(
+                transport_received_at_ms <= service_future_created_at_ms,
+                "transport_received_at_ms must not exceed service_future_created_at_ms"
+            );
+            assert!(
+                service_future_created_at_ms <= service_scope_entered_at_ms,
+                "service_future_created_at_ms must not exceed service_scope_entered_at_ms"
+            );
+            assert!(
                 service_scope_entered_at_ms <= method_entered_at_ms,
                 "service_scope_entered_at_ms must not exceed method_entered_at_ms"
+            );
+            assert_eq!(
+                transport_to_service_future_wait_ms,
+                service_future_created_at_ms.saturating_sub(transport_received_at_ms),
+                "transport_to_service_future_wait_ms must match timestamp delta"
+            );
+            assert_eq!(
+                service_future_to_scope_wait_ms,
+                service_scope_entered_at_ms.saturating_sub(service_future_created_at_ms),
+                "service_future_to_scope_wait_ms must match timestamp delta"
             );
             assert_eq!(
                 transport_to_service_scope_wait_ms,
@@ -9980,6 +10010,18 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
             );
         } else {
             assert!(
+                !server_edge_details.contains_key("service_future_created_at_ms"),
+                "service_future_created_at_ms must not be fabricated when service_scope_entered_at_ms is absent"
+            );
+            assert!(
+                !server_edge_details.contains_key("transport_to_service_future_wait_ms"),
+                "transport_to_service_future_wait_ms must not be fabricated when service_scope_entered_at_ms is absent"
+            );
+            assert!(
+                !server_edge_details.contains_key("service_future_to_scope_wait_ms"),
+                "service_future_to_scope_wait_ms must not be fabricated when service_scope_entered_at_ms is absent"
+            );
+            assert!(
                 !server_edge_details.contains_key("transport_to_service_scope_wait_ms"),
                 "transport_to_service_scope_wait_ms must not be fabricated when service_scope_entered_at_ms is absent"
             );
@@ -9989,6 +10031,18 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
             );
         }
     } else {
+        assert!(
+            !server_edge_details.contains_key("service_future_created_at_ms"),
+            "service_future_created_at_ms must not be present when method_entered_at_ms is absent"
+        );
+        assert!(
+            !server_edge_details.contains_key("transport_to_service_future_wait_ms"),
+            "transport_to_service_future_wait_ms must not be present when method_entered_at_ms is absent"
+        );
+        assert!(
+            !server_edge_details.contains_key("service_future_to_scope_wait_ms"),
+            "service_future_to_scope_wait_ms must not be present when method_entered_at_ms is absent"
+        );
         assert!(
             !server_edge_details.contains_key("service_scope_entered_at_ms"),
             "service_scope_entered_at_ms must not be present when method_entered_at_ms is absent"

@@ -17,15 +17,22 @@ async fn current_request_service_scope_entered_at_ms_is_none_outside_scope() {
 }
 
 #[tokio::test]
+async fn current_request_service_future_created_at_ms_is_none_outside_scope() {
+    assert_eq!(current_request_service_future_created_at_ms(), None);
+}
+
+#[tokio::test]
 async fn with_request_context_exposes_context_inside_scope() {
     let scoped = with_request_context(
         Some("42".to_string()),
         Some(1_700_000_000_123),
+        Some(1_700_000_000_124),
         Some(1_700_000_000_125),
         async {
             (
                 current_request_id(),
                 current_request_received_at_ms(),
+                current_request_service_future_created_at_ms(),
                 current_request_service_scope_entered_at_ms(),
             )
         },
@@ -33,7 +40,8 @@ async fn with_request_context_exposes_context_inside_scope() {
     .await;
     assert_eq!(scoped.0, Some("42".to_string()));
     assert_eq!(scoped.1, Some(1_700_000_000_123));
-    assert_eq!(scoped.2, Some(1_700_000_000_125));
+    assert_eq!(scoped.2, Some(1_700_000_000_124));
+    assert_eq!(scoped.3, Some(1_700_000_000_125));
 }
 
 #[tokio::test]
@@ -42,7 +50,7 @@ async fn request_context_service_sets_jsonrpc_numeric_id() {
     struct CaptureService;
 
     impl Service<Request> for CaptureService {
-        type Response = (Option<String>, Option<u64>, Option<u64>);
+        type Response = (Option<String>, Option<u64>, Option<u64>, Option<u64>);
         type Error = ();
         type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
@@ -55,6 +63,7 @@ async fn request_context_service_sets_jsonrpc_numeric_id() {
                 Ok((
                     current_request_id(),
                     current_request_received_at_ms(),
+                    current_request_service_future_created_at_ms(),
                     current_request_service_scope_entered_at_ms(),
                 ))
             })
@@ -71,10 +80,18 @@ async fn request_context_service_sets_jsonrpc_numeric_id() {
     );
     assert!(
         captured.2.is_some(),
+        "service future creation timestamp must be scoped"
+    );
+    assert!(
+        captured.3.is_some(),
         "service-scope enter timestamp must be scoped"
     );
     assert!(
         captured.2.unwrap() >= captured.1.unwrap(),
+        "service future creation timestamp must not be earlier than request receive timestamp"
+    );
+    assert!(
+        captured.3.unwrap() >= captured.2.unwrap(),
         "service-scope enter timestamp must not be earlier than request receive timestamp"
     );
 }
@@ -85,7 +102,7 @@ async fn request_context_service_does_not_propagate_request_id_to_spawned_handle
     struct SpawnedCaptureService;
 
     impl Service<Request> for SpawnedCaptureService {
-        type Response = (Option<String>, Option<u64>, Option<u64>);
+        type Response = (Option<String>, Option<u64>, Option<u64>, Option<u64>);
         type Error = ();
         type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
@@ -99,6 +116,7 @@ async fn request_context_service_does_not_propagate_request_id_to_spawned_handle
                     (
                         current_request_id(),
                         current_request_received_at_ms(),
+                        current_request_service_future_created_at_ms(),
                         current_request_service_scope_entered_at_ms(),
                     )
                 })
@@ -115,6 +133,7 @@ async fn request_context_service_does_not_propagate_request_id_to_spawned_handle
     assert_eq!(captured.0, None);
     assert_eq!(captured.1, None);
     assert_eq!(captured.2, None);
+    assert_eq!(captured.3, None);
 }
 
 #[tokio::test]
@@ -213,9 +232,14 @@ async fn request_context_service_records_completion_context_for_position_lookup(
     let captured = captured.expect("captured request context");
     assert_eq!(captured.request_id, "req-context");
     assert!(captured.request_received_at_ms.is_some());
+    assert!(captured.service_future_created_at_ms.is_some());
     assert!(captured.service_scope_entered_at_ms.is_some());
     assert!(
-        captured.service_scope_entered_at_ms.unwrap() >= captured.request_received_at_ms.unwrap()
+        captured.service_future_created_at_ms.unwrap() >= captured.request_received_at_ms.unwrap()
+    );
+    assert!(
+        captured.service_scope_entered_at_ms.unwrap()
+            >= captured.service_future_created_at_ms.unwrap()
     );
 }
 
@@ -268,24 +292,28 @@ fn overlapping_completion_request_context_can_be_taken_by_request_id_out_of_orde
         .finish();
 
     record_pending_completion_request_id(&first_request, first_request_id, Some(1_700_000_000_010));
+    record_pending_completion_service_future_created_at_ms(first_request_id, 1_700_000_000_011);
     record_pending_completion_service_scope_entered_at_ms(first_request_id, 1_700_000_000_012);
     record_pending_completion_request_id(
         &second_request,
         second_request_id,
         Some(1_700_000_000_020),
     );
+    record_pending_completion_service_future_created_at_ms(second_request_id, 1_700_000_000_020);
     record_pending_completion_service_scope_entered_at_ms(second_request_id, 1_700_000_000_021);
 
     let second = take_completion_request_context_by_request_id(second_request_id)
         .expect("second request should be taken by request id");
     assert_eq!(second.request_id, second_request_id);
     assert_eq!(second.request_received_at_ms, Some(1_700_000_000_020));
+    assert_eq!(second.service_future_created_at_ms, Some(1_700_000_000_020));
     assert_eq!(second.service_scope_entered_at_ms, Some(1_700_000_000_021));
 
     let first = take_completion_request_context(&uri, position)
         .expect("first request should remain available by position");
     assert_eq!(first.request_id, first_request_id);
     assert_eq!(first.request_received_at_ms, Some(1_700_000_000_010));
+    assert_eq!(first.service_future_created_at_ms, Some(1_700_000_000_011));
     assert_eq!(first.service_scope_entered_at_ms, Some(1_700_000_000_012));
 }
 

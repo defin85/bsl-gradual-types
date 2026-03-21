@@ -156,9 +156,15 @@ function buildCompletionTimelineSource(
             gaps.push(
                 `Completion timeline contract v${completionTimeline.response.version} does not include all v7 pre-method and snapshot overshoot attribution fields; those facts are unavailable by design.`
             );
-        } else if (completionTimeline.response.version < 8) {
+        }
+        if (completionTimeline.response.version < 8) {
             gaps.push(
                 `Completion timeline contract v${completionTimeline.response.version} does not include trustworthy v8 pre-method attribution provenance; strong ingress findings are unavailable by design.`
+            );
+        }
+        if (completionTimeline.response.version < 9) {
+            gaps.push(
+                `Completion timeline contract v${completionTimeline.response.version} does not include bounded v9 pre-service-scope split fields; pre-service-scope split is unavailable by design.`
             );
         }
         rawAttachments.push({
@@ -271,9 +277,15 @@ function deriveFindings(
             findings.push(
                 `Completion timeline contract v${input.completionTimeline.response.version} is available, but v7 pre-method and snapshot overshoot attribution details are unavailable by design.`
             );
-        } else if (input.completionTimeline.response.version < 8) {
+        }
+        if (input.completionTimeline.response.version < 8) {
             findings.push(
                 `Completion timeline contract v${input.completionTimeline.response.version} is available, but trustworthy v8 pre-method attribution provenance is unavailable by design.`
+            );
+        }
+        if (input.completionTimeline.response.version < 9) {
+            findings.push(
+                `Completion timeline contract v${input.completionTimeline.response.version} is available, but bounded v9 pre-service-scope split is unavailable by design.`
             );
         }
         const serverBeforeMethodCount = requestSection.requests.filter((request) =>

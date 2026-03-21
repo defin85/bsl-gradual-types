@@ -41,7 +41,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 8,
+                version: 9,
                 traces: [
                     {
                         trace_id: 'trace-1',
@@ -69,11 +69,14 @@ suite('Observability Incident Bundle Test Suite', () => {
                         },
                         server_edge_details: {
                             transport_received_at_ms: 1_700_000_000_000,
+                            service_future_created_at_ms: 1_700_000_001_200,
                             pre_method_attribution_provenance: 'same_request_authoritative',
                             service_scope_entered_at_ms: 1_700_000_002_000,
                             method_entered_at_ms: 1_700_000_003_000,
                             handler_entered_at_ms: 1_700_000_003_000,
                             response_sent_at_ms: 1_700_000_003_172,
+                            transport_to_service_future_wait_ms: 1200,
+                            service_future_to_scope_wait_ms: 800,
                             transport_to_service_scope_wait_ms: 2000,
                             service_scope_to_method_wait_ms: 1000,
                             transport_to_method_wait_ms: 3000,
@@ -200,7 +203,7 @@ suite('Observability Incident Bundle Test Suite', () => {
             ]
         );
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'available');
-        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 8);
+        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 9);
         assert.strictEqual(bundle.incidentReport.sources.client_probes.probe_count, 2);
         assert.strictEqual(bundle.incidentReport.sources.observability_metrics.uptime_seconds, 184);
         assert.deepStrictEqual(bundle.incidentReport.capture_scope, {
@@ -216,6 +219,9 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.status, 'correlated');
         assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.probe_id, 'probe-1');
         assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.client_to_transport_wait_ms, 0);
+        assert.strictEqual(bundle.incidentReport.requests[0].service_future_created_at_ms, 1_700_000_001_200);
+        assert.strictEqual(bundle.incidentReport.requests[0].transport_to_service_future_wait_ms, 1200);
+        assert.strictEqual(bundle.incidentReport.requests[0].service_future_to_scope_wait_ms, 800);
         assert.strictEqual(bundle.incidentReport.requests[0].transport_to_service_scope_wait_ms, 2000);
         assert.strictEqual(bundle.incidentReport.requests[0].service_scope_to_method_wait_ms, 1000);
         assert.strictEqual(bundle.incidentReport.requests[1].prepare_timeout?.source, 'prepare_guard');
@@ -235,6 +241,9 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.summaryMarkdown.includes('## Request Summary'));
         assert.ok(bundle.summaryMarkdown.includes('trace-1 | request=req-1'));
         assert.ok(bundle.summaryMarkdown.includes('pre_method_provenance=same_request_authoritative'));
+        assert.ok(bundle.summaryMarkdown.includes('service_future_created_at_ms=1700000001200'));
+        assert.ok(bundle.summaryMarkdown.includes('transport_to_service_future_wait_ms=1200'));
+        assert.ok(bundle.summaryMarkdown.includes('service_future_to_scope_wait_ms=800'));
         assert.ok(bundle.summaryMarkdown.includes('transport_to_service_scope_wait_ms=2000'));
         assert.ok(bundle.summaryMarkdown.includes('service_scope_to_method_wait_ms=1000'));
         assert.ok(
@@ -311,6 +320,39 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.status, 'unavailable');
         assert.ok(!bundle.incidentReport.requests[0].bottleneck_verdicts.includes('server_before_method_entry_dominant'));
         assert.ok(!bundle.incidentReport.requests[0].bottleneck_verdicts.includes('client_before_transport_dominant'));
+    });
+
+    test('v8 completion timeline should mark v9 pre-service-scope split as unavailable by design', () => {
+        const timeline = sampleTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok timeline fixture');
+        }
+        timeline.response.version = 8;
+        timeline.response.traces[0].server_edge_details = {
+            ...timeline.response.traces[0].server_edge_details!,
+            service_future_created_at_ms: undefined,
+            transport_to_service_future_wait_ms: undefined,
+            service_future_to_scope_wait_ms: undefined,
+        };
+
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: timeline,
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('contract v8')));
+        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('pre-service-scope split')));
+        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('contract v8')));
+        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('pre-service-scope split')));
+        assert.strictEqual(bundle.incidentReport.requests[0].service_future_created_at_ms, undefined);
+        assert.strictEqual(bundle.incidentReport.requests[0].transport_to_service_future_wait_ms, undefined);
+        assert.strictEqual(bundle.incidentReport.requests[0].service_future_to_scope_wait_ms, undefined);
+        assert.ok(bundle.summaryMarkdown.includes('contract=v8'));
+        assert.ok(bundle.summaryMarkdown.includes('pre-service-scope split is unavailable by design'));
+        assert.ok(!bundle.summaryMarkdown.includes('No gaps were recorded for this bundle.'));
     });
 
     test('correlated request should expose client-before-transport verdict when client wait dominates', () => {

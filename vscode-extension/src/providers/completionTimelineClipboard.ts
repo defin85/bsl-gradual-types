@@ -93,6 +93,9 @@ export function formatCompletionTimelineTraceForClipboard(
     if (trace.server_edge_details) {
         const detailsBits = [
             `transport_received_at_ms=${trace.server_edge_details.transport_received_at_ms}`,
+            ...(typeof trace.server_edge_details.service_future_created_at_ms === 'number'
+                ? [`service_future_created_at_ms=${trace.server_edge_details.service_future_created_at_ms}`]
+                : []),
             ...(trace.server_edge_details.pre_method_attribution_provenance
                 ? [`pre_method_attribution_provenance=${trace.server_edge_details.pre_method_attribution_provenance}`]
                 : []),
@@ -106,6 +109,12 @@ export function formatCompletionTimelineTraceForClipboard(
             `response_sent_at_ms=${trace.server_edge_details.response_sent_at_ms}`,
             ...(typeof trace.server_edge_details.transport_to_service_scope_wait_ms === 'number'
                 ? [`transport_to_service_scope_wait_ms=${trace.server_edge_details.transport_to_service_scope_wait_ms}`]
+                : []),
+            ...(typeof trace.server_edge_details.transport_to_service_future_wait_ms === 'number'
+                ? [`transport_to_service_future_wait_ms=${trace.server_edge_details.transport_to_service_future_wait_ms}`]
+                : []),
+            ...(typeof trace.server_edge_details.service_future_to_scope_wait_ms === 'number'
+                ? [`service_future_to_scope_wait_ms=${trace.server_edge_details.service_future_to_scope_wait_ms}`]
                 : []),
             ...(typeof trace.server_edge_details.service_scope_to_method_wait_ms === 'number'
                 ? [`service_scope_to_method_wait_ms=${trace.server_edge_details.service_scope_to_method_wait_ms}`]
@@ -312,8 +321,12 @@ function formatServerTimelineSectionForClipboard(
     lines.push(`contract=v${state.version}`);
     if (state.version < 7) {
         lines.push('v7 pre-method and snapshot overshoot attribution fields are unavailable by design on this payload.');
-    } else if (state.version < 8) {
+    }
+    if (state.version < 8) {
         lines.push('v8 trustworthy pre-method attribution provenance is unavailable by design on this payload.');
+    }
+    if (state.version < 9) {
+        lines.push('v9 pre-service-scope split is unavailable by design on this payload.');
     }
     const traces = mode === 'average'
         ? (state.average_trace ? [state.average_trace] : [])

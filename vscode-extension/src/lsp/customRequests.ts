@@ -602,12 +602,15 @@ export interface CompletionTimelinePrepareDetailsTrace {
 
 export interface CompletionTimelineServerEdgeDetailsTrace {
     transport_received_at_ms: number;
+    service_future_created_at_ms?: number;
     pre_method_attribution_provenance?: CompletionTimelinePreMethodAttributionProvenance;
     service_scope_entered_at_ms?: number;
     method_entered_at_ms?: number;
     handler_entered_at_ms: number;
     response_sent_at_ms: number;
     cancel_observed_at_ms?: number;
+    transport_to_service_future_wait_ms?: number;
+    service_future_to_scope_wait_ms?: number;
     transport_to_service_scope_wait_ms?: number;
     service_scope_to_method_wait_ms?: number;
     transport_to_method_wait_ms?: number;

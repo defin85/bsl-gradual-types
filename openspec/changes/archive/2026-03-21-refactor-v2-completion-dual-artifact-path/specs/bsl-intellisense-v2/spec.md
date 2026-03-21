@@ -1,6 +1,6 @@
 ## MODIFIED Requirements
 
-### Requirement: IntelliSense v2 обеспечивает IDE-grade completion по выражениям (MUST)
+### Requirement: IntelliSense v2 обеспечивает IDE‑grade completion по выражениям (MUST)
 Система SHALL обеспечивать completion v2, который корректно работает для member access в выражениях и цепочках, включая неполный код:
 - `Идентификатор.`
 - `Вызов().`

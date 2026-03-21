@@ -441,3 +441,202 @@ Human-readable projection MUST:
 - **THEN** summary явно отмечает, что dispatch split unavailable by design for `contract=v9`
 - **AND** summary не должен одновременно утверждать, что для этого missing split `No gaps were recorded`
 
+### Requirement: Existing completion surfaces различают strong и weak pre-method attribution без invented findings (MUST)
+Completion Timeline panel, clipboard export и request-centric incident bundle summary MUST переносить `v8` pre-method attribution provenance в человекочитаемом виде.
+
+Human-readable projection MUST:
+- явно показывать provenance для pre-method attribution, если connected server возвращает `v8` payload;
+- считать `server_before_method_entry_dominant` сильным verdict только для same-request authoritative provenance;
+- явно деградировать на `v7`, не выдумывая provenance для старого payload.
+
+#### Scenario: Panel и clipboard показывают provenance рядом с pre-method split
+- **GIVEN** extension получает completion timeline `v8` с pre-method provenance
+- **WHEN** оператор открывает Completion Timeline panel или копирует visible traces
+- **THEN** human-readable output показывает pre-method split вместе с provenance
+- **AND** оператор может отличить strong same-request attribution от best-effort fallback
+
+#### Scenario: Incident bundle findings не агрегируют weak attribution как сильный ingress bottleneck
+- **GIVEN** incident bundle строится по `v8` payload, где trace использует best-effort fallback provenance
+- **WHEN** extension формирует `incident.json` и `summary.md`
+- **THEN** request summary сохраняет bounded raw fact
+- **AND** derived findings не считают такой trace сильным `server_before_method_entry` bottleneck
+
+#### Scenario: Extension явно деградирует на `v7`
+- **GIVEN** connected server возвращает completion timeline `v7`
+- **WHEN** extension формирует panel, clipboard или incident bundle
+- **THEN** extension не выдумывает `v8` provenance
+- **AND** человекочитаемый output явно отмечает, что trustworthy pre-method attribution fields unavailable by design
+
+### Requirement: Existing completion surfaces переносят `v7` pre-method и snapshot overshoot facts без invented data (MUST)
+Completion Timeline panel, clipboard export и request-centric incident bundle summary MUST переносить новые `v7` authoritative facts в человекочитаемом виде и MUST явно деградировать на `v6`, не реконструируя отсутствующие поля эвристикой.
+
+Human-readable projection MUST:
+- показывать pre-method split отдельно от уже существующих `transport_to_method_wait_ms` / `transport_to_handler_wait_ms`;
+- показывать bounded `snapshot_with_deps_timeout_runtime`, если он доступен;
+- явно указывать, что `v7` fields unavailable by design, если bundle построен по `v6` payload.
+
+#### Scenario: Panel и clipboard показывают новый pre-method split
+- **GIVEN** extension получает authoritative completion timeline `v7` с bounded pre-method split
+- **WHEN** оператор открывает Completion Timeline panel или копирует visible traces
+- **THEN** human-readable output показывает отдельные fact lines для pre-method split
+- **AND** оператору не нужно открывать raw JSON, чтобы увидеть этот split
+
+#### Scenario: Incident bundle summary показывает snapshot overshoot attribution
+- **GIVEN** incident bundle построен по `v7` payload, где `prepare_timeout` содержит `snapshot_with_deps_timeout_runtime`
+- **WHEN** extension формирует `incident.json` и `summary.md`
+- **THEN** request-centric summary переносит этот bounded fact в derived handoff
+- **AND** summary не заменяет его guessed причиной
+
+#### Scenario: Extension явно деградирует на `v6`
+- **GIVEN** connected server возвращает completion timeline `v6`
+- **WHEN** extension формирует panel, clipboard или incident bundle
+- **THEN** extension не выдумывает `service_scope_*` или `snapshot_with_deps_timeout_runtime`
+- **AND** человекочитаемый output явно отмечает отсутствие `v7` attribution fields
+
+### Requirement: Incident bundle findings агрегируют ingress verdicts truthfully (MUST)
+`incident.json` и `summary.md` MUST агрегировать ingress-related findings только из truthful positive-only verdicts и MUST NOT переоценивать ingress bottleneck на hot traces, где положительный ingress wait отсутствует.
+
+Request-centric bundle summary MUST:
+- использовать тот же смысл ingress verdicts, что и другие completion projections extension;
+- считать client-side и server-side ingress отдельно, если соответствующие verdicts доступны;
+- не формулировать общий ingress bottleneck только на основании traces с нулевыми ingress waits;
+- сохранять request summary валидным, даже если client correlation unavailable.
+
+#### Scenario: Summary не переоценивает hot traces как ingress bottleneck
+- **GIVEN** capture window содержит hot completion trace с нулевыми ingress/prelude waits
+- **WHEN** extension формирует `incident.json` и `summary.md`
+- **THEN** этот trace не учитывается в ingress findings
+- **AND** summary не заявляет ingress bottleneck для него
+
+#### Scenario: Summary различает client-side и server-side ingress
+- **GIVEN** capture window содержит как минимум один correlated trace с доминирующим `client_to_transport_wait_ms`
+- **AND** содержит trace с доминирующим `transport_to_method_wait_ms`
+- **WHEN** extension формирует derived request-centric summary
+- **THEN** findings и request entries различают client-side и server-side ingress verdicts
+- **AND** оператору не нужно открывать raw JSON, чтобы увидеть этот split
+
+#### Scenario: Correlation gap не превращается в guessed ingress finding
+- **GIVEN** request summary не имеет deterministic client correlation
+- **WHEN** extension формирует `incident.json` и `summary.md`
+- **THEN** summary не создаёт client-side ingress finding для такого request
+- **AND** request остаётся server-centric или без ingress finding, если положительный server-side ingress wait отсутствует
+
+### Requirement: Observability incident bundle даёт request-centric handoff summary поверх raw evidence (MUST)
+VS Code extension MUST формировать `incident.json` и `summary.md` так, чтобы типовой completion incident можно было разбирать как набор bounded request-level facts без обязательного чтения полного raw timeline JSON.
+
+Этот derived report MUST:
+- сохранять raw attachments отдельными и не подменять их;
+- использовать authoritative request list только из `bsl.getCompletionTimeline`, если этот источник доступен;
+- выражать capture scope (`uri` или явное отсутствие single-URI scope) без guesswork;
+- выражать `request_count`;
+- содержать bounded request list для authoritative completion traces;
+- переносить в request list ключевые latency/verdict facts из authoritative trace;
+- использовать client probes только как optional supplemental correlation layer;
+- явно маркировать unavailable/unsupported/ambiguous correlation;
+- не вычислять псевдо-`metrics delta` из одного cumulative snapshot.
+
+#### Scenario: Single-document capture получает request-centric summary
+- **GIVEN** export bundle содержит authoritative completion timeline, и все captured traces относятся к одному `uri`
+- **WHEN** extension формирует `incident.json` и `summary.md`
+- **THEN** derived report явно содержит этот `uri`
+- **AND** derived report содержит `request_count`
+- **AND** derived report включает bounded request list с ключевыми latency/verdict facts для каждого authoritative trace
+
+#### Scenario: Derived report не подменяет missing authoritative request list local probes-данными
+- **GIVEN** connected server не вернул authoritative completion timeline
+- **WHEN** extension формирует bundle
+- **THEN** bundle остаётся валидным partial export
+- **AND** request-centric section явно помечается как unavailable или unsupported
+- **AND** local client probes не выдаются за authoritative request list
+
+### Requirement: Probe-to-trace correlation остаётся deterministic и fail-closed (MUST)
+Если extension дополняет request-centric summary данными из local client probes, такая correlation MUST выполняться только по deterministic bounded rules.
+
+Correlation MUST:
+- использовать только уже записанные bounded fields из authoritative trace и probe;
+- быть optional;
+- не требовать нового server-side request или explicit shared request id;
+- не создавать guessed pair, если correlation ambiguous.
+
+При успешной correlation request summary MAY включать bounded client-side supplement, например:
+- `probe_id`;
+- `client_duration_ms`;
+- `client_terminal_state`;
+- optional client/server edge delta.
+
+При ambiguous или unavailable correlation derived report MUST:
+- оставить request summary валидным и server-centric;
+- явно указать ограничение;
+- не выдумывать client-side pair.
+
+#### Scenario: Unambiguous correlation переносит bounded client-side supplement
+- **GIVEN** authoritative trace и local probe можно сопоставить детерминированно
+- **WHEN** extension строит request-centric summary
+- **THEN** request entry MAY включать bounded client-side supplement
+- **AND** supplement не подменяет authoritative server verdicts и latencies
+
+#### Scenario: Ambiguous correlation не создаёт guessed pair
+- **GIVEN** для authoritative trace существует несколько одинаково правдоподобных probe-кандидатов или недостаточно данных для уверенного сопоставления
+- **WHEN** extension строит request-centric summary
+- **THEN** request entry остаётся без client-side pair
+- **AND** derived report явно фиксирует correlation gap
+- **AND** bundle не создаёт guessed correlation
+
+### Requirement: VS Code extension экспортирует AI-friendly observability incident bundle (MUST)
+VS Code extension MUST предоставлять явный user-facing export surface для observability incident handoff в формате bundle, пригодном для внешнего AI/incident анализа.
+
+Этот export bundle MUST:
+- собираться extension-side поверх уже существующих observability surface-ов;
+- использовать authoritative server timeline только из `bsl.getCompletionTimeline`;
+- использовать observability metrics snapshot только из `bsl.getObservabilityMetrics`;
+- использовать local client probes только из session-local probe buffer extension;
+- включать `summary.md` как краткий human-readable report;
+- включать `incident.json` как machine-readable derived report;
+- включать raw attachments отдельно от derived report;
+- не использовать Output panel dump text как canonical raw source;
+- не требовать нового server-side custom request в первой итерации;
+- не подменять существующие raw panels и copy/debug flows.
+
+Export bundle MUST явно различать:
+- authoritative server trace;
+- local-only client probes;
+- cumulative metrics snapshot.
+
+#### Scenario: Пользователь экспортирует bundle из observability surface
+- **GIVEN** extension подключена к LSP и observability surfaces доступны
+- **WHEN** пользователь запускает export incident bundle
+- **THEN** extension создаёт bundle с `summary.md` и `incident.json`
+- **AND** bundle содержит raw attachments для server timeline, client probes и metrics snapshot
+- **AND** summary/report не требуют ручного склеивания текста из нескольких UI панелей
+
+#### Scenario: Raw evidence остаётся отдельным от derived summary
+- **GIVEN** extension экспортирует incident bundle
+- **WHEN** пользователь или внешний инструмент читает bundle
+- **THEN** raw данные completion timeline, client probes и metrics snapshot доступны как отдельные attachments
+- **AND** derived summary не подменяет и не перезаписывает raw evidence
+- **AND** raw attachments не зависят от truncated Output formatting
+
+### Requirement: Incident bundle деградирует предсказуемо при частичной недоступности данных (MUST)
+Export incident bundle MUST завершаться fail-closed по отсутствующим sections, но fail-open для самого handoff flow: bundle может быть частичным, если некоторые источники недоступны, однако он MUST явно фиксировать gaps и MUST NOT выдумывать отсутствующие данные.
+
+Partial export semantics MUST:
+- сохранять capture metadata даже при частичной недоступности;
+- явно помечать unavailable/unsupported sections в `incident.json` и `summary.md`;
+- не реконструировать server trace из client probes или aggregate metrics;
+- не подменять missing metrics snapshot последним текстовым dump из Output;
+- оставлять raw attachments только для реально полученных sections.
+
+#### Scenario: Legacy LSP не поддерживает `bsl.getCompletionTimeline`
+- **GIVEN** connected server не поддерживает `bsl.getCompletionTimeline`
+- **WHEN** пользователь запускает export incident bundle
+- **THEN** export всё равно создаёт bundle
+- **AND** bundle явно помечает server timeline как `unsupported`
+- **AND** не пытается реконструировать authoritative server trace из local probes
+
+#### Scenario: Metrics snapshot временно недоступен
+- **GIVEN** `bsl.getObservabilityMetrics` временно недоступен или завершился ошибкой
+- **WHEN** пользователь запускает export incident bundle
+- **THEN** export всё равно создаёт bundle с доступными server timeline и/или client probes
+- **AND** `incident.json` и `summary.md` явно фиксируют отсутствие metrics snapshot
+- **AND** export не подменяет missing metrics текстом из прошлых Output dumps
+

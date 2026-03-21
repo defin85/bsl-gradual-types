@@ -11,19 +11,32 @@ TBD - created by archiving change define-bsl-intellisense-v2. Update Purpose aft
 - `(expr).`
 - цепочки вида `a.b().c[d].e.`
 
-Syntax extraction для неполного кода MAY использовать parse/syntax helpers, но semantic candidates MUST происходить только из canonical IR snapshot текущей revision и его derived semantic index.
+Syntax extraction для неполного кода MAY использовать parse/syntax helpers, но semantic candidates для completion MUST происходить только из canonical IR snapshot текущей revision и его canonical derived completion artifacts.
 
-Если canonical semantic artifacts для текущей revision недоступны, completion MUST работать fail-closed и MUST NOT синтезировать semantic candidates из stale cache, keyword fallback или альтернативного inference path.
-Система MUST NOT возвращать semantic candidates другой revision под видом exact/current-revision completion ответа.
+Для completion допускается bounded set canonical current-revision artifacts:
+- `CompletionHeadArtifact` — fast artifact для initial completion response;
+- `ExactSemanticArtifact` (`derived semantic index`) — full exact semantic artifact для enriched completion и других interactive semantic операций.
 
-#### Scenario: Completion на неполном коде использует canonical semantic path
-- **GIVEN** пользователь набирает `expr.` и код может быть синтаксически неполным
+Оба артефакта MUST:
+- строиться только из canonical IR snapshot той же revision;
+- invalidated по `(file_version, deps_id, settings_id)`;
+- не использовать stale payload другой revision как substitute.
+
+`CompletionHeadArtifact` для текущей revision MUST быть publishable и queryable независимо от ready-state `ExactSemanticArtifact` той же revision. Completion MUST NOT оставаться effectively `exact-only` только потому, что exact artifact ещё не достроен после нового `didChange`.
+
+Если current-revision `CompletionHeadArtifact` и `ExactSemanticArtifact` недоступны, completion MUST работать fail-closed и MUST NOT синтезировать semantic candidates из stale cache, keyword fallback или альтернативного inference path.
+Система MUST NOT возвращать semantic candidates другой revision под видом current-revision completion ответа.
+
+#### Scenario: Completion после новой revision может вернуться из current-revision completion head artifact
+- **GIVEN** пользователь только что создал новую requested revision через `didChange`
+- **AND** exact semantic artifact текущей revision ещё не ready
+- **AND** current-revision `CompletionHeadArtifact` уже ready
 - **WHEN** IDE запрашивает completion на позиции после `.`
-- **THEN** система извлекает receiver-выражение syntax-aware способом
-- **AND** semantic candidates читаются только из canonical IR snapshot и derived semantic index текущей revision
+- **THEN** сервер возвращает semantic completion response из `CompletionHeadArtifact` той же revision
+- **AND** не использует stale semantic payload другой revision
 
-#### Scenario: Недоступность canonical artifacts не превращается в semantic fallback
-- **GIVEN** для текущей revision canonical IR или derived semantic index ещё недоступны
+#### Scenario: Недоступность current-revision completion artifacts не превращается в semantic fallback
+- **GIVEN** для текущей revision недоступны и `CompletionHeadArtifact`, и `ExactSemanticArtifact`
 - **WHEN** IDE запрашивает completion на позиции после `.`
 - **THEN** сервер возвращает explicit empty/unavailable fail-closed response для этой revision
 - **AND** сервер не возвращает stale, degraded или keyword-only semantic substitute
@@ -66,14 +79,16 @@ Syntax extraction для неполного кода MAY использоват�
 ### Requirement: v2 pipeline является единственным источником истины для вывода типов (MUST)
 Система MUST использовать canonical IR как единственный semantic source of truth для IDE-функций (`completion`, `hover`, `signatureHelp`, `definition`, `diagnostics`, `type-at-position`).
 
-`derived semantic index` MUST быть единственным fast query артефактом для интерактивных semantic запросов и MUST строиться только из canonical IR snapshot.
+Bounded set canonical derived semantic artifacts MUST строиться только из canonical IR snapshot:
+- `CompletionHeadArtifact` — fast query artifact только для initial completion response;
+- `ExactSemanticArtifact` (`derived semantic index`) — full semantic artifact для exact completion и остальных interactive semantic запросов.
 
 Legacy-пути вывода типов MUST быть удалены (не поддерживаются), включая parse-result-based semantic inference paths, которые существуют параллельно canonical IR.
 
-#### Scenario: Hover и completion используют canonical IR и derived semantic index
+#### Scenario: Completion head и exact artifact используют один canonical snapshot
 - **GIVEN** пользователь работает в IDE с `.bsl` файлом
-- **WHEN** IDE запрашивает hover и completion в одной и той же позиции/контексте
-- **THEN** ответы опираются на один canonical IR snapshot и derived semantic index той же revision
+- **WHEN** IDE запрашивает completion, а затем hover в том же current-revision контексте
+- **THEN** completion head и exact semantic artifact опираются на один canonical IR snapshot той же revision
 - **AND** не используют альтернативные semantic inference пути вне canonical IR contract
 
 ### Requirement: Completion resolve не имеет legacy fallback (MUST)
@@ -632,21 +647,31 @@ Runtime knob MUST валидироваться и приводиться к ди
 Snapshot с несовпадающими `deps_id` или `settings_id`, а также snapshot предыдущей revision, MUST NOT использоваться как semantic substitute для interactive ответа.
 
 Дополнительно для completion:
-- при timeout/cancel на latest-path система MUST завершать запрос быстро (без блокировки сверх wait budget) и MAY вернуть empty/partial fail-closed ответ;
-- completion MUST NOT использовать stale completion как substitute для текущей revision;
-- observability MUST фиксировать bounded fail-closed причину и guardrail-счётчики stale пути должны оставаться нулевыми.
+- completion MUST ждать bounded время current-revision `CompletionHeadArtifact` или `ExactSemanticArtifact`;
+- readiness/publish path для current-revision `CompletionHeadArtifact` MUST NOT блокироваться ожиданием ready exact semantic artifact той же revision;
+- если `CompletionHeadArtifact` ready внутри wait budget, completion MAY вернуть current-revision semantic response из него;
+- если `ExactSemanticArtifact` ready внутри wait budget, completion MAY использовать exact semantic response напрямую;
+- если внутри wait budget не ready ни один current-revision completion artifact, completion MUST завершиться fail-closed;
+- exact precompute MAY продолжаться после first response, но MUST NOT менять revision ответа задним числом, MUST NOT маскировать stale semantic path как acceptable substitute и MUST NOT превращать completion под `revision-churn` обратно в `exact-only` wait path, если head artifact уже ready.
 
-#### Scenario: Первый completion после правки остаётся current-revision exact-or-fail-closed
-- **GIVEN** пользователь ввёл новую строку и `received_version=V+1`, но `applied_version=V`
-- **AND** latest-path запрос для `V+1` не завершился в wait budget
+#### Scenario: Completion после правки использует current-revision head artifact без stale substitute
+- **GIVEN** пользователь ввёл новую строку и `received_version=V+1`, но exact semantic artifact для `V+1` ещё не ready
+- **AND** current-revision `CompletionHeadArtifact` для `V+1` успел построиться в wait budget
 - **WHEN** IDE запрашивает completion
-- **THEN** сервер возвращает fail-closed ответ для версии `V+1`
+- **THEN** сервер возвращает non-empty semantic completion response для версии `V+1`
 - **AND** не возвращает semantic payload версии `V` под видом текущего результата
-- **AND** запрос завершается без ожидания секундного хвоста
 
-#### Scenario: Нет current-revision artifact в пределах wait budget
-- **GIVEN** requested версия ещё не ready по `applied_version`
-- **WHEN** IDE запрашивает hover/signatureHelp/completion
+#### Scenario: Последовательные didChange не возвращают completion к exact-only зависимости
+- **GIVEN** пользователь последовательно создаёт новые requested revisions `V+1` и `V+2`
+- **AND** для `V+2` current-revision `CompletionHeadArtifact` ready внутри wait budget
+- **AND** `ExactSemanticArtifact` для `V+2` ещё не ready
+- **WHEN** IDE запрашивает completion на `V+2`
+- **THEN** сервер возвращает current-revision completion response из `CompletionHeadArtifact` для `V+2`
+- **AND** не продолжает ждать exact artifact только потому, что completion выполняется после очередного `didChange`
+
+#### Scenario: Нет current-revision completion artifacts в пределах wait budget
+- **GIVEN** requested версия ещё не ready ни по `CompletionHeadArtifact`, ни по exact semantic artifact
+- **WHEN** IDE запрашивает completion
 - **THEN** сервер не блокируется дольше wait budget
 - **AND** сервер не использует snapshot предыдущей revision как semantic substitute
 
@@ -1716,19 +1741,17 @@ Hardcoded foreign `change_id` в runtime/perf path MUST NOT использова
 - **AND** такой артефакт не может быть использован как cutover evidence
 
 ### Requirement: LSP предоставляет versioned per-request completion timeline контракт (MUST)
-LSP MUST предоставлять server-driven custom request `bsl.getCompletionTimeline` с contract version `10`.
+LSP MUST предоставлять server-driven custom request `bsl.getCompletionTimeline` с contract version `5`.
 
 Для VS Code extension в текущей архитектуре этот контракт MUST быть доступен через `workspace/executeCommand` с `command: bsl.getCompletionTimeline`.
 Per-request timeline payload MUST формироваться на стороне LSP и MUST NOT требовать клиентской реконструкции из логов, incident summary или агрегированных observability-метрик.
-
-Репозиторий MUST поддерживать versioned contract baseline `contracts/lsp-completion-timeline/v7`, синхронизированный с текущим authoritative payload и его bounded field-set.
 
 VS Code extension MAY отображать отдельно captured local client-side completion probes рядом с server trace, и такой local-only debug stream MAY включать bounded cancellation hints, transport-phase diagnostics, result-shape diagnostics и overlap/drift diagnostics, но такой stream:
 - MUST NOT менять contract version или shape server-generated payload;
 - MUST NOT подменять server-generated stages, routes, causes, waiter states или outcomes;
 - MUST оставаться отдельным UI-level stream, а не частью LSP timeline contract.
 
-Контракт `v10` MUST включать:
+Контракт `v5` MUST включать:
 - `version` (числовой номер контракта);
 - `traces` (массив completion trace записей).
 
@@ -1741,7 +1764,7 @@ VS Code extension MAY отображать отдельно captured local clien
 - optional `server_edge_details`;
 - `stages`.
 
-Если `turn_attribution` присутствует, объект MUST оставаться bounded и MAY включать `dispatcher_resolution_latency_ms`, достаточный для отделения dispatcher-ready latency от остального ingress wait.
+Если `turn_attribution` присутствует, объект MUST оставаться bounded и MAY включать `dispatcher_resolution_latency_ms`, достаточный для отделения dispatcher-ready latency от остального `transport_to_handler_wait`.
 
 Если `prepare_details` присутствует, объект MUST оставаться bounded и MUST NOT вводить high-cardinality labels.
 Для completion bottleneck drilldown этот объект MUST включать:
@@ -1750,65 +1773,23 @@ VS Code extension MAY отображать отдельно captured local clien
 - `progress` с coarse prepare phase и bounded offsets;
 - optional bounded runtime drilldown для `wait_for_file_version`;
 - optional bounded runtime drilldown для `snapshot_with_deps`;
-- optional bounded `timeout_attribution`;
 - optional `exact_wait`.
 
-Если `timeout_attribution` присутствует, объект MUST оставаться bounded и MUST включать:
-- `source`;
-- `phase`;
-- `budget_ms`;
-- `elapsed_ms`;
-- `overshoot_ms`.
-
 Runtime drilldown внутри `prepare_details` MUST использовать только bounded numeric/state fields и MUST NOT требовать свободного текста для интерпретации queue wait, wake path или snapshot execution.
-Если timeout attribution присутствует без runtime reply details, payload MUST оставаться валидным и MUST NOT выдумывать отсутствующий runtime split.
 
-Если `exact_wait` присутствует, объект MUST оставаться bounded и MUST включать существующие readiness/outcome поля, а также MAY включать bounded waiter/task-state поля и optional bounded `artifact_poll`.
-
-Если `artifact_poll` присутствует, объект MUST оставаться bounded и MAY включать только:
-- `poll_count`;
-- `poll_elapsed_ms`;
-- `observed_file_version`;
-- `head_ready`;
-- `exact_ready`.
+Если `exact_wait` присутствует, объект MUST оставаться bounded и MUST включать существующие readiness/outcome поля, а также MAY включать bounded waiter/task-state поля, достаточные для различения как минимум:
+- matching task присутствует или отсутствует;
+- waiter только joined существующий task или promoted background task;
+- task находится в одной из bounded phase категорий ожидания/вычисления.
 
 Если `server_edge_details` присутствует, объект MUST оставаться bounded и MUST включать:
 - `transport_received_at_ms`;
-- `transport_received_at_ms_provenance`;
-- `pre_method_attribution_provenance`;
 - `handler_entered_at_ms`;
 - `response_sent_at_ms`;
 - optional `cancel_observed_at_ms`;
 - `transport_to_handler_wait_ms`;
 - `server_handler_exec_ms`;
-- optional `cancel_observed_after_handler_enter_ms`;
-- optional `jsonrpc_dispatch_received_at_ms`;
-- optional `dispatch_to_request_context_wait_ms`;
-- optional `method_entered_at_ms`;
-- optional `transport_to_method_wait_ms`;
-- optional `method_prelude_exec_ms`;
-- optional `service_scope_entered_at_ms`;
-- optional `transport_to_service_scope_wait_ms`;
-- optional `service_scope_to_method_wait_ms`;
-- optional `service_future_created_at_ms`;
-- optional `transport_to_service_future_wait_ms`;
-- optional `service_future_to_scope_wait_ms`.
-
-`transport_received_at_ms_provenance` MUST использовать только bounded vocabulary:
-- `request_context_call_entry`;
-- `jsonrpc_dispatch_received`.
-
-Если `method_entered_at_ms` присутствует, payload MUST включать и `transport_to_method_wait_ms`, и `method_prelude_exec_ms`, чтобы ingress attribution можно было прочитать без ручного вычитания timestamp'ов.
-
-Если `service_scope_entered_at_ms` присутствует, payload MUST включать и `transport_to_service_scope_wait_ms`, и `service_scope_to_method_wait_ms`, чтобы pre-method split оставался self-contained.
-
-Если `service_future_created_at_ms` присутствует, payload MUST включать и `transport_to_service_future_wait_ms`, и `service_future_to_scope_wait_ms`, чтобы pre-service-scope split не требовал ручного вычитания timestamp'ов.
-
-Если `jsonrpc_dispatch_received_at_ms` присутствует, payload MUST включать и `dispatch_to_request_context_wait_ms`, чтобы pre-request-context split не требовал ручного вычитания timestamp'ов.
-
-Если `transport_received_at_ms_provenance=jsonrpc_dispatch_received`, payload MUST включать `jsonrpc_dispatch_received_at_ms`, а `transport_received_at_ms` MUST совпадать с ним.
-
-Если `transport_received_at_ms_provenance=request_context_call_entry`, payload MUST NOT выдумывать `jsonrpc_dispatch_received_at_ms` и `dispatch_to_request_context_wait_ms`.
+- optional `cancel_observed_after_handler_enter_ms`.
 
 Каждый stage entry MUST включать:
 - `name`;
@@ -1816,36 +1797,31 @@ Runtime drilldown внутри `prepare_details` MUST использовать �
 - `started_offset_ms`;
 - `duration_ms`.
 
+#### Scenario: Ingress-dominant trace различает transport, dispatcher и handler work
+- **GIVEN** completion request пользователю ощущается как "долгий" до входа в основную логику completion
+- **WHEN** клиент вызывает `bsl.getCompletionTimeline`
+- **THEN** authoritative payload содержит достаточно bounded данных, чтобы отделить `transport_to_handler_wait` от `server_handler_exec`
+- **AND** при наличии `dispatcher_resolution_latency_ms` видно, была ли задержка уже после dispatcher-ready
+
+#### Scenario: Prepare timeout trace показывает subphase и runtime split
+- **GIVEN** completion завершается `prepare_timeout`
+- **WHEN** клиент вызывает `bsl.getCompletionTimeline`
+- **THEN** trace содержит bounded prepare phase marker
+- **AND** payload явно показывает, относится ли bottleneck к `wait_for_file_version` или `snapshot_with_deps`
+- **AND** при наличии runtime drilldown можно отличить queue wait от execute/wake path без чтения текстовых логов
+
+#### Scenario: Exact deadline trace показывает waiter/task state
+- **GIVEN** completion падает с `exact_deadline` после успешного `prepare`
+- **WHEN** клиент вызывает `bsl.getCompletionTimeline`
+- **THEN** trace содержит bounded `exact_wait` block
+- **AND** из него видно outcome exact wait, waiter action и task-state категорию
+- **AND** payload не требует реконструкции exact root cause из косвенных global metrics
+
 #### Scenario: VS Code клиент получает server-generated payload без reconstruction
 - **GIVEN** VS Code extension запрашивает completion timeline
 - **WHEN** клиент вызывает `workspace/executeCommand` с `command: bsl.getCompletionTimeline`
-- **THEN** LSP возвращает response контракта `v10` с server-generated traces
+- **THEN** LSP возвращает response контракта `v5` с server-generated traces
 - **AND** клиент не строит authoritative server trace из raw logs, incident summary или p95/p99 агрегатов
-
-#### Scenario: Ingress-dominant trace различает lag до request context, внутри request context и в handler prelude
-- **GIVEN** completion request пользователю ощущается как "долгий" ещё до основной completion-логики
-- **WHEN** клиент вызывает `bsl.getCompletionTimeline`
-- **THEN** authoritative payload содержит bounded данные, чтобы отделить `jsonrpc_dispatch_received -> RequestContextService::call`, `transport_received -> service_future_created`, `service_future_created -> service_scope_entered` и `method_entered -> handler_entered`
-- **AND** existing `transport_to_handler_wait_ms` и `server_handler_exec_ms` остаются доступны для backward-compatible чтения
-
-#### Scenario: Prepare timeout trace показывает timeout-layer и overshoot
-- **GIVEN** completion завершается `prepare_timeout`
-- **WHEN** клиент вызывает `bsl.getCompletionTimeline`
-- **THEN** trace содержит bounded `timeout_attribution`
-- **AND** из `budget_ms`, `elapsed_ms` и `overshoot_ms` видно late timeout wake без чтения текстовых логов
-- **AND** отсутствующие runtime reply details не выдумываются
-
-#### Scenario: Exact deadline trace показывает artifact polling до waiter path
-- **GIVEN** completion падает с `exact_deadline` до перехода в type-index waiter path
-- **WHEN** клиент вызывает `bsl.getCompletionTimeline`
-- **THEN** trace содержит bounded `exact_wait.artifact_poll`
-- **AND** payload не требует реконструкции artifact polling из косвенных global metrics
-
-#### Scenario: Versioned contract baseline синхронизирован с shipped payload
-- **GIVEN** authoritative completion timeline уже публикует contract `v10`
-- **WHEN** репозиторий фиксирует versioned contract baseline для этой поверхности
-- **THEN** в `contracts/lsp-completion-timeline/v7/` существует новый contiguous baseline для текущего bounded payload
-- **AND** older `v6` остаётся compatibility baseline для предыдущего `response.version=9` surface
 
 ### Requirement: Timeline stage taxonomy bounded и совместима с completion observability (MUST)
 Stage names в per-request timeline MUST использовать bounded taxonomy, согласованную с completion stage observability.
@@ -1969,7 +1945,11 @@ Adapters MUST NOT:
 - **AND** не строит локальный semantic substitute вне shared runtime path
 
 ### Requirement: Canonical semantic queries fail-closed при недоступности артефактов (MUST)
-Interactive semantic queries (`completion`, `hover`, `signatureHelp`, `definition`, `type-at-position`) MUST завершаться fail-closed, если canonical IR или derived semantic index текущей revision недоступны.
+Interactive semantic queries (`completion`, `hover`, `signatureHelp`, `definition`, `type-at-position`) MUST завершаться fail-closed, если для них недоступен необходимый canonical current-revision artifact.
+
+Требуемые артефакты:
+- `completion` -> `CompletionHeadArtifact` ИЛИ `ExactSemanticArtifact`;
+- `hover`, `signatureHelp`, `definition`, `type-at-position` -> `ExactSemanticArtifact`.
 
 Fail-closed path MUST NOT:
 - использовать stale semantic artifacts как substitute;
@@ -1978,19 +1958,18 @@ Fail-closed path MUST NOT:
 - запускать альтернативный parse-result-based semantic inference path;
 - усиливать semantic truth локальной adapter logic.
 
-Observability MAY фиксировать bounded reason-code недоступности, но не MAY вводить отдельный fallback semantic path.
-
 #### Scenario: Hover miss current revision остаётся fail-closed
-- **GIVEN** canonical IR или derived semantic index текущей revision недоступны
+- **GIVEN** exact semantic artifact текущей revision недоступен
 - **WHEN** IDE запрашивает hover в позиции с member access
 - **THEN** сервер возвращает empty/unavailable hover response
-- **AND** не materialize-ит semantic ответ из альтернативного non-IR path
+- **AND** не materialize-ит semantic ответ из `CompletionHeadArtifact` или другого non-exact пути
 
-#### Scenario: После didChange stale semantic payload не маскируется под current revision
-- **GIVEN** пользователь только что изменил документ и current revision ещё не имеет canonical IR или derived semantic index
-- **WHEN** IDE запрашивает `hover`, `type-at-position` или `definition`
-- **THEN** сервер отвечает fail-closed для текущей revision
-- **AND** не возвращает semantic payload, вычисленный для предыдущей revision, как будто он относится к текущему коду
+#### Scenario: Completion head current revision допустим, stale exact другой revision недопустим
+- **GIVEN** `CompletionHeadArtifact` для текущей revision ready
+- **AND** exact semantic artifact ready только для предыдущей revision
+- **WHEN** IDE запрашивает completion
+- **THEN** сервер использует только current-revision `CompletionHeadArtifact` или fail-closed
+- **AND** не использует exact artifact предыдущей revision как substitute
 
 ### Requirement: Fail-closed observability использует bounded reason codes (MUST)
 Когда interactive semantic запрос завершается fail-closed, observability MUST фиксировать bounded low-cardinality reason code для текущей revision.
@@ -2005,14 +1984,16 @@ Reason taxonomy MUST оставаться low-cardinality и одинаково 
 - **AND** причина не маскирует ответ как stale-but-acceptable semantic path
 
 ### Requirement: Interactive latency budget защищается canonical fast path, а не fallback semantics (MUST)
-Система MUST удовлетворять согласованным representative latency budgets для interactive semantic queries (`completion`, `hover`, `definition`, `type-at-position`) с использованием canonical IR + derived semantic index.
+Система MUST удовлетворять согласованным representative latency budgets для interactive semantic queries с использованием canonical IR и canonical derived semantic artifacts.
+
+Для completion latency budget MAY соблюдаться через current-revision `CompletionHeadArtifact`, но MUST NOT соблюдаться через stale, degraded или discovery-backed semantic substitute.
 
 Если latency budget нарушен, система MUST оптимизировать canonical semantic path и MUST NOT возвращать stale, degraded или discovery-backed semantic substitute как механизм соблюдения latency.
 
-#### Scenario: Latency regression не возвращает legacy semantic rescue path
-- **GIVEN** representative interactive fixture показывает превышение согласованного latency budget
-- **WHEN** команда исправляет производительность v2 semantic pipeline
-- **THEN** исправление оптимизирует canonical IR/derived semantic index path
+#### Scenario: Representative large-module completion использует canonical head path, а не stale rescue
+- **GIVEN** representative large real module
+- **WHEN** команда исправляет latency interactive completion
+- **THEN** first-response completion приходит из current-revision `CompletionHeadArtifact` или `ExactSemanticArtifact`
 - **AND** merge-state не вводит stale/degraded/search-backed semantic substitute как perf workaround
 
 ### Requirement: Applied-owner bare identifier fallback удалён из v2 semantics (MUST)
@@ -2140,4 +2121,416 @@ Instrumentation MUST:
 - **WHEN** extension или operator читает authoritative payload
 - **THEN** payload не выдумывает dispatch-to-request-context split
 - **AND** trustworthy semantics остаются ограничены уже существующими `v9` полями
+
+### Requirement: Completion timeline `v8` публикует trustworthy pre-method attribution provenance (MUST)
+Authoritative `bsl.getCompletionTimeline` payload MUST поднимать contract до `v8`, если он переносит pre-method attribution provenance.
+
+Если payload включает bounded pre-method facts (`service_scope_entered_at_ms`, `transport_to_service_scope_wait_ms`, `service_scope_to_method_wait_ms`), он MUST также включать bounded provenance для этих фактов. Provenance vocabulary MUST оставаться low-cardinality и MUST различать как минимум:
+- same-request authoritative attribution;
+- best-effort fallback attribution.
+
+Payload MUST NOT выдавать best-effort fallback за доказанный same-request pre-method факт.
+
+#### Scenario: Overlapping completion на одной позиции не получает чужой authoritative ingress
+- **GIVEN** два completion request пересекаются на одном и том же `uri + position`
+- **WHEN** сервер сериализует completion timeline `v8`
+- **THEN** trace не маркирует pre-method attribution как same-request authoritative, если provenance не доказан для этого `request_id`
+- **AND** payload не маскирует best-effort fallback под strong ingress факт
+
+#### Scenario: Request-bound attribution сохранён через service handoff
+- **GIVEN** completion request сохраняет свой request context до consumer path
+- **WHEN** сервер сериализует completion timeline `v8`
+- **THEN** payload включает bounded provenance same-request authoritative attribution
+- **AND** оператор может доверять pre-method split как факту для этого `request_id`
+
+#### Scenario: Provenance недоступен
+- **GIVEN** completion trace не может доказать provenance pre-method attribution
+- **WHEN** сервер сериализует completion timeline `v8`
+- **THEN** payload явно деградирует до bounded fallback/unavailable semantics
+- **AND** не выдумывает strong same-request attribution
+
+### Requirement: Pre-method attribution integrity остаётся bounded и side-effect-safe (MUST)
+Integrity instrumentation для pre-method attribution MUST:
+- не менять completion semantics;
+- не добавлять новый unbounded лог-канал;
+- использовать только bounded fields и bounded vocabulary;
+- fail-open для самого completion response и fail-closed для attribution confidence.
+
+#### Scenario: Timeline не может сохранить request-bound provenance
+- **GIVEN** completion response всё ещё может быть построен, но request-bound provenance для pre-method attribution потерян
+- **WHEN** timeline trace формируется
+- **THEN** completion response пользователю остаётся прежним
+- **AND** timeline понижает confidence или опускает strong attribution
+- **AND** payload не заменяет missing provenance guessed полями
+
+### Requirement: Completion timeline v7 сужает `server_before_method_entry` до bounded pre-method segments (MUST)
+Authoritative `bsl.getCompletionTimeline` payload MUST поднимать contract до `v7` и MUST сохранять существующие server-edge fields, дополняя их bounded pre-method split без free-text логов.
+
+Если payload включает новый pre-method split, он MUST использовать только additive bounded поля:
+- optional `service_scope_entered_at_ms`;
+- optional `transport_to_service_scope_wait_ms`;
+- optional `service_scope_to_method_wait_ms`.
+
+Если `service_scope_entered_at_ms` присутствует, payload MUST включать и оба derived waits, чтобы оператору не приходилось вручную вычитать timestamp'ы.
+
+#### Scenario: Запрос задерживается до первого poll service future
+- **GIVEN** completion request получает большой lag до начала service future
+- **WHEN** сервер сериализует completion timeline `v7`
+- **THEN** payload содержит bounded pre-method split
+- **AND** `transport_to_service_scope_wait_ms` показывает положительную задержку
+- **AND** старые поля `transport_to_method_wait_ms` и `transport_to_handler_wait_ms` остаются доступны
+
+#### Scenario: Запрос задерживается между первым poll и входом в `lsp_completion`
+- **GIVEN** completion request уже вошёл в service future scope, но ещё не достиг первой строки `lsp_completion`
+- **WHEN** сервер сериализует completion timeline `v7`
+- **THEN** payload содержит положительный `service_scope_to_method_wait_ms`
+- **AND** оператор может отличить этот случай от lag до первого poll
+
+### Requirement: `prepare_timeout` на `snapshot_with_deps` получает timeout-safe bounded runtime attribution (MUST)
+Если `prepare_timeout` происходит после входа в фазу `snapshot_with_deps`, authoritative payload MUST уметь сериализовать bounded `snapshot_with_deps_timeout_runtime`, достаточный для различения overshoot как минимум между:
+- `queue_wait`
+- `exec`
+- `wake_wait`
+- `unavailable`
+
+Object MUST оставаться bounded и MAY включать только:
+- optional `queue_wait_ms`
+- optional `exec_ms`
+- optional `wake_wait_ms`
+- required `resolution`
+
+#### Scenario: Timeout происходит во время queue wait snapshot command
+- **GIVEN** completion prepare timeout случается, пока `GetSnapshotWithDeps` ещё ждёт исполнения в runtime queue
+- **WHEN** сервер сериализует completion timeline `v7`
+- **THEN** payload включает `snapshot_with_deps_timeout_runtime`
+- **AND** `resolution=queue_wait`
+- **AND** payload не выдумывает `exec_ms`, если exec ещё не начался
+
+#### Scenario: Timeout происходит после готового snapshot reply, но до timely wake
+- **GIVEN** runtime уже завершил snapshot command, но completion future просыпается слишком поздно
+- **WHEN** сервер сериализует completion timeline `v7`
+- **THEN** payload включает bounded `snapshot_with_deps_timeout_runtime`
+- **AND** `resolution=wake_wait`
+
+#### Scenario: Timeout path ещё не имеет partial runtime split
+- **GIVEN** prepare timeout произошёл на `snapshot_with_deps`, но bounded partial runtime attribution пока недоступна
+- **WHEN** сервер сериализует completion timeline `v7`
+- **THEN** payload использует `resolution=unavailable`
+- **AND** не подменяет отсутствие данных guessed queue/exec/wake split
+
+### Requirement: Human-readable completion ingress verdicts остаются truthful и positive-only (MUST)
+Derived verdicts для `Completion Timeline` panel, clipboard и связанных extension projections MUST строиться только из уже имеющихся bounded latency fields и MUST NOT маркировать trace как ingress-bottleneck, если соответствующая ingress задержка отсутствует.
+
+Derived verdict layer MUST:
+- использовать только существующие bounded waits (`transport_to_method_wait_ms`, `method_prelude_exec_ms` и, при наличии deterministic correlation в downstream consumer, `client_to_transport_wait_ms`);
+- строить ingress verdict только при положительной доминирующей задержке;
+- различать как минимум `server_before_method_entry_dominant` и `handler_prelude_dominant`;
+- MAY различать `client_before_transport_dominant`, если downstream projection уже имеет deterministic probe correlation;
+- не выводить generic ingress verdict только потому, что `0 >= 0` или потому что одна из задержек отсутствует.
+
+#### Scenario: Hot trace без положительного ingress wait не получает ingress verdict
+- **GIVEN** completion trace имеет `transport_to_method_wait_ms=0` и `method_prelude_exec_ms=0`
+- **WHEN** extension строит human-readable verdicts
+- **THEN** trace не получает ingress verdict
+- **AND** trace не маркируется как `handler_prelude_dominant`
+
+#### Scenario: Server-side wait до method entry доминирует над prelude
+- **GIVEN** completion trace имеет положительный `transport_to_method_wait_ms`, который доминирует над `method_prelude_exec_ms`
+- **WHEN** extension строит human-readable verdicts
+- **THEN** trace получает verdict `server_before_method_entry_dominant`
+- **AND** trace не получает `handler_prelude_dominant`
+
+#### Scenario: Handler prelude доминирует над wait до method entry
+- **GIVEN** completion trace имеет положительный `method_prelude_exec_ms`, который доминирует над `transport_to_method_wait_ms`
+- **WHEN** extension строит human-readable verdicts
+- **THEN** trace получает verdict `handler_prelude_dominant`
+- **AND** trace не получает server-side ingress verdict
+
+### Requirement: Client-side ingress supplement остаётся fail-closed и deterministic (MUST)
+Если extension-projection добавляет human-readable client-side ingress verdict поверх authoritative completion trace, такой verdict MUST появляться только при deterministic probe correlation и положительном доминирующем `client_to_transport_wait_ms`.
+
+Проекция MUST:
+- не создавать client-side ingress verdict для uncorrelated или ambiguous requests;
+- не использовать probe-only эвристики как substitute для authoritative server verdicts;
+- сохранять trace валидным и server-centric, если client correlation недоступна.
+
+#### Scenario: Correlated trace получает client-side ingress verdict
+- **GIVEN** request summary имеет deterministic correlation и положительный `client_to_transport_wait_ms`, доминирующий над server-side ingress waits
+- **WHEN** extension строит human-readable verdicts
+- **THEN** trace получает verdict `client_before_transport_dominant`
+- **AND** server-side verdicts остаются отдельными и не подменяются client-side supplement
+
+#### Scenario: Uncorrelated trace не получает client-side ingress verdict
+- **GIVEN** request summary не имеет deterministic probe correlation
+- **WHEN** extension строит human-readable verdicts
+- **THEN** trace не получает verdict `client_before_transport_dominant`
+- **AND** projection остаётся fail-closed без guessed client-side attribution
+
+### Requirement: Existing completion surfaces переносят `v6` root-cause attribution без invented data (MUST)
+VS Code extension MUST переносить authoritative `v6` root-cause attribution в уже существующие completion-oriented surface'ы, не требуя от оператора ручного чтения raw JSON для типовых verdict'ов.
+
+Минимальные surface'ы:
+- Completion Timeline panel;
+- clipboard export видимого trace;
+- observability incident handoff summary поверх authoritative timeline.
+
+Derived projection MUST:
+- строиться только из structured authoritative fields и bounded local status markers;
+- различать `ingress_before_method_entry`, `handler_prelude_dominant`, `prepare_timeout@source` и `exact_deadline@artifact_poll`, когда соответствующие поля доступны;
+- явно деградировать на payload `v5`;
+- MUST NOT придумывать отсутствующие значения и MUST NOT подменять raw attachments.
+
+#### Scenario: Completion Timeline panel показывает method-entry и timeout attribution
+- **GIVEN** сервер вернул completion timeline с `v6` root-cause attribution
+- **WHEN** пользователь открывает Completion Timeline panel
+- **THEN** panel показывает bounded fact lines для method-entry split, timeout source/overshoot и artifact polling, если эти поля присутствуют
+- **AND** оператору не требуется открывать raw JSON для типовых verdict'ов `handler_prelude_dominant`, `prepare_timeout@source` или `exact_deadline@artifact_poll`
+
+#### Scenario: Clipboard export переносит ключевой `v6` verdict
+- **GIVEN** пользователь копирует trace из Completion Timeline
+- **WHEN** extension формирует clipboard text
+- **THEN** copied text содержит ключевые bounded `v6` fact lines
+- **AND** copied text не теряет distinction между transport wait, method prelude, timeout source и artifact polling, если эти поля присутствуют
+
+#### Scenario: Incident handoff summary деградирует явно на payload `v5`
+- **GIVEN** extension строит incident handoff summary для backend, который ещё не вернул `v6` root-cause attribution
+- **WHEN** summary формируется из completion timeline payload версии `5`
+- **THEN** summary остаётся валидным и использует доступные `v5` поля
+- **AND** отсутствующие `v6` verdict details помечаются как unavailable, а не выдумываются
+
+### Requirement: Человекочитаемые completion timeline projections сохраняют authoritative bottleneck semantics (MUST)
+VS Code extension MUST проецировать bounded authoritative bottleneck drilldown из completion timeline в человекочитаемые surface'ы, не заставляя оператора читать raw JSON для типовых root-cause verdict'ов.
+
+Минимальные surface'ы:
+- Completion Timeline panel;
+- clipboard export видимого trace;
+- AI-friendly incident handoff summary поверх authoritative timeline.
+
+Derived projection MUST:
+- строиться только из structured authoritative fields и bounded local status markers;
+- явно различать `ingress_dominant`, `prepare_timeout` subphase и `exact_wait` bottleneck, когда соответствующие поля доступны;
+- деградировать явно, если backend вернул старый payload или часть новых bounded полей отсутствует;
+- MUST NOT придумывать отсутствующие значения и MUST NOT подменять raw attachments.
+
+#### Scenario: Completion Timeline panel показывает bounded bottleneck drilldown
+- **GIVEN** сервер вернул completion timeline с bounded prepare/exact/dispatcher drilldown
+- **WHEN** пользователь открывает Completion Timeline panel
+- **THEN** panel показывает эти факты в человекочитаемом виде рядом с trace
+- **AND** оператору не требуется открывать raw JSON для типового verdict `ingress_dominant`, `prepare_timeout@phase` или `exact_deadline`
+
+#### Scenario: Clipboard export переносит ключевой bottleneck verdict
+- **GIVEN** пользователь копирует trace из Completion Timeline
+- **WHEN** extension формирует clipboard text
+- **THEN** copied text содержит ключевые bounded drilldown поля
+- **AND** copied text не теряет distinction между `transport_to_handler_wait`, `dispatcher_resolution_latency_ms`, `prepare` subphase и `exact_wait` state, если эти поля присутствуют
+
+#### Scenario: Incident handoff summary деградирует явно на payload `v4`
+- **GIVEN** extension строит incident handoff summary для backend, который ещё не вернул `v5` drilldown
+- **WHEN** summary формируется из completion timeline payload более старой версии
+- **THEN** summary остаётся валидным и использует доступные `v4` поля
+- **AND** отсутствующие `v5` verdict details помечаются как unavailable, а не выдумываются
+
+### Requirement: v2 отслеживает schema-effects universal value collections в одном snapshot (MUST)
+Система MUST отслеживать snapshot-local schema/effects для universal value collections (`Соответствие`, `Структура`, `ТаблицаЗначений`) в рамках одного и того же v2 snapshot.
+
+Эти effects MUST использоваться как единый source of truth для:
+- `completion`,
+- `hover`,
+- `type-at-position`,
+- `semantic diagnostics`.
+
+#### Scenario: Один snapshot даёт единый смысл для collection-derived access
+- **GIVEN** документ создаёт `Соответствие`, `Структура` и `ТаблицаЗначений` с локально известными schema/effects
+- **WHEN** IDE выполняет completion, hover и diagnostics в одной ревизии документа
+- **THEN** все операции используют один и тот же resolved type contract без расхождений между consumer-слоями
+
+### Requirement: Consumer channels используют только единый resolved path (MUST)
+Система MUST использовать один и тот же resolved owner/type contract для `completion`, `hover`, `type-at-position` и `semantic diagnostics`.
+
+Consumer-local schema/effect inference MUST NOT использоваться как источник истины.
+Допустим только thin-adapter, который читает уже резолвленный тип из общего v2 snapshot contract.
+
+#### Scenario: Один и тот же owner-type для member access во всех consumer каналах
+- **GIVEN** документ содержит member/index access, зависящий от schema-effects universal value collections
+- **WHEN** IDE последовательно запрашивает completion, hover, type-at-position и semantic diagnostics в одной ревизии документа
+- **THEN** все каналы используют один и тот же resolved owner/type contract
+- **AND** результаты не расходятся из-за consumer-local inference
+
+### Requirement: v2 резолвит значение `Соответствие` при index access (MUST)
+Система MUST резолвить тип выражения `map[key]` для `Соответствие` в рамках одного v2 snapshot, используя map-effects из кода.
+
+#### Scenario: Литеральный ключ резолвит точный тип значения
+- **GIVEN** код содержит `Map = Новый Соответствие;` и `Map.Вставить("Идентификатор", 10)`
+- **WHEN** анализируется выражение `Map["Идентификатор"]`
+- **THEN** система возвращает тип `Число`
+
+### Requirement: Приоритет резолюции `map[key]` определён и стабилен (MUST)
+Система MUST применять следующий порядок для определения типа `map[key]`:
+1. тип literal-key specialization для конкретного ключа,
+2. generic value type `V`,
+3. fallback `Произвольный`.
+
+#### Scenario: Неизвестный ключ использует generic `V`
+- **GIVEN** map типизирован как `Соответствие<Строка, ДокументСсылка.Док1>`
+- **AND** literal-key specialization для ключа отсутствует
+- **WHEN** анализируется `Map["ЛюбойКлюч"]`
+- **THEN** система возвращает тип `ДокументСсылка.Док1`
+
+#### Scenario: При отсутствии данных используется `Произвольный`
+- **GIVEN** map создан как `Новый Соответствие` без достаточных эффектов вывода
+- **WHEN** анализируется `Map[Expr]`
+- **THEN** система возвращает тип `Произвольный`
+
+### Requirement: Completion/hover/type-at-position после map index access согласованы (MUST)
+Система MUST использовать один и тот же resolved owner-type после index access для completion, hover и type-at-position.
+
+#### Scenario: Completion на `map["k"].` использует тип значения
+- **GIVEN** `Map.Вставить("k", Obj)` и тип `Obj` содержит свойство `Имя`
+- **WHEN** IDE запрашивает completion на `Map["k"].`
+- **THEN** completion включает `Имя`
+
+#### Scenario: Hover/type-at-position на `map["k"]` показывает тип значения
+- **GIVEN** для `k` выведен тип `КолонкаТаблицыЗначений`
+- **WHEN** IDE запрашивает hover/type-at-position на `Map["k"]`
+- **THEN** система возвращает тип `КолонкаТаблицыЗначений`
+
+### Requirement: Dynamic keys не генерируют hard-fail о неизвестном ключе (MUST)
+Для динамических ключей система MUST избегать hard-fail диагностики "ключ не найден" и использовать safe type fallback policy.
+
+#### Scenario: Динамический ключ не вызывает ложную ошибку отсутствия ключа
+- **GIVEN** ключ вычисляется как выражение `Ключ = ПолучитьКлюч()`
+- **WHEN** анализируется `Map[Ключ]`
+- **THEN** система не создаёт hard-fail диагностику о неизвестном ключе
+- **AND** тип выражения определяется по policy приоритетов
+
+### Requirement: Per-instance schema не мутирует глобальный TypeRepository (MUST)
+Per-instance schema/effects MUST оставаться snapshot-local.
+Система MUST NOT регистрировать synthetic per-instance типы или иные mutable записи в глобальном `TypeRepository` ради `Соответствие` / `Структура` / `ТаблицаЗначений`.
+
+#### Scenario: Переключение snapshot не протекает per-instance state в global repository
+- **GIVEN** один snapshot содержит локально выведенную schema для экземпляров universal value collections
+- **AND** другой snapshot не содержит эту schema
+- **WHEN** выполняется анализ во втором snapshot
+- **THEN** во втором snapshot не появляются synthetic members из первого snapshot
+- **AND** global `TypeRepository` не содержит новых per-instance synthetic типов
+
+### Requirement: v2 отслеживает flow-sensitive schema полей `Структура` (MUST)
+Система MUST отслеживать schema-effect полей конкретного экземпляра `Структура` в рамках одного v2 snapshot.
+
+Отслеживание MUST как минимум включать:
+- имя поля (регистронезависимый lookup с сохранением каноничного имени),
+- тип поля (если извлечён),
+- source span добавления/обновления поля.
+
+#### Scenario: Поле, добавленное через `Вставить`, доступно как свойство
+- **GIVEN** код содержит `S = Новый Структура;` и `S.Вставить("Идентификатор", "A-01")`
+- **WHEN** v2 строит type snapshot для completion/hover/diagnostics
+- **THEN** схема `S` содержит поле `Идентификатор`
+- **AND** member access `S.Идентификатор` резолвится без ошибки
+
+### Requirement: Typed-structure резолвит поля как свойства в user-facing каналах (MUST)
+Для переменной, определённой как typed-structure, система MUST единообразно резолвить `s.<ИмяПоля>` в completion, hover и type-at-position.
+
+#### Scenario: Completion предлагает известные поля структуры
+- **GIVEN** у структуры `S` есть поля `Идентификатор` и `Количество`
+- **WHEN** IDE запрашивает completion на `S.`
+- **THEN** completion включает `Идентификатор` и `Количество`
+
+#### Scenario: Hover/type-at-position возвращает тип поля структуры
+- **GIVEN** поле `Идентификатор` имеет тип `Строка`
+- **WHEN** IDE запрашивает hover/type-at-position для `S.Идентификатор`
+- **THEN** система возвращает тип `Строка`
+
+### Requirement: Unknown field у typed-structure диагностируется как ошибка (MUST)
+Если объект определён как typed-structure, обращение к полю, отсутствующему в schema, MUST приводить к диагностике несуществующего свойства.
+
+#### Scenario: Опечатка в имени поля даёт hard-fail диагностику
+- **GIVEN** в schema структуры есть только поле `Идентификатор`
+- **WHEN** код обращается к `S.Идентифкатор`
+- **THEN** система возвращает диагностику о несуществующем свойстве для typed-structure
+
+### Requirement: Тип поля извлекается best-effort с безопасным fallback (MUST)
+Система MUST извлекать тип поля из поддерживаемых паттернов присваивания/вставки.
+Если тип вычислить невозможно, система MUST сохранять поле в schema и использовать тип `Произвольный`.
+
+#### Scenario: Невычислимый тип не удаляет поле из schema
+- **GIVEN** код содержит `S.Вставить("СложноеПоле", ПолучитьНечёткийТип())`
+- **WHEN** система не может статически вычислить тип значения
+- **THEN** поле `СложноеПоле` остаётся доступным в member access/completion
+- **AND** его тип определяется как `Произвольный`
+
+### Requirement: v2 отслеживает schema-effect `ТаблицаЗначений.Колонки.Добавить` (MUST)
+Система MUST отслеживать side-effect вызовов `ТЗ.Колонки.Добавить(...)` как изменение схемы колонок конкретного экземпляра `ТаблицаЗначений` в рамках одного v2 snapshot.
+
+Отслеживание MUST как минимум включать:
+- имя колонки (регистронезависимый lookup, с сохранением каноничного имени для отображения),
+- тип значения колонки (если извлечен из аргументов),
+- source span изменения схемы.
+
+#### Scenario: Колонка, добавленная через `Колонки.Добавить`, видна в том же snapshot
+- **GIVEN** код содержит `ТЗ = Новый ТаблицаЗначений;` и `ТЗ.Колонки.Добавить("Идентификатор", ...)`
+- **WHEN** v2 строит type snapshot для diagnostics/completion/hover
+- **THEN** схема `ТЗ` содержит колонку `Идентификатор`
+
+### Requirement: Typed-row `ТаблицаЗначений` резолвит колонки как свойства (MUST)
+Система MUST формировать typed-row для строк `ТаблицаЗначений` (минимум для `ТЗ.Добавить()` и `Для каждого Стр Из ТЗ`) и MUST резолвить `Стр.<ИмяКолонки>` по сохраненной схеме колонок.
+
+#### Scenario: Completion предлагает колонки строки таблицы
+- **GIVEN** таблица содержит колонки `Идентификатор`, `ИдентификаторОрганизации`, `ТипПоиска`
+- **AND** переменная `Стр` является строкой этой таблицы
+- **WHEN** IDE запрашивает completion на `Стр.`
+- **THEN** completion включает `Идентификатор`, `ИдентификаторОрганизации`, `ТипПоиска`
+
+#### Scenario: Hover/type-at-position возвращает тип колонки строки
+- **GIVEN** тип колонки `Идентификатор` извлечен как `Строка`
+- **WHEN** IDE запрашивает hover/type-at-position для `Стр.Идентификатор`
+- **THEN** система возвращает тип `Строка`
+
+### Requirement: Unknown column у typed-row диагностируется в strict режиме (MUST)
+Если объект определен как typed-row `ТаблицаЗначений`, обращение к колонке, отсутствующей в схеме, MUST приводить к диагностике несуществующего свойства (hard-fail), а не silently-degrade в `Unknown`.
+
+#### Scenario: Опечатка в имени колонки даёт ошибку
+- **GIVEN** в схеме строки есть только колонка `Идентификатор`
+- **WHEN** код обращается к `Стр.Идентифкатор`
+- **THEN** система возвращает диагностику о несуществующем свойстве для typed-row
+
+### Requirement: Тип колонки извлекается из `ОписаниеТипов` с безопасной деградацией (MUST)
+Система MUST извлекать тип колонки из аргументов `Колонки.Добавить` в поддерживаемых паттернах `ОписаниеТипов`.
+Если извлечь тип невозможно, система MUST сохранять имя колонки и использовать тип `Произвольный`.
+
+#### Scenario: `ОписаниеТипов` с StringType даёт `Строка`
+- **GIVEN** `ОписаниеТиповСтрока150 = Новый ОписаниеТипов(КвалификаторыСтрок.StringType, ...)`
+- **AND** `ТЗ.Колонки.Добавить("Идентификатор", ОписаниеТиповСтрока150)`
+- **WHEN** IDE запрашивает тип `Стр.Идентификатор`
+- **THEN** система возвращает `Строка`
+
+#### Scenario: Неподдержанный `ОписаниеТипов` сохраняет колонку с `Произвольный`
+- **GIVEN** `ТЗ.Колонки.Добавить("СложнаяКолонка", ВычислитьОписаниеТипов())`
+- **WHEN** система не может извлечь тип колонки статически
+- **THEN** колонка `СложнаяКолонка` остается доступной для member access/completion
+- **AND** её тип определяется как `Произвольный`
+
+### Requirement: Acceptance фиксирует cross-consumer consistency для одной позиции (MUST)
+Система MUST иметь интеграционные acceptance tests, которые сравнивают результат для одной и той же позиции между `completion`, `hover`, `type-at-position` и `semantic diagnostics`.
+
+#### Scenario: `map["k"].` консистентен между completion/hover/type-at-position/diagnostics
+- **GIVEN** код выводит тип `map["k"]` из schema-effects
+- **WHEN** запускаются acceptance tests по одной позиции в документе
+- **THEN** completion candidates, hover/type-at-position type и semantic diagnostics соответствуют одному resolved owner/type contract
+
+### Requirement: Representative real-module gate проверяет current-revision first-response availability для completion (MUST)
+Acceptance для архитектурных изменений completion MUST включать representative gate на реальном workspace module, а не только synthetic URI harness.
+
+Этот gate MUST:
+- открывать реальный модуль из representative large configuration;
+- проверять отдельно `same-revision warm` member-access completion и `revision-churn` completion после нового `didChange` перед каждым measured sample;
+- отдельно учитывать first-response availability и exact upgrade latency;
+- fail-ить, если completion после новой revision снова деградирует в `fail_closed`, несмотря на наличие current-revision canonical fast path.
+
+#### Scenario: Real-module gate ловит регрессию first-response availability
+- **GIVEN** representative real module из большой конфигурации открыт в live gate
+- **AND** gate применяет новый `didChange` перед каждым measured completion в `revision-churn` профиле
+- **WHEN** выполняется member-access completion
+- **THEN** gate требует `ok_non_empty` first response из current-revision canonical artifact
+- **AND** gate фиксирует exact upgrade отдельно, не маскируя им first-response availability
 

@@ -18,3 +18,4 @@
 - [x] 4.3 Обновить smoke/runbook expectations для нового bounded split и для `v8` note `split unavailable by design`.
 - [x] 4.4 Зафиксировать `Requirement -> Code -> Test` traceability.
 - [x] 4.5 Провалидировать change через `openspec validate add-completion-pre-service-scope-attribution --strict --no-interactive`.
+- [x] 4.6 Синхронизировать versioned contract baseline и canonical OpenSpec truth с shipped `v9` payload.

@@ -61,6 +61,9 @@
 - existing `v8` fields сохраняются;
 - новые поля optional и bounded;
 - никаких free-text объяснений или high-cardinality identifiers не добавляется.
+- versioned contract baseline в репозитории должен эволюционировать как contiguous major
+  `contracts/lsp-completion-timeline/v5 -> v6`, а policy checker обязан ожидать
+  именно этот новый baseline вместо старого `response.version=3`.
 
 Если `service_future_created_at_ms` присутствует, payload должен включать и оба derived waits, чтобы operator и summary не вычисляли их вручную.
 
@@ -104,7 +107,9 @@ Panel, clipboard и request-centric incident bundle summary должны:
 ### Риск: drift между raw contract и human-readable projection
 Смягчение:
 - change включает regression coverage для panel, clipboard и incident bundle summary;
-- smoke/runbook ожидания обновляются вместе с projection.
+- smoke/runbook ожидания обновляются вместе с projection;
+- versioned contract artifacts и canonical OpenSpec truth синхронизируются с shipped
+  `v9` payload, а не остаются на старом `v5` / `response.version=3`.
 
 ### Риск: `v8` limitation останется видимой только через `contract=v8`
 Смягчение:

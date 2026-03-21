@@ -41,6 +41,8 @@
   - `backend/src/bin/lsp_server/server/request_context.rs`
   - `backend/src/bin/lsp_server/server/language_server/impl_completion.rs`
   - `backend/src/bin/lsp_server/types.rs`
+  - `contracts/lsp-completion-timeline/v6/*`
+  - `scripts/check-versioned-contracts.py`
   - `vscode-extension/src/lsp/customRequests.ts`
   - `vscode-extension/src/providers/completionTimelineClipboard.ts`
   - `vscode-extension/src/providers/completionTimelineWebview.ts`

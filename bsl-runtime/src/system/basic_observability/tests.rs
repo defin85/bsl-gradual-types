@@ -1342,6 +1342,237 @@ fn completion_v2_contract_matches_runtime_transport_and_trigger_modes() {
 }
 
 #[test]
+fn completion_timeline_v6_contract_matches_current_runtime_payload_shape() {
+    let contract = contract_json("lsp-completion-timeline/v6/contract.json");
+    let response = contract
+        .get("response")
+        .and_then(|value| value.as_object())
+        .expect("response contract section");
+
+    assert_eq!(
+        response
+            .get("version")
+            .and_then(|value| value.as_u64())
+            .expect("response.version"),
+        9,
+        "timeline contract must match current runtime response.version"
+    );
+
+    let trace_fields: BTreeSet<String> = response
+        .get("trace_fields")
+        .and_then(|value| value.as_array())
+        .expect("trace_fields array")
+        .iter()
+        .map(|value| value.as_str().expect("trace field string").to_string())
+        .collect();
+    let expected_trace_fields: BTreeSet<String> = [
+        "trace_id",
+        "request_id",
+        "uri",
+        "trigger_mode",
+        "outcome",
+        "started_at_ms",
+        "total_duration_ms",
+        "dominant_stage",
+        "prepare_details",
+        "server_edge_details",
+        "turn_attribution",
+        "stages",
+    ]
+    .iter()
+    .map(|value| value.to_string())
+    .collect();
+    assert_eq!(trace_fields, expected_trace_fields);
+
+    let prepare_details_fields: BTreeSet<String> = response
+        .get("prepare_details_fields")
+        .and_then(|value| value.as_array())
+        .expect("prepare_details_fields array")
+        .iter()
+        .map(|value| value.as_str().expect("prepare_details field string").to_string())
+        .collect();
+    let expected_prepare_details_fields: BTreeSet<String> = [
+        "wait_budget_ms",
+        "guard_outcome",
+        "outcome",
+        "route",
+        "fail_closed_cause",
+        "min_file_version",
+        "shadow_version_at_start",
+        "observed_file_version",
+        "wait_elapsed_ms",
+        "snapshot_elapsed_ms",
+        "apply_age_at_start_ms",
+        "apply_age_at_terminal_ms",
+        "progress",
+        "wait_for_file_version_runtime",
+        "snapshot_with_deps_runtime",
+        "snapshot_with_deps_timeout_runtime",
+        "timeout_attribution",
+        "exact_wait",
+    ]
+    .iter()
+    .map(|value| value.to_string())
+    .collect();
+    assert_eq!(prepare_details_fields, expected_prepare_details_fields);
+
+    let prepare_progress_fields: BTreeSet<String> = response
+        .get("prepare_progress_fields")
+        .and_then(|value| value.as_array())
+        .expect("prepare_progress_fields array")
+        .iter()
+        .map(|value| value.as_str().expect("prepare_progress field string").to_string())
+        .collect();
+    let expected_prepare_progress_fields: BTreeSet<String> = [
+        "phase",
+        "phase_started_offset_ms",
+        "wait_completed_offset_ms",
+        "snapshot_completed_offset_ms",
+    ]
+    .iter()
+    .map(|value| value.to_string())
+    .collect();
+    assert_eq!(prepare_progress_fields, expected_prepare_progress_fields);
+
+    let prepare_runtime_fields: BTreeSet<String> = response
+        .get("prepare_runtime_fields")
+        .and_then(|value| value.as_array())
+        .expect("prepare_runtime_fields array")
+        .iter()
+        .map(|value| value.as_str().expect("prepare_runtime field string").to_string())
+        .collect();
+    let expected_prepare_runtime_fields: BTreeSet<String> =
+        ["queue_wait_ms", "exec_ms", "wake_wait_ms", "resolution"]
+            .iter()
+            .map(|value| value.to_string())
+            .collect();
+    assert_eq!(prepare_runtime_fields, expected_prepare_runtime_fields);
+
+    let prepare_timeout_attribution_fields: BTreeSet<String> = response
+        .get("prepare_timeout_attribution_fields")
+        .and_then(|value| value.as_array())
+        .expect("prepare_timeout_attribution_fields array")
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .expect("prepare_timeout_attribution field string")
+                .to_string()
+        })
+        .collect();
+    let expected_prepare_timeout_attribution_fields: BTreeSet<String> =
+        ["source", "phase", "budget_ms", "elapsed_ms", "overshoot_ms"]
+            .iter()
+            .map(|value| value.to_string())
+            .collect();
+    assert_eq!(
+        prepare_timeout_attribution_fields,
+        expected_prepare_timeout_attribution_fields
+    );
+
+    let exact_wait_fields: BTreeSet<String> = response
+        .get("exact_wait_fields")
+        .and_then(|value| value.as_array())
+        .expect("exact_wait_fields array")
+        .iter()
+        .map(|value| value.as_str().expect("exact_wait field string").to_string())
+        .collect();
+    let expected_exact_wait_fields: BTreeSet<String> = [
+        "head_ready_before_wait",
+        "exact_ready_before_wait",
+        "current_revision_head_owner_hints_ready",
+        "artifact_wait_outcome",
+        "type_index_wait_outcome",
+        "type_index_waiter_action",
+        "matching_task_state",
+        "task_phase",
+        "artifact_poll",
+    ]
+    .iter()
+    .map(|value| value.to_string())
+    .collect();
+    assert_eq!(exact_wait_fields, expected_exact_wait_fields);
+
+    let exact_artifact_poll_fields: BTreeSet<String> = response
+        .get("exact_artifact_poll_fields")
+        .and_then(|value| value.as_array())
+        .expect("exact_artifact_poll_fields array")
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .expect("exact_artifact_poll field string")
+                .to_string()
+        })
+        .collect();
+    let expected_exact_artifact_poll_fields: BTreeSet<String> =
+        ["poll_count", "poll_elapsed_ms", "observed_file_version", "head_ready", "exact_ready"]
+            .iter()
+            .map(|value| value.to_string())
+            .collect();
+    assert_eq!(exact_artifact_poll_fields, expected_exact_artifact_poll_fields);
+
+    let turn_attribution_fields: BTreeSet<String> = response
+        .get("turn_attribution_fields")
+        .and_then(|value| value.as_array())
+        .expect("turn_attribution_fields array")
+        .iter()
+        .map(|value| value.as_str().expect("turn_attribution field string").to_string())
+        .collect();
+    let expected_turn_attribution_fields: BTreeSet<String> = [
+        "request_file_seq",
+        "request_epoch",
+        "queue_outcome",
+        "turn_wait_outcome",
+        "dispatcher_resolution_latency_ms",
+        "queue_capacity",
+        "queue_depth_before_enqueue",
+        "queue_depth_after_enqueue",
+        "queued_completion_ahead_count",
+        "did_change_ahead_count",
+        "active_completion_count",
+        "dropped_completion_file_seq",
+        "active_holder",
+        "queued_completion_ahead",
+    ]
+    .iter()
+    .map(|value| value.to_string())
+    .collect();
+    assert_eq!(turn_attribution_fields, expected_turn_attribution_fields);
+
+    let server_edge_details_fields: BTreeSet<String> = response
+        .get("server_edge_details_fields")
+        .and_then(|value| value.as_array())
+        .expect("server_edge_details_fields array")
+        .iter()
+        .map(|value| value.as_str().expect("server_edge_details field string").to_string())
+        .collect();
+    let expected_server_edge_details_fields: BTreeSet<String> = [
+        "transport_received_at_ms",
+        "pre_method_attribution_provenance",
+        "service_future_created_at_ms",
+        "service_scope_entered_at_ms",
+        "method_entered_at_ms",
+        "handler_entered_at_ms",
+        "response_sent_at_ms",
+        "cancel_observed_at_ms",
+        "transport_to_service_future_wait_ms",
+        "service_future_to_scope_wait_ms",
+        "transport_to_service_scope_wait_ms",
+        "service_scope_to_method_wait_ms",
+        "transport_to_method_wait_ms",
+        "method_prelude_exec_ms",
+        "transport_to_handler_wait_ms",
+        "server_handler_exec_ms",
+        "cancel_observed_after_handler_enter_ms",
+    ]
+    .iter()
+    .map(|value| value.to_string())
+    .collect();
+    assert_eq!(server_edge_details_fields, expected_server_edge_details_fields);
+}
+
+#[test]
 fn observability_completion_v4_contract_matches_runtime_metric_labels() {
     let contract = contract_json("observability-completion-v2/v4/contract.json");
     let metrics_contract = contract

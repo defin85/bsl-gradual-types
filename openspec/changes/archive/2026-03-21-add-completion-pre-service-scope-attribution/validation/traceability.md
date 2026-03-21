@@ -7,6 +7,13 @@
   - Code: `backend/src/bin/lsp_server/server/mod.rs`
   - Code: `backend/src/bin/lsp_server/types.rs`
   - Test: `backend/src/bin/lsp_server/server/core/tests.rs::p22_get_completion_timeline_contains_completion_trace`
+- Versioned contract baseline и policy checker синхронизированы с shipped payload:
+  - Code: `contracts/lsp-completion-timeline/v6/contract.json`
+  - Code: `contracts/lsp-completion-timeline/v6/schema.json`
+  - Code: `contracts/lsp-completion-timeline/v6/changelog.md`
+  - Code: `scripts/check-versioned-contracts.py`
+  - Test: `bsl-runtime/src/system/basic_observability/tests.rs::completion_timeline_v6_contract_matches_current_runtime_payload_shape`
+  - Test: `python3 scripts/check-versioned-contracts.py`
 - `service_future_created_at_ms` проходит через request-context producer path без guesswork:
   - Code: `backend/src/bin/lsp_server/server/request_context.rs`
   - Test: `backend/src/bin/lsp_server/server/request_context/tests.rs::request_context_service_sets_jsonrpc_numeric_id`
@@ -49,6 +56,9 @@
 - Shipped smoke path:
   - Code: `scripts/run-intellisense-tests.sh`
   - Test: `scripts/test-intellisense-readiness-assets.py`
+- Canonical OpenSpec truth после фиксации change:
+  - Spec delta: `openspec/changes/add-completion-pre-service-scope-attribution/specs/bsl-intellisense-v2/spec.md`
+  - Command: `openspec archive add-completion-pre-service-scope-attribution --yes`
 - Manual/runbook expectations:
   - Doc: `scripts/README.md`
   - Doc: `vscode-extension/src/test/README.md`

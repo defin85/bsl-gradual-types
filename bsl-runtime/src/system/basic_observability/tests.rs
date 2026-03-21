@@ -1342,8 +1342,8 @@ fn completion_v2_contract_matches_runtime_transport_and_trigger_modes() {
 }
 
 #[test]
-fn completion_timeline_v7_contract_matches_current_runtime_payload_shape() {
-    let contract = contract_json("lsp-completion-timeline/v7/contract.json");
+fn completion_timeline_v8_contract_matches_current_runtime_payload_shape() {
+    let contract = contract_json("lsp-completion-timeline/v8/contract.json");
     let response = contract
         .get("response")
         .and_then(|value| value.as_object())
@@ -1354,7 +1354,7 @@ fn completion_timeline_v7_contract_matches_current_runtime_payload_shape() {
             .get("version")
             .and_then(|value| value.as_u64())
             .expect("response.version"),
-        10,
+        11,
         "timeline contract must match current runtime response.version"
     );
 
@@ -1552,6 +1552,9 @@ fn completion_timeline_v7_contract_matches_current_runtime_payload_shape() {
         "transport_received_at_ms_provenance",
         "pre_method_attribution_provenance",
         "service_future_created_at_ms",
+        "service_future_first_poll_entered_at_ms",
+        "service_future_first_poll_outcome",
+        "service_future_first_wake_scheduled_at_ms",
         "service_scope_entered_at_ms",
         "method_entered_at_ms",
         "handler_entered_at_ms",
@@ -1561,6 +1564,8 @@ fn completion_timeline_v7_contract_matches_current_runtime_payload_shape() {
         "dispatch_to_request_context_wait_ms",
         "transport_to_service_future_wait_ms",
         "service_future_to_scope_wait_ms",
+        "service_future_to_first_poll_wait_ms",
+        "first_poll_to_first_wake_wait_ms",
         "transport_to_service_scope_wait_ms",
         "service_scope_to_method_wait_ms",
         "transport_to_method_wait_ms",

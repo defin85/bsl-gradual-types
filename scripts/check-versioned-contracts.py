@@ -20,7 +20,7 @@ REQUIRED_SURFACES = {
 }
 
 REQUIRED_LATEST_MAJORS = {
-    "lsp-completion-timeline": 7,
+    "lsp-completion-timeline": 8,
     "intellisense-perf-gate": 2,
     "observability-completion-v2": 4,
 }
@@ -225,6 +225,14 @@ REQUIRED_V7_TIMELINE_SERVER_EDGE_DETAILS_FIELDS = REQUIRED_V6_TIMELINE_SERVER_ED
     "transport_received_at_ms_provenance",
     "jsonrpc_dispatch_received_at_ms",
     "dispatch_to_request_context_wait_ms",
+}
+
+REQUIRED_V8_TIMELINE_SERVER_EDGE_DETAILS_FIELDS = REQUIRED_V7_TIMELINE_SERVER_EDGE_DETAILS_FIELDS | {
+    "service_future_first_poll_entered_at_ms",
+    "service_future_first_poll_outcome",
+    "service_future_first_wake_scheduled_at_ms",
+    "service_future_to_first_poll_wait_ms",
+    "first_poll_to_first_wake_wait_ms",
 }
 
 REQUIRED_V4_COMPLETION_ROUTES = {
@@ -1332,6 +1340,82 @@ def validate_surface_contract(surface_dir: Path) -> None:
             ensure(
                 server_edge_details_fields == REQUIRED_V7_TIMELINE_SERVER_EDGE_DETAILS_FIELDS,
                 f"{contract_path}: response.server_edge_details_fields must equal {sorted(REQUIRED_V7_TIMELINE_SERVER_EDGE_DETAILS_FIELDS)}",
+            )
+            ensure(
+                turn_attribution_fields == REQUIRED_V6_TIMELINE_TURN_ATTRIBUTION_FIELDS,
+                f"{contract_path}: response.turn_attribution_fields must equal {sorted(REQUIRED_V6_TIMELINE_TURN_ATTRIBUTION_FIELDS)}",
+            )
+            ensure(
+                turn_holder_fields == REQUIRED_V4_TIMELINE_TURN_HOLDER_FIELDS,
+                f"{contract_path}: response.turn_holder_fields must equal {sorted(REQUIRED_V4_TIMELINE_TURN_HOLDER_FIELDS)}",
+            )
+            ensure(
+                prepare_routes == REQUIRED_V4_COMPLETION_ROUTES,
+                f"{contract_path}: response.prepare_routes must equal {sorted(REQUIRED_V4_COMPLETION_ROUTES)}",
+            )
+            ensure(
+                prepare_fail_closed_causes == REQUIRED_V4_COMPLETION_FAIL_CLOSED_CAUSES,
+                f"{contract_path}: response.prepare_fail_closed_causes must equal {sorted(REQUIRED_V4_COMPLETION_FAIL_CLOSED_CAUSES)}",
+            )
+
+        if surface_dir.name == "lsp-completion-timeline" and major == 8:
+            response = contract.get("response")
+            ensure(isinstance(response, dict), f"{contract_path}: response must be object")
+            ensure(
+                response.get("version") == 11,
+                f"{contract_path}: response.version must equal 11",
+            )
+            outcomes = set(response.get("outcomes", []))
+            trace_fields = set(response.get("trace_fields", []))
+            prepare_details_fields = set(response.get("prepare_details_fields", []))
+            prepare_progress_fields = set(response.get("prepare_progress_fields", []))
+            prepare_runtime_fields = set(response.get("prepare_runtime_fields", []))
+            prepare_timeout_attribution_fields = set(
+                response.get("prepare_timeout_attribution_fields", [])
+            )
+            exact_wait_fields = set(response.get("exact_wait_fields", []))
+            exact_artifact_poll_fields = set(response.get("exact_artifact_poll_fields", []))
+            server_edge_details_fields = set(response.get("server_edge_details_fields", []))
+            turn_attribution_fields = set(response.get("turn_attribution_fields", []))
+            turn_holder_fields = set(response.get("turn_holder_fields", []))
+            prepare_routes = set(response.get("prepare_routes", []))
+            prepare_fail_closed_causes = set(response.get("prepare_fail_closed_causes", []))
+            ensure(
+                outcomes == REQUIRED_V3_TIMELINE_OUTCOMES,
+                f"{contract_path}: response.outcomes must equal {sorted(REQUIRED_V3_TIMELINE_OUTCOMES)}",
+            )
+            ensure(
+                trace_fields == REQUIRED_V6_TIMELINE_TRACE_FIELDS,
+                f"{contract_path}: response.trace_fields must equal {sorted(REQUIRED_V6_TIMELINE_TRACE_FIELDS)}",
+            )
+            ensure(
+                prepare_details_fields == REQUIRED_V6_TIMELINE_PREPARE_DETAILS_FIELDS,
+                f"{contract_path}: response.prepare_details_fields must equal {sorted(REQUIRED_V6_TIMELINE_PREPARE_DETAILS_FIELDS)}",
+            )
+            ensure(
+                prepare_progress_fields == REQUIRED_V6_TIMELINE_PREPARE_PROGRESS_FIELDS,
+                f"{contract_path}: response.prepare_progress_fields must equal {sorted(REQUIRED_V6_TIMELINE_PREPARE_PROGRESS_FIELDS)}",
+            )
+            ensure(
+                prepare_runtime_fields == REQUIRED_V6_TIMELINE_PREPARE_RUNTIME_FIELDS,
+                f"{contract_path}: response.prepare_runtime_fields must equal {sorted(REQUIRED_V6_TIMELINE_PREPARE_RUNTIME_FIELDS)}",
+            )
+            ensure(
+                prepare_timeout_attribution_fields
+                == REQUIRED_V6_TIMELINE_PREPARE_TIMEOUT_ATTRIBUTION_FIELDS,
+                f"{contract_path}: response.prepare_timeout_attribution_fields must equal {sorted(REQUIRED_V6_TIMELINE_PREPARE_TIMEOUT_ATTRIBUTION_FIELDS)}",
+            )
+            ensure(
+                exact_wait_fields == REQUIRED_V6_TIMELINE_EXACT_WAIT_FIELDS,
+                f"{contract_path}: response.exact_wait_fields must equal {sorted(REQUIRED_V6_TIMELINE_EXACT_WAIT_FIELDS)}",
+            )
+            ensure(
+                exact_artifact_poll_fields == REQUIRED_V6_TIMELINE_EXACT_ARTIFACT_POLL_FIELDS,
+                f"{contract_path}: response.exact_artifact_poll_fields must equal {sorted(REQUIRED_V6_TIMELINE_EXACT_ARTIFACT_POLL_FIELDS)}",
+            )
+            ensure(
+                server_edge_details_fields == REQUIRED_V8_TIMELINE_SERVER_EDGE_DETAILS_FIELDS,
+                f"{contract_path}: response.server_edge_details_fields must equal {sorted(REQUIRED_V8_TIMELINE_SERVER_EDGE_DETAILS_FIELDS)}",
             )
             ensure(
                 turn_attribution_fields == REQUIRED_V6_TIMELINE_TURN_ATTRIBUTION_FIELDS,

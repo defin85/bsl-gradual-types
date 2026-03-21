@@ -563,6 +563,10 @@ export type CompletionTimelineTransportReceivedAtMsProvenance =
     | 'request_context_call_entry'
     | 'jsonrpc_dispatch_received';
 
+export type CompletionTimelineServiceFutureFirstPollOutcome =
+    | 'ready'
+    | 'pending';
+
 export interface CompletionTimelineExactArtifactPollTrace {
     poll_count: number;
     poll_elapsed_ms: number;
@@ -609,6 +613,9 @@ export interface CompletionTimelineServerEdgeDetailsTrace {
     transport_received_at_ms_provenance?: CompletionTimelineTransportReceivedAtMsProvenance;
     jsonrpc_dispatch_received_at_ms?: number;
     service_future_created_at_ms?: number;
+    service_future_first_poll_entered_at_ms?: number;
+    service_future_first_poll_outcome?: CompletionTimelineServiceFutureFirstPollOutcome;
+    service_future_first_wake_scheduled_at_ms?: number;
     pre_method_attribution_provenance?: CompletionTimelinePreMethodAttributionProvenance;
     service_scope_entered_at_ms?: number;
     method_entered_at_ms?: number;
@@ -618,6 +625,8 @@ export interface CompletionTimelineServerEdgeDetailsTrace {
     dispatch_to_request_context_wait_ms?: number;
     transport_to_service_future_wait_ms?: number;
     service_future_to_scope_wait_ms?: number;
+    service_future_to_first_poll_wait_ms?: number;
+    first_poll_to_first_wake_wait_ms?: number;
     transport_to_service_scope_wait_ms?: number;
     service_scope_to_method_wait_ms?: number;
     transport_to_method_wait_ms?: number;

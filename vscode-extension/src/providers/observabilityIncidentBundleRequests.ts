@@ -61,11 +61,16 @@ export interface ObservabilityIncidentRequestSummary {
     transport_received_at_ms_provenance?: CompletionTimelineTransportReceivedAtMsProvenance;
     jsonrpc_dispatch_received_at_ms?: number;
     service_future_created_at_ms?: number;
+    service_future_first_poll_entered_at_ms?: number;
+    service_future_first_poll_outcome?: string;
+    service_future_first_wake_scheduled_at_ms?: number;
     pre_method_attribution_provenance?: CompletionTimelinePreMethodAttributionProvenance;
     transport_to_handler_wait_ms?: number;
     dispatch_to_request_context_wait_ms?: number;
     transport_to_service_future_wait_ms?: number;
     service_future_to_scope_wait_ms?: number;
+    service_future_to_first_poll_wait_ms?: number;
+    first_poll_to_first_wake_wait_ms?: number;
     transport_to_service_scope_wait_ms?: number;
     service_scope_to_method_wait_ms?: number;
     transport_to_method_wait_ms?: number;
@@ -126,6 +131,12 @@ export function buildObservabilityIncidentRequestSection(
                 trace.server_edge_details?.jsonrpc_dispatch_received_at_ms,
             service_future_created_at_ms:
                 trace.server_edge_details?.service_future_created_at_ms,
+            service_future_first_poll_entered_at_ms:
+                trace.server_edge_details?.service_future_first_poll_entered_at_ms,
+            service_future_first_poll_outcome:
+                trace.server_edge_details?.service_future_first_poll_outcome,
+            service_future_first_wake_scheduled_at_ms:
+                trace.server_edge_details?.service_future_first_wake_scheduled_at_ms,
             pre_method_attribution_provenance:
                 trace.server_edge_details?.pre_method_attribution_provenance,
             transport_to_handler_wait_ms: trace.server_edge_details?.transport_to_handler_wait_ms,
@@ -135,6 +146,10 @@ export function buildObservabilityIncidentRequestSection(
                 trace.server_edge_details?.transport_to_service_future_wait_ms,
             service_future_to_scope_wait_ms:
                 trace.server_edge_details?.service_future_to_scope_wait_ms,
+            service_future_to_first_poll_wait_ms:
+                trace.server_edge_details?.service_future_to_first_poll_wait_ms,
+            first_poll_to_first_wake_wait_ms:
+                trace.server_edge_details?.first_poll_to_first_wake_wait_ms,
             transport_to_service_scope_wait_ms:
                 trace.server_edge_details?.transport_to_service_scope_wait_ms,
             service_scope_to_method_wait_ms:
@@ -213,6 +228,15 @@ export function renderRequestSummaryLines(section: ObservabilityIncidentRequestS
             typeof request.service_future_created_at_ms === 'number'
                 ? `service_future_created_at_ms=${request.service_future_created_at_ms}`
                 : undefined,
+            typeof request.service_future_first_poll_entered_at_ms === 'number'
+                ? `service_future_first_poll_entered_at_ms=${request.service_future_first_poll_entered_at_ms}`
+                : undefined,
+            request.service_future_first_poll_outcome
+                ? `service_future_first_poll_outcome=${request.service_future_first_poll_outcome}`
+                : undefined,
+            typeof request.service_future_first_wake_scheduled_at_ms === 'number'
+                ? `service_future_first_wake_scheduled_at_ms=${request.service_future_first_wake_scheduled_at_ms}`
+                : undefined,
             request.pre_method_attribution_provenance
                 ? `pre_method_provenance=${request.pre_method_attribution_provenance}`
                 : undefined,
@@ -227,6 +251,12 @@ export function renderRequestSummaryLines(section: ObservabilityIncidentRequestS
                 : undefined,
             typeof request.service_future_to_scope_wait_ms === 'number'
                 ? `service_future_to_scope_wait_ms=${request.service_future_to_scope_wait_ms}`
+                : undefined,
+            typeof request.service_future_to_first_poll_wait_ms === 'number'
+                ? `service_future_to_first_poll_wait_ms=${request.service_future_to_first_poll_wait_ms}`
+                : undefined,
+            typeof request.first_poll_to_first_wake_wait_ms === 'number'
+                ? `first_poll_to_first_wake_wait_ms=${request.first_poll_to_first_wake_wait_ms}`
                 : undefined,
             typeof request.transport_to_service_scope_wait_ms === 'number'
                 ? `transport_to_service_scope_wait_ms=${request.transport_to_service_scope_wait_ms}`

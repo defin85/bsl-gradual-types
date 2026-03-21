@@ -58,7 +58,7 @@ export type CompletionTimelinePanelState =
 
 
 export const AVERAGE_TRACE_PROVENANCE_NOTICE =
-    'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, and v10 dispatch split are unavailable by design.';
+    'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, and v11 first-poll / first-wake split are unavailable by design.';
 
 export function getAverageTraceProvenanceNotice(
     trace: Pick<CompletionTimelineTraceViewModel, 'trigger_mode'> | null | undefined

@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll};
+use std::task::{Context, Poll, Wake, Waker};
 
 use tower::Service;
 use tower_lsp::jsonrpc::{Id, Request};
@@ -26,6 +26,10 @@ tokio::task_local! {
 
 tokio::task_local! {
     static LSP_REQUEST_SERVICE_SCOPE_ENTERED_AT_MS: Option<u64>;
+}
+
+tokio::task_local! {
+    static LSP_REQUEST_SERVICE_FUTURE_POLL_OBSERVATION: Option<ServiceFuturePollObservationState>;
 }
 
 type CancelRequestHook = Arc<dyn Fn(String) + Send + Sync + 'static>;
@@ -54,6 +58,9 @@ struct PendingCompletionRequestEntry {
     jsonrpc_dispatch_received_at_ms: Option<u64>,
     request_received_at_ms: Option<u64>,
     service_future_created_at_ms: Option<u64>,
+    service_future_first_poll_entered_at_ms: Option<u64>,
+    service_future_first_poll_outcome: Option<String>,
+    service_future_first_wake_scheduled_at_ms: Option<u64>,
     service_scope_entered_at_ms: Option<u64>,
 }
 
@@ -63,7 +70,289 @@ pub(crate) struct PendingCompletionRequestContext {
     pub(crate) jsonrpc_dispatch_received_at_ms: Option<u64>,
     pub(crate) request_received_at_ms: Option<u64>,
     pub(crate) service_future_created_at_ms: Option<u64>,
+    pub(crate) service_future_first_poll_entered_at_ms: Option<u64>,
+    pub(crate) service_future_first_poll_outcome: Option<String>,
+    pub(crate) service_future_first_wake_scheduled_at_ms: Option<u64>,
     pub(crate) service_scope_entered_at_ms: Option<u64>,
+}
+
+#[derive(Debug, Default, Clone)]
+struct ServiceFuturePollObservationSnapshot {
+    first_poll_entered_at_ms: Option<u64>,
+    first_poll_outcome: Option<String>,
+    first_wake_scheduled_at_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+struct ServiceFuturePollObservationState {
+    request_id: Option<String>,
+    snapshot: Arc<Mutex<ServiceFuturePollObservationSnapshot>>,
+}
+
+impl ServiceFuturePollObservationState {
+    fn new(request_id: Option<String>) -> Self {
+        Self {
+            request_id,
+            snapshot: Arc::new(Mutex::new(ServiceFuturePollObservationSnapshot::default())),
+        }
+    }
+
+    fn first_poll_entered_at_ms(&self) -> Option<u64> {
+        self.snapshot
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .first_poll_entered_at_ms
+    }
+
+    fn first_poll_outcome(&self) -> Option<String> {
+        self.snapshot
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .first_poll_outcome
+            .clone()
+    }
+
+    fn first_wake_scheduled_at_ms(&self) -> Option<u64> {
+        self.snapshot
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .first_wake_scheduled_at_ms
+    }
+
+    fn record_first_poll_entered_at_ms(&self, first_poll_entered_at_ms: u64) {
+        let should_record_pending = {
+            let mut snapshot = self
+                .snapshot
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if snapshot.first_poll_entered_at_ms.is_none() {
+                snapshot.first_poll_entered_at_ms = Some(first_poll_entered_at_ms);
+                true
+            } else {
+                false
+            }
+        };
+        if should_record_pending {
+            if let Some(request_id) = self.request_id.as_deref() {
+                record_pending_completion_service_future_first_poll_entered_at_ms(
+                    request_id,
+                    first_poll_entered_at_ms,
+                );
+            }
+        }
+    }
+
+    fn record_first_poll_outcome(&self, first_poll_outcome: &'static str) {
+        let should_record_pending = {
+            let mut snapshot = self
+                .snapshot
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if snapshot.first_poll_outcome.is_none() {
+                snapshot.first_poll_outcome = Some(first_poll_outcome.to_string());
+                true
+            } else {
+                false
+            }
+        };
+        if should_record_pending {
+            if let Some(request_id) = self.request_id.as_deref() {
+                record_pending_completion_service_future_first_poll_outcome(
+                    request_id,
+                    first_poll_outcome,
+                );
+            }
+        }
+    }
+
+    fn record_first_wake_scheduled_at_ms(&self, first_wake_scheduled_at_ms: u64) {
+        let should_record_pending = {
+            let mut snapshot = self
+                .snapshot
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if snapshot.first_wake_scheduled_at_ms.is_none() {
+                snapshot.first_wake_scheduled_at_ms = Some(first_wake_scheduled_at_ms);
+                true
+            } else {
+                false
+            }
+        };
+        if should_record_pending {
+            if let Some(request_id) = self.request_id.as_deref() {
+                record_pending_completion_service_future_first_wake_scheduled_at_ms(
+                    request_id,
+                    first_wake_scheduled_at_ms,
+                );
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FirstWakeTrackingMode {
+    Unknown,
+    Armed,
+    Disabled,
+    Committed,
+}
+
+#[derive(Debug)]
+struct FirstWakeTrackingState {
+    mode: FirstWakeTrackingMode,
+    candidate_at_ms: Option<u64>,
+}
+
+impl Default for FirstWakeTrackingState {
+    fn default() -> Self {
+        Self {
+            mode: FirstWakeTrackingMode::Unknown,
+            candidate_at_ms: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct FirstWakeTracker {
+    observation: ServiceFuturePollObservationState,
+    state: Arc<Mutex<FirstWakeTrackingState>>,
+}
+
+impl FirstWakeTracker {
+    fn new(observation: ServiceFuturePollObservationState) -> Self {
+        Self {
+            observation,
+            state: Arc::new(Mutex::new(FirstWakeTrackingState::default())),
+        }
+    }
+
+    fn observe_wake(&self) {
+        let wake_to_record = {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            match state.mode {
+                FirstWakeTrackingMode::Unknown => {
+                    state
+                        .candidate_at_ms
+                        .get_or_insert_with(super::unix_timestamp_ms);
+                    None
+                }
+                FirstWakeTrackingMode::Armed => {
+                    let wake_at_ms = state
+                        .candidate_at_ms
+                        .take()
+                        .unwrap_or_else(super::unix_timestamp_ms);
+                    state.mode = FirstWakeTrackingMode::Committed;
+                    Some(wake_at_ms)
+                }
+                FirstWakeTrackingMode::Disabled | FirstWakeTrackingMode::Committed => None,
+            }
+        };
+        if let Some(wake_at_ms) = wake_to_record {
+            self.observation.record_first_wake_scheduled_at_ms(wake_at_ms);
+        }
+    }
+
+    fn arm_after_first_pending_poll(&self) {
+        let wake_to_record = {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(wake_at_ms) = state.candidate_at_ms.take() {
+                state.mode = FirstWakeTrackingMode::Committed;
+                Some(wake_at_ms)
+            } else {
+                state.mode = FirstWakeTrackingMode::Armed;
+                None
+            }
+        };
+        if let Some(wake_at_ms) = wake_to_record {
+            self.observation.record_first_wake_scheduled_at_ms(wake_at_ms);
+        }
+    }
+
+    fn disable(&self) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.mode = FirstWakeTrackingMode::Disabled;
+        state.candidate_at_ms = None;
+    }
+}
+
+#[derive(Debug)]
+struct FirstWakeTrackingWaker {
+    inner: Waker,
+    tracker: FirstWakeTracker,
+}
+
+impl Wake for FirstWakeTrackingWaker {
+    fn wake(self: Arc<Self>) {
+        self.tracker.observe_wake();
+        self.inner.wake_by_ref();
+    }
+
+    fn wake_by_ref(self: &Arc<Self>) {
+        self.tracker.observe_wake();
+        self.inner.wake_by_ref();
+    }
+}
+
+#[derive(Debug)]
+struct InstrumentedServiceFuture<F> {
+    inner: Pin<Box<F>>,
+    first_poll_observed: bool,
+    observation: ServiceFuturePollObservationState,
+}
+
+impl<F> InstrumentedServiceFuture<F> {
+    fn new(inner: F, observation: ServiceFuturePollObservationState) -> Self {
+        Self {
+            inner: Box::pin(inner),
+            first_poll_observed: false,
+            observation,
+        }
+    }
+}
+
+impl<F> Future for InstrumentedServiceFuture<F>
+where
+    F: Future,
+{
+    type Output = F::Output;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.as_mut().get_mut();
+        if this.first_poll_observed {
+            return this.inner.as_mut().poll(cx);
+        }
+
+        this.first_poll_observed = true;
+        this.observation
+            .record_first_poll_entered_at_ms(super::unix_timestamp_ms());
+        let first_wake_tracker = FirstWakeTracker::new(this.observation.clone());
+        let wrapped_waker = Waker::from(Arc::new(FirstWakeTrackingWaker {
+            inner: cx.waker().clone(),
+            tracker: first_wake_tracker.clone(),
+        }));
+        let mut wrapped_cx = Context::from_waker(&wrapped_waker);
+        match this.inner.as_mut().poll(&mut wrapped_cx) {
+            Poll::Ready(output) => {
+                this.observation.record_first_poll_outcome("ready");
+                first_wake_tracker.disable();
+                Poll::Ready(output)
+            }
+            Poll::Pending => {
+                this.observation.record_first_poll_outcome("pending");
+                first_wake_tracker.arm_after_first_pending_poll();
+                Poll::Pending
+            }
+        }
+    }
 }
 
 fn pending_completion_request_ids_cell() -> &'static Mutex<PendingCompletionRequestIds> {
@@ -146,6 +435,9 @@ fn record_pending_completion_request_id(
                 jsonrpc_dispatch_received_at_ms: None,
                 request_received_at_ms,
                 service_future_created_at_ms: None,
+                service_future_first_poll_entered_at_ms: None,
+                service_future_first_poll_outcome: None,
+                service_future_first_wake_scheduled_at_ms: None,
                 service_scope_entered_at_ms: None,
             },
         );
@@ -185,6 +477,9 @@ fn record_pending_completion_jsonrpc_dispatch_received_at_ms(
                 jsonrpc_dispatch_received_at_ms,
                 request_received_at_ms: None,
                 service_future_created_at_ms: None,
+                service_future_first_poll_entered_at_ms: None,
+                service_future_first_poll_outcome: None,
+                service_future_first_wake_scheduled_at_ms: None,
                 service_scope_entered_at_ms: None,
             },
         );
@@ -201,6 +496,45 @@ fn record_pending_completion_service_future_created_at_ms(
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     if let Some(entry) = pending.by_request_id.get_mut(request_id) {
         entry.service_future_created_at_ms = Some(service_future_created_at_ms);
+    }
+}
+
+fn record_pending_completion_service_future_first_poll_entered_at_ms(
+    request_id: &str,
+    service_future_first_poll_entered_at_ms: u64,
+) {
+    let mut pending = pending_completion_request_ids_cell()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(entry) = pending.by_request_id.get_mut(request_id) {
+        entry.service_future_first_poll_entered_at_ms =
+            Some(service_future_first_poll_entered_at_ms);
+    }
+}
+
+fn record_pending_completion_service_future_first_poll_outcome(
+    request_id: &str,
+    service_future_first_poll_outcome: &str,
+) {
+    let mut pending = pending_completion_request_ids_cell()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(entry) = pending.by_request_id.get_mut(request_id) {
+        entry.service_future_first_poll_outcome =
+            Some(service_future_first_poll_outcome.to_string());
+    }
+}
+
+fn record_pending_completion_service_future_first_wake_scheduled_at_ms(
+    request_id: &str,
+    service_future_first_wake_scheduled_at_ms: u64,
+) {
+    let mut pending = pending_completion_request_ids_cell()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(entry) = pending.by_request_id.get_mut(request_id) {
+        entry.service_future_first_wake_scheduled_at_ms =
+            Some(service_future_first_wake_scheduled_at_ms);
     }
 }
 
@@ -248,6 +582,9 @@ pub(crate) fn record_completion_request_id_for_testing(
             jsonrpc_dispatch_received_at_ms: None,
             request_received_at_ms: None,
             service_future_created_at_ms: None,
+            service_future_first_poll_entered_at_ms: None,
+            service_future_first_poll_outcome: None,
+            service_future_first_wake_scheduled_at_ms: None,
             service_scope_entered_at_ms: None,
         },
     ) {
@@ -279,6 +616,9 @@ pub(crate) fn take_completion_request_context_by_request_id(
         jsonrpc_dispatch_received_at_ms: entry.jsonrpc_dispatch_received_at_ms,
         request_received_at_ms: entry.request_received_at_ms,
         service_future_created_at_ms: entry.service_future_created_at_ms,
+        service_future_first_poll_entered_at_ms: entry.service_future_first_poll_entered_at_ms,
+        service_future_first_poll_outcome: entry.service_future_first_poll_outcome,
+        service_future_first_wake_scheduled_at_ms: entry.service_future_first_wake_scheduled_at_ms,
         service_scope_entered_at_ms: entry.service_scope_entered_at_ms,
     })
 }
@@ -317,6 +657,11 @@ pub(crate) fn take_completion_request_context(
                 jsonrpc_dispatch_received_at_ms: entry.jsonrpc_dispatch_received_at_ms,
                 request_received_at_ms: entry.request_received_at_ms,
                 service_future_created_at_ms: entry.service_future_created_at_ms,
+                service_future_first_poll_entered_at_ms: entry
+                    .service_future_first_poll_entered_at_ms,
+                service_future_first_poll_outcome: entry.service_future_first_poll_outcome,
+                service_future_first_wake_scheduled_at_ms: entry
+                    .service_future_first_wake_scheduled_at_ms,
                 service_scope_entered_at_ms: entry.service_scope_entered_at_ms,
             });
         }
@@ -355,6 +700,39 @@ pub(crate) fn current_request_service_scope_entered_at_ms() -> Option<u64> {
         .flatten()
 }
 
+pub(crate) fn current_request_service_future_first_poll_entered_at_ms() -> Option<u64> {
+    LSP_REQUEST_SERVICE_FUTURE_POLL_OBSERVATION
+        .try_with(|state| {
+            state
+                .as_ref()
+                .and_then(|observation| observation.first_poll_entered_at_ms())
+        })
+        .ok()
+        .flatten()
+}
+
+pub(crate) fn current_request_service_future_first_poll_outcome() -> Option<String> {
+    LSP_REQUEST_SERVICE_FUTURE_POLL_OBSERVATION
+        .try_with(|state| {
+            state
+                .as_ref()
+                .and_then(|observation| observation.first_poll_outcome())
+        })
+        .ok()
+        .flatten()
+}
+
+pub(crate) fn current_request_service_future_first_wake_scheduled_at_ms() -> Option<u64> {
+    LSP_REQUEST_SERVICE_FUTURE_POLL_OBSERVATION
+        .try_with(|state| {
+            state
+                .as_ref()
+                .and_then(|observation| observation.first_wake_scheduled_at_ms())
+        })
+        .ok()
+        .flatten()
+}
+
 pub(crate) fn set_cancel_request_hook(hook: Option<CancelRequestHook>) {
     let mut slot = cancel_request_hook_cell()
         .lock()
@@ -368,6 +746,7 @@ async fn with_request_context<F, T>(
     jsonrpc_dispatch_received_at_ms: Option<u64>,
     service_future_created_at_ms: Option<u64>,
     service_scope_entered_at_ms: Option<u64>,
+    service_future_poll_observation: Option<ServiceFuturePollObservationState>,
     future: F,
 ) -> T
 where
@@ -382,7 +761,11 @@ where
                             LSP_REQUEST_SERVICE_FUTURE_CREATED_AT_MS
                                 .scope(service_future_created_at_ms, async move {
                                     LSP_REQUEST_SERVICE_SCOPE_ENTERED_AT_MS
-                                        .scope(service_scope_entered_at_ms, future)
+                                        .scope(service_scope_entered_at_ms, async move {
+                                            LSP_REQUEST_SERVICE_FUTURE_POLL_OBSERVATION
+                                                .scope(service_future_poll_observation, future)
+                                                .await
+                                        })
                                         .await
                                 })
                                 .await
@@ -516,7 +899,10 @@ where
         if let Some(request_id) = request_id.as_deref() {
             record_pending_completion_request_id(&request, request_id, request_received_at_ms);
         }
-        let future = self.inner.call(request);
+        let service_future_poll_observation =
+            ServiceFuturePollObservationState::new(request_id.clone());
+        let future =
+            InstrumentedServiceFuture::new(self.inner.call(request), service_future_poll_observation.clone());
         let service_future_created_at_ms = Some(super::unix_timestamp_ms());
         if let (Some(request_id), Some(service_future_created_at_ms)) =
             (request_id.as_deref(), service_future_created_at_ms)
@@ -542,6 +928,7 @@ where
                 jsonrpc_dispatch_received_at_ms,
                 service_future_created_at_ms,
                 service_scope_entered_at_ms,
+                Some(service_future_poll_observation),
                 future,
             )
             .await

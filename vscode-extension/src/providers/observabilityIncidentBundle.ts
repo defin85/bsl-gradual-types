@@ -172,6 +172,11 @@ function buildCompletionTimelineSource(
                 `Completion timeline contract v${completionTimeline.response.version} does not include bounded v10 dispatch split fields; dispatch split is unavailable by design.`
             );
         }
+        if (completionTimeline.response.version < 11) {
+            gaps.push(
+                `Completion timeline contract v${completionTimeline.response.version} does not include bounded v11 first-poll / first-wake split fields; first-poll / first-wake split is unavailable by design.`
+            );
+        }
         rawAttachments.push({
             path: COMPLETION_TIMELINE_RAW_PATH,
             section: 'completion_timeline',
@@ -296,6 +301,11 @@ function deriveFindings(
         if (input.completionTimeline.response.version < 10) {
             findings.push(
                 `Completion timeline contract v${input.completionTimeline.response.version} is available, but bounded v10 dispatch split is unavailable by design.`
+            );
+        }
+        if (input.completionTimeline.response.version < 11) {
+            findings.push(
+                `Completion timeline contract v${input.completionTimeline.response.version} is available, but bounded v11 first-poll / first-wake split is unavailable by design.`
             );
         }
         const serverBeforeMethodCount = requestSection.requests.filter((request) =>

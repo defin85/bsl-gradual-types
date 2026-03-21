@@ -265,6 +265,12 @@ pub struct CompletionTimelineServerEdgeDetailsTrace {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service_future_created_at_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_future_first_poll_entered_at_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_future_first_poll_outcome: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_future_first_wake_scheduled_at_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub service_scope_entered_at_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub method_entered_at_ms: Option<u64>,
@@ -278,6 +284,10 @@ pub struct CompletionTimelineServerEdgeDetailsTrace {
     pub transport_to_service_future_wait_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service_future_to_scope_wait_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_future_to_first_poll_wait_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_poll_to_first_wake_wait_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transport_to_service_scope_wait_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]

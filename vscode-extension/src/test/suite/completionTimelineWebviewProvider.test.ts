@@ -250,7 +250,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 10,
+                version: 11,
                 traces: [
                     {
                         trace_id: 'trace-copy',
@@ -266,6 +266,9 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                             transport_received_at_ms_provenance: 'jsonrpc_dispatch_received',
                             jsonrpc_dispatch_received_at_ms: 1_700_000_000_000,
                             service_future_created_at_ms: 1_700_000_000_001,
+                            service_future_first_poll_entered_at_ms: 1_700_000_000_003,
+                            service_future_first_poll_outcome: 'pending',
+                            service_future_first_wake_scheduled_at_ms: 1_700_000_000_007,
                             pre_method_attribution_provenance: 'same_request_authoritative',
                             service_scope_entered_at_ms: 1_700_000_000_002,
                             method_entered_at_ms: 1_700_000_000_005,
@@ -274,6 +277,8 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                             dispatch_to_request_context_wait_ms: 0,
                             transport_to_service_future_wait_ms: 1,
                             service_future_to_scope_wait_ms: 1,
+                            service_future_to_first_poll_wait_ms: 2,
+                            first_poll_to_first_wake_wait_ms: 4,
                             transport_to_service_scope_wait_ms: 2,
                             service_scope_to_method_wait_ms: 3,
                             transport_to_method_wait_ms: 5,
@@ -367,17 +372,22 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const clipboardPayload = clipboardStub.firstCall.args[0];
         assert.ok(clipboardPayload.includes('Completion Timeline | mode=all'));
         assert.ok(clipboardPayload.includes('Server Timeline'));
-        assert.ok(clipboardPayload.includes('contract=v10'));
+        assert.ok(clipboardPayload.includes('contract=v11'));
         assert.ok(clipboardPayload.includes('trace-copy (invoked)'));
         assert.ok(clipboardPayload.includes('transport_received_at_ms_provenance=jsonrpc_dispatch_received'));
         assert.ok(clipboardPayload.includes('jsonrpc_dispatch_received_at_ms=1700000000000'));
         assert.ok(clipboardPayload.includes('service_future_created_at_ms=1700000000001'));
+        assert.ok(clipboardPayload.includes('service_future_first_poll_entered_at_ms=1700000000003'));
+        assert.ok(clipboardPayload.includes('service_future_first_poll_outcome=pending'));
+        assert.ok(clipboardPayload.includes('service_future_first_wake_scheduled_at_ms=1700000000007'));
         assert.ok(clipboardPayload.includes('pre_method_attribution_provenance=same_request_authoritative'));
         assert.ok(clipboardPayload.includes('service_scope_entered_at_ms=1700000000002'));
         assert.ok(clipboardPayload.includes('method_entered_at_ms=1700000000005'));
         assert.ok(clipboardPayload.includes('dispatch_to_request_context_wait_ms=0'));
         assert.ok(clipboardPayload.includes('transport_to_service_future_wait_ms=1'));
         assert.ok(clipboardPayload.includes('service_future_to_scope_wait_ms=1'));
+        assert.ok(clipboardPayload.includes('service_future_to_first_poll_wait_ms=2'));
+        assert.ok(clipboardPayload.includes('first_poll_to_first_wake_wait_ms=4'));
         assert.ok(clipboardPayload.includes('transport_to_service_scope_wait_ms=2'));
         assert.ok(clipboardPayload.includes('service_scope_to_method_wait_ms=3'));
         assert.ok(clipboardPayload.includes('transport_to_method_wait_ms=5'));
@@ -413,7 +423,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 10,
+                version: 11,
                 traces: [
                     {
                         trace_id: 'trace-copy',
@@ -531,7 +541,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         assert.ok(clipboardPayload.includes('Completion Timeline | mode=average'));
         assert.ok(
             clipboardPayload.includes(
-                'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, and v10 dispatch split are unavailable by design.'
+                'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, and v11 first-poll / first-wake split are unavailable by design.'
             )
         );
         assert.ok(!clipboardPayload.includes('bottleneck_verdict=server_before_method_entry_dominant'));
@@ -582,6 +592,9 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         assert.ok(
             webview.html.includes('v10 dispatch split is unavailable by design on this payload.')
         );
+        assert.ok(
+            webview.html.includes('v11 first-poll / first-wake split is unavailable by design on this payload.')
+        );
 
         onDidDisposeEmitter.dispose();
         onDidReceiveMessageEmitter.dispose();
@@ -593,7 +606,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 10,
+                version: 11,
                 traces: [
                     {
                         trace_id: 'trace-inline',
@@ -654,7 +667,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         );
 
         assert.ok(rendered.serverHtml.includes('trace-inline'));
-        assert.ok(rendered.updatedText.includes('contract v10'));
+        assert.ok(rendered.updatedText.includes('contract v11'));
         assert.ok(
             rendered.clientHtml.includes('No client probes recorded yet'),
             'expected empty client feed placeholder to remain intact'
@@ -665,7 +678,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         onDidChangeVisibilityEmitter.dispose();
     });
 
-    test('inline webview script should mark v9 payload as missing v10 dispatch split by design', () => {
+    test('inline webview script should mark v10 payload as missing v11 first-poll / first-wake split by design', () => {
         const outputChannel = {
             appendLine: sinon.stub(),
         } as unknown as vscode.OutputChannel;
@@ -692,7 +705,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
 
         const rendered = renderTimelineStateInInlineWebview(webview.html, {
             kind: 'ready',
-            version: 9,
+            version: 10,
             updated_at_ms: 1_700_000_000_100,
             traces: [
                 {
@@ -744,7 +757,8 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
             },
         });
 
-        assert.ok(rendered.serverHtml.includes('v10 dispatch split is unavailable by design on this payload.'));
+        assert.ok(!rendered.serverHtml.includes('v10 dispatch split is unavailable by design on this payload.'));
+        assert.ok(rendered.serverHtml.includes('v11 first-poll / first-wake split is unavailable by design on this payload.'));
         assert.ok(rendered.serverHtml.includes('service_future_created='));
         assert.ok(!rendered.serverHtml.includes('transport_received_provenance='));
         assert.ok(!rendered.serverHtml.includes('jsonrpc_dispatch_received='));
@@ -760,7 +774,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 10,
+                version: 11,
                 traces: [
                     {
                         trace_id: 'trace-export',

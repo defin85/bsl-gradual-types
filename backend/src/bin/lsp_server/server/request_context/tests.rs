@@ -1,5 +1,14 @@
 use super::*;
 use serde_json::json;
+use std::sync::{Arc, Mutex};
+use std::task::{Wake, Waker};
+
+#[derive(Default)]
+struct NoopWake;
+
+impl Wake for NoopWake {
+    fn wake(self: Arc<Self>) {}
+}
 
 #[tokio::test]
 async fn current_request_id_is_none_outside_scope() {
@@ -27,6 +36,21 @@ async fn current_request_jsonrpc_dispatch_received_at_ms_is_none_outside_scope()
 }
 
 #[tokio::test]
+async fn current_request_service_future_first_poll_entered_at_ms_is_none_outside_scope() {
+    assert_eq!(current_request_service_future_first_poll_entered_at_ms(), None);
+}
+
+#[tokio::test]
+async fn current_request_service_future_first_poll_outcome_is_none_outside_scope() {
+    assert_eq!(current_request_service_future_first_poll_outcome(), None);
+}
+
+#[tokio::test]
+async fn current_request_service_future_first_wake_scheduled_at_ms_is_none_outside_scope() {
+    assert_eq!(current_request_service_future_first_wake_scheduled_at_ms(), None);
+}
+
+#[tokio::test]
 async fn with_request_context_exposes_context_inside_scope() {
     let scoped = with_request_context(
         Some("42".to_string()),
@@ -34,6 +58,7 @@ async fn with_request_context_exposes_context_inside_scope() {
         Some(1_700_000_000_122),
         Some(1_700_000_000_124),
         Some(1_700_000_000_125),
+        None,
         async {
             (
                 current_request_id(),
@@ -310,6 +335,164 @@ async fn dispatch_context_service_records_completion_context_for_position_lookup
     );
 }
 
+#[tokio::test]
+async fn request_context_service_records_first_poll_and_first_wake_for_pending_future() {
+    #[derive(Debug, Default)]
+    struct PendingOnceState {
+        waker: Option<Waker>,
+        returned_pending: bool,
+    }
+
+    #[derive(Debug, Clone)]
+    struct PendingOnceCaptureService {
+        state: Arc<Mutex<PendingOnceState>>,
+    }
+
+    #[derive(Debug)]
+    struct PendingOnceCaptureFuture {
+        state: Arc<Mutex<PendingOnceState>>,
+    }
+
+    impl Future for PendingOnceCaptureFuture {
+        type Output = Result<(Option<u64>, Option<String>, Option<u64>), ()>;
+
+        fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            let mut state = self.state.lock().unwrap();
+            if !state.returned_pending {
+                state.returned_pending = true;
+                state.waker = Some(cx.waker().clone());
+                return Poll::Pending;
+            }
+            drop(state);
+            Poll::Ready(Ok((
+                current_request_service_future_first_poll_entered_at_ms(),
+                current_request_service_future_first_poll_outcome(),
+                current_request_service_future_first_wake_scheduled_at_ms(),
+            )))
+        }
+    }
+
+    impl Service<Request> for PendingOnceCaptureService {
+        type Response = (Option<u64>, Option<String>, Option<u64>);
+        type Error = ();
+        type Future = PendingOnceCaptureFuture;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _request: Request) -> Self::Future {
+            PendingOnceCaptureFuture {
+                state: self.state.clone(),
+            }
+        }
+    }
+
+    let state = Arc::new(Mutex::new(PendingOnceState::default()));
+    let mut service = RequestContextService::new(PendingOnceCaptureService {
+        state: state.clone(),
+    });
+    let uri = Url::parse("file:///request_context_pending_first_poll.bsl").expect("url");
+    let position = Position::new(7, 2);
+    let request = Request::build("textDocument/completion")
+        .id("req-pending-first-poll")
+        .params(json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": position.line, "character": position.character },
+        }))
+        .finish();
+
+    let mut future = Box::pin(service.call(request));
+    let noop_waker = Waker::from(Arc::new(NoopWake));
+    let mut cx = Context::from_waker(&noop_waker);
+    assert!(matches!(future.as_mut().poll(&mut cx), Poll::Pending));
+
+    {
+        let pending = pending_completion_request_ids_cell()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let entry = pending
+            .by_request_id
+            .get("req-pending-first-poll")
+            .expect("pending completion entry");
+        assert!(entry.service_future_first_poll_entered_at_ms.is_some());
+        assert_eq!(
+            entry.service_future_first_poll_outcome.as_deref(),
+            Some("pending")
+        );
+        assert_eq!(entry.service_future_first_wake_scheduled_at_ms, None);
+    }
+
+    let stored_waker = state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .waker
+        .clone()
+        .expect("stored waker");
+    stored_waker.wake_by_ref();
+
+    let first_wake_after_pending = {
+        let pending = pending_completion_request_ids_cell()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let entry = pending
+            .by_request_id
+            .get("req-pending-first-poll")
+            .expect("pending completion entry after wake");
+        entry.service_future_first_wake_scheduled_at_ms
+            .expect("first wake timestamp must be recorded after wake")
+    };
+
+    let captured = future
+        .await
+        .expect("service call should resolve after explicit wake");
+    assert!(captured.0.is_some(), "first poll timestamp must be scoped");
+    assert_eq!(captured.1.as_deref(), Some("pending"));
+    assert_eq!(captured.2, Some(first_wake_after_pending));
+}
+
+#[tokio::test]
+async fn request_context_service_does_not_fabricate_first_wake_for_ready_first_poll() {
+    #[derive(Clone, Debug, Default)]
+    struct ReadyCaptureService;
+
+    impl Service<Request> for ReadyCaptureService {
+        type Response = ();
+        type Error = ();
+        type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _request: Request) -> Self::Future {
+            Box::pin(async move { Ok(()) })
+        }
+    }
+
+    let mut service = RequestContextService::new(ReadyCaptureService);
+    let uri = Url::parse("file:///request_context_ready_first_poll.bsl").expect("url");
+    let position = Position::new(8, 5);
+    let request = Request::build("textDocument/completion")
+        .id("req-ready-first-poll")
+        .params(json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": position.line, "character": position.character },
+        }))
+        .finish();
+
+    service.call(request).await.expect("service call");
+
+    let captured = take_completion_request_context_by_request_id("req-ready-first-poll")
+        .expect("captured request context");
+    assert!(captured.service_future_first_poll_entered_at_ms.is_some());
+    assert_eq!(
+        captured.service_future_first_poll_outcome.as_deref(),
+        Some("ready")
+    );
+    assert_eq!(captured.service_future_first_wake_scheduled_at_ms, None);
+}
+
 #[test]
 fn completion_request_id_is_recorded_and_taken_by_position_key() {
     let uri = Url::parse("file:///request_context_completion.bsl").expect("url");
@@ -360,6 +543,11 @@ fn overlapping_completion_request_context_can_be_taken_by_request_id_out_of_orde
 
     record_pending_completion_request_id(&first_request, first_request_id, Some(1_700_000_000_010));
     record_pending_completion_service_future_created_at_ms(first_request_id, 1_700_000_000_011);
+    record_pending_completion_service_future_first_poll_entered_at_ms(
+        first_request_id,
+        1_700_000_000_011,
+    );
+    record_pending_completion_service_future_first_poll_outcome(first_request_id, "ready");
     record_pending_completion_service_scope_entered_at_ms(first_request_id, 1_700_000_000_012);
     record_pending_completion_request_id(
         &second_request,
@@ -367,6 +555,15 @@ fn overlapping_completion_request_context_can_be_taken_by_request_id_out_of_orde
         Some(1_700_000_000_020),
     );
     record_pending_completion_service_future_created_at_ms(second_request_id, 1_700_000_000_020);
+    record_pending_completion_service_future_first_poll_entered_at_ms(
+        second_request_id,
+        1_700_000_000_021,
+    );
+    record_pending_completion_service_future_first_poll_outcome(second_request_id, "pending");
+    record_pending_completion_service_future_first_wake_scheduled_at_ms(
+        second_request_id,
+        1_700_000_000_022,
+    );
     record_pending_completion_service_scope_entered_at_ms(second_request_id, 1_700_000_000_021);
 
     let second = take_completion_request_context_by_request_id(second_request_id)
@@ -374,6 +571,15 @@ fn overlapping_completion_request_context_can_be_taken_by_request_id_out_of_orde
     assert_eq!(second.request_id, second_request_id);
     assert_eq!(second.request_received_at_ms, Some(1_700_000_000_020));
     assert_eq!(second.service_future_created_at_ms, Some(1_700_000_000_020));
+    assert_eq!(
+        second.service_future_first_poll_entered_at_ms,
+        Some(1_700_000_000_021)
+    );
+    assert_eq!(second.service_future_first_poll_outcome.as_deref(), Some("pending"));
+    assert_eq!(
+        second.service_future_first_wake_scheduled_at_ms,
+        Some(1_700_000_000_022)
+    );
     assert_eq!(second.service_scope_entered_at_ms, Some(1_700_000_000_021));
 
     let first = take_completion_request_context(&uri, position)
@@ -381,6 +587,12 @@ fn overlapping_completion_request_context_can_be_taken_by_request_id_out_of_orde
     assert_eq!(first.request_id, first_request_id);
     assert_eq!(first.request_received_at_ms, Some(1_700_000_000_010));
     assert_eq!(first.service_future_created_at_ms, Some(1_700_000_000_011));
+    assert_eq!(
+        first.service_future_first_poll_entered_at_ms,
+        Some(1_700_000_000_011)
+    );
+    assert_eq!(first.service_future_first_poll_outcome.as_deref(), Some("ready"));
+    assert_eq!(first.service_future_first_wake_scheduled_at_ms, None);
     assert_eq!(first.service_scope_entered_at_ms, Some(1_700_000_000_012));
 }
 

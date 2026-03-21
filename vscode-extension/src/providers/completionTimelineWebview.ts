@@ -787,6 +787,9 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             if (contractVersion < 10) {
                 notices.push('v10 dispatch split is unavailable by design on this payload.');
             }
+            if (contractVersion < 11) {
+                notices.push('v11 first-poll / first-wake split is unavailable by design on this payload.');
+            }
             return notices.map((notice) => '<div class="placeholder">' + escapeHtml(notice) + '</div>').join('');
         }
 
@@ -982,6 +985,15 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 ...(typeof details.service_future_created_at_ms === 'number'
                     ? ['service_future_created=' + escapeHtml(new Date(details.service_future_created_at_ms).toLocaleTimeString())]
                     : []),
+                ...(typeof details.service_future_first_poll_entered_at_ms === 'number'
+                    ? ['service_future_first_poll_entered=' + escapeHtml(new Date(details.service_future_first_poll_entered_at_ms).toLocaleTimeString())]
+                    : []),
+                ...(details.service_future_first_poll_outcome
+                    ? ['service_future_first_poll_outcome=' + escapeHtml(details.service_future_first_poll_outcome)]
+                    : []),
+                ...(typeof details.service_future_first_wake_scheduled_at_ms === 'number'
+                    ? ['service_future_first_wake_scheduled=' + escapeHtml(new Date(details.service_future_first_wake_scheduled_at_ms).toLocaleTimeString())]
+                    : []),
                 ...(details.pre_method_attribution_provenance
                     ? ['pre_method_provenance=' + escapeHtml(details.pre_method_attribution_provenance)]
                     : []),
@@ -998,6 +1010,12 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                     : []),
                 ...(typeof details.service_future_to_scope_wait_ms === 'number'
                     ? ['service_future_to_scope_wait=' + escapeHtml(details.service_future_to_scope_wait_ms) + 'ms']
+                    : []),
+                ...(typeof details.service_future_to_first_poll_wait_ms === 'number'
+                    ? ['service_future_to_first_poll_wait=' + escapeHtml(details.service_future_to_first_poll_wait_ms) + 'ms']
+                    : []),
+                ...(typeof details.first_poll_to_first_wake_wait_ms === 'number'
+                    ? ['first_poll_to_first_wake_wait=' + escapeHtml(details.first_poll_to_first_wake_wait_ms) + 'ms']
                     : []),
                 ...(typeof details.transport_to_service_scope_wait_ms === 'number'
                     ? ['transport_to_service_scope_wait=' + escapeHtml(details.transport_to_service_scope_wait_ms) + 'ms']
@@ -1211,7 +1229,9 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                         ? ' | v7 fields unavailable by design'
                         : state.version < 8
                             ? ' | v8 provenance unavailable by design'
-                            : '');
+                            : state.version < 11
+                                ? ' | v11 first-poll / first-wake split unavailable by design'
+                                : '');
             }
         }
 

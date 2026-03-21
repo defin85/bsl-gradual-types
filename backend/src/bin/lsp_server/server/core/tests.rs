@@ -9693,7 +9693,7 @@ async fn p22_get_completion_timeline_exposes_versioned_contract() {
             .get("version")
             .and_then(|value| value.as_u64())
             .expect("version"),
-        10
+        11
     );
     assert!(
         result
@@ -10015,6 +10015,9 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
                 .get("service_future_to_scope_wait_ms")
                 .and_then(|value| value.as_u64())
                 .expect("service_future_to_scope_wait_ms");
+            let service_future_first_poll_entered_at_ms = server_edge_details
+                .get("service_future_first_poll_entered_at_ms")
+                .and_then(|value| value.as_u64());
             let transport_to_service_scope_wait_ms = server_edge_details
                 .get("transport_to_service_scope_wait_ms")
                 .and_then(|value| value.as_u64())
@@ -10049,6 +10052,83 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
                 service_scope_entered_at_ms.saturating_sub(service_future_created_at_ms),
                 "service_future_to_scope_wait_ms must match timestamp delta"
             );
+            if let Some(service_future_first_poll_entered_at_ms) =
+                service_future_first_poll_entered_at_ms
+            {
+                let service_future_to_first_poll_wait_ms = server_edge_details
+                    .get("service_future_to_first_poll_wait_ms")
+                    .and_then(|value| value.as_u64())
+                    .expect("service_future_to_first_poll_wait_ms");
+                let service_future_first_poll_outcome = server_edge_details
+                    .get("service_future_first_poll_outcome")
+                    .and_then(|value| value.as_str())
+                    .expect("service_future_first_poll_outcome");
+                assert!(
+                    service_scope_entered_at_ms <= service_future_first_poll_entered_at_ms,
+                    "service_scope_entered_at_ms must not exceed service_future_first_poll_entered_at_ms"
+                );
+                assert!(
+                    service_future_created_at_ms <= service_future_first_poll_entered_at_ms,
+                    "service_future_created_at_ms must not exceed service_future_first_poll_entered_at_ms"
+                );
+                assert!(
+                    matches!(service_future_first_poll_outcome, "ready" | "pending"),
+                    "unexpected service_future_first_poll_outcome={service_future_first_poll_outcome}"
+                );
+                assert_eq!(
+                    service_future_to_first_poll_wait_ms,
+                    service_future_first_poll_entered_at_ms
+                        .saturating_sub(service_future_created_at_ms),
+                    "service_future_to_first_poll_wait_ms must match timestamp delta"
+                );
+                if let Some(service_future_first_wake_scheduled_at_ms) = server_edge_details
+                    .get("service_future_first_wake_scheduled_at_ms")
+                    .and_then(|value| value.as_u64())
+                {
+                    let first_poll_to_first_wake_wait_ms = server_edge_details
+                        .get("first_poll_to_first_wake_wait_ms")
+                        .and_then(|value| value.as_u64())
+                        .expect("first_poll_to_first_wake_wait_ms");
+                    assert_eq!(
+                        service_future_first_poll_outcome,
+                        "pending",
+                        "first wake split must only exist for pending-first-poll traces"
+                    );
+                    assert!(
+                        service_future_first_poll_entered_at_ms
+                            <= service_future_first_wake_scheduled_at_ms,
+                        "service_future_first_poll_entered_at_ms must not exceed service_future_first_wake_scheduled_at_ms"
+                    );
+                    assert_eq!(
+                        first_poll_to_first_wake_wait_ms,
+                        service_future_first_wake_scheduled_at_ms
+                            .saturating_sub(service_future_first_poll_entered_at_ms),
+                        "first_poll_to_first_wake_wait_ms must match timestamp delta"
+                    );
+                } else {
+                    assert!(
+                        !server_edge_details.contains_key("first_poll_to_first_wake_wait_ms"),
+                        "first_poll_to_first_wake_wait_ms must not be fabricated when service_future_first_wake_scheduled_at_ms is absent"
+                    );
+                }
+            } else {
+                assert!(
+                    !server_edge_details.contains_key("service_future_to_first_poll_wait_ms"),
+                    "service_future_to_first_poll_wait_ms must not be fabricated when service_future_first_poll_entered_at_ms is absent"
+                );
+                assert!(
+                    !server_edge_details.contains_key("service_future_first_poll_outcome"),
+                    "service_future_first_poll_outcome must not be fabricated when service_future_first_poll_entered_at_ms is absent"
+                );
+                assert!(
+                    !server_edge_details.contains_key("service_future_first_wake_scheduled_at_ms"),
+                    "service_future_first_wake_scheduled_at_ms must not be fabricated when service_future_first_poll_entered_at_ms is absent"
+                );
+                assert!(
+                    !server_edge_details.contains_key("first_poll_to_first_wake_wait_ms"),
+                    "first_poll_to_first_wake_wait_ms must not be fabricated when service_future_first_poll_entered_at_ms is absent"
+                );
+            }
             assert_eq!(
                 transport_to_service_scope_wait_ms,
                 service_scope_entered_at_ms.saturating_sub(transport_received_at_ms),
@@ -10079,6 +10159,26 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
             assert!(
                 !server_edge_details.contains_key("service_scope_to_method_wait_ms"),
                 "service_scope_to_method_wait_ms must not be fabricated when service_scope_entered_at_ms is absent"
+            );
+            assert!(
+                !server_edge_details.contains_key("service_future_first_poll_entered_at_ms"),
+                "service_future_first_poll_entered_at_ms must not be fabricated when service_scope_entered_at_ms is absent"
+            );
+            assert!(
+                !server_edge_details.contains_key("service_future_to_first_poll_wait_ms"),
+                "service_future_to_first_poll_wait_ms must not be fabricated when service_scope_entered_at_ms is absent"
+            );
+            assert!(
+                !server_edge_details.contains_key("service_future_first_poll_outcome"),
+                "service_future_first_poll_outcome must not be fabricated when service_scope_entered_at_ms is absent"
+            );
+            assert!(
+                !server_edge_details.contains_key("service_future_first_wake_scheduled_at_ms"),
+                "service_future_first_wake_scheduled_at_ms must not be fabricated when service_scope_entered_at_ms is absent"
+            );
+            assert!(
+                !server_edge_details.contains_key("first_poll_to_first_wake_wait_ms"),
+                "first_poll_to_first_wake_wait_ms must not be fabricated when service_scope_entered_at_ms is absent"
             );
         }
     } else {

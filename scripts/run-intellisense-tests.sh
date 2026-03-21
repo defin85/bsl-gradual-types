@@ -72,6 +72,10 @@ run_completion_timeline_drilldown_smoke() {
   cargo test -p bsl-backend --bin bsl-lsp-server server_edge_details_are_derived_from_transport_handler_and_response_timestamps -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server server_edge_details_include_pre_method_attribution_provenance -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server server_edge_details_use_outer_dispatch_timestamp_as_transport_anchor_when_available -- --nocapture
+  cargo test -p bsl-backend --bin bsl-lsp-server request_context_service_records_first_poll_and_first_wake_for_pending_future -- --nocapture
+  cargo test -p bsl-backend --bin bsl-lsp-server request_context_service_does_not_fabricate_first_wake_for_ready_first_poll -- --nocapture
+  cargo test -p bsl-backend --bin bsl-lsp-server server_edge_details_derive_first_poll_and_first_wake_split_when_present -- --nocapture
+  cargo test -p bsl-backend --bin bsl-lsp-server server_edge_details_do_not_fabricate_first_wake_split_when_first_poll_is_ready -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server prepare_runtime_drilldown_is_serialised_into_trace -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server prepare_timeout_attribution_is_serialised_into_trace -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server snapshot_timeout_runtime_is_serialised_into_trace -- --nocapture

@@ -64,6 +64,9 @@ struct CompletionTimelineCapture {
     request_context_call_entered_at_ms: Option<u64>,
     pre_method_attribution_provenance: Option<String>,
     service_future_created_at_ms: Option<u64>,
+    service_future_first_poll_entered_at_ms: Option<u64>,
+    service_future_first_poll_outcome: Option<String>,
+    service_future_first_wake_scheduled_at_ms: Option<u64>,
     service_scope_entered_at_ms: Option<u64>,
     method_entered_at_ms: Option<u64>,
     handler_entered_at_ms: Option<u64>,
@@ -102,6 +105,9 @@ impl CompletionTimelineCapture {
             request_context_call_entered_at_ms: None,
             pre_method_attribution_provenance: None,
             service_future_created_at_ms: None,
+            service_future_first_poll_entered_at_ms: None,
+            service_future_first_poll_outcome: None,
+            service_future_first_wake_scheduled_at_ms: None,
             service_scope_entered_at_ms: None,
             method_entered_at_ms: Some(method_entered_at_ms),
             handler_entered_at_ms: Some(handler_entered_at_ms),
@@ -235,6 +241,29 @@ impl CompletionTimelineCapture {
         self.service_future_created_at_ms = Some(service_future_created_at_ms);
     }
 
+    fn set_service_future_first_poll_entered_at_ms(
+        &mut self,
+        service_future_first_poll_entered_at_ms: u64,
+    ) {
+        self.service_future_first_poll_entered_at_ms =
+            Some(service_future_first_poll_entered_at_ms);
+    }
+
+    fn set_service_future_first_poll_outcome(
+        &mut self,
+        service_future_first_poll_outcome: impl Into<String>,
+    ) {
+        self.service_future_first_poll_outcome = Some(service_future_first_poll_outcome.into());
+    }
+
+    fn set_service_future_first_wake_scheduled_at_ms(
+        &mut self,
+        service_future_first_wake_scheduled_at_ms: u64,
+    ) {
+        self.service_future_first_wake_scheduled_at_ms =
+            Some(service_future_first_wake_scheduled_at_ms);
+    }
+
     fn set_service_scope_entered_at_ms(&mut self, service_scope_entered_at_ms: u64) {
         self.service_scope_entered_at_ms = Some(service_scope_entered_at_ms);
     }
@@ -271,6 +300,10 @@ impl CompletionTimelineCapture {
         let jsonrpc_dispatch_received_at_ms = self.jsonrpc_dispatch_received_at_ms;
         let request_context_call_entered_at_ms = self.request_context_call_entered_at_ms;
         let service_future_created_at_ms = self.service_future_created_at_ms;
+        let service_future_first_poll_entered_at_ms = self.service_future_first_poll_entered_at_ms;
+        let service_future_first_poll_outcome = self.service_future_first_poll_outcome.clone();
+        let service_future_first_wake_scheduled_at_ms =
+            self.service_future_first_wake_scheduled_at_ms;
         let service_scope_entered_at_ms = self.service_scope_entered_at_ms;
         let method_entered_at_ms = self.method_entered_at_ms;
         let handler_entered_at_ms = self.handler_entered_at_ms?;
@@ -285,6 +318,9 @@ impl CompletionTimelineCapture {
                 .clone()
                 .unwrap_or_else(|| "unavailable".to_string()),
             service_future_created_at_ms,
+            service_future_first_poll_entered_at_ms,
+            service_future_first_poll_outcome,
+            service_future_first_wake_scheduled_at_ms,
             service_scope_entered_at_ms,
             method_entered_at_ms,
             handler_entered_at_ms,
@@ -311,6 +347,28 @@ impl CompletionTimelineCapture {
                 .map(|(service_future_created_at_ms, service_scope_entered_at_ms)| {
                     service_scope_entered_at_ms.saturating_sub(service_future_created_at_ms)
                 }),
+            service_future_to_first_poll_wait_ms: service_future_created_at_ms
+                .zip(service_future_first_poll_entered_at_ms)
+                .map(
+                    |(
+                        service_future_created_at_ms,
+                        service_future_first_poll_entered_at_ms,
+                    )| {
+                        service_future_first_poll_entered_at_ms
+                            .saturating_sub(service_future_created_at_ms)
+                    },
+                ),
+            first_poll_to_first_wake_wait_ms: service_future_first_poll_entered_at_ms
+                .zip(service_future_first_wake_scheduled_at_ms)
+                .map(
+                    |(
+                        service_future_first_poll_entered_at_ms,
+                        service_future_first_wake_scheduled_at_ms,
+                    )| {
+                        service_future_first_wake_scheduled_at_ms
+                            .saturating_sub(service_future_first_poll_entered_at_ms)
+                    },
+                ),
             transport_to_service_scope_wait_ms: service_scope_entered_at_ms.map(
                 |service_scope_entered_at_ms| {
                     service_scope_entered_at_ms.saturating_sub(transport_received_at_ms)
@@ -2289,6 +2347,39 @@ impl BslLanguageServer {
             }
         }
         timeline_capture.push_terminal_stage(timeline_outcome);
+        if let Some(service_future_first_poll_entered_at_ms) =
+            super::super::request_context::current_request_service_future_first_poll_entered_at_ms()
+                .or_else(|| {
+                    pending_request_context
+                        .and_then(|context| context.service_future_first_poll_entered_at_ms)
+                })
+        {
+            timeline_capture.set_service_future_first_poll_entered_at_ms(
+                service_future_first_poll_entered_at_ms,
+            );
+        }
+        if let Some(service_future_first_poll_outcome) =
+            super::super::request_context::current_request_service_future_first_poll_outcome()
+                .or_else(|| {
+                    pending_request_context
+                        .and_then(|context| context.service_future_first_poll_outcome.clone())
+                })
+        {
+            timeline_capture
+                .set_service_future_first_poll_outcome(service_future_first_poll_outcome);
+        }
+        if let Some(service_future_first_wake_scheduled_at_ms) =
+            super::super::request_context::current_request_service_future_first_wake_scheduled_at_ms(
+            )
+            .or_else(|| {
+                pending_request_context
+                    .and_then(|context| context.service_future_first_wake_scheduled_at_ms)
+            })
+        {
+            timeline_capture.set_service_future_first_wake_scheduled_at_ms(
+                service_future_first_wake_scheduled_at_ms,
+            );
+        }
         timeline_capture.set_response_sent_at_ms(super::super::unix_timestamp_ms());
         if !shadow_internal_request {
             if let Some(server_edge_details) = timeline_capture.server_edge_details_trace() {
@@ -2471,6 +2562,11 @@ mod tests {
         assert_eq!(details.response_sent_at_ms, 1_700_000_000_025);
         assert_eq!(details.transport_to_service_future_wait_ms, Some(1));
         assert_eq!(details.service_future_to_scope_wait_ms, Some(1));
+        assert_eq!(details.service_future_first_poll_entered_at_ms, None);
+        assert_eq!(details.service_future_to_first_poll_wait_ms, None);
+        assert_eq!(details.service_future_first_poll_outcome, None);
+        assert_eq!(details.service_future_first_wake_scheduled_at_ms, None);
+        assert_eq!(details.first_poll_to_first_wake_wait_ms, None);
         assert_eq!(details.transport_to_service_scope_wait_ms, Some(2));
         assert_eq!(details.service_scope_to_method_wait_ms, Some(3));
         assert_eq!(details.transport_to_method_wait_ms, Some(5));
@@ -2479,6 +2575,80 @@ mod tests {
         assert_eq!(details.server_handler_exec_ms, 25);
         assert_eq!(details.cancel_observed_at_ms, None);
         assert_eq!(details.cancel_observed_after_handler_enter_ms, None);
+    }
+
+    #[test]
+    fn server_edge_details_derive_first_poll_and_first_wake_split_when_present() {
+        let mut capture = sample_capture();
+        capture.set_transport_received_at_ms(1_699_999_999_990);
+        capture.set_transport_received_at_ms_provenance("request_context_call_entry");
+        capture.set_service_future_created_at_ms(1_699_999_999_995);
+        capture.set_service_future_first_poll_entered_at_ms(1_700_000_000_000);
+        capture.set_service_future_first_poll_outcome("pending");
+        capture.set_service_future_first_wake_scheduled_at_ms(1_700_000_000_007);
+        capture.set_service_scope_entered_at_ms(1_700_000_000_009);
+        capture.set_method_entered_at_ms(1_700_000_000_012);
+        capture.set_handler_entered_at_ms(1_700_000_000_020);
+        capture.set_response_sent_at_ms(1_700_000_000_040);
+
+        let trace = capture.into_trace(
+            "trace-service-future-first-poll".to_string(),
+            std::time::Duration::from_millis(50),
+            "ok_non_empty",
+        );
+        let details = trace
+            .server_edge_details
+            .expect("server_edge_details must be present");
+        assert_eq!(details.service_future_created_at_ms, Some(1_699_999_999_995));
+        assert_eq!(
+            details.service_future_first_poll_entered_at_ms,
+            Some(1_700_000_000_000)
+        );
+        assert_eq!(details.service_future_to_first_poll_wait_ms, Some(5));
+        assert_eq!(
+            details.service_future_first_poll_outcome.as_deref(),
+            Some("pending")
+        );
+        assert_eq!(
+            details.service_future_first_wake_scheduled_at_ms,
+            Some(1_700_000_000_007)
+        );
+        assert_eq!(details.first_poll_to_first_wake_wait_ms, Some(7));
+        assert_eq!(details.service_future_to_scope_wait_ms, Some(14));
+    }
+
+    #[test]
+    fn server_edge_details_do_not_fabricate_first_wake_split_when_first_poll_is_ready() {
+        let mut capture = sample_capture();
+        capture.set_transport_received_at_ms(1_699_999_999_990);
+        capture.set_transport_received_at_ms_provenance("request_context_call_entry");
+        capture.set_service_future_created_at_ms(1_699_999_999_995);
+        capture.set_service_future_first_poll_entered_at_ms(1_700_000_000_000);
+        capture.set_service_future_first_poll_outcome("ready");
+        capture.set_service_scope_entered_at_ms(1_700_000_000_000);
+        capture.set_method_entered_at_ms(1_700_000_000_004);
+        capture.set_handler_entered_at_ms(1_700_000_000_006);
+        capture.set_response_sent_at_ms(1_700_000_000_015);
+
+        let trace = capture.into_trace(
+            "trace-service-future-first-poll-ready".to_string(),
+            std::time::Duration::from_millis(25),
+            "ok_non_empty",
+        );
+        let details = trace
+            .server_edge_details
+            .expect("server_edge_details must be present");
+        assert_eq!(
+            details.service_future_first_poll_entered_at_ms,
+            Some(1_700_000_000_000)
+        );
+        assert_eq!(details.service_future_to_first_poll_wait_ms, Some(5));
+        assert_eq!(
+            details.service_future_first_poll_outcome.as_deref(),
+            Some("ready")
+        );
+        assert_eq!(details.service_future_first_wake_scheduled_at_ms, None);
+        assert_eq!(details.first_poll_to_first_wake_wait_ms, None);
     }
 
     #[test]

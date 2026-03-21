@@ -183,7 +183,7 @@ suite('LSP Custom Requests Test Suite', () => {
 
                 if (command === 'bsl.getCompletionTimeline') {
                     return Promise.resolve({
-                        version: 10,
+                        version: 11,
                         traces: [
                             {
                                 trace_id: 'trace-1',
@@ -219,6 +219,9 @@ suite('LSP Custom Requests Test Suite', () => {
                                     transport_received_at_ms_provenance: 'jsonrpc_dispatch_received',
                                     jsonrpc_dispatch_received_at_ms: 1_700_000_000_000,
                                     service_future_created_at_ms: 1_700_000_000_001,
+                                    service_future_first_poll_entered_at_ms: 1_700_000_000_003,
+                                    service_future_first_poll_outcome: 'pending',
+                                    service_future_first_wake_scheduled_at_ms: 1_700_000_000_007,
                                     pre_method_attribution_provenance: 'same_request_authoritative',
                                     service_scope_entered_at_ms: 1_700_000_000_002,
                                     method_entered_at_ms: 1_700_000_000_003,
@@ -227,6 +230,8 @@ suite('LSP Custom Requests Test Suite', () => {
                                     dispatch_to_request_context_wait_ms: 0,
                                     transport_to_service_future_wait_ms: 1,
                                     service_future_to_scope_wait_ms: 1,
+                                    service_future_to_first_poll_wait_ms: 2,
+                                    first_poll_to_first_wake_wait_ms: 4,
                                     transport_to_service_scope_wait_ms: 2,
                                     service_scope_to_method_wait_ms: 1,
                                     transport_to_handler_wait_ms: 3,
@@ -398,7 +403,7 @@ suite('LSP Custom Requests Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(result.response.version, 10);
+        assert.strictEqual(result.response.version, 11);
         assert.strictEqual(result.response.traces.length, 1);
         assert.strictEqual(result.response.traces[0].trace_id, 'trace-1');
         assert.ok(result.response.traces[0].server_edge_details);
@@ -415,6 +420,18 @@ suite('LSP Custom Requests Test Suite', () => {
             1_700_000_000_001
         );
         assert.strictEqual(
+            result.response.traces[0].server_edge_details?.service_future_first_poll_entered_at_ms,
+            1_700_000_000_003
+        );
+        assert.strictEqual(
+            result.response.traces[0].server_edge_details?.service_future_first_poll_outcome,
+            'pending'
+        );
+        assert.strictEqual(
+            result.response.traces[0].server_edge_details?.service_future_first_wake_scheduled_at_ms,
+            1_700_000_000_007
+        );
+        assert.strictEqual(
             result.response.traces[0].server_edge_details?.pre_method_attribution_provenance,
             'same_request_authoritative'
         );
@@ -425,6 +442,14 @@ suite('LSP Custom Requests Test Suite', () => {
         assert.strictEqual(
             result.response.traces[0].server_edge_details?.service_future_to_scope_wait_ms,
             1
+        );
+        assert.strictEqual(
+            result.response.traces[0].server_edge_details?.service_future_to_first_poll_wait_ms,
+            2
+        );
+        assert.strictEqual(
+            result.response.traces[0].server_edge_details?.first_poll_to_first_wake_wait_ms,
+            4
         );
         assert.strictEqual(
             result.response.traces[0].server_edge_details?.transport_to_service_scope_wait_ms,

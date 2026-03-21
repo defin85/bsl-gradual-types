@@ -102,6 +102,15 @@ export function formatCompletionTimelineTraceForClipboard(
             ...(typeof trace.server_edge_details.service_future_created_at_ms === 'number'
                 ? [`service_future_created_at_ms=${trace.server_edge_details.service_future_created_at_ms}`]
                 : []),
+            ...(typeof trace.server_edge_details.service_future_first_poll_entered_at_ms === 'number'
+                ? [`service_future_first_poll_entered_at_ms=${trace.server_edge_details.service_future_first_poll_entered_at_ms}`]
+                : []),
+            ...(trace.server_edge_details.service_future_first_poll_outcome
+                ? [`service_future_first_poll_outcome=${trace.server_edge_details.service_future_first_poll_outcome}`]
+                : []),
+            ...(typeof trace.server_edge_details.service_future_first_wake_scheduled_at_ms === 'number'
+                ? [`service_future_first_wake_scheduled_at_ms=${trace.server_edge_details.service_future_first_wake_scheduled_at_ms}`]
+                : []),
             ...(trace.server_edge_details.pre_method_attribution_provenance
                 ? [`pre_method_attribution_provenance=${trace.server_edge_details.pre_method_attribution_provenance}`]
                 : []),
@@ -124,6 +133,12 @@ export function formatCompletionTimelineTraceForClipboard(
                 : []),
             ...(typeof trace.server_edge_details.service_future_to_scope_wait_ms === 'number'
                 ? [`service_future_to_scope_wait_ms=${trace.server_edge_details.service_future_to_scope_wait_ms}`]
+                : []),
+            ...(typeof trace.server_edge_details.service_future_to_first_poll_wait_ms === 'number'
+                ? [`service_future_to_first_poll_wait_ms=${trace.server_edge_details.service_future_to_first_poll_wait_ms}`]
+                : []),
+            ...(typeof trace.server_edge_details.first_poll_to_first_wake_wait_ms === 'number'
+                ? [`first_poll_to_first_wake_wait_ms=${trace.server_edge_details.first_poll_to_first_wake_wait_ms}`]
                 : []),
             ...(typeof trace.server_edge_details.service_scope_to_method_wait_ms === 'number'
                 ? [`service_scope_to_method_wait_ms=${trace.server_edge_details.service_scope_to_method_wait_ms}`]
@@ -339,6 +354,9 @@ function formatServerTimelineSectionForClipboard(
     }
     if (state.version < 10) {
         lines.push('v10 dispatch split is unavailable by design on this payload.');
+    }
+    if (state.version < 11) {
+        lines.push('v11 first-poll / first-wake split is unavailable by design on this payload.');
     }
     const traces = mode === 'average'
         ? (state.average_trace ? [state.average_trace] : [])

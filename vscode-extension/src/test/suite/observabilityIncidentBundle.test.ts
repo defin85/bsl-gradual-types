@@ -41,7 +41,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 10,
+                version: 11,
                 traces: [
                     {
                         trace_id: 'trace-1',
@@ -72,6 +72,9 @@ suite('Observability Incident Bundle Test Suite', () => {
                             transport_received_at_ms_provenance: 'jsonrpc_dispatch_received',
                             jsonrpc_dispatch_received_at_ms: 1_700_000_000_000,
                             service_future_created_at_ms: 1_700_000_001_200,
+                            service_future_first_poll_entered_at_ms: 1_700_000_001_500,
+                            service_future_first_poll_outcome: 'pending',
+                            service_future_first_wake_scheduled_at_ms: 1_700_000_001_880,
                             pre_method_attribution_provenance: 'same_request_authoritative',
                             service_scope_entered_at_ms: 1_700_000_002_000,
                             method_entered_at_ms: 1_700_000_003_000,
@@ -80,6 +83,8 @@ suite('Observability Incident Bundle Test Suite', () => {
                             dispatch_to_request_context_wait_ms: 200,
                             transport_to_service_future_wait_ms: 1200,
                             service_future_to_scope_wait_ms: 800,
+                            service_future_to_first_poll_wait_ms: 300,
+                            first_poll_to_first_wake_wait_ms: 380,
                             transport_to_service_scope_wait_ms: 2000,
                             service_scope_to_method_wait_ms: 1000,
                             transport_to_method_wait_ms: 3000,
@@ -207,7 +212,7 @@ suite('Observability Incident Bundle Test Suite', () => {
             ]
         );
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'available');
-        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 10);
+        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 11);
         assert.strictEqual(bundle.incidentReport.sources.client_probes.probe_count, 2);
         assert.strictEqual(bundle.incidentReport.sources.observability_metrics.uptime_seconds, 184);
         assert.deepStrictEqual(bundle.incidentReport.capture_scope, {
@@ -232,9 +237,23 @@ suite('Observability Incident Bundle Test Suite', () => {
             1_700_000_000_000
         );
         assert.strictEqual(bundle.incidentReport.requests[0].service_future_created_at_ms, 1_700_000_001_200);
+        assert.strictEqual(
+            bundle.incidentReport.requests[0].service_future_first_poll_entered_at_ms,
+            1_700_000_001_500
+        );
+        assert.strictEqual(
+            bundle.incidentReport.requests[0].service_future_first_poll_outcome,
+            'pending'
+        );
+        assert.strictEqual(
+            bundle.incidentReport.requests[0].service_future_first_wake_scheduled_at_ms,
+            1_700_000_001_880
+        );
         assert.strictEqual(bundle.incidentReport.requests[0].dispatch_to_request_context_wait_ms, 200);
         assert.strictEqual(bundle.incidentReport.requests[0].transport_to_service_future_wait_ms, 1200);
         assert.strictEqual(bundle.incidentReport.requests[0].service_future_to_scope_wait_ms, 800);
+        assert.strictEqual(bundle.incidentReport.requests[0].service_future_to_first_poll_wait_ms, 300);
+        assert.strictEqual(bundle.incidentReport.requests[0].first_poll_to_first_wake_wait_ms, 380);
         assert.strictEqual(bundle.incidentReport.requests[0].transport_to_service_scope_wait_ms, 2000);
         assert.strictEqual(bundle.incidentReport.requests[0].service_scope_to_method_wait_ms, 1000);
         assert.strictEqual(bundle.incidentReport.requests[1].prepare_timeout?.source, 'prepare_guard');
@@ -257,9 +276,14 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.summaryMarkdown.includes('jsonrpc_dispatch_received_at_ms=1700000000000'));
         assert.ok(bundle.summaryMarkdown.includes('pre_method_provenance=same_request_authoritative'));
         assert.ok(bundle.summaryMarkdown.includes('service_future_created_at_ms=1700000001200'));
+        assert.ok(bundle.summaryMarkdown.includes('service_future_first_poll_entered_at_ms=1700000001500'));
+        assert.ok(bundle.summaryMarkdown.includes('service_future_first_poll_outcome=pending'));
+        assert.ok(bundle.summaryMarkdown.includes('service_future_first_wake_scheduled_at_ms=1700000001880'));
         assert.ok(bundle.summaryMarkdown.includes('dispatch_to_request_context_wait_ms=200'));
         assert.ok(bundle.summaryMarkdown.includes('transport_to_service_future_wait_ms=1200'));
         assert.ok(bundle.summaryMarkdown.includes('service_future_to_scope_wait_ms=800'));
+        assert.ok(bundle.summaryMarkdown.includes('service_future_to_first_poll_wait_ms=300'));
+        assert.ok(bundle.summaryMarkdown.includes('first_poll_to_first_wake_wait_ms=380'));
         assert.ok(bundle.summaryMarkdown.includes('transport_to_service_scope_wait_ms=2000'));
         assert.ok(bundle.summaryMarkdown.includes('service_scope_to_method_wait_ms=1000'));
         assert.ok(
@@ -341,17 +365,19 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.summaryMarkdown.includes('dispatch split is unavailable by design'));
     });
 
-    test('v9 completion timeline should mark v10 dispatch split as unavailable by design', () => {
+    test('v10 completion timeline should mark v11 first-poll / first-wake split as unavailable by design', () => {
         const timeline = sampleTimeline();
         if (timeline.kind !== 'ok') {
             throw new Error('expected ok timeline fixture');
         }
-        timeline.response.version = 9;
+        timeline.response.version = 10;
         timeline.response.traces[0].server_edge_details = {
             ...timeline.response.traces[0].server_edge_details!,
-            transport_received_at_ms_provenance: undefined,
-            jsonrpc_dispatch_received_at_ms: undefined,
-            dispatch_to_request_context_wait_ms: undefined,
+            service_future_first_poll_entered_at_ms: undefined,
+            service_future_first_poll_outcome: undefined,
+            service_future_first_wake_scheduled_at_ms: undefined,
+            service_future_to_first_poll_wait_ms: undefined,
+            first_poll_to_first_wake_wait_ms: undefined,
         };
 
         const bundle = buildObservabilityIncidentBundle({
@@ -362,16 +388,16 @@ suite('Observability Incident Bundle Test Suite', () => {
             observabilityMetrics: sampleMetrics(),
         });
 
-        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('contract v9')));
-        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('dispatch split')));
-        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('contract v9')));
-        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('dispatch split')));
-        assert.strictEqual(bundle.incidentReport.requests[0].transport_received_at_ms_provenance, undefined);
-        assert.strictEqual(bundle.incidentReport.requests[0].jsonrpc_dispatch_received_at_ms, undefined);
-        assert.strictEqual(bundle.incidentReport.requests[0].dispatch_to_request_context_wait_ms, undefined);
+        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('contract v10')));
+        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('first-poll / first-wake split')));
+        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('contract v10')));
+        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('first-poll / first-wake split')));
+        assert.strictEqual(bundle.incidentReport.requests[0].service_future_first_poll_entered_at_ms, undefined);
+        assert.strictEqual(bundle.incidentReport.requests[0].service_future_first_poll_outcome, undefined);
+        assert.strictEqual(bundle.incidentReport.requests[0].service_future_first_wake_scheduled_at_ms, undefined);
         assert.strictEqual(bundle.incidentReport.requests[0].service_future_created_at_ms, 1_700_000_001_200);
-        assert.ok(bundle.summaryMarkdown.includes('contract=v9'));
-        assert.ok(bundle.summaryMarkdown.includes('dispatch split is unavailable by design'));
+        assert.ok(bundle.summaryMarkdown.includes('contract=v10'));
+        assert.ok(bundle.summaryMarkdown.includes('first-poll / first-wake split is unavailable by design'));
         assert.ok(!bundle.summaryMarkdown.includes('No gaps were recorded for this bundle.'));
     });
 

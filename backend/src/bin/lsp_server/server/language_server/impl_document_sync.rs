@@ -239,6 +239,46 @@ impl BslLanguageServer {
         });
     }
 
+    fn spawn_completion_head_precompute_from_current_revision_v2(
+        &self,
+        file_id: bsl_analysis_v2::FileId,
+        requested_version: i32,
+    ) {
+        let server = self.clone();
+        tokio::spawn(async move {
+            if server
+                .latest_received_file_versions_v2
+                .read()
+                .await
+                .get(&file_id)
+                .copied()
+                != Some(requested_version)
+            {
+                return;
+            }
+
+            let analysis = server.analysis_v2.snapshot().await;
+            if analysis.file_version(file_id).ok().flatten() != Some(requested_version) {
+                return;
+            }
+            if analysis
+                .current_completion_head_ready(file_id)
+                .ok()
+                .unwrap_or(false)
+            {
+                return;
+            }
+
+            let _ = bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
+                bsl_runtime::application::CpuWorkClass::Background,
+                bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                Some(server.coordinator.as_ref()),
+                move || analysis.ir(file_id),
+            )
+            .await;
+        });
+    }
+
     fn spawn_large_churn_completion_head_reuse_v2(
         &self,
         file_id: bsl_analysis_v2::FileId,
@@ -610,6 +650,11 @@ impl BslLanguageServer {
             bsl_runtime::application::ObservabilityOrigin::Lsp,
             current_revision_changes,
         );
+        if identical_text_previous_version.is_none()
+            && tail_whitespace_append_previous_version.is_none()
+        {
+            self.spawn_completion_head_precompute_from_current_revision_v2(file_id, version);
+        }
         if let Some(previous_version) = identical_text_previous_version {
             self.spawn_completion_head_reuse_from_previous_version_v2(
                 file_id,

@@ -527,11 +527,7 @@ async fn p33_did_open_returns_before_blocking_parse_snapshot_finishes() {
 
     const FIXTURE: &str = "Процедура Тест()\n    ДляCompletion = Объект.\nКонецПроцедуры\n";
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK);
     let _blocking_parse_delay_guard =
         EnvVarGuard::set("BSL_TEST_DID_OPEN_BLOCKING_PARSE_DELAY_MS", "1500");
 
@@ -1991,11 +1987,7 @@ async fn p28_cancel_request_stops_completion_and_prevents_late_publish() {
         }
     }
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK);
     let _delay_guard = EnvVarGuard::set("BSL_TEST_COMPLETION_DELAY_MS", "40");
 
     let coordinator = Arc::new(SystemCoordinator::new());
@@ -14807,6 +14799,354 @@ async fn p33_changed_text_current_revision_head_stays_available_while_parse_snap
         completion_timeline_prepare_detail_str(trace, "fail_closed_cause"),
         Some("exact_deadline"),
         "changed-text current-revision head must not regress into exact_deadline while parse snapshot is still building, trace={trace:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn p33_changed_text_current_revision_head_waits_for_delayed_runtime_apply() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const V1_FIXTURE: &str =
+        "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str =
+        "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    S.Вставить(\"Описание\", \"x\");\n    ДляCompletion = S.\nКонецПроцедуры\n";
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+    let _apply_delay_guard = EnvVarGuard::set("BSL_TEST_RUNTIME_APPLY_SET_FILE_DELAY_MS", "300");
+    let _blocking_parse_delay_guard =
+        EnvVarGuard::set("BSL_TEST_DID_CHANGE_BLOCKING_PARSE_DELAY_MS", "1500");
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let uri = Url::parse("file:///test_p33_changed_text_runtime_apply_delay.bsl").expect("uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: V1_FIXTURE.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    server.sync_v2_globals().await;
+
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    let did_change_started = Instant::now();
+    server
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: uri.clone(),
+                version: 2,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                range: None,
+                range_length: None,
+                text: V2_FIXTURE.to_string(),
+            }],
+        })
+        .await;
+    let did_change_elapsed = did_change_started.elapsed();
+    assert!(
+        did_change_elapsed < Duration::from_millis(250),
+        "didChange must return before delayed runtime apply completes (elapsed={did_change_elapsed:?})"
+    );
+
+    server.cancel_type_index_precompute_v2(file_id).await;
+
+    tokio::time::timeout(Duration::from_millis(1200), async {
+        loop {
+            if server
+                .analysis_v2
+                .file_revision_state(file_id)
+                .await
+                .map(|state| state.version)
+                == Some(2)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("delayed runtime apply must eventually publish version 2");
+
+    let completion_position = find_utf16_position_after_marker(V2_FIXTURE, "ДляCompletion = S.");
+    let completion_response = server
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: completion_position,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: Some(CompletionContext {
+                trigger_kind: CompletionTriggerKind::INVOKED,
+                trigger_character: None,
+            }),
+        })
+        .await
+        .expect("completion request")
+        .expect("completion response");
+    let completion_labels: Vec<String> = match completion_response {
+        CompletionResponse::Array(items) => items.into_iter().map(|item| item.label).collect(),
+        CompletionResponse::List(list) => list.items.into_iter().map(|item| item.label).collect(),
+    };
+    assert!(
+        completion_labels.iter().any(|label| label == "Описание"),
+        "current-revision head must survive delayed runtime apply and expose latest member on first response, labels={completion_labels:?}"
+    );
+
+    let timeline = lsp_get_completion_timeline(&mut service, 4062, 10).await;
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("completion timeline traces array");
+    let trace = traces
+        .last()
+        .expect("completion trace after delayed runtime apply");
+    assert_eq!(
+        completion_timeline_prepare_detail_str(trace, "route"),
+        Some("head_hit"),
+        "delayed runtime apply must still resolve through current-revision head route, trace={trace:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn p33_changed_text_burst_supersedes_obsolete_current_revision_head_precompute() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+
+    let wait_budget_ms = bsl_runtime::system::global_runtime_config()
+        .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
+        .unwrap_or(120);
+    let head_precompute_delay_ms = (wait_budget_ms / 3).max(40);
+    let _current_head_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_CURRENT_REVISION_HEAD_PRECOMPUTE_DELAY_MS",
+        &head_precompute_delay_ms.to_string(),
+    );
+    let _async_parse_delay_guard = EnvVarGuard::set("BSL_TEST_DID_CHANGE_PARSE_DELAY_MS", "500");
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let uri = Url::parse("file:///test_p33_changed_text_burst_current_revision_supersession.bsl")
+        .expect("uri");
+    let mut current_text =
+        "Процедура Тест()\n    S = Новый Структура;\n    ДляCompletion = S.\nКонецПроцедуры\n"
+            .to_string();
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: current_text.clone(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    server.sync_v2_globals().await;
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+
+    let latest_version = 8_i32;
+    for version in 2..=latest_version {
+        let insert_line = format!("    S.Вставить(\"Поле{version}\", {version});\n");
+        current_text = current_text.replacen(
+            "    ДляCompletion = S.\n",
+            &(insert_line + "    ДляCompletion = S.\n"),
+            1,
+        );
+        server
+            .did_change(DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: current_text.clone(),
+                }],
+            })
+            .await;
+        server.cancel_type_index_precompute_v2(file_id).await;
+    }
+
+    let completion_position = find_utf16_position_after_marker(&current_text, "ДляCompletion = S.");
+    let completion_started = Instant::now();
+    let completion_response = server
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: completion_position,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: Some(CompletionContext {
+                trigger_kind: CompletionTriggerKind::INVOKED,
+                trigger_character: None,
+            }),
+        })
+        .await
+        .expect("completion request")
+        .expect("completion response");
+    let completion_elapsed = completion_started.elapsed();
+    let completion_labels: Vec<String> = match completion_response {
+        CompletionResponse::Array(items) => items.into_iter().map(|item| item.label).collect(),
+        CompletionResponse::List(list) => list.items.into_iter().map(|item| item.label).collect(),
+    };
+    assert!(
+        completion_labels
+            .iter()
+            .any(|label| label == &format!("Поле{latest_version}")),
+        "burst changed-text path must preserve latest current-revision head instead of burning CPU on obsolete versions, labels={completion_labels:?}"
+    );
+    assert!(
+        completion_elapsed < Duration::from_millis(wait_budget_ms.saturating_mul(2)),
+        "burst changed-text completion must stay bounded after current-revision head supersession (elapsed={completion_elapsed:?}, latest_version={latest_version}, labels={completion_labels:?})"
+    );
+
+    let timeline = lsp_get_completion_timeline(&mut service, 4063, 10).await;
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("completion timeline traces array");
+    let trace = traces
+        .last()
+        .expect("completion trace after changed-text burst supersession");
+    assert_eq!(
+        completion_timeline_prepare_detail_str(trace, "route"),
+        Some("head_hit"),
+        "burst changed-text completion must resolve through latest current-revision head route, trace={trace:?}"
+    );
+    assert_ne!(
+        completion_timeline_prepare_detail_str(trace, "fail_closed_cause"),
+        Some("exact_deadline"),
+        "burst changed-text completion must not regress into exact_deadline when obsolete head precompute work is superseded, trace={trace:?}"
     );
 
     drain_task.abort();

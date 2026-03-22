@@ -17,7 +17,7 @@ pub(crate) mod request_context;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{Mutex, RwLock};
@@ -205,6 +205,8 @@ pub struct BslLanguageServer {
     pub(crate) next_file_id_v2: Arc<AtomicU32>,
     pub(crate) diagnostics_tasks_v2: Arc<Mutex<DiagnosticsTasksV2>>,
     pub(crate) type_index_precompute_tasks_v2: Arc<Mutex<TypeIndexPrecomputeTasksV2>>,
+    pub(crate) current_revision_head_precompute_tasks_v2:
+        Arc<Mutex<CurrentRevisionHeadPrecomputeTasksV2>>,
     pub(crate) diagnostics_generation_v2: Arc<RwLock<HashMap<V2FileId, u64>>>,
     pub(crate) latest_received_file_versions_v2: Arc<RwLock<HashMap<V2FileId, i32>>>,
     pub(crate) latest_document_shadow_state_v2:
@@ -350,6 +352,13 @@ pub(crate) struct TypeIndexPrecomputeTaskV2 {
 }
 
 type TypeIndexPrecomputeTasksV2 = HashMap<V2FileId, TypeIndexPrecomputeTaskV2>;
+
+pub(crate) struct CurrentRevisionHeadPrecomputeTaskV2 {
+    pub requested_version: Arc<AtomicI32>,
+    pub handle: JoinHandle<()>,
+}
+
+type CurrentRevisionHeadPrecomputeTasksV2 = HashMap<V2FileId, CurrentRevisionHeadPrecomputeTaskV2>;
 
 pub(crate) fn intellisense_v2_slow_wait_warn_threshold() -> Option<Duration> {
     bsl_runtime::application::RuntimePerfKnobs::from_runtime_config().slow_wait_warn_threshold

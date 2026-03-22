@@ -1,6 +1,7 @@
 use super::*;
 #[cfg(test)]
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 #[cfg(test)]
@@ -35,6 +36,25 @@ fn maybe_inject_blocking_parse_delay_for_test(env_key: &'static str) {
 
 #[cfg(not(test))]
 fn maybe_inject_blocking_parse_delay_for_test(_env_key: &'static str) {}
+
+#[cfg(test)]
+fn maybe_inject_current_revision_head_precompute_delay_for_test() {
+    if let Some(delay_ms) = std::env::var("BSL_TEST_CURRENT_REVISION_HEAD_PRECOMPUTE_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+    {
+        static DELAY_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        let _delay_lock = DELAY_LOCK
+            .get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        std::thread::sleep(Duration::from_millis(delay_ms));
+    }
+}
+
+#[cfg(not(test))]
+fn maybe_inject_current_revision_head_precompute_delay_for_test() {}
 
 #[cfg(test)]
 pub(super) fn did_change_inline_parse_delay_active_for_test() -> bool {
@@ -324,14 +344,67 @@ impl BslLanguageServer {
         });
     }
 
-    fn spawn_completion_head_precompute_from_current_revision_v2(
+    async fn schedule_completion_head_precompute_from_current_revision_v2(
         &self,
         file_id: bsl_analysis_v2::FileId,
         requested_version: i32,
     ) {
+        let mut tasks = self.current_revision_head_precompute_tasks_v2.lock().await;
+        if let Some(task) = tasks.get(&file_id) {
+            task.requested_version
+                .store(requested_version, Ordering::Relaxed);
+            return;
+        }
+
+        let requested_version_state =
+            Arc::new(std::sync::atomic::AtomicI32::new(requested_version));
         let server = self.clone();
-        tokio::spawn(async move {
-            if server
+        let worker_requested_version_state = Arc::clone(&requested_version_state);
+        let handle = tokio::spawn(async move {
+            server
+                .run_current_revision_head_precompute_worker_v2(
+                    file_id,
+                    worker_requested_version_state,
+                )
+                .await;
+        });
+        tasks.insert(
+            file_id,
+            super::super::CurrentRevisionHeadPrecomputeTaskV2 {
+                requested_version: requested_version_state,
+                handle,
+            },
+        );
+    }
+
+    async fn run_current_revision_head_precompute_worker_v2(
+        &self,
+        file_id: bsl_analysis_v2::FileId,
+        requested_version_state: Arc<std::sync::atomic::AtomicI32>,
+    ) {
+        loop {
+            let requested_version = requested_version_state.load(Ordering::Relaxed);
+            if requested_version <= 0 {
+                break;
+            }
+            if self
+                .latest_received_file_versions_v2
+                .read()
+                .await
+                .get(&file_id)
+                .copied()
+                .is_none()
+            {
+                break;
+            }
+            if !self
+                .analysis_v2
+                .wait_for_file_version(file_id, requested_version)
+                .await
+            {
+                break;
+            }
+            if self
                 .latest_received_file_versions_v2
                 .read()
                 .await
@@ -339,29 +412,94 @@ impl BslLanguageServer {
                 .copied()
                 != Some(requested_version)
             {
-                return;
+                continue;
             }
 
-            let analysis = server.analysis_v2.snapshot().await;
+            let analysis = self.analysis_v2.snapshot().await;
             if analysis.file_version(file_id).ok().flatten() != Some(requested_version) {
-                return;
+                continue;
             }
             if analysis
                 .current_completion_head_ready(file_id)
                 .ok()
                 .unwrap_or(false)
             {
-                return;
+                if requested_version_state.load(Ordering::Relaxed) == requested_version
+                    && self
+                        .try_finish_current_revision_head_precompute_v2(
+                            file_id,
+                            requested_version,
+                            &requested_version_state,
+                        )
+                        .await
+                {
+                    return;
+                }
+                continue;
             }
 
             let _ = bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
                 bsl_runtime::application::CpuWorkClass::Background,
                 bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
-                Some(server.coordinator.as_ref()),
-                move || analysis.ir(file_id),
+                Some(self.coordinator.as_ref()),
+                move || {
+                    maybe_inject_current_revision_head_precompute_delay_for_test();
+                    analysis.ir(file_id)
+                },
             )
             .await;
-        });
+
+            if requested_version_state.load(Ordering::Relaxed) == requested_version
+                && self
+                    .try_finish_current_revision_head_precompute_v2(
+                        file_id,
+                        requested_version,
+                        &requested_version_state,
+                    )
+                    .await
+            {
+                return;
+            }
+        }
+
+        let mut tasks = self.current_revision_head_precompute_tasks_v2.lock().await;
+        if tasks
+            .get(&file_id)
+            .is_some_and(|task| Arc::ptr_eq(&task.requested_version, &requested_version_state))
+        {
+            tasks.remove(&file_id);
+        }
+    }
+
+    async fn try_finish_current_revision_head_precompute_v2(
+        &self,
+        file_id: bsl_analysis_v2::FileId,
+        requested_version: i32,
+        requested_version_state: &Arc<std::sync::atomic::AtomicI32>,
+    ) -> bool {
+        let mut tasks = self.current_revision_head_precompute_tasks_v2.lock().await;
+        let Some(task) = tasks.get(&file_id) else {
+            return true;
+        };
+        if !Arc::ptr_eq(&task.requested_version, requested_version_state) {
+            return false;
+        }
+        if task.requested_version.load(Ordering::Relaxed) != requested_version {
+            return false;
+        }
+        tasks.remove(&file_id);
+        true
+    }
+
+    async fn cancel_current_revision_head_precompute_v2(&self, file_id: bsl_analysis_v2::FileId) {
+        let task = self
+            .current_revision_head_precompute_tasks_v2
+            .lock()
+            .await
+            .remove(&file_id);
+        if let Some(task) = task {
+            task.handle.abort();
+        }
     }
 
     fn spawn_large_churn_completion_head_reuse_v2(
@@ -485,7 +623,8 @@ impl BslLanguageServer {
                 }],
             );
         }
-        self.spawn_completion_head_precompute_from_current_revision_v2(file_id, version);
+        self.schedule_completion_head_precompute_from_current_revision_v2(file_id, version)
+            .await;
         self.spawn_background_parse_snapshot_apply_v2(BackgroundParseSnapshotApplyArgs {
             file_id,
             requested_version: version,
@@ -557,7 +696,15 @@ impl BslLanguageServer {
             Ok(path) => path.to_string_lossy().to_string(),
             Err(_) => uri.to_string(),
         };
-        let (updated_text, path, parser_edits, large_churn_active, identical_text_previous_version, tail_whitespace_append_previous_version, previous_analysis_for_identical_text_reuse) = {
+        let (
+            updated_text,
+            path,
+            parser_edits,
+            large_churn_active,
+            identical_text_previous_version,
+            tail_whitespace_append_previous_version,
+            previous_analysis_for_identical_text_reuse,
+        ) = {
             let _sync_guard = self.text_sync_v2.lock().await;
             let previous_shadow_state = {
                 let shadow = self.latest_document_shadow_state_v2.read().await;
@@ -605,9 +752,10 @@ impl BslLanguageServer {
                     }
                     (current_text, parser_edits)
                 };
-            let identical_text_previous_version = previous_shadow_state.as_ref().and_then(|state| {
-                (state.text.as_ref() == updated_text.as_str()).then_some(state.version)
-            });
+            let identical_text_previous_version =
+                previous_shadow_state.as_ref().and_then(|state| {
+                    (state.text.as_ref() == updated_text.as_str()).then_some(state.version)
+                });
             let tail_whitespace_append_previous_version =
                 previous_shadow_state.as_ref().and_then(|state| {
                     let previous_text = state.text.as_ref();
@@ -632,20 +780,15 @@ impl BslLanguageServer {
                 let now = Instant::now();
                 let transition = {
                     let mut churn_state = self.scale_aware_churn_state_v2.write().await;
-                    let state =
-                        churn_state
-                            .entry(file_id)
-                            .or_insert(super::super::ScaleAwareChurnStateV2 {
-                                window_started_at: now,
-                                changes_in_window: 0,
-                                large_churn_active: false,
-                            });
-                    let transition = advance_large_churn_state(
-                        state,
-                        now,
-                        is_large_document,
-                        scale_aware_knobs,
+                    let state = churn_state.entry(file_id).or_insert(
+                        super::super::ScaleAwareChurnStateV2 {
+                            window_started_at: now,
+                            changes_in_window: 0,
+                            large_churn_active: false,
+                        },
                     );
+                    let transition =
+                        advance_large_churn_state(state, now, is_large_document, scale_aware_knobs);
                     large_churn_active = state.large_churn_active;
                     transition
                 };
@@ -738,7 +881,8 @@ impl BslLanguageServer {
         if identical_text_previous_version.is_none()
             && tail_whitespace_append_previous_version.is_none()
         {
-            self.spawn_completion_head_precompute_from_current_revision_v2(file_id, version);
+            self.schedule_completion_head_precompute_from_current_revision_v2(file_id, version)
+                .await;
         }
         if let Some(previous_version) = identical_text_previous_version {
             self.spawn_completion_head_reuse_from_previous_version_v2(
@@ -931,6 +1075,8 @@ impl BslLanguageServer {
             }
             self.cancel_diagnostics_v2(file_id).await;
             self.cancel_type_index_precompute_v2(file_id).await;
+            self.cancel_current_revision_head_precompute_v2(file_id)
+                .await;
             self.latest_received_file_versions_v2
                 .write()
                 .await

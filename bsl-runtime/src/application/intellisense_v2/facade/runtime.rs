@@ -1,5 +1,29 @@
 use super::*;
 
+#[cfg(test)]
+fn maybe_inject_apply_change_delay_for_test(change: &Change) {
+    let env_key = match change {
+        Change::SetFile { .. } => Some("BSL_TEST_RUNTIME_APPLY_SET_FILE_DELAY_MS"),
+        Change::SetFileWithSnapshot { .. } => {
+            Some("BSL_TEST_RUNTIME_APPLY_SET_FILE_WITH_SNAPSHOT_DELAY_MS")
+        }
+        _ => None,
+    };
+    let Some(env_key) = env_key else {
+        return;
+    };
+    if let Some(delay_ms) = std::env::var(env_key)
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+    {
+        std::thread::sleep(Duration::from_millis(delay_ms));
+    }
+}
+
+#[cfg(not(test))]
+fn maybe_inject_apply_change_delay_for_test(_change: &Change) {}
+
 impl IntellisenseV2Facade {
     pub fn new(
         initial_host: AnalysisHostV2,
@@ -148,6 +172,7 @@ impl IntellisenseV2Facade {
                                     }
                                     Change::SetDepsSnapshot { .. } => None,
                                 };
+                                maybe_inject_apply_change_delay_for_test(&change);
                                 match &change {
                                     Change::SetFile { file_id, version, .. }
                                     | Change::SetFileWithSnapshot {

@@ -147,6 +147,9 @@ impl BslLanguageServer {
         ),
         bsl_runtime::application::SemanticOutcome,
     > {
+        // latest_received tracks the freshest transport revision. prepare_stateful_operation
+        // still waits for runtime applied_version to reach this bound before treating the
+        // semantic snapshot as ready.
         let min_file_version = match self
             .latest_received_file_versions_v2
             .read()

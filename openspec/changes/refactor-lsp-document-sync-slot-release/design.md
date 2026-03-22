@@ -31,7 +31,7 @@ Incident bundle `2026-03-22T16:19:59Z` показывает два разных 
 `didOpen/didChange` service future должна делать только transport-critical работу:
 - принять и валидировать входной payload;
 - обновить `latest_received` / shadow state;
-- выполнить current-revision `SetFile` apply в analysis runtime для той же `file_version`;
+- поставить current-revision `SetFile` в analysis runtime writer path для той же `file_version`;
 - зарегистрировать или перевыставить background work для parse/head/exact/diagnostics;
 - завершиться, освободив transport slot.
 
@@ -39,11 +39,13 @@ Slow stages после handoff MUST выполняться вне document-sync 
 
 `applied_version` в рамках этого change сохраняет базовую семантику: это revision, уже применённая в analysis runtime через current-revision `SetFile` / `SetFileWithSnapshot`. Change не переопределяет `applied_version` как readiness `CompletionHeadArtifact`, `ExactSemanticArtifact` или diagnostics publish.
 
+Current-revision handoff здесь сознательно означает enqueue/register writer work, а не обязательное наблюдаемое продвижение `applied_version` к моменту возврата `didOpen/didChange`. После возврата document-sync future `received_version` и shadow state уже отражают новую requested revision, но interactive path по-прежнему должен дождаться `applied_version` через bounded `wait_for_file_version`.
+
 #### Stage boundary
 Inline до возврата `didOpen/didChange`:
 - payload validation и построение updated text / parser edits;
 - обновление shadow state и `latest_received_file_versions_v2`;
-- current-revision `SetFile` apply;
+- current-revision `SetFile` enqueue/register в runtime writer path;
 - enqueue / supersede background parse-head-exact-diagnostics work.
 
 Background после возврата `didOpen/didChange`:

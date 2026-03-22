@@ -3,11 +3,17 @@
 `textDocument/didOpen` и `textDocument/didChange` MUST завершать свой service future после того, как:
 - входной payload принят;
 - `latest_received` и shadow state обновлены для новой requested revision;
-- current-revision `SetFile` apply выполнен в analysis runtime для той же `file_version`;
+- current-revision `SetFile` handoff зарегистрирован в analysis runtime writer path для той же `file_version`;
 - минимальный handoff slow background work зарегистрирован;
-- interactive readers могут видеть новую current revision согласно существующему current-revision contract.
+- transport slot больше не удерживается ради ожидания slow background стадий.
 
 `applied_version` в этом требовании продолжает означать revision, уже применённую в analysis runtime через `SetFile` / `SetFileWithSnapshot`. Она MUST NOT переопределяться как readiness `CompletionHeadArtifact`, `ExactSemanticArtifact` или diagnostics publish.
+
+Для этого change current-revision handoff означает enqueue/register соответствующего `SetFile` в runtime writer path для той же `file_version`. Handoff сам по себе MUST NOT трактоваться как уже наблюдаемое продвижение `applied_version`.
+
+После document-sync handoff `received_version` MAY уже указывать на новую requested revision, пока `applied_version` ещё кратко отстаёт и догоняет её через runtime writer path. Это допустимо для данного change при двух условиях:
+- interactive orchestration продолжает использовать `applied_version` как критерий фактической готовности snapshot;
+- `didOpen/didChange` не маскируют этот lag выдачей artifact-ready semantics под видом `applied_version`.
 
 После этого slow стадии (`parse snapshot build`, current-revision completion precompute, exact precompute, deferred diagnostics) MUST продолжаться вне transport service future.
 
@@ -26,6 +32,21 @@ Document-sync path MUST NOT удерживать LSP transport request-admission
 - **THEN** document-sync service future завершается после current-revision handoff
 - **AND** slow parse/head/exact работа продолжается в фоне
 - **AND** initial open не удерживает transport slot до терминального завершения slow path
+
+#### Scenario: Handoff не приравнивает `received_version` к `applied_version`
+- **GIVEN** `didChange` уже завершил service future после current-revision handoff
+- **AND** `received_version=V+1`, но runtime writer path ещё не применил `SetFile` и `applied_version` остаётся `V`
+- **WHEN** interactive completion запрашивается для той же requested revision `V+1`
+- **THEN** orchestration продолжает ждать `applied_version >= V+1` bounded path'ом
+- **AND** readiness `CompletionHeadArtifact` / `ExactSemanticArtifact` не считается substitute для `applied_version`
+
+#### Scenario: `didChange` может завершиться до observable advance `applied_version`
+- **GIVEN** changed-text `didChange` уже обновил `latest_received` и shadow state до `V+1`
+- **AND** current-revision `SetFile` только поставлен в runtime writer path
+- **WHEN** document-sync service future завершается
+- **THEN** `received_version` MAY уже быть равен `V+1`
+- **AND** `applied_version` MAY ещё кратко оставаться на `V`, пока runtime snapshot догоняет handoff
+- **AND** это не считается нарушением short-lived transport contract
 
 ## MODIFIED Requirements
 ### Requirement: Completion under large-module churn использует bounded wait и fail-closed current-revision path (MUST)

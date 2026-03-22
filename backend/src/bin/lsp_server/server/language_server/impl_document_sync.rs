@@ -861,6 +861,8 @@ impl BslLanguageServer {
                     },
                 );
             }
+            // This handoff advances transport-visible freshness immediately, but runtime
+            // applied_version may still lag until the interactive writer path catches up.
             self.analysis_v2.apply_changes_interactive(
                 bsl_runtime::application::ObservabilityOrigin::Lsp,
                 current_revision_changes,

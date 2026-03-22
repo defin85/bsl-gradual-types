@@ -13,6 +13,7 @@ Incident bundle `2026-03-22T16:19:59Z` показывает, что текущи
 ## What Changes
 - Добавить в `bsl-intellisense-v2` требование short-lived transport path для `didOpen/didChange`:
   - current-revision `SetFile` handoff и semantics `applied_version` фиксируются явно;
+  - handoff трактуется как enqueue/register в runtime writer path, а не как мгновенно наблюдаемое продвижение `applied_version`;
   - slow stages (`parse snapshot`, current-revision precompute, exact precompute, deferred diagnostics) продолжаются в фоне;
   - transport slot не удерживается ожиданием этих slow stages.
 - Уточнить churn-aware completion contract: интерактивный completion не должен накапливать секундный `service_future_created -> first poll` backlog только потому, что предыдущие document-sync notifications ещё не завершили slow background work.

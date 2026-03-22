@@ -575,6 +575,7 @@ fn record_pending_completion_service_scope_entered_at_ms(
     }
 }
 
+#[cfg(test)]
 fn remove_pending_completion_request_id(request_id: &str) {
     let mut pending = pending_completion_request_ids_cell()
         .lock()

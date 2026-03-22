@@ -37,7 +37,10 @@ async fn current_request_jsonrpc_dispatch_received_at_ms_is_none_outside_scope()
 
 #[tokio::test]
 async fn current_request_service_future_first_poll_entered_at_ms_is_none_outside_scope() {
-    assert_eq!(current_request_service_future_first_poll_entered_at_ms(), None);
+    assert_eq!(
+        current_request_service_future_first_poll_entered_at_ms(),
+        None
+    );
 }
 
 #[tokio::test]
@@ -47,7 +50,10 @@ async fn current_request_service_future_first_poll_outcome_is_none_outside_scope
 
 #[tokio::test]
 async fn current_request_service_future_first_wake_scheduled_at_ms_is_none_outside_scope() {
-    assert_eq!(current_request_service_future_first_wake_scheduled_at_ms(), None);
+    assert_eq!(
+        current_request_service_future_first_wake_scheduled_at_ms(),
+        None
+    );
 }
 
 #[tokio::test]
@@ -302,11 +308,10 @@ async fn dispatch_context_service_records_completion_context_for_position_lookup
 
     let uri = Url::parse("file:///dispatch_context_service_record_context.bsl").expect("url");
     let position = Position::new(6, 9);
-    let mut service =
-        DispatchContextService::new(RequestContextService::new(TakeCaptureService {
-            uri: uri.clone(),
-            position,
-        }));
+    let mut service = DispatchContextService::new(RequestContextService::new(TakeCaptureService {
+        uri: uri.clone(),
+        position,
+    }));
     let completion_params = CompletionParams {
         text_document_position: tower_lsp::lsp_types::TextDocumentPositionParams {
             text_document: tower_lsp::lsp_types::TextDocumentIdentifier { uri: uri.clone() },
@@ -328,7 +333,8 @@ async fn dispatch_context_service_records_completion_context_for_position_lookup
     assert!(captured.request_received_at_ms.is_some());
     assert!(captured.service_future_created_at_ms.is_some());
     assert!(
-        captured.jsonrpc_dispatch_received_at_ms.unwrap() <= captured.request_received_at_ms.unwrap()
+        captured.jsonrpc_dispatch_received_at_ms.unwrap()
+            <= captured.request_received_at_ms.unwrap()
     );
     assert!(
         captured.request_received_at_ms.unwrap() <= captured.service_future_created_at_ms.unwrap()
@@ -439,7 +445,8 @@ async fn request_context_service_records_first_poll_and_first_wake_for_pending_f
             .by_request_id
             .get("req-pending-first-poll")
             .expect("pending completion entry after wake");
-        entry.service_future_first_wake_scheduled_at_ms
+        entry
+            .service_future_first_wake_scheduled_at_ms
             .expect("first wake timestamp must be recorded after wake")
     };
 
@@ -569,13 +576,17 @@ fn overlapping_completion_request_context_can_be_taken_by_request_id_out_of_orde
     let second = take_completion_request_context_by_request_id(second_request_id)
         .expect("second request should be taken by request id");
     assert_eq!(second.request_id, second_request_id);
+    assert!(!second.cancelled_before_take);
     assert_eq!(second.request_received_at_ms, Some(1_700_000_000_020));
     assert_eq!(second.service_future_created_at_ms, Some(1_700_000_000_020));
     assert_eq!(
         second.service_future_first_poll_entered_at_ms,
         Some(1_700_000_000_021)
     );
-    assert_eq!(second.service_future_first_poll_outcome.as_deref(), Some("pending"));
+    assert_eq!(
+        second.service_future_first_poll_outcome.as_deref(),
+        Some("pending")
+    );
     assert_eq!(
         second.service_future_first_wake_scheduled_at_ms,
         Some(1_700_000_000_022)
@@ -585,13 +596,17 @@ fn overlapping_completion_request_context_can_be_taken_by_request_id_out_of_orde
     let first = take_completion_request_context(&uri, position)
         .expect("first request should remain available by position");
     assert_eq!(first.request_id, first_request_id);
+    assert!(!first.cancelled_before_take);
     assert_eq!(first.request_received_at_ms, Some(1_700_000_000_010));
     assert_eq!(first.service_future_created_at_ms, Some(1_700_000_000_011));
     assert_eq!(
         first.service_future_first_poll_entered_at_ms,
         Some(1_700_000_000_011)
     );
-    assert_eq!(first.service_future_first_poll_outcome.as_deref(), Some("ready"));
+    assert_eq!(
+        first.service_future_first_poll_outcome.as_deref(),
+        Some("ready")
+    );
     assert_eq!(first.service_future_first_wake_scheduled_at_ms, None);
     assert_eq!(first.service_scope_entered_at_ms, Some(1_700_000_000_012));
 }
@@ -615,6 +630,60 @@ fn pending_completion_request_is_removed_when_cancelled_before_take() {
         Position::new(1, 2),
     );
     assert_eq!(taken, None);
+}
+
+#[tokio::test]
+async fn cancel_request_marks_pending_completion_request_cancelled_before_take() {
+    #[derive(Clone, Debug, Default)]
+    struct NoopService;
+
+    impl Service<Request> for NoopService {
+        type Response = ();
+        type Error = ();
+        type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _request: Request) -> Self::Future {
+            Box::pin(async move { Ok(()) })
+        }
+    }
+
+    let uri = Url::parse("file:///request_context_cancel_before_take.bsl").expect("url");
+    let position = Position::new(3, 7);
+    let mut service = RequestContextService::new(NoopService);
+    let completion_request = Request::build("textDocument/completion")
+        .id("req-cancel-before-take")
+        .params(json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": position.line, "character": position.character },
+        }))
+        .finish();
+    let completion_future = service.call(completion_request);
+
+    let cancel_request = Request::build("$/cancelRequest")
+        .params(json!({ "id": "req-cancel-before-take" }))
+        .finish();
+    let cancel_response = service
+        .call(cancel_request)
+        .await
+        .expect("cancel notification");
+    assert_eq!(cancel_response, ());
+
+    let by_position = take_completion_request_id(&uri, position);
+    assert_eq!(
+        by_position, None,
+        "cancelled request must not stay in position queue"
+    );
+
+    let context = take_completion_request_context_by_request_id("req-cancel-before-take")
+        .expect("cancelled request context must remain available by request id");
+    assert!(context.cancelled_before_take);
+    assert_eq!(context.request_id, "req-cancel-before-take");
+
+    drop(completion_future);
 }
 
 #[test]

@@ -329,10 +329,7 @@ impl CompletionTimelineCapture {
             dispatch_to_request_context_wait_ms: jsonrpc_dispatch_received_at_ms
                 .zip(request_context_call_entered_at_ms)
                 .map(
-                    |(
-                        jsonrpc_dispatch_received_at_ms,
-                        request_context_call_entered_at_ms,
-                    )| {
+                    |(jsonrpc_dispatch_received_at_ms, request_context_call_entered_at_ms)| {
                         request_context_call_entered_at_ms
                             .saturating_sub(jsonrpc_dispatch_received_at_ms)
                     },
@@ -344,16 +341,15 @@ impl CompletionTimelineCapture {
             ),
             service_future_to_scope_wait_ms: service_future_created_at_ms
                 .zip(service_scope_entered_at_ms)
-                .map(|(service_future_created_at_ms, service_scope_entered_at_ms)| {
-                    service_scope_entered_at_ms.saturating_sub(service_future_created_at_ms)
-                }),
+                .map(
+                    |(service_future_created_at_ms, service_scope_entered_at_ms)| {
+                        service_scope_entered_at_ms.saturating_sub(service_future_created_at_ms)
+                    },
+                ),
             service_future_to_first_poll_wait_ms: service_future_created_at_ms
                 .zip(service_future_first_poll_entered_at_ms)
                 .map(
-                    |(
-                        service_future_created_at_ms,
-                        service_future_first_poll_entered_at_ms,
-                    )| {
+                    |(service_future_created_at_ms, service_future_first_poll_entered_at_ms)| {
                         service_future_first_poll_entered_at_ms
                             .saturating_sub(service_future_created_at_ms)
                     },
@@ -870,6 +866,8 @@ impl BslLanguageServer {
         let pending_request_context = exact_request_context
             .as_ref()
             .or(fallback_request_context.as_ref());
+        let pending_request_cancelled_before_take =
+            pending_request_context.is_some_and(|context| context.cancelled_before_take);
         let completion_request_id = current_request_id.clone().or_else(|| {
             pending_request_context
                 .as_ref()
@@ -949,34 +947,28 @@ impl BslLanguageServer {
             fallback_request_context.as_ref(),
         );
         timeline_capture.set_pre_method_attribution_provenance(pre_method_attribution_provenance);
-        let request_context_call_entered_at_ms = current_request_received_at_ms.or_else(|| {
-            pending_request_context.and_then(|context| context.request_received_at_ms)
-        });
+        let request_context_call_entered_at_ms = current_request_received_at_ms
+            .or_else(|| pending_request_context.and_then(|context| context.request_received_at_ms));
         if let Some(request_context_call_entered_at_ms) = request_context_call_entered_at_ms {
             timeline_capture
                 .set_request_context_call_entered_at_ms(request_context_call_entered_at_ms);
         }
         if let Some(jsonrpc_dispatch_received_at_ms) =
             current_request_jsonrpc_dispatch_received_at_ms.or_else(|| {
-                pending_request_context
-                    .and_then(|context| context.jsonrpc_dispatch_received_at_ms)
+                pending_request_context.and_then(|context| context.jsonrpc_dispatch_received_at_ms)
             })
         {
-            timeline_capture.set_transport_received_at_ms_provenance(
-                "jsonrpc_dispatch_received",
-            );
-            timeline_capture
-                .set_jsonrpc_dispatch_received_at_ms(jsonrpc_dispatch_received_at_ms);
+            timeline_capture.set_transport_received_at_ms_provenance("jsonrpc_dispatch_received");
+            timeline_capture.set_jsonrpc_dispatch_received_at_ms(jsonrpc_dispatch_received_at_ms);
             timeline_capture.set_transport_received_at_ms(jsonrpc_dispatch_received_at_ms);
         } else {
-            timeline_capture
-                .set_transport_received_at_ms_provenance("request_context_call_entry");
+            timeline_capture.set_transport_received_at_ms_provenance("request_context_call_entry");
             timeline_capture.set_transport_received_at_ms(
                 request_context_call_entered_at_ms.unwrap_or(method_entered_at_ms),
             );
         }
-        if let Some(service_future_created_at_ms) =
-            current_request_service_future_created_at_ms.or_else(|| {
+        if let Some(service_future_created_at_ms) = current_request_service_future_created_at_ms
+            .or_else(|| {
                 pending_request_context.and_then(|context| context.service_future_created_at_ms)
             })
         {
@@ -1035,6 +1027,11 @@ impl BslLanguageServer {
             let completion_cancellation_token = completion_request_registration
                 .as_ref()
                 .map(|registration| registration.token());
+            if pending_request_cancelled_before_take {
+                if let Some(token) = completion_cancellation_token.as_ref() {
+                    token.cancel();
+                }
+            }
             let completion_drop_guard = Some(CompletionRequestDropCancelGuard::new(
                 completion_request_id.clone(),
                 Arc::clone(&self.completion_cancellation_registry_v2),
@@ -1162,6 +1159,30 @@ impl BslLanguageServer {
                         completion_outcome = Some("queue_rejected");
                         break 'completion_flow Some(completion_incomplete_empty_response());
                     }
+                }
+            }
+            if pending_request_cancelled_before_take {
+                if event_driven_guards_enabled {
+                    if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
+                        event_driven_guards_enabled,
+                        self,
+                        file_id,
+                        completion_request_id.as_deref(),
+                        completion_ticket.request_epoch,
+                        completion_cancellation_token.as_ref(),
+                        "before_sync_globals",
+                        &mut cancel_event_emitted,
+                    )
+                    .await
+                    {
+                        observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
+                        completion_outcome = Some(outcome);
+                        break 'completion_flow Some(completion_incomplete_empty_response());
+                    }
+                } else {
+                    observe_cancelled_timeline_outcome(&mut timeline_capture, "cancelled");
+                    completion_outcome = Some("cancelled");
+                    break 'completion_flow Some(completion_incomplete_empty_response());
                 }
             }
             let first_completion_for_file = {
@@ -2555,7 +2576,10 @@ mod tests {
         );
         assert_eq!(details.jsonrpc_dispatch_received_at_ms, None);
         assert_eq!(details.dispatch_to_request_context_wait_ms, None);
-        assert_eq!(details.service_future_created_at_ms, Some(1_699_999_999_991));
+        assert_eq!(
+            details.service_future_created_at_ms,
+            Some(1_699_999_999_991)
+        );
         assert_eq!(details.service_scope_entered_at_ms, Some(1_699_999_999_992));
         assert_eq!(details.method_entered_at_ms, Some(1_699_999_999_995));
         assert_eq!(details.handler_entered_at_ms, 1_700_000_000_000);
@@ -2599,7 +2623,10 @@ mod tests {
         let details = trace
             .server_edge_details
             .expect("server_edge_details must be present");
-        assert_eq!(details.service_future_created_at_ms, Some(1_699_999_999_995));
+        assert_eq!(
+            details.service_future_created_at_ms,
+            Some(1_699_999_999_995)
+        );
         assert_eq!(
             details.service_future_first_poll_entered_at_ms,
             Some(1_700_000_000_000)
@@ -2758,7 +2785,10 @@ mod tests {
             details.transport_received_at_ms_provenance,
             "jsonrpc_dispatch_received"
         );
-        assert_eq!(details.jsonrpc_dispatch_received_at_ms, Some(1_699_999_999_990));
+        assert_eq!(
+            details.jsonrpc_dispatch_received_at_ms,
+            Some(1_699_999_999_990)
+        );
         assert_eq!(details.dispatch_to_request_context_wait_ms, Some(2));
         assert_eq!(details.transport_to_service_future_wait_ms, Some(5));
         assert_eq!(details.service_future_to_scope_wait_ms, Some(4));

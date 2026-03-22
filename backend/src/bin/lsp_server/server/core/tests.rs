@@ -2073,6 +2073,125 @@ async fn p28_cancel_request_stops_completion_and_prevents_late_publish() {
 
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
+async fn p28_cancel_request_before_first_poll_honors_cancellation() {
+    fn completion_response_incomplete_empty(response: &CompletionResponse) -> bool {
+        match response {
+            CompletionResponse::List(list) => list.is_incomplete && list.items.is_empty(),
+            CompletionResponse::Array(items) => items.is_empty(),
+        }
+    }
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+    let mut service = crate::server::request_context::RequestContextService::new(service);
+
+    let uri =
+        Url::parse("file:///test_p28_cancel_request_before_first_poll.bsl").expect("test uri");
+    let text = "Процедура Тест()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.\nКонецПроцедуры\n";
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    let did_open_req = Request::build("textDocument/didOpen")
+        .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+        .finish();
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(did_open_req)
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position::new(2, "    ЛокМассив.".encode_utf16().count() as u32),
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: Some(CompletionContext {
+            trigger_kind: CompletionTriggerKind::INVOKED,
+            trigger_character: Some("__bsl_shadow_internal__:46".to_string()),
+        }),
+    };
+    let completion_req = Request::build("textDocument/completion")
+        .id(701_i64)
+        .params(serde_json::to_value(completion_params).expect("CompletionParams"))
+        .finish();
+    let completion_future = service.ready().await.unwrap().call(completion_req);
+
+    let cancel_req = Request::build("$/cancelRequest")
+        .params(serde_json::json!({ "id": 701_i64 }))
+        .finish();
+    let cancel_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(cancel_req)
+        .await
+        .expect("cancel request notification");
+    assert!(cancel_response.is_none(), "cancel is a notification");
+
+    let completion_response =
+        tokio::time::timeout(tokio::time::Duration::from_secs(5), completion_future)
+            .await
+            .expect("completion request timeout")
+            .expect("completion request")
+            .expect("completion response");
+    let completion_value =
+        serde_json::to_value(&completion_response).expect("serialize completion");
+    let completion_is_safe =
+        if let Some(completion_result) = completion_value.get("result").cloned() {
+            let completion_lsp: Option<CompletionResponse> =
+                serde_json::from_value(completion_result).expect("parse completion result");
+            completion_lsp
+                .as_ref()
+                .is_some_and(completion_response_incomplete_empty)
+        } else if let Some(error) = completion_value.get("error") {
+            let error_code = error
+                .get("code")
+                .and_then(|value| value.as_i64())
+                .unwrap_or_default();
+            let error_message = error
+                .get("message")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            error_code == -32800 || error_message.contains("cancel")
+        } else {
+            false
+        };
+
+    assert!(
+        completion_is_safe,
+        "expected $/cancelRequest before first poll to prevent late completion publish"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn p28_newer_completion_proactively_cancels_older_active_completion_on_same_file() {
     fn completion_response_incomplete_empty(response: &CompletionResponse) -> bool {
         match response {
@@ -9964,8 +10083,7 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
                 .and_then(|value| value.as_u64())
                 .expect("dispatch_to_request_context_wait_ms");
             assert_eq!(
-                transport_received_at_ms_provenance,
-                "jsonrpc_dispatch_received",
+                transport_received_at_ms_provenance, "jsonrpc_dispatch_received",
                 "jsonrpc dispatch timestamp must align with provenance"
             );
             assert_eq!(
@@ -9978,8 +10096,7 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
                 "jsonrpc dispatch timestamp must not exceed method_entered_at_ms"
             );
             assert_eq!(
-                dispatch_to_request_context_wait_ms
-                    <= transport_to_method_wait_ms,
+                dispatch_to_request_context_wait_ms <= transport_to_method_wait_ms,
                 true,
                 "dispatch_to_request_context_wait_ms must not exceed transport_to_method_wait_ms"
             );
@@ -10090,8 +10207,7 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
                         .and_then(|value| value.as_u64())
                         .expect("first_poll_to_first_wake_wait_ms");
                     assert_eq!(
-                        service_future_first_poll_outcome,
-                        "pending",
+                        service_future_first_poll_outcome, "pending",
                         "first wake split must only exist for pending-first-poll traces"
                     );
                     assert!(

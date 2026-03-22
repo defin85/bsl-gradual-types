@@ -55,6 +55,7 @@ struct PendingCompletionRequestIds {
 #[derive(Debug)]
 struct PendingCompletionRequestEntry {
     key: CompletionRequestKey,
+    cancelled_before_take: bool,
     jsonrpc_dispatch_received_at_ms: Option<u64>,
     request_received_at_ms: Option<u64>,
     service_future_created_at_ms: Option<u64>,
@@ -67,6 +68,7 @@ struct PendingCompletionRequestEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PendingCompletionRequestContext {
     pub(crate) request_id: String,
+    pub(crate) cancelled_before_take: bool,
     pub(crate) jsonrpc_dispatch_received_at_ms: Option<u64>,
     pub(crate) request_received_at_ms: Option<u64>,
     pub(crate) service_future_created_at_ms: Option<u64>,
@@ -251,7 +253,8 @@ impl FirstWakeTracker {
             }
         };
         if let Some(wake_at_ms) = wake_to_record {
-            self.observation.record_first_wake_scheduled_at_ms(wake_at_ms);
+            self.observation
+                .record_first_wake_scheduled_at_ms(wake_at_ms);
         }
     }
 
@@ -270,7 +273,8 @@ impl FirstWakeTracker {
             }
         };
         if let Some(wake_at_ms) = wake_to_record {
-            self.observation.record_first_wake_scheduled_at_ms(wake_at_ms);
+            self.observation
+                .record_first_wake_scheduled_at_ms(wake_at_ms);
         }
     }
 
@@ -425,6 +429,7 @@ fn record_pending_completion_request_id(
         }
         if let Some(entry) = pending.by_request_id.get_mut(&request_id) {
             entry.key = key.clone();
+            entry.cancelled_before_take = false;
             entry.request_received_at_ms = request_received_at_ms;
         }
     } else {
@@ -432,6 +437,7 @@ fn record_pending_completion_request_id(
             request_id.clone(),
             PendingCompletionRequestEntry {
                 key: key.clone(),
+                cancelled_before_take: false,
                 jsonrpc_dispatch_received_at_ms: None,
                 request_received_at_ms,
                 service_future_created_at_ms: None,
@@ -467,6 +473,7 @@ fn record_pending_completion_jsonrpc_dispatch_received_at_ms(
         }
         if let Some(entry) = pending.by_request_id.get_mut(&request_id) {
             entry.key = key.clone();
+            entry.cancelled_before_take = false;
             entry.jsonrpc_dispatch_received_at_ms = jsonrpc_dispatch_received_at_ms;
         }
     } else {
@@ -474,6 +481,7 @@ fn record_pending_completion_jsonrpc_dispatch_received_at_ms(
             request_id.clone(),
             PendingCompletionRequestEntry {
                 key: key.clone(),
+                cancelled_before_take: false,
                 jsonrpc_dispatch_received_at_ms,
                 request_received_at_ms: None,
                 service_future_created_at_ms: None,
@@ -485,6 +493,23 @@ fn record_pending_completion_jsonrpc_dispatch_received_at_ms(
         );
     }
     ensure_request_id_enqueued(&mut pending, &key, &request_id);
+}
+
+fn mark_pending_completion_request_cancelled_before_take(request_id: &str) {
+    let mut pending = pending_completion_request_ids_cell()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let Some(key) = pending
+        .by_request_id
+        .get(request_id)
+        .map(|entry| entry.key.clone())
+    else {
+        return;
+    };
+    if let Some(entry) = pending.by_request_id.get_mut(request_id) {
+        entry.cancelled_before_take = true;
+    }
+    remove_request_id_from_key_queue(&mut pending, &key, request_id);
 }
 
 fn record_pending_completion_service_future_created_at_ms(
@@ -579,6 +604,7 @@ pub(crate) fn record_completion_request_id_for_testing(
         request_id.clone(),
         PendingCompletionRequestEntry {
             key: key.clone(),
+            cancelled_before_take: false,
             jsonrpc_dispatch_received_at_ms: None,
             request_received_at_ms: None,
             service_future_created_at_ms: None,
@@ -613,6 +639,7 @@ pub(crate) fn take_completion_request_context_by_request_id(
     }
     Some(PendingCompletionRequestContext {
         request_id: request_id.to_string(),
+        cancelled_before_take: entry.cancelled_before_take,
         jsonrpc_dispatch_received_at_ms: entry.jsonrpc_dispatch_received_at_ms,
         request_received_at_ms: entry.request_received_at_ms,
         service_future_created_at_ms: entry.service_future_created_at_ms,
@@ -652,8 +679,12 @@ pub(crate) fn take_completion_request_context(
             if empty {
                 pending.by_key.remove(&key);
             }
+            if entry.cancelled_before_take {
+                continue;
+            }
             return Some(PendingCompletionRequestContext {
                 request_id,
+                cancelled_before_take: entry.cancelled_before_take,
                 jsonrpc_dispatch_received_at_ms: entry.jsonrpc_dispatch_received_at_ms,
                 request_received_at_ms: entry.request_received_at_ms,
                 service_future_created_at_ms: entry.service_future_created_at_ms,
@@ -888,7 +919,7 @@ where
 
     fn call(&mut self, request: Request) -> Self::Future {
         if let Some(request_id) = cancelled_request_id_from_request(&request) {
-            remove_pending_completion_request_id(&request_id);
+            mark_pending_completion_request_cancelled_before_take(&request_id);
             notify_cancel_request_hook(request_id);
         }
         let request_id = request_id_from_request(&request);
@@ -901,8 +932,10 @@ where
         }
         let service_future_poll_observation =
             ServiceFuturePollObservationState::new(request_id.clone());
-        let future =
-            InstrumentedServiceFuture::new(self.inner.call(request), service_future_poll_observation.clone());
+        let future = InstrumentedServiceFuture::new(
+            self.inner.call(request),
+            service_future_poll_observation.clone(),
+        );
         let service_future_created_at_ms = Some(super::unix_timestamp_ms());
         if let (Some(request_id), Some(service_future_created_at_ms)) =
             (request_id.as_deref(), service_future_created_at_ms)

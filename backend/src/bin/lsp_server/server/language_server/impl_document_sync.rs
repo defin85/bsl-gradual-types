@@ -23,6 +23,20 @@ async fn maybe_inject_did_change_parse_delay() {
 async fn maybe_inject_did_change_parse_delay() {}
 
 #[cfg(test)]
+fn maybe_inject_did_change_blocking_parse_delay() {
+    if let Some(delay_ms) = std::env::var("BSL_TEST_DID_CHANGE_BLOCKING_PARSE_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+    {
+        std::thread::sleep(Duration::from_millis(delay_ms));
+    }
+}
+
+#[cfg(not(test))]
+fn maybe_inject_did_change_blocking_parse_delay() {}
+
+#[cfg(test)]
 pub(super) fn did_change_inline_parse_delay_active_for_test() -> bool {
     DID_CHANGE_PARSE_DELAY_ACTIVE.load(Ordering::SeqCst) > 0
 }
@@ -57,6 +71,75 @@ fn parse_snapshot_from_report(
 }
 
 impl BslLanguageServer {
+    fn record_parse_snapshot_report_v2(
+        &self,
+        report: &bsl_runtime::system::parser_coordinator::ParseSnapshotReport,
+        parse_elapsed: Duration,
+    ) {
+        let mode = if report.incremental {
+            if report.changed_ranges.is_empty() {
+                "reused"
+            } else {
+                "incremental"
+            }
+        } else {
+            "full"
+        };
+        let changed_ranges_count = report.changed_ranges.len();
+        let changed_ranges_bytes: usize = report
+            .changed_ranges
+            .iter()
+            .map(changed_range_footprint_bytes)
+            .sum();
+        self.coordinator.record_intellisense_v2_parse_snapshot(
+            bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+            mode,
+            changed_ranges_count,
+            changed_ranges_bytes,
+            report.fallback_reason.as_deref(),
+            parse_elapsed,
+        );
+    }
+
+    async fn build_parse_snapshot_v2(
+        &self,
+        file_id: bsl_analysis_v2::FileId,
+        version: i32,
+        path: Arc<str>,
+        text: Arc<str>,
+        parser_edits: Vec<bsl_runtime::system::parser_coordinator::TextEdit>,
+        inject_test_blocking_delay: bool,
+    ) -> Option<bsl_analysis_v2::ParseSnapshot> {
+        let coordinator = self.coordinator.clone();
+        let path_for_parse = path.clone();
+        let text_for_parse = text.clone();
+        let parse_started = Instant::now();
+        let report = bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
+            bsl_runtime::application::CpuWorkClass::Background,
+            bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+            Some(self.coordinator.as_ref()),
+            move || {
+                if inject_test_blocking_delay {
+                    maybe_inject_did_change_blocking_parse_delay();
+                }
+                coordinator.parser_coordinator().and_then(|parser| {
+                    parser
+                        .parse_incremental_with_report(
+                            PathBuf::from(path_for_parse.as_ref()),
+                            text_for_parse.to_string(),
+                            parser_edits,
+                        )
+                        .ok()
+                })
+            },
+        )
+        .await
+        .ok()
+        .flatten()?;
+        self.record_parse_snapshot_report_v2(&report, parse_started.elapsed());
+        Some(parse_snapshot_from_report(file_id, version, report))
+    }
+
     fn spawn_completion_head_reuse_from_previous_version_v2(
         &self,
         file_id: bsl_analysis_v2::FileId,
@@ -253,66 +336,15 @@ impl BslLanguageServer {
         let text: Arc<str> = Arc::from(text);
         let path: Arc<str> = Arc::from(path);
         let parse_snapshot = self
-            .coordinator
-            .parser_coordinator()
-            .and_then(|parser| {
-                let parse_started = Instant::now();
-                let report = parser
-                    .parse_incremental_with_report(
-                        PathBuf::from(path.as_ref()),
-                        text.to_string(),
-                        Vec::new(),
-                    )
-                    .ok()?;
-                Some((report, parse_started.elapsed()))
-            })
-            .map(|(report, parse_elapsed)| {
-                let mode = if report.incremental {
-                    if report.changed_ranges.is_empty() {
-                        "reused"
-                    } else {
-                        "incremental"
-                    }
-                } else {
-                    "full"
-                };
-                let changed_ranges_count = report.changed_ranges.len();
-                let changed_ranges_bytes: usize = report
-                    .changed_ranges
-                    .iter()
-                    .map(changed_range_footprint_bytes)
-                    .sum();
-                self.coordinator.record_intellisense_v2_parse_snapshot(
-                    bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
-                    mode,
-                    changed_ranges_count,
-                    changed_ranges_bytes,
-                    report.fallback_reason.as_deref(),
-                    parse_elapsed,
-                );
-                bsl_analysis_v2::ParseSnapshot {
-                    file_id,
-                    file_version: version,
-                    parse_result: Arc::new(report.parse_result),
-                    line_index: report.line_index,
-                    backend_tree: report.backend_tree,
-                    changed_ranges: Arc::new(
-                        report
-                            .changed_ranges
-                            .into_iter()
-                            .map(|range| bsl_analysis_v2::ParseChangedRange {
-                                start_byte: range.start_byte,
-                                old_end_byte: range.old_end_byte,
-                                new_end_byte: range.new_end_byte,
-                            })
-                            .collect(),
-                    ),
-                    produced_at_millis: unix_time_millis(),
-                    backend_tree_hash: report.backend_tree_hash,
-                    incremental: report.incremental,
-                    fallback_reason: report.fallback_reason.map(Arc::from),
-                }
-            });
+            .build_parse_snapshot_v2(
+                file_id,
+                version,
+                path.clone(),
+                text.clone(),
+                Vec::new(),
+                false,
+            )
+            .await;
 
         self.latest_received_file_versions_v2
             .write()
@@ -600,45 +632,15 @@ impl BslLanguageServer {
             None
         } else {
             maybe_inject_did_change_parse_delay().await;
-            self.coordinator
-                .parser_coordinator()
-                .and_then(|parser| {
-                    let parse_started = Instant::now();
-                    let report = parser
-                        .parse_incremental_with_report(
-                            PathBuf::from(path.as_ref()),
-                            updated_text.to_string(),
-                            parser_edits.clone(),
-                        )
-                        .ok()?;
-                    Some((report, parse_started.elapsed()))
-                })
-                .map(|(report, parse_elapsed)| {
-                    let mode = if report.incremental {
-                        if report.changed_ranges.is_empty() {
-                            "reused"
-                        } else {
-                            "incremental"
-                        }
-                    } else {
-                        "full"
-                    };
-                    let changed_ranges_count = report.changed_ranges.len();
-                    let changed_ranges_bytes: usize = report
-                        .changed_ranges
-                        .iter()
-                        .map(changed_range_footprint_bytes)
-                        .sum();
-                    self.coordinator.record_intellisense_v2_parse_snapshot(
-                        bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
-                        mode,
-                        changed_ranges_count,
-                        changed_ranges_bytes,
-                        report.fallback_reason.as_deref(),
-                        parse_elapsed,
-                    );
-                    parse_snapshot_from_report(file_id, version, report)
-                })
+            self.build_parse_snapshot_v2(
+                file_id,
+                version,
+                path.clone(),
+                updated_text.clone(),
+                parser_edits.clone(),
+                true,
+            )
+            .await
         };
         if let Some(parse_snapshot) = parse_snapshot {
             self.analysis_v2.apply_changes_interactive(

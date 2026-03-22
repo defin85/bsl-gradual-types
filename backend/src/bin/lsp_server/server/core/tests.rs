@@ -499,6 +499,128 @@ async fn p35_large_conf_big_did_open_returns_promptly() {
     drain_task.abort();
 }
 
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn p33_did_open_returns_before_blocking_parse_snapshot_finishes() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const FIXTURE: &str = "Процедура Тест()\n    ДляCompletion = Объект.\nКонецПроцедуры\n";
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+    let _blocking_parse_delay_guard =
+        EnvVarGuard::set("BSL_TEST_DID_OPEN_BLOCKING_PARSE_DELAY_MS", "1500");
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let uri = Url::parse("file:///test_p33_did_open_prompt_return.bsl").expect("uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: FIXTURE.to_string(),
+        },
+    };
+    let started = Instant::now();
+    let did_open_response = tokio::time::timeout(Duration::from_millis(250), async {
+        service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                Request::build("textDocument/didOpen")
+                    .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                    .finish(),
+            )
+            .await
+            .expect("didOpen notification")
+    })
+    .await
+    .expect("didOpen must return before blocking parse snapshot completes");
+    let elapsed = started.elapsed();
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+    assert!(
+        elapsed < Duration::from_millis(250),
+        "didOpen must stay short-lived under blocking parse snapshot delay (elapsed={elapsed:?})"
+    );
+
+    server.sync_v2_globals().await;
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    tokio::time::timeout(Duration::from_millis(100), async {
+        loop {
+            if server
+                .latest_received_file_versions_v2
+                .read()
+                .await
+                .get(&file_id)
+                .copied()
+                == Some(1)
+                && server
+                    .analysis_v2
+                    .file_revision_state(file_id)
+                    .await
+                    .map(|state| state.version)
+                    == Some(1)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("didOpen must complete after current-revision handoff");
+
+    drain_task.abort();
+}
+
 async fn wait_lsp_publish_diagnostics(
     receiver: &mut UnboundedReceiver<PublishDiagnosticsParams>,
     uri: &Url,
@@ -14303,8 +14425,8 @@ async fn p33_completion_current_revision_head_ignores_did_change_inline_parse_de
         "head-path completion must not wait for delayed didChange inline parse to finish (elapsed={elapsed:?})"
     );
     assert!(
-        !did_change_handle.is_finished(),
-        "completion must finish before delayed didChange inline parse completes"
+        did_change_handle.is_finished(),
+        "didChange must already return while delayed parse continues in background"
     );
 
     did_change_handle.await.expect("didChange join");
@@ -14479,8 +14601,8 @@ async fn p33_completion_service_first_poll_ignores_blocking_did_change_parse_del
         "completion must not inherit blocking didChange parse delay before first poll (elapsed={elapsed:?}, labels={completion_labels:?}, trace={trace:?})"
     );
     assert!(
-        !did_change_handle.is_finished(),
-        "completion must finish before blocking didChange parse completes"
+        did_change_handle.is_finished(),
+        "didChange must already return while blocking parse continues in background"
     );
 
     did_change_handle.await.expect("didChange join");
@@ -14662,8 +14784,8 @@ async fn p33_changed_text_current_revision_head_stays_available_while_parse_snap
         "changed-text current-revision head must stay bounded while parse snapshot builds in background (elapsed={elapsed:?})"
     );
     assert!(
-        !did_change_handle.is_finished(),
-        "completion must finish before blocking parse snapshot build completes for changed text"
+        did_change_handle.is_finished(),
+        "didChange must already return while changed-text parse snapshot build continues in background"
     );
 
     did_change_handle.await.expect("didChange join");
@@ -18766,7 +18888,7 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
     init_test_tracing();
     let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
     const PROFILE_NAME: &str = "p38_real_conf_big_revision_churn_completion_perf_report_live";
-    const WARMUP_REQUESTS: usize = 3;
+    const WARMUP_REQUESTS: usize = 1;
     const MEASURE_REQUESTS: usize = 4;
     const REVISION_CHURN_HEAD_PATH_P95_BUDGET_MS: f64 = 150.0;
 

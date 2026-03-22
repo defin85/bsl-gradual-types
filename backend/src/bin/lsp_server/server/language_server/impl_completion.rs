@@ -879,12 +879,16 @@ impl BslLanguageServer {
         }
 
         let file_id = self.get_or_create_file_id_v2(&uri).await;
+        // Serialize against prior didOpen/didChange current-revision handoff without
+        // reintroducing slow parse/exact work on the completion path.
+        let _text_sync_barrier = self.text_sync_v2.lock().await;
         let version_hint = self
             .latest_received_file_versions_v2
             .read()
             .await
             .get(&file_id)
             .copied();
+        drop(_text_sync_barrier);
         let completion_knobs =
             bsl_runtime::application::CompletionPipelineKnobs::from_runtime_config();
         self.completion_dispatcher_v2

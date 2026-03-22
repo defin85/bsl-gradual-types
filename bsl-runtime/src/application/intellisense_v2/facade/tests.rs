@@ -153,6 +153,132 @@ async fn interactive_apply_changes_preempts_background_backlog_for_wait_for_file
 }
 
 #[tokio::test]
+async fn interactive_set_file_burst_coalesces_latest_version_for_wait_for_file_version() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+    let _apply_delay_guard = EnvVarGuard::set("BSL_TEST_RUNTIME_APPLY_SET_FILE_DELAY_MS", "80");
+
+    let runtime = IntellisenseV2Facade::new(
+        AnalysisHostV2::default(),
+        Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p7"))),
+        None,
+    );
+    let file_id = FileId(21);
+
+    for version in 1..=3 {
+        runtime.apply_changes_interactive(
+            ObservabilityOrigin::Lsp,
+            vec![Change::SetFile {
+                file_id,
+                text: Arc::from(format!("x = {version};")),
+                version,
+                path: Arc::from("interactive_burst_latest.bsl"),
+            }],
+        );
+    }
+
+    let started = Instant::now();
+    let wait_result = timeout(
+        Duration::from_millis(170),
+        runtime.wait_for_file_version_with_priority(
+            ObservabilityOrigin::Lsp,
+            RuntimeQueuePriority::Interactive,
+            file_id,
+            3,
+        ),
+    )
+    .await
+    .expect("interactive SetFile burst should not require sequentially applying superseded revisions");
+    assert!(
+        wait_result.ready,
+        "wait_for_file_version must observe the latest burst revision"
+    );
+    assert!(
+        started.elapsed() < Duration::from_millis(170),
+        "latest burst revision must become applied within a single-delay budget"
+    );
+
+    let analysis = runtime.snapshot().await;
+    assert_eq!(analysis.file_version(file_id).unwrap(), Some(3));
+
+    runtime.shutdown_for_test().await;
+}
+
+#[tokio::test]
+async fn stale_background_snapshot_apply_does_not_regress_newer_interactive_revision() {
+    let runtime = IntellisenseV2Facade::new(
+        AnalysisHostV2::default(),
+        Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p7"))),
+        None,
+    );
+    let file_id = FileId(22);
+    let latest_text: Arc<str> = Arc::from("x = 2;");
+    let stale_text: Arc<str> = Arc::from("x = 1;");
+
+    runtime.apply_changes_interactive(
+        ObservabilityOrigin::Lsp,
+        vec![Change::SetFile {
+            file_id,
+            text: latest_text.clone(),
+            version: 2,
+            path: Arc::from("stale_snapshot_guard.bsl"),
+        }],
+    );
+    let ready = timeout(
+        Duration::from_secs(1),
+        runtime.wait_for_file_version(file_id, 2),
+    )
+    .await
+    .expect("wait_for_file_version timeout");
+    assert!(ready, "latest interactive revision must become visible first");
+
+    runtime.apply_changes(vec![Change::SetFileWithSnapshot {
+        file_id,
+        text: stale_text,
+        version: 1,
+        path: Arc::from("stale_snapshot_guard.bsl"),
+        parse_snapshot: parse_snapshot_for_test(file_id, 1, "x = 1;", vec![], false, None),
+    }]);
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let analysis = runtime.snapshot().await;
+    assert_eq!(analysis.file_version(file_id).unwrap(), Some(2));
+    assert_eq!(
+        analysis.file_text(file_id).ok().flatten().as_deref(),
+        Some(latest_text.as_ref())
+    );
+
+    runtime.shutdown_for_test().await;
+}
+
+#[tokio::test]
 async fn wait_for_file_version_runtime_trace_distinguishes_immediate_and_waiter_paths() {
     let runtime = IntellisenseV2Facade::new(
         AnalysisHostV2::default(),

@@ -594,6 +594,114 @@ enum Command {
     },
 }
 
+struct CurrentRevisionApplyCommand {
+    origin: ObservabilityOrigin,
+    enqueued_at: Instant,
+    file_id: FileId,
+    version: i32,
+    text: Arc<str>,
+    path: Arc<str>,
+    reuse_previous_version: Option<i32>,
+}
+
+impl CurrentRevisionApplyCommand {
+    fn try_from_command(command: Command) -> Result<Self, Command> {
+        let Command::ApplyChanges {
+            origin,
+            enqueued_at,
+            changes,
+        } = command
+        else {
+            return Err(command);
+        };
+        if origin != ObservabilityOrigin::Lsp {
+            return Err(Command::ApplyChanges {
+                origin,
+                enqueued_at,
+                changes,
+            });
+        }
+        let parsed = match changes.as_slice() {
+            [Change::SetFile {
+                file_id,
+                text,
+                version,
+                path,
+            }] => Some(Self {
+                origin,
+                enqueued_at,
+                file_id: *file_id,
+                version: *version,
+                text: text.clone(),
+                path: path.clone(),
+                reuse_previous_version: None,
+            }),
+            [
+                Change::SetFile {
+                    file_id,
+                    text,
+                    version,
+                    path,
+                },
+                Change::ReuseCompletionHeadFromPreviousVersion {
+                    file_id: reuse_file_id,
+                    expected_version,
+                    previous_version,
+                },
+            ] if file_id == reuse_file_id && version == expected_version => Some(Self {
+                origin,
+                enqueued_at,
+                file_id: *file_id,
+                version: *version,
+                text: text.clone(),
+                path: path.clone(),
+                reuse_previous_version: Some(*previous_version),
+            }),
+            _ => None,
+        };
+        parsed.ok_or(Command::ApplyChanges {
+            origin,
+            enqueued_at,
+            changes,
+        })
+    }
+
+    fn can_supersede(&self, newer: &Self) -> bool {
+        self.file_id == newer.file_id && newer.version > self.version
+    }
+
+    fn supersede_with(&mut self, newer: Self) {
+        self.enqueued_at = self.enqueued_at.min(newer.enqueued_at);
+        self.version = newer.version;
+        self.text = newer.text;
+        self.path = newer.path;
+        // Older current-revision batches are skipped, so previous_version may no longer
+        // exist in the runtime state. Keep the latest SetFile and let head precompute rebuild.
+        self.reuse_previous_version = None;
+    }
+
+    fn into_command(self) -> Command {
+        let mut changes = vec![Change::SetFile {
+            file_id: self.file_id,
+            text: self.text,
+            version: self.version,
+            path: self.path,
+        }];
+        if let Some(previous_version) = self.reuse_previous_version {
+            changes.push(Change::ReuseCompletionHeadFromPreviousVersion {
+                file_id: self.file_id,
+                expected_version: self.version,
+                previous_version,
+            });
+        }
+        Command::ApplyChanges {
+            origin: self.origin,
+            enqueued_at: self.enqueued_at,
+            changes,
+        }
+    }
+}
+
 const INTERACTIVE_BURST_QUOTA: usize = 8;
 
 fn recv_next_writer_command(
@@ -665,6 +773,40 @@ fn recv_next_writer_command(
             }
         }
     }
+}
+
+fn coalesce_interactive_current_revision_apply_command(
+    interactive_rx: &std::sync::mpsc::Receiver<Command>,
+    command: Command,
+    pending_interactive_command: &mut Option<Command>,
+) -> Command {
+    use std::sync::mpsc::TryRecvError;
+
+    let mut current = match CurrentRevisionApplyCommand::try_from_command(command) {
+        Ok(current) => current,
+        Err(command) => return command,
+    };
+
+    loop {
+        match interactive_rx.try_recv() {
+            Ok(next_command) => match CurrentRevisionApplyCommand::try_from_command(next_command) {
+                Ok(next) if current.can_supersede(&next) => {
+                    current.supersede_with(next);
+                }
+                Ok(next) => {
+                    *pending_interactive_command = Some(next.into_command());
+                    break;
+                }
+                Err(next_command) => {
+                    *pending_interactive_command = Some(next_command);
+                    break;
+                }
+            },
+            Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
+        }
+    }
+
+    current.into_command()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

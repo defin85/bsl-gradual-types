@@ -20,6 +20,7 @@ use bsl_backend::system::{
 };
 use futures::StreamExt;
 use std::collections::BTreeSet;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tower::Service;
 use tower::ServiceExt;
@@ -40,6 +41,7 @@ use tower_lsp::lsp_types::{
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::LspService;
+use tower_lsp::Server;
 
 fn init_test_tracing() {
     static INIT: std::sync::Once = std::sync::Once::new();
@@ -308,6 +310,289 @@ async fn initialize_lsp_service(service: &mut LspService<BslLanguageServer>) {
     );
 }
 
+struct LiveLspTransportHarness {
+    reader: BufReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
+    writer: tokio::io::WriteHalf<tokio::io::DuplexStream>,
+    server_task: tokio::task::JoinHandle<()>,
+}
+
+impl LiveLspTransportHarness {
+    async fn send_notification<P>(&mut self, method: &str, params: P)
+    where
+        P: serde::Serialize,
+    {
+        self.write_message(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params,
+        }))
+        .await;
+    }
+
+    async fn send_request<P>(&mut self, id: i64, method: &str, params: P) -> serde_json::Value
+    where
+        P: serde::Serialize,
+    {
+        self.write_message(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": method,
+            "params": params,
+        }))
+        .await;
+        self.wait_for_response(id).await
+    }
+
+    async fn shutdown(mut self) {
+        let shutdown_response = self
+            .send_request(9_999_991, "shutdown", serde_json::Value::Null)
+            .await;
+        assert!(
+            shutdown_response.get("result").is_some(),
+            "shutdown should return a response"
+        );
+        self.send_notification("exit", serde_json::Value::Null).await;
+        drop(self.writer);
+        if tokio::time::timeout(Duration::from_secs(5), &mut self.server_task)
+            .await
+            .is_err()
+        {
+            self.server_task.abort();
+            let _ = self.server_task.await;
+        }
+    }
+
+    async fn write_message(&mut self, message: &serde_json::Value) {
+        let body = serde_json::to_vec(message).expect("serialize LSP transport message");
+        let header = format!("Content-Length: {}\r\n\r\n", body.len());
+        self.writer
+            .write_all(header.as_bytes())
+            .await
+            .expect("write LSP Content-Length header");
+        self.writer
+            .write_all(&body)
+            .await
+            .expect("write LSP message body");
+        self.writer.flush().await.expect("flush LSP client stream");
+    }
+
+    async fn wait_for_response(&mut self, expected_id: i64) -> serde_json::Value {
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                let message = self.read_message().await;
+                if message.get("method").is_some() {
+                    continue;
+                }
+                if message
+                    .get("id")
+                    .and_then(|value| value.as_i64())
+                    == Some(expected_id)
+                {
+                    return message;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for LSP transport response")
+    }
+
+    async fn read_message(&mut self) -> serde_json::Value {
+        let mut content_length = None;
+        loop {
+            let mut line = String::new();
+            let bytes = self
+                .reader
+                .read_line(&mut line)
+                .await
+                .expect("read LSP header line");
+            assert!(bytes > 0, "unexpected EOF while reading LSP header");
+            if line == "\r\n" {
+                break;
+            }
+            let trimmed = line.trim_end_matches(['\r', '\n']);
+            if let Some(raw_len) = trimmed.strip_prefix("Content-Length:") {
+                content_length = Some(
+                    raw_len
+                        .trim()
+                        .parse::<usize>()
+                        .expect("parse Content-Length header"),
+                );
+            }
+        }
+        let body_len = content_length.expect("Content-Length header must be present");
+        let mut body = vec![0; body_len];
+        self.reader
+            .read_exact(&mut body)
+            .await
+            .expect("read LSP message body");
+        serde_json::from_slice(&body).expect("parse framed LSP JSON message")
+    }
+}
+
+async fn spawn_live_lsp_transport_harness(
+    coordinator: Arc<SystemCoordinator>,
+) -> (LiveLspTransportHarness, BslLanguageServer) {
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let (service, socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+    let service = crate::server::request_context::DispatchContextService::new(
+        crate::server::request_context::RequestContextService::new(service),
+    );
+    let (client_stream, server_stream) = tokio::io::duplex(1024 * 1024);
+    let (client_read, client_write) = tokio::io::split(client_stream);
+    let (server_read, server_write) = tokio::io::split(server_stream);
+    let server_task = tokio::spawn(async move {
+        Server::new(server_read, server_write, socket)
+            .serve(service)
+            .await;
+    });
+    (
+        LiveLspTransportHarness {
+            reader: BufReader::new(client_read),
+            writer: client_write,
+            server_task,
+        },
+        server,
+    )
+}
+
+async fn initialize_live_lsp_transport(harness: &mut LiveLspTransportHarness) {
+    let initialize_response = harness
+        .send_request(
+            1,
+            "initialize",
+            InitializeParams {
+                capabilities: ClientCapabilities::default(),
+                ..Default::default()
+            },
+        )
+        .await;
+    assert!(
+        initialize_response.get("result").is_some(),
+        "initialize should return a response"
+    );
+    harness
+        .send_notification("initialized", InitializedParams {})
+        .await;
+}
+
+async fn live_transport_append_text_change(
+    harness: &mut LiveLspTransportHarness,
+    uri: &Url,
+    current_text: &str,
+    version: i32,
+    appended_text: &str,
+) {
+    let end_position = utf16_end_position(current_text);
+    harness
+        .send_notification(
+            "textDocument/didChange",
+            DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: Some(Range {
+                        start: end_position,
+                        end: end_position,
+                    }),
+                    range_length: None,
+                    text: appended_text.to_string(),
+                }],
+            },
+        )
+        .await;
+}
+
+async fn live_transport_completion_labels_with_request(
+    harness: &mut LiveLspTransportHarness,
+    request_id: i64,
+    uri: &Url,
+    position: Position,
+    context: Option<CompletionContext>,
+) -> Vec<String> {
+    let completion_response = harness
+        .send_request(
+            request_id,
+            "textDocument/completion",
+            CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position,
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context,
+            },
+        )
+        .await;
+    let completion_result = completion_response
+        .get("result")
+        .cloned()
+        .expect("completion result field");
+    let completion: Option<CompletionResponse> =
+        serde_json::from_value(completion_result).expect("parse completion result");
+
+    normalize_lsp_member_labels(&completion.expect("completion result present"))
+}
+
+async fn live_transport_get_completion_timeline(
+    harness: &mut LiveLspTransportHarness,
+    request_id: i64,
+    limit: usize,
+) -> serde_json::Value {
+    let execute_response = harness
+        .send_request(
+            request_id,
+            "workspace/executeCommand",
+            serde_json::json!({
+                "command": "bsl.getCompletionTimeline",
+                "arguments": [{ "limit": limit }],
+            }),
+        )
+        .await;
+    execute_response
+        .get("result")
+        .cloned()
+        .expect("result field")
+}
+
+async fn live_transport_get_observability_metrics(
+    harness: &mut LiveLspTransportHarness,
+    request_id: i64,
+) -> serde_json::Value {
+    let execute_response = harness
+        .send_request(
+            request_id,
+            "workspace/executeCommand",
+            serde_json::json!({
+                "command": "bsl.getObservabilityMetrics",
+                "arguments": [],
+            }),
+        )
+        .await;
+    execute_response
+        .get("result")
+        .and_then(|result| result.get("metrics"))
+        .cloned()
+        .expect("result.metrics field")
+}
+
 async fn shutdown_lsp_service(
     service: &mut LspService<BslLanguageServer>,
     close_uri: Option<&Url>,
@@ -469,6 +754,9 @@ async fn p35_large_conf_big_did_open_returns_promptly() {
     let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
 
     initialize_lsp_service(&mut service).await;
+    let mut service = crate::server::request_context::DispatchContextService::new(
+        crate::server::request_context::RequestContextService::new(service),
+    );
 
     let uri = Url::from_file_path(&conf_big_module).expect("conf_big module uri");
     let text = std::fs::read_to_string(&conf_big_module).expect("read conf_big module");
@@ -12971,46 +13259,6 @@ async fn replace_lsp_fixture_and_wait(
     wait_for_type_index_precompute_completion(server, file_id).await;
 }
 
-async fn lsp_append_text_change<S>(
-    service: &mut S,
-    uri: &Url,
-    current_text: &str,
-    version: i32,
-    appended_text: &str,
-) where
-    S: Service<Request, Response = Option<JsonRpcResponse>> + Send,
-    S::Future: Send,
-    S::Error: std::fmt::Debug,
-{
-    let end_position = utf16_end_position(current_text);
-    let did_change = DidChangeTextDocumentParams {
-        text_document: VersionedTextDocumentIdentifier {
-            uri: uri.clone(),
-            version,
-        },
-        content_changes: vec![TextDocumentContentChangeEvent {
-            range: Some(Range {
-                start: end_position,
-                end: end_position,
-            }),
-            range_length: None,
-            text: appended_text.to_string(),
-        }],
-    };
-    let did_change_response = service
-        .ready()
-        .await
-        .unwrap()
-        .call(
-            Request::build("textDocument/didChange")
-                .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
-                .finish(),
-        )
-        .await
-        .expect("didChange notification");
-    assert!(did_change_response.is_none(), "didChange is a notification");
-}
-
 async fn lsp_completion_labels_at<S>(service: &mut S, uri: &Url, position: Position) -> Vec<String>
 where
     S: Service<Request, Response = Option<JsonRpcResponse>> + Send,
@@ -13773,6 +14021,14 @@ fn completion_timeline_prepare_detail_str<'a>(
         .and_then(|value| value.as_object())
         .and_then(|details| details.get(field))
         .and_then(|value| value.as_str())
+}
+
+fn completion_timeline_server_edge_u64(trace: &serde_json::Value, field: &str) -> Option<u64> {
+    trace
+        .get("server_edge_details")
+        .and_then(|value| value.as_object())
+        .and_then(|details| details.get(field))
+        .and_then(|value| value.as_u64())
 }
 
 async fn wait_for_type_index_precompute_phase(
@@ -18749,6 +19005,7 @@ async fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
             .await,
         "analysis runtime must catch up to opened real conf_big file version"
     );
+    wait_for_type_index_precompute_completion(&server, file_id).await;
     let exact_type_index_seed =
         seed_exact_type_index_for_current_file_version(&server, file_id).await;
     server.cancel_type_index_precompute_v2(file_id).await;
@@ -19226,11 +19483,46 @@ async fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
 #[tokio::test]
 async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
     init_test_tracing();
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+    let _blocking_parse_delay_guard =
+        EnvVarGuard::set("BSL_TEST_DID_CHANGE_BLOCKING_PARSE_DELAY_MS", "1500");
+
     let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
     const PROFILE_NAME: &str = "p38_real_conf_big_revision_churn_completion_perf_report_live";
+    const CHANGE_ID: &str = "refactor-lsp-document-sync-slot-release";
     const WARMUP_REQUESTS: usize = 1;
-    const MEASURE_REQUESTS: usize = 4;
+    const MEASURE_REQUESTS: usize = 10;
+    const DID_CHANGE_BURST_NOTIFICATIONS: usize = 4;
     const REVISION_CHURN_HEAD_PATH_P95_BUDGET_MS: f64 = 150.0;
+    const SERVICE_FUTURE_FIRST_POLL_P95_BUDGET_MS: f64 = 250.0;
+    const SERVICE_FUTURE_FIRST_POLL_MAX_BUDGET_MS: u64 = 1_000;
 
     let Some(conf_big_root) = conf_big_root_for_tests() else {
         if allow_fixture_skip {
@@ -19267,27 +19559,8 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
         platform_version: "8.3.25".to_string(),
     };
     let coordinator = Arc::new(SystemCoordinator::new());
-    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
-        Arc::new(std::sync::Mutex::new(None));
-    let (mut service, mut socket) = LspService::build({
-        let coordinator = coordinator.clone();
-        let server_holder = server_holder.clone();
-        move |client| {
-            let server = BslLanguageServer::new(client, coordinator.clone());
-            *server_holder.lock().expect("server holder lock") = Some(server.clone());
-            server
-        }
-    })
-    .finish();
-    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
-
-    initialize_lsp_service(&mut service).await;
-
-    let server = server_holder
-        .lock()
-        .expect("server holder lock")
-        .clone()
-        .expect("server must be captured");
+    let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator.clone()).await;
+    initialize_live_lsp_transport(&mut harness).await;
     prime_server_with_workspace_setup(&server, &workspace_setup, "p38_real_conf_big_live_setup")
         .await;
 
@@ -19300,21 +19573,27 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
             text: module_text.clone(),
         },
     };
-    let did_open_response = service
-        .ready()
-        .await
-        .unwrap()
-        .call(
-            Request::build("textDocument/didOpen")
-                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
-                .finish(),
-        )
-        .await
-        .expect("didOpen notification");
-    assert!(did_open_response.is_none(), "didOpen is a notification");
+    server.did_open(did_open).await;
 
     server.sync_v2_globals().await;
     let file_id = server.get_or_create_file_id_v2(&uri).await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if server
+                .latest_received_file_versions_v2
+                .read()
+                .await
+                .get(&file_id)
+                .copied()
+                == Some(1)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("didOpen must publish latest received version on live transport");
     let opened_version = server
         .latest_received_file_versions_v2
         .read()
@@ -19350,8 +19629,8 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
     for index in 0..WARMUP_REQUESTS {
         let request_id = 38_100_000_i64 + index as i64;
         let started = Instant::now();
-        let labels = lsp_completion_labels_with_request(
-            &mut service,
+        let labels = live_transport_completion_labels_with_request(
+            &mut harness,
             request_id,
             &uri,
             completion_position,
@@ -19376,25 +19655,35 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
 
     let mut measured_samples = Vec::new();
     for index in 0..MEASURE_REQUESTS {
-        let appended_text = if index % 2 == 0 { " " } else { "\n" };
-        let next_version = current_version
-            .checked_add(1)
-            .expect("p38 revision churn version overflow");
-        lsp_append_text_change(
-            &mut service,
-            &uri,
-            &current_text,
-            next_version,
-            appended_text,
-        )
-        .await;
-        current_text.push_str(appended_text);
-        current_version = next_version;
+        let mut burst_versions = Vec::new();
+        let mut burst_appended = String::new();
+        for burst_index in 0..DID_CHANGE_BURST_NOTIFICATIONS {
+            let appended_text = if (index + burst_index) % 2 == 0 {
+                " "
+            } else {
+                "\n"
+            };
+            let next_version = current_version
+                .checked_add(1)
+                .expect("p38 revision churn version overflow");
+            live_transport_append_text_change(
+                &mut harness,
+                &uri,
+                &current_text,
+                next_version,
+                appended_text,
+            )
+            .await;
+            current_text.push_str(appended_text);
+            current_version = next_version;
+            burst_versions.push(current_version);
+            burst_appended.push_str(appended_text);
+        }
 
         let request_id = 38_100_100_i64 + index as i64;
         let started = Instant::now();
-        let labels = lsp_completion_labels_with_request(
-            &mut service,
+        let labels = live_transport_completion_labels_with_request(
+            &mut harness,
             request_id,
             &uri,
             completion_position,
@@ -19408,12 +19697,16 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
             "label_count": labels.len(),
             "labels": labels,
             "version": current_version,
-            "appended_text": appended_text,
+            "burst_notification_count": DID_CHANGE_BURST_NOTIFICATIONS,
+            "burst_versions": burst_versions,
+            "appended_text": burst_appended,
         }));
     }
 
-    let completion_timeline = lsp_get_completion_timeline(&mut service, 38_100_900, 96).await;
-    let observability_metrics = lsp_get_observability_metrics(&mut service, 38_100_901).await;
+    let completion_timeline =
+        live_transport_get_completion_timeline(&mut harness, 38_100_900, 96).await;
+    let observability_metrics =
+        live_transport_get_observability_metrics(&mut harness, 38_100_901).await;
     let timeline_traces = completion_timeline
         .get("traces")
         .and_then(|value| value.as_array())
@@ -19501,6 +19794,18 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
                             .get("prepare_details")
                             .and_then(|value| value.get("wait_elapsed_ms"))
                             .and_then(|value| value.as_u64()),
+                        "dispatch_to_request_context_wait_ms": completion_timeline_server_edge_u64(
+                            trace,
+                            "dispatch_to_request_context_wait_ms",
+                        ),
+                        "transport_to_service_future_wait_ms": completion_timeline_server_edge_u64(
+                            trace,
+                            "transport_to_service_future_wait_ms",
+                        ),
+                        "service_future_to_first_poll_wait_ms": completion_timeline_server_edge_u64(
+                            trace,
+                            "service_future_to_first_poll_wait_ms",
+                        ),
                         "prepare_snapshot_elapsed_ms": trace
                             .get("prepare_details")
                             .and_then(|value| value.get("snapshot_elapsed_ms"))
@@ -19556,6 +19861,18 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
                     .get("prepare_details")
                     .and_then(|value| value.get("wait_elapsed_ms"))
                     .and_then(|value| value.as_u64()),
+                "dispatch_to_request_context_wait_ms": completion_timeline_server_edge_u64(
+                    trace,
+                    "dispatch_to_request_context_wait_ms",
+                ),
+                "transport_to_service_future_wait_ms": completion_timeline_server_edge_u64(
+                    trace,
+                    "transport_to_service_future_wait_ms",
+                ),
+                "service_future_to_first_poll_wait_ms": completion_timeline_server_edge_u64(
+                    trace,
+                    "service_future_to_first_poll_wait_ms",
+                ),
                 "prepare_snapshot_elapsed_ms": trace
                     .get("prepare_details")
                     .and_then(|value| value.get("snapshot_elapsed_ms"))
@@ -19662,12 +19979,39 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
             .collect::<Vec<_>>();
         sample_histogram_value(&values)
     };
+    let sample_trace_server_edge_histogram = |samples: &[serde_json::Value], field: &str| {
+        let values = samples
+            .iter()
+            .filter_map(|sample| {
+                sample
+                    .get("trace")
+                    .and_then(|trace| trace.get(field))
+                    .and_then(|value| value.as_u64())
+            })
+            .map(|value| value as f64)
+            .collect::<Vec<_>>();
+        sample_histogram_value(&values)
+    };
     let warmup_latency_histogram = sample_elapsed_histogram(&warmup_samples);
     let measured_latency_histogram = sample_elapsed_histogram(&measured_samples);
     let measured_latency_p95_ms = read_numeric_metric(measured_latency_histogram.get("p95"));
+    let measured_service_future_first_poll_histogram =
+        sample_trace_server_edge_histogram(&measured_samples, "service_future_to_first_poll_wait_ms");
+    let measured_service_future_first_poll_p95_ms =
+        read_numeric_metric(measured_service_future_first_poll_histogram.get("p95"));
+    let measured_service_future_first_poll_max_ms = measured_samples
+        .iter()
+        .filter_map(|sample| {
+            sample
+                .get("trace")
+                .and_then(|trace| trace.get("service_future_to_first_poll_wait_ms"))
+                .and_then(|value| value.as_u64())
+        })
+        .max()
+        .unwrap_or(0);
 
     let report = serde_json::json!({
-        "change_id": "refactor-v2-completion-dual-artifact-path",
+        "change_id": CHANGE_ID,
         "profile": PROFILE_NAME,
         "schema_version": 1,
         "configuration_path": conf_big_root,
@@ -19680,8 +20024,12 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
             "warmup_requests": WARMUP_REQUESTS,
             "measured_requests": MEASURE_REQUESTS,
             "completion_trigger_mode": "invoked",
+            "transport_path": "tower_lsp_server_serve_duplex",
+            "churn_profile": "didChange-burst",
             "churn_before_each_measured_completion": true,
-            "churn_edit_kind": "append_at_eof",
+            "churn_edit_kind": "append_at_eof_incremental",
+            "did_change_notifications_per_measured_completion": DID_CHANGE_BURST_NOTIFICATIONS,
+            "did_change_blocking_parse_delay_ms": 1500,
         },
         "warm_cache_seed": exact_type_index_seed,
         "warmup_samples": warmup_samples,
@@ -19720,6 +20068,16 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
             "measured_interactive_wait_budget_exhausted_total_delta": counter_delta("intellisense_v2_interactive_wait_budget_exhausted_total"),
             "warmup_latency_ms": warmup_latency_histogram,
             "measured_latency_ms": measured_latency_histogram,
+            "measured_service_future_to_first_poll_wait_ms": measured_service_future_first_poll_histogram,
+            "measured_service_future_to_first_poll_wait_max_ms": measured_service_future_first_poll_max_ms,
+            "measured_dispatch_to_request_context_wait_ms": sample_trace_server_edge_histogram(
+                &measured_samples,
+                "dispatch_to_request_context_wait_ms"
+            ),
+            "measured_transport_to_service_future_wait_ms": sample_trace_server_edge_histogram(
+                &measured_samples,
+                "transport_to_service_future_wait_ms"
+            ),
             "measured_turn_wait_ms": sample_trace_histogram(&measured_samples, "turn_wait_ms"),
             "measured_prepare_stateful_ms": sample_trace_histogram(&measured_samples, "prepare_stateful_ms"),
             "measured_wait_exact_type_index_ms": sample_trace_histogram(&measured_samples, "wait_exact_type_index_ms"),
@@ -19790,6 +20148,10 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
     println!("{PROFILE_NAME}_path={}", report_path.display());
 
     assert!(
+        MEASURE_REQUESTS >= 10,
+        "revision-churn representative gate must collect at least 10 measured samples"
+    );
+    assert!(
         trace_matching_mode == "request_id",
         "expected request-context parity to expose JSON-RPC request ids in completion timeline, trace_matching_mode={}, trace_request_id_present_total={}, filtered_traces={filtered_traces:?}",
         trace_matching_mode,
@@ -19855,6 +20217,18 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
         REVISION_CHURN_HEAD_PATH_P95_BUDGET_MS
     );
     assert!(
+        measured_service_future_first_poll_p95_ms <= SERVICE_FUTURE_FIRST_POLL_P95_BUDGET_MS,
+        "revision-churn pre-poll p95 regression: measured_service_future_to_first_poll_wait_ms p95={}ms > {}ms, measured_samples={measured_samples:?}",
+        measured_service_future_first_poll_p95_ms,
+        SERVICE_FUTURE_FIRST_POLL_P95_BUDGET_MS
+    );
+    assert!(
+        measured_service_future_first_poll_max_ms <= SERVICE_FUTURE_FIRST_POLL_MAX_BUDGET_MS,
+        "revision-churn pre-poll max regression: measured_service_future_to_first_poll_wait_ms max={}ms > {}ms, measured_samples={measured_samples:?}",
+        measured_service_future_first_poll_max_ms,
+        SERVICE_FUTURE_FIRST_POLL_MAX_BUDGET_MS
+    );
+    assert!(
         counter_delta("intellisense_v2_completion_route_total_route_head_hit")
             + counter_delta("intellisense_v2_completion_route_total_route_exact_hit")
             >= MEASURE_REQUESTS as u64,
@@ -19864,6 +20238,5 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
     );
 
     drop(server);
-    drop(service);
-    drain_task.abort();
+    harness.shutdown().await;
 }

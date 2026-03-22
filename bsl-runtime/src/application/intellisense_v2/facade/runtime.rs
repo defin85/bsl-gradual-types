@@ -45,6 +45,7 @@ impl IntellisenseV2Facade {
                 let mut interactive_streak = 0usize;
                 let mut interactive_closed = false;
                 let mut background_closed = false;
+                let mut pending_interactive_command = None;
 
                 let wake_waiters_for_file =
                     |file_id: FileId,
@@ -123,13 +124,29 @@ impl IntellisenseV2Facade {
                         }
                     };
 
-                while let Some((queue_priority, cmd)) = recv_next_writer_command(
-                    &interactive_rx,
-                    &background_rx,
-                    &mut interactive_streak,
-                    &mut interactive_closed,
-                    &mut background_closed,
-                ) {
+                while let Some((queue_priority, cmd)) =
+                    if let Some(command) = pending_interactive_command.take() {
+                        interactive_streak = interactive_streak.saturating_add(1);
+                        Some((RuntimeQueuePriority::Interactive, command))
+                    } else {
+                        recv_next_writer_command(
+                            &interactive_rx,
+                            &background_rx,
+                            &mut interactive_streak,
+                            &mut interactive_closed,
+                            &mut background_closed,
+                        )
+                    }
+                {
+                    let cmd = if queue_priority == RuntimeQueuePriority::Interactive {
+                        coalesce_interactive_current_revision_apply_command(
+                            &interactive_rx,
+                            cmd,
+                            &mut pending_interactive_command,
+                        )
+                    } else {
+                        cmd
+                    };
                     match cmd {
                         Command::ApplyChanges {
                             origin,
@@ -172,6 +189,29 @@ impl IntellisenseV2Facade {
                                     }
                                     Change::SetDepsSnapshot { .. } => None,
                                 };
+                                let skip_stale_change = match &change {
+                                    Change::SetFile {
+                                        file_id, version, ..
+                                    } => applied_file_revisions
+                                        .get(file_id)
+                                        .is_some_and(|state| state.version > *version),
+                                    Change::SetFileWithSnapshot {
+                                        file_id, version, ..
+                                    } => applied_file_revisions
+                                        .get(file_id)
+                                        .is_some_and(|state| state.version > *version),
+                                    Change::ReuseCompletionHeadFromPreviousVersion {
+                                        file_id,
+                                        expected_version,
+                                        ..
+                                    } => applied_file_revisions
+                                        .get(file_id)
+                                        .is_some_and(|state| state.version > *expected_version),
+                                    _ => false,
+                                };
+                                if skip_stale_change {
+                                    continue;
+                                }
                                 maybe_inject_apply_change_delay_for_test(&change);
                                 match &change {
                                     Change::SetFile { file_id, version, .. }

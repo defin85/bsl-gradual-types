@@ -95,6 +95,10 @@ enum ParseSnapshotAsyncDelayMode {
     DidChangeTestOnly,
 }
 
+fn parse_snapshot_apply_debounce_duration() -> Duration {
+    Duration::from_millis(25)
+}
+
 struct BackgroundParseSnapshotApplyArgs {
     file_id: bsl_analysis_v2::FileId,
     requested_version: i32,
@@ -179,6 +183,20 @@ impl BslLanguageServer {
     fn spawn_background_parse_snapshot_apply_v2(&self, args: BackgroundParseSnapshotApplyArgs) {
         let server = self.clone();
         tokio::spawn(async move {
+            let debounce = parse_snapshot_apply_debounce_duration();
+            if debounce > Duration::ZERO {
+                tokio::time::sleep(debounce).await;
+            }
+            if server
+                .latest_received_file_versions_v2
+                .read()
+                .await
+                .get(&args.file_id)
+                .copied()
+                != Some(args.requested_version)
+            {
+                return;
+            }
             match args.async_delay_mode {
                 ParseSnapshotAsyncDelayMode::None => {}
                 ParseSnapshotAsyncDelayMode::DidChangeTestOnly => {
@@ -228,16 +246,18 @@ impl BslLanguageServer {
                 return;
             }
 
-            server.analysis_v2.apply_changes_interactive(
-                bsl_runtime::application::ObservabilityOrigin::Lsp,
-                vec![bsl_analysis_v2::Change::SetFileWithSnapshot {
+            // Snapshot-backed apply is enrichment for the already published current revision.
+            // Keep it off the interactive writer queue so completion wait_for_file_version
+            // is not blocked by slow snapshot installs on large modules.
+            server
+                .analysis_v2
+                .apply_changes(vec![bsl_analysis_v2::Change::SetFileWithSnapshot {
                     file_id: args.file_id,
                     text: args.text,
                     version: args.requested_version,
                     path: args.path,
                     parse_snapshot,
-                }],
-            );
+                }]);
             server.spawn_completion_head_precompute_from_snapshot_v2(
                 args.file_id,
                 args.requested_version,

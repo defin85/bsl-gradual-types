@@ -1440,6 +1440,9 @@ Completion и diagnostics MUST использовать один и тот же 
 
 Completion under churn MUST NOT блокироваться секундными хвостами ожидания latest-path.
 Интерактивный request path MUST NOT запускать sync parse/index compute, даже если exact artifact еще недоступен.
+Completion under churn MUST NOT накапливать second-scale `service_future_created -> first poll` wait только потому, что более ранние `didOpen/didChange` notifications продолжают slow background стадии после current-revision handoff.
+
+Для этого change `second-scale` pre-poll backlog operationally означает regression, если representative `didChange-burst` gate нарушает budgets, определённые требованием про representative real-module gate.
 
 #### Scenario: Under churn completion отдаёт bounded fail-closed ответ без sync parse/index
 - **GIVEN** большой модуль находится в активном churn режиме
@@ -1447,6 +1450,12 @@ Completion under churn MUST NOT блокироваться секундными 
 - **WHEN** IDE запрашивает completion
 - **THEN** сервер возвращает bounded fail-closed response для текущей revision
 - **AND** sync parse/index compute не выполняется в интерактивном request path
+
+#### Scenario: Burst document-sync не превращает completion в pre-poll backlog
+- **GIVEN** несколько changed-text `didChange` уже перевели файл на новую revision и зарегистрировали slow background работу
+- **WHEN** IDE запрашивает member-access completion через live LSP transport path
+- **THEN** completion future не проводит seconds-scale время в состоянии "created but not first-polled" только из-за pending document-sync service futures
+- **AND** дальнейшая latency атрибуция остаётся отделимой от handler execution
 
 ### Requirement: После fail-closed miss система выполняет асинхронный latest refresh без user-facing блокировки (MUST)
 После bounded fail-closed completion miss система MUST продолжать или запускать background refresh latest snapshot.
@@ -2581,8 +2590,14 @@ Acceptance для архитектурных изменений completion MUST 
 Этот gate MUST:
 - открывать реальный модуль из representative large configuration;
 - проверять отдельно `same-revision warm` member-access completion и `revision-churn` completion после нового `didChange` перед каждым measured sample;
-- отдельно учитывать first-response availability и exact upgrade latency;
-- fail-ить, если completion после новой revision снова деградирует в `fail_closed`, несмотря на наличие current-revision canonical fast path.
+- включать `didChange-burst` профиль через реальный LSP transport path, а не только прямой вызов service layer;
+- отдельно учитывать `service_future_to_first_poll_wait_ms`, first-response availability и exact upgrade latency;
+- использовать warmup phase, которая не входит в measured set;
+- собирать не менее 10 measured completion samples в `didChange-burst` профиле;
+- fail-ить, если `p95(service_future_to_first_poll_wait_ms) > 250ms`;
+- fail-ить, если любой measured sample имеет `service_future_to_first_poll_wait_ms > 1000ms`, а overshoot атрибутирован pending document-sync futures, а не client-side ingress;
+- fail-ить, если completion после новой revision снова деградирует в `fail_closed`, несмотря на наличие current-revision canonical fast path;
+- fail-ить, если успешный first response достигается только после seconds-scale pre-poll backlog, вызванного удержанием transport slots document-sync notifications.
 
 #### Scenario: Real-module gate ловит регрессию first-response availability
 - **GIVEN** representative real module из большой конфигурации открыт в live gate
@@ -2590,6 +2605,12 @@ Acceptance для архитектурных изменений completion MUST 
 - **WHEN** выполняется member-access completion
 - **THEN** gate требует `ok_non_empty` first response из current-revision canonical artifact
 - **AND** gate фиксирует exact upgrade отдельно, не маскируя им first-response availability
+
+#### Scenario: Real-module gate ловит возврат document-sync slot retention
+- **GIVEN** gate отправляет burst changed-text notifications через live LSP transport path
+- **WHEN** completion timeline показывает seconds-scale `service_future_to_first_poll_wait_ms` до входа в handler
+- **THEN** gate завершает прогон ошибкой, даже если completion позже становится `ok_non_empty`
+- **AND** отчёт выделяет pre-poll transport backlog отдельно от handler и exact-upgrade latency
 
 ### Requirement: `v11` service-future poll / wake split сохраняет truthful post-dispatch attribution semantics (MUST)
 Новый bounded split внутри `service_future_created -> service_scope_entered` MUST не ослаблять existing `v10` / `v9` / `v8` integrity semantics.
@@ -2612,4 +2633,53 @@ Acceptance для архитектурных изменений completion MUST 
 - **WHEN** extension или operator читает authoritative payload
 - **THEN** payload не выдумывает first-poll / first-wake split
 - **AND** trustworthy semantics остаются ограничены уже существующими `v10` полями
+
+### Requirement: LSP document-sync service future освобождает transport slot до slow background стадий (MUST)
+`textDocument/didOpen` и `textDocument/didChange` MUST завершать свой service future после того, как:
+- входной payload принят;
+- `latest_received` и shadow state обновлены для новой requested revision;
+- current-revision `SetFile` handoff зарегистрирован в analysis runtime writer path для той же `file_version`;
+- минимальный handoff slow background work зарегистрирован;
+- transport slot больше не удерживается ради ожидания slow background стадий.
+
+`applied_version` в этом требовании продолжает означать revision, уже применённую в analysis runtime через `SetFile` / `SetFileWithSnapshot`. Она MUST NOT переопределяться как readiness `CompletionHeadArtifact`, `ExactSemanticArtifact` или diagnostics publish.
+
+Для этого change current-revision handoff означает enqueue/register соответствующего `SetFile` в runtime writer path для той же `file_version`. Handoff сам по себе MUST NOT трактоваться как уже наблюдаемое продвижение `applied_version`.
+
+После document-sync handoff `received_version` MAY уже указывать на новую requested revision, пока `applied_version` ещё кратко отстаёт и догоняет её через runtime writer path. Это допустимо для данного change при двух условиях:
+- interactive orchestration продолжает использовать `applied_version` как критерий фактической готовности snapshot;
+- `didOpen/didChange` не маскируют этот lag выдачей artifact-ready semantics под видом `applied_version`.
+
+После этого slow стадии (`parse snapshot build`, current-revision completion precompute, exact precompute, deferred diagnostics) MUST продолжаться вне transport service future.
+
+Document-sync path MUST NOT удерживать LSP transport request-admission slot только ради ожидания завершения этих slow стадий.
+
+#### Scenario: `didChange` освобождает transport slot до завершения parse snapshot
+- **GIVEN** changed-text `didChange` для большого модуля запускает дорогой `parse snapshot build`
+- **WHEN** LSP принимает notification
+- **THEN** document-sync service future завершается после current-revision handoff
+- **AND** slow parse snapshot работа продолжается в фоне
+- **AND** transport slot не удерживается до терминального завершения parse snapshot
+
+#### Scenario: `didOpen` не ждёт slow parse/head path перед возвратом transport control
+- **GIVEN** LSP открывает большой модуль, для которого initial parse/head path дорогой
+- **WHEN** сервер принимает `textDocument/didOpen`
+- **THEN** document-sync service future завершается после current-revision handoff
+- **AND** slow parse/head/exact работа продолжается в фоне
+- **AND** initial open не удерживает transport slot до терминального завершения slow path
+
+#### Scenario: Handoff не приравнивает `received_version` к `applied_version`
+- **GIVEN** `didChange` уже завершил service future после current-revision handoff
+- **AND** `received_version=V+1`, но runtime writer path ещё не применил `SetFile` и `applied_version` остаётся `V`
+- **WHEN** interactive completion запрашивается для той же requested revision `V+1`
+- **THEN** orchestration продолжает ждать `applied_version >= V+1` bounded path'ом
+- **AND** readiness `CompletionHeadArtifact` / `ExactSemanticArtifact` не считается substitute для `applied_version`
+
+#### Scenario: `didChange` может завершиться до observable advance `applied_version`
+- **GIVEN** changed-text `didChange` уже обновил `latest_received` и shadow state до `V+1`
+- **AND** current-revision `SetFile` только поставлен в runtime writer path
+- **WHEN** document-sync service future завершается
+- **THEN** `received_version` MAY уже быть равен `V+1`
+- **AND** `applied_version` MAY ещё кратко оставаться на `V`, пока runtime snapshot догоняет handoff
+- **AND** это не считается нарушением short-lived transport contract
 

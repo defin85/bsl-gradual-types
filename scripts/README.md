@@ -181,10 +181,10 @@ Representative matrix:
 
 ---
 
-### `validate-v2-completion-gates.sh` - Readiness gates для `refactor-ir-canonical-semantic-pipeline`
+### `validate-v2-completion-gates.sh` - Readiness gates для `refactor-current-revision-readiness-fast-lane`
 
 **Назначение:** воспроизводимый fail-fast прогон checked-in readiness gates
-для `refactor-ir-canonical-semantic-pipeline`:
+для `refactor-current-revision-readiness-fast-lane`:
 - contract-sync guards (`scripts/test-intellisense-smoke-gate.py`,
   `scripts/test-intellisense-readiness-assets.py`) проверяют, что
   `quality-gates.json`, CI и default smoke path описывают один и тот же shipped
@@ -192,6 +192,10 @@ Representative matrix:
 - shipped cross-adapter smoke: LSP/runtime/web/MCP/CLI/module-context slices, включая current-revision stale proofs beyond completion и regression на removal of bare-identifier fallback;
 - authoritative representative-matrix perf gate через `./scripts/run-intellisense-perf.sh`
   в blocking mode для `small` / `large` / `churn`;
+- real-module post-handoff readiness gate через
+  `cargo test -p bsl-backend --bin bsl-lsp-server p38_real_conf_big_revision_churn_completion_perf_report_live -- --nocapture`
+  с report path
+  `backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-real-conf-big-revision-churn-completion-perf-live.json`;
 - fail-closed budget enforcement для mandatory операций `completion`, `hover`,
   `definition`, `type_at_position`, `members`;
 - strict-валидация change через OpenSpec.
@@ -214,9 +218,11 @@ tests/contracts/docs.
 **Важно:** скрипт не зависит от `.github/workflows/*` и предназначен для локального запуска или внешнего CI (например, Jenkins/GitLab Runner).
 
 **Артефакты:**
-- `backend/tests/perf/reports/refactor-ir-canonical-semantic-pipeline-readiness-gate.json`
-- `backend/tests/perf/reports/refactor-ir-canonical-semantic-pipeline-readiness-gate.md`
-- `backend/tests/perf/reports/refactor-ir-canonical-semantic-pipeline-openspec-validate.log`
+- `backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-readiness-gate.json`
+- `backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-readiness-gate.md`
+- `backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-real-conf-big-revision-churn-completion-perf-live.json`
+- `backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-real-conf-big-revision-churn-completion-perf-live.md`
+- `backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-openspec-validate.log`
 
 ---
 

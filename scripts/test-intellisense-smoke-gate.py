@@ -15,7 +15,8 @@ class IntellisenseSmokeGateContractTest(unittest.TestCase):
         REPO_ROOT
         / "openspec"
         / "changes"
-        / "refactor-ir-canonical-semantic-pipeline"
+        / "archive"
+        / "2026-03-13-refactor-ir-canonical-semantic-pipeline"
         / "validation"
         / "quality-gates.json"
     )

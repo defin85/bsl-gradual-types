@@ -271,7 +271,6 @@ impl IntellisenseV2Facade {
                                     }
                                 }
                             }
-
                             let changed_files_count = changed_files.len();
                             for file_id in changed_files {
                                 let version = applied_file_revisions

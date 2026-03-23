@@ -1,0 +1,4340 @@
+{
+  "change_id": "refactor-current-revision-readiness-fast-lane",
+  "completion_timeline": {
+    "raw": {
+      "traces": [
+        {
+          "dominant_stage": "prepare_stateful",
+          "outcome": "ok_non_empty",
+          "prepare_details": {
+            "apply_age_at_start_ms": 43821,
+            "apply_age_at_terminal_ms": 43826,
+            "exact_wait": {
+              "current_revision_head_owner_hints_ready": true,
+              "exact_ready_before_wait": true,
+              "head_ready_before_wait": true
+            },
+            "fail_closed_cause": null,
+            "guard_outcome": "prepared",
+            "min_file_version": 1,
+            "observed_file_version": 1,
+            "outcome": "ready",
+            "progress": {
+              "phase": "ready",
+              "phase_started_offset_ms": 4,
+              "snapshot_completed_offset_ms": 4,
+              "wait_completed_offset_ms": 4
+            },
+            "route": "head_hit",
+            "shadow_version_at_start": 1,
+            "snapshot_elapsed_ms": 0,
+            "snapshot_with_deps_runtime": {
+              "exec_ms": 0,
+              "queue_wait_ms": 0
+            },
+            "timeout_attribution": null,
+            "wait_budget_ms": 120,
+            "wait_elapsed_ms": 4,
+            "wait_for_file_version_runtime": {
+              "exec_ms": 0,
+              "queue_wait_ms": 0,
+              "resolution": "immediate"
+            }
+          },
+          "request_id": "38100000",
+          "server_edge_details": {
+            "dispatch_to_request_context_wait_ms": 0,
+            "first_poll_to_first_wake_wait_ms": 1,
+            "handler_entered_at_ms": 1774261751888,
+            "jsonrpc_dispatch_received_at_ms": 1774261751887,
+            "method_entered_at_ms": 1774261751888,
+            "method_prelude_exec_ms": 0,
+            "pre_method_attribution_provenance": "same_request_authoritative",
+            "response_sent_at_ms": 1774261751896,
+            "server_handler_exec_ms": 8,
+            "service_future_created_at_ms": 1774261751887,
+            "service_future_first_poll_entered_at_ms": 1774261751887,
+            "service_future_first_poll_outcome": "pending",
+            "service_future_first_wake_scheduled_at_ms": 1774261751888,
+            "service_future_to_first_poll_wait_ms": 0,
+            "service_future_to_scope_wait_ms": 0,
+            "service_scope_entered_at_ms": 1774261751887,
+            "service_scope_to_method_wait_ms": 1,
+            "transport_received_at_ms": 1774261751887,
+            "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+            "transport_to_handler_wait_ms": 1,
+            "transport_to_method_wait_ms": 1,
+            "transport_to_service_future_wait_ms": 0,
+            "transport_to_service_scope_wait_ms": 0
+          },
+          "stages": [
+            {
+              "duration_ms": 0,
+              "name": "turn_wait",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "sync_globals",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 4,
+              "name": "prepare_stateful",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "query_bundle",
+              "started_offset_ms": 4,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 2,
+              "name": "response_build",
+              "started_offset_ms": 4,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "terminal",
+              "started_offset_ms": 6,
+              "status": "completed"
+            }
+          ],
+          "started_at_ms": 1774261751888,
+          "total_duration_ms": 8,
+          "trace_id": "completion-trace-1",
+          "trigger_mode": "invoked",
+          "turn_attribution": {
+            "active_completion_count": 0,
+            "did_change_ahead_count": 0,
+            "dispatcher_resolution_latency_ms": 0,
+            "dropped_completion_file_seq": [],
+            "queue_capacity": 256,
+            "queue_depth_after_enqueue": 1,
+            "queue_depth_before_enqueue": 0,
+            "queue_outcome": "enqueued",
+            "queued_completion_ahead_count": 0,
+            "request_epoch": 1,
+            "request_file_seq": 2,
+            "turn_wait_outcome": "ready"
+          },
+          "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+        },
+        {
+          "dominant_stage": "prepare_stateful",
+          "outcome": "fail_closed",
+          "prepare_details": {
+            "apply_age_at_start_ms": 0,
+            "apply_age_at_terminal_ms": 121,
+            "fail_closed_cause": "prepare_timeout",
+            "guard_outcome": "timeout",
+            "min_file_version": 5,
+            "outcome": "wait_not_ready",
+            "progress": {
+              "phase": "wait_for_file_version",
+              "phase_started_offset_ms": 0
+            },
+            "route": null,
+            "shadow_version_at_start": 5,
+            "timeout_attribution": {
+              "budget_ms": 120,
+              "elapsed_ms": 120,
+              "overshoot_ms": 0,
+              "phase": "wait_for_file_version",
+              "source": "prepare_guard"
+            },
+            "wait_budget_ms": 120
+          },
+          "request_id": "38100100",
+          "server_edge_details": {
+            "dispatch_to_request_context_wait_ms": 0,
+            "first_poll_to_first_wake_wait_ms": 0,
+            "handler_entered_at_ms": 1774261751923,
+            "jsonrpc_dispatch_received_at_ms": 1774261751906,
+            "method_entered_at_ms": 1774261751923,
+            "method_prelude_exec_ms": 0,
+            "pre_method_attribution_provenance": "same_request_authoritative",
+            "response_sent_at_ms": 1774261752044,
+            "server_handler_exec_ms": 121,
+            "service_future_created_at_ms": 1774261751906,
+            "service_future_first_poll_entered_at_ms": 1774261751923,
+            "service_future_first_poll_outcome": "pending",
+            "service_future_first_wake_scheduled_at_ms": 1774261751923,
+            "service_future_to_first_poll_wait_ms": 17,
+            "service_future_to_scope_wait_ms": 17,
+            "service_scope_entered_at_ms": 1774261751923,
+            "service_scope_to_method_wait_ms": 0,
+            "transport_received_at_ms": 1774261751906,
+            "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+            "transport_to_handler_wait_ms": 17,
+            "transport_to_method_wait_ms": 17,
+            "transport_to_service_future_wait_ms": 0,
+            "transport_to_service_scope_wait_ms": 17
+          },
+          "stages": [
+            {
+              "duration_ms": 0,
+              "name": "turn_wait",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "sync_globals",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 120,
+              "name": "prepare_stateful",
+              "started_offset_ms": 0,
+              "status": "failed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "terminal",
+              "started_offset_ms": 120,
+              "status": "failed"
+            }
+          ],
+          "started_at_ms": 1774261751923,
+          "total_duration_ms": 121,
+          "trace_id": "completion-trace-2",
+          "trigger_mode": "invoked",
+          "turn_attribution": {
+            "active_completion_count": 0,
+            "did_change_ahead_count": 1,
+            "dispatcher_resolution_latency_ms": 0,
+            "dropped_completion_file_seq": [],
+            "queue_capacity": 256,
+            "queue_depth_after_enqueue": 2,
+            "queue_depth_before_enqueue": 1,
+            "queue_outcome": "enqueued",
+            "queued_completion_ahead_count": 0,
+            "request_epoch": 2,
+            "request_file_seq": 7,
+            "turn_wait_outcome": "ready"
+          },
+          "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+        },
+        {
+          "dominant_stage": "prepare_stateful",
+          "outcome": "fail_closed",
+          "prepare_details": {
+            "apply_age_at_start_ms": 1,
+            "apply_age_at_terminal_ms": 122,
+            "fail_closed_cause": "prepare_timeout",
+            "guard_outcome": "timeout",
+            "min_file_version": 9,
+            "outcome": "wait_not_ready",
+            "progress": {
+              "phase": "wait_for_file_version",
+              "phase_started_offset_ms": 0
+            },
+            "route": null,
+            "shadow_version_at_start": 9,
+            "timeout_attribution": {
+              "budget_ms": 120,
+              "elapsed_ms": 121,
+              "overshoot_ms": 1,
+              "phase": "wait_for_file_version",
+              "source": "prepare_guard"
+            },
+            "wait_budget_ms": 120
+          },
+          "request_id": "38100101",
+          "server_edge_details": {
+            "dispatch_to_request_context_wait_ms": 0,
+            "first_poll_to_first_wake_wait_ms": 0,
+            "handler_entered_at_ms": 1774261752067,
+            "jsonrpc_dispatch_received_at_ms": 1774261752046,
+            "method_entered_at_ms": 1774261752067,
+            "method_prelude_exec_ms": 0,
+            "pre_method_attribution_provenance": "same_request_authoritative",
+            "response_sent_at_ms": 1774261752189,
+            "server_handler_exec_ms": 122,
+            "service_future_created_at_ms": 1774261752047,
+            "service_future_first_poll_entered_at_ms": 1774261752067,
+            "service_future_first_poll_outcome": "pending",
+            "service_future_first_wake_scheduled_at_ms": 1774261752067,
+            "service_future_to_first_poll_wait_ms": 20,
+            "service_future_to_scope_wait_ms": 20,
+            "service_scope_entered_at_ms": 1774261752067,
+            "service_scope_to_method_wait_ms": 0,
+            "transport_received_at_ms": 1774261752046,
+            "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+            "transport_to_handler_wait_ms": 21,
+            "transport_to_method_wait_ms": 21,
+            "transport_to_service_future_wait_ms": 1,
+            "transport_to_service_scope_wait_ms": 21
+          },
+          "stages": [
+            {
+              "duration_ms": 0,
+              "name": "turn_wait",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "sync_globals",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 121,
+              "name": "prepare_stateful",
+              "started_offset_ms": 0,
+              "status": "failed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "terminal",
+              "started_offset_ms": 121,
+              "status": "failed"
+            }
+          ],
+          "started_at_ms": 1774261752067,
+          "total_duration_ms": 122,
+          "trace_id": "completion-trace-3",
+          "trigger_mode": "invoked",
+          "turn_attribution": {
+            "active_completion_count": 0,
+            "did_change_ahead_count": 1,
+            "dispatcher_resolution_latency_ms": 0,
+            "dropped_completion_file_seq": [],
+            "queue_capacity": 256,
+            "queue_depth_after_enqueue": 2,
+            "queue_depth_before_enqueue": 1,
+            "queue_outcome": "enqueued",
+            "queued_completion_ahead_count": 0,
+            "request_epoch": 3,
+            "request_file_seq": 12,
+            "turn_wait_outcome": "ready"
+          },
+          "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+        },
+        {
+          "dominant_stage": "prepare_stateful",
+          "outcome": "fail_closed",
+          "prepare_details": {
+            "apply_age_at_start_ms": 0,
+            "apply_age_at_terminal_ms": 121,
+            "fail_closed_cause": "prepare_timeout",
+            "guard_outcome": "timeout",
+            "min_file_version": 13,
+            "outcome": "wait_not_ready",
+            "progress": {
+              "phase": "wait_for_file_version",
+              "phase_started_offset_ms": 0
+            },
+            "route": null,
+            "shadow_version_at_start": 13,
+            "timeout_attribution": {
+              "budget_ms": 120,
+              "elapsed_ms": 120,
+              "overshoot_ms": 0,
+              "phase": "wait_for_file_version",
+              "source": "prepare_guard"
+            },
+            "wait_budget_ms": 120
+          },
+          "request_id": "38100102",
+          "server_edge_details": {
+            "dispatch_to_request_context_wait_ms": 0,
+            "first_poll_to_first_wake_wait_ms": 1,
+            "handler_entered_at_ms": 1774261752212,
+            "jsonrpc_dispatch_received_at_ms": 1774261752191,
+            "method_entered_at_ms": 1774261752211,
+            "method_prelude_exec_ms": 1,
+            "pre_method_attribution_provenance": "same_request_authoritative",
+            "response_sent_at_ms": 1774261752333,
+            "server_handler_exec_ms": 121,
+            "service_future_created_at_ms": 1774261752191,
+            "service_future_first_poll_entered_at_ms": 1774261752211,
+            "service_future_first_poll_outcome": "pending",
+            "service_future_first_wake_scheduled_at_ms": 1774261752212,
+            "service_future_to_first_poll_wait_ms": 20,
+            "service_future_to_scope_wait_ms": 20,
+            "service_scope_entered_at_ms": 1774261752211,
+            "service_scope_to_method_wait_ms": 0,
+            "transport_received_at_ms": 1774261752191,
+            "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+            "transport_to_handler_wait_ms": 21,
+            "transport_to_method_wait_ms": 20,
+            "transport_to_service_future_wait_ms": 0,
+            "transport_to_service_scope_wait_ms": 20
+          },
+          "stages": [
+            {
+              "duration_ms": 0,
+              "name": "turn_wait",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "sync_globals",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 120,
+              "name": "prepare_stateful",
+              "started_offset_ms": 0,
+              "status": "failed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "terminal",
+              "started_offset_ms": 120,
+              "status": "failed"
+            }
+          ],
+          "started_at_ms": 1774261752211,
+          "total_duration_ms": 121,
+          "trace_id": "completion-trace-4",
+          "trigger_mode": "invoked",
+          "turn_attribution": {
+            "active_completion_count": 0,
+            "did_change_ahead_count": 1,
+            "dispatcher_resolution_latency_ms": 0,
+            "dropped_completion_file_seq": [],
+            "queue_capacity": 256,
+            "queue_depth_after_enqueue": 2,
+            "queue_depth_before_enqueue": 1,
+            "queue_outcome": "enqueued",
+            "queued_completion_ahead_count": 0,
+            "request_epoch": 4,
+            "request_file_seq": 17,
+            "turn_wait_outcome": "ready"
+          },
+          "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+        },
+        {
+          "dominant_stage": "wait_exact_type_index",
+          "outcome": "fail_closed",
+          "prepare_details": {
+            "apply_age_at_start_ms": 0,
+            "apply_age_at_terminal_ms": 83,
+            "exact_wait": {
+              "artifact_poll": {
+                "exact_ready": false,
+                "head_ready": false,
+                "observed_file_version": 17,
+                "poll_count": 11,
+                "poll_elapsed_ms": 127
+              },
+              "artifact_wait_outcome": "deadline",
+              "exact_ready_before_wait": false,
+              "head_ready_before_wait": false
+            },
+            "fail_closed_cause": "exact_deadline",
+            "guard_outcome": "prepared",
+            "min_file_version": 17,
+            "observed_file_version": 17,
+            "outcome": "ready",
+            "progress": {
+              "phase": "ready",
+              "phase_started_offset_ms": 82,
+              "snapshot_completed_offset_ms": 82,
+              "wait_completed_offset_ms": 82
+            },
+            "route": null,
+            "shadow_version_at_start": 17,
+            "snapshot_elapsed_ms": 0,
+            "snapshot_with_deps_runtime": {
+              "exec_ms": 0,
+              "queue_wait_ms": 0
+            },
+            "timeout_attribution": null,
+            "wait_budget_ms": 120,
+            "wait_elapsed_ms": 82,
+            "wait_for_file_version_runtime": {
+              "exec_ms": 0,
+              "queue_wait_ms": 82,
+              "resolution": "immediate"
+            }
+          },
+          "request_id": "38100103",
+          "server_edge_details": {
+            "dispatch_to_request_context_wait_ms": 0,
+            "first_poll_to_first_wake_wait_ms": 0,
+            "handler_entered_at_ms": 1774261752354,
+            "jsonrpc_dispatch_received_at_ms": 1774261752336,
+            "method_entered_at_ms": 1774261752354,
+            "method_prelude_exec_ms": 0,
+            "pre_method_attribution_provenance": "same_request_authoritative",
+            "response_sent_at_ms": 1774261752566,
+            "server_handler_exec_ms": 212,
+            "service_future_created_at_ms": 1774261752336,
+            "service_future_first_poll_entered_at_ms": 1774261752354,
+            "service_future_first_poll_outcome": "pending",
+            "service_future_first_wake_scheduled_at_ms": 1774261752354,
+            "service_future_to_first_poll_wait_ms": 18,
+            "service_future_to_scope_wait_ms": 18,
+            "service_scope_entered_at_ms": 1774261752354,
+            "service_scope_to_method_wait_ms": 0,
+            "transport_received_at_ms": 1774261752336,
+            "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+            "transport_to_handler_wait_ms": 18,
+            "transport_to_method_wait_ms": 18,
+            "transport_to_service_future_wait_ms": 0,
+            "transport_to_service_scope_wait_ms": 18
+          },
+          "stages": [
+            {
+              "duration_ms": 0,
+              "name": "turn_wait",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "sync_globals",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 82,
+              "name": "prepare_stateful",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 127,
+              "name": "wait_exact_type_index",
+              "started_offset_ms": 82,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "terminal",
+              "started_offset_ms": 209,
+              "status": "failed"
+            }
+          ],
+          "started_at_ms": 1774261752354,
+          "total_duration_ms": 211,
+          "trace_id": "completion-trace-5",
+          "trigger_mode": "invoked",
+          "turn_attribution": {
+            "active_completion_count": 0,
+            "did_change_ahead_count": 1,
+            "dispatcher_resolution_latency_ms": 0,
+            "dropped_completion_file_seq": [],
+            "queue_capacity": 256,
+            "queue_depth_after_enqueue": 2,
+            "queue_depth_before_enqueue": 1,
+            "queue_outcome": "enqueued",
+            "queued_completion_ahead_count": 0,
+            "request_epoch": 5,
+            "request_file_seq": 22,
+            "turn_wait_outcome": "ready"
+          },
+          "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+        },
+        {
+          "dominant_stage": "prepare_stateful",
+          "outcome": "fail_closed",
+          "prepare_details": {
+            "apply_age_at_start_ms": 0,
+            "apply_age_at_terminal_ms": 121,
+            "fail_closed_cause": "prepare_timeout",
+            "guard_outcome": "timeout",
+            "min_file_version": 21,
+            "outcome": "wait_not_ready",
+            "progress": {
+              "phase": "wait_for_file_version",
+              "phase_started_offset_ms": 0
+            },
+            "route": null,
+            "shadow_version_at_start": 21,
+            "timeout_attribution": {
+              "budget_ms": 120,
+              "elapsed_ms": 121,
+              "overshoot_ms": 1,
+              "phase": "wait_for_file_version",
+              "source": "prepare_guard"
+            },
+            "wait_budget_ms": 120
+          },
+          "request_id": "38100104",
+          "server_edge_details": {
+            "dispatch_to_request_context_wait_ms": 0,
+            "first_poll_to_first_wake_wait_ms": 0,
+            "handler_entered_at_ms": 1774261752590,
+            "jsonrpc_dispatch_received_at_ms": 1774261752569,
+            "method_entered_at_ms": 1774261752590,
+            "method_prelude_exec_ms": 0,
+            "pre_method_attribution_provenance": "same_request_authoritative",
+            "response_sent_at_ms": 1774261752712,
+            "server_handler_exec_ms": 122,
+            "service_future_created_at_ms": 1774261752569,
+            "service_future_first_poll_entered_at_ms": 1774261752590,
+            "service_future_first_poll_outcome": "pending",
+            "service_future_first_wake_scheduled_at_ms": 1774261752590,
+            "service_future_to_first_poll_wait_ms": 21,
+            "service_future_to_scope_wait_ms": 21,
+            "service_scope_entered_at_ms": 1774261752590,
+            "service_scope_to_method_wait_ms": 0,
+            "transport_received_at_ms": 1774261752569,
+            "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+            "transport_to_handler_wait_ms": 21,
+            "transport_to_method_wait_ms": 21,
+            "transport_to_service_future_wait_ms": 0,
+            "transport_to_service_scope_wait_ms": 21
+          },
+          "stages": [
+            {
+              "duration_ms": 0,
+              "name": "turn_wait",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "sync_globals",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 121,
+              "name": "prepare_stateful",
+              "started_offset_ms": 0,
+              "status": "failed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "terminal",
+              "started_offset_ms": 121,
+              "status": "failed"
+            }
+          ],
+          "started_at_ms": 1774261752590,
+          "total_duration_ms": 121,
+          "trace_id": "completion-trace-6",
+          "trigger_mode": "invoked",
+          "turn_attribution": {
+            "active_completion_count": 0,
+            "did_change_ahead_count": 1,
+            "dispatcher_resolution_latency_ms": 0,
+            "dropped_completion_file_seq": [],
+            "queue_capacity": 256,
+            "queue_depth_after_enqueue": 2,
+            "queue_depth_before_enqueue": 1,
+            "queue_outcome": "enqueued",
+            "queued_completion_ahead_count": 0,
+            "request_epoch": 6,
+            "request_file_seq": 27,
+            "turn_wait_outcome": "ready"
+          },
+          "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+        },
+        {
+          "dominant_stage": "prepare_stateful",
+          "outcome": "fail_closed",
+          "prepare_details": {
+            "apply_age_at_start_ms": 0,
+            "apply_age_at_terminal_ms": 121,
+            "fail_closed_cause": "prepare_timeout",
+            "guard_outcome": "timeout",
+            "min_file_version": 25,
+            "outcome": "wait_not_ready",
+            "progress": {
+              "phase": "wait_for_file_version",
+              "phase_started_offset_ms": 0
+            },
+            "route": null,
+            "shadow_version_at_start": 25,
+            "timeout_attribution": {
+              "budget_ms": 120,
+              "elapsed_ms": 120,
+              "overshoot_ms": 0,
+              "phase": "wait_for_file_version",
+              "source": "prepare_guard"
+            },
+            "wait_budget_ms": 120
+          },
+          "request_id": "38100105",
+          "server_edge_details": {
+            "dispatch_to_request_context_wait_ms": 0,
+            "first_poll_to_first_wake_wait_ms": 0,
+            "handler_entered_at_ms": 1774261752733,
+            "jsonrpc_dispatch_received_at_ms": 1774261752713,
+            "method_entered_at_ms": 1774261752733,
+            "method_prelude_exec_ms": 0,
+            "pre_method_attribution_provenance": "same_request_authoritative",
+            "response_sent_at_ms": 1774261752854,
+            "server_handler_exec_ms": 121,
+            "service_future_created_at_ms": 1774261752713,
+            "service_future_first_poll_entered_at_ms": 1774261752733,
+            "service_future_first_poll_outcome": "pending",
+            "service_future_first_wake_scheduled_at_ms": 1774261752733,
+            "service_future_to_first_poll_wait_ms": 20,
+            "service_future_to_scope_wait_ms": 20,
+            "service_scope_entered_at_ms": 1774261752733,
+            "service_scope_to_method_wait_ms": 0,
+            "transport_received_at_ms": 1774261752713,
+            "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+            "transport_to_handler_wait_ms": 20,
+            "transport_to_method_wait_ms": 20,
+            "transport_to_service_future_wait_ms": 0,
+            "transport_to_service_scope_wait_ms": 20
+          },
+          "stages": [
+            {
+              "duration_ms": 0,
+              "name": "turn_wait",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "sync_globals",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 120,
+              "name": "prepare_stateful",
+              "started_offset_ms": 0,
+              "status": "failed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "terminal",
+              "started_offset_ms": 120,
+              "status": "failed"
+            }
+          ],
+          "started_at_ms": 1774261752733,
+          "total_duration_ms": 121,
+          "trace_id": "completion-trace-7",
+          "trigger_mode": "invoked",
+          "turn_attribution": {
+            "active_completion_count": 0,
+            "did_change_ahead_count": 1,
+            "dispatcher_resolution_latency_ms": 0,
+            "dropped_completion_file_seq": [],
+            "queue_capacity": 256,
+            "queue_depth_after_enqueue": 2,
+            "queue_depth_before_enqueue": 1,
+            "queue_outcome": "enqueued",
+            "queued_completion_ahead_count": 0,
+            "request_epoch": 7,
+            "request_file_seq": 32,
+            "turn_wait_outcome": "ready"
+          },
+          "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+        },
+        {
+          "dominant_stage": "prepare_stateful",
+          "outcome": "fail_closed",
+          "prepare_details": {
+            "apply_age_at_start_ms": 0,
+            "apply_age_at_terminal_ms": 121,
+            "fail_closed_cause": "prepare_timeout",
+            "guard_outcome": "timeout",
+            "min_file_version": 29,
+            "outcome": "wait_not_ready",
+            "progress": {
+              "phase": "wait_for_file_version",
+              "phase_started_offset_ms": 0
+            },
+            "route": null,
+            "shadow_version_at_start": 29,
+            "timeout_attribution": {
+              "budget_ms": 120,
+              "elapsed_ms": 120,
+              "overshoot_ms": 0,
+              "phase": "wait_for_file_version",
+              "source": "prepare_guard"
+            },
+            "wait_budget_ms": 120
+          },
+          "request_id": "38100106",
+          "server_edge_details": {
+            "dispatch_to_request_context_wait_ms": 0,
+            "first_poll_to_first_wake_wait_ms": 0,
+            "handler_entered_at_ms": 1774261752872,
+            "jsonrpc_dispatch_received_at_ms": 1774261752856,
+            "method_entered_at_ms": 1774261752872,
+            "method_prelude_exec_ms": 0,
+            "pre_method_attribution_provenance": "same_request_authoritative",
+            "response_sent_at_ms": 1774261752993,
+            "server_handler_exec_ms": 121,
+            "service_future_created_at_ms": 1774261752856,
+            "service_future_first_poll_entered_at_ms": 1774261752872,
+            "service_future_first_poll_outcome": "pending",
+            "service_future_first_wake_scheduled_at_ms": 1774261752872,
+            "service_future_to_first_poll_wait_ms": 16,
+            "service_future_to_scope_wait_ms": 16,
+            "service_scope_entered_at_ms": 1774261752872,
+            "service_scope_to_method_wait_ms": 0,
+            "transport_received_at_ms": 1774261752856,
+            "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+            "transport_to_handler_wait_ms": 16,
+            "transport_to_method_wait_ms": 16,
+            "transport_to_service_future_wait_ms": 0,
+            "transport_to_service_scope_wait_ms": 16
+          },
+          "stages": [
+            {
+              "duration_ms": 0,
+              "name": "turn_wait",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "sync_globals",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 120,
+              "name": "prepare_stateful",
+              "started_offset_ms": 0,
+              "status": "failed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "terminal",
+              "started_offset_ms": 120,
+              "status": "failed"
+            }
+          ],
+          "started_at_ms": 1774261752872,
+          "total_duration_ms": 120,
+          "trace_id": "completion-trace-8",
+          "trigger_mode": "invoked",
+          "turn_attribution": {
+            "active_completion_count": 0,
+            "did_change_ahead_count": 1,
+            "dispatcher_resolution_latency_ms": 0,
+            "dropped_completion_file_seq": [],
+            "queue_capacity": 256,
+            "queue_depth_after_enqueue": 2,
+            "queue_depth_before_enqueue": 1,
+            "queue_outcome": "enqueued",
+            "queued_completion_ahead_count": 0,
+            "request_epoch": 8,
+            "request_file_seq": 37,
+            "turn_wait_outcome": "ready"
+          },
+          "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+        },
+        {
+          "dominant_stage": "prepare_stateful",
+          "outcome": "fail_closed",
+          "prepare_details": {
+            "apply_age_at_start_ms": 0,
+            "apply_age_at_terminal_ms": 121,
+            "fail_closed_cause": "prepare_timeout",
+            "guard_outcome": "timeout",
+            "min_file_version": 33,
+            "outcome": "wait_not_ready",
+            "progress": {
+              "phase": "wait_for_file_version",
+              "phase_started_offset_ms": 0
+            },
+            "route": null,
+            "shadow_version_at_start": 33,
+            "timeout_attribution": {
+              "budget_ms": 120,
+              "elapsed_ms": 121,
+              "overshoot_ms": 1,
+              "phase": "wait_for_file_version",
+              "source": "prepare_guard"
+            },
+            "wait_budget_ms": 120
+          },
+          "request_id": "38100107",
+          "server_edge_details": {
+            "dispatch_to_request_context_wait_ms": 0,
+            "first_poll_to_first_wake_wait_ms": 0,
+            "handler_entered_at_ms": 1774261753010,
+            "jsonrpc_dispatch_received_at_ms": 1774261752995,
+            "method_entered_at_ms": 1774261753010,
+            "method_prelude_exec_ms": 0,
+            "pre_method_attribution_provenance": "same_request_authoritative",
+            "response_sent_at_ms": 1774261753132,
+            "server_handler_exec_ms": 122,
+            "service_future_created_at_ms": 1774261752995,
+            "service_future_first_poll_entered_at_ms": 1774261753010,
+            "service_future_first_poll_outcome": "pending",
+            "service_future_first_wake_scheduled_at_ms": 1774261753010,
+            "service_future_to_first_poll_wait_ms": 15,
+            "service_future_to_scope_wait_ms": 15,
+            "service_scope_entered_at_ms": 1774261753010,
+            "service_scope_to_method_wait_ms": 0,
+            "transport_received_at_ms": 1774261752995,
+            "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+            "transport_to_handler_wait_ms": 15,
+            "transport_to_method_wait_ms": 15,
+            "transport_to_service_future_wait_ms": 0,
+            "transport_to_service_scope_wait_ms": 15
+          },
+          "stages": [
+            {
+              "duration_ms": 0,
+              "name": "turn_wait",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "sync_globals",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 121,
+              "name": "prepare_stateful",
+              "started_offset_ms": 0,
+              "status": "failed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "terminal",
+              "started_offset_ms": 121,
+              "status": "failed"
+            }
+          ],
+          "started_at_ms": 1774261753010,
+          "total_duration_ms": 121,
+          "trace_id": "completion-trace-9",
+          "trigger_mode": "invoked",
+          "turn_attribution": {
+            "active_completion_count": 0,
+            "did_change_ahead_count": 1,
+            "dispatcher_resolution_latency_ms": 0,
+            "dropped_completion_file_seq": [],
+            "queue_capacity": 256,
+            "queue_depth_after_enqueue": 2,
+            "queue_depth_before_enqueue": 1,
+            "queue_outcome": "enqueued",
+            "queued_completion_ahead_count": 0,
+            "request_epoch": 9,
+            "request_file_seq": 42,
+            "turn_wait_outcome": "ready"
+          },
+          "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+        },
+        {
+          "dominant_stage": "prepare_stateful",
+          "outcome": "fail_closed",
+          "prepare_details": {
+            "apply_age_at_start_ms": 0,
+            "apply_age_at_terminal_ms": 121,
+            "fail_closed_cause": "prepare_timeout",
+            "guard_outcome": "timeout",
+            "min_file_version": 37,
+            "outcome": "wait_not_ready",
+            "progress": {
+              "phase": "snapshot_with_deps",
+              "phase_started_offset_ms": 121,
+              "wait_completed_offset_ms": 121
+            },
+            "route": null,
+            "shadow_version_at_start": 37,
+            "snapshot_with_deps_timeout_runtime": {
+              "queue_wait_ms": 0,
+              "resolution": "queue_wait"
+            },
+            "timeout_attribution": {
+              "budget_ms": 120,
+              "elapsed_ms": 121,
+              "overshoot_ms": 1,
+              "phase": "snapshot_with_deps",
+              "source": "prepare_guard"
+            },
+            "wait_budget_ms": 120
+          },
+          "request_id": "38100108",
+          "server_edge_details": {
+            "dispatch_to_request_context_wait_ms": 0,
+            "first_poll_to_first_wake_wait_ms": 0,
+            "handler_entered_at_ms": 1774261753152,
+            "jsonrpc_dispatch_received_at_ms": 1774261753135,
+            "method_entered_at_ms": 1774261753152,
+            "method_prelude_exec_ms": 0,
+            "pre_method_attribution_provenance": "same_request_authoritative",
+            "response_sent_at_ms": 1774261753274,
+            "server_handler_exec_ms": 122,
+            "service_future_created_at_ms": 1774261753135,
+            "service_future_first_poll_entered_at_ms": 1774261753152,
+            "service_future_first_poll_outcome": "pending",
+            "service_future_first_wake_scheduled_at_ms": 1774261753152,
+            "service_future_to_first_poll_wait_ms": 17,
+            "service_future_to_scope_wait_ms": 17,
+            "service_scope_entered_at_ms": 1774261753152,
+            "service_scope_to_method_wait_ms": 0,
+            "transport_received_at_ms": 1774261753135,
+            "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+            "transport_to_handler_wait_ms": 17,
+            "transport_to_method_wait_ms": 17,
+            "transport_to_service_future_wait_ms": 0,
+            "transport_to_service_scope_wait_ms": 17
+          },
+          "stages": [
+            {
+              "duration_ms": 0,
+              "name": "turn_wait",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "sync_globals",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 121,
+              "name": "prepare_stateful",
+              "started_offset_ms": 0,
+              "status": "failed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "terminal",
+              "started_offset_ms": 121,
+              "status": "failed"
+            }
+          ],
+          "started_at_ms": 1774261753152,
+          "total_duration_ms": 121,
+          "trace_id": "completion-trace-10",
+          "trigger_mode": "invoked",
+          "turn_attribution": {
+            "active_completion_count": 0,
+            "did_change_ahead_count": 1,
+            "dispatcher_resolution_latency_ms": 0,
+            "dropped_completion_file_seq": [],
+            "queue_capacity": 256,
+            "queue_depth_after_enqueue": 2,
+            "queue_depth_before_enqueue": 1,
+            "queue_outcome": "enqueued",
+            "queued_completion_ahead_count": 0,
+            "request_epoch": 10,
+            "request_file_seq": 47,
+            "turn_wait_outcome": "ready"
+          },
+          "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+        },
+        {
+          "dominant_stage": "prepare_stateful",
+          "outcome": "fail_closed",
+          "prepare_details": {
+            "apply_age_at_start_ms": 0,
+            "apply_age_at_terminal_ms": 122,
+            "fail_closed_cause": "prepare_timeout",
+            "guard_outcome": "timeout",
+            "min_file_version": 41,
+            "outcome": "wait_not_ready",
+            "progress": {
+              "phase": "wait_for_file_version",
+              "phase_started_offset_ms": 0
+            },
+            "route": null,
+            "shadow_version_at_start": 41,
+            "timeout_attribution": {
+              "budget_ms": 120,
+              "elapsed_ms": 121,
+              "overshoot_ms": 1,
+              "phase": "wait_for_file_version",
+              "source": "prepare_guard"
+            },
+            "wait_budget_ms": 120
+          },
+          "request_id": "38100109",
+          "server_edge_details": {
+            "dispatch_to_request_context_wait_ms": 0,
+            "first_poll_to_first_wake_wait_ms": 0,
+            "handler_entered_at_ms": 1774261753293,
+            "jsonrpc_dispatch_received_at_ms": 1774261753276,
+            "method_entered_at_ms": 1774261753293,
+            "method_prelude_exec_ms": 0,
+            "pre_method_attribution_provenance": "same_request_authoritative",
+            "response_sent_at_ms": 1774261753415,
+            "server_handler_exec_ms": 122,
+            "service_future_created_at_ms": 1774261753276,
+            "service_future_first_poll_entered_at_ms": 1774261753293,
+            "service_future_first_poll_outcome": "pending",
+            "service_future_first_wake_scheduled_at_ms": 1774261753293,
+            "service_future_to_first_poll_wait_ms": 17,
+            "service_future_to_scope_wait_ms": 17,
+            "service_scope_entered_at_ms": 1774261753293,
+            "service_scope_to_method_wait_ms": 0,
+            "transport_received_at_ms": 1774261753276,
+            "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+            "transport_to_handler_wait_ms": 17,
+            "transport_to_method_wait_ms": 17,
+            "transport_to_service_future_wait_ms": 0,
+            "transport_to_service_scope_wait_ms": 17
+          },
+          "stages": [
+            {
+              "duration_ms": 0,
+              "name": "turn_wait",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "sync_globals",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 121,
+              "name": "prepare_stateful",
+              "started_offset_ms": 0,
+              "status": "failed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "terminal",
+              "started_offset_ms": 121,
+              "status": "failed"
+            }
+          ],
+          "started_at_ms": 1774261753293,
+          "total_duration_ms": 121,
+          "trace_id": "completion-trace-11",
+          "trigger_mode": "invoked",
+          "turn_attribution": {
+            "active_completion_count": 0,
+            "did_change_ahead_count": 1,
+            "dispatcher_resolution_latency_ms": 0,
+            "dropped_completion_file_seq": [],
+            "queue_capacity": 256,
+            "queue_depth_after_enqueue": 2,
+            "queue_depth_before_enqueue": 1,
+            "queue_outcome": "enqueued",
+            "queued_completion_ahead_count": 0,
+            "request_epoch": 11,
+            "request_file_seq": 52,
+            "turn_wait_outcome": "ready"
+          },
+          "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+        }
+      ],
+      "version": 11
+    },
+    "selected_traces": [
+      {
+        "dominant_stage": "prepare_stateful",
+        "outcome": "ok_non_empty",
+        "prepare_details": {
+          "apply_age_at_start_ms": 43821,
+          "apply_age_at_terminal_ms": 43826,
+          "exact_wait": {
+            "current_revision_head_owner_hints_ready": true,
+            "exact_ready_before_wait": true,
+            "head_ready_before_wait": true
+          },
+          "fail_closed_cause": null,
+          "guard_outcome": "prepared",
+          "min_file_version": 1,
+          "observed_file_version": 1,
+          "outcome": "ready",
+          "progress": {
+            "phase": "ready",
+            "phase_started_offset_ms": 4,
+            "snapshot_completed_offset_ms": 4,
+            "wait_completed_offset_ms": 4
+          },
+          "route": "head_hit",
+          "shadow_version_at_start": 1,
+          "snapshot_elapsed_ms": 0,
+          "snapshot_with_deps_runtime": {
+            "exec_ms": 0,
+            "queue_wait_ms": 0
+          },
+          "timeout_attribution": null,
+          "wait_budget_ms": 120,
+          "wait_elapsed_ms": 4,
+          "wait_for_file_version_runtime": {
+            "exec_ms": 0,
+            "queue_wait_ms": 0,
+            "resolution": "immediate"
+          }
+        },
+        "request_id": "38100000",
+        "server_edge_details": {
+          "dispatch_to_request_context_wait_ms": 0,
+          "first_poll_to_first_wake_wait_ms": 1,
+          "handler_entered_at_ms": 1774261751888,
+          "jsonrpc_dispatch_received_at_ms": 1774261751887,
+          "method_entered_at_ms": 1774261751888,
+          "method_prelude_exec_ms": 0,
+          "pre_method_attribution_provenance": "same_request_authoritative",
+          "response_sent_at_ms": 1774261751896,
+          "server_handler_exec_ms": 8,
+          "service_future_created_at_ms": 1774261751887,
+          "service_future_first_poll_entered_at_ms": 1774261751887,
+          "service_future_first_poll_outcome": "pending",
+          "service_future_first_wake_scheduled_at_ms": 1774261751888,
+          "service_future_to_first_poll_wait_ms": 0,
+          "service_future_to_scope_wait_ms": 0,
+          "service_scope_entered_at_ms": 1774261751887,
+          "service_scope_to_method_wait_ms": 1,
+          "transport_received_at_ms": 1774261751887,
+          "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+          "transport_to_handler_wait_ms": 1,
+          "transport_to_method_wait_ms": 1,
+          "transport_to_service_future_wait_ms": 0,
+          "transport_to_service_scope_wait_ms": 0
+        },
+        "stages": [
+          {
+            "duration_ms": 0,
+            "name": "turn_wait",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "sync_globals",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 4,
+            "name": "prepare_stateful",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "query_bundle",
+            "started_offset_ms": 4,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 2,
+            "name": "response_build",
+            "started_offset_ms": 4,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "terminal",
+            "started_offset_ms": 6,
+            "status": "completed"
+          }
+        ],
+        "started_at_ms": 1774261751888,
+        "total_duration_ms": 8,
+        "trace_id": "completion-trace-1",
+        "trigger_mode": "invoked",
+        "turn_attribution": {
+          "active_completion_count": 0,
+          "did_change_ahead_count": 0,
+          "dispatcher_resolution_latency_ms": 0,
+          "dropped_completion_file_seq": [],
+          "queue_capacity": 256,
+          "queue_depth_after_enqueue": 1,
+          "queue_depth_before_enqueue": 0,
+          "queue_outcome": "enqueued",
+          "queued_completion_ahead_count": 0,
+          "request_epoch": 1,
+          "request_file_seq": 2,
+          "turn_wait_outcome": "ready"
+        },
+        "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+      },
+      {
+        "dominant_stage": "prepare_stateful",
+        "outcome": "fail_closed",
+        "prepare_details": {
+          "apply_age_at_start_ms": 0,
+          "apply_age_at_terminal_ms": 121,
+          "fail_closed_cause": "prepare_timeout",
+          "guard_outcome": "timeout",
+          "min_file_version": 5,
+          "outcome": "wait_not_ready",
+          "progress": {
+            "phase": "wait_for_file_version",
+            "phase_started_offset_ms": 0
+          },
+          "route": null,
+          "shadow_version_at_start": 5,
+          "timeout_attribution": {
+            "budget_ms": 120,
+            "elapsed_ms": 120,
+            "overshoot_ms": 0,
+            "phase": "wait_for_file_version",
+            "source": "prepare_guard"
+          },
+          "wait_budget_ms": 120
+        },
+        "request_id": "38100100",
+        "server_edge_details": {
+          "dispatch_to_request_context_wait_ms": 0,
+          "first_poll_to_first_wake_wait_ms": 0,
+          "handler_entered_at_ms": 1774261751923,
+          "jsonrpc_dispatch_received_at_ms": 1774261751906,
+          "method_entered_at_ms": 1774261751923,
+          "method_prelude_exec_ms": 0,
+          "pre_method_attribution_provenance": "same_request_authoritative",
+          "response_sent_at_ms": 1774261752044,
+          "server_handler_exec_ms": 121,
+          "service_future_created_at_ms": 1774261751906,
+          "service_future_first_poll_entered_at_ms": 1774261751923,
+          "service_future_first_poll_outcome": "pending",
+          "service_future_first_wake_scheduled_at_ms": 1774261751923,
+          "service_future_to_first_poll_wait_ms": 17,
+          "service_future_to_scope_wait_ms": 17,
+          "service_scope_entered_at_ms": 1774261751923,
+          "service_scope_to_method_wait_ms": 0,
+          "transport_received_at_ms": 1774261751906,
+          "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+          "transport_to_handler_wait_ms": 17,
+          "transport_to_method_wait_ms": 17,
+          "transport_to_service_future_wait_ms": 0,
+          "transport_to_service_scope_wait_ms": 17
+        },
+        "stages": [
+          {
+            "duration_ms": 0,
+            "name": "turn_wait",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "sync_globals",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 120,
+            "name": "prepare_stateful",
+            "started_offset_ms": 0,
+            "status": "failed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "terminal",
+            "started_offset_ms": 120,
+            "status": "failed"
+          }
+        ],
+        "started_at_ms": 1774261751923,
+        "total_duration_ms": 121,
+        "trace_id": "completion-trace-2",
+        "trigger_mode": "invoked",
+        "turn_attribution": {
+          "active_completion_count": 0,
+          "did_change_ahead_count": 1,
+          "dispatcher_resolution_latency_ms": 0,
+          "dropped_completion_file_seq": [],
+          "queue_capacity": 256,
+          "queue_depth_after_enqueue": 2,
+          "queue_depth_before_enqueue": 1,
+          "queue_outcome": "enqueued",
+          "queued_completion_ahead_count": 0,
+          "request_epoch": 2,
+          "request_file_seq": 7,
+          "turn_wait_outcome": "ready"
+        },
+        "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+      },
+      {
+        "dominant_stage": "prepare_stateful",
+        "outcome": "fail_closed",
+        "prepare_details": {
+          "apply_age_at_start_ms": 1,
+          "apply_age_at_terminal_ms": 122,
+          "fail_closed_cause": "prepare_timeout",
+          "guard_outcome": "timeout",
+          "min_file_version": 9,
+          "outcome": "wait_not_ready",
+          "progress": {
+            "phase": "wait_for_file_version",
+            "phase_started_offset_ms": 0
+          },
+          "route": null,
+          "shadow_version_at_start": 9,
+          "timeout_attribution": {
+            "budget_ms": 120,
+            "elapsed_ms": 121,
+            "overshoot_ms": 1,
+            "phase": "wait_for_file_version",
+            "source": "prepare_guard"
+          },
+          "wait_budget_ms": 120
+        },
+        "request_id": "38100101",
+        "server_edge_details": {
+          "dispatch_to_request_context_wait_ms": 0,
+          "first_poll_to_first_wake_wait_ms": 0,
+          "handler_entered_at_ms": 1774261752067,
+          "jsonrpc_dispatch_received_at_ms": 1774261752046,
+          "method_entered_at_ms": 1774261752067,
+          "method_prelude_exec_ms": 0,
+          "pre_method_attribution_provenance": "same_request_authoritative",
+          "response_sent_at_ms": 1774261752189,
+          "server_handler_exec_ms": 122,
+          "service_future_created_at_ms": 1774261752047,
+          "service_future_first_poll_entered_at_ms": 1774261752067,
+          "service_future_first_poll_outcome": "pending",
+          "service_future_first_wake_scheduled_at_ms": 1774261752067,
+          "service_future_to_first_poll_wait_ms": 20,
+          "service_future_to_scope_wait_ms": 20,
+          "service_scope_entered_at_ms": 1774261752067,
+          "service_scope_to_method_wait_ms": 0,
+          "transport_received_at_ms": 1774261752046,
+          "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+          "transport_to_handler_wait_ms": 21,
+          "transport_to_method_wait_ms": 21,
+          "transport_to_service_future_wait_ms": 1,
+          "transport_to_service_scope_wait_ms": 21
+        },
+        "stages": [
+          {
+            "duration_ms": 0,
+            "name": "turn_wait",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "sync_globals",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 121,
+            "name": "prepare_stateful",
+            "started_offset_ms": 0,
+            "status": "failed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "terminal",
+            "started_offset_ms": 121,
+            "status": "failed"
+          }
+        ],
+        "started_at_ms": 1774261752067,
+        "total_duration_ms": 122,
+        "trace_id": "completion-trace-3",
+        "trigger_mode": "invoked",
+        "turn_attribution": {
+          "active_completion_count": 0,
+          "did_change_ahead_count": 1,
+          "dispatcher_resolution_latency_ms": 0,
+          "dropped_completion_file_seq": [],
+          "queue_capacity": 256,
+          "queue_depth_after_enqueue": 2,
+          "queue_depth_before_enqueue": 1,
+          "queue_outcome": "enqueued",
+          "queued_completion_ahead_count": 0,
+          "request_epoch": 3,
+          "request_file_seq": 12,
+          "turn_wait_outcome": "ready"
+        },
+        "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+      },
+      {
+        "dominant_stage": "prepare_stateful",
+        "outcome": "fail_closed",
+        "prepare_details": {
+          "apply_age_at_start_ms": 0,
+          "apply_age_at_terminal_ms": 121,
+          "fail_closed_cause": "prepare_timeout",
+          "guard_outcome": "timeout",
+          "min_file_version": 13,
+          "outcome": "wait_not_ready",
+          "progress": {
+            "phase": "wait_for_file_version",
+            "phase_started_offset_ms": 0
+          },
+          "route": null,
+          "shadow_version_at_start": 13,
+          "timeout_attribution": {
+            "budget_ms": 120,
+            "elapsed_ms": 120,
+            "overshoot_ms": 0,
+            "phase": "wait_for_file_version",
+            "source": "prepare_guard"
+          },
+          "wait_budget_ms": 120
+        },
+        "request_id": "38100102",
+        "server_edge_details": {
+          "dispatch_to_request_context_wait_ms": 0,
+          "first_poll_to_first_wake_wait_ms": 1,
+          "handler_entered_at_ms": 1774261752212,
+          "jsonrpc_dispatch_received_at_ms": 1774261752191,
+          "method_entered_at_ms": 1774261752211,
+          "method_prelude_exec_ms": 1,
+          "pre_method_attribution_provenance": "same_request_authoritative",
+          "response_sent_at_ms": 1774261752333,
+          "server_handler_exec_ms": 121,
+          "service_future_created_at_ms": 1774261752191,
+          "service_future_first_poll_entered_at_ms": 1774261752211,
+          "service_future_first_poll_outcome": "pending",
+          "service_future_first_wake_scheduled_at_ms": 1774261752212,
+          "service_future_to_first_poll_wait_ms": 20,
+          "service_future_to_scope_wait_ms": 20,
+          "service_scope_entered_at_ms": 1774261752211,
+          "service_scope_to_method_wait_ms": 0,
+          "transport_received_at_ms": 1774261752191,
+          "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+          "transport_to_handler_wait_ms": 21,
+          "transport_to_method_wait_ms": 20,
+          "transport_to_service_future_wait_ms": 0,
+          "transport_to_service_scope_wait_ms": 20
+        },
+        "stages": [
+          {
+            "duration_ms": 0,
+            "name": "turn_wait",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "sync_globals",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 120,
+            "name": "prepare_stateful",
+            "started_offset_ms": 0,
+            "status": "failed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "terminal",
+            "started_offset_ms": 120,
+            "status": "failed"
+          }
+        ],
+        "started_at_ms": 1774261752211,
+        "total_duration_ms": 121,
+        "trace_id": "completion-trace-4",
+        "trigger_mode": "invoked",
+        "turn_attribution": {
+          "active_completion_count": 0,
+          "did_change_ahead_count": 1,
+          "dispatcher_resolution_latency_ms": 0,
+          "dropped_completion_file_seq": [],
+          "queue_capacity": 256,
+          "queue_depth_after_enqueue": 2,
+          "queue_depth_before_enqueue": 1,
+          "queue_outcome": "enqueued",
+          "queued_completion_ahead_count": 0,
+          "request_epoch": 4,
+          "request_file_seq": 17,
+          "turn_wait_outcome": "ready"
+        },
+        "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+      },
+      {
+        "dominant_stage": "wait_exact_type_index",
+        "outcome": "fail_closed",
+        "prepare_details": {
+          "apply_age_at_start_ms": 0,
+          "apply_age_at_terminal_ms": 83,
+          "exact_wait": {
+            "artifact_poll": {
+              "exact_ready": false,
+              "head_ready": false,
+              "observed_file_version": 17,
+              "poll_count": 11,
+              "poll_elapsed_ms": 127
+            },
+            "artifact_wait_outcome": "deadline",
+            "exact_ready_before_wait": false,
+            "head_ready_before_wait": false
+          },
+          "fail_closed_cause": "exact_deadline",
+          "guard_outcome": "prepared",
+          "min_file_version": 17,
+          "observed_file_version": 17,
+          "outcome": "ready",
+          "progress": {
+            "phase": "ready",
+            "phase_started_offset_ms": 82,
+            "snapshot_completed_offset_ms": 82,
+            "wait_completed_offset_ms": 82
+          },
+          "route": null,
+          "shadow_version_at_start": 17,
+          "snapshot_elapsed_ms": 0,
+          "snapshot_with_deps_runtime": {
+            "exec_ms": 0,
+            "queue_wait_ms": 0
+          },
+          "timeout_attribution": null,
+          "wait_budget_ms": 120,
+          "wait_elapsed_ms": 82,
+          "wait_for_file_version_runtime": {
+            "exec_ms": 0,
+            "queue_wait_ms": 82,
+            "resolution": "immediate"
+          }
+        },
+        "request_id": "38100103",
+        "server_edge_details": {
+          "dispatch_to_request_context_wait_ms": 0,
+          "first_poll_to_first_wake_wait_ms": 0,
+          "handler_entered_at_ms": 1774261752354,
+          "jsonrpc_dispatch_received_at_ms": 1774261752336,
+          "method_entered_at_ms": 1774261752354,
+          "method_prelude_exec_ms": 0,
+          "pre_method_attribution_provenance": "same_request_authoritative",
+          "response_sent_at_ms": 1774261752566,
+          "server_handler_exec_ms": 212,
+          "service_future_created_at_ms": 1774261752336,
+          "service_future_first_poll_entered_at_ms": 1774261752354,
+          "service_future_first_poll_outcome": "pending",
+          "service_future_first_wake_scheduled_at_ms": 1774261752354,
+          "service_future_to_first_poll_wait_ms": 18,
+          "service_future_to_scope_wait_ms": 18,
+          "service_scope_entered_at_ms": 1774261752354,
+          "service_scope_to_method_wait_ms": 0,
+          "transport_received_at_ms": 1774261752336,
+          "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+          "transport_to_handler_wait_ms": 18,
+          "transport_to_method_wait_ms": 18,
+          "transport_to_service_future_wait_ms": 0,
+          "transport_to_service_scope_wait_ms": 18
+        },
+        "stages": [
+          {
+            "duration_ms": 0,
+            "name": "turn_wait",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "sync_globals",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 82,
+            "name": "prepare_stateful",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 127,
+            "name": "wait_exact_type_index",
+            "started_offset_ms": 82,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "terminal",
+            "started_offset_ms": 209,
+            "status": "failed"
+          }
+        ],
+        "started_at_ms": 1774261752354,
+        "total_duration_ms": 211,
+        "trace_id": "completion-trace-5",
+        "trigger_mode": "invoked",
+        "turn_attribution": {
+          "active_completion_count": 0,
+          "did_change_ahead_count": 1,
+          "dispatcher_resolution_latency_ms": 0,
+          "dropped_completion_file_seq": [],
+          "queue_capacity": 256,
+          "queue_depth_after_enqueue": 2,
+          "queue_depth_before_enqueue": 1,
+          "queue_outcome": "enqueued",
+          "queued_completion_ahead_count": 0,
+          "request_epoch": 5,
+          "request_file_seq": 22,
+          "turn_wait_outcome": "ready"
+        },
+        "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+      },
+      {
+        "dominant_stage": "prepare_stateful",
+        "outcome": "fail_closed",
+        "prepare_details": {
+          "apply_age_at_start_ms": 0,
+          "apply_age_at_terminal_ms": 121,
+          "fail_closed_cause": "prepare_timeout",
+          "guard_outcome": "timeout",
+          "min_file_version": 21,
+          "outcome": "wait_not_ready",
+          "progress": {
+            "phase": "wait_for_file_version",
+            "phase_started_offset_ms": 0
+          },
+          "route": null,
+          "shadow_version_at_start": 21,
+          "timeout_attribution": {
+            "budget_ms": 120,
+            "elapsed_ms": 121,
+            "overshoot_ms": 1,
+            "phase": "wait_for_file_version",
+            "source": "prepare_guard"
+          },
+          "wait_budget_ms": 120
+        },
+        "request_id": "38100104",
+        "server_edge_details": {
+          "dispatch_to_request_context_wait_ms": 0,
+          "first_poll_to_first_wake_wait_ms": 0,
+          "handler_entered_at_ms": 1774261752590,
+          "jsonrpc_dispatch_received_at_ms": 1774261752569,
+          "method_entered_at_ms": 1774261752590,
+          "method_prelude_exec_ms": 0,
+          "pre_method_attribution_provenance": "same_request_authoritative",
+          "response_sent_at_ms": 1774261752712,
+          "server_handler_exec_ms": 122,
+          "service_future_created_at_ms": 1774261752569,
+          "service_future_first_poll_entered_at_ms": 1774261752590,
+          "service_future_first_poll_outcome": "pending",
+          "service_future_first_wake_scheduled_at_ms": 1774261752590,
+          "service_future_to_first_poll_wait_ms": 21,
+          "service_future_to_scope_wait_ms": 21,
+          "service_scope_entered_at_ms": 1774261752590,
+          "service_scope_to_method_wait_ms": 0,
+          "transport_received_at_ms": 1774261752569,
+          "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+          "transport_to_handler_wait_ms": 21,
+          "transport_to_method_wait_ms": 21,
+          "transport_to_service_future_wait_ms": 0,
+          "transport_to_service_scope_wait_ms": 21
+        },
+        "stages": [
+          {
+            "duration_ms": 0,
+            "name": "turn_wait",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "sync_globals",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 121,
+            "name": "prepare_stateful",
+            "started_offset_ms": 0,
+            "status": "failed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "terminal",
+            "started_offset_ms": 121,
+            "status": "failed"
+          }
+        ],
+        "started_at_ms": 1774261752590,
+        "total_duration_ms": 121,
+        "trace_id": "completion-trace-6",
+        "trigger_mode": "invoked",
+        "turn_attribution": {
+          "active_completion_count": 0,
+          "did_change_ahead_count": 1,
+          "dispatcher_resolution_latency_ms": 0,
+          "dropped_completion_file_seq": [],
+          "queue_capacity": 256,
+          "queue_depth_after_enqueue": 2,
+          "queue_depth_before_enqueue": 1,
+          "queue_outcome": "enqueued",
+          "queued_completion_ahead_count": 0,
+          "request_epoch": 6,
+          "request_file_seq": 27,
+          "turn_wait_outcome": "ready"
+        },
+        "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+      },
+      {
+        "dominant_stage": "prepare_stateful",
+        "outcome": "fail_closed",
+        "prepare_details": {
+          "apply_age_at_start_ms": 0,
+          "apply_age_at_terminal_ms": 121,
+          "fail_closed_cause": "prepare_timeout",
+          "guard_outcome": "timeout",
+          "min_file_version": 25,
+          "outcome": "wait_not_ready",
+          "progress": {
+            "phase": "wait_for_file_version",
+            "phase_started_offset_ms": 0
+          },
+          "route": null,
+          "shadow_version_at_start": 25,
+          "timeout_attribution": {
+            "budget_ms": 120,
+            "elapsed_ms": 120,
+            "overshoot_ms": 0,
+            "phase": "wait_for_file_version",
+            "source": "prepare_guard"
+          },
+          "wait_budget_ms": 120
+        },
+        "request_id": "38100105",
+        "server_edge_details": {
+          "dispatch_to_request_context_wait_ms": 0,
+          "first_poll_to_first_wake_wait_ms": 0,
+          "handler_entered_at_ms": 1774261752733,
+          "jsonrpc_dispatch_received_at_ms": 1774261752713,
+          "method_entered_at_ms": 1774261752733,
+          "method_prelude_exec_ms": 0,
+          "pre_method_attribution_provenance": "same_request_authoritative",
+          "response_sent_at_ms": 1774261752854,
+          "server_handler_exec_ms": 121,
+          "service_future_created_at_ms": 1774261752713,
+          "service_future_first_poll_entered_at_ms": 1774261752733,
+          "service_future_first_poll_outcome": "pending",
+          "service_future_first_wake_scheduled_at_ms": 1774261752733,
+          "service_future_to_first_poll_wait_ms": 20,
+          "service_future_to_scope_wait_ms": 20,
+          "service_scope_entered_at_ms": 1774261752733,
+          "service_scope_to_method_wait_ms": 0,
+          "transport_received_at_ms": 1774261752713,
+          "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+          "transport_to_handler_wait_ms": 20,
+          "transport_to_method_wait_ms": 20,
+          "transport_to_service_future_wait_ms": 0,
+          "transport_to_service_scope_wait_ms": 20
+        },
+        "stages": [
+          {
+            "duration_ms": 0,
+            "name": "turn_wait",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "sync_globals",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 120,
+            "name": "prepare_stateful",
+            "started_offset_ms": 0,
+            "status": "failed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "terminal",
+            "started_offset_ms": 120,
+            "status": "failed"
+          }
+        ],
+        "started_at_ms": 1774261752733,
+        "total_duration_ms": 121,
+        "trace_id": "completion-trace-7",
+        "trigger_mode": "invoked",
+        "turn_attribution": {
+          "active_completion_count": 0,
+          "did_change_ahead_count": 1,
+          "dispatcher_resolution_latency_ms": 0,
+          "dropped_completion_file_seq": [],
+          "queue_capacity": 256,
+          "queue_depth_after_enqueue": 2,
+          "queue_depth_before_enqueue": 1,
+          "queue_outcome": "enqueued",
+          "queued_completion_ahead_count": 0,
+          "request_epoch": 7,
+          "request_file_seq": 32,
+          "turn_wait_outcome": "ready"
+        },
+        "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+      },
+      {
+        "dominant_stage": "prepare_stateful",
+        "outcome": "fail_closed",
+        "prepare_details": {
+          "apply_age_at_start_ms": 0,
+          "apply_age_at_terminal_ms": 121,
+          "fail_closed_cause": "prepare_timeout",
+          "guard_outcome": "timeout",
+          "min_file_version": 29,
+          "outcome": "wait_not_ready",
+          "progress": {
+            "phase": "wait_for_file_version",
+            "phase_started_offset_ms": 0
+          },
+          "route": null,
+          "shadow_version_at_start": 29,
+          "timeout_attribution": {
+            "budget_ms": 120,
+            "elapsed_ms": 120,
+            "overshoot_ms": 0,
+            "phase": "wait_for_file_version",
+            "source": "prepare_guard"
+          },
+          "wait_budget_ms": 120
+        },
+        "request_id": "38100106",
+        "server_edge_details": {
+          "dispatch_to_request_context_wait_ms": 0,
+          "first_poll_to_first_wake_wait_ms": 0,
+          "handler_entered_at_ms": 1774261752872,
+          "jsonrpc_dispatch_received_at_ms": 1774261752856,
+          "method_entered_at_ms": 1774261752872,
+          "method_prelude_exec_ms": 0,
+          "pre_method_attribution_provenance": "same_request_authoritative",
+          "response_sent_at_ms": 1774261752993,
+          "server_handler_exec_ms": 121,
+          "service_future_created_at_ms": 1774261752856,
+          "service_future_first_poll_entered_at_ms": 1774261752872,
+          "service_future_first_poll_outcome": "pending",
+          "service_future_first_wake_scheduled_at_ms": 1774261752872,
+          "service_future_to_first_poll_wait_ms": 16,
+          "service_future_to_scope_wait_ms": 16,
+          "service_scope_entered_at_ms": 1774261752872,
+          "service_scope_to_method_wait_ms": 0,
+          "transport_received_at_ms": 1774261752856,
+          "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+          "transport_to_handler_wait_ms": 16,
+          "transport_to_method_wait_ms": 16,
+          "transport_to_service_future_wait_ms": 0,
+          "transport_to_service_scope_wait_ms": 16
+        },
+        "stages": [
+          {
+            "duration_ms": 0,
+            "name": "turn_wait",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "sync_globals",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 120,
+            "name": "prepare_stateful",
+            "started_offset_ms": 0,
+            "status": "failed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "terminal",
+            "started_offset_ms": 120,
+            "status": "failed"
+          }
+        ],
+        "started_at_ms": 1774261752872,
+        "total_duration_ms": 120,
+        "trace_id": "completion-trace-8",
+        "trigger_mode": "invoked",
+        "turn_attribution": {
+          "active_completion_count": 0,
+          "did_change_ahead_count": 1,
+          "dispatcher_resolution_latency_ms": 0,
+          "dropped_completion_file_seq": [],
+          "queue_capacity": 256,
+          "queue_depth_after_enqueue": 2,
+          "queue_depth_before_enqueue": 1,
+          "queue_outcome": "enqueued",
+          "queued_completion_ahead_count": 0,
+          "request_epoch": 8,
+          "request_file_seq": 37,
+          "turn_wait_outcome": "ready"
+        },
+        "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+      },
+      {
+        "dominant_stage": "prepare_stateful",
+        "outcome": "fail_closed",
+        "prepare_details": {
+          "apply_age_at_start_ms": 0,
+          "apply_age_at_terminal_ms": 121,
+          "fail_closed_cause": "prepare_timeout",
+          "guard_outcome": "timeout",
+          "min_file_version": 33,
+          "outcome": "wait_not_ready",
+          "progress": {
+            "phase": "wait_for_file_version",
+            "phase_started_offset_ms": 0
+          },
+          "route": null,
+          "shadow_version_at_start": 33,
+          "timeout_attribution": {
+            "budget_ms": 120,
+            "elapsed_ms": 121,
+            "overshoot_ms": 1,
+            "phase": "wait_for_file_version",
+            "source": "prepare_guard"
+          },
+          "wait_budget_ms": 120
+        },
+        "request_id": "38100107",
+        "server_edge_details": {
+          "dispatch_to_request_context_wait_ms": 0,
+          "first_poll_to_first_wake_wait_ms": 0,
+          "handler_entered_at_ms": 1774261753010,
+          "jsonrpc_dispatch_received_at_ms": 1774261752995,
+          "method_entered_at_ms": 1774261753010,
+          "method_prelude_exec_ms": 0,
+          "pre_method_attribution_provenance": "same_request_authoritative",
+          "response_sent_at_ms": 1774261753132,
+          "server_handler_exec_ms": 122,
+          "service_future_created_at_ms": 1774261752995,
+          "service_future_first_poll_entered_at_ms": 1774261753010,
+          "service_future_first_poll_outcome": "pending",
+          "service_future_first_wake_scheduled_at_ms": 1774261753010,
+          "service_future_to_first_poll_wait_ms": 15,
+          "service_future_to_scope_wait_ms": 15,
+          "service_scope_entered_at_ms": 1774261753010,
+          "service_scope_to_method_wait_ms": 0,
+          "transport_received_at_ms": 1774261752995,
+          "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+          "transport_to_handler_wait_ms": 15,
+          "transport_to_method_wait_ms": 15,
+          "transport_to_service_future_wait_ms": 0,
+          "transport_to_service_scope_wait_ms": 15
+        },
+        "stages": [
+          {
+            "duration_ms": 0,
+            "name": "turn_wait",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "sync_globals",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 121,
+            "name": "prepare_stateful",
+            "started_offset_ms": 0,
+            "status": "failed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "terminal",
+            "started_offset_ms": 121,
+            "status": "failed"
+          }
+        ],
+        "started_at_ms": 1774261753010,
+        "total_duration_ms": 121,
+        "trace_id": "completion-trace-9",
+        "trigger_mode": "invoked",
+        "turn_attribution": {
+          "active_completion_count": 0,
+          "did_change_ahead_count": 1,
+          "dispatcher_resolution_latency_ms": 0,
+          "dropped_completion_file_seq": [],
+          "queue_capacity": 256,
+          "queue_depth_after_enqueue": 2,
+          "queue_depth_before_enqueue": 1,
+          "queue_outcome": "enqueued",
+          "queued_completion_ahead_count": 0,
+          "request_epoch": 9,
+          "request_file_seq": 42,
+          "turn_wait_outcome": "ready"
+        },
+        "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+      },
+      {
+        "dominant_stage": "prepare_stateful",
+        "outcome": "fail_closed",
+        "prepare_details": {
+          "apply_age_at_start_ms": 0,
+          "apply_age_at_terminal_ms": 121,
+          "fail_closed_cause": "prepare_timeout",
+          "guard_outcome": "timeout",
+          "min_file_version": 37,
+          "outcome": "wait_not_ready",
+          "progress": {
+            "phase": "snapshot_with_deps",
+            "phase_started_offset_ms": 121,
+            "wait_completed_offset_ms": 121
+          },
+          "route": null,
+          "shadow_version_at_start": 37,
+          "snapshot_with_deps_timeout_runtime": {
+            "queue_wait_ms": 0,
+            "resolution": "queue_wait"
+          },
+          "timeout_attribution": {
+            "budget_ms": 120,
+            "elapsed_ms": 121,
+            "overshoot_ms": 1,
+            "phase": "snapshot_with_deps",
+            "source": "prepare_guard"
+          },
+          "wait_budget_ms": 120
+        },
+        "request_id": "38100108",
+        "server_edge_details": {
+          "dispatch_to_request_context_wait_ms": 0,
+          "first_poll_to_first_wake_wait_ms": 0,
+          "handler_entered_at_ms": 1774261753152,
+          "jsonrpc_dispatch_received_at_ms": 1774261753135,
+          "method_entered_at_ms": 1774261753152,
+          "method_prelude_exec_ms": 0,
+          "pre_method_attribution_provenance": "same_request_authoritative",
+          "response_sent_at_ms": 1774261753274,
+          "server_handler_exec_ms": 122,
+          "service_future_created_at_ms": 1774261753135,
+          "service_future_first_poll_entered_at_ms": 1774261753152,
+          "service_future_first_poll_outcome": "pending",
+          "service_future_first_wake_scheduled_at_ms": 1774261753152,
+          "service_future_to_first_poll_wait_ms": 17,
+          "service_future_to_scope_wait_ms": 17,
+          "service_scope_entered_at_ms": 1774261753152,
+          "service_scope_to_method_wait_ms": 0,
+          "transport_received_at_ms": 1774261753135,
+          "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+          "transport_to_handler_wait_ms": 17,
+          "transport_to_method_wait_ms": 17,
+          "transport_to_service_future_wait_ms": 0,
+          "transport_to_service_scope_wait_ms": 17
+        },
+        "stages": [
+          {
+            "duration_ms": 0,
+            "name": "turn_wait",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "sync_globals",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 121,
+            "name": "prepare_stateful",
+            "started_offset_ms": 0,
+            "status": "failed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "terminal",
+            "started_offset_ms": 121,
+            "status": "failed"
+          }
+        ],
+        "started_at_ms": 1774261753152,
+        "total_duration_ms": 121,
+        "trace_id": "completion-trace-10",
+        "trigger_mode": "invoked",
+        "turn_attribution": {
+          "active_completion_count": 0,
+          "did_change_ahead_count": 1,
+          "dispatcher_resolution_latency_ms": 0,
+          "dropped_completion_file_seq": [],
+          "queue_capacity": 256,
+          "queue_depth_after_enqueue": 2,
+          "queue_depth_before_enqueue": 1,
+          "queue_outcome": "enqueued",
+          "queued_completion_ahead_count": 0,
+          "request_epoch": 10,
+          "request_file_seq": 47,
+          "turn_wait_outcome": "ready"
+        },
+        "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+      },
+      {
+        "dominant_stage": "prepare_stateful",
+        "outcome": "fail_closed",
+        "prepare_details": {
+          "apply_age_at_start_ms": 0,
+          "apply_age_at_terminal_ms": 122,
+          "fail_closed_cause": "prepare_timeout",
+          "guard_outcome": "timeout",
+          "min_file_version": 41,
+          "outcome": "wait_not_ready",
+          "progress": {
+            "phase": "wait_for_file_version",
+            "phase_started_offset_ms": 0
+          },
+          "route": null,
+          "shadow_version_at_start": 41,
+          "timeout_attribution": {
+            "budget_ms": 120,
+            "elapsed_ms": 121,
+            "overshoot_ms": 1,
+            "phase": "wait_for_file_version",
+            "source": "prepare_guard"
+          },
+          "wait_budget_ms": 120
+        },
+        "request_id": "38100109",
+        "server_edge_details": {
+          "dispatch_to_request_context_wait_ms": 0,
+          "first_poll_to_first_wake_wait_ms": 0,
+          "handler_entered_at_ms": 1774261753293,
+          "jsonrpc_dispatch_received_at_ms": 1774261753276,
+          "method_entered_at_ms": 1774261753293,
+          "method_prelude_exec_ms": 0,
+          "pre_method_attribution_provenance": "same_request_authoritative",
+          "response_sent_at_ms": 1774261753415,
+          "server_handler_exec_ms": 122,
+          "service_future_created_at_ms": 1774261753276,
+          "service_future_first_poll_entered_at_ms": 1774261753293,
+          "service_future_first_poll_outcome": "pending",
+          "service_future_first_wake_scheduled_at_ms": 1774261753293,
+          "service_future_to_first_poll_wait_ms": 17,
+          "service_future_to_scope_wait_ms": 17,
+          "service_scope_entered_at_ms": 1774261753293,
+          "service_scope_to_method_wait_ms": 0,
+          "transport_received_at_ms": 1774261753276,
+          "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+          "transport_to_handler_wait_ms": 17,
+          "transport_to_method_wait_ms": 17,
+          "transport_to_service_future_wait_ms": 0,
+          "transport_to_service_scope_wait_ms": 17
+        },
+        "stages": [
+          {
+            "duration_ms": 0,
+            "name": "turn_wait",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "sync_globals",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 121,
+            "name": "prepare_stateful",
+            "started_offset_ms": 0,
+            "status": "failed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "terminal",
+            "started_offset_ms": 121,
+            "status": "failed"
+          }
+        ],
+        "started_at_ms": 1774261753293,
+        "total_duration_ms": 121,
+        "trace_id": "completion-trace-11",
+        "trigger_mode": "invoked",
+        "turn_attribution": {
+          "active_completion_count": 0,
+          "did_change_ahead_count": 1,
+          "dispatcher_resolution_latency_ms": 0,
+          "dropped_completion_file_seq": [],
+          "queue_capacity": 256,
+          "queue_depth_after_enqueue": 2,
+          "queue_depth_before_enqueue": 1,
+          "queue_outcome": "enqueued",
+          "queued_completion_ahead_count": 0,
+          "request_epoch": 11,
+          "request_file_seq": 52,
+          "turn_wait_outcome": "ready"
+        },
+        "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+      }
+    ],
+    "trace_count": 11
+  },
+  "configuration_path": "/home/egor/code/bsl-gradual-types/examples/conf_big",
+  "extension_like_key_latencies": {
+    "intellisense_v2_ir_query_completion": {
+      "count": 0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99": 0.0
+    },
+    "intellisense_v2_semantic_diagnostics_query": {
+      "count": 1,
+      "p50": 529.0,
+      "p95": 529.0,
+      "p99": 529.0
+    },
+    "intellisense_v2_snapshot_completion": {
+      "count": 2,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99": 0.0
+    },
+    "intellisense_v2_syntax_diagnostics_query": {
+      "count": 1,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99": 0.0
+    },
+    "intellisense_v2_wait_for_file_version_completion": {
+      "count": 3,
+      "p50": 82.0,
+      "p95": 121.0,
+      "p99": 121.0
+    },
+    "intellisense_v2_wait_for_file_version_diagnostics": {
+      "count": 1,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99": 0.0
+    }
+  },
+  "latest_trace_summaries": [
+    {
+      "active_completion_count": null,
+      "artifact_poll": null,
+      "collect_ms": null,
+      "did_change_ahead": null,
+      "dispatch_to_request_context_wait_ms": 0,
+      "dominant_stage": "prepare_stateful",
+      "fail_closed_cause": "prepare_timeout",
+      "head_ready_before_wait": null,
+      "min_file_version": 41,
+      "observed_file_version": null,
+      "outcome": "fail_closed",
+      "prepare_guard_outcome": "timeout",
+      "prepare_outcome": "wait_not_ready",
+      "prepare_snapshot_elapsed_ms": null,
+      "prepare_stateful_ms": 121,
+      "prepare_wait_elapsed_ms": null,
+      "query_bundle_ms": null,
+      "queue_outcome": null,
+      "queued_completion_ahead": null,
+      "rank_ms": null,
+      "request_id": "38100109",
+      "response_build_ms": null,
+      "response_build_other_ms": null,
+      "route": null,
+      "service_future_to_first_poll_wait_ms": 17,
+      "started_at_ms": 1774261753293,
+      "timeout_phase": "wait_for_file_version",
+      "timeout_source": "prepare_guard",
+      "total_duration_ms": 121,
+      "trace_id": "completion-trace-11",
+      "transport_to_service_future_wait_ms": 0,
+      "trigger_mode": "invoked",
+      "turn_wait_ms": 0,
+      "turn_wait_outcome": null,
+      "wait_exact_type_index_ms": null,
+      "wait_for_file_version_runtime_queue_wait_ms": null
+    },
+    {
+      "active_completion_count": null,
+      "artifact_poll": null,
+      "collect_ms": null,
+      "did_change_ahead": null,
+      "dispatch_to_request_context_wait_ms": 0,
+      "dominant_stage": "prepare_stateful",
+      "fail_closed_cause": "prepare_timeout",
+      "head_ready_before_wait": null,
+      "min_file_version": 37,
+      "observed_file_version": null,
+      "outcome": "fail_closed",
+      "prepare_guard_outcome": "timeout",
+      "prepare_outcome": "wait_not_ready",
+      "prepare_snapshot_elapsed_ms": null,
+      "prepare_stateful_ms": 121,
+      "prepare_wait_elapsed_ms": null,
+      "query_bundle_ms": null,
+      "queue_outcome": null,
+      "queued_completion_ahead": null,
+      "rank_ms": null,
+      "request_id": "38100108",
+      "response_build_ms": null,
+      "response_build_other_ms": null,
+      "route": null,
+      "service_future_to_first_poll_wait_ms": 17,
+      "started_at_ms": 1774261753152,
+      "timeout_phase": "snapshot_with_deps",
+      "timeout_source": "prepare_guard",
+      "total_duration_ms": 121,
+      "trace_id": "completion-trace-10",
+      "transport_to_service_future_wait_ms": 0,
+      "trigger_mode": "invoked",
+      "turn_wait_ms": 0,
+      "turn_wait_outcome": null,
+      "wait_exact_type_index_ms": null,
+      "wait_for_file_version_runtime_queue_wait_ms": null
+    },
+    {
+      "active_completion_count": null,
+      "artifact_poll": null,
+      "collect_ms": null,
+      "did_change_ahead": null,
+      "dispatch_to_request_context_wait_ms": 0,
+      "dominant_stage": "prepare_stateful",
+      "fail_closed_cause": "prepare_timeout",
+      "head_ready_before_wait": null,
+      "min_file_version": 33,
+      "observed_file_version": null,
+      "outcome": "fail_closed",
+      "prepare_guard_outcome": "timeout",
+      "prepare_outcome": "wait_not_ready",
+      "prepare_snapshot_elapsed_ms": null,
+      "prepare_stateful_ms": 121,
+      "prepare_wait_elapsed_ms": null,
+      "query_bundle_ms": null,
+      "queue_outcome": null,
+      "queued_completion_ahead": null,
+      "rank_ms": null,
+      "request_id": "38100107",
+      "response_build_ms": null,
+      "response_build_other_ms": null,
+      "route": null,
+      "service_future_to_first_poll_wait_ms": 15,
+      "started_at_ms": 1774261753010,
+      "timeout_phase": "wait_for_file_version",
+      "timeout_source": "prepare_guard",
+      "total_duration_ms": 121,
+      "trace_id": "completion-trace-9",
+      "transport_to_service_future_wait_ms": 0,
+      "trigger_mode": "invoked",
+      "turn_wait_ms": 0,
+      "turn_wait_outcome": null,
+      "wait_exact_type_index_ms": null,
+      "wait_for_file_version_runtime_queue_wait_ms": null
+    },
+    {
+      "active_completion_count": null,
+      "artifact_poll": null,
+      "collect_ms": null,
+      "did_change_ahead": null,
+      "dispatch_to_request_context_wait_ms": 0,
+      "dominant_stage": "prepare_stateful",
+      "fail_closed_cause": "prepare_timeout",
+      "head_ready_before_wait": null,
+      "min_file_version": 29,
+      "observed_file_version": null,
+      "outcome": "fail_closed",
+      "prepare_guard_outcome": "timeout",
+      "prepare_outcome": "wait_not_ready",
+      "prepare_snapshot_elapsed_ms": null,
+      "prepare_stateful_ms": 120,
+      "prepare_wait_elapsed_ms": null,
+      "query_bundle_ms": null,
+      "queue_outcome": null,
+      "queued_completion_ahead": null,
+      "rank_ms": null,
+      "request_id": "38100106",
+      "response_build_ms": null,
+      "response_build_other_ms": null,
+      "route": null,
+      "service_future_to_first_poll_wait_ms": 16,
+      "started_at_ms": 1774261752872,
+      "timeout_phase": "wait_for_file_version",
+      "timeout_source": "prepare_guard",
+      "total_duration_ms": 120,
+      "trace_id": "completion-trace-8",
+      "transport_to_service_future_wait_ms": 0,
+      "trigger_mode": "invoked",
+      "turn_wait_ms": 0,
+      "turn_wait_outcome": null,
+      "wait_exact_type_index_ms": null,
+      "wait_for_file_version_runtime_queue_wait_ms": null
+    },
+    {
+      "active_completion_count": null,
+      "artifact_poll": null,
+      "collect_ms": null,
+      "did_change_ahead": null,
+      "dispatch_to_request_context_wait_ms": 0,
+      "dominant_stage": "prepare_stateful",
+      "fail_closed_cause": "prepare_timeout",
+      "head_ready_before_wait": null,
+      "min_file_version": 25,
+      "observed_file_version": null,
+      "outcome": "fail_closed",
+      "prepare_guard_outcome": "timeout",
+      "prepare_outcome": "wait_not_ready",
+      "prepare_snapshot_elapsed_ms": null,
+      "prepare_stateful_ms": 120,
+      "prepare_wait_elapsed_ms": null,
+      "query_bundle_ms": null,
+      "queue_outcome": null,
+      "queued_completion_ahead": null,
+      "rank_ms": null,
+      "request_id": "38100105",
+      "response_build_ms": null,
+      "response_build_other_ms": null,
+      "route": null,
+      "service_future_to_first_poll_wait_ms": 20,
+      "started_at_ms": 1774261752733,
+      "timeout_phase": "wait_for_file_version",
+      "timeout_source": "prepare_guard",
+      "total_duration_ms": 121,
+      "trace_id": "completion-trace-7",
+      "transport_to_service_future_wait_ms": 0,
+      "trigger_mode": "invoked",
+      "turn_wait_ms": 0,
+      "turn_wait_outcome": null,
+      "wait_exact_type_index_ms": null,
+      "wait_for_file_version_runtime_queue_wait_ms": null
+    },
+    {
+      "active_completion_count": null,
+      "artifact_poll": null,
+      "collect_ms": null,
+      "did_change_ahead": null,
+      "dispatch_to_request_context_wait_ms": 0,
+      "dominant_stage": "prepare_stateful",
+      "fail_closed_cause": "prepare_timeout",
+      "head_ready_before_wait": null,
+      "min_file_version": 21,
+      "observed_file_version": null,
+      "outcome": "fail_closed",
+      "prepare_guard_outcome": "timeout",
+      "prepare_outcome": "wait_not_ready",
+      "prepare_snapshot_elapsed_ms": null,
+      "prepare_stateful_ms": 121,
+      "prepare_wait_elapsed_ms": null,
+      "query_bundle_ms": null,
+      "queue_outcome": null,
+      "queued_completion_ahead": null,
+      "rank_ms": null,
+      "request_id": "38100104",
+      "response_build_ms": null,
+      "response_build_other_ms": null,
+      "route": null,
+      "service_future_to_first_poll_wait_ms": 21,
+      "started_at_ms": 1774261752590,
+      "timeout_phase": "wait_for_file_version",
+      "timeout_source": "prepare_guard",
+      "total_duration_ms": 121,
+      "trace_id": "completion-trace-6",
+      "transport_to_service_future_wait_ms": 0,
+      "trigger_mode": "invoked",
+      "turn_wait_ms": 0,
+      "turn_wait_outcome": null,
+      "wait_exact_type_index_ms": null,
+      "wait_for_file_version_runtime_queue_wait_ms": null
+    },
+    {
+      "active_completion_count": null,
+      "artifact_poll": {
+        "exact_ready": false,
+        "head_ready": false,
+        "observed_file_version": 17,
+        "poll_count": 11,
+        "poll_elapsed_ms": 127
+      },
+      "collect_ms": null,
+      "did_change_ahead": null,
+      "dispatch_to_request_context_wait_ms": 0,
+      "dominant_stage": "wait_exact_type_index",
+      "fail_closed_cause": "exact_deadline",
+      "head_ready_before_wait": false,
+      "min_file_version": 17,
+      "observed_file_version": 17,
+      "outcome": "fail_closed",
+      "prepare_guard_outcome": "prepared",
+      "prepare_outcome": "ready",
+      "prepare_snapshot_elapsed_ms": 0,
+      "prepare_stateful_ms": 82,
+      "prepare_wait_elapsed_ms": 82,
+      "query_bundle_ms": null,
+      "queue_outcome": null,
+      "queued_completion_ahead": null,
+      "rank_ms": null,
+      "request_id": "38100103",
+      "response_build_ms": null,
+      "response_build_other_ms": null,
+      "route": null,
+      "service_future_to_first_poll_wait_ms": 18,
+      "started_at_ms": 1774261752354,
+      "timeout_phase": null,
+      "timeout_source": null,
+      "total_duration_ms": 211,
+      "trace_id": "completion-trace-5",
+      "transport_to_service_future_wait_ms": 0,
+      "trigger_mode": "invoked",
+      "turn_wait_ms": 0,
+      "turn_wait_outcome": null,
+      "wait_exact_type_index_ms": 127,
+      "wait_for_file_version_runtime_queue_wait_ms": 82
+    },
+    {
+      "active_completion_count": null,
+      "artifact_poll": null,
+      "collect_ms": null,
+      "did_change_ahead": null,
+      "dispatch_to_request_context_wait_ms": 0,
+      "dominant_stage": "prepare_stateful",
+      "fail_closed_cause": "prepare_timeout",
+      "head_ready_before_wait": null,
+      "min_file_version": 13,
+      "observed_file_version": null,
+      "outcome": "fail_closed",
+      "prepare_guard_outcome": "timeout",
+      "prepare_outcome": "wait_not_ready",
+      "prepare_snapshot_elapsed_ms": null,
+      "prepare_stateful_ms": 120,
+      "prepare_wait_elapsed_ms": null,
+      "query_bundle_ms": null,
+      "queue_outcome": null,
+      "queued_completion_ahead": null,
+      "rank_ms": null,
+      "request_id": "38100102",
+      "response_build_ms": null,
+      "response_build_other_ms": null,
+      "route": null,
+      "service_future_to_first_poll_wait_ms": 20,
+      "started_at_ms": 1774261752211,
+      "timeout_phase": "wait_for_file_version",
+      "timeout_source": "prepare_guard",
+      "total_duration_ms": 121,
+      "trace_id": "completion-trace-4",
+      "transport_to_service_future_wait_ms": 0,
+      "trigger_mode": "invoked",
+      "turn_wait_ms": 0,
+      "turn_wait_outcome": null,
+      "wait_exact_type_index_ms": null,
+      "wait_for_file_version_runtime_queue_wait_ms": null
+    },
+    {
+      "active_completion_count": null,
+      "artifact_poll": null,
+      "collect_ms": null,
+      "did_change_ahead": null,
+      "dispatch_to_request_context_wait_ms": 0,
+      "dominant_stage": "prepare_stateful",
+      "fail_closed_cause": "prepare_timeout",
+      "head_ready_before_wait": null,
+      "min_file_version": 9,
+      "observed_file_version": null,
+      "outcome": "fail_closed",
+      "prepare_guard_outcome": "timeout",
+      "prepare_outcome": "wait_not_ready",
+      "prepare_snapshot_elapsed_ms": null,
+      "prepare_stateful_ms": 121,
+      "prepare_wait_elapsed_ms": null,
+      "query_bundle_ms": null,
+      "queue_outcome": null,
+      "queued_completion_ahead": null,
+      "rank_ms": null,
+      "request_id": "38100101",
+      "response_build_ms": null,
+      "response_build_other_ms": null,
+      "route": null,
+      "service_future_to_first_poll_wait_ms": 20,
+      "started_at_ms": 1774261752067,
+      "timeout_phase": "wait_for_file_version",
+      "timeout_source": "prepare_guard",
+      "total_duration_ms": 122,
+      "trace_id": "completion-trace-3",
+      "transport_to_service_future_wait_ms": 1,
+      "trigger_mode": "invoked",
+      "turn_wait_ms": 0,
+      "turn_wait_outcome": null,
+      "wait_exact_type_index_ms": null,
+      "wait_for_file_version_runtime_queue_wait_ms": null
+    },
+    {
+      "active_completion_count": null,
+      "artifact_poll": null,
+      "collect_ms": null,
+      "did_change_ahead": null,
+      "dispatch_to_request_context_wait_ms": 0,
+      "dominant_stage": "prepare_stateful",
+      "fail_closed_cause": "prepare_timeout",
+      "head_ready_before_wait": null,
+      "min_file_version": 5,
+      "observed_file_version": null,
+      "outcome": "fail_closed",
+      "prepare_guard_outcome": "timeout",
+      "prepare_outcome": "wait_not_ready",
+      "prepare_snapshot_elapsed_ms": null,
+      "prepare_stateful_ms": 120,
+      "prepare_wait_elapsed_ms": null,
+      "query_bundle_ms": null,
+      "queue_outcome": null,
+      "queued_completion_ahead": null,
+      "rank_ms": null,
+      "request_id": "38100100",
+      "response_build_ms": null,
+      "response_build_other_ms": null,
+      "route": null,
+      "service_future_to_first_poll_wait_ms": 17,
+      "started_at_ms": 1774261751923,
+      "timeout_phase": "wait_for_file_version",
+      "timeout_source": "prepare_guard",
+      "total_duration_ms": 121,
+      "trace_id": "completion-trace-2",
+      "transport_to_service_future_wait_ms": 0,
+      "trigger_mode": "invoked",
+      "turn_wait_ms": 0,
+      "turn_wait_outcome": null,
+      "wait_exact_type_index_ms": null,
+      "wait_for_file_version_runtime_queue_wait_ms": null
+    },
+    {
+      "active_completion_count": null,
+      "artifact_poll": null,
+      "collect_ms": null,
+      "did_change_ahead": null,
+      "dispatch_to_request_context_wait_ms": 0,
+      "dominant_stage": "prepare_stateful",
+      "fail_closed_cause": null,
+      "head_ready_before_wait": true,
+      "min_file_version": 1,
+      "observed_file_version": 1,
+      "outcome": "ok_non_empty",
+      "prepare_guard_outcome": "prepared",
+      "prepare_outcome": "ready",
+      "prepare_snapshot_elapsed_ms": 0,
+      "prepare_stateful_ms": 4,
+      "prepare_wait_elapsed_ms": 4,
+      "query_bundle_ms": 0,
+      "queue_outcome": null,
+      "queued_completion_ahead": null,
+      "rank_ms": null,
+      "request_id": "38100000",
+      "response_build_ms": 2,
+      "response_build_other_ms": null,
+      "route": "head_hit",
+      "service_future_to_first_poll_wait_ms": 0,
+      "started_at_ms": 1774261751888,
+      "timeout_phase": null,
+      "timeout_source": null,
+      "total_duration_ms": 8,
+      "trace_id": "completion-trace-1",
+      "transport_to_service_future_wait_ms": 0,
+      "trigger_mode": "invoked",
+      "turn_wait_ms": 0,
+      "turn_wait_outcome": null,
+      "wait_exact_type_index_ms": null,
+      "wait_for_file_version_runtime_queue_wait_ms": 0
+    }
+  ],
+  "marker": "Объект.",
+  "measured_samples": [
+    {
+      "appended_text": " \n \n",
+      "burst_notification_count": 4,
+      "burst_versions": [
+        2,
+        3,
+        4,
+        5
+      ],
+      "elapsed_ms": 139,
+      "label_count": 0,
+      "labels": [],
+      "request_id": 38100100,
+      "step": "measured_revision_churn_completion_1",
+      "trace": {
+        "active_completion_count": null,
+        "artifact_poll": null,
+        "collect_ms": null,
+        "did_change_ahead": null,
+        "dispatch_to_request_context_wait_ms": 0,
+        "dominant_stage": "prepare_stateful",
+        "fail_closed_cause": "prepare_timeout",
+        "head_ready_before_wait": null,
+        "min_file_version": 5,
+        "observed_file_version": null,
+        "outcome": "fail_closed",
+        "prepare_guard_outcome": "timeout",
+        "prepare_outcome": "wait_not_ready",
+        "prepare_snapshot_elapsed_ms": null,
+        "prepare_stateful_ms": 120,
+        "prepare_wait_elapsed_ms": null,
+        "query_bundle_ms": null,
+        "queue_outcome": null,
+        "queued_completion_ahead": null,
+        "request_id": "38100100",
+        "response_build_ms": null,
+        "response_build_other_ms": null,
+        "route": null,
+        "service_future_to_first_poll_wait_ms": 17,
+        "timeout_phase": "wait_for_file_version",
+        "timeout_source": "prepare_guard",
+        "total_duration_ms": 121,
+        "trace_id": "completion-trace-2",
+        "transport_to_service_future_wait_ms": 0,
+        "trigger_mode": "invoked",
+        "turn_wait_ms": 0,
+        "turn_wait_outcome": null,
+        "wait_exact_type_index_ms": null,
+        "wait_for_file_version_runtime_queue_wait_ms": null
+      },
+      "version": 5
+    },
+    {
+      "appended_text": "\n \n ",
+      "burst_notification_count": 4,
+      "burst_versions": [
+        6,
+        7,
+        8,
+        9
+      ],
+      "elapsed_ms": 143,
+      "label_count": 0,
+      "labels": [],
+      "request_id": 38100101,
+      "step": "measured_revision_churn_completion_2",
+      "trace": {
+        "active_completion_count": null,
+        "artifact_poll": null,
+        "collect_ms": null,
+        "did_change_ahead": null,
+        "dispatch_to_request_context_wait_ms": 0,
+        "dominant_stage": "prepare_stateful",
+        "fail_closed_cause": "prepare_timeout",
+        "head_ready_before_wait": null,
+        "min_file_version": 9,
+        "observed_file_version": null,
+        "outcome": "fail_closed",
+        "prepare_guard_outcome": "timeout",
+        "prepare_outcome": "wait_not_ready",
+        "prepare_snapshot_elapsed_ms": null,
+        "prepare_stateful_ms": 121,
+        "prepare_wait_elapsed_ms": null,
+        "query_bundle_ms": null,
+        "queue_outcome": null,
+        "queued_completion_ahead": null,
+        "request_id": "38100101",
+        "response_build_ms": null,
+        "response_build_other_ms": null,
+        "route": null,
+        "service_future_to_first_poll_wait_ms": 20,
+        "timeout_phase": "wait_for_file_version",
+        "timeout_source": "prepare_guard",
+        "total_duration_ms": 122,
+        "trace_id": "completion-trace-3",
+        "transport_to_service_future_wait_ms": 1,
+        "trigger_mode": "invoked",
+        "turn_wait_ms": 0,
+        "turn_wait_outcome": null,
+        "wait_exact_type_index_ms": null,
+        "wait_for_file_version_runtime_queue_wait_ms": null
+      },
+      "version": 9
+    },
+    {
+      "appended_text": " \n \n",
+      "burst_notification_count": 4,
+      "burst_versions": [
+        10,
+        11,
+        12,
+        13
+      ],
+      "elapsed_ms": 143,
+      "label_count": 0,
+      "labels": [],
+      "request_id": 38100102,
+      "step": "measured_revision_churn_completion_3",
+      "trace": {
+        "active_completion_count": null,
+        "artifact_poll": null,
+        "collect_ms": null,
+        "did_change_ahead": null,
+        "dispatch_to_request_context_wait_ms": 0,
+        "dominant_stage": "prepare_stateful",
+        "fail_closed_cause": "prepare_timeout",
+        "head_ready_before_wait": null,
+        "min_file_version": 13,
+        "observed_file_version": null,
+        "outcome": "fail_closed",
+        "prepare_guard_outcome": "timeout",
+        "prepare_outcome": "wait_not_ready",
+        "prepare_snapshot_elapsed_ms": null,
+        "prepare_stateful_ms": 120,
+        "prepare_wait_elapsed_ms": null,
+        "query_bundle_ms": null,
+        "queue_outcome": null,
+        "queued_completion_ahead": null,
+        "request_id": "38100102",
+        "response_build_ms": null,
+        "response_build_other_ms": null,
+        "route": null,
+        "service_future_to_first_poll_wait_ms": 20,
+        "timeout_phase": "wait_for_file_version",
+        "timeout_source": "prepare_guard",
+        "total_duration_ms": 121,
+        "trace_id": "completion-trace-4",
+        "transport_to_service_future_wait_ms": 0,
+        "trigger_mode": "invoked",
+        "turn_wait_ms": 0,
+        "turn_wait_outcome": null,
+        "wait_exact_type_index_ms": null,
+        "wait_for_file_version_runtime_queue_wait_ms": null
+      },
+      "version": 13
+    },
+    {
+      "appended_text": "\n \n ",
+      "burst_notification_count": 4,
+      "burst_versions": [
+        14,
+        15,
+        16,
+        17
+      ],
+      "elapsed_ms": 230,
+      "label_count": 0,
+      "labels": [],
+      "request_id": 38100103,
+      "step": "measured_revision_churn_completion_4",
+      "trace": {
+        "active_completion_count": null,
+        "artifact_poll": {
+          "exact_ready": false,
+          "head_ready": false,
+          "observed_file_version": 17,
+          "poll_count": 11,
+          "poll_elapsed_ms": 127
+        },
+        "collect_ms": null,
+        "did_change_ahead": null,
+        "dispatch_to_request_context_wait_ms": 0,
+        "dominant_stage": "wait_exact_type_index",
+        "fail_closed_cause": "exact_deadline",
+        "head_ready_before_wait": false,
+        "min_file_version": 17,
+        "observed_file_version": 17,
+        "outcome": "fail_closed",
+        "prepare_guard_outcome": "prepared",
+        "prepare_outcome": "ready",
+        "prepare_snapshot_elapsed_ms": 0,
+        "prepare_stateful_ms": 82,
+        "prepare_wait_elapsed_ms": 82,
+        "query_bundle_ms": null,
+        "queue_outcome": null,
+        "queued_completion_ahead": null,
+        "request_id": "38100103",
+        "response_build_ms": null,
+        "response_build_other_ms": null,
+        "route": null,
+        "service_future_to_first_poll_wait_ms": 18,
+        "timeout_phase": null,
+        "timeout_source": null,
+        "total_duration_ms": 211,
+        "trace_id": "completion-trace-5",
+        "transport_to_service_future_wait_ms": 0,
+        "trigger_mode": "invoked",
+        "turn_wait_ms": 0,
+        "turn_wait_outcome": null,
+        "wait_exact_type_index_ms": 127,
+        "wait_for_file_version_runtime_queue_wait_ms": 82
+      },
+      "version": 17
+    },
+    {
+      "appended_text": " \n \n",
+      "burst_notification_count": 4,
+      "burst_versions": [
+        18,
+        19,
+        20,
+        21
+      ],
+      "elapsed_ms": 144,
+      "label_count": 0,
+      "labels": [],
+      "request_id": 38100104,
+      "step": "measured_revision_churn_completion_5",
+      "trace": {
+        "active_completion_count": null,
+        "artifact_poll": null,
+        "collect_ms": null,
+        "did_change_ahead": null,
+        "dispatch_to_request_context_wait_ms": 0,
+        "dominant_stage": "prepare_stateful",
+        "fail_closed_cause": "prepare_timeout",
+        "head_ready_before_wait": null,
+        "min_file_version": 21,
+        "observed_file_version": null,
+        "outcome": "fail_closed",
+        "prepare_guard_outcome": "timeout",
+        "prepare_outcome": "wait_not_ready",
+        "prepare_snapshot_elapsed_ms": null,
+        "prepare_stateful_ms": 121,
+        "prepare_wait_elapsed_ms": null,
+        "query_bundle_ms": null,
+        "queue_outcome": null,
+        "queued_completion_ahead": null,
+        "request_id": "38100104",
+        "response_build_ms": null,
+        "response_build_other_ms": null,
+        "route": null,
+        "service_future_to_first_poll_wait_ms": 21,
+        "timeout_phase": "wait_for_file_version",
+        "timeout_source": "prepare_guard",
+        "total_duration_ms": 121,
+        "trace_id": "completion-trace-6",
+        "transport_to_service_future_wait_ms": 0,
+        "trigger_mode": "invoked",
+        "turn_wait_ms": 0,
+        "turn_wait_outcome": null,
+        "wait_exact_type_index_ms": null,
+        "wait_for_file_version_runtime_queue_wait_ms": null
+      },
+      "version": 21
+    },
+    {
+      "appended_text": "\n \n ",
+      "burst_notification_count": 4,
+      "burst_versions": [
+        22,
+        23,
+        24,
+        25
+      ],
+      "elapsed_ms": 141,
+      "label_count": 0,
+      "labels": [],
+      "request_id": 38100105,
+      "step": "measured_revision_churn_completion_6",
+      "trace": {
+        "active_completion_count": null,
+        "artifact_poll": null,
+        "collect_ms": null,
+        "did_change_ahead": null,
+        "dispatch_to_request_context_wait_ms": 0,
+        "dominant_stage": "prepare_stateful",
+        "fail_closed_cause": "prepare_timeout",
+        "head_ready_before_wait": null,
+        "min_file_version": 25,
+        "observed_file_version": null,
+        "outcome": "fail_closed",
+        "prepare_guard_outcome": "timeout",
+        "prepare_outcome": "wait_not_ready",
+        "prepare_snapshot_elapsed_ms": null,
+        "prepare_stateful_ms": 120,
+        "prepare_wait_elapsed_ms": null,
+        "query_bundle_ms": null,
+        "queue_outcome": null,
+        "queued_completion_ahead": null,
+        "request_id": "38100105",
+        "response_build_ms": null,
+        "response_build_other_ms": null,
+        "route": null,
+        "service_future_to_first_poll_wait_ms": 20,
+        "timeout_phase": "wait_for_file_version",
+        "timeout_source": "prepare_guard",
+        "total_duration_ms": 121,
+        "trace_id": "completion-trace-7",
+        "transport_to_service_future_wait_ms": 0,
+        "trigger_mode": "invoked",
+        "turn_wait_ms": 0,
+        "turn_wait_outcome": null,
+        "wait_exact_type_index_ms": null,
+        "wait_for_file_version_runtime_queue_wait_ms": null
+      },
+      "version": 25
+    },
+    {
+      "appended_text": " \n \n",
+      "burst_notification_count": 4,
+      "burst_versions": [
+        26,
+        27,
+        28,
+        29
+      ],
+      "elapsed_ms": 137,
+      "label_count": 0,
+      "labels": [],
+      "request_id": 38100106,
+      "step": "measured_revision_churn_completion_7",
+      "trace": {
+        "active_completion_count": null,
+        "artifact_poll": null,
+        "collect_ms": null,
+        "did_change_ahead": null,
+        "dispatch_to_request_context_wait_ms": 0,
+        "dominant_stage": "prepare_stateful",
+        "fail_closed_cause": "prepare_timeout",
+        "head_ready_before_wait": null,
+        "min_file_version": 29,
+        "observed_file_version": null,
+        "outcome": "fail_closed",
+        "prepare_guard_outcome": "timeout",
+        "prepare_outcome": "wait_not_ready",
+        "prepare_snapshot_elapsed_ms": null,
+        "prepare_stateful_ms": 120,
+        "prepare_wait_elapsed_ms": null,
+        "query_bundle_ms": null,
+        "queue_outcome": null,
+        "queued_completion_ahead": null,
+        "request_id": "38100106",
+        "response_build_ms": null,
+        "response_build_other_ms": null,
+        "route": null,
+        "service_future_to_first_poll_wait_ms": 16,
+        "timeout_phase": "wait_for_file_version",
+        "timeout_source": "prepare_guard",
+        "total_duration_ms": 120,
+        "trace_id": "completion-trace-8",
+        "transport_to_service_future_wait_ms": 0,
+        "trigger_mode": "invoked",
+        "turn_wait_ms": 0,
+        "turn_wait_outcome": null,
+        "wait_exact_type_index_ms": null,
+        "wait_for_file_version_runtime_queue_wait_ms": null
+      },
+      "version": 29
+    },
+    {
+      "appended_text": "\n \n ",
+      "burst_notification_count": 4,
+      "burst_versions": [
+        30,
+        31,
+        32,
+        33
+      ],
+      "elapsed_ms": 137,
+      "label_count": 0,
+      "labels": [],
+      "request_id": 38100107,
+      "step": "measured_revision_churn_completion_8",
+      "trace": {
+        "active_completion_count": null,
+        "artifact_poll": null,
+        "collect_ms": null,
+        "did_change_ahead": null,
+        "dispatch_to_request_context_wait_ms": 0,
+        "dominant_stage": "prepare_stateful",
+        "fail_closed_cause": "prepare_timeout",
+        "head_ready_before_wait": null,
+        "min_file_version": 33,
+        "observed_file_version": null,
+        "outcome": "fail_closed",
+        "prepare_guard_outcome": "timeout",
+        "prepare_outcome": "wait_not_ready",
+        "prepare_snapshot_elapsed_ms": null,
+        "prepare_stateful_ms": 121,
+        "prepare_wait_elapsed_ms": null,
+        "query_bundle_ms": null,
+        "queue_outcome": null,
+        "queued_completion_ahead": null,
+        "request_id": "38100107",
+        "response_build_ms": null,
+        "response_build_other_ms": null,
+        "route": null,
+        "service_future_to_first_poll_wait_ms": 15,
+        "timeout_phase": "wait_for_file_version",
+        "timeout_source": "prepare_guard",
+        "total_duration_ms": 121,
+        "trace_id": "completion-trace-9",
+        "transport_to_service_future_wait_ms": 0,
+        "trigger_mode": "invoked",
+        "turn_wait_ms": 0,
+        "turn_wait_outcome": null,
+        "wait_exact_type_index_ms": null,
+        "wait_for_file_version_runtime_queue_wait_ms": null
+      },
+      "version": 33
+    },
+    {
+      "appended_text": " \n \n",
+      "burst_notification_count": 4,
+      "burst_versions": [
+        34,
+        35,
+        36,
+        37
+      ],
+      "elapsed_ms": 140,
+      "label_count": 0,
+      "labels": [],
+      "request_id": 38100108,
+      "step": "measured_revision_churn_completion_9",
+      "trace": {
+        "active_completion_count": null,
+        "artifact_poll": null,
+        "collect_ms": null,
+        "did_change_ahead": null,
+        "dispatch_to_request_context_wait_ms": 0,
+        "dominant_stage": "prepare_stateful",
+        "fail_closed_cause": "prepare_timeout",
+        "head_ready_before_wait": null,
+        "min_file_version": 37,
+        "observed_file_version": null,
+        "outcome": "fail_closed",
+        "prepare_guard_outcome": "timeout",
+        "prepare_outcome": "wait_not_ready",
+        "prepare_snapshot_elapsed_ms": null,
+        "prepare_stateful_ms": 121,
+        "prepare_wait_elapsed_ms": null,
+        "query_bundle_ms": null,
+        "queue_outcome": null,
+        "queued_completion_ahead": null,
+        "request_id": "38100108",
+        "response_build_ms": null,
+        "response_build_other_ms": null,
+        "route": null,
+        "service_future_to_first_poll_wait_ms": 17,
+        "timeout_phase": "snapshot_with_deps",
+        "timeout_source": "prepare_guard",
+        "total_duration_ms": 121,
+        "trace_id": "completion-trace-10",
+        "transport_to_service_future_wait_ms": 0,
+        "trigger_mode": "invoked",
+        "turn_wait_ms": 0,
+        "turn_wait_outcome": null,
+        "wait_exact_type_index_ms": null,
+        "wait_for_file_version_runtime_queue_wait_ms": null
+      },
+      "version": 37
+    },
+    {
+      "appended_text": "\n \n ",
+      "burst_notification_count": 4,
+      "burst_versions": [
+        38,
+        39,
+        40,
+        41
+      ],
+      "elapsed_ms": 140,
+      "label_count": 0,
+      "labels": [],
+      "request_id": 38100109,
+      "step": "measured_revision_churn_completion_10",
+      "trace": {
+        "active_completion_count": null,
+        "artifact_poll": null,
+        "collect_ms": null,
+        "did_change_ahead": null,
+        "dispatch_to_request_context_wait_ms": 0,
+        "dominant_stage": "prepare_stateful",
+        "fail_closed_cause": "prepare_timeout",
+        "head_ready_before_wait": null,
+        "min_file_version": 41,
+        "observed_file_version": null,
+        "outcome": "fail_closed",
+        "prepare_guard_outcome": "timeout",
+        "prepare_outcome": "wait_not_ready",
+        "prepare_snapshot_elapsed_ms": null,
+        "prepare_stateful_ms": 121,
+        "prepare_wait_elapsed_ms": null,
+        "query_bundle_ms": null,
+        "queue_outcome": null,
+        "queued_completion_ahead": null,
+        "request_id": "38100109",
+        "response_build_ms": null,
+        "response_build_other_ms": null,
+        "route": null,
+        "service_future_to_first_poll_wait_ms": 17,
+        "timeout_phase": "wait_for_file_version",
+        "timeout_source": "prepare_guard",
+        "total_duration_ms": 121,
+        "trace_id": "completion-trace-11",
+        "transport_to_service_future_wait_ms": 0,
+        "trigger_mode": "invoked",
+        "turn_wait_ms": 0,
+        "turn_wait_outcome": null,
+        "wait_exact_type_index_ms": null,
+        "wait_for_file_version_runtime_queue_wait_ms": null
+      },
+      "version": 41
+    }
+  ],
+  "module_path": "/home/egor/code/bsl-gradual-types/examples/conf_big/Documents/РеализацияТоваровУслуг/Forms/ФормаДокументаОбщая/Ext/Form/Module.bsl",
+  "observability": {
+    "raw": {
+      "config": {
+        "BSL_INTELLISENSE_V2_INTERACTIVE_WAIT_BUDGET_MS": {
+          "effective": 120,
+          "source": "default"
+        },
+        "BSL_INTELLISENSE_V2_SLOW_CLIENT_LOG_MS": {
+          "effective": 2000,
+          "source": "default"
+        },
+        "BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS": {
+          "effective": 250,
+          "source": "default"
+        }
+      },
+      "counters": {
+        "completion_incomplete_total": 9,
+        "completion_total": 11,
+        "intellisense_v2_completion_exact_type_index_wait_join_total": 0,
+        "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_deadline": 1,
+        "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_no_matching_task": 0,
+        "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_observed_version_mismatch": 0,
+        "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_ready": 0,
+        "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_task_present_wrong_version": 0,
+        "intellisense_v2_completion_exact_type_index_wait_promotion_total": 0,
+        "intellisense_v2_completion_exact_type_index_wait_ready_after_wait_total": 0,
+        "intellisense_v2_completion_fail_closed_cause_total_cause_exact_deadline": 1,
+        "intellisense_v2_completion_fail_closed_cause_total_cause_prepare_timeout": 9,
+        "intellisense_v2_completion_fallback_unavailable_total": 10,
+        "intellisense_v2_completion_first_for_file_total": 1,
+        "intellisense_v2_completion_owner_hint_index_fetch_block_on_other_total": 0,
+        "intellisense_v2_completion_owner_hint_index_fetch_block_on_parse_result_total": 0,
+        "intellisense_v2_completion_owner_hint_index_fetch_block_on_total": 0,
+        "intellisense_v2_completion_owner_hint_index_fetch_block_on_type_index_total": 0,
+        "intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_other_total": 0,
+        "intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_parse_result_total": 0,
+        "intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_total": 0,
+        "intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_type_index_total": 0,
+        "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_check_cancellation_total": 0,
+        "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_other_total": 0,
+        "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_parse_result_total": 0,
+        "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_total": 0,
+        "intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_type_index_total": 0,
+        "intellisense_v2_completion_result_total_fail_closed": 10,
+        "intellisense_v2_completion_result_total_ok_non_empty": 1,
+        "intellisense_v2_completion_route_total_route_head_hit": 1,
+        "intellisense_v2_completion_stale_fallback_total": 0,
+        "intellisense_v2_completion_trigger_mode_total_mode_invoked": 11,
+        "intellisense_v2_completion_warm_for_file_total": 10,
+        "intellisense_v2_deps_update_apply_total": 1,
+        "intellisense_v2_deps_update_build_total": 1,
+        "intellisense_v2_deps_update_success_total": 1,
+        "intellisense_v2_diagnostics_pipeline_total_origin_lsp_trigger_did_change_profile_debounced_full_reason_superseded_generation": 5,
+        "intellisense_v2_diagnostics_pipeline_total_origin_lsp_trigger_did_change_profile_fast_reason_published": 40,
+        "intellisense_v2_diagnostics_pipeline_total_origin_lsp_trigger_did_open_profile_debounced_full_reason_superseded_generation": 2,
+        "intellisense_v2_diagnostics_pipeline_total_origin_lsp_trigger_idle_profile_debounced_full_reason_superseded_generation": 34,
+        "intellisense_v2_drilldown_saturation_sample_total_origin_lsp_reason_exec_work_class_background": 4,
+        "intellisense_v2_drilldown_saturation_sample_total_origin_lsp_reason_exec_work_class_interactive": 27,
+        "intellisense_v2_drilldown_saturation_sample_total_origin_lsp_reason_queue_wait_work_class_background": 12,
+        "intellisense_v2_drilldown_saturation_sample_total_origin_lsp_reason_queue_wait_work_class_interactive": 28,
+        "intellisense_v2_drilldown_saturation_sample_total_origin_runtime_reason_exec_work_class_background": 4,
+        "intellisense_v2_drilldown_saturation_sample_total_origin_runtime_reason_queue_wait_work_class_background": 4,
+        "intellisense_v2_drilldown_singleflight_effectiveness_total_origin_lsp_outcome_leader_query_kind_syntax_diagnostics": 1,
+        "intellisense_v2_drilldown_stage_total_origin_lsp_mode_event_driven_operation_completion_stage_runtime_snapshot_with_deps": 2,
+        "intellisense_v2_drilldown_stage_total_origin_lsp_mode_event_driven_operation_completion_stage_runtime_wait_for_file_version": 3,
+        "intellisense_v2_drilldown_stage_total_origin_lsp_mode_other_operation_diagnostics_stage_syntax_diagnostics_query": 1,
+        "intellisense_v2_drilldown_stage_total_origin_lsp_operation_apply_change_set_file_stage_runtime_exec": 6,
+        "intellisense_v2_drilldown_stage_total_origin_lsp_operation_apply_changes_batch_stage_runtime_exec": 6,
+        "intellisense_v2_drilldown_stage_total_origin_lsp_operation_apply_changes_batch_stage_runtime_queue_wait": 7,
+        "intellisense_v2_drilldown_stage_total_origin_lsp_operation_diagnostics_stage_runtime_snapshot_with_deps": 1,
+        "intellisense_v2_drilldown_stage_total_origin_lsp_operation_diagnostics_stage_runtime_wait_for_file_version": 1,
+        "intellisense_v2_drilldown_stage_total_origin_lsp_operation_diagnostics_stage_semantic_diagnostics_query": 1,
+        "intellisense_v2_drilldown_stage_total_origin_lsp_operation_other_stage_runtime_exec": 1,
+        "intellisense_v2_drilldown_stage_total_origin_lsp_operation_type_index_precompute_stage_runtime_queue_wait": 2,
+        "intellisense_v2_drilldown_stage_total_origin_runtime_operation_snapshot_with_deps_stage_runtime_exec": 16,
+        "intellisense_v2_drilldown_stage_total_origin_runtime_operation_snapshot_with_deps_stage_runtime_queue_wait": 16,
+        "intellisense_v2_drilldown_stage_total_origin_runtime_operation_wait_for_file_version_stage_runtime_exec": 10,
+        "intellisense_v2_drilldown_stage_total_origin_runtime_operation_wait_for_file_version_stage_runtime_queue_wait": 10,
+        "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_completion_reason_missing_semantic_index": 10,
+        "intellisense_v2_heavy_diagnostics_deferred_total_origin_lsp_profile_debounced_full_reason_large_and_churn": 35,
+        "intellisense_v2_interactive_knob_clamped_total": 0,
+        "intellisense_v2_interactive_stale_served_total": 0,
+        "intellisense_v2_interactive_wait_budget_exhausted_total": 10,
+        "intellisense_v2_ir_query_cancelled_total_other": 0,
+        "intellisense_v2_ir_query_other_total": 0,
+        "intellisense_v2_large_churn_state_total_origin_lsp_state_enter": 1,
+        "intellisense_v2_observability_contract_violation_total": 0,
+        "intellisense_v2_parse_result_query_total": 0,
+        "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_incremental_failed": 0,
+        "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_no_edits_provided": 0,
+        "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_no_previous_tree": 0,
+        "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_other": 35,
+        "intellisense_v2_parse_snapshot_total_origin_lsp_mode_full": 0,
+        "intellisense_v2_parse_snapshot_total_origin_lsp_mode_incremental": 0,
+        "intellisense_v2_parse_snapshot_total_origin_lsp_mode_other": 35,
+        "intellisense_v2_parse_snapshot_total_origin_lsp_mode_reused": 0,
+        "intellisense_v2_payload_shape_total_origin_lsp_operation_completion_stage_runtime_snapshot_with_deps_size_bucket_ge_64k_line_bucket_ge_2k": 2,
+        "intellisense_v2_payload_shape_total_origin_lsp_operation_diagnostics_stage_semantic_diagnostics_query_size_bucket_ge_64k_line_bucket_ge_2k": 1,
+        "intellisense_v2_payload_shape_total_origin_lsp_operation_diagnostics_stage_syntax_diagnostics_query_size_bucket_ge_64k_line_bucket_ge_2k": 1,
+        "intellisense_v2_projection_missing_total": 0,
+        "intellisense_v2_query_cancelled_total_semantic": 0,
+        "intellisense_v2_query_cancelled_total_syntax": 0,
+        "intellisense_v2_revision_lag_sample_total": 0,
+        "intellisense_v2_runtime_apply_change_remove_file_exec_total": 0,
+        "intellisense_v2_runtime_apply_change_set_file_exec_total": 6,
+        "intellisense_v2_runtime_apply_change_set_file_with_snapshot_exec_total": 0,
+        "intellisense_v2_runtime_apply_change_set_settings_snapshot_exec_total": 0,
+        "intellisense_v2_runtime_apply_changes_exec_total": 6,
+        "intellisense_v2_runtime_apply_changes_queue_wait_total": 7,
+        "intellisense_v2_runtime_exec_background_total": 8,
+        "intellisense_v2_runtime_exec_interactive_total": 27,
+        "intellisense_v2_runtime_other_exec_total": 1,
+        "intellisense_v2_runtime_queue_wait_background_total": 16,
+        "intellisense_v2_runtime_queue_wait_interactive_total": 28,
+        "intellisense_v2_runtime_saturation_sample_total": 84,
+        "intellisense_v2_runtime_snapshot_with_deps_exec_total": 16,
+        "intellisense_v2_runtime_snapshot_with_deps_queue_wait_total": 16,
+        "intellisense_v2_runtime_type_index_precompute_ast_to_ir_exec_total": 0,
+        "intellisense_v2_runtime_type_index_precompute_build_exec_total": 0,
+        "intellisense_v2_runtime_type_index_precompute_exec_total": 0,
+        "intellisense_v2_runtime_type_index_precompute_ir_exec_total": 0,
+        "intellisense_v2_runtime_type_index_precompute_queue_wait_total": 2,
+        "intellisense_v2_runtime_type_index_precompute_semantic_facts_exec_total": 0,
+        "intellisense_v2_runtime_type_index_precompute_semantic_facts_local_function_summaries_exec_total": 0,
+        "intellisense_v2_runtime_type_index_precompute_semantic_facts_seed_module_context_exec_total": 0,
+        "intellisense_v2_runtime_type_index_precompute_semantic_facts_visit_statements_exec_total": 0,
+        "intellisense_v2_runtime_wait_for_file_version_exec_total": 10,
+        "intellisense_v2_runtime_wait_for_file_version_queue_wait_total": 10,
+        "intellisense_v2_semantic_diagnostics_query_total": 1,
+        "intellisense_v2_singleflight_key_unavailable_total": 0,
+        "intellisense_v2_singleflight_leader_total": 1,
+        "intellisense_v2_singleflight_shared_total": 0,
+        "intellisense_v2_snapshot_completion_total": 2,
+        "intellisense_v2_snapshot_diagnostics_total": 1,
+        "intellisense_v2_syntax_diagnostics_query_total": 1,
+        "intellisense_v2_type_index_reason_total_reason_type_index_precompute_cancelled": 1,
+        "intellisense_v2_type_index_reason_total_reason_type_index_precompute_superseded": 1,
+        "intellisense_v2_wait_for_file_version_completion_total": 3,
+        "intellisense_v2_wait_for_file_version_diagnostics_total": 1
+      },
+      "gauges": {
+        "intellisense_v2_completion_owner_hint_index_fetch_active": 0.0,
+        "intellisense_v2_drilldown_saturation_gauge_origin_lsp_saturation_metric_permits_background": 0.0,
+        "intellisense_v2_drilldown_saturation_gauge_origin_lsp_saturation_metric_permits_interactive": 0.0,
+        "intellisense_v2_drilldown_saturation_gauge_origin_lsp_saturation_metric_permits_shared": 0.0,
+        "intellisense_v2_drilldown_saturation_gauge_origin_lsp_saturation_metric_queue_depth_total": 5.0,
+        "intellisense_v2_drilldown_saturation_gauge_origin_lsp_saturation_metric_waiters_background": 5.0,
+        "intellisense_v2_drilldown_saturation_gauge_origin_lsp_saturation_metric_waiters_interactive": 0.0,
+        "intellisense_v2_runtime_saturation_permits_background": 0.0,
+        "intellisense_v2_runtime_saturation_permits_interactive": 0.0,
+        "intellisense_v2_runtime_saturation_permits_shared": 0.0,
+        "intellisense_v2_runtime_saturation_queue_depth_total": 5.0,
+        "intellisense_v2_runtime_saturation_waiters_background": 5.0,
+        "intellisense_v2_runtime_saturation_waiters_interactive": 0.0
+      },
+      "histograms": {
+        "completion_duration_ms": {
+          "count": 11,
+          "p50": 121.0,
+          "p95": 211.0,
+          "p99": 211.0
+        },
+        "completion_stage_collect_ms": {
+          "count": 1,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "completion_stage_exact_wait_apply_age_at_start_ms": {
+          "count": 1,
+          "p50": 84.0,
+          "p95": 84.0,
+          "p99": 84.0
+        },
+        "completion_stage_exact_wait_apply_age_at_terminal_ms": {
+          "count": 1,
+          "p50": 211.0,
+          "p95": 211.0,
+          "p99": 211.0
+        },
+        "completion_stage_format_ms": {
+          "count": 1,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "completion_stage_other_ms": {
+          "count": 1,
+          "p50": 127.0,
+          "p95": 127.0,
+          "p99": 127.0
+        },
+        "completion_stage_prepare_apply_age_at_start_ms": {
+          "count": 11,
+          "p50": 0.0,
+          "p95": 43821.0,
+          "p99": 43821.0
+        },
+        "completion_stage_prepare_apply_age_at_terminal_ms": {
+          "count": 11,
+          "p50": 121.0,
+          "p95": 43826.0,
+          "p99": 43826.0
+        },
+        "completion_stage_prepare_stateful_ms": {
+          "count": 11,
+          "p50": 120.0,
+          "p95": 121.0,
+          "p99": 121.0
+        },
+        "completion_stage_query_bundle_ms": {
+          "count": 1,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "completion_stage_rank_ms": {
+          "count": 1,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "completion_stage_response_build_ms": {
+          "count": 1,
+          "p50": 2.0,
+          "p95": 2.0,
+          "p99": 2.0
+        },
+        "completion_stage_server_handler_exec_ms": {
+          "count": 11,
+          "p50": 122.0,
+          "p95": 212.0,
+          "p99": 212.0
+        },
+        "completion_stage_snapshot_read_ms": {
+          "count": 1,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "completion_stage_sync_globals_ms": {
+          "count": 11,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "completion_stage_transport_to_handler_wait_ms": {
+          "count": 11,
+          "p50": 17.0,
+          "p95": 21.0,
+          "p99": 21.0
+        },
+        "completion_stage_turn_wait_ms": {
+          "count": 11,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_completion_items_count": {
+          "count": 11,
+          "p50": 0.0,
+          "p95": 86.0,
+          "p99": 86.0
+        },
+        "intellisense_v2_completion_owner_hint_index_fetch_did_discard_accumulated_per_fetch": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_completion_owner_hint_index_fetch_did_discard_per_fetch": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_completion_owner_hint_index_fetch_did_set_cancellation_flag_per_fetch": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_completion_owner_hint_index_fetch_events_before_first_will_execute_type_index_per_fetch": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_completion_owner_hint_index_fetch_first_will_execute_type_index_seen_per_fetch": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_completion_owner_hint_index_fetch_global_did_set_cancellation_flag_per_fetch": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_completion_owner_hint_index_fetch_revision_delta": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_completion_owner_hint_index_fetch_revision_end": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_completion_owner_hint_index_fetch_revision_start": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_completion_owner_hint_index_fetch_will_check_before_first_will_execute_type_index_per_fetch": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_completion_owner_hint_index_fetch_will_check_cancellation_per_fetch": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_completion_owner_hint_index_fetch_will_execute_other_per_fetch": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_completion_owner_hint_index_fetch_will_execute_parse_result_before_first_will_execute_type_index_per_fetch": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_completion_owner_hint_index_fetch_will_iterate_cycle_per_fetch": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_deps_update_apply_ms": {
+          "count": 1,
+          "p50": 1.0,
+          "p95": 1.0,
+          "p99": 1.0
+        },
+        "intellisense_v2_deps_update_build_ms": {
+          "count": 1,
+          "p50": 2761.0,
+          "p95": 2761.0,
+          "p99": 2761.0
+        },
+        "intellisense_v2_diagnostics_pipeline_cancel_sample_origin_lsp_trigger_did_change_profile_debounced_full_reason_superseded_generation": {
+          "count": 5,
+          "p50": 1.0,
+          "p95": 1.0,
+          "p99": 1.0
+        },
+        "intellisense_v2_diagnostics_pipeline_cancel_sample_origin_lsp_trigger_did_open_profile_debounced_full_reason_superseded_generation": {
+          "count": 2,
+          "p50": 1.0,
+          "p95": 1.0,
+          "p99": 1.0
+        },
+        "intellisense_v2_diagnostics_pipeline_cancel_sample_origin_lsp_trigger_idle_profile_debounced_full_reason_superseded_generation": {
+          "count": 34,
+          "p50": 1.0,
+          "p95": 1.0,
+          "p99": 1.0
+        },
+        "intellisense_v2_drilldown_saturation_sample_latency_ms_origin_lsp_reason_exec_work_class_background": {
+          "count": 4,
+          "p50": 7.0,
+          "p95": 531.0,
+          "p99": 531.0
+        },
+        "intellisense_v2_drilldown_saturation_sample_latency_ms_origin_lsp_reason_exec_work_class_interactive": {
+          "count": 27,
+          "p50": 0.0,
+          "p95": 4.0,
+          "p99": 522.0
+        },
+        "intellisense_v2_drilldown_saturation_sample_latency_ms_origin_lsp_reason_queue_wait_work_class_background": {
+          "count": 12,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 220.0
+        },
+        "intellisense_v2_drilldown_saturation_sample_latency_ms_origin_lsp_reason_queue_wait_work_class_interactive": {
+          "count": 28,
+          "p50": 1.0,
+          "p95": 513.0,
+          "p99": 520.0
+        },
+        "intellisense_v2_drilldown_saturation_sample_latency_ms_origin_runtime_reason_exec_work_class_background": {
+          "count": 4,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_drilldown_saturation_sample_latency_ms_origin_runtime_reason_queue_wait_work_class_background": {
+          "count": 4,
+          "p50": 2.0,
+          "p95": 487.0,
+          "p99": 487.0
+        },
+        "intellisense_v2_drilldown_stage_latency_ms_origin_lsp_mode_event_driven_operation_completion_stage_runtime_snapshot_with_deps": {
+          "count": 2,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_drilldown_stage_latency_ms_origin_lsp_mode_event_driven_operation_completion_stage_runtime_wait_for_file_version": {
+          "count": 3,
+          "p50": 82.0,
+          "p95": 121.0,
+          "p99": 121.0
+        },
+        "intellisense_v2_drilldown_stage_latency_ms_origin_lsp_mode_other_operation_diagnostics_stage_syntax_diagnostics_query": {
+          "count": 1,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_drilldown_stage_latency_ms_origin_lsp_operation_apply_change_set_file_stage_runtime_exec": {
+          "count": 6,
+          "p50": 0.0,
+          "p95": 518.0,
+          "p99": 518.0
+        },
+        "intellisense_v2_drilldown_stage_latency_ms_origin_lsp_operation_apply_changes_batch_stage_runtime_exec": {
+          "count": 6,
+          "p50": 0.0,
+          "p95": 522.0,
+          "p99": 522.0
+        },
+        "intellisense_v2_drilldown_stage_latency_ms_origin_lsp_operation_apply_changes_batch_stage_runtime_queue_wait": {
+          "count": 7,
+          "p50": 97.0,
+          "p95": 520.0,
+          "p99": 520.0
+        },
+        "intellisense_v2_drilldown_stage_latency_ms_origin_lsp_operation_diagnostics_stage_runtime_snapshot_with_deps": {
+          "count": 1,
+          "p50": 43821.0,
+          "p95": 43821.0,
+          "p99": 43821.0
+        },
+        "intellisense_v2_drilldown_stage_latency_ms_origin_lsp_operation_diagnostics_stage_runtime_wait_for_file_version": {
+          "count": 1,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_drilldown_stage_latency_ms_origin_lsp_operation_diagnostics_stage_semantic_diagnostics_query": {
+          "count": 1,
+          "p50": 529.0,
+          "p95": 529.0,
+          "p99": 529.0
+        },
+        "intellisense_v2_drilldown_stage_latency_ms_origin_lsp_operation_other_stage_runtime_exec": {
+          "count": 1,
+          "p50": 3.0,
+          "p95": 3.0,
+          "p99": 3.0
+        },
+        "intellisense_v2_drilldown_stage_latency_ms_origin_lsp_operation_type_index_precompute_stage_runtime_queue_wait": {
+          "count": 2,
+          "p50": 109.0,
+          "p95": 109.0,
+          "p99": 109.0
+        },
+        "intellisense_v2_drilldown_stage_latency_ms_origin_runtime_operation_snapshot_with_deps_stage_runtime_exec": {
+          "count": 16,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_drilldown_stage_latency_ms_origin_runtime_operation_snapshot_with_deps_stage_runtime_queue_wait": {
+          "count": 16,
+          "p50": 0.0,
+          "p95": 2.0,
+          "p99": 2.0
+        },
+        "intellisense_v2_drilldown_stage_latency_ms_origin_runtime_operation_wait_for_file_version_stage_runtime_exec": {
+          "count": 10,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_drilldown_stage_latency_ms_origin_runtime_operation_wait_for_file_version_stage_runtime_queue_wait": {
+          "count": 10,
+          "p50": 82.0,
+          "p95": 513.0,
+          "p99": 513.0
+        },
+        "intellisense_v2_ir_query_other_ms": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_parse_result_query_ms": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_parse_snapshot_build_ms_origin_lsp_mode_full": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_parse_snapshot_build_ms_origin_lsp_mode_incremental": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_parse_snapshot_build_ms_origin_lsp_mode_other": {
+          "count": 35,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_parse_snapshot_build_ms_origin_lsp_mode_reused": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_parse_snapshot_changed_ranges_bytes_origin_lsp": {
+          "count": 35,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_parse_snapshot_changed_ranges_count_origin_lsp": {
+          "count": 35,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_payload_shape_bytes_origin_lsp_operation_completion_stage_runtime_snapshot_with_deps": {
+          "count": 2,
+          "p50": 375794.0,
+          "p95": 375794.0,
+          "p99": 375794.0
+        },
+        "intellisense_v2_payload_shape_bytes_origin_lsp_operation_diagnostics_stage_semantic_diagnostics_query": {
+          "count": 1,
+          "p50": 375778.0,
+          "p95": 375778.0,
+          "p99": 375778.0
+        },
+        "intellisense_v2_payload_shape_bytes_origin_lsp_operation_diagnostics_stage_syntax_diagnostics_query": {
+          "count": 1,
+          "p50": 375778.0,
+          "p95": 375778.0,
+          "p99": 375778.0
+        },
+        "intellisense_v2_payload_shape_lines_origin_lsp_operation_completion_stage_runtime_snapshot_with_deps": {
+          "count": 2,
+          "p50": 5373.0,
+          "p95": 5373.0,
+          "p99": 5373.0
+        },
+        "intellisense_v2_payload_shape_lines_origin_lsp_operation_diagnostics_stage_semantic_diagnostics_query": {
+          "count": 1,
+          "p50": 5364.0,
+          "p95": 5364.0,
+          "p99": 5364.0
+        },
+        "intellisense_v2_payload_shape_lines_origin_lsp_operation_diagnostics_stage_syntax_diagnostics_query": {
+          "count": 1,
+          "p50": 5364.0,
+          "p95": 5364.0,
+          "p99": 5364.0
+        },
+        "intellisense_v2_revision_lag_versions": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_runtime_apply_change_remove_file_exec_ms": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_runtime_apply_change_set_file_exec_ms": {
+          "count": 6,
+          "p50": 0.0,
+          "p95": 518.0,
+          "p99": 518.0
+        },
+        "intellisense_v2_runtime_apply_change_set_file_with_snapshot_exec_ms": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_runtime_apply_change_set_settings_snapshot_exec_ms": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_runtime_apply_changes_batch_size": {
+          "count": 7,
+          "p50": 1.0,
+          "p95": 2.0,
+          "p99": 2.0
+        },
+        "intellisense_v2_runtime_apply_changes_changed_files_count": {
+          "count": 6,
+          "p50": 1.0,
+          "p95": 1.0,
+          "p99": 1.0
+        },
+        "intellisense_v2_runtime_apply_changes_exec_ms": {
+          "count": 6,
+          "p50": 0.0,
+          "p95": 522.0,
+          "p99": 522.0
+        },
+        "intellisense_v2_runtime_apply_changes_queue_wait_ms": {
+          "count": 7,
+          "p50": 97.0,
+          "p95": 520.0,
+          "p99": 520.0
+        },
+        "intellisense_v2_runtime_exec_background_ms": {
+          "count": 8,
+          "p50": 0.0,
+          "p95": 531.0,
+          "p99": 531.0
+        },
+        "intellisense_v2_runtime_exec_interactive_ms": {
+          "count": 27,
+          "p50": 0.0,
+          "p95": 4.0,
+          "p99": 522.0
+        },
+        "intellisense_v2_runtime_other_exec_ms": {
+          "count": 1,
+          "p50": 3.0,
+          "p95": 3.0,
+          "p99": 3.0
+        },
+        "intellisense_v2_runtime_queue_wait_background_ms": {
+          "count": 16,
+          "p50": 0.0,
+          "p95": 220.0,
+          "p99": 487.0
+        },
+        "intellisense_v2_runtime_queue_wait_interactive_ms": {
+          "count": 28,
+          "p50": 1.0,
+          "p95": 513.0,
+          "p99": 520.0
+        },
+        "intellisense_v2_runtime_snapshot_with_deps_exec_ms": {
+          "count": 16,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_runtime_snapshot_with_deps_queue_wait_ms": {
+          "count": 16,
+          "p50": 0.0,
+          "p95": 2.0,
+          "p99": 2.0
+        },
+        "intellisense_v2_runtime_type_index_precompute_ast_to_ir_exec_ms": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_runtime_type_index_precompute_build_exec_ms": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_runtime_type_index_precompute_exec_ms": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_runtime_type_index_precompute_ir_exec_ms": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_runtime_type_index_precompute_queue_wait_ms": {
+          "count": 2,
+          "p50": 109.0,
+          "p95": 109.0,
+          "p99": 109.0
+        },
+        "intellisense_v2_runtime_type_index_precompute_semantic_facts_exec_ms": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_runtime_type_index_precompute_semantic_facts_local_function_summaries_exec_ms": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_runtime_type_index_precompute_semantic_facts_seed_module_context_exec_ms": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_runtime_type_index_precompute_semantic_facts_visit_statements_exec_ms": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_runtime_wait_for_file_version_exec_ms": {
+          "count": 10,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_runtime_wait_for_file_version_queue_wait_ms": {
+          "count": 10,
+          "p50": 82.0,
+          "p95": 513.0,
+          "p99": 513.0
+        },
+        "intellisense_v2_semantic_diagnostics_query_collect_ms": {
+          "count": 1,
+          "p50": 529.0,
+          "p95": 529.0,
+          "p99": 529.0
+        },
+        "intellisense_v2_semantic_diagnostics_query_flow_sensitive_ms": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_semantic_diagnostics_query_inputs_ms": {
+          "count": 1,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_semantic_diagnostics_query_ir_ms": {
+          "count": 1,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_semantic_diagnostics_query_ms": {
+          "count": 1,
+          "p50": 529.0,
+          "p95": 529.0,
+          "p99": 529.0
+        },
+        "intellisense_v2_semantic_diagnostics_query_parse_result_ms": {
+          "count": 1,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_singleflight_wait_ms": {
+          "count": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_snapshot_completion_ms": {
+          "count": 2,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_snapshot_diagnostics_ms": {
+          "count": 1,
+          "p50": 43821.0,
+          "p95": 43821.0,
+          "p99": 43821.0
+        },
+        "intellisense_v2_syntax_diagnostics_query_ms": {
+          "count": 1,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        },
+        "intellisense_v2_wait_for_file_version_completion_ms": {
+          "count": 3,
+          "p50": 82.0,
+          "p95": 121.0,
+          "p99": 121.0
+        },
+        "intellisense_v2_wait_for_file_version_diagnostics_ms": {
+          "count": 1,
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
+        }
+      },
+      "rates": {
+        "completion_incomplete_rate": 0.8181818181818182
+      },
+      "uptime_seconds": 58
+    }
+  },
+  "profile": "p38_real_conf_big_post_handoff_readiness_completion_perf_report_live",
+  "request_plan": {
+    "cache_mode": "self_warmed_then_revision_churn_same_process",
+    "churn_before_each_measured_completion": true,
+    "churn_edit_kind": "append_at_eof_incremental",
+    "churn_profile": "didChange-burst",
+    "completion_trigger_mode": "invoked",
+    "did_change_blocking_parse_delay_ms": 1500,
+    "did_change_notifications_per_measured_completion": 4,
+    "exact_type_index_seed_mode": "snapshot_precompute_current_revision",
+    "measured_requests": 10,
+    "transport_path": "tower_lsp_server_serve_duplex",
+    "wait_for_current_revision_before_seed": true,
+    "warmup_requests": 1
+  },
+  "schema_version": 1,
+  "summary": {
+    "interactive_wait_budget_ms": 120,
+    "measured_cancelled_total_delta": 0,
+    "measured_collect_ms": {
+      "count": 0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99": 0.0
+    },
+    "measured_completion_total_delta": 10,
+    "measured_deadline_total_delta": 1,
+    "measured_dispatch_to_request_context_wait_ms": {
+      "count": 10,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99": 0.0
+    },
+    "measured_exact_deadline_total_delta": 1,
+    "measured_exact_hit_total_delta": 0,
+    "measured_exact_hit_traces": 0,
+    "measured_fail_closed_total_delta": 10,
+    "measured_fail_closed_traces": 10,
+    "measured_fallback_unavailable_total_delta": 10,
+    "measured_head_hit_total_delta": 0,
+    "measured_head_hit_traces": 0,
+    "measured_head_ready_before_wait_present_samples": 1,
+    "measured_head_to_exact_upgrade_total_delta": 0,
+    "measured_interactive_wait_budget_exhausted_total_delta": 10,
+    "measured_latency_ms": {
+      "count": 10,
+      "p50": 141.0,
+      "p95": 230.0,
+      "p99": 230.0
+    },
+    "measured_no_matching_task_total_delta": 0,
+    "measured_non_empty_samples": 0,
+    "measured_observed_version_mismatch_total_delta": 0,
+    "measured_ok_empty_total_delta": 0,
+    "measured_ok_non_empty_total_delta": 0,
+    "measured_ok_non_empty_traces": 0,
+    "measured_post_apply_head_gap_exact_deadline_samples": 1,
+    "measured_prepare_stateful_ms": {
+      "count": 10,
+      "p50": 121.0,
+      "p95": 121.0,
+      "p99": 121.0
+    },
+    "measured_prepare_timeout_total_delta": 9,
+    "measured_prepare_timeout_wait_for_file_version_samples": 8,
+    "measured_query_bundle_ms": {
+      "count": 0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99": 0.0
+    },
+    "measured_ready_total_delta": 0,
+    "measured_service_future_to_first_poll_wait_max_ms": 21,
+    "measured_service_future_to_first_poll_wait_ms": {
+      "count": 10,
+      "p50": 18.0,
+      "p95": 21.0,
+      "p99": 21.0
+    },
+    "measured_task_present_wrong_version_total_delta": 0,
+    "measured_trace_linked_samples": 10,
+    "measured_transport_to_service_future_wait_ms": {
+      "count": 10,
+      "p50": 0.0,
+      "p95": 1.0,
+      "p99": 1.0
+    },
+    "measured_turn_wait_ms": {
+      "count": 10,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99": 0.0
+    },
+    "measured_wait_exact_type_index_ms": {
+      "count": 1,
+      "p50": 127.0,
+      "p95": 127.0,
+      "p99": 127.0
+    },
+    "measured_wait_for_file_version_runtime_queue_wait_max_ms": 82,
+    "measured_wait_for_file_version_runtime_queue_wait_ms": {
+      "count": 1,
+      "p50": 82.0,
+      "p95": 82.0,
+      "p99": 82.0
+    },
+    "measured_wait_for_file_version_runtime_queue_wait_present_samples": 1,
+    "trace_count_for_uri": 11,
+    "trace_matching_mode": "request_id",
+    "trace_request_id_present_total": 11,
+    "warmup_latency_ms": {
+      "count": 1,
+      "p50": 16.0,
+      "p95": 16.0,
+      "p99": 16.0
+    },
+    "warmup_non_empty_samples": 1
+  },
+  "warm_cache_seed": {
+    "exact_ready": true,
+    "manual_precompute": "TypeIndexPrecomputeResult { reason_code: TypeIndexPrecomputeExactStored, file_version: Some(1), stats: TypeIndexPrecomputeStats { queue_wait_ms: 0, exec_ms: 43819, ir_ms: 0, ast_to_ir_convert_ms: 0, semantic_facts_materialize_ms: 0, semantic_facts_seed_module_context_ms: 0, semantic_facts_local_function_summaries_ms: 0, semantic_facts_visit_statements_ms: 0, semantic_facts_visit_callable_body_ms: 0, semantic_facts_visit_callable_body_count: 0, semantic_facts_merge_control_flow_env_ms: 0, semantic_facts_merge_control_flow_env_count: 0, semantic_facts_statement_count: 0, semantic_facts_local_function_summary_count: 0, semantic_facts_index_entry_count: 0, build_ms: 43819, evicted_per_file_window_total: 0, evicted_global_guard_total: 0 } }",
+    "observed_version": 1
+  },
+  "warmup_samples": [
+    {
+      "elapsed_ms": 16,
+      "label_count": 86,
+      "labels": [
+        "АгентскиеУслуги",
+        "АдресДоставки",
+        "АдресДоставкиЗначение",
+        "БезОтраженияВУчете",
+        "ВалютаДокумента",
+        "ВидОперации",
+        "ВидТранспортаНаГранице",
+        "ВидЭлектронногоДокумента",
+        "Водитель",
+        "ВодительДолжность",
+        "ВодительскоеУдостоверение",
+        "ВозвратнаяТара",
+        "ГлавныйБухгалтер",
+        "Грузоотправитель",
+        "Грузополучатель",
+        "Дата",
+        "ДеятельностьНаПатенте",
+        "ДеятельностьНаТорговомСборе",
+        "ДоверенностьВыдана",
+        "ДоверенностьДата",
+        "ДоверенностьНомер",
+        "ДоверенностьЧерезКого",
+        "ДокументБезНДС",
+        "ЕстьМаркируемаяПродукцияГИСМ",
+        "ЕстьПодакцизныеТовары",
+        "ЗаЗаказчикаНаОсновании",
+        "ЗачетАвансов",
+        "ИдентификаторЧекаККМДляОбмена",
+        "Комментарий",
+        "Контрагент",
+        "КраткоеНаименованиеГруза",
+        "КратностьВзаиморасчетов",
+        "КурсВзаиморасчетов",
+        "МаркаАвтомобиля",
+        "МаркаПрицепа",
+        "НДССМежценовойРазницы",
+        "Номер",
+        "НомерДляОтслеживания",
+        "НомерЧекаККМ",
+        "ОбъектВыполненияРабот",
+        "Организация",
+        "Отбор.Владелец",
+        "Отбор.Организация",
+        "Отбор.ФизическоеЛицо",
+        "Ответственный",
+        "ОтветственныйЗаОформление",
+        "ОтпускПроизвел",
+        "ОтчетМаркетплейса",
+        "ПеревозкаАвтотранспортом",
+        "Перевозчик",
+        "ПериодНачалаРабот",
+        "ПериодОкончанияРабот",
+        "ПометкаУдаления",
+        "Проведен",
+        "РегистрационныйЗнакАвтомобиля",
+        "РегистрационныйЗнакПрицепа",
+        "Руководитель",
+        "РучнаяКорректировка",
+        "СведенияОТранспортировкеИГрузе",
+        "СведенияПрослеживаемости",
+        "Свойство",
+        "Склад",
+        "Смета",
+        "СопроводительныеДокументы",
+        "СпособДоставки",
+        "СпособЗачетаАвансов",
+        "Ссылка",
+        "СтранаРеализации",
+        "СуммаВключаетНДС",
+        "СуммаДокумента",
+        "СчетУчетаРасчетовПоАвансам",
+        "СчетУчетаРасчетовПоТаре",
+        "СчетУчетаРасчетовСКонтрагентом",
+        "ТипЦен",
+        "Товары",
+        "УдалитьЗаГлавногоБухгалтераПоПриказу",
+        "УдалитьЗаРуководителяПоПриказу",
+        "УдалитьСтатьяДоходовИРасходовПоТаре",
+        "УдалитьСчетУчетаДоходовПоТаре",
+        "УдалитьСчетУчетаРасходовПоТаре",
+        "УдалитьУчитыватьНДС",
+        "Услуги",
+        "ШтрихкодыУпаковок",
+        "ЭлектроннаяТорговаяПлощадка",
+        "ЭтапГосконтрактаЕИС",
+        "ЭтоУниверсальныйДокумент"
+      ],
+      "request_id": 38100000,
+      "step": "warmup_completion_1",
+      "trace": {
+        "active_completion_count": null,
+        "artifact_poll": null,
+        "collect_ms": null,
+        "did_change_ahead": null,
+        "dispatch_to_request_context_wait_ms": 0,
+        "dominant_stage": "prepare_stateful",
+        "fail_closed_cause": null,
+        "head_ready_before_wait": true,
+        "min_file_version": 1,
+        "observed_file_version": 1,
+        "outcome": "ok_non_empty",
+        "prepare_guard_outcome": "prepared",
+        "prepare_outcome": "ready",
+        "prepare_snapshot_elapsed_ms": 0,
+        "prepare_stateful_ms": 4,
+        "prepare_wait_elapsed_ms": 4,
+        "query_bundle_ms": 0,
+        "queue_outcome": null,
+        "queued_completion_ahead": null,
+        "request_id": "38100000",
+        "response_build_ms": 2,
+        "response_build_other_ms": null,
+        "route": "head_hit",
+        "service_future_to_first_poll_wait_ms": 0,
+        "timeout_phase": null,
+        "timeout_source": null,
+        "total_duration_ms": 8,
+        "trace_id": "completion-trace-1",
+        "transport_to_service_future_wait_ms": 0,
+        "trigger_mode": "invoked",
+        "turn_wait_ms": 0,
+        "turn_wait_outcome": null,
+        "wait_exact_type_index_ms": null,
+        "wait_for_file_version_runtime_queue_wait_ms": 0
+      },
+      "version": 1
+    }
+  ]
+}

@@ -113,6 +113,10 @@ jobs:
           THRESHOLD_P99: "50"
           THRESHOLD_RESOURCE: "50"
         run: ./scripts/run-intellisense-perf.sh
+      - name: Run real-module post-handoff readiness gate
+        env:
+          BSL_V2_REAL_CONF_BIG_REVISION_CHURN_COMPLETION_PERF_REPORT: ${{ github.workspace }}/backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-real-conf-big-revision-churn-completion-perf-live.json
+        run: cargo test -p bsl-backend --bin bsl-lsp-server p38_real_conf_big_revision_churn_completion_perf_report_live -- --nocapture
       - name: Upload perf gate reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -121,3 +125,5 @@ jobs:
           path: |
             backend/tests/perf/reports/intellisense_*.json
             backend/tests/perf/reports/intellisense_*.md
+            backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-*.json
+            backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-*.md

@@ -157,6 +157,16 @@ fn type_index_precompute_debounce_duration() -> Duration {
 }
 
 impl BslLanguageServer {
+    async fn snapshot_for_completion_wait_v2(&self) -> bsl_analysis_v2::AnalysisV2 {
+        self.analysis_v2
+            .snapshot_for_origin_and_operation(
+                bsl_runtime::application::ObservabilityOrigin::Lsp,
+                bsl_runtime::application::SemanticOperation::Completion,
+            )
+            .await
+            .analysis
+    }
+
     fn spawn_type_index_precompute_task_v2(
         &self,
         supersession_key: super::super::TypeIndexPrecomputeSupersessionKeyV2,
@@ -410,7 +420,7 @@ impl BslLanguageServer {
         let deadline = tokio::time::Instant::now() + max_wait;
         let mut waiter_action = TypeIndexPrecomputeWaiterActionV2::None;
         loop {
-            let analysis = self.analysis_v2.snapshot().await;
+            let analysis = self.snapshot_for_completion_wait_v2().await;
             let observed_version = analysis.file_version(file_id).ok().flatten();
             let exact_ready = expected_version
                 .is_none_or(|version| observed_version == Some(version))
@@ -506,7 +516,7 @@ impl BslLanguageServer {
         let started = Instant::now();
         let mut poll_count = 0_u64;
         loop {
-            let analysis = self.analysis_v2.snapshot().await;
+            let analysis = self.snapshot_for_completion_wait_v2().await;
             let observed_version = analysis.file_version(file_id).ok().flatten();
             let version_matches = expected_version
                 .map(|version| observed_version == Some(version))

@@ -250,6 +250,55 @@ pub fn completion_member_access_owner_type_hints_from_completion_head(
     resolutions
 }
 
+pub fn completion_member_access_owner_type_hints_from_completion_head_for_version(
+    analysis: &bsl_analysis_v2::AnalysisV2,
+    file_id: bsl_analysis_v2::FileId,
+    file_version: i32,
+    deps_id: &bsl_analysis_v2::DepsSnapshotId,
+    settings_id: &bsl_analysis_v2::SettingsId,
+    file_content: &str,
+    line: u32,
+    column: u32,
+) -> Vec<TypeResolution> {
+    let Some(receiver_spans) = extract_member_access_receiver_spans(file_content, line, column)
+    else {
+        return Vec::new();
+    };
+
+    let mut resolutions = Vec::new();
+    for span in receiver_spans {
+        let mut probe_offsets = Vec::with_capacity(2);
+        if span.end > span.start {
+            probe_offsets.push(span.end.saturating_sub(1));
+        }
+        probe_offsets.push(span.start);
+
+        for offset in &probe_offsets {
+            let resolution = analysis
+                .completion_head_type_at_byte_offset_for_version(
+                    file_id,
+                    file_version,
+                    deps_id,
+                    settings_id,
+                    *offset,
+                )
+                .ok()
+                .flatten();
+            let Some(resolution) =
+                resolution.filter(|hint| !hint.is_unknown() && !hint.is_dynamic())
+            else {
+                continue;
+            };
+            if !resolutions.contains(&resolution) {
+                resolutions.push(resolution);
+            }
+            break;
+        }
+    }
+
+    resolutions
+}
+
 pub fn completion_member_access_owner_type_hints_from_static_receiver(
     file_content: &str,
     line: u32,

@@ -1813,7 +1813,6 @@ fn serve_only_matches_legacy_for_incomplete_parenthesized_new_member_access() {
     );
 }
 
-#[test]
 fn incomplete_bare_member_access_does_not_materialize_type_truth_from_parse_recovery() {
     let mut host = AnalysisHostV2::default();
     let file_id = FileId(214);
@@ -2471,6 +2470,71 @@ fn completion_head_previous_version_ir_reuse_publishes_current_revision_artifact
             .map(|resolution| resolution.type_name().to_string()),
         Some("Массив<Неопределено>".to_string()),
         "reused current-revision head artifact must stay queryable"
+    );
+}
+
+#[test]
+fn completion_head_version_keyed_publish_and_query_do_not_require_current_file_version() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(2191);
+    let text: Arc<str> = Arc::from(
+        "Процедура Тест()\n\
+             ДляCompletion = (Новый Массив()).\n\
+             КонецПроцедуры",
+    );
+
+    host.apply_change(Change::SetFile {
+        file_id,
+        text: text.clone(),
+        version: 1,
+        path: Arc::from("completion-head-version-keyed-v1.bsl"),
+    });
+
+    let analysis = host.snapshot();
+    let _ = analysis.ir(file_id).expect("materialize v1 ir");
+    let deps_id = analysis.deps_id().expect("deps id");
+    let settings_id = analysis.settings_id().expect("settings id");
+    let probe = marker_tail_offset(text.as_ref(), "Новый Массив()");
+
+    assert!(
+        !analysis
+            .completion_head_ready_for_version(file_id, 2, &deps_id, &settings_id)
+            .expect("version-keyed head ready before publish"),
+        "version-keyed readiness must stay false before the artifact is explicitly published"
+    );
+    assert!(
+        analysis
+            .try_publish_completion_head_from_previous_ir_reuse_for_version(file_id, 2, 1)
+            .expect("publish version-keyed head from previous ir"),
+        "version-keyed publish must reuse previous ir without requiring host current_version == expected_version"
+    );
+    assert!(
+        analysis
+            .completion_head_ready_for_version(file_id, 2, &deps_id, &settings_id)
+            .expect("version-keyed head ready after publish"),
+        "version-keyed readiness must become true after explicit publish"
+    );
+    assert_eq!(
+        analysis
+            .completion_head_type_at_byte_offset_for_version(
+                file_id,
+                2,
+                &deps_id,
+                &settings_id,
+                probe,
+            )
+            .expect("version-keyed head query after publish")
+            .map(|resolution| resolution.type_name().to_string()),
+        Some("Массив<Неопределено>".to_string()),
+        "version-keyed head query must resolve through the explicitly published artifact"
+    );
+    assert_eq!(
+        analysis
+            .completion_head_type_at_byte_offset(file_id, probe)
+            .expect("current revision head query")
+            .map(|resolution| resolution.type_name().to_string()),
+        Some("Массив<Неопределено>".to_string()),
+        "publishing a version-keyed alias must not break the current revision query for the actually loaded file version"
     );
 }
 

@@ -107,19 +107,6 @@ impl AnalysisV2 {
         )
     }
 
-    fn make_completion_head_artifact_key(
-        &self,
-        file_id: FileId,
-        file_version: i32,
-    ) -> CompletionHeadArtifactKey {
-        CompletionHeadArtifactKey::new(
-            file_id,
-            file_version,
-            self.deps.id(&self.db).clone(),
-            self.settings.id(&self.db).clone(),
-        )
-    }
-
     fn current_completion_head_artifact(
         &self,
         file_id: FileId,
@@ -129,16 +116,32 @@ impl AnalysisV2 {
         };
 
         let file_version = file.version(&self.db);
-        let key = self.make_completion_head_artifact_key(file_id, file_version);
-        if let Some(artifact) = self
+        self.completion_head_artifact_for_version(
+            file_id,
+            file_version,
+            &self.deps.id(&self.db).clone(),
+            &self.settings.id(&self.db).clone(),
+        )
+    }
+
+    fn completion_head_artifact_for_version(
+        &self,
+        file_id: FileId,
+        file_version: i32,
+        deps_id: &DepsSnapshotId,
+        settings_id: &SettingsId,
+    ) -> Cancellable<Option<Arc<crate::derived_artifacts::CompletionHeadArtifact>>> {
+        let key = CompletionHeadArtifactKey::new(
+            file_id,
+            file_version,
+            deps_id.clone(),
+            settings_id.clone(),
+        );
+        Ok(self
             .derived_cache
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get_completion_head_exact(&key)
-        {
-            return Ok(Some(artifact));
-        }
-        Ok(None)
+            .get_completion_head_exact(&key))
     }
 
     pub fn try_publish_completion_head_from_parse_snapshot_reuse(
@@ -236,6 +239,43 @@ impl AnalysisV2 {
         Ok(true)
     }
 
+    pub fn try_publish_completion_head_from_previous_ir_reuse_for_version(
+        &self,
+        file_id: FileId,
+        expected_version: i32,
+        previous_version: i32,
+    ) -> Cancellable<bool> {
+        if previous_version >= expected_version {
+            return Ok(false);
+        }
+
+        let deps_id = self.deps.id(&self.db).clone();
+        let settings_id = self.settings.id(&self.db).clone();
+        if self
+            .completion_head_artifact_for_version(
+                file_id,
+                expected_version,
+                &deps_id,
+                &settings_id,
+            )?
+            .is_some()
+        {
+            return Ok(true);
+        }
+
+        let Some(reused) = self
+            .derived_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get_ir(file_id, previous_version, &deps_id, &settings_id)
+        else {
+            return Ok(false);
+        };
+
+        self.remember_ir_artifact(file_id, expected_version, deps_id, settings_id, reused);
+        Ok(true)
+    }
+
     pub fn precompute_type_index_for_file(
         &self,
         file_id: FileId,
@@ -277,8 +317,9 @@ impl AnalysisV2 {
             parse_snapshot_serve_only_blocked = parse_snapshot_meta.serve_only_blocked,
             "type_index_precompute: start"
         );
-        let (type_index, build_profile, ir_profile) =
-            if let Some(_snapshot) = self.parse_snapshot_for_file(file_id, file) {
+        let (type_index, build_profile, ir_profile) = if let Some(_snapshot) =
+            self.parse_snapshot_for_file(file_id, file)
+        {
             tracing::debug!(
                 target: "bsl_backend::analysis_v2",
                 file_id = file_id.0,
@@ -400,11 +441,11 @@ impl AnalysisV2 {
                 ir_ms: ir_profile.total_ms,
                 ast_to_ir_convert_ms: ir_profile.ast_to_ir_convert_ms,
                 semantic_facts_materialize_ms: ir_profile.semantic_facts_materialize_ms,
-                semantic_facts_seed_module_context_ms: ir_profile.semantic_facts_seed_module_context_ms,
+                semantic_facts_seed_module_context_ms: ir_profile
+                    .semantic_facts_seed_module_context_ms,
                 semantic_facts_local_function_summaries_ms: ir_profile
                     .semantic_facts_local_function_summaries_ms,
-                semantic_facts_visit_statements_ms: ir_profile
-                    .semantic_facts_visit_statements_ms,
+                semantic_facts_visit_statements_ms: ir_profile.semantic_facts_visit_statements_ms,
                 semantic_facts_visit_callable_body_ms: ir_profile
                     .semantic_facts_visit_callable_body_ms,
                 semantic_facts_visit_callable_body_count: ir_profile
@@ -443,8 +484,8 @@ impl AnalysisV2 {
         let mut idx = (byte_offset as usize).min(bytes.len().saturating_sub(1));
         let mut skipped = false;
         while let Some(byte) = bytes.get(idx).copied() {
-            let is_wrapper_tail = matches!(byte, b')' | b'(' | b']' | b'[')
-                || byte.is_ascii_whitespace();
+            let is_wrapper_tail =
+                matches!(byte, b')' | b'(' | b']' | b'[') || byte.is_ascii_whitespace();
             if !is_wrapper_tail {
                 break;
             }
@@ -499,10 +540,7 @@ impl AnalysisV2 {
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             if let Some(artifact) = cache.get_type_index_exact(&key) {
                 if artifact.parse_snapshot_meta.serve_only_blocked {
-                    (
-                        None,
-                        TypeIndexServeReasonCode::TypeIndexFallbackUnavailable,
-                    )
+                    (None, TypeIndexServeReasonCode::TypeIndexFallbackUnavailable)
                 } else {
                     (Some(artifact), TypeIndexServeReasonCode::TypeIndexExactHit)
                 }
@@ -516,8 +554,11 @@ impl AnalysisV2 {
         };
         let scan_started = Instant::now();
         let source_text = file.text(&self.db);
-        let resolution =
-            Self::resolve_type_index_at_offset(source_text.as_ref(), artifact.type_index.as_ref(), byte_offset);
+        let resolution = Self::resolve_type_index_at_offset(
+            source_text.as_ref(),
+            artifact.type_index.as_ref(),
+            byte_offset,
+        );
         let index_scan_ms = scan_started.elapsed().as_millis();
         let total_ms = lookup_started.elapsed().as_millis();
         Ok(TypeAtByteOffsetProfiledResult {
@@ -555,14 +596,24 @@ impl AnalysisV2 {
             return Ok(false);
         };
 
-        let file_version = file.version(&self.db);
-        let key = self.make_completion_head_artifact_key(file_id, file_version);
-        let cache = self
-            .derived_cache
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.completion_head_ready_for_version(
+            file_id,
+            file.version(&self.db),
+            &self.deps.id(&self.db).clone(),
+            &self.settings.id(&self.db).clone(),
+        )
+    }
 
-        Ok(cache.get_completion_head_exact(&key).is_some())
+    pub fn completion_head_ready_for_version(
+        &self,
+        file_id: FileId,
+        file_version: i32,
+        deps_id: &DepsSnapshotId,
+        settings_id: &SettingsId,
+    ) -> Cancellable<bool> {
+        Ok(self
+            .completion_head_artifact_for_version(file_id, file_version, deps_id, settings_id)?
+            .is_some())
     }
 
     pub fn completion_head_type_at_byte_offset(
@@ -572,6 +623,19 @@ impl AnalysisV2 {
     ) -> Cancellable<Option<TypeResolution>> {
         Ok(self
             .current_completion_head_artifact(file_id)?
+            .and_then(|artifact| artifact.type_at_byte_offset(byte_offset)))
+    }
+
+    pub fn completion_head_type_at_byte_offset_for_version(
+        &self,
+        file_id: FileId,
+        file_version: i32,
+        deps_id: &DepsSnapshotId,
+        settings_id: &SettingsId,
+        byte_offset: u32,
+    ) -> Cancellable<Option<TypeResolution>> {
+        Ok(self
+            .completion_head_artifact_for_version(file_id, file_version, deps_id, settings_id)?
             .and_then(|artifact| artifact.type_at_byte_offset(byte_offset)))
     }
 
@@ -963,7 +1027,10 @@ impl AnalysisV2 {
         let parsed = cancellable(|| parse_result(&self.db, file, self.settings).0)?;
         let parse_result_ms = parse_started.elapsed().as_millis();
         if !parsed.syntax_errors.is_empty()
-            && !syntax_errors_only_in_directives(file.text(&self.db).as_ref(), &parsed.syntax_errors)
+            && !syntax_errors_only_in_directives(
+                file.text(&self.db).as_ref(),
+                &parsed.syntax_errors,
+            )
         {
             return Ok(Some(SemanticDiagnosticsProfiledResult {
                 diagnostics: Arc::new(Vec::new()),
@@ -981,8 +1048,9 @@ impl AnalysisV2 {
         let ir_ms = ir_started.elapsed().as_millis();
 
         let collect_started = Instant::now();
-        let diagnostics =
-            cancellable(|| collect_semantic_diagnostics_from_program(program, deps_data, detail_level))?;
+        let diagnostics = cancellable(|| {
+            collect_semantic_diagnostics_from_program(program, deps_data, detail_level)
+        })?;
         let collect_ms = collect_started.elapsed().as_millis();
 
         Ok(Some(SemanticDiagnosticsProfiledResult {
@@ -1031,7 +1099,10 @@ impl AnalysisV2 {
             .parse_result_ms
             .saturating_add(parse_started.elapsed().as_millis());
         if !parsed.syntax_errors.is_empty()
-            && !syntax_errors_only_in_directives(file.text(&self.db).as_ref(), &parsed.syntax_errors)
+            && !syntax_errors_only_in_directives(
+                file.text(&self.db).as_ref(),
+                &parsed.syntax_errors,
+            )
         {
             base.profile.total_ms = started.elapsed().as_millis();
             return Ok(Some(base));
@@ -1347,7 +1418,8 @@ impl AnalysisV2 {
 
         let index_scan_started = Instant::now();
         let source_text = file.text(&self.db);
-        let resolution = Self::resolve_type_index_at_offset(source_text.as_ref(), index.as_ref(), byte_offset);
+        let resolution =
+            Self::resolve_type_index_at_offset(source_text.as_ref(), index.as_ref(), byte_offset);
         let index_scan_ms = index_scan_started.elapsed().as_millis();
         let total_ms = started.elapsed().as_millis();
 
@@ -1474,10 +1546,11 @@ impl AnalysisV2 {
                 index_build_local_function_summaries_ms,
                 index_build_visit_statements_ms,
                 index_build_visit_callable_body_ms,
-                index_build_visit_callable_body_count: index_build_profile.visit_callable_body_count,
+                index_build_visit_callable_body_count: index_build_profile
+                    .visit_callable_body_count,
                 index_build_merge_control_flow_env_ms,
-                index_build_merge_control_flow_env_count:
-                    index_build_profile.merge_control_flow_env_count,
+                index_build_merge_control_flow_env_count: index_build_profile
+                    .merge_control_flow_env_count,
                 index_scan_ms,
                 total_ms,
             },

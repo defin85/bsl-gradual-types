@@ -1,3 +1,4 @@
+use arc_swap::ArcSwap;
 use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, Condvar, OnceLock};
@@ -322,6 +323,39 @@ pub struct SemanticSnapshot {
     pub deps_id: DepsSnapshotId,
 }
 
+/// Request-scoped snapshot payload for completion first-response routing.
+pub struct CompletionCurrentRevisionSnapshot {
+    pub analysis: AnalysisV2,
+    pub deps_id: DepsSnapshotId,
+    pub index_snapshot: Arc<IndexSnapshot>,
+}
+
+/// Lightweight immutable bundle for completion routes that only need deps/index truth.
+pub struct CompletionSupportBundle {
+    pub deps: Arc<SemanticDeps>,
+    pub deps_id: DepsSnapshotId,
+    pub index_snapshot: Arc<IndexSnapshot>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompletionFirstResponseReadiness {
+    HeadReady,
+    ExactReady,
+    NotReady,
+}
+
+/// Prepared current-revision state for completion first response.
+pub struct PreparedCompletionFirstResponse {
+    pub snapshot: CompletionCurrentRevisionSnapshot,
+    pub wait_elapsed: Option<Duration>,
+    pub snapshot_elapsed: Duration,
+    pub wait_for_file_version_runtime: Option<WaitForFileVersionRuntimeTrace>,
+    pub timeout_attribution: Option<PrepareTimeoutAttributionTrace>,
+    pub wait_budget_exhausted: bool,
+    pub observed_file_version: Option<i32>,
+    pub readiness: CompletionFirstResponseReadiness,
+}
+
 /// Prepared operation state after canonical wait/snapshot sequencing.
 pub struct PreparedOperationSnapshot {
     pub snapshot: SemanticSnapshot,
@@ -543,8 +577,16 @@ pub struct IntellisenseV2Facade {
 struct Inner {
     interactive_tx: std::sync::mpsc::Sender<Command>,
     background_tx: std::sync::mpsc::Sender<Command>,
+    completion_deps_index_snapshot: Arc<ArcSwap<CompletionDepsIndexSnapshot>>,
     #[cfg(test)]
     join_handle: std::sync::Mutex<Option<std::thread::JoinHandle<()>>>,
+}
+
+#[derive(Clone)]
+struct CompletionDepsIndexSnapshot {
+    deps: Arc<SemanticDeps>,
+    deps_id: DepsSnapshotId,
+    index_snapshot: Arc<IndexSnapshot>,
 }
 
 enum Command {
@@ -636,19 +678,16 @@ impl CurrentRevisionApplyCommand {
                 path: path.clone(),
                 reuse_previous_version: None,
             }),
-            [
-                Change::SetFile {
-                    file_id,
-                    text,
-                    version,
-                    path,
-                },
-                Change::ReuseCompletionHeadFromPreviousVersion {
-                    file_id: reuse_file_id,
-                    expected_version,
-                    previous_version,
-                },
-            ] if file_id == reuse_file_id && version == expected_version => Some(Self {
+            [Change::SetFile {
+                file_id,
+                text,
+                version,
+                path,
+            }, Change::ReuseCompletionHeadFromPreviousVersion {
+                file_id: reuse_file_id,
+                expected_version,
+                previous_version,
+            }] if file_id == reuse_file_id && version == expected_version => Some(Self {
                 origin,
                 enqueued_at,
                 file_id: *file_id,
@@ -671,13 +710,20 @@ impl CurrentRevisionApplyCommand {
     }
 
     fn supersede_with(&mut self, newer: Self) {
+        let reuse_previous_version = match newer.reuse_previous_version {
+            Some(newer_previous_version) if newer_previous_version == self.version => {
+                self.reuse_previous_version.or(Some(newer_previous_version))
+            }
+            Some(newer_previous_version) => Some(newer_previous_version),
+            None => None,
+        };
         self.enqueued_at = self.enqueued_at.min(newer.enqueued_at);
         self.version = newer.version;
         self.text = newer.text;
         self.path = newer.path;
-        // Older current-revision batches are skipped, so previous_version may no longer
-        // exist in the runtime state. Keep the latest SetFile and let head precompute rebuild.
-        self.reuse_previous_version = None;
+        // Preserve the earliest reusable base across a coalesced whitespace-append chain so
+        // the latest current-revision SetFile can still publish a completion head immediately.
+        self.reuse_previous_version = reuse_previous_version;
     }
 
     fn into_command(self) -> Command {
@@ -703,6 +749,7 @@ impl CurrentRevisionApplyCommand {
 }
 
 const INTERACTIVE_BURST_QUOTA: usize = 8;
+const CURRENT_REVISION_COALESCE_WINDOW: Duration = Duration::from_millis(4);
 
 fn recv_next_writer_command(
     interactive_rx: &std::sync::mpsc::Receiver<Command>,
@@ -780,16 +827,34 @@ fn coalesce_interactive_current_revision_apply_command(
     command: Command,
     pending_interactive_command: &mut Option<Command>,
 ) -> Command {
-    use std::sync::mpsc::TryRecvError;
+    use std::sync::mpsc::{RecvTimeoutError, TryRecvError};
 
     let mut current = match CurrentRevisionApplyCommand::try_from_command(command) {
         Ok(current) => current,
         Err(command) => return command,
     };
+    let coalesce_deadline = Instant::now() + CURRENT_REVISION_COALESCE_WINDOW;
 
     loop {
-        match interactive_rx.try_recv() {
-            Ok(next_command) => match CurrentRevisionApplyCommand::try_from_command(next_command) {
+        let next_command = match interactive_rx.try_recv() {
+            Ok(next_command) => Some(next_command),
+            Err(TryRecvError::Empty) => {
+                let remaining = coalesce_deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    None
+                } else {
+                    match interactive_rx.recv_timeout(remaining) {
+                        Ok(next_command) => Some(next_command),
+                        Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => None,
+                    }
+                }
+            }
+            Err(TryRecvError::Disconnected) => None,
+        };
+
+        match next_command {
+            Some(next_command) => match CurrentRevisionApplyCommand::try_from_command(next_command)
+            {
                 Ok(next) if current.can_supersede(&next) => {
                     current.supersede_with(next);
                 }
@@ -802,7 +867,7 @@ fn coalesce_interactive_current_revision_apply_command(
                     break;
                 }
             },
-            Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
+            None => break,
         }
     }
 

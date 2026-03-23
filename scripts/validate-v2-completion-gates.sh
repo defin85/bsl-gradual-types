@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPORT_DIR="${ROOT_DIR}/backend/tests/perf/reports"
-CHANGE_ID="${CHANGE_ID:-refactor-current-revision-readiness-fast-lane}"
+CHANGE_ID="${CHANGE_ID:-refactor-completion-prepare-lightweight-exact-split}"
 READINESS_REPORT="${REPORT_DIR}/${CHANGE_ID}-readiness-gate.json"
 READINESS_SUMMARY="${REPORT_DIR}/${CHANGE_ID}-readiness-gate.md"
 REAL_MODULE_PROFILE="p38_real_conf_big_revision_churn_completion_perf_report_live"

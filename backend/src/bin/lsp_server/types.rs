@@ -221,6 +221,8 @@ pub struct CompletionTimelinePrepareTimeoutAttributionTrace {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CompletionTimelinePrepareDetailsTrace {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub wait_budget_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub guard_outcome: Option<String>,
@@ -242,16 +244,11 @@ pub struct CompletionTimelinePrepareDetailsTrace {
     pub apply_age_at_start_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub apply_age_at_terminal_ms: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub progress: Option<CompletionTimelinePrepareProgressTrace>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub wait_for_file_version_runtime: Option<CompletionTimelinePrepareRuntimeTrace>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub snapshot_with_deps_runtime: Option<CompletionTimelinePrepareRuntimeTrace>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub snapshot_with_deps_timeout_runtime: Option<CompletionTimelinePrepareRuntimeTrace>,
     pub timeout_attribution: Option<CompletionTimelinePrepareTimeoutAttributionTrace>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub exact_wait: Option<CompletionTimelineExactWaitDetailsTrace>,
 }
 

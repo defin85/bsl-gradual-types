@@ -159,7 +159,7 @@ fn type_index_precompute_debounce_duration() -> Duration {
 impl BslLanguageServer {
     async fn snapshot_for_completion_wait_v2(&self) -> bsl_analysis_v2::AnalysisV2 {
         self.analysis_v2
-            .snapshot_for_origin_and_operation(
+            .completion_current_revision_snapshot_for_origin_and_operation(
                 bsl_runtime::application::ObservabilityOrigin::Lsp,
                 bsl_runtime::application::SemanticOperation::Completion,
             )

@@ -1,6 +1,15 @@
 use super::*;
 
 impl IntellisenseV2Facade {
+    pub fn completion_support_bundle(&self) -> CompletionSupportBundle {
+        let snapshot = self.inner.completion_deps_index_snapshot.load_full();
+        CompletionSupportBundle {
+            deps: snapshot.deps.clone(),
+            deps_id: snapshot.deps_id.clone(),
+            index_snapshot: snapshot.index_snapshot.clone(),
+        }
+    }
+
     fn operation_requires_exact_type_index(operation: SemanticOperation) -> bool {
         matches!(
             operation,
@@ -24,6 +33,29 @@ impl IntellisenseV2Facade {
         // completion, hover, definition, signature help, and type-at-position turn into hidden
         // cold rebuilds instead of observing readiness as-is.
         !matches!(context.origin, ObservabilityOrigin::Lsp)
+    }
+
+    fn classify_completion_first_response_readiness(
+        analysis: &AnalysisV2,
+        file_id: FileId,
+    ) -> CompletionFirstResponseReadiness {
+        let exact_ready = analysis
+            .current_type_index_serve_only_ready(file_id)
+            .ok()
+            .unwrap_or(false);
+        if exact_ready {
+            return CompletionFirstResponseReadiness::ExactReady;
+        }
+
+        let head_ready = analysis
+            .current_completion_head_ready(file_id)
+            .ok()
+            .unwrap_or(false);
+        if head_ready {
+            CompletionFirstResponseReadiness::HeadReady
+        } else {
+            CompletionFirstResponseReadiness::NotReady
+        }
     }
 
     pub async fn snapshot_for_origin_and_operation(
@@ -61,6 +93,271 @@ impl IntellisenseV2Facade {
         )
         .await
         .ready
+    }
+
+    pub async fn completion_current_revision_snapshot_for_origin_and_operation(
+        &self,
+        origin: ObservabilityOrigin,
+        operation: SemanticOperation,
+    ) -> CompletionCurrentRevisionSnapshot {
+        let queue_priority = RuntimeQueuePriority::for_operation(operation);
+        for _ in 0..4 {
+            let deps_index_snapshot = self.inner.completion_deps_index_snapshot.load_full();
+            let analysis = self.snapshot_with_priority(queue_priority).await;
+            let analysis_deps_id = analysis.deps_id().ok();
+            if analysis_deps_id.as_ref() == Some(&deps_index_snapshot.deps_id) {
+                return CompletionCurrentRevisionSnapshot {
+                    analysis,
+                    deps_id: deps_index_snapshot.deps_id.clone(),
+                    index_snapshot: deps_index_snapshot.index_snapshot.clone(),
+                };
+            }
+
+            let refreshed_deps_index_snapshot =
+                self.inner.completion_deps_index_snapshot.load_full();
+            if analysis_deps_id.as_ref() == Some(&refreshed_deps_index_snapshot.deps_id) {
+                return CompletionCurrentRevisionSnapshot {
+                    analysis,
+                    deps_id: refreshed_deps_index_snapshot.deps_id.clone(),
+                    index_snapshot: refreshed_deps_index_snapshot.index_snapshot.clone(),
+                };
+            }
+            tokio::task::yield_now().await;
+        }
+
+        let snapshot = self
+            .snapshot_with_deps_with_priority(origin, queue_priority, None)
+            .await;
+        CompletionCurrentRevisionSnapshot {
+            analysis: snapshot.analysis,
+            deps_id: snapshot.deps_id,
+            index_snapshot: snapshot.index_snapshot,
+        }
+    }
+
+    pub async fn prepare_completion_first_response(
+        &self,
+        context: &ExecutionContext,
+        observability: Option<&SystemCoordinator>,
+    ) -> Result<PreparedCompletionFirstResponse, SemanticOutcome> {
+        self.prepare_completion_first_response_with_progress(context, observability, None)
+            .await
+    }
+
+    pub async fn prepare_completion_first_response_with_progress(
+        &self,
+        context: &ExecutionContext,
+        observability: Option<&SystemCoordinator>,
+        progress: Option<&PrepareStatefulProgress>,
+    ) -> Result<PreparedCompletionFirstResponse, SemanticOutcome> {
+        debug_assert_eq!(context.operation, SemanticOperation::Completion);
+
+        let interactive_knobs = interactive_freshness_knobs(context.operation, observability);
+        let queue_priority = RuntimeQueuePriority::for_operation(context.operation);
+        let mut wait_budget_exhausted = false;
+        let mut timeout_attribution = None;
+
+        let (wait_elapsed, wait_for_file_version_runtime) = if let Some(min_file_version) =
+            context.min_file_version
+        {
+            if let Some(progress) = progress {
+                progress.mark_phase("wait_for_file_version");
+            }
+            let started = Instant::now();
+            let wait_result = if let Some(knobs) = interactive_knobs {
+                match tokio::time::timeout(
+                    knobs.wait_budget,
+                    self.wait_for_file_version_with_priority(
+                        context.origin,
+                        queue_priority,
+                        context.file_id,
+                        min_file_version,
+                    ),
+                )
+                .await
+                {
+                    Ok(wait_result) => Some(wait_result),
+                    Err(_) => {
+                        wait_budget_exhausted = true;
+                        if let Some(coordinator) = observability {
+                            coordinator.record_intellisense_v2_interactive_wait_budget_exhausted();
+                        }
+                        None
+                    }
+                }
+            } else {
+                Some(
+                    self.wait_for_file_version_with_priority(
+                        context.origin,
+                        queue_priority,
+                        context.file_id,
+                        min_file_version,
+                    )
+                    .await,
+                )
+            };
+            let elapsed = started.elapsed();
+            if wait_budget_exhausted {
+                if let Some(knobs) = interactive_knobs {
+                    timeout_attribution = Some(PrepareTimeoutAttributionTrace::new(
+                        PrepareTimeoutSourceKind::InteractiveWaitBudget,
+                        "wait_for_file_version",
+                        knobs.wait_budget,
+                        elapsed,
+                    ));
+                }
+            }
+            if let Some(coordinator) = observability {
+                coordinator.record_intellisense_v2_wait_for_file_version_with_origin_and_mode(
+                    context.origin.as_str(),
+                    context.operation.as_str(),
+                    context.completion_mode,
+                    elapsed,
+                );
+            }
+            if let Some(progress) = progress {
+                progress.mark_wait_completed();
+            }
+            let wait_ok = wait_result
+                .as_ref()
+                .map(|reply| reply.ready)
+                .unwrap_or(true);
+            if !wait_ok {
+                if let Some(progress) = progress {
+                    progress.mark_phase("stale_version");
+                }
+                return Err(SemanticOutcome::StaleVersion);
+            }
+            (Some(elapsed), wait_result.map(|reply| reply.trace))
+        } else {
+            (None, None)
+        };
+
+        if let Some(progress) = progress {
+            progress.mark_phase("snapshot_current_revision");
+        }
+        let snapshot_started = Instant::now();
+        let snapshot = self
+            .completion_current_revision_snapshot_for_origin_and_operation(
+                context.origin,
+                context.operation,
+            )
+            .await;
+        if let Some(progress) = progress {
+            progress.mark_snapshot_completed();
+            progress.mark_phase("deps_guard");
+        }
+
+        if let Some(expected_deps_id) = context.expected_deps_id.as_ref() {
+            if expected_deps_id != &snapshot.deps_id {
+                if let Some(coordinator) = observability {
+                    coordinator.record_intellisense_v2_snapshot_latency_with_origin_and_mode(
+                        context.origin.as_str(),
+                        context.operation.as_str(),
+                        context.completion_mode,
+                        snapshot_started.elapsed(),
+                    );
+                }
+                if let Some(progress) = progress {
+                    progress.mark_phase("missing_deps");
+                }
+                return Err(SemanticOutcome::MissingDeps);
+            }
+        }
+
+        let observed_file_version = snapshot
+            .analysis
+            .file_version(context.file_id)
+            .ok()
+            .flatten();
+        if let (Some(min_file_version), Some(_knobs)) =
+            (context.min_file_version, interactive_knobs)
+        {
+            if wait_budget_exhausted {
+                let record_fallback_unavailable = || {
+                    if let Some(coordinator) = observability {
+                        coordinator.record_intellisense_v2_completion_fallback_unavailable();
+                    }
+                };
+
+                if let Some(observed_version) = observed_file_version {
+                    if observed_version < min_file_version {
+                        let lag_versions = min_file_version.saturating_sub(observed_version);
+                        if let Some(coordinator) = observability {
+                            coordinator.record_intellisense_v2_revision_lag(lag_versions);
+                        }
+                        record_fallback_unavailable();
+                        if let Some(coordinator) = observability {
+                            coordinator
+                                .record_intellisense_v2_snapshot_latency_with_origin_and_mode(
+                                    context.origin.as_str(),
+                                    context.operation.as_str(),
+                                    context.completion_mode,
+                                    snapshot_started.elapsed(),
+                                );
+                        }
+                        if let Some(progress) = progress {
+                            progress.mark_phase("stale_version");
+                        }
+                        return Err(SemanticOutcome::StaleVersion);
+                    }
+                } else {
+                    record_fallback_unavailable();
+                    if let Some(coordinator) = observability {
+                        coordinator.record_intellisense_v2_snapshot_latency_with_origin_and_mode(
+                            context.origin.as_str(),
+                            context.operation.as_str(),
+                            context.completion_mode,
+                            snapshot_started.elapsed(),
+                        );
+                    }
+                    if let Some(progress) = progress {
+                        progress.mark_phase("stale_version");
+                    }
+                    return Err(SemanticOutcome::StaleVersion);
+                }
+            } else if observed_file_version.is_some_and(|version| version < min_file_version) {
+                if let Some(coordinator) = observability {
+                    coordinator.record_intellisense_v2_snapshot_latency_with_origin_and_mode(
+                        context.origin.as_str(),
+                        context.operation.as_str(),
+                        context.completion_mode,
+                        snapshot_started.elapsed(),
+                    );
+                }
+                if let Some(progress) = progress {
+                    progress.mark_phase("stale_version");
+                }
+                return Err(SemanticOutcome::StaleVersion);
+            }
+        }
+
+        let snapshot_elapsed = snapshot_started.elapsed();
+        if let Some(coordinator) = observability {
+            coordinator.record_intellisense_v2_snapshot_latency_with_origin_and_mode(
+                context.origin.as_str(),
+                context.operation.as_str(),
+                context.completion_mode,
+                snapshot_elapsed,
+            );
+        }
+        if let Some(progress) = progress {
+            progress.mark_phase("ready");
+        }
+
+        Ok(PreparedCompletionFirstResponse {
+            readiness: Self::classify_completion_first_response_readiness(
+                &snapshot.analysis,
+                context.file_id,
+            ),
+            snapshot,
+            wait_elapsed,
+            snapshot_elapsed,
+            wait_for_file_version_runtime,
+            timeout_attribution,
+            wait_budget_exhausted,
+            observed_file_version,
+        })
     }
 
     /// Canonical stateful operation preparation for adapters:

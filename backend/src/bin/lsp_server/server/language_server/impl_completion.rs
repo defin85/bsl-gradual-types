@@ -52,6 +52,144 @@ struct CompletionRouteObservation {
     exact_ready: bool,
 }
 
+struct CompletionPreparedSnapshot {
+    kind: &'static str,
+    context: bsl_runtime::application::ExecutionContext,
+    expected_version: i32,
+    snapshot: bsl_runtime::application::CompletionCurrentRevisionSnapshot,
+    wait_elapsed: Option<std::time::Duration>,
+    snapshot_elapsed: std::time::Duration,
+    wait_for_file_version_runtime: Option<bsl_runtime::application::WaitForFileVersionRuntimeTrace>,
+    snapshot_with_deps_runtime: Option<bsl_runtime::application::SnapshotWithDepsRuntimeTrace>,
+    timeout_attribution: Option<bsl_runtime::application::PrepareTimeoutAttributionTrace>,
+    observed_file_version: Option<i32>,
+    file_content_override: Option<Arc<str>>,
+    file_path_override: Option<Arc<str>>,
+    head_owner_type_hints_override: Option<Vec<bsl_shared::domain::types::TypeResolution>>,
+    head_ready_override: bool,
+    deps_override: Option<Arc<bsl_analysis_v2::SemanticDeps>>,
+    settings_id_override: Option<bsl_analysis_v2::SettingsId>,
+}
+
+impl CompletionPreparedSnapshot {
+    fn from_lightweight(
+        context: bsl_runtime::application::ExecutionContext,
+        prepared: bsl_runtime::application::PreparedCompletionFirstResponse,
+        expected_version: i32,
+    ) -> Self {
+        Self {
+            kind: "lightweight_current_revision",
+            context,
+            expected_version,
+            snapshot: prepared.snapshot,
+            wait_elapsed: prepared.wait_elapsed,
+            snapshot_elapsed: prepared.snapshot_elapsed,
+            wait_for_file_version_runtime: prepared.wait_for_file_version_runtime,
+            snapshot_with_deps_runtime: None,
+            timeout_attribution: prepared.timeout_attribution,
+            observed_file_version: prepared.observed_file_version,
+            file_content_override: None,
+            file_path_override: None,
+            head_owner_type_hints_override: None,
+            head_ready_override: false,
+            deps_override: None,
+            settings_id_override: None,
+        }
+    }
+
+    fn from_exact_stateful(
+        context: bsl_runtime::application::ExecutionContext,
+        prepared: bsl_runtime::application::PreparedOperationSnapshot,
+        expected_version: i32,
+    ) -> Self {
+        Self {
+            kind: "exact_stateful",
+            context,
+            expected_version,
+            snapshot: bsl_runtime::application::CompletionCurrentRevisionSnapshot {
+                analysis: prepared.snapshot.analysis,
+                deps_id: prepared.snapshot.deps_id,
+                index_snapshot: prepared.index_snapshot,
+            },
+            wait_elapsed: prepared.wait_elapsed,
+            snapshot_elapsed: prepared.snapshot_elapsed,
+            wait_for_file_version_runtime: prepared.wait_for_file_version_runtime,
+            snapshot_with_deps_runtime: Some(prepared.snapshot_with_deps_runtime),
+            timeout_attribution: prepared.timeout_attribution,
+            observed_file_version: prepared.observed_file_version,
+            file_content_override: None,
+            file_path_override: None,
+            head_owner_type_hints_override: None,
+            head_ready_override: false,
+            deps_override: None,
+            settings_id_override: None,
+        }
+    }
+
+    fn from_shadow_head_fast_path(
+        context: bsl_runtime::application::ExecutionContext,
+        snapshot: bsl_runtime::application::CompletionCurrentRevisionSnapshot,
+        expected_version: i32,
+        file_content: Arc<str>,
+        file_path: Arc<str>,
+        head_owner_type_hints: Vec<bsl_shared::domain::types::TypeResolution>,
+        snapshot_elapsed: std::time::Duration,
+    ) -> Self {
+        Self {
+            kind: "lightweight_current_revision",
+            context,
+            expected_version,
+            snapshot,
+            wait_elapsed: None,
+            snapshot_elapsed,
+            wait_for_file_version_runtime: None,
+            snapshot_with_deps_runtime: None,
+            timeout_attribution: None,
+            observed_file_version: Some(expected_version),
+            file_content_override: Some(file_content),
+            file_path_override: Some(file_path),
+            head_owner_type_hints_override: Some(head_owner_type_hints),
+            head_ready_override: true,
+            deps_override: None,
+            settings_id_override: None,
+        }
+    }
+
+    fn from_shadow_head_support_bundle_fast_path(
+        context: bsl_runtime::application::ExecutionContext,
+        bundle: bsl_runtime::application::CompletionSupportBundle,
+        expected_version: i32,
+        file_content: Arc<str>,
+        file_path: Arc<str>,
+        head_owner_type_hints: Vec<bsl_shared::domain::types::TypeResolution>,
+        snapshot_elapsed: std::time::Duration,
+    ) -> Self {
+        let settings_id = context.settings.settings_id.clone();
+        Self {
+            kind: "lightweight_current_revision",
+            context,
+            expected_version,
+            snapshot: bsl_runtime::application::CompletionCurrentRevisionSnapshot {
+                analysis: bsl_analysis_v2::AnalysisHostV2::default().snapshot(),
+                deps_id: bundle.deps_id.clone(),
+                index_snapshot: bundle.index_snapshot,
+            },
+            wait_elapsed: None,
+            snapshot_elapsed,
+            wait_for_file_version_runtime: None,
+            snapshot_with_deps_runtime: None,
+            timeout_attribution: None,
+            observed_file_version: Some(expected_version),
+            file_content_override: Some(file_content),
+            file_path_override: Some(file_path),
+            head_owner_type_hints_override: Some(head_owner_type_hints),
+            head_ready_override: true,
+            deps_override: Some(bundle.deps),
+            settings_id_override: Some(settings_id),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct CompletionTimelineCapture {
     request_id: Option<String>,
@@ -408,6 +546,10 @@ impl CompletionTimelineCapture {
 
     fn set_prepare_outcome(&mut self, outcome: &str) {
         self.prepare_details_mut().outcome = Some(outcome.to_string());
+    }
+
+    fn set_prepare_kind(&mut self, kind: &str) {
+        self.prepare_details_mut().kind = Some(kind.to_string());
     }
 
     fn set_prepare_route(&mut self, route: &str) {
@@ -1162,8 +1304,120 @@ impl BslLanguageServer {
                     super::super::completion_dispatcher::CompletionTurnOutcome::QueueRejected => {
                         completion_outcome = Some("queue_rejected");
                         break 'completion_flow Some(completion_incomplete_empty_response());
-                    }
+        }
+    }
+            }
+
+            async fn try_prepare_shadow_head_fast_path(
+                server: &BslLanguageServer,
+                uri: &Url,
+                file_id: bsl_analysis_v2::FileId,
+                position: Position,
+                flow_sensitive: bool,
+                completion_mode: Option<&'static str>,
+            ) -> Result<Option<CompletionPreparedSnapshot>, bsl_runtime::application::SemanticOutcome>
+            {
+                let expected_version = server
+                    .resolve_or_seed_min_file_version_v2(
+                        uri,
+                        file_id,
+                        bsl_runtime::application::SemanticOperation::Completion,
+                    )
+                    .await?;
+                let Some(shadow_state) = server
+                    .latest_document_shadow_state_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .cloned()
+                else {
+                    return Ok(None);
+                };
+                if shadow_state.version < expected_version {
+                    return Ok(None);
                 }
+                let file_path = match uri.to_file_path() {
+                    Ok(path) => Arc::<str>::from(path.to_string_lossy().to_string()),
+                    Err(_) => Arc::<str>::from(uri.to_string()),
+                };
+
+                let context = server
+                    .build_execution_context_v2_with_completion_mode(
+                        bsl_runtime::application::SemanticOperation::Completion,
+                        file_id,
+                        Some(expected_version),
+                        flow_sensitive,
+                        completion_mode,
+                    )
+                    .await;
+                let support_bundle_started = Instant::now();
+                let support_bundle = server.analysis_v2.completion_support_bundle();
+                let contextual_owner_type_hints = support_bundle
+                    .deps
+                    .resolver
+                    .as_ref()
+                    .map(|resolver| {
+                        bsl_runtime::application::completion_member_access_owner_type_hints_from_head_receiver(
+                            shadow_state.text.as_ref(),
+                            position.line,
+                            position.character,
+                            file_path.as_ref(),
+                            resolver.as_ref(),
+                            support_bundle.deps.repository.as_ref(),
+                        )
+                    })
+                    .unwrap_or_default();
+                if !contextual_owner_type_hints.is_empty() {
+                    return Ok(Some(
+                        CompletionPreparedSnapshot::from_shadow_head_support_bundle_fast_path(
+                            context,
+                            support_bundle,
+                            expected_version,
+                            shadow_state.text,
+                            file_path,
+                            contextual_owner_type_hints,
+                            support_bundle_started.elapsed(),
+                        ),
+                    ));
+                }
+                let snapshot_started = Instant::now();
+                let snapshot = server
+                    .analysis_v2
+                    .completion_current_revision_snapshot_for_origin_and_operation(
+                        context.origin,
+                        context.operation,
+                    )
+                    .await;
+                let snapshot_elapsed = snapshot_started.elapsed();
+                let Some(settings_id) = snapshot.analysis.settings_id().ok() else {
+                    return Ok(None);
+                };
+                let head_owner_type_hints = bsl_runtime::application::
+        completion_member_access_owner_type_hints_from_completion_head_for_version(
+            &snapshot.analysis,
+            file_id,
+            expected_version,
+            &snapshot.deps_id,
+            &settings_id,
+            shadow_state.text.as_ref(),
+            position.line,
+            position.character,
+        );
+                if head_owner_type_hints.is_empty() {
+                    return Ok(None);
+                }
+
+                Ok(Some(
+                    CompletionPreparedSnapshot::from_shadow_head_fast_path(
+                        context,
+                        snapshot,
+                        expected_version,
+                        shadow_state.text,
+                        file_path,
+                        head_owner_type_hints,
+                        snapshot_elapsed,
+                    ),
+                ))
             }
             if pending_request_cancelled_before_take {
                 if event_driven_guards_enabled {
@@ -1258,30 +1512,109 @@ impl BslLanguageServer {
                 )
                 .map(|knobs| knobs.wait_budget);
             timeline_capture.set_prepare_wait_budget(prepare_timeout);
-            let prepare_abort = event_driven_guards_enabled.then(|| {
-                wait_for_completion_prepare_abort(
-                    self,
-                    file_id,
-                    completion_request_id.as_deref(),
-                    completion_ticket.request_epoch,
-                    completion_cancellation_token.as_ref(),
-                    &mut cancel_event_emitted,
-                )
+            timeline_capture.set_prepare_kind(if member_access_request {
+                "lightweight_current_revision"
+            } else {
+                "exact_stateful"
             });
             let prepare_progress = bsl_runtime::application::PrepareStatefulProgress::new();
-            let guarded_prepare = run_completion_prepare_guard(
-                self.prepare_lsp_stateful_operation_v2_with_completion_mode_and_progress(
+            let guarded_prepare = if member_access_request {
+                match try_prepare_shadow_head_fast_path(
+                    self,
                     &uri,
                     file_id,
-                    bsl_runtime::application::SemanticOperation::Completion,
+                    position,
                     include_flow_sensitive,
                     Some(completion_observability_mode),
-                    Some(&prepare_progress),
-                ),
-                prepare_timeout,
-                prepare_abort,
-            )
-            .await;
+                )
+                .await
+                {
+                    Ok(Some(prepared)) => CompletionPrepareGuardResult::Prepared(Ok(prepared)),
+                    Ok(None) => match run_completion_prepare_guard(
+                        self.prepare_lsp_completion_first_response_v2_with_completion_mode_and_progress(
+                            &uri,
+                            file_id,
+                            include_flow_sensitive,
+                            Some(completion_observability_mode),
+                            Some(&prepare_progress),
+                        ),
+                        prepare_timeout,
+                        event_driven_guards_enabled.then(|| {
+                            wait_for_completion_prepare_abort(
+                                self,
+                                file_id,
+                                completion_request_id.as_deref(),
+                                completion_ticket.request_epoch,
+                                completion_cancellation_token.as_ref(),
+                                &mut cancel_event_emitted,
+                            )
+                        }),
+                    )
+                    .await
+                    {
+                        CompletionPrepareGuardResult::Prepared(prepared) => {
+                            CompletionPrepareGuardResult::Prepared(prepared.map(
+                                |(context, prepared, expected_version)| {
+                                    CompletionPreparedSnapshot::from_lightweight(
+                                        context,
+                                        prepared,
+                                        expected_version,
+                                    )
+                                },
+                            ))
+                        }
+                        CompletionPrepareGuardResult::TimedOut => {
+                            CompletionPrepareGuardResult::TimedOut
+                        }
+                        CompletionPrepareGuardResult::Aborted(outcome) => {
+                            CompletionPrepareGuardResult::Aborted(outcome)
+                        }
+                    },
+                    Err(outcome) => CompletionPrepareGuardResult::Prepared(Err(outcome)),
+                }
+            } else {
+                match run_completion_prepare_guard(
+                    self.prepare_lsp_stateful_operation_v2_with_completion_mode_and_progress(
+                        &uri,
+                        file_id,
+                        bsl_runtime::application::SemanticOperation::Completion,
+                        include_flow_sensitive,
+                        Some(completion_observability_mode),
+                        Some(&prepare_progress),
+                    ),
+                    prepare_timeout,
+                    event_driven_guards_enabled.then(|| {
+                        wait_for_completion_prepare_abort(
+                            self,
+                            file_id,
+                            completion_request_id.as_deref(),
+                            completion_ticket.request_epoch,
+                            completion_cancellation_token.as_ref(),
+                            &mut cancel_event_emitted,
+                        )
+                    }),
+                )
+                .await
+                {
+                    CompletionPrepareGuardResult::Prepared(prepared) => {
+                        CompletionPrepareGuardResult::Prepared(prepared.map(
+                            |(context, prepared, expected_version)| {
+                                CompletionPreparedSnapshot::from_exact_stateful(
+                                    context,
+                                    prepared,
+                                    expected_version,
+                                )
+                            },
+                        ))
+                    }
+                    CompletionPrepareGuardResult::TimedOut => {
+                        CompletionPrepareGuardResult::TimedOut
+                    }
+                    CompletionPrepareGuardResult::Aborted(outcome) => {
+                        CompletionPrepareGuardResult::Aborted(outcome)
+                    }
+                }
+            };
             let prepare_elapsed = prepare_started.elapsed();
             let prepare_progress_snapshot = prepare_progress.snapshot();
             timeline_capture.set_prepare_progress_snapshot(&prepare_progress_snapshot);
@@ -1359,24 +1692,22 @@ impl BslLanguageServer {
             };
 
             match prepared {
-                Ok((context, prepared, expected_version)) => {
+                Ok(prepared) => {
+                    let context = prepared.context.clone();
+                    let expected_version = prepared.expected_version;
+                    timeline_capture.set_prepare_kind(prepared.kind);
                     timeline_capture.set_prepare_outcome("ready");
-                    timeline_capture.set_prepare_observed_file_version(
-                        prepared
-                            .snapshot
-                            .analysis
-                            .file_version(file_id)
-                            .ok()
-                            .flatten(),
-                    );
+                    timeline_capture
+                        .set_prepare_observed_file_version(prepared.observed_file_version);
                     timeline_capture.set_prepare_wait_elapsed(prepared.wait_elapsed);
                     timeline_capture.set_prepare_snapshot_elapsed(prepared.snapshot_elapsed);
                     timeline_capture.set_prepare_wait_for_file_version_runtime(
                         prepared.wait_for_file_version_runtime,
                     );
-                    timeline_capture.set_prepare_snapshot_with_deps_runtime(
-                        prepared.snapshot_with_deps_runtime,
-                    );
+                    if let Some(snapshot_with_deps_runtime) = prepared.snapshot_with_deps_runtime {
+                        timeline_capture
+                            .set_prepare_snapshot_with_deps_runtime(snapshot_with_deps_runtime);
+                    }
                     if let Some(timeout_attribution) = prepared.timeout_attribution {
                         timeline_capture.set_prepare_timeout_attribution(timeout_attribution);
                     }
@@ -1397,12 +1728,18 @@ impl BslLanguageServer {
                         break 'completion_flow Some(completion_incomplete_empty_response());
                     }
                     let (snapshot_file_bytes, snapshot_file_lines) = prepared
-                        .snapshot
-                        .analysis
-                        .file_text(file_id)
-                        .ok()
-                        .flatten()
+                        .file_content_override
+                        .as_ref()
                         .map(|text| (text.len(), text.lines().count()))
+                        .or_else(|| {
+                            prepared
+                                .snapshot
+                                .analysis
+                                .file_text(file_id)
+                                .ok()
+                                .flatten()
+                                .map(|text| (text.len(), text.lines().count()))
+                        })
                         .unwrap_or((0, 0));
                     self.coordinator
                         .record_intellisense_v2_payload_shape_with_origin(
@@ -1470,12 +1807,13 @@ impl BslLanguageServer {
                         .map(|knobs| knobs.wait_budget)
                         .unwrap_or_default();
                     let mut head_ready = member_access_request
-                        && prepared
-                            .snapshot
-                            .analysis
-                            .current_completion_head_ready(file_id)
-                            .ok()
-                            .unwrap_or(false);
+                        && (prepared.head_ready_override
+                            || prepared
+                                .snapshot
+                                .analysis
+                                .current_completion_head_ready(file_id)
+                                .ok()
+                                .unwrap_or(false));
                     let exact_ready_before_wait = prepared
                         .snapshot
                         .analysis
@@ -1541,8 +1879,14 @@ impl BslLanguageServer {
                                             .as_str(),
                                     );
                                 exact_hit_candidate = true;
-                                refreshed_snapshot_after_wait =
-                                    Some(self.analysis_v2.snapshot_with_deps().await);
+                                refreshed_snapshot_after_wait = Some(
+                                    self.analysis_v2
+                                        .completion_current_revision_snapshot_for_origin_and_operation(
+                                            context.origin,
+                                            context.operation,
+                                        )
+                                        .await,
+                                );
                             }
                             super::super::core::CompletionArtifactWaitOutcomeV2::Deadline
                             | super::super::core::CompletionArtifactWaitOutcomeV2::ObservedVersionMismatch => {
@@ -1584,16 +1928,22 @@ impl BslLanguageServer {
                             }
                         }
                     }
-                    let current_revision_head_owner_type_hints =
-                        if member_access_request && head_ready {
-                            completion_member_access_owner_type_hints_from_current_revision_head(
-                                &prepared.snapshot.analysis,
-                                file_id,
-                                position,
-                            )
-                        } else {
-                            Vec::new()
-                        };
+                    let current_revision_head_owner_type_hints = if member_access_request
+                        && head_ready
+                    {
+                        prepared
+                            .head_owner_type_hints_override
+                            .clone()
+                            .unwrap_or_else(|| {
+                                completion_member_access_owner_type_hints_from_current_revision_head(
+                                    &prepared.snapshot.analysis,
+                                    file_id,
+                                    position,
+                                )
+                            })
+                    } else {
+                        Vec::new()
+                    };
                     let head_route_candidate =
                         member_access_request && !current_revision_head_owner_type_hints.is_empty();
                     if member_access_request {
@@ -1671,14 +2021,21 @@ impl BslLanguageServer {
                             break 'completion_flow Some(completion_empty_response(false));
                         }
 
-                        let (analysis_after_wait, index_snapshot_after_wait, deps_id_after_wait) =
-                            self.analysis_v2.snapshot_with_deps().await;
-                        let exact_ready_after_wait = analysis_after_wait
+                        let snapshot_after_wait = self
+                            .analysis_v2
+                            .completion_current_revision_snapshot_for_origin_and_operation(
+                                context.origin,
+                                context.operation,
+                            )
+                            .await;
+                        let exact_ready_after_wait = snapshot_after_wait
+                            .analysis
                             .current_type_index_serve_only_ready(file_id)
                             .ok()
                             .unwrap_or(false);
                         if !exact_ready_after_wait {
-                            let terminal_outcome = if analysis_after_wait
+                            let terminal_outcome = if snapshot_after_wait
+                                .analysis
                                 .file_version(file_id)
                                 .ok()
                                 .flatten()
@@ -1726,11 +2083,7 @@ impl BslLanguageServer {
                                 super::super::core::ExactTypeIndexWaitOutcomeV2::Ready.as_str(),
                             );
                         exact_hit_candidate = true;
-                        refreshed_snapshot_after_wait = Some((
-                            analysis_after_wait,
-                            index_snapshot_after_wait,
-                            deps_id_after_wait,
-                        ));
+                        refreshed_snapshot_after_wait = Some(snapshot_after_wait);
                     }
 
                     let query_bundle_started = Instant::now();
@@ -1745,14 +2098,19 @@ impl BslLanguageServer {
                         observed_settings_id,
                         observed_file_version,
                     ) = {
-                        let (analysis, index_snapshot, observed_deps_id) =
-                            refreshed_snapshot_after_wait.unwrap_or((
-                                prepared.snapshot.analysis,
-                                prepared.index_snapshot,
-                                prepared.snapshot.deps_id,
-                            ));
-                        let observed_file_version = analysis.file_version(file_id).ok().flatten();
-                        let observed_settings_id = analysis.settings_id().ok();
+                        let file_content_override = prepared.file_content_override.clone();
+                        let file_path_override = prepared.file_path_override.clone();
+                        let observed_file_version_override = prepared.observed_file_version;
+                        let snapshot = refreshed_snapshot_after_wait.unwrap_or(prepared.snapshot);
+                        let analysis = snapshot.analysis;
+                        let index_snapshot = snapshot.index_snapshot;
+                        let observed_deps_id = snapshot.deps_id;
+                        let observed_file_version = observed_file_version_override
+                            .or_else(|| analysis.file_version(file_id).ok().flatten());
+                        let observed_settings_id = prepared
+                            .settings_id_override
+                            .clone()
+                            .or_else(|| analysis.settings_id().ok());
                         debug!(
                         "Completion v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}, index_snapshot_id={}",
                             uri,
@@ -1800,9 +2158,14 @@ impl BslLanguageServer {
                     );
 
                         if head_route_candidate {
-                            let file_content = analysis.file_text(file_id).ok().flatten();
-                            let file_path = analysis.file_path(file_id).ok().flatten();
-                            let deps = analysis.deps_data().ok();
+                            let file_content = file_content_override
+                                .or_else(|| analysis.file_text(file_id).ok().flatten());
+                            let file_path = file_path_override
+                                .or_else(|| analysis.file_path(file_id).ok().flatten());
+                            let deps = prepared
+                                .deps_override
+                                .clone()
+                                .or_else(|| analysis.deps_data().ok());
                             (
                                 file_content,
                                 file_path,
@@ -2863,6 +3226,7 @@ mod tests {
     #[test]
     fn prepare_runtime_drilldown_is_serialised_into_trace() {
         let mut capture = sample_capture();
+        capture.set_prepare_kind("lightweight_current_revision");
         capture.set_prepare_wait_for_file_version_runtime(Some(
             bsl_runtime::application::WaitForFileVersionRuntimeTrace {
                 queue_wait_elapsed: Some(std::time::Duration::from_millis(11)),
@@ -2888,6 +3252,10 @@ mod tests {
         let prepare_details = trace
             .prepare_details
             .expect("prepare_details must be present");
+        assert_eq!(
+            prepare_details.kind.as_deref(),
+            Some("lightweight_current_revision")
+        );
         let wait_runtime = prepare_details
             .wait_for_file_version_runtime
             .expect("wait runtime must be present");

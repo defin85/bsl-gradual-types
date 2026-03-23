@@ -1389,7 +1389,12 @@ fn completion_timeline_v8_contract_matches_current_runtime_payload_shape() {
         .and_then(|value| value.as_array())
         .expect("prepare_details_fields array")
         .iter()
-        .map(|value| value.as_str().expect("prepare_details field string").to_string())
+        .map(|value| {
+            value
+                .as_str()
+                .expect("prepare_details field string")
+                .to_string()
+        })
         .collect();
     let expected_prepare_details_fields: BTreeSet<String> = [
         "wait_budget_ms",
@@ -1421,7 +1426,12 @@ fn completion_timeline_v8_contract_matches_current_runtime_payload_shape() {
         .and_then(|value| value.as_array())
         .expect("prepare_progress_fields array")
         .iter()
-        .map(|value| value.as_str().expect("prepare_progress field string").to_string())
+        .map(|value| {
+            value
+                .as_str()
+                .expect("prepare_progress field string")
+                .to_string()
+        })
         .collect();
     let expected_prepare_progress_fields: BTreeSet<String> = [
         "phase",
@@ -1439,7 +1449,12 @@ fn completion_timeline_v8_contract_matches_current_runtime_payload_shape() {
         .and_then(|value| value.as_array())
         .expect("prepare_runtime_fields array")
         .iter()
-        .map(|value| value.as_str().expect("prepare_runtime field string").to_string())
+        .map(|value| {
+            value
+                .as_str()
+                .expect("prepare_runtime field string")
+                .to_string()
+        })
         .collect();
     let expected_prepare_runtime_fields: BTreeSet<String> =
         ["queue_wait_ms", "exec_ms", "wake_wait_ms", "resolution"]
@@ -1505,19 +1520,32 @@ fn completion_timeline_v8_contract_matches_current_runtime_payload_shape() {
                 .to_string()
         })
         .collect();
-    let expected_exact_artifact_poll_fields: BTreeSet<String> =
-        ["poll_count", "poll_elapsed_ms", "observed_file_version", "head_ready", "exact_ready"]
-            .iter()
-            .map(|value| value.to_string())
-            .collect();
-    assert_eq!(exact_artifact_poll_fields, expected_exact_artifact_poll_fields);
+    let expected_exact_artifact_poll_fields: BTreeSet<String> = [
+        "poll_count",
+        "poll_elapsed_ms",
+        "observed_file_version",
+        "head_ready",
+        "exact_ready",
+    ]
+    .iter()
+    .map(|value| value.to_string())
+    .collect();
+    assert_eq!(
+        exact_artifact_poll_fields,
+        expected_exact_artifact_poll_fields
+    );
 
     let turn_attribution_fields: BTreeSet<String> = response
         .get("turn_attribution_fields")
         .and_then(|value| value.as_array())
         .expect("turn_attribution_fields array")
         .iter()
-        .map(|value| value.as_str().expect("turn_attribution field string").to_string())
+        .map(|value| {
+            value
+                .as_str()
+                .expect("turn_attribution field string")
+                .to_string()
+        })
         .collect();
     let expected_turn_attribution_fields: BTreeSet<String> = [
         "request_file_seq",
@@ -1545,7 +1573,12 @@ fn completion_timeline_v8_contract_matches_current_runtime_payload_shape() {
         .and_then(|value| value.as_array())
         .expect("server_edge_details_fields array")
         .iter()
-        .map(|value| value.as_str().expect("server_edge_details field string").to_string())
+        .map(|value| {
+            value
+                .as_str()
+                .expect("server_edge_details field string")
+                .to_string()
+        })
         .collect();
     let expected_server_edge_details_fields: BTreeSet<String> = [
         "transport_received_at_ms",
@@ -1577,7 +1610,10 @@ fn completion_timeline_v8_contract_matches_current_runtime_payload_shape() {
     .iter()
     .map(|value| value.to_string())
     .collect();
-    assert_eq!(server_edge_details_fields, expected_server_edge_details_fields);
+    assert_eq!(
+        server_edge_details_fields,
+        expected_server_edge_details_fields
+    );
 }
 
 #[test]

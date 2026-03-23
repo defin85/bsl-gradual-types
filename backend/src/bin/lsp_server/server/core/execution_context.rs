@@ -131,33 +131,20 @@ impl BslLanguageServer {
         .await
     }
 
-    pub(crate) async fn prepare_lsp_stateful_operation_v2_with_completion_mode_and_progress(
+    pub(crate) async fn resolve_or_seed_min_file_version_v2(
         &self,
         uri: &Url,
         file_id: V2FileId,
         operation: bsl_runtime::application::SemanticOperation,
-        flow_sensitive: bool,
-        completion_mode: Option<&'static str>,
-        progress: Option<&bsl_runtime::application::PrepareStatefulProgress>,
-    ) -> Result<
-        (
-            bsl_runtime::application::ExecutionContext,
-            bsl_runtime::application::PreparedOperationSnapshot,
-            i32,
-        ),
-        bsl_runtime::application::SemanticOutcome,
-    > {
-        // latest_received tracks the freshest transport revision. prepare_stateful_operation
-        // still waits for runtime applied_version to reach this bound before treating the
-        // semantic snapshot as ready.
-        let min_file_version = match self
+    ) -> Result<i32, bsl_runtime::application::SemanticOutcome> {
+        match self
             .latest_received_file_versions_v2
             .read()
             .await
             .get(&file_id)
             .copied()
         {
-            Some(version) => version,
+            Some(version) => Ok(version),
             None => {
                 let path = match uri.to_file_path() {
                     Ok(path) => path,
@@ -222,9 +209,76 @@ impl BslLanguageServer {
                         text: Arc::from(file_content),
                     },
                 );
-                0
+                Ok(0)
             }
-        };
+        }
+    }
+
+    pub(crate) async fn prepare_lsp_completion_first_response_v2_with_completion_mode_and_progress(
+        &self,
+        uri: &Url,
+        file_id: V2FileId,
+        flow_sensitive: bool,
+        completion_mode: Option<&'static str>,
+        progress: Option<&bsl_runtime::application::PrepareStatefulProgress>,
+    ) -> Result<
+        (
+            bsl_runtime::application::ExecutionContext,
+            bsl_runtime::application::PreparedCompletionFirstResponse,
+            i32,
+        ),
+        bsl_runtime::application::SemanticOutcome,
+    > {
+        let min_file_version = self
+            .resolve_or_seed_min_file_version_v2(
+                uri,
+                file_id,
+                bsl_runtime::application::SemanticOperation::Completion,
+            )
+            .await?;
+        let context = self
+            .build_execution_context_v2_with_completion_mode(
+                bsl_runtime::application::SemanticOperation::Completion,
+                file_id,
+                Some(min_file_version),
+                flow_sensitive,
+                completion_mode,
+            )
+            .await;
+        let prepared = self
+            .analysis_v2
+            .prepare_completion_first_response_with_progress(
+                &context,
+                Some(self.coordinator.as_ref()),
+                progress,
+            )
+            .await?;
+
+        Ok((context, prepared, min_file_version))
+    }
+
+    pub(crate) async fn prepare_lsp_stateful_operation_v2_with_completion_mode_and_progress(
+        &self,
+        uri: &Url,
+        file_id: V2FileId,
+        operation: bsl_runtime::application::SemanticOperation,
+        flow_sensitive: bool,
+        completion_mode: Option<&'static str>,
+        progress: Option<&bsl_runtime::application::PrepareStatefulProgress>,
+    ) -> Result<
+        (
+            bsl_runtime::application::ExecutionContext,
+            bsl_runtime::application::PreparedOperationSnapshot,
+            i32,
+        ),
+        bsl_runtime::application::SemanticOutcome,
+    > {
+        // latest_received tracks the freshest transport revision. prepare_stateful_operation
+        // still waits for runtime applied_version to reach this bound before treating the
+        // semantic snapshot as ready.
+        let min_file_version = self
+            .resolve_or_seed_min_file_version_v2(uri, file_id, operation)
+            .await?;
 
         let context = self
             .build_execution_context_v2_with_completion_mode(

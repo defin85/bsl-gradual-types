@@ -32,6 +32,16 @@ impl IntellisenseV2Facade {
     ) -> Self {
         let (interactive_tx, interactive_rx) = std::sync::mpsc::channel::<Command>();
         let (background_tx, background_rx) = std::sync::mpsc::channel::<Command>();
+        let initial_snapshot = initial_host.snapshot();
+        let initial_deps_id = initial_snapshot.deps_id().expect("initial deps id");
+        let initial_deps = initial_snapshot.deps_data().expect("initial deps data");
+        let completion_deps_index_snapshot =
+            Arc::new(ArcSwap::from_pointee(CompletionDepsIndexSnapshot {
+                deps: initial_deps,
+                deps_id: initial_deps_id,
+                index_snapshot: initial_index_snapshot.clone(),
+            }));
+        let completion_deps_index_snapshot_for_writer = completion_deps_index_snapshot.clone();
 
         let join_handle = std::thread::Builder::new()
             .name("analysis-v2-writer".to_string())
@@ -312,6 +322,16 @@ impl IntellisenseV2Facade {
                             index_snapshot = new_index_snapshot;
                             let cache_effects =
                                 host.apply_change(Change::SetDepsSnapshot { deps_id, deps });
+                            completion_deps_index_snapshot_for_writer.store(Arc::new(
+                                CompletionDepsIndexSnapshot {
+                                    deps: host
+                                        .snapshot()
+                                        .deps_data()
+                                        .expect("deps after ApplyDepsBundle"),
+                                    deps_id: current_deps_id.clone(),
+                                    index_snapshot: index_snapshot.clone(),
+                                },
+                            ));
                             if let Some(coordinator) = &observability {
                                 if cache_effects.invalidated_deps_total > 0 {
                                     coordinator.record_intellisense_v2_type_index_reason(
@@ -502,6 +522,7 @@ impl IntellisenseV2Facade {
             inner: Arc::new(Inner {
                 interactive_tx,
                 background_tx,
+                completion_deps_index_snapshot,
                 #[cfg(test)]
                 join_handle: std::sync::Mutex::new(Some(join_handle)),
             }),
@@ -589,9 +610,17 @@ impl IntellisenseV2Facade {
     }
 
     pub async fn snapshot(&self) -> AnalysisV2 {
+        self.snapshot_with_priority(RuntimeQueuePriority::Background)
+            .await
+    }
+
+    pub(super) async fn snapshot_with_priority(
+        &self,
+        priority: RuntimeQueuePriority,
+    ) -> AnalysisV2 {
         let (reply, rx) = oneshot::channel::<AnalysisV2>();
         if self
-            .send_background_command(Command::GetSnapshot { reply })
+            .send_command_with_priority(priority, Command::GetSnapshot { reply })
             .is_err()
         {
             warn!("analysis_v2_runtime: failed to send GetSnapshot (writer thread is gone)");

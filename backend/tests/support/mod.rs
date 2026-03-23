@@ -229,3 +229,29 @@ pub fn completion_owner_hint_for_position(
         column,
     )
 }
+
+pub fn completion_owner_hint_for_position_with_resolver(
+    analysis: &AnalysisV2,
+    file_id: V2FileId,
+    file_content: &str,
+    line: u32,
+    column: u32,
+    resolver: &TypeResolver,
+) -> Option<TypeResolution> {
+    completion_owner_hint_for_position(analysis, file_id, file_content, line, column).or_else(
+        || {
+            let mut hints =
+                bsl_backend::application::completion_member_access_owner_type_hints_from_static_receiver(
+                    file_content,
+                    line,
+                    column,
+                    resolver,
+                );
+            if hints.len() == 1 {
+                hints.pop()
+            } else {
+                None
+            }
+        },
+    )
+}

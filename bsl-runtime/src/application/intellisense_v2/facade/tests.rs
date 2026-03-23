@@ -154,11 +154,9 @@ async fn interactive_apply_changes_preempts_background_backlog_for_wait_for_file
 
 #[tokio::test]
 async fn interactive_snapshot_for_completion_preempts_background_backlog() {
-    let runtime = IntellisenseV2Facade::new(
-        AnalysisHostV2::default(),
-        Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p7"))),
-        None,
-    );
+    let index_snapshot = Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p7")));
+    let runtime =
+        IntellisenseV2Facade::new(AnalysisHostV2::default(), index_snapshot.clone(), None);
     let file_id = FileId(20);
 
     runtime.apply_changes_interactive(
@@ -193,11 +191,18 @@ async fn interactive_snapshot_for_completion_preempts_background_backlog() {
 
     let snapshot = timeout(
         Duration::from_millis(120),
-        runtime.snapshot_for_operation(SemanticOperation::Completion),
+        runtime.completion_current_revision_snapshot_for_origin_and_operation(
+            ObservabilityOrigin::Lsp,
+            SemanticOperation::Completion,
+        ),
     )
     .await
-    .expect("completion snapshot must not wait for the full background backlog");
+    .expect("completion current-revision snapshot must not wait for the full background backlog");
     assert_eq!(snapshot.analysis.file_version(file_id).unwrap(), Some(7));
+    assert_eq!(
+        snapshot.index_snapshot.id.as_str(),
+        index_snapshot.id.as_str()
+    );
 
     for sleeper_ack in sleepers {
         timeout(Duration::from_secs(1), sleeper_ack)
@@ -271,7 +276,9 @@ async fn interactive_set_file_burst_coalesces_latest_version_for_wait_for_file_v
         ),
     )
     .await
-    .expect("interactive SetFile burst should not require sequentially applying superseded revisions");
+    .expect(
+        "interactive SetFile burst should not require sequentially applying superseded revisions",
+    );
     assert!(
         wait_result.ready,
         "wait_for_file_version must observe the latest burst revision"
@@ -285,6 +292,185 @@ async fn interactive_set_file_burst_coalesces_latest_version_for_wait_for_file_v
     assert_eq!(analysis.file_version(file_id).unwrap(), Some(3));
 
     runtime.shutdown_for_test().await;
+}
+
+#[tokio::test]
+async fn delayed_interactive_set_file_burst_still_coalesces_latest_version() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+    let _apply_delay_guard = EnvVarGuard::set("BSL_TEST_RUNTIME_APPLY_SET_FILE_DELAY_MS", "80");
+
+    let runtime = IntellisenseV2Facade::new(
+        AnalysisHostV2::default(),
+        Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p7"))),
+        None,
+    );
+    let file_id = FileId(211);
+
+    runtime.apply_changes_interactive(
+        ObservabilityOrigin::Lsp,
+        vec![Change::SetFile {
+            file_id,
+            text: Arc::from("x = 1;"),
+            version: 1,
+            path: Arc::from("interactive_burst_delayed_latest.bsl"),
+        }],
+    );
+
+    let burst_sender = tokio::spawn({
+        let runtime = runtime.clone();
+        async move {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            for version in 2..=4 {
+                runtime.apply_changes_interactive(
+                    ObservabilityOrigin::Lsp,
+                    vec![Change::SetFile {
+                        file_id,
+                        text: Arc::from(format!("x = {version};")),
+                        version,
+                        path: Arc::from("interactive_burst_delayed_latest.bsl"),
+                    }],
+                );
+            }
+        }
+    });
+
+    let started = Instant::now();
+    let wait_result = timeout(
+        Duration::from_millis(170),
+        runtime.wait_for_file_version_with_priority(
+            ObservabilityOrigin::Lsp,
+            RuntimeQueuePriority::Interactive,
+            file_id,
+            4,
+        ),
+    )
+    .await
+    .expect(
+        "delayed interactive SetFile burst should still converge to the latest revision without sequential superseded applies",
+    );
+    assert!(
+        wait_result.ready,
+        "wait_for_file_version must observe the latest delayed burst revision"
+    );
+    assert!(
+        started.elapsed() < Duration::from_millis(170),
+        "latest delayed burst revision must become applied within a single-delay budget"
+    );
+
+    burst_sender.await.expect("burst sender task");
+    let analysis = runtime.snapshot().await;
+    assert_eq!(analysis.file_version(file_id).unwrap(), Some(4));
+
+    runtime.shutdown_for_test().await;
+}
+
+#[test]
+fn coalesced_whitespace_append_burst_preserves_earliest_reuse_base() {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let file_id = FileId(212);
+    let path: Arc<str> = Arc::from("<coalesced-head-reuse-chain>");
+
+    let first = Command::ApplyChanges {
+        origin: ObservabilityOrigin::Lsp,
+        enqueued_at: Instant::now(),
+        changes: vec![
+            Change::SetFile {
+                file_id,
+                text: Arc::from("v2"),
+                version: 2,
+                path: path.clone(),
+            },
+            Change::ReuseCompletionHeadFromPreviousVersion {
+                file_id,
+                expected_version: 2,
+                previous_version: 1,
+            },
+        ],
+    };
+
+    for version in 3..=5 {
+        tx.send(Command::ApplyChanges {
+            origin: ObservabilityOrigin::Lsp,
+            enqueued_at: Instant::now(),
+            changes: vec![
+                Change::SetFile {
+                    file_id,
+                    text: Arc::from(format!("v{version}")),
+                    version,
+                    path: path.clone(),
+                },
+                Change::ReuseCompletionHeadFromPreviousVersion {
+                    file_id,
+                    expected_version: version,
+                    previous_version: version - 1,
+                },
+            ],
+        })
+        .expect("enqueue coalesced burst command");
+    }
+    drop(tx);
+
+    let mut pending = None;
+    let coalesced = coalesce_interactive_current_revision_apply_command(&rx, first, &mut pending);
+    assert!(pending.is_none(), "burst should coalesce into a single latest command");
+
+    let Command::ApplyChanges { changes, .. } = coalesced else {
+        panic!("coalesced command must stay ApplyChanges");
+    };
+    match changes.as_slice() {
+        [
+            Change::SetFile {
+                file_id: set_file_id,
+                text,
+                version,
+                path: set_file_path,
+            },
+            Change::ReuseCompletionHeadFromPreviousVersion {
+                file_id: reuse_file_id,
+                expected_version,
+                previous_version,
+            },
+        ] => {
+            assert_eq!(*set_file_id, file_id);
+            assert_eq!(text.as_ref(), "v5");
+            assert_eq!(*version, 5);
+            assert_eq!(set_file_path.as_ref(), path.as_ref());
+            assert_eq!(*reuse_file_id, file_id);
+            assert_eq!(*expected_version, 5);
+            assert_eq!(
+                *previous_version, 1,
+                "coalesced whitespace-append chain must preserve the earliest reusable base revision for the latest SetFile"
+            );
+        }
+        other => panic!("unexpected coalesced change shape: {other:?}"),
+    }
 }
 
 #[tokio::test]
@@ -313,7 +499,10 @@ async fn stale_background_snapshot_apply_does_not_regress_newer_interactive_revi
     )
     .await
     .expect("wait_for_file_version timeout");
-    assert!(ready, "latest interactive revision must become visible first");
+    assert!(
+        ready,
+        "latest interactive revision must become visible first"
+    );
 
     runtime.apply_changes(vec![Change::SetFileWithSnapshot {
         file_id,
@@ -578,6 +767,128 @@ async fn p8_snapshot_with_deps_is_atomic() {
     assert_eq!(deps_id.as_str(), "deps_new");
     assert_eq!(index_snapshot.id.as_str(), "index_new");
     assert_eq!(analysis.deps_id().unwrap().as_str(), "deps_new");
+
+    runtime.shutdown_for_test().await;
+}
+
+#[tokio::test]
+async fn p8_completion_current_revision_snapshot_keeps_deps_and_index_atomic() {
+    let mut host = AnalysisHostV2::default();
+
+    let deps_old = make_deps();
+    let deps_id_old = DepsSnapshotId::from_hash("deps_old");
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: deps_id_old.clone(),
+        deps: deps_old,
+    });
+
+    let runtime = IntellisenseV2Facade::new(host, make_index_snapshot("index_old"), None);
+
+    {
+        let snapshot = runtime
+            .completion_current_revision_snapshot_for_origin_and_operation(
+                ObservabilityOrigin::Lsp,
+                SemanticOperation::Completion,
+            )
+            .await;
+        assert_eq!(snapshot.deps_id.as_str(), "deps_old");
+        assert_eq!(snapshot.index_snapshot.id.as_str(), "index_old");
+        assert_eq!(snapshot.analysis.deps_id().unwrap().as_str(), "deps_old");
+    }
+
+    let deps_new = make_deps();
+    let deps_id_new = DepsSnapshotId::from_hash("deps_new");
+    let index_new = make_index_snapshot("index_new");
+
+    let apply_task = tokio::spawn({
+        let runtime = runtime.clone();
+        let deps_new = deps_new.clone();
+        let deps_id_new = deps_id_new.clone();
+        let index_new = index_new.clone();
+        async move {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            let ok = runtime
+                .apply_deps_bundle(deps_id_new, deps_new, index_new)
+                .await;
+            assert!(ok, "apply_deps_bundle should succeed");
+        }
+    });
+
+    let watch_task = tokio::spawn({
+        let runtime = runtime.clone();
+        async move {
+            for _ in 0..200 {
+                let snapshot = runtime
+                    .completion_current_revision_snapshot_for_origin_and_operation(
+                        ObservabilityOrigin::Lsp,
+                        SemanticOperation::Completion,
+                    )
+                    .await;
+                match snapshot.deps_id.as_str() {
+                    "deps_old" => assert_eq!(snapshot.index_snapshot.id.as_str(), "index_old"),
+                    "deps_new" => assert_eq!(snapshot.index_snapshot.id.as_str(), "index_new"),
+                    other => panic!("unexpected deps_id: {}", other),
+                }
+                assert_eq!(
+                    snapshot.analysis.deps_id().unwrap().as_str(),
+                    snapshot.deps_id.as_str()
+                );
+            }
+        }
+    });
+
+    apply_task.await.expect("apply task join");
+    watch_task.await.expect("watch task join");
+
+    let snapshot = runtime
+        .completion_current_revision_snapshot_for_origin_and_operation(
+            ObservabilityOrigin::Lsp,
+            SemanticOperation::Completion,
+        )
+        .await;
+    assert_eq!(snapshot.deps_id.as_str(), "deps_new");
+    assert_eq!(snapshot.index_snapshot.id.as_str(), "index_new");
+    assert_eq!(snapshot.analysis.deps_id().unwrap().as_str(), "deps_new");
+
+    runtime.shutdown_for_test().await;
+}
+
+#[tokio::test]
+async fn completion_current_revision_snapshot_falls_back_to_writer_snapshot_on_persistent_bundle_mismatch(
+) {
+    let mut host = AnalysisHostV2::default();
+
+    let deps_old = make_deps();
+    let deps_id_old = DepsSnapshotId::from_hash("deps_old");
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: deps_id_old.clone(),
+        deps: deps_old,
+    });
+
+    let runtime = IntellisenseV2Facade::new(host, make_index_snapshot("index_old"), None);
+
+    runtime
+        .inner
+        .completion_deps_index_snapshot
+        .store(Arc::new(CompletionDepsIndexSnapshot {
+            deps: make_deps(),
+            deps_id: DepsSnapshotId::from_hash("deps_mismatch"),
+            index_snapshot: make_index_snapshot("index_mismatch"),
+        }));
+
+    let snapshot = timeout(
+        Duration::from_secs(1),
+        runtime.completion_current_revision_snapshot_for_origin_and_operation(
+            ObservabilityOrigin::Lsp,
+            SemanticOperation::Completion,
+        ),
+    )
+    .await
+    .expect("completion current-revision snapshot must not spin on persistent deps/index mismatch");
+
+    assert_eq!(snapshot.deps_id.as_str(), "deps_old");
+    assert_eq!(snapshot.index_snapshot.id.as_str(), "index_old");
+    assert_eq!(snapshot.analysis.deps_id().unwrap().as_str(), "deps_old");
 
     runtime.shutdown_for_test().await;
 }
@@ -1207,6 +1518,250 @@ async fn prepare_stateful_operation_skips_eager_exact_type_index_warm_for_lsp_ex
 
         runtime.shutdown_for_test().await;
     }
+}
+
+#[tokio::test]
+async fn prepare_completion_first_response_reports_not_ready_before_current_revision_head_publish()
+{
+    let deps_id = DepsSnapshotId::from_hash("deps_completion_first_response_not_ready");
+    let settings = ExecutionSettings {
+        settings_id: SettingsId::from_hash("settings_completion_first_response_not_ready"),
+        diagnostics_detail_level: DetailLevel::Full,
+    };
+    let file_id = FileId(240);
+    let file_text: Arc<str> = Arc::from(
+        "Процедура Тест()\n\
+             Результат = (Новый Массив()).\n\
+             КонецПроцедуры",
+    );
+    let index_snapshot = make_index_snapshot("index_completion_first_response_not_ready");
+
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: deps_id.clone(),
+        deps: make_deps(),
+    });
+    host.apply_change(Change::SetSettingsSnapshot {
+        settings_id: settings.settings_id.clone(),
+        diagnostics_detail_level: settings.diagnostics_detail_level,
+    });
+    let runtime = IntellisenseV2Facade::new(host, index_snapshot.clone(), None);
+    runtime.apply_changes(vec![Change::SetFile {
+        file_id,
+        text: file_text,
+        version: 3,
+        path: Arc::from("<completion-first-response-not-ready>"),
+    }]);
+    let _ = runtime.snapshot().await;
+
+    let context = ExecutionContext {
+        origin: ObservabilityOrigin::Lsp,
+        operation: SemanticOperation::Completion,
+        completion_mode: Some("event_driven"),
+        completion_large_churn_active: false,
+        file_id,
+        min_file_version: Some(3),
+        expected_deps_id: Some(deps_id),
+        flow_sensitive: false,
+        settings,
+        cancellation: CancellationPolicy::BestEffort,
+    };
+
+    let prepared = runtime
+        .prepare_completion_first_response(&context, None)
+        .await
+        .expect("prepare_completion_first_response");
+
+    assert_eq!(
+        prepared.readiness,
+        CompletionFirstResponseReadiness::NotReady,
+        "completion first-response prepare must stay bounded fail-closed before current-revision head/exact truth is published"
+    );
+    assert_eq!(prepared.observed_file_version, Some(3));
+    assert_eq!(
+        prepared.snapshot.index_snapshot.id.as_str(),
+        index_snapshot.id.as_str(),
+        "lightweight current-revision prepare must carry the representative index snapshot needed by head route"
+    );
+    assert!(
+        !prepared
+            .snapshot
+            .analysis
+            .current_completion_head_ready(file_id)
+            .expect("head readiness before publish"),
+        "current-revision head must stay unavailable before publish"
+    );
+    assert!(
+        !prepared
+            .snapshot
+            .analysis
+            .current_type_index_serve_only_ready(file_id)
+            .expect("exact readiness before publish"),
+        "exact artifact must stay unavailable before publish"
+    );
+
+    runtime.shutdown_for_test().await;
+}
+
+#[tokio::test]
+async fn prepare_completion_first_response_reports_head_ready_after_current_revision_head_publish()
+{
+    let deps_id = DepsSnapshotId::from_hash("deps_completion_first_response_head_ready");
+    let settings = ExecutionSettings {
+        settings_id: SettingsId::from_hash("settings_completion_first_response_head_ready"),
+        diagnostics_detail_level: DetailLevel::Full,
+    };
+    let file_id = FileId(241);
+    let file_text: Arc<str> = Arc::from(
+        "Процедура Тест()\n\
+             Результат = (Новый Массив()).\n\
+             КонецПроцедуры",
+    );
+
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: deps_id.clone(),
+        deps: make_deps(),
+    });
+    host.apply_change(Change::SetSettingsSnapshot {
+        settings_id: settings.settings_id.clone(),
+        diagnostics_detail_level: settings.diagnostics_detail_level,
+    });
+    let runtime = IntellisenseV2Facade::new(
+        host,
+        make_index_snapshot("index_completion_first_response_head_ready"),
+        None,
+    );
+    runtime.apply_changes(vec![Change::SetFile {
+        file_id,
+        text: file_text,
+        version: 3,
+        path: Arc::from("<completion-first-response-head-ready>"),
+    }]);
+    let analysis = runtime.snapshot().await;
+    let _ = analysis.ir(file_id).expect("publish current-revision head");
+
+    let context = ExecutionContext {
+        origin: ObservabilityOrigin::Lsp,
+        operation: SemanticOperation::Completion,
+        completion_mode: Some("event_driven"),
+        completion_large_churn_active: false,
+        file_id,
+        min_file_version: Some(3),
+        expected_deps_id: Some(deps_id),
+        flow_sensitive: false,
+        settings,
+        cancellation: CancellationPolicy::BestEffort,
+    };
+
+    let prepared = runtime
+        .prepare_completion_first_response(&context, None)
+        .await
+        .expect("prepare_completion_first_response");
+
+    assert_eq!(
+        prepared.readiness,
+        CompletionFirstResponseReadiness::HeadReady,
+        "completion first-response prepare must classify current revision as head-ready once the head artifact is published"
+    );
+    assert!(
+        prepared
+            .snapshot
+            .analysis
+            .current_completion_head_ready(file_id)
+            .expect("head readiness after publish"),
+        "head readiness must be observable through the lightweight completion prepare boundary"
+    );
+    assert!(
+        !prepared
+            .snapshot
+            .analysis
+            .current_type_index_serve_only_ready(file_id)
+            .expect("exact readiness after head publish"),
+        "head-ready path must stay logically distinct from exact type-index readiness"
+    );
+
+    runtime.shutdown_for_test().await;
+}
+
+#[tokio::test]
+async fn prepare_completion_first_response_reports_exact_ready_after_exact_precompute() {
+    let deps_id = DepsSnapshotId::from_hash("deps_completion_first_response_exact_ready");
+    let settings = ExecutionSettings {
+        settings_id: SettingsId::from_hash("settings_completion_first_response_exact_ready"),
+        diagnostics_detail_level: DetailLevel::Full,
+    };
+    let file_id = FileId(242);
+    let file_text: Arc<str> = Arc::from(
+        "Процедура Тест()\n\
+             Результат = (Новый Массив()).\n\
+             КонецПроцедуры",
+    );
+
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: deps_id.clone(),
+        deps: make_deps(),
+    });
+    host.apply_change(Change::SetSettingsSnapshot {
+        settings_id: settings.settings_id.clone(),
+        diagnostics_detail_level: settings.diagnostics_detail_level,
+    });
+    let runtime = IntellisenseV2Facade::new(
+        host,
+        make_index_snapshot("index_completion_first_response_exact_ready"),
+        None,
+    );
+    runtime.apply_changes(vec![Change::SetFile {
+        file_id,
+        text: file_text,
+        version: 3,
+        path: Arc::from("<completion-first-response-exact-ready>"),
+    }]);
+    let analysis = runtime.snapshot().await;
+    let _ = analysis
+        .precompute_type_index_for_file(file_id, Some(3), 0)
+        .expect("precompute exact artifact");
+    assert!(
+        analysis
+            .current_type_index_serve_only_ready(file_id)
+            .expect("exact readiness after precompute"),
+        "test setup must materialize the exact type-index artifact"
+    );
+
+    let context = ExecutionContext {
+        origin: ObservabilityOrigin::Lsp,
+        operation: SemanticOperation::Completion,
+        completion_mode: Some("event_driven"),
+        completion_large_churn_active: false,
+        file_id,
+        min_file_version: Some(3),
+        expected_deps_id: Some(deps_id),
+        flow_sensitive: false,
+        settings,
+        cancellation: CancellationPolicy::BestEffort,
+    };
+
+    let prepared = runtime
+        .prepare_completion_first_response(&context, None)
+        .await
+        .expect("prepare_completion_first_response");
+
+    assert_eq!(
+        prepared.readiness,
+        CompletionFirstResponseReadiness::ExactReady,
+        "completion first-response prepare must classify exact-ready state once the exact artifact is already available"
+    );
+    assert!(
+        prepared
+            .snapshot
+            .analysis
+            .current_type_index_serve_only_ready(file_id)
+            .expect("exact readiness through prepare boundary"),
+        "exact readiness must be observable through the lightweight completion prepare boundary"
+    );
+
+    runtime.shutdown_for_test().await;
 }
 
 #[test]

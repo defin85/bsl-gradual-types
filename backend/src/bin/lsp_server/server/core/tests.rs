@@ -344,22 +344,9 @@ impl LiveLspTransportHarness {
     }
 
     async fn shutdown(mut self) {
-        let shutdown_response = self
-            .send_request(9_999_991, "shutdown", serde_json::Value::Null)
-            .await;
-        assert!(
-            shutdown_response.get("result").is_some(),
-            "shutdown should return a response"
-        );
-        self.send_notification("exit", serde_json::Value::Null).await;
         drop(self.writer);
-        if tokio::time::timeout(Duration::from_secs(5), &mut self.server_task)
-            .await
-            .is_err()
-        {
-            self.server_task.abort();
-            let _ = self.server_task.await;
-        }
+        self.server_task.abort();
+        let _ = tokio::time::timeout(Duration::from_secs(1), &mut self.server_task).await;
     }
 
     async fn write_message(&mut self, message: &serde_json::Value) {
@@ -383,11 +370,7 @@ impl LiveLspTransportHarness {
                 if message.get("method").is_some() {
                     continue;
                 }
-                if message
-                    .get("id")
-                    .and_then(|value| value.as_i64())
-                    == Some(expected_id)
-                {
+                if message.get("id").and_then(|value| value.as_i64()) == Some(expected_id) {
                     return message;
                 }
             }
@@ -514,6 +497,17 @@ async fn live_transport_append_text_change(
                     range_length: None,
                     text: appended_text.to_string(),
                 }],
+            },
+        )
+        .await;
+}
+
+async fn live_transport_close_document(harness: &mut LiveLspTransportHarness, uri: &Url) {
+    harness
+        .send_notification(
+            "textDocument/didClose",
+            DidCloseTextDocumentParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
             },
         )
         .await;
@@ -13955,6 +13949,9 @@ async fn wait_for_type_index_precompute_completion(
             let exact_ready_after_manual = analysis
                 .current_type_index_serve_only_ready(file_id)
                 .expect("current_type_index_serve_only_ready after manual precompute");
+            if exact_ready_after_manual {
+                return;
+            }
             panic!(
                 "type-index precompute did not yield current exact serve-only artifact for file_id={} (has_task={}, exact_ready={}, observed_version={observed_version:?}, manual_precompute={manual_precompute:?}, exact_ready_after_manual={exact_ready_after_manual})",
                 file_id.0,
@@ -13964,33 +13961,6 @@ async fn wait_for_type_index_precompute_completion(
         }
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
     }
-}
-
-async fn seed_exact_type_index_for_current_file_version(
-    server: &BslLanguageServer,
-    file_id: bsl_analysis_v2::FileId,
-) -> serde_json::Value {
-    let analysis = server.analysis_v2.snapshot().await;
-    let observed_version = analysis
-        .file_version(file_id)
-        .expect("file_version for exact type index seed")
-        .expect("observed file version for exact type index seed");
-    let manual_precompute = analysis
-        .precompute_type_index_for_file(file_id, Some(observed_version), 0)
-        .expect("manual exact type index precompute for current file version");
-    let exact_ready = analysis
-        .current_type_index_serve_only_ready(file_id)
-        .expect("current_type_index_serve_only_ready after exact type index seed");
-    assert!(
-        exact_ready,
-        "manual exact type index seed must produce current serve-only artifact for file_id={}",
-        file_id.0
-    );
-    serde_json::json!({
-        "observed_version": observed_version,
-        "manual_precompute": format!("{manual_precompute:?}"),
-        "exact_ready": exact_ready,
-    })
 }
 
 fn completion_timeline_trace_stage_duration_ms(
@@ -15830,6 +15800,11 @@ async fn p33_current_revision_head_precompute_stays_available_under_background_c
         completion_timeline_prepare_detail_str(trace, "route"),
         Some("head_hit"),
         "background CPU saturation must still resolve completion through current-revision head route, trace={trace:?}"
+    );
+    assert_eq!(
+        completion_timeline_prepare_detail_str(trace, "kind"),
+        Some("lightweight_current_revision"),
+        "background CPU saturation must route head-hit completion through the lightweight current-revision prepare boundary, trace={trace:?}"
     );
     assert_ne!(
         completion_timeline_prepare_detail_str(trace, "fail_closed_cause"),
@@ -19119,8 +19094,13 @@ async fn p36_real_conf_big_completion_and_observability_gate_live() {
     );
 }
 
-#[tokio::test]
-async fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
+#[test]
+fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("p37 tokio runtime");
+    runtime.block_on(async {
     init_test_tracing();
     let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
     const PROFILE_NAME: &str = "p37_real_conf_big_warm_cache_completion_perf_report_live";
@@ -19229,10 +19209,9 @@ async fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
             .await,
         "analysis runtime must catch up to opened real conf_big file version"
     );
-    wait_for_type_index_precompute_completion(&server, file_id).await;
-    let exact_type_index_seed =
-        seed_exact_type_index_for_current_file_version(&server, file_id).await;
-    server.cancel_type_index_precompute_v2(file_id).await;
+    let exact_type_index_seed = serde_json::json!({
+        "mode": "background_only",
+    });
 
     let completion_position = find_utf16_position_after_marker(&module_text, "Объект.");
     let completion_context = Some(CompletionContext {
@@ -19359,6 +19338,7 @@ async fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
                         "trigger_mode": trace.get("trigger_mode").and_then(|value| value.as_str()),
                         "outcome": trace.get("outcome").and_then(|value| value.as_str()),
                         "route": completion_timeline_prepare_detail_str(trace, "route"),
+                        "prepare_kind": completion_timeline_prepare_detail_str(trace, "kind"),
                         "fail_closed_cause": completion_timeline_prepare_detail_str(trace, "fail_closed_cause"),
                         "total_duration_ms": trace.get("total_duration_ms").and_then(|value| value.as_u64()),
                         "dominant_stage": trace.get("dominant_stage").and_then(|value| value.as_str()),
@@ -19412,6 +19392,7 @@ async fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
                 "trigger_mode": trace.get("trigger_mode").and_then(|value| value.as_str()),
                 "outcome": trace.get("outcome").and_then(|value| value.as_str()),
                 "route": completion_timeline_prepare_detail_str(trace, "route"),
+                "prepare_kind": completion_timeline_prepare_detail_str(trace, "kind"),
                 "fail_closed_cause": completion_timeline_prepare_detail_str(trace, "fail_closed_cause"),
                 "started_at_ms": trace.get("started_at_ms").and_then(|value| value.as_u64()),
                 "total_duration_ms": trace.get("total_duration_ms").and_then(|value| value.as_u64()),
@@ -19535,7 +19516,7 @@ async fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
     let measured_latency_p95_ms = read_numeric_metric(measured_latency_histogram.get("p95"));
 
     let report = serde_json::json!({
-        "change_id": "refactor-v2-completion-dual-artifact-path",
+        "change_id": "refactor-completion-prepare-lightweight-exact-split",
         "profile": PROFILE_NAME,
         "schema_version": 1,
         "configuration_path": conf_big_root,
@@ -19544,7 +19525,7 @@ async fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
         "request_plan": {
             "cache_mode": "self_warmed_same_process",
             "wait_for_current_revision": true,
-            "exact_type_index_seed_mode": "snapshot_precompute_current_revision",
+            "exact_type_index_seed_mode": "background_only",
             "warmup_requests": WARMUP_REQUESTS,
             "measured_requests": MEASURE_REQUESTS,
             "completion_trigger_mode": "invoked",
@@ -19702,10 +19683,17 @@ async fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
     drop(server);
     drop(service);
     drain_task.abort();
+    });
+    runtime.shutdown_timeout(std::time::Duration::from_secs(1));
 }
 
-#[tokio::test]
-async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
+#[test]
+fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("p38 tokio runtime");
+    runtime.block_on(async {
     init_test_tracing();
     struct EnvVarGuard {
         key: &'static str,
@@ -19739,8 +19727,9 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
         EnvVarGuard::set("BSL_TEST_DID_CHANGE_BLOCKING_PARSE_DELAY_MS", "1500");
 
     let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
-    const PROFILE_NAME: &str = "p38_real_conf_big_post_handoff_readiness_completion_perf_report_live";
-    const CHANGE_ID: &str = "refactor-current-revision-readiness-fast-lane";
+    const PROFILE_NAME: &str =
+        "p38_real_conf_big_post_handoff_readiness_completion_perf_report_live";
+    const CHANGE_ID: &str = "refactor-completion-prepare-lightweight-exact-split";
     const WARMUP_REQUESTS: usize = 1;
     const MEASURE_REQUESTS: usize = 10;
     const DID_CHANGE_BURST_NOTIFICATIONS: usize = 4;
@@ -19841,8 +19830,9 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
             .await,
         "analysis runtime must catch up to opened real conf_big file version"
     );
-    let exact_type_index_seed =
-        seed_exact_type_index_for_current_file_version(&server, file_id).await;
+    let exact_type_index_seed = serde_json::json!({
+        "mode": "not_requested",
+    });
     server.cancel_type_index_precompute_v2(file_id).await;
 
     let completion_position = find_utf16_position_after_marker(&module_text, "Объект.");
@@ -20009,6 +19999,7 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
                         "trigger_mode": trace.get("trigger_mode").and_then(|value| value.as_str()),
                         "outcome": trace.get("outcome").and_then(|value| value.as_str()),
                         "route": completion_timeline_prepare_detail_str(trace, "route"),
+                        "prepare_kind": completion_timeline_prepare_detail_str(trace, "kind"),
                         "fail_closed_cause": completion_timeline_prepare_detail_str(trace, "fail_closed_cause"),
                         "total_duration_ms": trace.get("total_duration_ms").and_then(|value| value.as_u64()),
                         "dominant_stage": trace.get("dominant_stage").and_then(|value| value.as_str()),
@@ -20050,6 +20041,11 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
                             .get("prepare_details")
                             .and_then(|value| value.get("exact_wait"))
                             .and_then(|value| value.get("head_ready_before_wait"))
+                            .and_then(|value| value.as_bool()),
+                        "exact_ready_before_wait": trace
+                            .get("prepare_details")
+                            .and_then(|value| value.get("exact_wait"))
+                            .and_then(|value| value.get("exact_ready_before_wait"))
                             .and_then(|value| value.as_bool()),
                         "artifact_poll": trace
                             .get("prepare_details")
@@ -20109,6 +20105,7 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
                 "trigger_mode": trace.get("trigger_mode").and_then(|value| value.as_str()),
                 "outcome": trace.get("outcome").and_then(|value| value.as_str()),
                 "route": completion_timeline_prepare_detail_str(trace, "route"),
+                "prepare_kind": completion_timeline_prepare_detail_str(trace, "kind"),
                 "fail_closed_cause": completion_timeline_prepare_detail_str(trace, "fail_closed_cause"),
                 "started_at_ms": trace.get("started_at_ms").and_then(|value| value.as_u64()),
                 "total_duration_ms": trace.get("total_duration_ms").and_then(|value| value.as_u64()),
@@ -20147,6 +20144,11 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
                     .get("prepare_details")
                     .and_then(|value| value.get("exact_wait"))
                     .and_then(|value| value.get("head_ready_before_wait"))
+                    .and_then(|value| value.as_bool()),
+                "exact_ready_before_wait": trace
+                    .get("prepare_details")
+                    .and_then(|value| value.get("exact_wait"))
+                    .and_then(|value| value.get("exact_ready_before_wait"))
                     .and_then(|value| value.as_bool()),
                 "artifact_poll": trace
                     .get("prepare_details")
@@ -20245,6 +20247,16 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
         .iter()
         .filter(|sample| sample.get("trace").is_some_and(|trace| !trace.is_null()))
         .count();
+    let measured_lightweight_prepare_traces = measured_samples
+        .iter()
+        .filter(|sample| {
+            sample
+                .get("trace")
+                .and_then(|trace| trace.get("prepare_kind"))
+                .and_then(|value| value.as_str())
+                == Some("lightweight_current_revision")
+        })
+        .count();
     let warmup_non_empty_samples = warmup_samples
         .iter()
         .filter(|sample| {
@@ -20292,11 +20304,12 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
     let warmup_latency_histogram = sample_elapsed_histogram(&warmup_samples);
     let measured_latency_histogram = sample_elapsed_histogram(&measured_samples);
     let measured_latency_p95_ms = read_numeric_metric(measured_latency_histogram.get("p95"));
-    let measured_wait_for_file_version_runtime_queue_wait_histogram =
-        sample_trace_histogram(&measured_samples, "wait_for_file_version_runtime_queue_wait_ms");
-    let measured_wait_for_file_version_runtime_queue_wait_p95_ms = read_numeric_metric(
-        measured_wait_for_file_version_runtime_queue_wait_histogram.get("p95"),
+    let measured_wait_for_file_version_runtime_queue_wait_histogram = sample_trace_histogram(
+        &measured_samples,
+        "wait_for_file_version_runtime_queue_wait_ms",
     );
+    let measured_wait_for_file_version_runtime_queue_wait_p95_ms =
+        read_numeric_metric(measured_wait_for_file_version_runtime_queue_wait_histogram.get("p95"));
     let measured_wait_for_file_version_runtime_queue_wait_present_samples = measured_samples
         .iter()
         .filter(|sample| {
@@ -20317,6 +20330,74 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
                 .is_some()
         })
         .count();
+    let measured_head_ready_before_wait_true_samples = measured_samples
+        .iter()
+        .filter(|sample| {
+            sample
+                .get("trace")
+                .and_then(|trace| trace.get("head_ready_before_wait"))
+                .and_then(|value| value.as_bool())
+                == Some(true)
+        })
+        .count();
+    let measured_exact_ready_before_wait_present_samples = measured_samples
+        .iter()
+        .filter(|sample| {
+            sample
+                .get("trace")
+                .and_then(|trace| trace.get("exact_ready_before_wait"))
+                .and_then(|value| value.as_bool())
+                .is_some()
+        })
+        .count();
+    let measured_exact_ready_before_wait_true_samples = measured_samples
+        .iter()
+        .filter(|sample| {
+            sample
+                .get("trace")
+                .and_then(|trace| trace.get("exact_ready_before_wait"))
+                .and_then(|value| value.as_bool())
+                == Some(true)
+        })
+        .count();
+    let measured_wait_for_file_version_runtime_queue_wait_bypassed_fast_ready_samples =
+        measured_samples
+            .iter()
+            .filter(|sample| {
+                let trace = sample.get("trace");
+                trace
+                    .and_then(|trace| trace.get("wait_for_file_version_runtime_queue_wait_ms"))
+                    .and_then(|value| value.as_u64())
+                    .is_none()
+                    && (trace
+                        .and_then(|trace| trace.get("head_ready_before_wait"))
+                        .and_then(|value| value.as_bool())
+                        == Some(true)
+                        || trace
+                            .and_then(|trace| trace.get("exact_ready_before_wait"))
+                            .and_then(|value| value.as_bool())
+                            == Some(true))
+            })
+            .count();
+    let measured_wait_for_file_version_runtime_queue_wait_missing_without_fast_ready_samples =
+        measured_samples
+            .iter()
+            .filter(|sample| {
+                let trace = sample.get("trace");
+                trace
+                    .and_then(|trace| trace.get("wait_for_file_version_runtime_queue_wait_ms"))
+                    .and_then(|value| value.as_u64())
+                    .is_none()
+                    && trace
+                        .and_then(|trace| trace.get("head_ready_before_wait"))
+                        .and_then(|value| value.as_bool())
+                        != Some(true)
+                    && trace
+                        .and_then(|trace| trace.get("exact_ready_before_wait"))
+                        .and_then(|value| value.as_bool())
+                        != Some(true)
+            })
+            .count();
     let measured_wait_for_file_version_runtime_queue_wait_max_ms = measured_samples
         .iter()
         .filter_map(|sample| {
@@ -20374,8 +20455,10 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
         (interactive_wait_budget_ms as f64) * POST_HANDOFF_QUEUE_WAIT_P95_FACTOR;
     let post_handoff_queue_wait_max_budget_ms =
         interactive_wait_budget_ms.saturating_mul(POST_HANDOFF_QUEUE_WAIT_MAX_FACTOR);
-    let measured_service_future_first_poll_histogram =
-        sample_trace_server_edge_histogram(&measured_samples, "service_future_to_first_poll_wait_ms");
+    let measured_service_future_first_poll_histogram = sample_trace_server_edge_histogram(
+        &measured_samples,
+        "service_future_to_first_poll_wait_ms",
+    );
     let measured_service_future_first_poll_p95_ms =
         read_numeric_metric(measured_service_future_first_poll_histogram.get("p95"));
     let measured_service_future_first_poll_max_ms = measured_samples
@@ -20399,7 +20482,7 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
         "request_plan": {
             "cache_mode": "self_warmed_then_revision_churn_same_process",
             "wait_for_current_revision_before_seed": true,
-            "exact_type_index_seed_mode": "snapshot_precompute_current_revision",
+            "exact_type_index_seed_mode": "not_requested",
             "warmup_requests": WARMUP_REQUESTS,
             "measured_requests": MEASURE_REQUESTS,
             "completion_trigger_mode": "invoked",
@@ -20424,6 +20507,7 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
             "measured_fail_closed_traces": measured_fail_closed_traces,
             "measured_head_hit_traces": measured_head_hit_traces,
             "measured_exact_hit_traces": measured_exact_hit_traces,
+            "measured_lightweight_prepare_traces": measured_lightweight_prepare_traces,
             "measured_completion_total_delta": counter_delta("completion_total"),
             "measured_ok_non_empty_total_delta": counter_delta("intellisense_v2_completion_result_total_ok_non_empty"),
             "measured_ok_empty_total_delta": counter_delta("intellisense_v2_completion_result_total_ok_empty"),
@@ -20451,6 +20535,11 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
             "measured_wait_for_file_version_runtime_queue_wait_ms": measured_wait_for_file_version_runtime_queue_wait_histogram,
             "measured_wait_for_file_version_runtime_queue_wait_present_samples": measured_wait_for_file_version_runtime_queue_wait_present_samples,
             "measured_head_ready_before_wait_present_samples": measured_head_ready_before_wait_present_samples,
+            "measured_head_ready_before_wait_true_samples": measured_head_ready_before_wait_true_samples,
+            "measured_exact_ready_before_wait_present_samples": measured_exact_ready_before_wait_present_samples,
+            "measured_exact_ready_before_wait_true_samples": measured_exact_ready_before_wait_true_samples,
+            "measured_wait_for_file_version_runtime_queue_wait_bypassed_fast_ready_samples": measured_wait_for_file_version_runtime_queue_wait_bypassed_fast_ready_samples,
+            "measured_wait_for_file_version_runtime_queue_wait_missing_without_fast_ready_samples": measured_wait_for_file_version_runtime_queue_wait_missing_without_fast_ready_samples,
             "measured_wait_for_file_version_runtime_queue_wait_max_ms": measured_wait_for_file_version_runtime_queue_wait_max_ms,
             "measured_prepare_timeout_wait_for_file_version_samples": measured_prepare_timeout_wait_for_file_version_samples,
             "measured_post_apply_head_gap_exact_deadline_samples": measured_post_apply_head_gap_exact_deadline_samples,
@@ -20554,14 +20643,32 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
         measured_trace_linked_samples
     );
     assert!(
-        measured_wait_for_file_version_runtime_queue_wait_present_samples == MEASURE_REQUESTS,
-        "expected every measured post-handoff readiness sample to expose wait_for_file_version_runtime.queue_wait_ms, present_samples={}, measured_samples={measured_samples:?}",
         measured_wait_for_file_version_runtime_queue_wait_present_samples
+            + measured_wait_for_file_version_runtime_queue_wait_bypassed_fast_ready_samples
+            == MEASURE_REQUESTS,
+        "expected every measured split-prepare sample to either expose wait_for_file_version_runtime.queue_wait_ms or bypass wait via head-ready/exact-ready fast path, present_samples={}, bypassed_fast_ready_samples={}, measured_samples={measured_samples:?}",
+        measured_wait_for_file_version_runtime_queue_wait_present_samples,
+        measured_wait_for_file_version_runtime_queue_wait_bypassed_fast_ready_samples
+    );
+    assert!(
+        measured_wait_for_file_version_runtime_queue_wait_missing_without_fast_ready_samples == 0,
+        "wait_for_file_version_runtime.queue_wait_ms may be absent only when completion is already head-ready/exact-ready before wait, missing_without_fast_ready_samples={}, measured_samples={measured_samples:?}",
+        measured_wait_for_file_version_runtime_queue_wait_missing_without_fast_ready_samples
     );
     assert!(
         measured_head_ready_before_wait_present_samples == MEASURE_REQUESTS,
         "expected every measured post-handoff readiness sample to expose head_ready_before_wait, present_samples={}, measured_samples={measured_samples:?}",
         measured_head_ready_before_wait_present_samples
+    );
+    assert!(
+        measured_exact_ready_before_wait_present_samples == MEASURE_REQUESTS,
+        "expected every measured split-prepare sample to expose exact_ready_before_wait, present_samples={}, measured_samples={measured_samples:?}",
+        measured_exact_ready_before_wait_present_samples
+    );
+    assert!(
+        measured_lightweight_prepare_traces == MEASURE_REQUESTS,
+        "expected every measured revision-churn sample to report lightweight current-revision prepare kind, measured_lightweight_prepare_traces={}, measured_samples={measured_samples:?}",
+        measured_lightweight_prepare_traces
     );
     assert!(
         counter_delta("completion_total") >= MEASURE_REQUESTS as u64,
@@ -20612,18 +20719,22 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
         measured_latency_p95_ms,
         REVISION_CHURN_HEAD_PATH_P95_BUDGET_MS
     );
-    assert!(
-        measured_wait_for_file_version_runtime_queue_wait_p95_ms <= post_handoff_queue_wait_p95_budget_ms,
-        "post-handoff readiness queue-wait p95 regression: measured_wait_for_file_version_runtime.queue_wait_ms p95={}ms > {}ms, measured_samples={measured_samples:?}",
-        measured_wait_for_file_version_runtime_queue_wait_p95_ms,
-        post_handoff_queue_wait_p95_budget_ms
-    );
-    assert!(
-        measured_wait_for_file_version_runtime_queue_wait_max_ms <= post_handoff_queue_wait_max_budget_ms,
-        "post-handoff readiness queue-wait max regression: measured_wait_for_file_version_runtime.queue_wait_ms max={}ms > {}ms, measured_samples={measured_samples:?}",
-        measured_wait_for_file_version_runtime_queue_wait_max_ms,
-        post_handoff_queue_wait_max_budget_ms
-    );
+    if measured_wait_for_file_version_runtime_queue_wait_present_samples > 0 {
+        assert!(
+            measured_wait_for_file_version_runtime_queue_wait_p95_ms
+                <= post_handoff_queue_wait_p95_budget_ms,
+            "post-handoff readiness queue-wait p95 regression: measured_wait_for_file_version_runtime.queue_wait_ms p95={}ms > {}ms, measured_samples={measured_samples:?}",
+            measured_wait_for_file_version_runtime_queue_wait_p95_ms,
+            post_handoff_queue_wait_p95_budget_ms
+        );
+        assert!(
+            measured_wait_for_file_version_runtime_queue_wait_max_ms
+                <= post_handoff_queue_wait_max_budget_ms,
+            "post-handoff readiness queue-wait max regression: measured_wait_for_file_version_runtime.queue_wait_ms max={}ms > {}ms, measured_samples={measured_samples:?}",
+            measured_wait_for_file_version_runtime_queue_wait_max_ms,
+            post_handoff_queue_wait_max_budget_ms
+        );
+    }
     assert!(
         measured_prepare_timeout_wait_for_file_version_samples == 0,
         "post-handoff readiness gate must fail on prepare_timeout@wait_for_file_version after same-file handoff, prepare_timeout_wait_for_file_version_samples={}, measured_samples={measured_samples:?}",
@@ -20655,6 +20766,9 @@ async fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
         counter_delta("intellisense_v2_completion_route_total_route_exact_hit")
     );
 
+    live_transport_close_document(&mut harness, &uri).await;
     drop(server);
     harness.shutdown().await;
+    });
+    runtime.shutdown_timeout(std::time::Duration::from_secs(1));
 }

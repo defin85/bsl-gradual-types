@@ -26,15 +26,41 @@ impl IntellisenseV2Facade {
         !matches!(context.origin, ObservabilityOrigin::Lsp)
     }
 
-    pub async fn snapshot_for_operation(&self, operation: SemanticOperation) -> SemanticSnapshot {
+    pub async fn snapshot_for_origin_and_operation(
+        &self,
+        origin: ObservabilityOrigin,
+        operation: SemanticOperation,
+    ) -> SemanticSnapshot {
         let queue_priority = RuntimeQueuePriority::for_operation(operation);
         let snapshot_with_deps = self
-            .snapshot_with_deps_with_priority(ObservabilityOrigin::Runtime, queue_priority, None)
+            .snapshot_with_deps_with_priority(origin, queue_priority, None)
             .await;
         SemanticSnapshot {
             analysis: snapshot_with_deps.analysis,
             deps_id: snapshot_with_deps.deps_id,
         }
+    }
+
+    pub async fn snapshot_for_operation(&self, operation: SemanticOperation) -> SemanticSnapshot {
+        self.snapshot_for_origin_and_operation(ObservabilityOrigin::Runtime, operation)
+            .await
+    }
+
+    pub async fn wait_for_file_version_for_operation(
+        &self,
+        origin: ObservabilityOrigin,
+        operation: SemanticOperation,
+        file_id: FileId,
+        min_version: i32,
+    ) -> bool {
+        self.wait_for_file_version_with_priority(
+            origin,
+            RuntimeQueuePriority::for_operation(operation),
+            file_id,
+            min_version,
+        )
+        .await
+        .ready
     }
 
     /// Canonical stateful operation preparation for adapters:

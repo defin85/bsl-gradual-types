@@ -15621,6 +15621,230 @@ async fn p33_completion_head_hit_then_upgrade_after_precompute_finish() {
 }
 
 #[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn p33_current_revision_head_precompute_stays_available_under_background_cpu_saturation() {
+    const V1_FIXTURE: &str =
+        "Процедура Тест()\n    S = Новый Структура;\n    ДляCompletion = S.\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str = "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let total_cpu_permits = std::thread::available_parallelism()
+        .map(|parallelism| parallelism.get().max(2))
+        .unwrap_or(4);
+    let interactive_reserved = if total_cpu_permits >= 4 { 2 } else { 1 };
+    let background_blocker_count = total_cpu_permits
+        .saturating_sub(interactive_reserved)
+        .max(1);
+    let mut blocker_handles = Vec::new();
+    let mut blocker_started = Vec::new();
+    for _ in 0..background_blocker_count {
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel::<()>();
+        blocker_handles.push(tokio::spawn(async move {
+            bsl_runtime::application::spawn_bounded_blocking_with_class(
+                bsl_runtime::application::CpuWorkClass::Background,
+                move || {
+                    let _ = started_tx.send(());
+                    std::thread::sleep(Duration::from_millis(400));
+                },
+            )
+            .await
+            .expect("background blocker join");
+        }));
+        blocker_started.push(started_rx);
+    }
+    for started_rx in blocker_started {
+        started_rx
+            .await
+            .expect("background blocker should acquire non-interactive CPU permit");
+    }
+
+    let uri = Url::parse("file:///test_p33_current_revision_head_under_background_saturation.bsl")
+        .expect("uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: V1_FIXTURE.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    server.sync_v2_globals().await;
+
+    let did_change = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version: 2,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: None,
+            range_length: None,
+            text: V2_FIXTURE.to_string(),
+        }],
+    };
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+    server.sync_v2_globals().await;
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+
+    tokio::time::timeout(Duration::from_millis(1200), async {
+        loop {
+            if server
+                .analysis_v2
+                .file_revision_state(file_id)
+                .await
+                .map(|state| state.version)
+                == Some(2)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("current revision apply must reach version 2 before head-fast-lane measurement");
+
+    let completion_position = find_utf16_position_after_marker(V2_FIXTURE, "ДляCompletion = S.");
+    let head_started = Instant::now();
+    let head_owner_hints = tokio::time::timeout(Duration::from_millis(250), async {
+        loop {
+            let analysis = server.analysis_v2.snapshot().await;
+            let head_ready = analysis
+                .current_completion_head_ready(file_id)
+                .ok()
+                .unwrap_or(false);
+            let Some(file_text) = analysis.file_text(file_id).ok().flatten() else {
+                tokio::task::yield_now().await;
+                continue;
+            };
+            let owner_hints = bsl_runtime::application::completion_member_access_owner_type_hints_from_completion_head(
+                &analysis,
+                file_id,
+                file_text.as_ref(),
+                completion_position.line,
+                completion_position.character,
+            );
+            if head_ready && !owner_hints.is_empty() {
+                break owner_hints;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("current-revision completion head must stay available under background CPU saturation");
+    let head_elapsed = head_started.elapsed();
+    assert!(
+        head_elapsed < Duration::from_millis(250),
+        "current-revision completion head must stay bounded under background CPU saturation (elapsed={head_elapsed:?}, owner_hints={head_owner_hints:?}, blockers={background_blocker_count}, total_permits={total_cpu_permits})"
+    );
+
+    let started = Instant::now();
+    let completion_response = tokio::time::timeout(
+        Duration::from_millis(1200),
+        server.completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: completion_position,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: Some(CompletionContext {
+                trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+                trigger_character: Some(".".to_string()),
+            }),
+        }),
+    )
+    .await
+    .expect("completion should eventually finish after head fast-lane availability under background CPU saturation")
+    .expect("completion request")
+    .expect("completion response");
+    let elapsed = started.elapsed();
+    let completion_labels: Vec<String> = match completion_response {
+        CompletionResponse::Array(items) => items.into_iter().map(|item| item.label).collect(),
+        CompletionResponse::List(list) => list.items.into_iter().map(|item| item.label).collect(),
+    };
+    assert!(
+        completion_labels.iter().any(|label| label == "Количество"),
+        "current-revision head must remain available under background CPU saturation, labels={completion_labels:?}"
+    );
+    assert!(
+        elapsed < Duration::from_millis(1200),
+        "completion should eventually resolve after current-revision head becomes available (elapsed={elapsed:?}, blockers={background_blocker_count}, total_permits={total_cpu_permits})"
+    );
+
+    let timeline = lsp_get_completion_timeline(&mut service, 4064, 10).await;
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("completion timeline traces array");
+    let trace = traces
+        .last()
+        .expect("completion trace under background CPU saturation");
+    assert_eq!(
+        completion_timeline_prepare_detail_str(trace, "route"),
+        Some("head_hit"),
+        "background CPU saturation must still resolve completion through current-revision head route, trace={trace:?}"
+    );
+    assert_ne!(
+        completion_timeline_prepare_detail_str(trace, "fail_closed_cause"),
+        Some("exact_deadline"),
+        "background CPU saturation must not regress into exact_deadline when current-revision head should take the fast lane, trace={trace:?}"
+    );
+
+    for blocker_handle in blocker_handles {
+        blocker_handle.await.expect("background blocker task");
+    }
+
+    drain_task.abort();
+}
+
+#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn p33_completion_head_hit_emits_exact_upgrade_when_background_exact_finishes() {
     struct EnvVarGuard {

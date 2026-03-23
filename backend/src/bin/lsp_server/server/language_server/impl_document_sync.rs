@@ -275,7 +275,7 @@ impl BslLanguageServer {
         let server = self.clone();
         tokio::spawn(async move {
             let _ = bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
-                bsl_runtime::application::CpuWorkClass::Background,
+                bsl_runtime::application::CpuWorkClass::Interactive,
                 bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
                 Some(server.coordinator.as_ref()),
                 move || previous_analysis.ir(file_id),
@@ -283,7 +283,12 @@ impl BslLanguageServer {
             .await;
             if !server
                 .analysis_v2
-                .wait_for_file_version(file_id, requested_version)
+                .wait_for_file_version_for_operation(
+                    bsl_runtime::application::ObservabilityOrigin::Lsp,
+                    bsl_runtime::application::SemanticOperation::Completion,
+                    file_id,
+                    requested_version,
+                )
                 .await
             {
                 return;
@@ -299,7 +304,14 @@ impl BslLanguageServer {
                 return;
             }
 
-            let analysis = server.analysis_v2.snapshot().await;
+            let analysis = server
+                .analysis_v2
+                .snapshot_for_origin_and_operation(
+                    bsl_runtime::application::ObservabilityOrigin::Lsp,
+                    bsl_runtime::application::SemanticOperation::Completion,
+                )
+                .await
+                .analysis;
             if analysis.file_version(file_id).ok().flatten() != Some(requested_version) {
                 return;
             }
@@ -314,7 +326,7 @@ impl BslLanguageServer {
             if !reused {
                 let _ =
                     bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
-                        bsl_runtime::application::CpuWorkClass::Background,
+                        bsl_runtime::application::CpuWorkClass::Interactive,
                         bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
                         Some(server.coordinator.as_ref()),
                         move || analysis.ir(file_id),
@@ -371,9 +383,13 @@ impl BslLanguageServer {
     ) {
         let mut tasks = self.current_revision_head_precompute_tasks_v2.lock().await;
         if let Some(task) = tasks.get(&file_id) {
-            task.requested_version
-                .store(requested_version, Ordering::Relaxed);
-            return;
+            if task.requested_version.load(Ordering::Relaxed) == requested_version {
+                return;
+            }
+        }
+        if let Some(previous) = tasks.remove(&file_id) {
+            previous.requested_version.store(0, Ordering::Relaxed);
+            previous.handle.abort();
         }
 
         let requested_version_state =
@@ -402,6 +418,7 @@ impl BslLanguageServer {
         file_id: bsl_analysis_v2::FileId,
         requested_version_state: Arc<std::sync::atomic::AtomicI32>,
     ) {
+        tokio::task::yield_now().await;
         loop {
             let requested_version = requested_version_state.load(Ordering::Relaxed);
             if requested_version <= 0 {
@@ -419,7 +436,12 @@ impl BslLanguageServer {
             }
             if !self
                 .analysis_v2
-                .wait_for_file_version(file_id, requested_version)
+                .wait_for_file_version_for_operation(
+                    bsl_runtime::application::ObservabilityOrigin::Lsp,
+                    bsl_runtime::application::SemanticOperation::Completion,
+                    file_id,
+                    requested_version,
+                )
                 .await
             {
                 break;
@@ -435,7 +457,14 @@ impl BslLanguageServer {
                 continue;
             }
 
-            let analysis = self.analysis_v2.snapshot().await;
+            let analysis = self
+                .analysis_v2
+                .snapshot_for_origin_and_operation(
+                    bsl_runtime::application::ObservabilityOrigin::Lsp,
+                    bsl_runtime::application::SemanticOperation::Completion,
+                )
+                .await
+                .analysis;
             if analysis.file_version(file_id).ok().flatten() != Some(requested_version) {
                 continue;
             }
@@ -457,9 +486,25 @@ impl BslLanguageServer {
                 }
                 continue;
             }
+            if requested_version_state.load(Ordering::Relaxed) != requested_version {
+                continue;
+            }
+            if self
+                .latest_received_file_versions_v2
+                .read()
+                .await
+                .get(&file_id)
+                .copied()
+                != Some(requested_version)
+            {
+                continue;
+            }
 
             let _ = bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
-                bsl_runtime::application::CpuWorkClass::Background,
+                // Current-revision completion head is the readiness fast lane for strict-latest
+                // completion. Keep it on interactive CPU permits so background exact/index work
+                // cannot starve head publication after didOpen/didChange already handed off.
+                bsl_runtime::application::CpuWorkClass::Interactive,
                 bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
                 Some(self.coordinator.as_ref()),
                 move || {

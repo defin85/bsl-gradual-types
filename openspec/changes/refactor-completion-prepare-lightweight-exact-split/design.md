@@ -99,6 +99,28 @@ Synthetic tests нужны для:
 Смягчение:
 - change явно запрещает long-lived shared `AnalysisV2` как новую boundary abstraction.
 
+## Открытые разрывы после review
+На момент последнего implementation review change еще не готов к архивированию и требует доработки по двум обязательным направлениям.
+
+### 1. Lightweight boundary остается шире, чем разрешает change
+Текущая реализация уже request-scoped и не публикует long-lived shared cache, но публичный lightweight contract все еще выдает широкий `AnalysisV2` carrier вместо узкого feature-specific DTO/read-model payload.
+
+До закрытия change нужно:
+- сузить публичный lightweight boundary до минимального payload для first response;
+- не использовать `AnalysisV2` как внешний carrier для completion first-response API;
+- сохранить `PreparedOperationSnapshot` единственным heavy exact boundary для общего semantic path.
+
+### 2. Shipped gate path покрывает только churn real-module profile
+Representative evidence уже существует для `revision-churn`, но обязательный `same-revision warm` real-module profile пока не wired в blocking default gate path.
+
+До закрытия change нужно:
+- запускать отдельный `same-revision warm` real-module gate рядом с `revision-churn`;
+- держать оба профиля в `scripts/validate-v2-completion-gates.sh` и в CI;
+- считать change незавершенным, пока shipped gate не проверяет оба обязательных live profiles.
+
+### 3. Review outcome должен быть зафиксирован как checked-in evidence
+Сам факт review нельзя считать доказанным только по устной/чатовой истории. Для closure change нужен checked-in artifact или эквивалентный traceable record, который фиксирует вывод review и подтверждает отсутствие detached immutable snapshot как prereq.
+
 ## Acceptance-направление
 - Member-access completion на current revision имеет отдельный lightweight prepare boundary.
 - `head_hit` по default path больше не требует mandatory full `snapshot_with_deps`.

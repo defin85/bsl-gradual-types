@@ -1,3 +1,8 @@
+---
+name: verify-workspace
+description: Verify that the current workspace, agent-facing docs, and the default smoke path remain consistent. Use for quick post-change validation before handoff or after documentation/runtime updates.
+---
+
 # Verify Workspace
 
 Используй этот skill, когда нужно быстро проверить, что текущий workspace, agent-facing docs и default smoke path остаются согласованными.

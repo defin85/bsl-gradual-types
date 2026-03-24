@@ -1,3 +1,8 @@
+---
+name: docs-drift-audit
+description: Audit whether onboarding docs, `docs/agent/*`, and layered `AGENTS.md` files still match the actual workspace. Use when documentation, agent instructions, or readiness scripts may have drifted.
+---
+
 # Docs Drift Audit
 
 Используй этот skill, когда нужно проверить, что onboarding docs, `docs/agent/*` и layered `AGENTS.md` не разошлись с реальным workspace.

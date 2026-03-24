@@ -1,3 +1,8 @@
+---
+name: bsl-agent-mcp-smoke
+description: Run smoke checks for changes touching `bsl-agent`, MCP bootstrap, `.mcp.json`, or the read-only HTTP UI. Use to verify CLI help, UI helper commands, and bootstrap/docs alignment.
+---
+
 # BSL Agent MCP Smoke
 
 Используй этот skill, когда change затрагивает `bsl-agent`, MCP bootstrap, `.mcp.json` или read-only HTTP UI.

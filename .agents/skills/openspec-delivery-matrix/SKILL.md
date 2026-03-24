@@ -1,3 +1,8 @@
+---
+name: openspec-delivery-matrix
+description: Build a Requirement -> Artifact -> Validation matrix for an approved OpenSpec change before handoff. Use when preparing delivery evidence or checking traceability for requirements in `openspec/changes/<change-id>`.
+---
+
 # OpenSpec Delivery Matrix
 
 Используй этот skill перед handoff для OpenSpec change.

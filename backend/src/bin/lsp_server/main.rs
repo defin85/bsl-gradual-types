@@ -27,6 +27,8 @@ use bsl_backend::system::SystemCoordinator;
 use server::request_context::{DispatchContextService, RequestContextService};
 use server::BslLanguageServer;
 
+pub(crate) const DEFAULT_LSP_TRANSPORT_CONCURRENCY_LEVEL: usize = 16;
+
 #[derive(Parser, Debug)]
 #[command(name = "lsp-server")]
 #[command(about = "BSL Language Server (Clean Architecture)", long_about = None)]
@@ -136,7 +138,10 @@ async fn main() -> Result<()> {
 
     // Start server
     info!("Starting LSP server loop (listening on STDIO)...");
-    Server::new(stdin, stdout, socket).serve(service).await;
+    Server::new(stdin, stdout, socket)
+        .concurrency_level(DEFAULT_LSP_TRANSPORT_CONCURRENCY_LEVEL)
+        .serve(service)
+        .await;
     info!("LSP server shut down");
 
     Ok(())

@@ -7,7 +7,7 @@
           "dominant_stage": "response_build",
           "outcome": "ok_non_empty",
           "prepare_details": {
-            "apply_age_at_start_ms": 1,
+            "apply_age_at_start_ms": 0,
             "apply_age_at_terminal_ms": 1,
             "exact_wait": {
               "current_revision_head_owner_hints_ready": true,
@@ -32,13 +32,13 @@
           },
           "request_id": "37100000",
           "server_edge_details": {
-            "handler_entered_at_ms": 1774342681107,
-            "method_entered_at_ms": 1774342681107,
+            "handler_entered_at_ms": 1774345567531,
+            "method_entered_at_ms": 1774345567531,
             "method_prelude_exec_ms": 0,
             "pre_method_attribution_provenance": "best_effort_fallback",
-            "response_sent_at_ms": 1774342681111,
+            "response_sent_at_ms": 1774345567535,
             "server_handler_exec_ms": 4,
-            "transport_received_at_ms": 1774342681107,
+            "transport_received_at_ms": 1774345567531,
             "transport_received_at_ms_provenance": "request_context_call_entry",
             "transport_to_handler_wait_ms": 0,
             "transport_to_method_wait_ms": 0
@@ -81,7 +81,7 @@
               "status": "completed"
             }
           ],
-          "started_at_ms": 1774342681107,
+          "started_at_ms": 1774345567531,
           "total_duration_ms": 3,
           "trace_id": "completion-trace-1",
           "trigger_mode": "invoked",
@@ -106,7 +106,7 @@
           "outcome": "ok_non_empty",
           "prepare_details": {
             "apply_age_at_start_ms": 8,
-            "apply_age_at_terminal_ms": 8,
+            "apply_age_at_terminal_ms": 9,
             "exact_wait": {
               "current_revision_head_owner_hints_ready": true,
               "exact_ready_before_wait": false,
@@ -130,13 +130,13 @@
           },
           "request_id": "37100001",
           "server_edge_details": {
-            "handler_entered_at_ms": 1774342681115,
-            "method_entered_at_ms": 1774342681115,
+            "handler_entered_at_ms": 1774345567539,
+            "method_entered_at_ms": 1774345567539,
             "method_prelude_exec_ms": 0,
             "pre_method_attribution_provenance": "best_effort_fallback",
-            "response_sent_at_ms": 1774342681119,
+            "response_sent_at_ms": 1774345567543,
             "server_handler_exec_ms": 4,
-            "transport_received_at_ms": 1774342681115,
+            "transport_received_at_ms": 1774345567539,
             "transport_received_at_ms_provenance": "request_context_call_entry",
             "transport_to_handler_wait_ms": 0,
             "transport_to_method_wait_ms": 0
@@ -179,7 +179,7 @@
               "status": "completed"
             }
           ],
-          "started_at_ms": 1774342681115,
+          "started_at_ms": 1774345567539,
           "total_duration_ms": 3,
           "trace_id": "completion-trace-2",
           "trigger_mode": "invoked",
@@ -228,13 +228,13 @@
           },
           "request_id": "37100002",
           "server_edge_details": {
-            "handler_entered_at_ms": 1774342681122,
-            "method_entered_at_ms": 1774342681122,
+            "handler_entered_at_ms": 1774345567546,
+            "method_entered_at_ms": 1774345567546,
             "method_prelude_exec_ms": 0,
             "pre_method_attribution_provenance": "best_effort_fallback",
-            "response_sent_at_ms": 1774342681126,
+            "response_sent_at_ms": 1774345567550,
             "server_handler_exec_ms": 4,
-            "transport_received_at_ms": 1774342681122,
+            "transport_received_at_ms": 1774345567546,
             "transport_received_at_ms_provenance": "request_context_call_entry",
             "transport_to_handler_wait_ms": 0,
             "transport_to_method_wait_ms": 0
@@ -277,7 +277,7 @@
               "status": "completed"
             }
           ],
-          "started_at_ms": 1774342681122,
+          "started_at_ms": 1774345567546,
           "total_duration_ms": 3,
           "trace_id": "completion-trace-3",
           "trigger_mode": "invoked",
@@ -301,7 +301,7 @@
           "dominant_stage": "response_build",
           "outcome": "ok_non_empty",
           "prepare_details": {
-            "apply_age_at_start_ms": 22,
+            "apply_age_at_start_ms": 23,
             "apply_age_at_terminal_ms": 23,
             "exact_wait": {
               "current_revision_head_owner_hints_ready": true,
@@ -326,111 +326,13 @@
           },
           "request_id": "37100003",
           "server_edge_details": {
-            "handler_entered_at_ms": 1774342681129,
-            "method_entered_at_ms": 1774342681129,
+            "handler_entered_at_ms": 1774345567553,
+            "method_entered_at_ms": 1774345567553,
             "method_prelude_exec_ms": 0,
             "pre_method_attribution_provenance": "best_effort_fallback",
-            "response_sent_at_ms": 1774342681134,
-            "server_handler_exec_ms": 5,
-            "transport_received_at_ms": 1774342681129,
-            "transport_received_at_ms_provenance": "request_context_call_entry",
-            "transport_to_handler_wait_ms": 0,
-            "transport_to_method_wait_ms": 0
-          },
-          "stages": [
-            {
-              "duration_ms": 0,
-              "name": "turn_wait",
-              "started_offset_ms": 0,
-              "status": "completed"
-            },
-            {
-              "duration_ms": 0,
-              "name": "sync_globals",
-              "started_offset_ms": 0,
-              "status": "completed"
-            },
-            {
-              "duration_ms": 0,
-              "name": "prepare_stateful",
-              "started_offset_ms": 0,
-              "status": "completed"
-            },
-            {
-              "duration_ms": 0,
-              "name": "query_bundle",
-              "started_offset_ms": 0,
-              "status": "completed"
-            },
-            {
-              "duration_ms": 3,
-              "name": "response_build",
-              "started_offset_ms": 0,
-              "status": "completed"
-            },
-            {
-              "duration_ms": 0,
-              "name": "terminal",
-              "started_offset_ms": 3,
-              "status": "completed"
-            }
-          ],
-          "started_at_ms": 1774342681129,
-          "total_duration_ms": 4,
-          "trace_id": "completion-trace-4",
-          "trigger_mode": "invoked",
-          "turn_attribution": {
-            "active_completion_count": 0,
-            "did_change_ahead_count": 0,
-            "dispatcher_resolution_latency_ms": 0,
-            "dropped_completion_file_seq": [],
-            "queue_capacity": 256,
-            "queue_depth_after_enqueue": 1,
-            "queue_depth_before_enqueue": 0,
-            "queue_outcome": "enqueued",
-            "queued_completion_ahead_count": 0,
-            "request_epoch": 4,
-            "request_file_seq": 5,
-            "turn_wait_outcome": "ready"
-          },
-          "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
-        },
-        {
-          "dominant_stage": "response_build",
-          "outcome": "ok_non_empty",
-          "prepare_details": {
-            "apply_age_at_start_ms": 32,
-            "apply_age_at_terminal_ms": 32,
-            "exact_wait": {
-              "current_revision_head_owner_hints_ready": true,
-              "exact_ready_before_wait": false,
-              "head_ready_before_wait": true
-            },
-            "fail_closed_cause": null,
-            "guard_outcome": "prepared",
-            "kind": "lightweight_current_revision",
-            "min_file_version": 1,
-            "observed_file_version": 1,
-            "outcome": "ready",
-            "progress": {},
-            "route": "head_hit",
-            "shadow_version_at_start": 1,
-            "snapshot_elapsed_ms": 0,
-            "snapshot_with_deps_runtime": null,
-            "snapshot_with_deps_timeout_runtime": null,
-            "timeout_attribution": null,
-            "wait_budget_ms": 120,
-            "wait_for_file_version_runtime": null
-          },
-          "request_id": "37100004",
-          "server_edge_details": {
-            "handler_entered_at_ms": 1774342681139,
-            "method_entered_at_ms": 1774342681139,
-            "method_prelude_exec_ms": 0,
-            "pre_method_attribution_provenance": "best_effort_fallback",
-            "response_sent_at_ms": 1774342681143,
+            "response_sent_at_ms": 1774345567557,
             "server_handler_exec_ms": 4,
-            "transport_received_at_ms": 1774342681139,
+            "transport_received_at_ms": 1774345567553,
             "transport_received_at_ms_provenance": "request_context_call_entry",
             "transport_to_handler_wait_ms": 0,
             "transport_to_method_wait_ms": 0
@@ -473,7 +375,105 @@
               "status": "completed"
             }
           ],
-          "started_at_ms": 1774342681139,
+          "started_at_ms": 1774345567553,
+          "total_duration_ms": 3,
+          "trace_id": "completion-trace-4",
+          "trigger_mode": "invoked",
+          "turn_attribution": {
+            "active_completion_count": 0,
+            "did_change_ahead_count": 0,
+            "dispatcher_resolution_latency_ms": 0,
+            "dropped_completion_file_seq": [],
+            "queue_capacity": 256,
+            "queue_depth_after_enqueue": 1,
+            "queue_depth_before_enqueue": 0,
+            "queue_outcome": "enqueued",
+            "queued_completion_ahead_count": 0,
+            "request_epoch": 4,
+            "request_file_seq": 5,
+            "turn_wait_outcome": "ready"
+          },
+          "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+        },
+        {
+          "dominant_stage": "response_build",
+          "outcome": "ok_non_empty",
+          "prepare_details": {
+            "apply_age_at_start_ms": 31,
+            "apply_age_at_terminal_ms": 31,
+            "exact_wait": {
+              "current_revision_head_owner_hints_ready": true,
+              "exact_ready_before_wait": false,
+              "head_ready_before_wait": true
+            },
+            "fail_closed_cause": null,
+            "guard_outcome": "prepared",
+            "kind": "lightweight_current_revision",
+            "min_file_version": 1,
+            "observed_file_version": 1,
+            "outcome": "ready",
+            "progress": {},
+            "route": "head_hit",
+            "shadow_version_at_start": 1,
+            "snapshot_elapsed_ms": 0,
+            "snapshot_with_deps_runtime": null,
+            "snapshot_with_deps_timeout_runtime": null,
+            "timeout_attribution": null,
+            "wait_budget_ms": 120,
+            "wait_for_file_version_runtime": null
+          },
+          "request_id": "37100004",
+          "server_edge_details": {
+            "handler_entered_at_ms": 1774345567561,
+            "method_entered_at_ms": 1774345567561,
+            "method_prelude_exec_ms": 0,
+            "pre_method_attribution_provenance": "best_effort_fallback",
+            "response_sent_at_ms": 1774345567565,
+            "server_handler_exec_ms": 4,
+            "transport_received_at_ms": 1774345567561,
+            "transport_received_at_ms_provenance": "request_context_call_entry",
+            "transport_to_handler_wait_ms": 0,
+            "transport_to_method_wait_ms": 0
+          },
+          "stages": [
+            {
+              "duration_ms": 0,
+              "name": "turn_wait",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "sync_globals",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "prepare_stateful",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "query_bundle",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 2,
+              "name": "response_build",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "terminal",
+              "started_offset_ms": 2,
+              "status": "completed"
+            }
+          ],
+          "started_at_ms": 1774345567561,
           "total_duration_ms": 3,
           "trace_id": "completion-trace-5",
           "trigger_mode": "invoked",
@@ -522,13 +522,13 @@
           },
           "request_id": "37100100",
           "server_edge_details": {
-            "handler_entered_at_ms": 1774342681146,
-            "method_entered_at_ms": 1774342681146,
+            "handler_entered_at_ms": 1774345567569,
+            "method_entered_at_ms": 1774345567569,
             "method_prelude_exec_ms": 0,
             "pre_method_attribution_provenance": "best_effort_fallback",
-            "response_sent_at_ms": 1774342681151,
-            "server_handler_exec_ms": 5,
-            "transport_received_at_ms": 1774342681146,
+            "response_sent_at_ms": 1774345567573,
+            "server_handler_exec_ms": 4,
+            "transport_received_at_ms": 1774345567569,
             "transport_received_at_ms_provenance": "request_context_call_entry",
             "transport_to_handler_wait_ms": 0,
             "transport_to_method_wait_ms": 0
@@ -559,7 +559,7 @@
               "status": "completed"
             },
             {
-              "duration_ms": 3,
+              "duration_ms": 2,
               "name": "response_build",
               "started_offset_ms": 0,
               "status": "completed"
@@ -567,12 +567,12 @@
             {
               "duration_ms": 0,
               "name": "terminal",
-              "started_offset_ms": 3,
+              "started_offset_ms": 2,
               "status": "completed"
             }
           ],
-          "started_at_ms": 1774342681146,
-          "total_duration_ms": 5,
+          "started_at_ms": 1774345567569,
+          "total_duration_ms": 4,
           "trace_id": "completion-trace-6",
           "trigger_mode": "invoked",
           "turn_attribution": {
@@ -595,8 +595,8 @@
           "dominant_stage": "response_build",
           "outcome": "ok_non_empty",
           "prepare_details": {
-            "apply_age_at_start_ms": 47,
-            "apply_age_at_terminal_ms": 48,
+            "apply_age_at_start_ms": 46,
+            "apply_age_at_terminal_ms": 47,
             "exact_wait": {
               "current_revision_head_owner_hints_ready": true,
               "exact_ready_before_wait": false,
@@ -620,13 +620,13 @@
           },
           "request_id": "37100101",
           "server_edge_details": {
-            "handler_entered_at_ms": 1774342681154,
-            "method_entered_at_ms": 1774342681154,
+            "handler_entered_at_ms": 1774345567576,
+            "method_entered_at_ms": 1774345567576,
             "method_prelude_exec_ms": 0,
             "pre_method_attribution_provenance": "best_effort_fallback",
-            "response_sent_at_ms": 1774342681158,
+            "response_sent_at_ms": 1774345567580,
             "server_handler_exec_ms": 4,
-            "transport_received_at_ms": 1774342681154,
+            "transport_received_at_ms": 1774345567576,
             "transport_received_at_ms_provenance": "request_context_call_entry",
             "transport_to_handler_wait_ms": 0,
             "transport_to_method_wait_ms": 0
@@ -669,7 +669,7 @@
               "status": "completed"
             }
           ],
-          "started_at_ms": 1774342681154,
+          "started_at_ms": 1774345567576,
           "total_duration_ms": 3,
           "trace_id": "completion-trace-7",
           "trigger_mode": "invoked",
@@ -693,8 +693,8 @@
           "dominant_stage": "response_build",
           "outcome": "ok_non_empty",
           "prepare_details": {
-            "apply_age_at_start_ms": 54,
-            "apply_age_at_terminal_ms": 55,
+            "apply_age_at_start_ms": 53,
+            "apply_age_at_terminal_ms": 54,
             "exact_wait": {
               "current_revision_head_owner_hints_ready": true,
               "exact_ready_before_wait": false,
@@ -718,111 +718,13 @@
           },
           "request_id": "37100102",
           "server_edge_details": {
-            "handler_entered_at_ms": 1774342681161,
-            "method_entered_at_ms": 1774342681161,
+            "handler_entered_at_ms": 1774345567584,
+            "method_entered_at_ms": 1774345567584,
             "method_prelude_exec_ms": 0,
             "pre_method_attribution_provenance": "best_effort_fallback",
-            "response_sent_at_ms": 1774342681167,
-            "server_handler_exec_ms": 6,
-            "transport_received_at_ms": 1774342681161,
-            "transport_received_at_ms_provenance": "request_context_call_entry",
-            "transport_to_handler_wait_ms": 0,
-            "transport_to_method_wait_ms": 0
-          },
-          "stages": [
-            {
-              "duration_ms": 0,
-              "name": "turn_wait",
-              "started_offset_ms": 0,
-              "status": "completed"
-            },
-            {
-              "duration_ms": 0,
-              "name": "sync_globals",
-              "started_offset_ms": 0,
-              "status": "completed"
-            },
-            {
-              "duration_ms": 0,
-              "name": "prepare_stateful",
-              "started_offset_ms": 0,
-              "status": "completed"
-            },
-            {
-              "duration_ms": 0,
-              "name": "query_bundle",
-              "started_offset_ms": 0,
-              "status": "completed"
-            },
-            {
-              "duration_ms": 4,
-              "name": "response_build",
-              "started_offset_ms": 0,
-              "status": "completed"
-            },
-            {
-              "duration_ms": 0,
-              "name": "terminal",
-              "started_offset_ms": 4,
-              "status": "completed"
-            }
-          ],
-          "started_at_ms": 1774342681161,
-          "total_duration_ms": 6,
-          "trace_id": "completion-trace-8",
-          "trigger_mode": "invoked",
-          "turn_attribution": {
-            "active_completion_count": 0,
-            "did_change_ahead_count": 0,
-            "dispatcher_resolution_latency_ms": 0,
-            "dropped_completion_file_seq": [],
-            "queue_capacity": 256,
-            "queue_depth_after_enqueue": 1,
-            "queue_depth_before_enqueue": 0,
-            "queue_outcome": "enqueued",
-            "queued_completion_ahead_count": 0,
-            "request_epoch": 8,
-            "request_file_seq": 9,
-            "turn_wait_outcome": "ready"
-          },
-          "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
-        },
-        {
-          "dominant_stage": "response_build",
-          "outcome": "ok_non_empty",
-          "prepare_details": {
-            "apply_age_at_start_ms": 66,
-            "apply_age_at_terminal_ms": 67,
-            "exact_wait": {
-              "current_revision_head_owner_hints_ready": true,
-              "exact_ready_before_wait": false,
-              "head_ready_before_wait": true
-            },
-            "fail_closed_cause": null,
-            "guard_outcome": "prepared",
-            "kind": "lightweight_current_revision",
-            "min_file_version": 1,
-            "observed_file_version": 1,
-            "outcome": "ready",
-            "progress": {},
-            "route": "head_hit",
-            "shadow_version_at_start": 1,
-            "snapshot_elapsed_ms": 0,
-            "snapshot_with_deps_runtime": null,
-            "snapshot_with_deps_timeout_runtime": null,
-            "timeout_attribution": null,
-            "wait_budget_ms": 120,
-            "wait_for_file_version_runtime": null
-          },
-          "request_id": "37100103",
-          "server_edge_details": {
-            "handler_entered_at_ms": 1774342681173,
-            "method_entered_at_ms": 1774342681173,
-            "method_prelude_exec_ms": 0,
-            "pre_method_attribution_provenance": "best_effort_fallback",
-            "response_sent_at_ms": 1774342681177,
-            "server_handler_exec_ms": 4,
-            "transport_received_at_ms": 1774342681173,
+            "response_sent_at_ms": 1774345567587,
+            "server_handler_exec_ms": 3,
+            "transport_received_at_ms": 1774345567584,
             "transport_received_at_ms_provenance": "request_context_call_entry",
             "transport_to_handler_wait_ms": 0,
             "transport_to_method_wait_ms": 0
@@ -865,8 +767,106 @@
               "status": "completed"
             }
           ],
-          "started_at_ms": 1774342681173,
-          "total_duration_ms": 4,
+          "started_at_ms": 1774345567584,
+          "total_duration_ms": 3,
+          "trace_id": "completion-trace-8",
+          "trigger_mode": "invoked",
+          "turn_attribution": {
+            "active_completion_count": 0,
+            "did_change_ahead_count": 0,
+            "dispatcher_resolution_latency_ms": 0,
+            "dropped_completion_file_seq": [],
+            "queue_capacity": 256,
+            "queue_depth_after_enqueue": 1,
+            "queue_depth_before_enqueue": 0,
+            "queue_outcome": "enqueued",
+            "queued_completion_ahead_count": 0,
+            "request_epoch": 8,
+            "request_file_seq": 9,
+            "turn_wait_outcome": "ready"
+          },
+          "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+        },
+        {
+          "dominant_stage": "response_build",
+          "outcome": "ok_non_empty",
+          "prepare_details": {
+            "apply_age_at_start_ms": 60,
+            "apply_age_at_terminal_ms": 61,
+            "exact_wait": {
+              "current_revision_head_owner_hints_ready": true,
+              "exact_ready_before_wait": false,
+              "head_ready_before_wait": true
+            },
+            "fail_closed_cause": null,
+            "guard_outcome": "prepared",
+            "kind": "lightweight_current_revision",
+            "min_file_version": 1,
+            "observed_file_version": 1,
+            "outcome": "ready",
+            "progress": {},
+            "route": "head_hit",
+            "shadow_version_at_start": 1,
+            "snapshot_elapsed_ms": 0,
+            "snapshot_with_deps_runtime": null,
+            "snapshot_with_deps_timeout_runtime": null,
+            "timeout_attribution": null,
+            "wait_budget_ms": 120,
+            "wait_for_file_version_runtime": null
+          },
+          "request_id": "37100103",
+          "server_edge_details": {
+            "handler_entered_at_ms": 1774345567591,
+            "method_entered_at_ms": 1774345567591,
+            "method_prelude_exec_ms": 0,
+            "pre_method_attribution_provenance": "best_effort_fallback",
+            "response_sent_at_ms": 1774345567595,
+            "server_handler_exec_ms": 4,
+            "transport_received_at_ms": 1774345567591,
+            "transport_received_at_ms_provenance": "request_context_call_entry",
+            "transport_to_handler_wait_ms": 0,
+            "transport_to_method_wait_ms": 0
+          },
+          "stages": [
+            {
+              "duration_ms": 0,
+              "name": "turn_wait",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "sync_globals",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "prepare_stateful",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "query_bundle",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 2,
+              "name": "response_build",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "terminal",
+              "started_offset_ms": 2,
+              "status": "completed"
+            }
+          ],
+          "started_at_ms": 1774345567591,
+          "total_duration_ms": 3,
           "trace_id": "completion-trace-9",
           "trigger_mode": "invoked",
           "turn_attribution": {
@@ -893,7 +893,7 @@
         "dominant_stage": "response_build",
         "outcome": "ok_non_empty",
         "prepare_details": {
-          "apply_age_at_start_ms": 1,
+          "apply_age_at_start_ms": 0,
           "apply_age_at_terminal_ms": 1,
           "exact_wait": {
             "current_revision_head_owner_hints_ready": true,
@@ -918,13 +918,13 @@
         },
         "request_id": "37100000",
         "server_edge_details": {
-          "handler_entered_at_ms": 1774342681107,
-          "method_entered_at_ms": 1774342681107,
+          "handler_entered_at_ms": 1774345567531,
+          "method_entered_at_ms": 1774345567531,
           "method_prelude_exec_ms": 0,
           "pre_method_attribution_provenance": "best_effort_fallback",
-          "response_sent_at_ms": 1774342681111,
+          "response_sent_at_ms": 1774345567535,
           "server_handler_exec_ms": 4,
-          "transport_received_at_ms": 1774342681107,
+          "transport_received_at_ms": 1774345567531,
           "transport_received_at_ms_provenance": "request_context_call_entry",
           "transport_to_handler_wait_ms": 0,
           "transport_to_method_wait_ms": 0
@@ -967,7 +967,7 @@
             "status": "completed"
           }
         ],
-        "started_at_ms": 1774342681107,
+        "started_at_ms": 1774345567531,
         "total_duration_ms": 3,
         "trace_id": "completion-trace-1",
         "trigger_mode": "invoked",
@@ -992,7 +992,7 @@
         "outcome": "ok_non_empty",
         "prepare_details": {
           "apply_age_at_start_ms": 8,
-          "apply_age_at_terminal_ms": 8,
+          "apply_age_at_terminal_ms": 9,
           "exact_wait": {
             "current_revision_head_owner_hints_ready": true,
             "exact_ready_before_wait": false,
@@ -1016,13 +1016,13 @@
         },
         "request_id": "37100001",
         "server_edge_details": {
-          "handler_entered_at_ms": 1774342681115,
-          "method_entered_at_ms": 1774342681115,
+          "handler_entered_at_ms": 1774345567539,
+          "method_entered_at_ms": 1774345567539,
           "method_prelude_exec_ms": 0,
           "pre_method_attribution_provenance": "best_effort_fallback",
-          "response_sent_at_ms": 1774342681119,
+          "response_sent_at_ms": 1774345567543,
           "server_handler_exec_ms": 4,
-          "transport_received_at_ms": 1774342681115,
+          "transport_received_at_ms": 1774345567539,
           "transport_received_at_ms_provenance": "request_context_call_entry",
           "transport_to_handler_wait_ms": 0,
           "transport_to_method_wait_ms": 0
@@ -1065,7 +1065,7 @@
             "status": "completed"
           }
         ],
-        "started_at_ms": 1774342681115,
+        "started_at_ms": 1774345567539,
         "total_duration_ms": 3,
         "trace_id": "completion-trace-2",
         "trigger_mode": "invoked",
@@ -1114,13 +1114,13 @@
         },
         "request_id": "37100002",
         "server_edge_details": {
-          "handler_entered_at_ms": 1774342681122,
-          "method_entered_at_ms": 1774342681122,
+          "handler_entered_at_ms": 1774345567546,
+          "method_entered_at_ms": 1774345567546,
           "method_prelude_exec_ms": 0,
           "pre_method_attribution_provenance": "best_effort_fallback",
-          "response_sent_at_ms": 1774342681126,
+          "response_sent_at_ms": 1774345567550,
           "server_handler_exec_ms": 4,
-          "transport_received_at_ms": 1774342681122,
+          "transport_received_at_ms": 1774345567546,
           "transport_received_at_ms_provenance": "request_context_call_entry",
           "transport_to_handler_wait_ms": 0,
           "transport_to_method_wait_ms": 0
@@ -1163,7 +1163,7 @@
             "status": "completed"
           }
         ],
-        "started_at_ms": 1774342681122,
+        "started_at_ms": 1774345567546,
         "total_duration_ms": 3,
         "trace_id": "completion-trace-3",
         "trigger_mode": "invoked",
@@ -1187,7 +1187,7 @@
         "dominant_stage": "response_build",
         "outcome": "ok_non_empty",
         "prepare_details": {
-          "apply_age_at_start_ms": 22,
+          "apply_age_at_start_ms": 23,
           "apply_age_at_terminal_ms": 23,
           "exact_wait": {
             "current_revision_head_owner_hints_ready": true,
@@ -1212,111 +1212,13 @@
         },
         "request_id": "37100003",
         "server_edge_details": {
-          "handler_entered_at_ms": 1774342681129,
-          "method_entered_at_ms": 1774342681129,
+          "handler_entered_at_ms": 1774345567553,
+          "method_entered_at_ms": 1774345567553,
           "method_prelude_exec_ms": 0,
           "pre_method_attribution_provenance": "best_effort_fallback",
-          "response_sent_at_ms": 1774342681134,
-          "server_handler_exec_ms": 5,
-          "transport_received_at_ms": 1774342681129,
-          "transport_received_at_ms_provenance": "request_context_call_entry",
-          "transport_to_handler_wait_ms": 0,
-          "transport_to_method_wait_ms": 0
-        },
-        "stages": [
-          {
-            "duration_ms": 0,
-            "name": "turn_wait",
-            "started_offset_ms": 0,
-            "status": "completed"
-          },
-          {
-            "duration_ms": 0,
-            "name": "sync_globals",
-            "started_offset_ms": 0,
-            "status": "completed"
-          },
-          {
-            "duration_ms": 0,
-            "name": "prepare_stateful",
-            "started_offset_ms": 0,
-            "status": "completed"
-          },
-          {
-            "duration_ms": 0,
-            "name": "query_bundle",
-            "started_offset_ms": 0,
-            "status": "completed"
-          },
-          {
-            "duration_ms": 3,
-            "name": "response_build",
-            "started_offset_ms": 0,
-            "status": "completed"
-          },
-          {
-            "duration_ms": 0,
-            "name": "terminal",
-            "started_offset_ms": 3,
-            "status": "completed"
-          }
-        ],
-        "started_at_ms": 1774342681129,
-        "total_duration_ms": 4,
-        "trace_id": "completion-trace-4",
-        "trigger_mode": "invoked",
-        "turn_attribution": {
-          "active_completion_count": 0,
-          "did_change_ahead_count": 0,
-          "dispatcher_resolution_latency_ms": 0,
-          "dropped_completion_file_seq": [],
-          "queue_capacity": 256,
-          "queue_depth_after_enqueue": 1,
-          "queue_depth_before_enqueue": 0,
-          "queue_outcome": "enqueued",
-          "queued_completion_ahead_count": 0,
-          "request_epoch": 4,
-          "request_file_seq": 5,
-          "turn_wait_outcome": "ready"
-        },
-        "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
-      },
-      {
-        "dominant_stage": "response_build",
-        "outcome": "ok_non_empty",
-        "prepare_details": {
-          "apply_age_at_start_ms": 32,
-          "apply_age_at_terminal_ms": 32,
-          "exact_wait": {
-            "current_revision_head_owner_hints_ready": true,
-            "exact_ready_before_wait": false,
-            "head_ready_before_wait": true
-          },
-          "fail_closed_cause": null,
-          "guard_outcome": "prepared",
-          "kind": "lightweight_current_revision",
-          "min_file_version": 1,
-          "observed_file_version": 1,
-          "outcome": "ready",
-          "progress": {},
-          "route": "head_hit",
-          "shadow_version_at_start": 1,
-          "snapshot_elapsed_ms": 0,
-          "snapshot_with_deps_runtime": null,
-          "snapshot_with_deps_timeout_runtime": null,
-          "timeout_attribution": null,
-          "wait_budget_ms": 120,
-          "wait_for_file_version_runtime": null
-        },
-        "request_id": "37100004",
-        "server_edge_details": {
-          "handler_entered_at_ms": 1774342681139,
-          "method_entered_at_ms": 1774342681139,
-          "method_prelude_exec_ms": 0,
-          "pre_method_attribution_provenance": "best_effort_fallback",
-          "response_sent_at_ms": 1774342681143,
+          "response_sent_at_ms": 1774345567557,
           "server_handler_exec_ms": 4,
-          "transport_received_at_ms": 1774342681139,
+          "transport_received_at_ms": 1774345567553,
           "transport_received_at_ms_provenance": "request_context_call_entry",
           "transport_to_handler_wait_ms": 0,
           "transport_to_method_wait_ms": 0
@@ -1359,7 +1261,105 @@
             "status": "completed"
           }
         ],
-        "started_at_ms": 1774342681139,
+        "started_at_ms": 1774345567553,
+        "total_duration_ms": 3,
+        "trace_id": "completion-trace-4",
+        "trigger_mode": "invoked",
+        "turn_attribution": {
+          "active_completion_count": 0,
+          "did_change_ahead_count": 0,
+          "dispatcher_resolution_latency_ms": 0,
+          "dropped_completion_file_seq": [],
+          "queue_capacity": 256,
+          "queue_depth_after_enqueue": 1,
+          "queue_depth_before_enqueue": 0,
+          "queue_outcome": "enqueued",
+          "queued_completion_ahead_count": 0,
+          "request_epoch": 4,
+          "request_file_seq": 5,
+          "turn_wait_outcome": "ready"
+        },
+        "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+      },
+      {
+        "dominant_stage": "response_build",
+        "outcome": "ok_non_empty",
+        "prepare_details": {
+          "apply_age_at_start_ms": 31,
+          "apply_age_at_terminal_ms": 31,
+          "exact_wait": {
+            "current_revision_head_owner_hints_ready": true,
+            "exact_ready_before_wait": false,
+            "head_ready_before_wait": true
+          },
+          "fail_closed_cause": null,
+          "guard_outcome": "prepared",
+          "kind": "lightweight_current_revision",
+          "min_file_version": 1,
+          "observed_file_version": 1,
+          "outcome": "ready",
+          "progress": {},
+          "route": "head_hit",
+          "shadow_version_at_start": 1,
+          "snapshot_elapsed_ms": 0,
+          "snapshot_with_deps_runtime": null,
+          "snapshot_with_deps_timeout_runtime": null,
+          "timeout_attribution": null,
+          "wait_budget_ms": 120,
+          "wait_for_file_version_runtime": null
+        },
+        "request_id": "37100004",
+        "server_edge_details": {
+          "handler_entered_at_ms": 1774345567561,
+          "method_entered_at_ms": 1774345567561,
+          "method_prelude_exec_ms": 0,
+          "pre_method_attribution_provenance": "best_effort_fallback",
+          "response_sent_at_ms": 1774345567565,
+          "server_handler_exec_ms": 4,
+          "transport_received_at_ms": 1774345567561,
+          "transport_received_at_ms_provenance": "request_context_call_entry",
+          "transport_to_handler_wait_ms": 0,
+          "transport_to_method_wait_ms": 0
+        },
+        "stages": [
+          {
+            "duration_ms": 0,
+            "name": "turn_wait",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "sync_globals",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "prepare_stateful",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "query_bundle",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 2,
+            "name": "response_build",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "terminal",
+            "started_offset_ms": 2,
+            "status": "completed"
+          }
+        ],
+        "started_at_ms": 1774345567561,
         "total_duration_ms": 3,
         "trace_id": "completion-trace-5",
         "trigger_mode": "invoked",
@@ -1408,13 +1408,13 @@
         },
         "request_id": "37100100",
         "server_edge_details": {
-          "handler_entered_at_ms": 1774342681146,
-          "method_entered_at_ms": 1774342681146,
+          "handler_entered_at_ms": 1774345567569,
+          "method_entered_at_ms": 1774345567569,
           "method_prelude_exec_ms": 0,
           "pre_method_attribution_provenance": "best_effort_fallback",
-          "response_sent_at_ms": 1774342681151,
-          "server_handler_exec_ms": 5,
-          "transport_received_at_ms": 1774342681146,
+          "response_sent_at_ms": 1774345567573,
+          "server_handler_exec_ms": 4,
+          "transport_received_at_ms": 1774345567569,
           "transport_received_at_ms_provenance": "request_context_call_entry",
           "transport_to_handler_wait_ms": 0,
           "transport_to_method_wait_ms": 0
@@ -1445,7 +1445,7 @@
             "status": "completed"
           },
           {
-            "duration_ms": 3,
+            "duration_ms": 2,
             "name": "response_build",
             "started_offset_ms": 0,
             "status": "completed"
@@ -1453,12 +1453,12 @@
           {
             "duration_ms": 0,
             "name": "terminal",
-            "started_offset_ms": 3,
+            "started_offset_ms": 2,
             "status": "completed"
           }
         ],
-        "started_at_ms": 1774342681146,
-        "total_duration_ms": 5,
+        "started_at_ms": 1774345567569,
+        "total_duration_ms": 4,
         "trace_id": "completion-trace-6",
         "trigger_mode": "invoked",
         "turn_attribution": {
@@ -1481,8 +1481,8 @@
         "dominant_stage": "response_build",
         "outcome": "ok_non_empty",
         "prepare_details": {
-          "apply_age_at_start_ms": 47,
-          "apply_age_at_terminal_ms": 48,
+          "apply_age_at_start_ms": 46,
+          "apply_age_at_terminal_ms": 47,
           "exact_wait": {
             "current_revision_head_owner_hints_ready": true,
             "exact_ready_before_wait": false,
@@ -1506,13 +1506,13 @@
         },
         "request_id": "37100101",
         "server_edge_details": {
-          "handler_entered_at_ms": 1774342681154,
-          "method_entered_at_ms": 1774342681154,
+          "handler_entered_at_ms": 1774345567576,
+          "method_entered_at_ms": 1774345567576,
           "method_prelude_exec_ms": 0,
           "pre_method_attribution_provenance": "best_effort_fallback",
-          "response_sent_at_ms": 1774342681158,
+          "response_sent_at_ms": 1774345567580,
           "server_handler_exec_ms": 4,
-          "transport_received_at_ms": 1774342681154,
+          "transport_received_at_ms": 1774345567576,
           "transport_received_at_ms_provenance": "request_context_call_entry",
           "transport_to_handler_wait_ms": 0,
           "transport_to_method_wait_ms": 0
@@ -1555,7 +1555,7 @@
             "status": "completed"
           }
         ],
-        "started_at_ms": 1774342681154,
+        "started_at_ms": 1774345567576,
         "total_duration_ms": 3,
         "trace_id": "completion-trace-7",
         "trigger_mode": "invoked",
@@ -1579,8 +1579,8 @@
         "dominant_stage": "response_build",
         "outcome": "ok_non_empty",
         "prepare_details": {
-          "apply_age_at_start_ms": 54,
-          "apply_age_at_terminal_ms": 55,
+          "apply_age_at_start_ms": 53,
+          "apply_age_at_terminal_ms": 54,
           "exact_wait": {
             "current_revision_head_owner_hints_ready": true,
             "exact_ready_before_wait": false,
@@ -1604,111 +1604,13 @@
         },
         "request_id": "37100102",
         "server_edge_details": {
-          "handler_entered_at_ms": 1774342681161,
-          "method_entered_at_ms": 1774342681161,
+          "handler_entered_at_ms": 1774345567584,
+          "method_entered_at_ms": 1774345567584,
           "method_prelude_exec_ms": 0,
           "pre_method_attribution_provenance": "best_effort_fallback",
-          "response_sent_at_ms": 1774342681167,
-          "server_handler_exec_ms": 6,
-          "transport_received_at_ms": 1774342681161,
-          "transport_received_at_ms_provenance": "request_context_call_entry",
-          "transport_to_handler_wait_ms": 0,
-          "transport_to_method_wait_ms": 0
-        },
-        "stages": [
-          {
-            "duration_ms": 0,
-            "name": "turn_wait",
-            "started_offset_ms": 0,
-            "status": "completed"
-          },
-          {
-            "duration_ms": 0,
-            "name": "sync_globals",
-            "started_offset_ms": 0,
-            "status": "completed"
-          },
-          {
-            "duration_ms": 0,
-            "name": "prepare_stateful",
-            "started_offset_ms": 0,
-            "status": "completed"
-          },
-          {
-            "duration_ms": 0,
-            "name": "query_bundle",
-            "started_offset_ms": 0,
-            "status": "completed"
-          },
-          {
-            "duration_ms": 4,
-            "name": "response_build",
-            "started_offset_ms": 0,
-            "status": "completed"
-          },
-          {
-            "duration_ms": 0,
-            "name": "terminal",
-            "started_offset_ms": 4,
-            "status": "completed"
-          }
-        ],
-        "started_at_ms": 1774342681161,
-        "total_duration_ms": 6,
-        "trace_id": "completion-trace-8",
-        "trigger_mode": "invoked",
-        "turn_attribution": {
-          "active_completion_count": 0,
-          "did_change_ahead_count": 0,
-          "dispatcher_resolution_latency_ms": 0,
-          "dropped_completion_file_seq": [],
-          "queue_capacity": 256,
-          "queue_depth_after_enqueue": 1,
-          "queue_depth_before_enqueue": 0,
-          "queue_outcome": "enqueued",
-          "queued_completion_ahead_count": 0,
-          "request_epoch": 8,
-          "request_file_seq": 9,
-          "turn_wait_outcome": "ready"
-        },
-        "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
-      },
-      {
-        "dominant_stage": "response_build",
-        "outcome": "ok_non_empty",
-        "prepare_details": {
-          "apply_age_at_start_ms": 66,
-          "apply_age_at_terminal_ms": 67,
-          "exact_wait": {
-            "current_revision_head_owner_hints_ready": true,
-            "exact_ready_before_wait": false,
-            "head_ready_before_wait": true
-          },
-          "fail_closed_cause": null,
-          "guard_outcome": "prepared",
-          "kind": "lightweight_current_revision",
-          "min_file_version": 1,
-          "observed_file_version": 1,
-          "outcome": "ready",
-          "progress": {},
-          "route": "head_hit",
-          "shadow_version_at_start": 1,
-          "snapshot_elapsed_ms": 0,
-          "snapshot_with_deps_runtime": null,
-          "snapshot_with_deps_timeout_runtime": null,
-          "timeout_attribution": null,
-          "wait_budget_ms": 120,
-          "wait_for_file_version_runtime": null
-        },
-        "request_id": "37100103",
-        "server_edge_details": {
-          "handler_entered_at_ms": 1774342681173,
-          "method_entered_at_ms": 1774342681173,
-          "method_prelude_exec_ms": 0,
-          "pre_method_attribution_provenance": "best_effort_fallback",
-          "response_sent_at_ms": 1774342681177,
-          "server_handler_exec_ms": 4,
-          "transport_received_at_ms": 1774342681173,
+          "response_sent_at_ms": 1774345567587,
+          "server_handler_exec_ms": 3,
+          "transport_received_at_ms": 1774345567584,
           "transport_received_at_ms_provenance": "request_context_call_entry",
           "transport_to_handler_wait_ms": 0,
           "transport_to_method_wait_ms": 0
@@ -1751,8 +1653,106 @@
             "status": "completed"
           }
         ],
-        "started_at_ms": 1774342681173,
-        "total_duration_ms": 4,
+        "started_at_ms": 1774345567584,
+        "total_duration_ms": 3,
+        "trace_id": "completion-trace-8",
+        "trigger_mode": "invoked",
+        "turn_attribution": {
+          "active_completion_count": 0,
+          "did_change_ahead_count": 0,
+          "dispatcher_resolution_latency_ms": 0,
+          "dropped_completion_file_seq": [],
+          "queue_capacity": 256,
+          "queue_depth_after_enqueue": 1,
+          "queue_depth_before_enqueue": 0,
+          "queue_outcome": "enqueued",
+          "queued_completion_ahead_count": 0,
+          "request_epoch": 8,
+          "request_file_seq": 9,
+          "turn_wait_outcome": "ready"
+        },
+        "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+      },
+      {
+        "dominant_stage": "response_build",
+        "outcome": "ok_non_empty",
+        "prepare_details": {
+          "apply_age_at_start_ms": 60,
+          "apply_age_at_terminal_ms": 61,
+          "exact_wait": {
+            "current_revision_head_owner_hints_ready": true,
+            "exact_ready_before_wait": false,
+            "head_ready_before_wait": true
+          },
+          "fail_closed_cause": null,
+          "guard_outcome": "prepared",
+          "kind": "lightweight_current_revision",
+          "min_file_version": 1,
+          "observed_file_version": 1,
+          "outcome": "ready",
+          "progress": {},
+          "route": "head_hit",
+          "shadow_version_at_start": 1,
+          "snapshot_elapsed_ms": 0,
+          "snapshot_with_deps_runtime": null,
+          "snapshot_with_deps_timeout_runtime": null,
+          "timeout_attribution": null,
+          "wait_budget_ms": 120,
+          "wait_for_file_version_runtime": null
+        },
+        "request_id": "37100103",
+        "server_edge_details": {
+          "handler_entered_at_ms": 1774345567591,
+          "method_entered_at_ms": 1774345567591,
+          "method_prelude_exec_ms": 0,
+          "pre_method_attribution_provenance": "best_effort_fallback",
+          "response_sent_at_ms": 1774345567595,
+          "server_handler_exec_ms": 4,
+          "transport_received_at_ms": 1774345567591,
+          "transport_received_at_ms_provenance": "request_context_call_entry",
+          "transport_to_handler_wait_ms": 0,
+          "transport_to_method_wait_ms": 0
+        },
+        "stages": [
+          {
+            "duration_ms": 0,
+            "name": "turn_wait",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "sync_globals",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "prepare_stateful",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "query_bundle",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 2,
+            "name": "response_build",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "terminal",
+            "started_offset_ms": 2,
+            "status": "completed"
+          }
+        ],
+        "started_at_ms": 1774345567591,
+        "total_duration_ms": 3,
         "trace_id": "completion-trace-9",
         "trigger_mode": "invoked",
         "turn_attribution": {
@@ -1835,8 +1835,8 @@
       "response_build_ms": 2,
       "response_build_other_ms": null,
       "route": "head_hit",
-      "started_at_ms": 1774342681173,
-      "total_duration_ms": 4,
+      "started_at_ms": 1774345567591,
+      "total_duration_ms": 3,
       "trace_id": "completion-trace-9",
       "trigger_mode": "invoked",
       "turn_wait_ms": 0,
@@ -1861,11 +1861,11 @@
       "queued_completion_ahead": null,
       "rank_ms": null,
       "request_id": "37100102",
-      "response_build_ms": 4,
+      "response_build_ms": 2,
       "response_build_other_ms": null,
       "route": "head_hit",
-      "started_at_ms": 1774342681161,
-      "total_duration_ms": 6,
+      "started_at_ms": 1774345567584,
+      "total_duration_ms": 3,
       "trace_id": "completion-trace-8",
       "trigger_mode": "invoked",
       "turn_wait_ms": 0,
@@ -1893,7 +1893,7 @@
       "response_build_ms": 2,
       "response_build_other_ms": null,
       "route": "head_hit",
-      "started_at_ms": 1774342681154,
+      "started_at_ms": 1774345567576,
       "total_duration_ms": 3,
       "trace_id": "completion-trace-7",
       "trigger_mode": "invoked",
@@ -1919,11 +1919,11 @@
       "queued_completion_ahead": null,
       "rank_ms": null,
       "request_id": "37100100",
-      "response_build_ms": 3,
+      "response_build_ms": 2,
       "response_build_other_ms": null,
       "route": "head_hit",
-      "started_at_ms": 1774342681146,
-      "total_duration_ms": 5,
+      "started_at_ms": 1774345567569,
+      "total_duration_ms": 4,
       "trace_id": "completion-trace-6",
       "trigger_mode": "invoked",
       "turn_wait_ms": 0,
@@ -1951,7 +1951,7 @@
       "response_build_ms": 2,
       "response_build_other_ms": null,
       "route": "head_hit",
-      "started_at_ms": 1774342681139,
+      "started_at_ms": 1774345567561,
       "total_duration_ms": 3,
       "trace_id": "completion-trace-5",
       "trigger_mode": "invoked",
@@ -1977,11 +1977,11 @@
       "queued_completion_ahead": null,
       "rank_ms": null,
       "request_id": "37100003",
-      "response_build_ms": 3,
+      "response_build_ms": 2,
       "response_build_other_ms": null,
       "route": "head_hit",
-      "started_at_ms": 1774342681129,
-      "total_duration_ms": 4,
+      "started_at_ms": 1774345567553,
+      "total_duration_ms": 3,
       "trace_id": "completion-trace-4",
       "trigger_mode": "invoked",
       "turn_wait_ms": 0,
@@ -2009,7 +2009,7 @@
       "response_build_ms": 2,
       "response_build_other_ms": null,
       "route": "head_hit",
-      "started_at_ms": 1774342681122,
+      "started_at_ms": 1774345567546,
       "total_duration_ms": 3,
       "trace_id": "completion-trace-3",
       "trigger_mode": "invoked",
@@ -2038,7 +2038,7 @@
       "response_build_ms": 2,
       "response_build_other_ms": null,
       "route": "head_hit",
-      "started_at_ms": 1774342681115,
+      "started_at_ms": 1774345567539,
       "total_duration_ms": 3,
       "trace_id": "completion-trace-2",
       "trigger_mode": "invoked",
@@ -2067,7 +2067,7 @@
       "response_build_ms": 2,
       "response_build_other_ms": null,
       "route": "head_hit",
-      "started_at_ms": 1774342681107,
+      "started_at_ms": 1774345567531,
       "total_duration_ms": 3,
       "trace_id": "completion-trace-1",
       "trigger_mode": "invoked",
@@ -2079,7 +2079,7 @@
   "marker": "Объект.",
   "measured_samples": [
     {
-      "elapsed_ms": 8,
+      "elapsed_ms": 7,
       "label_count": 86,
       "labels": [
         "АгентскиеУслуги",
@@ -2188,9 +2188,9 @@
         "queue_outcome": null,
         "queued_completion_ahead": null,
         "request_id": "37100100",
-        "response_build_ms": 3,
+        "response_build_ms": 2,
         "route": "head_hit",
-        "total_duration_ms": 5,
+        "total_duration_ms": 4,
         "trace_id": "completion-trace-6",
         "trigger_mode": "invoked",
         "turn_wait_ms": 0,
@@ -2200,7 +2200,7 @@
       "version": 1
     },
     {
-      "elapsed_ms": 6,
+      "elapsed_ms": 7,
       "label_count": 86,
       "labels": [
         "АгентскиеУслуги",
@@ -2321,7 +2321,7 @@
       "version": 1
     },
     {
-      "elapsed_ms": 11,
+      "elapsed_ms": 7,
       "label_count": 86,
       "labels": [
         "АгентскиеУслуги",
@@ -2430,9 +2430,9 @@
         "queue_outcome": null,
         "queued_completion_ahead": null,
         "request_id": "37100102",
-        "response_build_ms": 4,
+        "response_build_ms": 2,
         "route": "head_hit",
-        "total_duration_ms": 6,
+        "total_duration_ms": 3,
         "trace_id": "completion-trace-8",
         "trigger_mode": "invoked",
         "turn_wait_ms": 0,
@@ -2553,7 +2553,7 @@
         "request_id": "37100103",
         "response_build_ms": 2,
         "route": "head_hit",
-        "total_duration_ms": 4,
+        "total_duration_ms": 3,
         "trace_id": "completion-trace-9",
         "trigger_mode": "invoked",
         "turn_wait_ms": 0,
@@ -2702,8 +2702,8 @@
         "completion_duration_ms": {
           "count": 9,
           "p50": 3.0,
-          "p95": 6.0,
-          "p99": 6.0
+          "p95": 4.0,
+          "p99": 4.0
         },
         "completion_stage_collect_ms": {
           "count": 9,
@@ -2731,15 +2731,15 @@
         },
         "completion_stage_prepare_apply_age_at_start_ms": {
           "count": 9,
-          "p50": 32.0,
-          "p95": 66.0,
-          "p99": 66.0
+          "p50": 31.0,
+          "p95": 60.0,
+          "p99": 60.0
         },
         "completion_stage_prepare_apply_age_at_terminal_ms": {
           "count": 9,
-          "p50": 32.0,
-          "p95": 67.0,
-          "p99": 67.0
+          "p50": 31.0,
+          "p95": 61.0,
+          "p99": 61.0
         },
         "completion_stage_prepare_stateful_ms": {
           "count": 9,
@@ -2762,14 +2762,14 @@
         "completion_stage_response_build_ms": {
           "count": 9,
           "p50": 2.0,
-          "p95": 4.0,
-          "p99": 4.0
+          "p95": 2.0,
+          "p99": 2.0
         },
         "completion_stage_server_handler_exec_ms": {
           "count": 9,
           "p50": 4.0,
-          "p95": 6.0,
-          "p99": 6.0
+          "p95": 4.0,
+          "p99": 4.0
         },
         "completion_stage_snapshot_read_ms": {
           "count": 9,
@@ -2887,15 +2887,15 @@
         },
         "intellisense_v2_deps_update_apply_ms": {
           "count": 1,
-          "p50": 1.0,
-          "p95": 1.0,
-          "p99": 1.0
+          "p50": 0.0,
+          "p95": 0.0,
+          "p99": 0.0
         },
         "intellisense_v2_deps_update_build_ms": {
           "count": 1,
-          "p50": 2544.0,
-          "p95": 2544.0,
-          "p99": 2544.0
+          "p50": 2640.0,
+          "p95": 2640.0,
+          "p99": 2640.0
         },
         "intellisense_v2_drilldown_saturation_sample_latency_ms_origin_lsp_reason_exec_work_class_background": {
           "count": 2,
@@ -2912,8 +2912,8 @@
         "intellisense_v2_drilldown_saturation_sample_latency_ms_origin_lsp_reason_queue_wait_work_class_background": {
           "count": 5,
           "p50": 0.0,
-          "p95": 0.0,
-          "p99": 0.0
+          "p95": 2.0,
+          "p99": 2.0
         },
         "intellisense_v2_drilldown_saturation_sample_latency_ms_origin_lsp_reason_queue_wait_work_class_interactive": {
           "count": 3,
@@ -2929,7 +2929,7 @@
         },
         "intellisense_v2_drilldown_saturation_sample_latency_ms_origin_runtime_reason_queue_wait_work_class_background": {
           "count": 3,
-          "p50": 1.0,
+          "p50": 0.0,
           "p95": 2.0,
           "p99": 2.0
         },
@@ -2953,9 +2953,9 @@
         },
         "intellisense_v2_drilldown_stage_latency_ms_origin_lsp_operation_diagnostics_stage_runtime_snapshot_with_deps": {
           "count": 1,
-          "p50": 0.0,
-          "p95": 0.0,
-          "p99": 0.0
+          "p50": 2.0,
+          "p95": 2.0,
+          "p99": 2.0
         },
         "intellisense_v2_drilldown_stage_latency_ms_origin_lsp_operation_diagnostics_stage_runtime_wait_for_file_version": {
           "count": 1,
@@ -2990,8 +2990,8 @@
         "intellisense_v2_drilldown_stage_latency_ms_origin_runtime_operation_wait_for_file_version_stage_runtime_queue_wait": {
           "count": 4,
           "p50": 0.0,
-          "p95": 1.0,
-          "p99": 1.0
+          "p95": 0.0,
+          "p99": 0.0
         },
         "intellisense_v2_ir_query_other_ms": {
           "count": 0,
@@ -3218,8 +3218,8 @@
         "intellisense_v2_runtime_wait_for_file_version_queue_wait_ms": {
           "count": 4,
           "p50": 0.0,
-          "p95": 1.0,
-          "p99": 1.0
+          "p95": 0.0,
+          "p99": 0.0
         },
         "intellisense_v2_semantic_diagnostics_query_collect_ms": {
           "count": 0,
@@ -3265,9 +3265,9 @@
         },
         "intellisense_v2_snapshot_diagnostics_ms": {
           "count": 1,
-          "p50": 0.0,
-          "p95": 0.0,
-          "p99": 0.0
+          "p50": 2.0,
+          "p95": 2.0,
+          "p99": 2.0
         },
         "intellisense_v2_syntax_diagnostics_query_ms": {
           "count": 0,
@@ -3317,9 +3317,9 @@
     "measured_head_hit_traces": 4,
     "measured_latency_ms": {
       "count": 4,
-      "p50": 8.0,
-      "p95": 11.0,
-      "p99": 11.0
+      "p50": 7.0,
+      "p95": 7.0,
+      "p99": 7.0
     },
     "measured_non_empty_samples": 4,
     "measured_ok_non_empty_traces": 4,
@@ -3358,8 +3358,8 @@
     "warmup_latency_ms": {
       "count": 5,
       "p50": 7.0,
-      "p95": 9.0,
-      "p99": 9.0
+      "p95": 7.0,
+      "p99": 7.0
     },
     "warmup_non_empty_samples": 5
   },
@@ -3610,7 +3610,7 @@
       "version": 1
     },
     {
-      "elapsed_ms": 6,
+      "elapsed_ms": 7,
       "label_count": 86,
       "labels": [
         "АгентскиеУслуги",
@@ -3731,7 +3731,7 @@
       "version": 1
     },
     {
-      "elapsed_ms": 9,
+      "elapsed_ms": 7,
       "label_count": 86,
       "labels": [
         "АгентскиеУслуги",
@@ -3840,9 +3840,9 @@
         "queue_outcome": null,
         "queued_completion_ahead": null,
         "request_id": "37100003",
-        "response_build_ms": 3,
+        "response_build_ms": 2,
         "route": "head_hit",
-        "total_duration_ms": 4,
+        "total_duration_ms": 3,
         "trace_id": "completion-trace-4",
         "trigger_mode": "invoked",
         "turn_wait_ms": 0,

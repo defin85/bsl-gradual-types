@@ -440,6 +440,7 @@ async fn spawn_live_lsp_transport_harness(
     let (server_read, server_write) = tokio::io::split(server_stream);
     let server_task = tokio::spawn(async move {
         Server::new(server_read, server_write, socket)
+            .concurrency_level(crate::DEFAULT_LSP_TRANSPORT_CONCURRENCY_LEVEL)
             .serve(service)
             .await;
     });
@@ -14956,6 +14957,144 @@ async fn p33_completion_service_first_poll_ignores_blocking_did_change_parse_del
     );
 
     drain_task.abort();
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn p33_completion_transport_first_poll_stays_short_under_completion_burst() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const FIXTURE: &str = "Процедура Тест()\n    ДляCompletion = Объект.\nКонецПроцедуры\n";
+    const SATURATING_REQUESTS: i64 = 4;
+    const FIFTH_REQUEST_ID: i64 = 40_654;
+    const COMPLETION_DELAY_MS: u64 = 350;
+    const FIRST_POLL_BUDGET_MS: u64 = 150;
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+    let _completion_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_COMPLETION_DELAY_MS",
+        &COMPLETION_DELAY_MS.to_string(),
+    );
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
+    initialize_live_lsp_transport(&mut harness).await;
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let uri = Url::parse("file:///test_p33_completion_transport_burst.bsl").expect("test uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: FIXTURE.to_string(),
+        },
+    };
+    server.did_open(did_open).await;
+    server.sync_v2_globals().await;
+
+    let completion_position = find_utf16_position_after_marker(FIXTURE, "ДляCompletion = Объект.");
+    let completion_request = |request_id: i64| {
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "textDocument/completion",
+            "params": CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: completion_position,
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: Some(CompletionContext {
+                    trigger_kind: CompletionTriggerKind::INVOKED,
+                    trigger_character: None,
+                }),
+            },
+        })
+    };
+
+    for request_id in 0..SATURATING_REQUESTS {
+        harness.write_message(&completion_request(40_650 + request_id)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let completion_response = harness
+        .send_request(
+            FIFTH_REQUEST_ID,
+            "textDocument/completion",
+            CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: completion_position,
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: Some(CompletionContext {
+                    trigger_kind: CompletionTriggerKind::INVOKED,
+                    trigger_character: None,
+                }),
+            },
+        )
+        .await;
+    assert!(
+        completion_response.get("result").is_some(),
+        "completion request under burst must still complete"
+    );
+
+    let trace = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let timeline = live_transport_get_completion_timeline(&mut harness, 40_699, 16).await;
+            let traces = timeline
+                .get("traces")
+                .and_then(|value| value.as_array())
+                .expect("completion timeline traces array");
+            if let Some(trace) = traces.iter().find(|trace| {
+                trace.get("request_id").and_then(|value| value.as_str())
+                    == Some(&FIFTH_REQUEST_ID.to_string())
+            }) {
+                break trace.clone();
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("fifth completion trace must appear in timeline");
+
+    let service_future_to_first_poll_wait_ms =
+        completion_timeline_server_edge_u64(&trace, "service_future_to_first_poll_wait_ms")
+            .expect("service_future_to_first_poll_wait_ms");
+    assert!(
+        service_future_to_first_poll_wait_ms <= FIRST_POLL_BUDGET_MS,
+        "transport slot backlog must not delay fifth completion before first poll under a short completion burst, trace={trace:?}"
+    );
+
+    harness.shutdown().await;
 }
 
 #[allow(clippy::await_holding_lock)]

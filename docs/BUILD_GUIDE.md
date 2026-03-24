@@ -1,135 +1,60 @@
-# 🏗️ Build Guide - BSL Gradual Types
+# Build Guide
 
-## Архитектура после рефакторинга
+Канонический build/test/runbook для агента находится в `docs/agent/verification.md`. Этот файл концентрируется на build/package paths и итоговых артефактах.
 
-### 🎯 Правильное разделение ответственности:
-
-#### Frontend (WASM UI)
-- **Цель**: Leptos компоненты для браузера
-- **Файлы**: `frontend/src/lib.rs` с `wasm-bindgen` entry point
-- **Сборка**: `trunk build` → WASM + HTML + CSS в `target/site/`
-- **Нет binary targets** - только library с cdylib
-
-#### Backend (API + LSP)
-- **Цель**: Axum веб-сервер + Language Server Protocol
-- **Файлы**: 
-  - `backend/src/main.rs` → `bsl-web-server` (веб API + статические файлы)
-  - `backend/src/bin/lsp_server.rs` → LSP сервер
-- **Раздает**: WASM файлы из `target/site/` как статику
-
-#### Shared (WASM-совместимые типы)
-- **Цель**: Доменная логика для frontend и backend
-- **Особенность**: Совместима с WASM (без `std` зависимостей)
-
-## 🔨 Команды сборки
-
-### Разработка
+## Workspace build
 
 ```bash
-# 1. Собрать frontend (WASM)
-cd frontend
-trunk build
-
-# 2. Собрать backend
-cd ..
-cargo build
-
-# 3. Запустить веб-сервер
-./target/debug/bsl-web-server --port 8080
-
-# 4. Открыть http://127.0.0.1:8080
+cargo build --workspace
+cargo build --release --workspace
 ```
 
-### Production
+## Выборочные бинарные сборки
 
 ```bash
-# 1. Release сборка frontend
-cd frontend
-trunk build --release
-
-# 2. Release сборка backend
-cd ..
-cargo build --release
-
-# 3. Запуск production сервера
-./target/release/bsl-web-server --port 8080
+cargo build -p bsl-backend --bin bsl-web-server --release
+cargo build -p bsl-backend --bin bsl-lsp-server --release
+cargo build -p bsl-cli --release
+cargo build -p bsl-agent --release
 ```
 
-### LSP сервер
+Ожидаемые release binaries:
+
+- `target/release/bsl-web-server`
+- `target/release/bsl-lsp-server`
+- `target/release/bsl-cli`
+- `target/release/bsl-agent`
+
+## Frontend / WASM
 
 ```bash
-# Сборка LSP сервера
-cargo build --release --bin lsp-server
-
-# Запуск
-./target/release/lsp-server
+(cd frontend && NO_COLOR=true trunk build --release)
 ```
 
-## 🔧 Отдельные компоненты
+Output:
+
+- `target/site/` — static assets for web UI
+
+## VS Code extension package
 
 ```bash
-# Только проверка компиляции
-cargo check --workspace
-
-# Сборка конкретного крейта
-cargo build -p bsl-frontend
-cargo build -p bsl-backend  
-cargo build -p bsl-shared
-cargo build -p bsl-cli
-
-# Тесты
-cargo test --workspace
+npm --prefix ./vscode-extension install
+npm --prefix ./vscode-extension run package
 ```
 
-## 📁 Структура после рефакторинга
+Это собирает extension bundle, копирует bundled binaries и подготавливает `.vsix` packaging flow.
 
-```
-bsl-gradual-types/
-├── frontend/           # Leptos WASM UI
-│   ├── src/lib.rs     # wasm-bindgen entry point  
-│   ├── index.html     # Trunk template
-│   └── Cargo.toml     # только [lib] crate-type = ["cdylib"]
-│
-├── backend/           # Axum API + LSP server
-│   ├── src/main.rs    # веб-сервер (раздает WASM + API)
-│   ├── src/bin/lsp_server.rs  # LSP сервер
-│   └── Cargo.toml     # [lib] + [[bin]] targets
-│
-├── shared/            # WASM-совместимые типы
-│   ├── src/lib.rs     # доменная логика
-│   └── Cargo.toml     # без std зависимостей
-│
-├── target/site/       # Trunk собирает WASM сюда
-│   ├── index.html     # HTML + JS loader
-│   ├── *.wasm         # WASM модуль
-│   └── *.js           # JS bindings
-│
-└── target/release/    # Rust executables
-    ├── bsl-web-server # веб API + статика
-    └── lsp-server     # Language Server
+## Smoke после сборки
+
+```bash
+cargo run -p bsl-cli -- --help
+cargo run -p bsl-backend --bin bsl-web-server -- --help
+cargo run -p bsl-backend --bin bsl-lsp-server -- --help
+cargo run -p bsl-agent -- --help
 ```
 
-## ✅ Преимущества рефакторинга
+## Связанные документы
 
-1. **Четкое разделение ответственности**
-   - Frontend = UI (WASM)
-   - Backend = API + LSP (native)
-
-2. **Стандартные практики**
-   - Leptos apps = только library
-   - Trunk работает с lib.rs
-   - Нет коллизий имен файлов
-
-3. **Простая сборка**
-   - `trunk build` для UI
-   - `cargo build` для сервера
-   - Один endpoint для всего
-
-4. **Production ready**
-   - Оптимизированные WASM бинарии
-   - Статический веб-сервер
-   - LSP интеграция
-
-## 🚀 Готово к разработке!
-
-Архитектура теперь соответствует best practices и готова к дальнейшему развитию.
+- `agent/verification.md` — canonical verify path
+- `guides/development-workflow.md` — developer workflow
+- `../bsl-agent/README.md` — operational details для MCP server

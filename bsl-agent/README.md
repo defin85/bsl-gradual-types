@@ -136,25 +136,26 @@ If your MCP client can call tools but cannot run shell commands, use the MCP too
 
 ## Example Codex MCP config (stdio)
 
-The checked-in repository [`.mcp.json`](../.mcp.json) now includes a Windows `bsl-agent` preset that points at the release binary and enables the read-only HTTP UI on an auto-port. Adjust `command` and env overrides to match your local machine.
+The checked-in repository [`.mcp.json`](../.mcp.json) is a portable example-only config. The canonical onboarding path for Codex lives in [`docs/agent/codex-setup.md`](../docs/agent/codex-setup.md).
 
 ```toml
 [mcp_servers.bsl_agent]
-command = "/home/egor/code/bsl-gradual-types/target/release/bsl-agent"
-cwd = "/home/egor/code/DO_Rolf_PT"
+command = "cargo"
+args = ["run", "-p", "bsl-agent", "--"]
 env = {
   RUST_LOG = "bsl_agent=info",
-  BSL_CACHE_DIR = "/home/egor/.cache/bsl-gradual-types",
   BSL_AGENT_HTTP_ADDR = "127.0.0.1:0",
 }
 ```
 
+Keep machine-specific absolute paths, extra servers and secrets in personal local config, not in tracked repo files.
+
 If your MCP client supports `cwd`, point it at the target project root to keep the default log file under `<project>/.bsl-agent/mcp.log`; otherwise use `BSL_AGENT_LOG_DIR`.
 
-With this config the stable default log path is:
+With this config the default log path is:
 
 ```text
-/home/egor/code/DO_Rolf_PT/.bsl-agent/mcp.log
+<project>/.bsl-agent/mcp.log
 ```
 
 ## Smoke-check for stdio logging
@@ -162,19 +163,19 @@ With this config the stable default log path is:
 Create the log file without `workspace_open`:
 
 ```bash
-tmpdir="$(mktemp -d)" && cd "$tmpdir" && RUST_LOG=bsl_agent=info /home/egor/code/bsl-gradual-types/target/debug/bsl-agent </dev/null >/tmp/bsl-agent-stdout.txt 2>/tmp/bsl-agent-stderr.txt; test -f "$tmpdir/.bsl-agent/mcp.log" && tail -n 20 "$tmpdir/.bsl-agent/mcp.log"
+repo_root="$(pwd)" && tmpdir="$(mktemp -d)" && cd "$tmpdir" && RUST_LOG=bsl_agent=info "$repo_root/target/debug/bsl-agent" </dev/null >/tmp/bsl-agent-stdout.txt 2>/tmp/bsl-agent-stderr.txt; test -f "$tmpdir/.bsl-agent/mcp.log" && tail -n 20 "$tmpdir/.bsl-agent/mcp.log"
 ```
 
 Check the explicit file override:
 
 ```bash
-tmpdir="$(mktemp -d)" && logfile="$tmpdir/custom-mcp.log" && cd "$tmpdir" && RUST_LOG=bsl_agent=info BSL_AGENT_LOG_FILE="$logfile" /home/egor/code/bsl-gradual-types/target/debug/bsl-agent </dev/null >/tmp/bsl-agent-stdout.txt 2>/tmp/bsl-agent-stderr.txt; test -f "$logfile" && tail -n 20 "$logfile"
+repo_root="$(pwd)" && tmpdir="$(mktemp -d)" && logfile="$tmpdir/custom-mcp.log" && cd "$tmpdir" && RUST_LOG=bsl_agent=info BSL_AGENT_LOG_FILE="$logfile" "$repo_root/target/debug/bsl-agent" </dev/null >/tmp/bsl-agent-stdout.txt 2>/tmp/bsl-agent-stderr.txt; test -f "$logfile" && tail -n 20 "$logfile"
 ```
 
 Reproduce the fail-fast path:
 
 ```bash
-tmpdir="$(mktemp -d)" && blocker="$tmpdir/not-a-dir" && printf blocker >"$blocker" && cd "$tmpdir" && BSL_AGENT_LOG_DIR="$blocker" /home/egor/code/bsl-gradual-types/target/debug/bsl-agent </dev/null >/tmp/bsl-agent-stdout.txt 2>/tmp/bsl-agent-stderr.txt; cat /tmp/bsl-agent-stderr.txt
+repo_root="$(pwd)" && tmpdir="$(mktemp -d)" && blocker="$tmpdir/not-a-dir" && printf blocker >"$blocker" && cd "$tmpdir" && BSL_AGENT_LOG_DIR="$blocker" "$repo_root/target/debug/bsl-agent" </dev/null >/tmp/bsl-agent-stdout.txt 2>/tmp/bsl-agent-stderr.txt; cat /tmp/bsl-agent-stderr.txt
 ```
 
 ## LLM usage notes

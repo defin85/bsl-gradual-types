@@ -1,0 +1,85 @@
+# Agent Verification Runbook
+
+## Prerequisites
+
+- Rust toolchain для workspace команд
+- Node.js для `vscode-extension/`
+- `cargo`, `python3`, `npm`
+- `trunk` нужен только для frontend/WASM сборок
+- Syntax Helper и config dump нужны только для сценариев, где они явно указаны
+
+## Runtime Surface Smoke
+
+Эти команды проверяют, что живые бинарные surfaces существуют и стартуют с корректным CLI contract.
+
+```bash
+cargo run -p bsl-cli -- --help
+cargo run -p bsl-backend --bin bsl-web-server -- --help
+cargo run -p bsl-backend --bin bsl-lsp-server -- --help
+cargo run -p bsl-agent -- --help
+```
+
+Expected outcome:
+
+- каждая команда завершается `0`
+- в help output используются текущие names `bsl-cli`, `bsl-web-server`, `bsl-lsp-server`, `bsl-agent`
+
+## Default Smoke Path
+
+```bash
+./scripts/run-agent-readiness-checks.sh
+
+python3 -m unittest \
+  scripts/test-agent-readiness.py \
+  scripts/test-intellisense-smoke-gate.py \
+  scripts/test-intellisense-readiness-assets.py \
+  scripts/test-ci-openspec-governance-workflow.py
+
+./scripts/run-intellisense-tests.sh smoke
+```
+
+Expected outcome:
+
+- canonical agent docs, instruction layering и onboarding commands проходят fail-closed validation
+- shipped smoke selectors и readiness assets согласованы
+- cross-adapter smoke suite проходит без внешних фикстур
+
+## Manual Or Broader Validation
+
+- VS Code extension compile/lint/tests:
+
+```bash
+npm --prefix ./vscode-extension run compile:fast
+npm --prefix ./vscode-extension run lint
+npm --prefix ./vscode-extension test
+```
+
+- Frontend/WASM build:
+
+```bash
+(cd frontend && NO_COLOR=true trunk build --release)
+```
+
+- Workspace-wide Rust verification:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+```
+
+## Heavy Or Readiness Gates
+
+- Canonical perf/readiness path:
+
+```bash
+./scripts/run-intellisense-perf.sh
+```
+
+- Active checked-in readiness bundle for current-revision completion changes:
+
+```bash
+./scripts/validate-v2-completion-gates.sh
+```
+
+Use these only when the task explicitly needs readiness/perf evidence.

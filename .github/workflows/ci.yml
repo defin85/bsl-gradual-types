@@ -1,8 +1,61 @@
 name: CI
 
 on:
-  # Temporary pause of automatic CI runs for this repository.
   workflow_dispatch:
+  pull_request:
+    paths:
+      - "AGENTS.md"
+      - "README.md"
+      - "CONTRIBUTING.md"
+      - "backend/AGENTS.md"
+      - "bsl-agent/AGENTS.md"
+      - "bsl-agent/README.md"
+      - "vscode-extension/AGENTS.md"
+      - "docs/README.md"
+      - "docs/BUILD_GUIDE.md"
+      - "docs/agent/**"
+      - "docs/guides/development-workflow.md"
+      - "openspec/changes/**"
+      - ".github/workflows/ci.yml"
+      - ".mcp.json"
+      - ".agents/skills/**"
+      - "scripts/check-agent-readiness.py"
+      - "scripts/check-doc-paths.py"
+      - "scripts/doc-path-check-targets.txt"
+      - "scripts/run-agent-readiness-checks.sh"
+      - "scripts/test-agent-readiness.py"
+      - "scripts/test-ci-openspec-governance-workflow.py"
+      - "scripts/test-intellisense-readiness-assets.py"
+      - "scripts/test-intellisense-smoke-gate.py"
+      - "scripts/run-intellisense-tests.sh"
+  push:
+    branches:
+      - master
+    paths:
+      - "AGENTS.md"
+      - "README.md"
+      - "CONTRIBUTING.md"
+      - "backend/AGENTS.md"
+      - "bsl-agent/AGENTS.md"
+      - "bsl-agent/README.md"
+      - "vscode-extension/AGENTS.md"
+      - "docs/README.md"
+      - "docs/BUILD_GUIDE.md"
+      - "docs/agent/**"
+      - "docs/guides/development-workflow.md"
+      - "openspec/changes/**"
+      - ".github/workflows/ci.yml"
+      - ".mcp.json"
+      - ".agents/skills/**"
+      - "scripts/check-agent-readiness.py"
+      - "scripts/check-doc-paths.py"
+      - "scripts/doc-path-check-targets.txt"
+      - "scripts/run-agent-readiness-checks.sh"
+      - "scripts/test-agent-readiness.py"
+      - "scripts/test-ci-openspec-governance-workflow.py"
+      - "scripts/test-intellisense-readiness-assets.py"
+      - "scripts/test-intellisense-smoke-gate.py"
+      - "scripts/run-intellisense-tests.sh"
 
 permissions: read-all
 
@@ -71,6 +124,16 @@ jobs:
               echo "Skipping protected-assets gate for ${change_id}: manifest missing."
             fi
           done
+
+  agent_readiness_docs_gate:
+    name: Agent readiness docs gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run canonical agent-readiness checks
+        run: ./scripts/run-agent-readiness-checks.sh
+      - name: Validate agent-readiness regression tests
+        run: python3 -m unittest scripts/test-agent-readiness.py
 
   intellisense_smoke_gate:
     name: IntelliSense smoke gate

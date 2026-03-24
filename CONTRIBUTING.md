@@ -166,8 +166,8 @@ npm test
 ## 🧪 Testing Guidelines
 
 ### Test Categories
-1. **Unit Tests** (`src/` files) - Тестирование отдельных модулей
-2. **Integration Tests** (`tests/` files) - Тестирование взаимодействия компонентов
+1. **Unit Tests** (`backend/src/`, `bsl-agent/src/`, `cli/src/`, `shared/src/`) - Тестирование отдельных модулей
+2. **Integration Tests** (`backend/tests/`, `bsl-agent/tests/`, `vscode-extension/src/test/`) - Тестирование взаимодействия компонентов
 3. **Performance Tests** (benchmarks) - Тестирование производительности
 4. **End-to-End Tests** - Тестирование полных сценариев
 
@@ -229,14 +229,14 @@ pub fn my_function(param1: Type1, param2: Type2) -> Result<ReturnType> {
 ## 🚦 Pull Request Process
 
 ### Before Submitting
-1. ✅ Убедитесь что `cargo test` проходит
-2. ✅ Запустите `cargo fmt` и `cargo clippy`
-3. ✅ Обновите документацию если нужно
+1. ✅ Убедитесь, что обязательный verify path из `docs/agent/verification.md` пройден
+2. ✅ Запустите `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings` и `cargo test --workspace --locked`
+3. ✅ Обновите документацию, если меняются команды, entry points или onboarding
 4. ✅ Добавьте тесты для новой функциональности
 5. ✅ Обновите CHANGELOG.md
 
 ### PR Review Process
-1. **GitHub Actions** - workflow `CI` является default entrypoint для OpenSpec governance gate по затронутым `openspec/changes/<id>` (см. `.github/workflows/ci.yml`).
+1. **GitHub Actions** - workflow `CI` является default readiness gate для OpenSpec governance и agent-facing smoke checks по затронутым изменениям (см. `.github/workflows/ci.yml`).
 2. **Code Review** - Минимум 1 approve от maintainer
 3. **Testing** - Comprehensive testing в разных окружениях
 4. **Documentation** - Проверка актуальности документации

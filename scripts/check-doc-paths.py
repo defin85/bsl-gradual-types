@@ -38,8 +38,13 @@ SKIP_PREFIXES = (
 )
 
 SKIP_PATH_PREFIXES = (
+    "feature/",
+    "bugfix/",
+    "hotfix/",
+    "release/",
     "target/",
     "node_modules/",
+    "workspace/",
 )
 
 SKIP_PATH_SUFFIXES = (
@@ -82,8 +87,7 @@ def load_targets(root: Path, targets_path: Path) -> list[Path]:
 
 
 def normalize_candidate(token: str) -> str | None:
-    token = token.strip().strip(",.;:")  # basic punctuation
-    token = token.strip("()[]{}<>")
+    token = token.strip().strip(",;:")  # basic punctuation
     token = token.strip("\"'")
 
     if not token:
@@ -94,6 +98,14 @@ def normalize_candidate(token: str) -> str | None:
 
     if token.startswith("~/") or token.startswith("/"):
         return None
+
+    if "<" in token or ">" in token:
+        return None
+
+    if "=" in token:
+        return None
+
+    token = token.strip("()[]{}")
 
     if token.startswith("@/"):
         token = token[2:]

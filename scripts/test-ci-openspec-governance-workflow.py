@@ -47,6 +47,17 @@ class OpenSpecGovernanceWorkflowTest(unittest.TestCase):
         ):
             self.assertIn(required_snippet, self.content)
 
+    def test_active_ci_workflow_runs_agent_readiness_docs_gate(self) -> None:
+        for required_snippet in (
+            "agent_readiness_docs_gate:",
+            "Agent readiness docs gate",
+            "./scripts/run-agent-readiness-checks.sh",
+            "python3 -m unittest scripts/test-agent-readiness.py",
+            '      - "docs/agent/**"',
+            '      - "scripts/run-agent-readiness-checks.sh"',
+        ):
+            self.assertIn(required_snippet, self.content)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

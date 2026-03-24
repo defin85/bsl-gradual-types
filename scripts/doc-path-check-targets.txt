@@ -4,10 +4,16 @@
 # - одна строка = glob (от корня репозитория)
 # - пустые строки и строки, начинающиеся с `#`, игнорируются
 
-architectural_report.md
+AGENTS.md
+README.md
+CONTRIBUTING.md
+.github/copilot-instructions.md
+backend/AGENTS.md
 backend/src/README.md
+bsl-agent/AGENTS.md
+bsl-agent/README.md
+docs/README.md
+docs/BUILD_GUIDE.md
+docs/agent/*.md
 docs/guides/development-workflow.md
-docs/guides/roadmap-verification.md
-docs/guides/tooling-guide.md
-docs/guides/type-lookup-architecture.md
-docs/guides/unified_documentation.md
+vscode-extension/AGENTS.md

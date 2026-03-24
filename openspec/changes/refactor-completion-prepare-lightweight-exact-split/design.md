@@ -19,6 +19,15 @@ Current-revision fast lane уже сделал `CompletionHeadArtifact` first-cl
 - Не заменять exact truth на head truth для non-completion запросов.
 - Не вводить stale, degraded или keyword fallback.
 
+## Relationship with `refactor-current-revision-readiness-fast-lane`
+Этот change является consumer-side follow-up к `refactor-current-revision-readiness-fast-lane`, а не его заменой:
+- `refactor-current-revision-readiness-fast-lane` задаёт producer-side инварианты `applied_version` / `CompletionHeadArtifact` и stabilizes post-handoff readiness gate;
+- текущий change убирает оставшуюся exact-first зависимость из completion request path, когда producer-side head truth уже доступен.
+
+Execution ordering:
+- narrowing public lightweight boundary можно доводить параллельно;
+- финальный shipped gate/evidence closure для `p37` + `p38` MUST ждать зелёного producer-side fast lane (`gy9c.13`, `gy9c.14`), иначе split-prepare acceptance будет зависеть от незакрытого runtime/readiness дефекта другого change.
+
 ## Решение
 
 ### 1. Completion получает отдельный prepare contract

@@ -181,10 +181,17 @@ Representative matrix:
 
 ---
 
-### `validate-v2-completion-gates.sh` - Readiness gates для `refactor-completion-prepare-lightweight-exact-split`
+### `validate-v2-completion-gates.sh` - Readiness gates для current-revision completion changes
 
 **Назначение:** воспроизводимый fail-fast прогон checked-in readiness gates
-для `refactor-completion-prepare-lightweight-exact-split`:
+для active current-revision completion changes.
+
+По умолчанию script собирает producer-side evidence для
+`refactor-current-revision-readiness-fast-lane`; consumer-side split-prepare
+artifacts можно собрать тем же entry point через override
+`CHANGE_ID=refactor-completion-prepare-lightweight-exact-split`.
+
+Default selector set:
 - contract-sync guards (`scripts/test-intellisense-smoke-gate.py`,
   `scripts/test-intellisense-readiness-assets.py`) проверяют, что
   `quality-gates.json`, CI и default smoke path описывают один и тот же shipped
@@ -195,7 +202,7 @@ Representative matrix:
 - real-module post-handoff readiness gate через
   `cargo test -p bsl-backend --bin bsl-lsp-server p38_real_conf_big_revision_churn_completion_perf_report_live -- --nocapture`
   с report path
-  `backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-real-conf-big-revision-churn-completion-perf-live.json`;
+  `backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-real-conf-big-revision-churn-completion-perf-live.json`;
 - fail-closed budget enforcement для mandatory операций `completion`, `hover`,
   `definition`, `type_at_position`, `members`;
 - strict-валидация change через OpenSpec.
@@ -215,14 +222,19 @@ tests/contracts/docs.
 ./scripts/validate-v2-completion-gates.sh
 ```
 
+Override для split-prepare evidence:
+```bash
+CHANGE_ID=refactor-completion-prepare-lightweight-exact-split ./scripts/validate-v2-completion-gates.sh
+```
+
 **Важно:** скрипт не зависит от `.github/workflows/*` и предназначен для локального запуска или внешнего CI (например, Jenkins/GitLab Runner).
 
 **Артефакты:**
-- `backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-readiness-gate.json`
-- `backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-readiness-gate.md`
-- `backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-real-conf-big-revision-churn-completion-perf-live.json`
-- `backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-real-conf-big-revision-churn-completion-perf-live.md`
-- `backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-openspec-validate.log`
+- `backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-readiness-gate.json`
+- `backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-readiness-gate.md`
+- `backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-real-conf-big-revision-churn-completion-perf-live.json`
+- `backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-real-conf-big-revision-churn-completion-perf-live.md`
+- `backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-openspec-validate.log`
 
 ---
 

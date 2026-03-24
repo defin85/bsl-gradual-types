@@ -19729,7 +19729,8 @@ fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
     let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
     const PROFILE_NAME: &str =
         "p38_real_conf_big_post_handoff_readiness_completion_perf_report_live";
-    const CHANGE_ID: &str = "refactor-completion-prepare-lightweight-exact-split";
+    let change_id = std::env::var("CHANGE_ID")
+        .unwrap_or_else(|_| "refactor-current-revision-readiness-fast-lane".to_string());
     const WARMUP_REQUESTS: usize = 1;
     const MEASURE_REQUESTS: usize = 10;
     const DID_CHANGE_BURST_NOTIFICATIONS: usize = 4;
@@ -20473,7 +20474,7 @@ fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
         .unwrap_or(0);
 
     let report = serde_json::json!({
-        "change_id": CHANGE_ID,
+        "change_id": change_id,
         "profile": PROFILE_NAME,
         "schema_version": 1,
         "configuration_path": conf_big_root,

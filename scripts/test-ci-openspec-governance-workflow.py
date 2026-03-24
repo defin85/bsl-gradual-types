@@ -37,6 +37,19 @@ class OpenSpecGovernanceWorkflowTest(unittest.TestCase):
         ):
             self.assertIn(required_snippet, self.content)
 
+    def test_active_ci_workflow_triggers_for_intellisense_runtime_and_evidence_surfaces(
+        self,
+    ) -> None:
+        for required_snippet in (
+            '      - "backend/src/bin/lsp_server/server/**"',
+            '      - "bsl-runtime/src/system/basic_observability/**"',
+            '      - "backend/tests/perf/reports/**"',
+            '      - "scripts/validate-v2-completion-gates.sh"',
+            '      - "scripts/README.md"',
+            '      - "scripts/run-intellisense-tests.sh"',
+        ):
+            self.assertIn(required_snippet, self.content)
+
     def test_active_ci_workflow_runs_governance_scripts_for_touched_changes(self) -> None:
         for required_snippet in (
             'sed -n \'s#^openspec/changes/\\([^/]*\\)/.*#\\1#p\'',

@@ -15,6 +15,9 @@ on:
       - "docs/BUILD_GUIDE.md"
       - "docs/agent/**"
       - "docs/guides/development-workflow.md"
+      - "backend/src/bin/lsp_server/server/**"
+      - "bsl-runtime/src/system/basic_observability/**"
+      - "backend/tests/perf/reports/**"
       - "openspec/changes/**"
       - ".github/workflows/ci.yml"
       - ".mcp.json"
@@ -27,6 +30,8 @@ on:
       - "scripts/test-ci-openspec-governance-workflow.py"
       - "scripts/test-intellisense-readiness-assets.py"
       - "scripts/test-intellisense-smoke-gate.py"
+      - "scripts/validate-v2-completion-gates.sh"
+      - "scripts/README.md"
       - "scripts/run-intellisense-tests.sh"
   push:
     branches:
@@ -43,6 +48,9 @@ on:
       - "docs/BUILD_GUIDE.md"
       - "docs/agent/**"
       - "docs/guides/development-workflow.md"
+      - "backend/src/bin/lsp_server/server/**"
+      - "bsl-runtime/src/system/basic_observability/**"
+      - "backend/tests/perf/reports/**"
       - "openspec/changes/**"
       - ".github/workflows/ci.yml"
       - ".mcp.json"
@@ -55,6 +63,8 @@ on:
       - "scripts/test-ci-openspec-governance-workflow.py"
       - "scripts/test-intellisense-readiness-assets.py"
       - "scripts/test-intellisense-smoke-gate.py"
+      - "scripts/validate-v2-completion-gates.sh"
+      - "scripts/README.md"
       - "scripts/run-intellisense-tests.sh"
 
 permissions: read-all

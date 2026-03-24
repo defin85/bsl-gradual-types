@@ -198,6 +198,10 @@ Default selector set:
   `quality-gates.json`, CI и default smoke path описывают один и тот же shipped
   selector set;
 - shipped cross-adapter smoke: LSP/runtime/web/MCP/CLI/module-context slices, включая current-revision stale proofs beyond completion и regression на removal of bare-identifier fallback;
+- shipped `documentSymbol` isolation smoke в `./scripts/run-intellisense-tests.sh smoke`:
+  bounded outcomes `unavailable` / `latest_ready`, per-file supersession,
+  same-file outline burst против `completion`, `hover`, `signatureHelp`,
+  `definition`, а также same-version `didSave` refresh на default path;
 - authoritative representative-matrix perf gate через `./scripts/run-intellisense-perf.sh`
   в blocking mode для `small` / `large` / `churn`;
 - для `refactor-current-revision-readiness-fast-lane`: real-module post-handoff readiness gate через
@@ -213,7 +217,8 @@ Default selector set:
 - для `refactor-document-symbol-interactive-isolation`: representative same-file mixed-load gate
   `p39_real_conf_big_document_symbol_mixed_load_gate_live` с change-specific report path
   `backend/tests/perf/reports/refactor-document-symbol-interactive-isolation-real-conf-big-document-symbol-mixed-load-live.json`,
-  который прогоняет `didChange`/`didSave` + burst `documentSymbol` + `completion`
+  который на real module делает честный `didOpen` outline bootstrap, затем
+  прогоняет `didChange`/`didSave` + burst `documentSymbol` + `completion`
   и fail-ит при outline-induced starvation interactive ingress;
 - fail-closed budget enforcement для mandatory операций `completion`, `hover`,
   `definition`, `type_at_position`, `members`;
@@ -247,6 +252,9 @@ CHANGE_ID=refactor-document-symbol-interactive-isolation ./scripts/validate-v2-c
 При override для split-prepare script автоматически расширяет `REAL_MODULE_PROFILES`
 до `warm churn`; для documentSymbol isolation используется `outline`.
 В обоих случаях script пишет per-profile summaries рядом с report JSON.
+Default smoke path уже покрывает mandatory `documentSymbol` isolation regressions;
+override `CHANGE_ID=refactor-document-symbol-interactive-isolation` нужен для
+change-specific checked-in representative report и aggregate readiness artifacts.
 
 **Важно:** скрипт не зависит от `.github/workflows/*` и предназначен для локального запуска или внешнего CI (например, Jenkins/GitLab Runner).
 

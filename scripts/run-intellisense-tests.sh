@@ -61,6 +61,15 @@ run_cross_adapter_smoke() {
   cargo test -p bsl-agent --test stdio_integration stdio_definition_revision_switch_does_not_return_stale_previous_revision_location -- --nocapture
 }
 
+run_document_symbol_isolation_smoke() {
+  cargo test -p bsl-backend --bin bsl-lsp-server p33_document_symbol_returns_unavailable_before_ready_outline_from_did_open_gap -- --nocapture
+  cargo test -p bsl-backend --bin bsl-lsp-server p33_document_symbol_returns_latest_ready_from_cache_during_parse_gap -- --nocapture
+  cargo test -p bsl-backend --bin bsl-lsp-server p33_document_symbol_supersedes_older_outstanding_refresh -- --nocapture
+  cargo test -p bsl-backend --bin bsl-lsp-server p33_document_symbol_burst_does_not_delay_completion_first_poll_under_parse_gap -- --nocapture
+  cargo test -p bsl-backend --bin bsl-lsp-server p33_document_symbol_burst_does_not_delay_hover_signature_help_or_definition_under_parse_gap -- --nocapture
+  cargo test -p bsl-backend --bin bsl-lsp-server p33_did_save_rearms_same_version_outline_refresh_on_default_path -- --nocapture
+}
+
 run_completion_timeline_drilldown_smoke() {
   cargo test -p bsl-runtime wait_for_file_version_runtime_trace_distinguishes_immediate_and_waiter_paths -- --nocapture
   cargo test -p bsl-runtime snapshot_with_deps_runtime_trace_exposes_queue_and_exec_latency -- --nocapture
@@ -106,6 +115,7 @@ run_smoke() {
   cargo test -p bsl-backend --test m8_completion_matrix_golden_v2_test
   cargo test -p bsl-backend --test lsp_incremental_completion_test
   run_cross_adapter_smoke
+  run_document_symbol_isolation_smoke
   run_completion_timeline_drilldown_smoke
   run_extension_completion_observability_smoke
   report_m8

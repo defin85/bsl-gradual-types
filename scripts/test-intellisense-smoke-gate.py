@@ -23,6 +23,12 @@ class IntellisenseSmokeGateContractTest(unittest.TestCase):
     REQUIRED_SMOKE_SELECTORS = {
         "backend/src/bin/lsp_server/server/core/tests.rs::p7_hover_and_type_at_position_revision_switch_do_not_report_stale_typed_structure_member": "p7_hover_and_type_at_position_revision_switch_do_not_report_stale_typed_structure_member",
         "backend/src/bin/lsp_server/server/core/tests.rs::p7_definition_revision_switch_does_not_return_stale_previous_revision_location_across_lsp_and_mcp": "p7_definition_revision_switch_does_not_return_stale_previous_revision_location_across_lsp_and_mcp",
+        "backend/src/bin/lsp_server/server/core/tests.rs::p33_document_symbol_returns_unavailable_before_ready_outline_from_did_open_gap": "p33_document_symbol_returns_unavailable_before_ready_outline_from_did_open_gap",
+        "backend/src/bin/lsp_server/server/core/tests.rs::p33_document_symbol_returns_latest_ready_from_cache_during_parse_gap": "p33_document_symbol_returns_latest_ready_from_cache_during_parse_gap",
+        "backend/src/bin/lsp_server/server/core/tests.rs::p33_document_symbol_supersedes_older_outstanding_refresh": "p33_document_symbol_supersedes_older_outstanding_refresh",
+        "backend/src/bin/lsp_server/server/core/tests.rs::p33_document_symbol_burst_does_not_delay_completion_first_poll_under_parse_gap": "p33_document_symbol_burst_does_not_delay_completion_first_poll_under_parse_gap",
+        "backend/src/bin/lsp_server/server/core/tests.rs::p33_document_symbol_burst_does_not_delay_hover_signature_help_or_definition_under_parse_gap": "p33_document_symbol_burst_does_not_delay_hover_signature_help_or_definition_under_parse_gap",
+        "backend/src/bin/lsp_server/server/core/tests.rs::p33_did_save_rearms_same_version_outline_refresh_on_default_path": "p33_did_save_rearms_same_version_outline_refresh_on_default_path",
         "bsl-agent/tests/stdio_integration.rs::stdio_type_at_position_revision_switch_does_not_return_stale_previous_revision_type": "stdio_type_at_position_revision_switch_does_not_return_stale_previous_revision_type",
         "bsl-agent/tests/stdio_integration.rs::stdio_definition_revision_switch_does_not_return_stale_previous_revision_location": "stdio_definition_revision_switch_does_not_return_stale_previous_revision_location",
         "backend/tests/form_module_object_unified_contract_test.rs::bare_owner_members_without_canonical_binding_stay_undeclared": "bare_owner_members_without_canonical_binding_stay_undeclared",

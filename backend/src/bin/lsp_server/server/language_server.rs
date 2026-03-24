@@ -68,6 +68,11 @@ pub(crate) fn did_change_inline_parse_delay_active_for_test() -> bool {
     impl_document_sync::did_change_inline_parse_delay_active_for_test()
 }
 
+#[cfg(test)]
+pub(crate) fn did_save_inline_parse_delay_active_for_test() -> bool {
+    impl_document_sync::did_save_inline_parse_delay_active_for_test()
+}
+
 #[tower_lsp::async_trait]
 impl LanguageServer for BslLanguageServer {
     async fn initialize(&self, params: InitializeParams) -> JsonRpcResult<InitializeResult> {

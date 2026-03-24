@@ -6,6 +6,8 @@
 - Фокус: same-file `didChange`/`didSave` + burst `textDocument/documentSymbol` + `textDocument/completion` на real module
 
 ## Поставляемые пути
+- Default smoke:
+  `./scripts/run-intellisense-tests.sh smoke`
 - Workflow: `.github/workflows/ci.yml`
 - Локальный script: `./scripts/validate-v2-completion-gates.sh`
 - Aggregate report:
@@ -21,22 +23,30 @@
 
 ## Проверка
 - `CHANGE_ID=refactor-document-symbol-interactive-isolation ./scripts/validate-v2-completion-gates.sh`
+- `./scripts/run-intellisense-tests.sh smoke`
 - `cargo test -p bsl-backend --bin bsl-lsp-server p39_real_conf_big_document_symbol_mixed_load_gate_live -- --nocapture`
 - `openspec validate refactor-document-symbol-interactive-isolation --strict --no-interactive`
 
 ## Результат
 - На 24 марта 2026 года checked-in mixed-load gate для `refactor-document-symbol-interactive-isolation` зелёный на `master`.
+- Default shipped smoke одновременно держит mandatory `p33` regressions для
+  `unavailable`, `latest_ready`, supersession, same-file outline burst против
+  `completion` / `hover` / `signatureHelp` / `definition` и same-version
+  `didSave` refresh.
 - Measured set:
   `10` completion samples, `10` `head_hit`, `0` `exact_hit`,
   `0` `prepare_timeout`, `0` `exact_deadline`, `0` ingress-regression samples.
 - Outline companion path в том же прогоне дал:
   `40` `latest_ready`, `0` `current_ready`, `0` `unavailable`, `0` `superseded`,
   `40` non-null responses и `0` null responses.
+- Parse-gap activation в measured iterations пришла через `didSave` re-arm после
+  same-file `didChange`/`didSave` churn; representative gate больше не зависит от
+  ручного outline seeding.
 - Interactive ingress budget сохранён:
-  `p95(service_future_to_first_poll_wait_ms)=23ms`,
-  `max(service_future_to_first_poll_wait_ms)=23ms`,
-  `p95(transport_to_handler_wait_ms)=23ms`,
-  `max(transport_to_handler_wait_ms)=23ms`,
+  `p95(service_future_to_first_poll_wait_ms)=22ms`,
+  `max(service_future_to_first_poll_wait_ms)=22ms`,
+  `p95(transport_to_handler_wait_ms)=22ms`,
+  `max(transport_to_handler_wait_ms)=22ms`,
   runtime budget `intellisense_v2_interactive_wait_budget_ms=120`.
 - Это даёт acceptance evidence, что auxiliary outline refresh больше не превращает completion ingress в starvation point даже под same-file mixed load.
 
@@ -46,7 +56,10 @@
   `backend/src/bin/lsp_server/server/language_server/impl_document_sync.rs`
   `backend/src/bin/lsp_server/server/core.rs`
   Test:
+  `./scripts/run-intellisense-tests.sh smoke`
   `cargo test -p bsl-backend --bin bsl-lsp-server p33_document_symbol_burst_does_not_delay_completion_first_poll_under_parse_gap -- --nocapture`
+  `cargo test -p bsl-backend --bin bsl-lsp-server p33_document_symbol_burst_does_not_delay_hover_signature_help_or_definition_under_parse_gap -- --nocapture`
+  `cargo test -p bsl-backend --bin bsl-lsp-server p33_did_save_rearms_same_version_outline_refresh_on_default_path -- --nocapture`
   `cargo test -p bsl-backend --bin bsl-lsp-server p39_real_conf_big_document_symbol_mixed_load_gate_live -- --nocapture`
 - Requirement: representative gate детерминированно ловит outline-induced starvation
   Code: `backend/src/bin/lsp_server/server/core/tests.rs`

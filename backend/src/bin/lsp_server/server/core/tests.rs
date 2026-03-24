@@ -1,5 +1,4 @@
 use super::*;
-use crate::handlers::symbols::build_document_symbols;
 use axum::http::{header, Request as AxumRequest};
 use bsl_agent::jobs::JobManager;
 use bsl_agent::server::types::{
@@ -15408,6 +15407,125 @@ async fn p33_document_symbol_returns_latest_ready_from_cache_during_parse_gap() 
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn p33_document_symbol_returns_unavailable_before_ready_outline_from_did_open_gap() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const FIXTURE: &str =
+        "#Область Public\nПроцедура OnlyProc() Экспорт\nКонецПроцедуры\n#КонецОбласти\n";
+    const PARSE_DELAY_MS: u64 = 1200;
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let _parse_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_DID_OPEN_BLOCKING_PARSE_DELAY_MS",
+        &PARSE_DELAY_MS.to_string(),
+    );
+    let uri =
+        Url::parse("file:///test_p33_document_symbol_unavailable_did_open_parse_gap.bsl")
+            .expect("test uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: FIXTURE.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let started = Instant::now();
+    let response = tokio::time::timeout(
+        Duration::from_millis(250),
+        lsp_document_symbol_with_request(&mut service, 50_329, &uri),
+    )
+    .await
+    .expect("documentSymbol unavailable request must stay bounded");
+    let elapsed = started.elapsed();
+    assert!(
+        response.is_none(),
+        "documentSymbol must return unavailable while no ready outline exists during didOpen parse gap"
+    );
+    assert!(
+        elapsed < Duration::from_millis(250),
+        "documentSymbol unavailable path must stay bounded during didOpen parse gap (elapsed={elapsed:?})"
+    );
+
+    let metrics = lsp_get_observability_metrics(&mut service, 50_328).await;
+    let counters = metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    assert!(
+        read_u64_metric(
+            counters.get("intellisense_v2_document_symbol_outcome_total_outcome_unavailable")
+        ) > 0,
+        "unavailable outcome must be observable, counters={counters:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn p33_document_symbol_supersedes_older_outstanding_refresh() {
     struct EnvVarGuard {
         key: &'static str,
@@ -15711,14 +15829,13 @@ async fn p33_document_symbol_burst_does_not_delay_completion_first_poll_under_pa
     let file_id = server.get_or_create_file_id_v2(&uri).await;
     tokio::time::timeout(Duration::from_millis(800), async {
         loop {
-            if super::super::language_server::did_change_inline_parse_delay_active_for_test()
-                && server
-                    .latest_received_file_versions_v2
-                    .read()
-                    .await
-                    .get(&file_id)
-                    .copied()
-                    == Some(2)
+            if server
+                .latest_received_file_versions_v2
+                .read()
+                .await
+                .get(&file_id)
+                .copied()
+                == Some(2)
             {
                 break;
             }
@@ -15726,7 +15843,8 @@ async fn p33_document_symbol_burst_does_not_delay_completion_first_poll_under_pa
         }
     })
     .await
-    .expect("test must observe parse-snapshot gap before outline burst");
+    .expect("test must observe current revision handoff before outline burst");
+    tokio::time::sleep(Duration::from_millis(50)).await;
 
     for request_id in 0..SATURATING_REQUESTS {
         harness
@@ -15805,6 +15923,491 @@ async fn p33_document_symbol_burst_does_not_delay_completion_first_poll_under_pa
             counters.get("intellisense_v2_document_symbol_outcome_total_outcome_latest_ready")
         ) > 0,
         "outline burst gate must observe latest_ready outcomes while current revision is not ready, counters={counters:?}"
+    );
+
+    live_transport_close_document(&mut harness, &uri).await;
+    harness.shutdown().await;
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn p33_document_symbol_burst_does_not_delay_hover_signature_help_or_definition_under_parse_gap()
+{
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const V1_FIXTURE: &str = "Процедура Тест()\n\
+МассивДляHover = Новый Массив;\n\
+ЗначДляHover = МассивДляHover.Количество();\n\
+\n\
+МассивДляSignature = Новый Массив;\n\
+МассивДляSignature.Количество();\n\
+\n\
+МассивДляDefinition = Новый Массив;\n\
+МассивДляDefinition.Количество();\n\
+КонецПроцедуры\n";
+    const APPENDED_OUTLINE: &str =
+        "\n#Область Public\nПроцедура AddedProc() Экспорт\nКонецПроцедуры\n#КонецОбласти\n";
+    const PARSE_DELAY_MS: u64 = 1200;
+    const DOCUMENT_SYMBOL_DELAY_MS: u64 = 300;
+    const INTERACTIVE_BUDGET_MS: u64 = 250;
+    const SATURATING_REQUESTS: i64 = 4;
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator.clone()).await;
+    initialize_live_lsp_transport(&mut harness).await;
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let uri =
+        Url::parse("file:///test_p33_document_symbol_burst_hover_signature_definition_parse_gap.bsl")
+            .expect("uri");
+    harness
+        .send_notification(
+            "textDocument/didOpen",
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "bsl".to_string(),
+                    version: 1,
+                    text: V1_FIXTURE.to_string(),
+                },
+            },
+        )
+        .await;
+    let seeded = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let response = harness
+                .send_request(
+                    50_352,
+                    "textDocument/documentSymbol",
+                    DocumentSymbolParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                        partial_result_params: PartialResultParams::default(),
+                    },
+                )
+                .await;
+            if let Some(response) = document_symbol_response_from_jsonrpc_response(&response) {
+                break response;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("seed documentSymbol response must arrive");
+    let seeded_names = document_symbol_names(&seeded);
+    assert!(
+        seeded_names.iter().any(|name| name == "Тест"),
+        "seed documentSymbol response must expose initial outline, names={seeded_names:?}"
+    );
+
+    let did_change_guard = EnvVarGuard::set(
+        "BSL_TEST_DID_CHANGE_PARSE_DELAY_MS",
+        &PARSE_DELAY_MS.to_string(),
+    );
+    let did_save_guard = EnvVarGuard::set(
+        "BSL_TEST_DID_SAVE_PARSE_DELAY_MS",
+        &PARSE_DELAY_MS.to_string(),
+    );
+    let document_symbol_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_DOCUMENT_SYMBOL_DELAY_MS",
+        &DOCUMENT_SYMBOL_DELAY_MS.to_string(),
+    );
+    let v2_fixture = format!("{V1_FIXTURE}{APPENDED_OUTLINE}");
+    harness
+        .send_notification(
+            "textDocument/didChange",
+            DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version: 2,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: v2_fixture.clone(),
+                }],
+            },
+        )
+        .await;
+    live_transport_save_document(&mut harness, &uri).await;
+
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    tokio::time::timeout(Duration::from_millis(800), async {
+        loop {
+            if server
+                .latest_received_file_versions_v2
+                .read()
+                .await
+                .get(&file_id)
+                .copied()
+                == Some(2)
+            {
+                if super::super::language_server::did_change_inline_parse_delay_active_for_test()
+                    || super::super::language_server::did_save_inline_parse_delay_active_for_test()
+                {
+                    break;
+                }
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("test must observe parse-snapshot gap before outline burst");
+
+    let hover_position = find_utf16_position_after_marker(&v2_fixture, "ЗначДляHover = МассивДляHover");
+    let signature_position =
+        find_utf16_position_after_marker(&v2_fixture, "МассивДляSignature.Количество(");
+    let definition_position =
+        find_utf16_position_after_marker(&v2_fixture, "МассивДляDefinition.Количество");
+
+    let hover_request_ids = (0..SATURATING_REQUESTS)
+        .map(|request_index| 50_361 + request_index)
+        .collect::<Vec<_>>();
+    for request_id in &hover_request_ids {
+        live_transport_write_document_symbol_request(&mut harness, *request_id, &uri).await;
+    }
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let hover_started = Instant::now();
+    let hover_response = tokio::time::timeout(
+        Duration::from_millis(INTERACTIVE_BUDGET_MS),
+        harness.send_request(
+            50_369,
+            "textDocument/hover",
+            HoverParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: hover_position,
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            },
+        ),
+    )
+    .await
+    .expect("hover under outline burst must stay bounded");
+    assert!(
+        hover_response.get("result").is_some(),
+        "hover request under outline burst must still return a response envelope"
+    );
+    assert!(
+        hover_started.elapsed() <= Duration::from_millis(INTERACTIVE_BUDGET_MS),
+        "outline burst must not delay hover on the current revision path"
+    );
+
+    let signature_request_ids = (0..SATURATING_REQUESTS)
+        .map(|request_index| 50_371 + request_index)
+        .collect::<Vec<_>>();
+    for request_id in &signature_request_ids {
+        live_transport_write_document_symbol_request(&mut harness, *request_id, &uri).await;
+    }
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let signature_started = Instant::now();
+    let signature_response = tokio::time::timeout(
+        Duration::from_millis(INTERACTIVE_BUDGET_MS),
+        harness.send_request(
+            50_379,
+            "textDocument/signatureHelp",
+            tower_lsp::lsp_types::SignatureHelpParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: signature_position,
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                context: None,
+            },
+        ),
+    )
+    .await
+    .expect("signatureHelp under outline burst must stay bounded");
+    assert!(
+        signature_response.get("result").is_some(),
+        "signatureHelp under outline burst must still return a response envelope"
+    );
+    assert!(
+        signature_started.elapsed() <= Duration::from_millis(INTERACTIVE_BUDGET_MS),
+        "outline burst must not delay signatureHelp on the current revision path"
+    );
+
+    let definition_request_ids = (0..SATURATING_REQUESTS)
+        .map(|request_index| 50_381 + request_index)
+        .collect::<Vec<_>>();
+    for request_id in &definition_request_ids {
+        live_transport_write_document_symbol_request(&mut harness, *request_id, &uri).await;
+    }
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let definition_started = Instant::now();
+    let definition_response = tokio::time::timeout(
+        Duration::from_millis(INTERACTIVE_BUDGET_MS),
+        harness.send_request(
+            50_389,
+            "textDocument/definition",
+            GotoDefinitionParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: definition_position,
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            },
+        ),
+    )
+    .await
+    .expect("definition under outline burst must stay bounded");
+    assert!(
+        definition_response.get("result").is_some(),
+        "definition under outline burst must still return a response envelope"
+    );
+    assert!(
+        definition_started.elapsed() <= Duration::from_millis(INTERACTIVE_BUDGET_MS),
+        "outline burst must not delay definition on the current revision path"
+    );
+
+    let metrics = live_transport_get_observability_metrics(&mut harness, 50_390).await;
+    let counters = metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    assert!(
+        read_u64_metric(
+            counters.get("intellisense_v2_document_symbol_outcome_total_outcome_latest_ready")
+        ) + read_u64_metric(
+            counters.get("intellisense_v2_document_symbol_outcome_total_outcome_unavailable")
+        ) > 0,
+        "outline burst must keep documentSymbol on a bounded auxiliary path while current revision is not ready, counters={counters:?}"
+    );
+
+    drop(document_symbol_delay_guard);
+    drop(did_save_guard);
+    drop(did_change_guard);
+    live_transport_close_document(&mut harness, &uri).await;
+    harness.shutdown().await;
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn p33_did_save_rearms_same_version_outline_refresh_on_default_path() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const V1_FIXTURE: &str =
+        "#Область Public\nПроцедура OldProc() Экспорт\nКонецПроцедуры\n#КонецОбласти\n";
+    const V2_FIXTURE: &str =
+        "#Область Public\nПроцедура NewProc() Экспорт\nКонецПроцедуры\n#КонецОбласти\n";
+    const PARSE_DELAY_MS: u64 = 1200;
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator.clone()).await;
+    initialize_live_lsp_transport(&mut harness).await;
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let uri =
+        Url::parse("file:///test_p33_document_symbol_did_save_same_version_refresh.bsl")
+            .expect("uri");
+    harness
+        .send_notification(
+            "textDocument/didOpen",
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "bsl".to_string(),
+                    version: 1,
+                    text: V1_FIXTURE.to_string(),
+                },
+            },
+        )
+        .await;
+    let seeded = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let response = harness
+                .send_request(
+                    50_392,
+                    "textDocument/documentSymbol",
+                    DocumentSymbolParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                        partial_result_params: PartialResultParams::default(),
+                    },
+                )
+                .await;
+            if let Some(response) = document_symbol_response_from_jsonrpc_response(&response) {
+                break response;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("seed documentSymbol response must arrive");
+    let seeded_names = document_symbol_names(&seeded);
+    assert!(
+        seeded_names.iter().any(|name| name == "OldProc"),
+        "seed documentSymbol response must expose OldProc, names={seeded_names:?}"
+    );
+
+    let did_change_guard = EnvVarGuard::set(
+        "BSL_TEST_DID_CHANGE_PARSE_DELAY_MS",
+        &PARSE_DELAY_MS.to_string(),
+    );
+    let did_save_guard = EnvVarGuard::set(
+        "BSL_TEST_DID_SAVE_PARSE_DELAY_MS",
+        &PARSE_DELAY_MS.to_string(),
+    );
+    harness
+        .send_notification(
+            "textDocument/didChange",
+            DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version: 2,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: V2_FIXTURE.to_string(),
+                }],
+            },
+        )
+        .await;
+
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    tokio::time::timeout(Duration::from_millis(800), async {
+        loop {
+            if super::super::language_server::did_change_inline_parse_delay_active_for_test()
+                && server
+                    .latest_received_file_versions_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .copied()
+                    == Some(2)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("didChange parse-snapshot gap must become observable before didSave");
+
+    live_transport_save_document(&mut harness, &uri).await;
+    tokio::time::timeout(Duration::from_millis(800), async {
+        loop {
+            if super::super::language_server::did_save_inline_parse_delay_active_for_test() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("didSave must re-arm same-version outline refresh on the default path");
+
+    let response = tokio::time::timeout(
+        Duration::from_millis(250),
+        harness.send_request(
+            50_393,
+            "textDocument/documentSymbol",
+            DocumentSymbolParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            },
+        ),
+    )
+    .await
+    .expect("documentSymbol during didSave parse gap must stay bounded");
+    let parsed = document_symbol_response_from_jsonrpc_response(&response)
+        .expect("didSave parse gap should still serve latest_ready outline");
+    let names = document_symbol_names(&parsed);
+    assert!(
+        names.iter().any(|name| name == "OldProc"),
+        "didSave-triggered outline refresh must keep serving the previous ready cache while rebuilding, names={names:?}"
+    );
+    assert!(
+        names.iter().all(|name| name != "NewProc"),
+        "didSave-triggered outline refresh must not masquerade as the new revision before refresh completes, names={names:?}"
+    );
+
+    drop(did_change_guard);
+    drop(did_save_guard);
+
+    let refreshed = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let response = harness
+                .send_request(
+                    50_394,
+                    "textDocument/documentSymbol",
+                    DocumentSymbolParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                        partial_result_params: PartialResultParams::default(),
+                    },
+                )
+                .await;
+            if let Some(parsed) = document_symbol_response_from_jsonrpc_response(&response) {
+                let names = document_symbol_names(&parsed);
+                if names.iter().any(|name| name == "NewProc") {
+                    break names;
+                }
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("didSave-triggered outline refresh must eventually materialize");
+    assert!(
+        refreshed.iter().any(|name| name == "NewProc"),
+        "didSave-triggered refresh must eventually expose the new outline, names={refreshed:?}"
     );
 
     live_transport_close_document(&mut harness, &uri).await;
@@ -21774,6 +22377,8 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             .lock()
             .expect("env lock");
         let _parse_delay_guard = EnvVarGuard::set("BSL_TEST_DID_CHANGE_PARSE_DELAY_MS", "1500");
+        let _did_save_parse_delay_guard =
+            EnvVarGuard::set("BSL_TEST_DID_SAVE_PARSE_DELAY_MS", "1500");
 
         let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
         const PROFILE_NAME: &str = "p39_real_conf_big_document_symbol_mixed_load_gate_live";
@@ -21878,29 +22483,27 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             "analysis runtime must catch up to opened real conf_big file version"
         );
 
-        let analysis = server.analysis_v2.snapshot().await;
-        let parse_result = analysis
-            .parse_result(file_id)
-            .expect("seed parse_result query")
-            .expect("seed parse_result must be present");
-        let seeded_outline = build_document_symbols(&module_text, parse_result.as_ref())
-            .expect("build seed documentSymbol outline");
-        server
-            .record_document_symbol_ready_v2(file_id, opened_version, seeded_outline)
-            .await;
-        let seeded = harness
-            .send_request(
-                39_100_000,
-                "textDocument/documentSymbol",
-                DocumentSymbolParams {
-                    text_document: TextDocumentIdentifier { uri: uri.clone() },
-                    work_done_progress_params: WorkDoneProgressParams::default(),
-                    partial_result_params: PartialResultParams::default(),
-                },
-            )
-            .await;
-        let seeded = document_symbol_response_from_jsonrpc_response(&seeded)
-            .expect("seed documentSymbol response must be present");
+        let seeded = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                let response = harness
+                    .send_request(
+                        39_100_000,
+                        "textDocument/documentSymbol",
+                        DocumentSymbolParams {
+                            text_document: TextDocumentIdentifier { uri: uri.clone() },
+                            work_done_progress_params: WorkDoneProgressParams::default(),
+                            partial_result_params: PartialResultParams::default(),
+                        },
+                    )
+                    .await;
+                if let Some(parsed) = document_symbol_response_from_jsonrpc_response(&response) {
+                    break parsed;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("default didOpen outline bootstrap must eventually materialize");
         assert!(
             !document_symbol_names(&seeded).is_empty(),
             "seed documentSymbol response must expose non-empty real-module outline"
@@ -21963,18 +22566,24 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             current_version = next_version;
             live_transport_save_document(&mut harness, &uri).await;
 
-            tokio::time::timeout(Duration::from_millis(800), async {
+            let parse_gap_source = tokio::time::timeout(Duration::from_millis(800), async {
                 loop {
-                    if super::super::language_server::did_change_inline_parse_delay_active_for_test()
-                        && server
-                            .latest_received_file_versions_v2
-                            .read()
-                            .await
-                            .get(&file_id)
-                            .copied()
-                            == Some(current_version)
+                    if server
+                        .latest_received_file_versions_v2
+                        .read()
+                        .await
+                        .get(&file_id)
+                        .copied()
+                        == Some(current_version)
                     {
-                        break;
+                        if super::super::language_server::did_change_inline_parse_delay_active_for_test()
+                        {
+                            break "didChange";
+                        }
+                        if super::super::language_server::did_save_inline_parse_delay_active_for_test()
+                        {
+                            break "didSave";
+                        }
                     }
                     tokio::task::yield_now().await;
                 }
@@ -22100,6 +22709,7 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                 "document_symbol_present_responses": document_symbol_present_responses,
                 "did_change_notifications_per_measured_completion": 1,
                 "did_save_after_did_change": true,
+                "parse_gap_source": parse_gap_source,
             }));
         }
 
@@ -22472,7 +23082,7 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             "module_path": module_path,
             "marker": "Объект.",
             "request_plan": {
-                "cache_mode": "seeded_outline_then_same_file_mixed_load",
+                "cache_mode": "default_did_open_outline_bootstrap_then_same_file_mixed_load",
                 "wait_for_current_revision_before_seed": true,
                 "warmup_requests": WARMUP_REQUESTS,
                 "measured_requests": MEASURE_REQUESTS,
@@ -22483,6 +23093,8 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                 "did_change_notifications_per_measured_completion": 1,
                 "did_save_after_did_change": true,
                 "did_change_blocking_parse_delay_ms": 1500,
+                "did_save_parse_delay_ms": 1500,
+                "parse_gap_activation_sources": ["didChange", "didSave"],
             },
             "warmup_samples": warmup_samples,
             "measured_samples": measured_samples,

@@ -8,20 +8,44 @@ use std::time::Duration;
 static DID_CHANGE_PARSE_DELAY_ACTIVE: AtomicUsize = AtomicUsize::new(0);
 
 #[cfg(test)]
-async fn maybe_inject_did_change_parse_delay() {
-    if let Some(delay_ms) = std::env::var("BSL_TEST_DID_CHANGE_PARSE_DELAY_MS")
+static DID_SAVE_PARSE_DELAY_ACTIVE: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(test)]
+async fn maybe_inject_parse_delay(
+    env_key: &'static str,
+    active_counter: &'static AtomicUsize,
+) {
+    if let Some(delay_ms) = std::env::var(env_key)
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|value| *value > 0)
     {
-        DID_CHANGE_PARSE_DELAY_ACTIVE.fetch_add(1, Ordering::SeqCst);
+        active_counter.fetch_add(1, Ordering::SeqCst);
         tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-        DID_CHANGE_PARSE_DELAY_ACTIVE.fetch_sub(1, Ordering::SeqCst);
+        active_counter.fetch_sub(1, Ordering::SeqCst);
     }
+}
+
+#[cfg(test)]
+async fn maybe_inject_did_change_parse_delay() {
+    maybe_inject_parse_delay(
+        "BSL_TEST_DID_CHANGE_PARSE_DELAY_MS",
+        &DID_CHANGE_PARSE_DELAY_ACTIVE,
+    )
+    .await;
 }
 
 #[cfg(not(test))]
 async fn maybe_inject_did_change_parse_delay() {}
+
+#[cfg(test)]
+async fn maybe_inject_did_save_parse_delay() {
+    maybe_inject_parse_delay("BSL_TEST_DID_SAVE_PARSE_DELAY_MS", &DID_SAVE_PARSE_DELAY_ACTIVE)
+        .await;
+}
+
+#[cfg(not(test))]
+async fn maybe_inject_did_save_parse_delay() {}
 
 #[cfg(test)]
 fn maybe_inject_blocking_parse_delay_for_test(env_key: &'static str) {
@@ -61,6 +85,11 @@ pub(super) fn did_change_inline_parse_delay_active_for_test() -> bool {
     DID_CHANGE_PARSE_DELAY_ACTIVE.load(Ordering::SeqCst) > 0
 }
 
+#[cfg(test)]
+pub(super) fn did_save_inline_parse_delay_active_for_test() -> bool {
+    DID_SAVE_PARSE_DELAY_ACTIVE.load(Ordering::SeqCst) > 0
+}
+
 fn parse_snapshot_from_report(
     file_id: bsl_analysis_v2::FileId,
     version: i32,
@@ -93,6 +122,7 @@ fn parse_snapshot_from_report(
 enum ParseSnapshotAsyncDelayMode {
     None,
     DidChangeTestOnly,
+    DidSaveTestOnly,
 }
 
 fn parse_snapshot_apply_debounce_duration() -> Duration {
@@ -107,6 +137,7 @@ struct BackgroundParseSnapshotApplyArgs {
     parser_edits: Vec<bsl_runtime::system::parser_coordinator::TextEdit>,
     async_delay_mode: ParseSnapshotAsyncDelayMode,
     blocking_delay_env_key: Option<&'static str>,
+    force_reschedule_same_version: bool,
 }
 
 impl BslLanguageServer {
@@ -195,7 +226,9 @@ impl BslLanguageServer {
         let mut tasks = self.background_parse_snapshot_apply_tasks_v2.lock().await;
         let file_id = args.file_id;
         if let Some(task) = tasks.get(&file_id) {
-            if task.requested_version.load(Ordering::Relaxed) == args.requested_version {
+            if !args.force_reschedule_same_version
+                && task.requested_version.load(Ordering::Relaxed) == args.requested_version
+            {
                 return;
             }
         }
@@ -254,6 +287,9 @@ impl BslLanguageServer {
                 ParseSnapshotAsyncDelayMode::None => {}
                 ParseSnapshotAsyncDelayMode::DidChangeTestOnly => {
                     maybe_inject_did_change_parse_delay().await;
+                }
+                ParseSnapshotAsyncDelayMode::DidSaveTestOnly => {
+                    maybe_inject_did_save_parse_delay().await;
                 }
             }
             if !still_requested(&requested_version_state, args.requested_version) {
@@ -845,6 +881,7 @@ impl BslLanguageServer {
             parser_edits: Vec::new(),
             async_delay_mode: ParseSnapshotAsyncDelayMode::None,
             blocking_delay_env_key: Some("BSL_TEST_DID_OPEN_BLOCKING_PARSE_DELAY_MS"),
+            force_reschedule_same_version: false,
         })
         .await;
         self.schedule_type_index_precompute_v2(file_id, version)
@@ -1140,6 +1177,7 @@ impl BslLanguageServer {
                 parser_edits,
                 async_delay_mode: ParseSnapshotAsyncDelayMode::DidChangeTestOnly,
                 blocking_delay_env_key: Some("BSL_TEST_DID_CHANGE_BLOCKING_PARSE_DELAY_MS"),
+                force_reschedule_same_version: false,
             })
             .await;
         }
@@ -1233,6 +1271,35 @@ impl BslLanguageServer {
         else {
             return;
         };
+        let Some(shadow_state) = self
+            .latest_document_shadow_state_v2
+            .read()
+            .await
+            .get(&file_id)
+            .cloned()
+        else {
+            return;
+        };
+        if shadow_state.version == version {
+            let path = match uri.to_file_path() {
+                Ok(path) => path.to_string_lossy().to_string(),
+                Err(_) => uri.to_string(),
+            };
+            // Save can be followed by an immediate outline refresh without a new version bump.
+            // Re-arm the snapshot-backed outline path for the current shadow revision so
+            // same-file didChange/didSave churn stays truthful on the default runtime path.
+            self.schedule_background_parse_snapshot_apply_v2(BackgroundParseSnapshotApplyArgs {
+                file_id,
+                requested_version: version,
+                path: Arc::from(path),
+                text: shadow_state.text,
+                parser_edits: Vec::new(),
+                async_delay_mode: ParseSnapshotAsyncDelayMode::DidSaveTestOnly,
+                blocking_delay_env_key: Some("BSL_TEST_DID_SAVE_BLOCKING_PARSE_DELAY_MS"),
+                force_reschedule_same_version: true,
+            })
+            .await;
+        }
 
         let flow_sensitive_enabled = {
             let settings = self.settings.read().await;

@@ -97,6 +97,12 @@ pub(crate) struct CompletionHeadServeObservationV2 {
     pub served_at: Instant,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct DocumentSymbolReadyStateV2 {
+    pub file_version: i32,
+    pub response: tower_lsp::lsp_types::DocumentSymbolResponse,
+}
+
 pub(crate) type CompletionParityKeyV2 = (V2FileId, i32, u32, u32);
 pub(crate) type CompletionParityStoreV2 =
     Arc<RwLock<HashMap<CompletionParityKeyV2, CompletionParityStateV2>>>;
@@ -215,6 +221,9 @@ pub struct BslLanguageServer {
         Arc<RwLock<HashMap<V2FileId, DocumentShadowStateV2>>>,
     pub(crate) latest_apply_enqueued_at_v2: Arc<RwLock<HashMap<V2FileId, Instant>>>,
     pub(crate) scale_aware_churn_state_v2: Arc<RwLock<HashMap<V2FileId, ScaleAwareChurnStateV2>>>,
+    pub(crate) document_symbol_ready_cache_v2:
+        Arc<RwLock<HashMap<V2FileId, DocumentSymbolReadyStateV2>>>,
+    pub(crate) document_symbol_request_epochs_v2: Arc<RwLock<HashMap<V2FileId, u64>>>,
     pub(crate) completion_seen_files_v2: Arc<RwLock<HashSet<V2FileId>>>,
     pub(crate) completion_parity_state_v2: CompletionParityStoreV2,
     pub(crate) completion_head_serve_observations_v2:
@@ -230,6 +239,7 @@ pub struct BslLanguageServer {
     pub(crate) completion_timeline_traces:
         Arc<Mutex<VecDeque<crate::types::CompletionTimelineTrace>>>,
     pub(crate) next_completion_timeline_trace_id: Arc<AtomicU64>,
+    pub(crate) next_document_symbol_request_epoch_v2: Arc<AtomicU64>,
     pub(crate) next_type_index_precompute_task_id: Arc<AtomicU64>,
 }
 
@@ -367,8 +377,7 @@ pub(crate) struct BackgroundParseSnapshotApplyTaskV2 {
     pub handle: JoinHandle<()>,
 }
 
-type BackgroundParseSnapshotApplyTasksV2 =
-    HashMap<V2FileId, BackgroundParseSnapshotApplyTaskV2>;
+type BackgroundParseSnapshotApplyTasksV2 = HashMap<V2FileId, BackgroundParseSnapshotApplyTaskV2>;
 
 pub(crate) fn intellisense_v2_slow_wait_warn_threshold() -> Option<Duration> {
     bsl_runtime::application::RuntimePerfKnobs::from_runtime_config().slow_wait_warn_threshold

@@ -16,7 +16,6 @@ pub enum SymbolsError {
 }
 
 pub fn build_document_symbols(
-    _uri: &Url,
     source: &str,
     parse_result: &ParseResult,
 ) -> Result<DocumentSymbolResponse, SymbolsError> {

@@ -204,6 +204,8 @@ impl BslLanguageServer {
             latest_document_shadow_state_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_apply_enqueued_at_v2: Arc::new(RwLock::new(HashMap::new())),
             scale_aware_churn_state_v2: Arc::new(RwLock::new(HashMap::new())),
+            document_symbol_ready_cache_v2: Arc::new(RwLock::new(HashMap::new())),
+            document_symbol_request_epochs_v2: Arc::new(RwLock::new(HashMap::new())),
             completion_seen_files_v2: Arc::new(RwLock::new(std::collections::HashSet::new())),
             completion_parity_state_v2: Arc::new(RwLock::new(HashMap::new())),
             completion_head_serve_observations_v2: Arc::new(RwLock::new(HashMap::new())),
@@ -216,6 +218,7 @@ impl BslLanguageServer {
             full_index_watchdog_timeout: Duration::from_millis(1_200_000),
             completion_timeline_traces: Arc::new(Mutex::new(VecDeque::new())),
             next_completion_timeline_trace_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            next_document_symbol_request_epoch_v2: Arc::new(std::sync::atomic::AtomicU64::new(1)),
             next_type_index_precompute_task_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
         }
     }
@@ -317,6 +320,76 @@ impl BslLanguageServer {
         self.coordinator
             .record_intellisense_v2_completion_head_to_exact_upgrade(pending_duration);
         true
+    }
+
+    pub(crate) async fn begin_document_symbol_request_v2(&self, file_id: V2FileId) -> u64 {
+        let epoch = self
+            .next_document_symbol_request_epoch_v2
+            .fetch_add(1, Ordering::Relaxed);
+        self.document_symbol_request_epochs_v2
+            .write()
+            .await
+            .insert(file_id, epoch);
+        epoch
+    }
+
+    pub(crate) async fn document_symbol_request_superseded_v2(
+        &self,
+        file_id: V2FileId,
+        request_epoch: u64,
+    ) -> bool {
+        self.document_symbol_request_epochs_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied()
+            != Some(request_epoch)
+    }
+
+    pub(crate) async fn record_document_symbol_ready_v2(
+        &self,
+        file_id: V2FileId,
+        file_version: i32,
+        response: tower_lsp::lsp_types::DocumentSymbolResponse,
+    ) {
+        let Some(latest_received_version) = self
+            .latest_received_file_versions_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied()
+        else {
+            return;
+        };
+        if latest_received_version < file_version {
+            return;
+        }
+
+        let mut cache = self.document_symbol_ready_cache_v2.write().await;
+        if cache
+            .get(&file_id)
+            .is_some_and(|existing| existing.file_version > file_version)
+        {
+            return;
+        }
+        cache.insert(
+            file_id,
+            super::DocumentSymbolReadyStateV2 {
+                file_version,
+                response,
+            },
+        );
+    }
+
+    pub(crate) async fn latest_document_symbol_ready_v2(
+        &self,
+        file_id: V2FileId,
+    ) -> Option<super::DocumentSymbolReadyStateV2> {
+        self.document_symbol_ready_cache_v2
+            .read()
+            .await
+            .get(&file_id)
+            .cloned()
     }
 }
 

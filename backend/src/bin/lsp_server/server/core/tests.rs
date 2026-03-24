@@ -8307,31 +8307,17 @@ async fn p11_document_symbol_groups_routines_by_region() {
         .expect("didOpen notification");
     assert!(did_open_response.is_none(), "didOpen is a notification");
 
-    let params = DocumentSymbolParams {
-        text_document: TextDocumentIdentifier { uri: uri.clone() },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let req = Request::build("textDocument/documentSymbol")
-        .id(2)
-        .params(serde_json::to_value(params.clone()).expect("DocumentSymbolParams"))
-        .finish();
-    let response_a = service
-        .ready()
-        .await
-        .unwrap()
-        .call(req)
-        .await
-        .expect("documentSymbol request");
-    let response_a = response_a.expect("documentSymbol should return a response");
-
-    let value_a = serde_json::to_value(&response_a).expect("serialize response");
-    let result_a_value = value_a.get("result").cloned().expect("result field");
-
-    let parsed_a: Option<DocumentSymbolResponse> =
-        serde_json::from_value(result_a_value.clone()).expect("parse result");
-    let parsed_a = parsed_a.expect("result present");
+    let parsed_a = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(response) = lsp_document_symbol_with_request(&mut service, 2, &uri).await {
+                break response;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("documentSymbol response must arrive");
+    let result_a_value = serde_json::to_value(&parsed_a).expect("serialize first result");
 
     let DocumentSymbolResponse::Nested(top_level) = parsed_a else {
         panic!("expected nested document symbols");
@@ -8366,20 +8352,17 @@ async fn p11_document_symbol_groups_routines_by_region() {
     assert_eq!(outside.selection_range.end.character, 15);
 
     // Determinism: second request returns identical JSON result.
-    let req_2 = Request::build("textDocument/documentSymbol")
-        .id(3)
-        .params(serde_json::to_value(params).expect("DocumentSymbolParams"))
-        .finish();
-    let response_b = service
-        .ready()
-        .await
-        .unwrap()
-        .call(req_2)
-        .await
-        .expect("documentSymbol request (2)");
-    let response_b = response_b.expect("documentSymbol (2) should return a response");
-    let value_b = serde_json::to_value(&response_b).expect("serialize response");
-    let result_b_value = value_b.get("result").cloned().expect("result field");
+    let response_b = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(response) = lsp_document_symbol_with_request(&mut service, 3, &uri).await {
+                break response;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("second documentSymbol response must arrive");
+    let result_b_value = serde_json::to_value(&response_b).expect("serialize second result");
     assert_eq!(
         result_a_value, result_b_value,
         "documentSymbol must be deterministic"
@@ -13382,6 +13365,64 @@ where
     }
 }
 
+async fn lsp_document_symbol_with_request<S>(
+    service: &mut S,
+    request_id: i64,
+    uri: &Url,
+) -> Option<DocumentSymbolResponse>
+where
+    S: Service<Request, Response = Option<JsonRpcResponse>> + Send,
+    S::Future: Send,
+    S::Error: std::fmt::Debug,
+{
+    let response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/documentSymbol")
+                .id(request_id)
+                .params(
+                    serde_json::to_value(DocumentSymbolParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                        partial_result_params: PartialResultParams::default(),
+                    })
+                    .expect("DocumentSymbolParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("documentSymbol request")
+        .expect("documentSymbol response");
+    let value = serde_json::to_value(&response).expect("serialize documentSymbol response");
+    let result = value
+        .get("result")
+        .cloned()
+        .expect("documentSymbol result field");
+    serde_json::from_value(result).expect("parse documentSymbol response")
+}
+
+fn document_symbol_names(response: &DocumentSymbolResponse) -> Vec<String> {
+    match response {
+        DocumentSymbolResponse::Flat(items) => items.iter().map(|item| item.name.clone()).collect(),
+        DocumentSymbolResponse::Nested(items) => {
+            fn collect(items: &[tower_lsp::lsp_types::DocumentSymbol], out: &mut Vec<String>) {
+                for item in items {
+                    out.push(item.name.clone());
+                    if let Some(children) = item.children.as_ref() {
+                        collect(children, out);
+                    }
+                }
+            }
+
+            let mut out = Vec::new();
+            collect(items, &mut out);
+            out
+        }
+    }
+}
+
 async fn lsp_completion_resolve_item_with_request<S>(
     service: &mut S,
     request_id: i64,
@@ -15040,7 +15081,9 @@ async fn p33_completion_transport_first_poll_stays_short_under_completion_burst(
     };
 
     for request_id in 0..SATURATING_REQUESTS {
-        harness.write_message(&completion_request(40_650 + request_id)).await;
+        harness
+            .write_message(&completion_request(40_650 + request_id))
+            .await;
     }
     tokio::time::sleep(Duration::from_millis(50)).await;
 
@@ -15094,6 +15137,600 @@ async fn p33_completion_transport_first_poll_stays_short_under_completion_burst(
         "transport slot backlog must not delay fifth completion before first poll under a short completion burst, trace={trace:?}"
     );
 
+    harness.shutdown().await;
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn p33_document_symbol_returns_latest_ready_from_cache_during_parse_gap() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const V1_FIXTURE: &str =
+        "#Область Public\nПроцедура OldProc() Экспорт\nКонецПроцедуры\n#КонецОбласти\n";
+    const V2_FIXTURE: &str =
+        "#Область Public\nПроцедура NewProc() Экспорт\nКонецПроцедуры\n#КонецОбласти\n";
+    const PARSE_DELAY_MS: u64 = 1200;
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let uri = Url::parse("file:///test_p33_document_symbol_latest_ready_parse_gap.bsl")
+        .expect("test uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: V1_FIXTURE.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let seeded = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(response) =
+                lsp_document_symbol_with_request(&mut service, 50_330, &uri).await
+            {
+                break response;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("seed documentSymbol response must arrive");
+    let seeded_names = document_symbol_names(&seeded);
+    assert!(
+        seeded_names.iter().any(|name| name == "OldProc"),
+        "seed documentSymbol response must expose OldProc, names={seeded_names:?}"
+    );
+
+    let _parse_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_DID_CHANGE_PARSE_DELAY_MS",
+        &PARSE_DELAY_MS.to_string(),
+    );
+
+    let did_change = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version: 2,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: None,
+            range_length: None,
+            text: V2_FIXTURE.to_string(),
+        }],
+    };
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    tokio::time::timeout(Duration::from_millis(800), async {
+        loop {
+            if super::super::language_server::did_change_inline_parse_delay_active_for_test()
+                && server
+                    .latest_received_file_versions_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .copied()
+                    == Some(2)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("test must observe parse-snapshot gap before requesting latest_ready outline");
+
+    let started = Instant::now();
+    let response = tokio::time::timeout(
+        Duration::from_millis(250),
+        lsp_document_symbol_with_request(&mut service, 50_331, &uri),
+    )
+    .await
+    .expect("documentSymbol latest_ready request must stay bounded")
+    .expect("documentSymbol latest_ready response must be present");
+    let elapsed = started.elapsed();
+    let names = document_symbol_names(&response);
+    assert!(
+        names.iter().any(|name| name == "OldProc"),
+        "latest_ready outline must serve cached previous structure while new revision is not ready, names={names:?}"
+    );
+    assert!(
+        names.iter().all(|name| name != "NewProc"),
+        "latest_ready outline must not masquerade as current revision before new snapshot is ready, names={names:?}"
+    );
+    assert!(
+        elapsed < Duration::from_millis(250),
+        "latest_ready outline must stay bounded during parse-snapshot gap (elapsed={elapsed:?})"
+    );
+
+    let metrics = lsp_get_observability_metrics(&mut service, 50_399).await;
+    let counters = metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    assert!(
+        read_u64_metric(
+            counters.get("intellisense_v2_document_symbol_outcome_total_outcome_latest_ready")
+        ) > 0,
+        "latest_ready outcome must be observable, counters={counters:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn p33_document_symbol_supersedes_older_outstanding_refresh() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const V1_FIXTURE: &str =
+        "#Область Public\nПроцедура OldProc() Экспорт\nКонецПроцедуры\n#КонецОбласти\n";
+    const V2_FIXTURE: &str =
+        "#Область Public\nПроцедура NewProc() Экспорт\nКонецПроцедуры\n#КонецОбласти\n";
+    const PARSE_DELAY_MS: u64 = 1200;
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
+    initialize_live_lsp_transport(&mut harness).await;
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let uri = Url::parse("file:///test_p33_document_symbol_superseded_refresh.bsl").expect("uri");
+    harness
+        .send_notification(
+            "textDocument/didOpen",
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "bsl".to_string(),
+                    version: 1,
+                    text: V1_FIXTURE.to_string(),
+                },
+            },
+        )
+        .await;
+
+    let seeded = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let response = harness
+                .send_request(
+                    50_340,
+                    "textDocument/documentSymbol",
+                    DocumentSymbolParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                        partial_result_params: PartialResultParams::default(),
+                    },
+                )
+                .await;
+            if let Some(result) = response.get("result").cloned() {
+                let parsed: Option<DocumentSymbolResponse> =
+                    serde_json::from_value(result).expect("parse seeded documentSymbol response");
+                if let Some(response) = parsed {
+                    break response;
+                }
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("seed documentSymbol response must arrive");
+    let seeded_names = document_symbol_names(&seeded);
+    assert!(
+        seeded_names.iter().any(|name| name == "OldProc"),
+        "seed documentSymbol response must expose OldProc, names={seeded_names:?}"
+    );
+
+    let _delay_guard = EnvVarGuard::set("BSL_TEST_DOCUMENT_SYMBOL_DELAY_MS", "300");
+    let _parse_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_DID_CHANGE_PARSE_DELAY_MS",
+        &PARSE_DELAY_MS.to_string(),
+    );
+    harness
+        .write_message(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 50_341,
+            "method": "textDocument/documentSymbol",
+            "params": DocumentSymbolParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            },
+        }))
+        .await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    harness
+        .send_notification(
+            "textDocument/didChange",
+            DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version: 2,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: V2_FIXTURE.to_string(),
+                }],
+            },
+        )
+        .await;
+
+    harness
+        .write_message(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 50_342,
+            "method": "textDocument/documentSymbol",
+            "params": DocumentSymbolParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            },
+        }))
+        .await;
+    let (first_response, second_response) = tokio::time::timeout(Duration::from_secs(10), async {
+        let mut first_response = None;
+        let mut second_response = None;
+        loop {
+            let response = harness.read_message().await;
+            match response.get("id").and_then(|value| value.as_i64()) {
+                Some(50_341) => first_response = Some(response),
+                Some(50_342) => second_response = Some(response),
+                _ => {}
+            }
+            if first_response.is_some() && second_response.is_some() {
+                break (
+                    first_response.take().expect("first response"),
+                    second_response.take().expect("second response"),
+                );
+            }
+        }
+    })
+    .await
+    .expect("both documentSymbol responses must arrive");
+    let second_result = second_response
+        .get("result")
+        .cloned()
+        .expect("second documentSymbol result field");
+    let second_parsed: Option<DocumentSymbolResponse> =
+        serde_json::from_value(second_result).expect("parse second documentSymbol response");
+    let second_parsed = second_parsed.expect("second documentSymbol response must be present");
+    let second_names = document_symbol_names(&second_parsed);
+    assert!(
+        second_names.iter().any(|name| name == "OldProc"),
+        "newer outline refresh should still return bounded latest_ready response, names={second_names:?}"
+    );
+
+    assert!(
+        first_response.get("result").is_some_and(|value| value.is_null()),
+        "older outstanding outline refresh must be superseded once a newer refresh arrives, response={first_response:?}"
+    );
+
+    let metrics = live_transport_get_observability_metrics(&mut harness, 50_343).await;
+    let counters = metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    assert!(
+        read_u64_metric(
+            counters.get("intellisense_v2_document_symbol_outcome_total_outcome_superseded")
+        ) > 0,
+        "superseded outcome must be observable, counters={counters:?}"
+    );
+
+    live_transport_close_document(&mut harness, &uri).await;
+    harness.shutdown().await;
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn p33_document_symbol_burst_does_not_delay_completion_first_poll_under_parse_gap() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const V1_FIXTURE: &str = "Процедура Тест()\n    ДляCompletion = Объект.\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str =
+        "#Область Public\nПроцедура AddedProc() Экспорт\nКонецПроцедуры\n#КонецОбласти\nПроцедура Тест()\n    ДляCompletion = Объект.\nКонецПроцедуры\n";
+    const PARSE_DELAY_MS: u64 = 1200;
+    const FIRST_POLL_BUDGET_MS: u64 = 200;
+    const SATURATING_REQUESTS: i64 = 4;
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator.clone()).await;
+    initialize_live_lsp_transport(&mut harness).await;
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let uri =
+        Url::parse("file:///test_p33_document_symbol_burst_first_poll_parse_gap.bsl").expect("uri");
+    harness
+        .send_notification(
+            "textDocument/didOpen",
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "bsl".to_string(),
+                    version: 1,
+                    text: V1_FIXTURE.to_string(),
+                },
+            },
+        )
+        .await;
+    let seeded = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let response = harness
+                .send_request(
+                    50_350,
+                    "textDocument/documentSymbol",
+                    DocumentSymbolParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                        partial_result_params: PartialResultParams::default(),
+                    },
+                )
+                .await;
+            if let Some(result) = response.get("result").cloned() {
+                let parsed: Option<DocumentSymbolResponse> =
+                    serde_json::from_value(result).expect("parse seeded documentSymbol response");
+                if let Some(response) = parsed {
+                    break response;
+                }
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("seed documentSymbol response must arrive");
+    let seeded_names = document_symbol_names(&seeded);
+    assert!(
+        seeded_names.iter().any(|name| name == "Тест"),
+        "seed documentSymbol response must expose initial outline, names={seeded_names:?}"
+    );
+
+    let _parse_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_DID_CHANGE_PARSE_DELAY_MS",
+        &PARSE_DELAY_MS.to_string(),
+    );
+    harness
+        .send_notification(
+            "textDocument/didChange",
+            DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version: 2,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: V2_FIXTURE.to_string(),
+                }],
+            },
+        )
+        .await;
+
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    tokio::time::timeout(Duration::from_millis(800), async {
+        loop {
+            if super::super::language_server::did_change_inline_parse_delay_active_for_test()
+                && server
+                    .latest_received_file_versions_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .copied()
+                    == Some(2)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("test must observe parse-snapshot gap before outline burst");
+
+    for request_id in 0..SATURATING_REQUESTS {
+        harness
+            .write_message(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 50_360 + request_id,
+                "method": "textDocument/documentSymbol",
+                "params": DocumentSymbolParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                    partial_result_params: PartialResultParams::default(),
+                },
+            }))
+            .await;
+    }
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let completion_position =
+        find_utf16_position_after_marker(V2_FIXTURE, "ДляCompletion = Объект.");
+    let completion_response = harness
+        .send_request(
+            50_399,
+            "textDocument/completion",
+            CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: completion_position,
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: Some(CompletionContext {
+                    trigger_kind: CompletionTriggerKind::INVOKED,
+                    trigger_character: None,
+                }),
+            },
+        )
+        .await;
+    assert!(
+        completion_response.get("result").is_some(),
+        "completion request under outline burst must still complete"
+    );
+
+    let trace = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let timeline = live_transport_get_completion_timeline(&mut harness, 50_398, 32).await;
+            let traces = timeline
+                .get("traces")
+                .and_then(|value| value.as_array())
+                .expect("completion timeline traces array");
+            if let Some(trace) = traces.iter().find(|trace| {
+                trace.get("request_id").and_then(|value| value.as_str()) == Some("50399")
+            }) {
+                break trace.clone();
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("completion trace must appear in timeline");
+
+    let service_future_to_first_poll_wait_ms =
+        completion_timeline_server_edge_u64(&trace, "service_future_to_first_poll_wait_ms")
+            .expect("service_future_to_first_poll_wait_ms");
+    assert!(
+        service_future_to_first_poll_wait_ms <= FIRST_POLL_BUDGET_MS,
+        "outline burst must not delay completion before first poll under parse-snapshot gap, trace={trace:?}"
+    );
+
+    let metrics = live_transport_get_observability_metrics(&mut harness, 50_397).await;
+    let counters = metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    assert!(
+        read_u64_metric(
+            counters.get("intellisense_v2_document_symbol_outcome_total_outcome_latest_ready")
+        ) > 0,
+        "outline burst gate must observe latest_ready outcomes while current revision is not ready, counters={counters:?}"
+    );
+
+    live_transport_close_document(&mut harness, &uri).await;
     harness.shutdown().await;
 }
 

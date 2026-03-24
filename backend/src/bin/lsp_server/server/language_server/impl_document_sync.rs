@@ -284,6 +284,24 @@ impl BslLanguageServer {
             else {
                 return;
             };
+            match build_document_symbols(args.text.as_ref(), parse_snapshot.parse_result.as_ref()) {
+                Ok(response) => {
+                    self.record_document_symbol_ready_v2(
+                        args.file_id,
+                        args.requested_version,
+                        response,
+                    )
+                    .await;
+                }
+                Err(err) => {
+                    warn!(
+                        file_id = args.file_id.0,
+                        file_version = args.requested_version,
+                        error = %err,
+                        "failed to build documentSymbol ready cache from parse snapshot"
+                    );
+                }
+            }
 
             if !still_requested(&requested_version_state, args.requested_version) {
                 return;
@@ -338,9 +356,10 @@ impl BslLanguageServer {
         run.await;
 
         let mut tasks = self.background_parse_snapshot_apply_tasks_v2.lock().await;
-        if tasks.get(&file_id).is_some_and(|task| {
-            Arc::ptr_eq(&task.requested_version, &requested_version_state)
-        }) {
+        if tasks
+            .get(&file_id)
+            .is_some_and(|task| Arc::ptr_eq(&task.requested_version, &requested_version_state))
+        {
             tasks.remove(&file_id);
         }
     }
@@ -1292,6 +1311,14 @@ impl BslLanguageServer {
                 .await
                 .remove(&file_id);
             self.latest_apply_enqueued_at_v2
+                .write()
+                .await
+                .remove(&file_id);
+            self.document_symbol_ready_cache_v2
+                .write()
+                .await
+                .remove(&file_id);
+            self.document_symbol_request_epochs_v2
                 .write()
                 .await
                 .remove(&file_id);

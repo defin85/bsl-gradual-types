@@ -1,6 +1,18 @@
 use super::*;
 
 impl BasicObservability {
+    pub fn record_intellisense_v2_document_symbol_outcome(&self, outcome: &str) {
+        let outcome = match outcome {
+            "current_ready" => "current_ready",
+            "latest_ready" => "latest_ready",
+            "unavailable" => "unavailable",
+            "superseded" => "superseded",
+            _ => "other",
+        };
+        let key = format!("intellisense_v2_document_symbol_outcome_total_outcome_{outcome}");
+        self.metrics.increment(&key);
+    }
+
     pub fn record_intellisense_v2_interactive_wait_budget_exhausted(&self) {
         self.metrics
             .increment("intellisense_v2_interactive_wait_budget_exhausted_total");

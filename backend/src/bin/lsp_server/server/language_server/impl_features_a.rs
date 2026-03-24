@@ -1,5 +1,19 @@
 use super::*;
 
+#[cfg(test)]
+async fn maybe_inject_document_symbol_delay_for_test() {
+    if let Some(delay_ms) = std::env::var("BSL_TEST_DOCUMENT_SYMBOL_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+    {
+        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+    }
+}
+
+#[cfg(not(test))]
+async fn maybe_inject_document_symbol_delay_for_test() {}
+
 impl BslLanguageServer {
     pub(super) async fn lsp_formatting(
         &self,
@@ -86,44 +100,57 @@ impl BslLanguageServer {
         &self,
         params: DocumentSymbolParams,
     ) -> JsonRpcResult<Option<DocumentSymbolResponse>> {
-        self.sync_v2_globals().await;
-
         let uri = params.text_document.uri;
         let Some(file_id) = self.get_file_id_v2(&uri).await else {
             return Ok(None);
         };
-
-        let prepared = self
-            .prepare_lsp_stateful_operation_v2(
-                &uri,
-                file_id,
-                bsl_runtime::application::SemanticOperation::DocumentSymbol,
-                false,
-            )
-            .await;
-        let (context, prepared, _expected_version) = match prepared {
-            Ok(values) => values,
-            Err(_) => return Ok(None),
-        };
-        let analysis = prepared.snapshot.analysis;
-        let Some(file_content) = analysis.file_text(file_id).ok().flatten() else {
+        let request_epoch = self.begin_document_symbol_request_v2(file_id).await;
+        maybe_inject_document_symbol_delay_for_test().await;
+        if self
+            .document_symbol_request_superseded_v2(file_id, request_epoch)
+            .await
+        {
+            self.coordinator
+                .record_intellisense_v2_document_symbol_outcome("superseded");
             return Ok(None);
-        };
-        let parse_result_query =
-            bsl_runtime::application::IntellisenseV2Facade::run_parse_result_query_singleflight(
-                &context,
-                &analysis,
-                true,
-                Some(self.coordinator.as_ref()),
-                file_id,
-            );
-        let Some(parse_result) = parse_result_query.ok().flatten() else {
+        }
+
+        let Some(requested_version) = self
+            .latest_received_file_versions_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied()
+        else {
+            self.coordinator
+                .record_intellisense_v2_document_symbol_outcome("unavailable");
             return Ok(None);
         };
 
-        let response = build_document_symbols(&uri, &file_content, &parse_result)
-            .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
-        Ok(Some(response))
+        let latest_ready = self.latest_document_symbol_ready_v2(file_id).await;
+        if self
+            .document_symbol_request_superseded_v2(file_id, request_epoch)
+            .await
+        {
+            self.coordinator
+                .record_intellisense_v2_document_symbol_outcome("superseded");
+            return Ok(None);
+        }
+
+        let Some(ready_state) = latest_ready else {
+            self.coordinator
+                .record_intellisense_v2_document_symbol_outcome("unavailable");
+            return Ok(None);
+        };
+
+        let outcome = if ready_state.file_version == requested_version {
+            "current_ready"
+        } else {
+            "latest_ready"
+        };
+        self.coordinator
+            .record_intellisense_v2_document_symbol_outcome(outcome);
+        Ok(Some(ready_state.response))
     }
 
     pub(super) async fn lsp_references(

@@ -1,6 +1,11 @@
 use super::*;
 
 impl SystemCoordinator {
+    pub fn record_intellisense_v2_document_symbol_outcome(&self, outcome: &str) {
+        self.observability
+            .record_intellisense_v2_document_symbol_outcome(outcome);
+    }
+
     pub fn record_completion_latency(&self, duration: std::time::Duration) {
         self.observability.record_completion_latency(duration);
     }

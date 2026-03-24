@@ -188,8 +188,9 @@ Representative matrix:
 
 По умолчанию script собирает producer-side evidence для
 `refactor-current-revision-readiness-fast-lane`; consumer-side split-prepare
-artifacts можно собрать тем же entry point через override
-`CHANGE_ID=refactor-completion-prepare-lightweight-exact-split`.
+artifacts и outline-isolation mixed-load evidence можно собрать тем же entry point
+через override `CHANGE_ID=refactor-completion-prepare-lightweight-exact-split`
+или `CHANGE_ID=refactor-document-symbol-interactive-isolation`.
 
 Default selector set:
 - contract-sync guards (`scripts/test-intellisense-smoke-gate.py`,
@@ -209,6 +210,11 @@ Default selector set:
   `backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-real-conf-big-warm-cache-completion-perf-live.json`
   и
   `backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-real-conf-big-revision-churn-completion-perf-live.json`;
+- для `refactor-document-symbol-interactive-isolation`: representative same-file mixed-load gate
+  `p39_real_conf_big_document_symbol_mixed_load_gate_live` с change-specific report path
+  `backend/tests/perf/reports/refactor-document-symbol-interactive-isolation-real-conf-big-document-symbol-mixed-load-live.json`,
+  который прогоняет `didChange`/`didSave` + burst `documentSymbol` + `completion`
+  и fail-ит при outline-induced starvation interactive ingress;
 - fail-closed budget enforcement для mandatory операций `completion`, `hover`,
   `definition`, `type_at_position`, `members`;
 - strict-валидация change через OpenSpec.
@@ -233,8 +239,14 @@ Override для split-prepare evidence:
 CHANGE_ID=refactor-completion-prepare-lightweight-exact-split ./scripts/validate-v2-completion-gates.sh
 ```
 
-При таком override script автоматически расширяет `REAL_MODULE_PROFILES` до `warm churn`
-и пишет per-profile summaries рядом с report JSON.
+Override для documentSymbol mixed-load evidence:
+```bash
+CHANGE_ID=refactor-document-symbol-interactive-isolation ./scripts/validate-v2-completion-gates.sh
+```
+
+При override для split-prepare script автоматически расширяет `REAL_MODULE_PROFILES`
+до `warm churn`; для documentSymbol isolation используется `outline`.
+В обоих случаях script пишет per-profile summaries рядом с report JSON.
 
 **Важно:** скрипт не зависит от `.github/workflows/*` и предназначен для локального запуска или внешнего CI (например, Jenkins/GitLab Runner).
 
@@ -251,6 +263,11 @@ CHANGE_ID=refactor-completion-prepare-lightweight-exact-split ./scripts/validate
 - `backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-real-conf-big-revision-churn-completion-perf-live.json`
 - `backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-real-conf-big-revision-churn-completion-perf-live.md`
 - `backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-openspec-validate.log`
+- `backend/tests/perf/reports/refactor-document-symbol-interactive-isolation-readiness-gate.json`
+- `backend/tests/perf/reports/refactor-document-symbol-interactive-isolation-readiness-gate.md`
+- `backend/tests/perf/reports/refactor-document-symbol-interactive-isolation-real-conf-big-document-symbol-mixed-load-live.json`
+- `backend/tests/perf/reports/refactor-document-symbol-interactive-isolation-real-conf-big-document-symbol-mixed-load-live.md`
+- `backend/tests/perf/reports/refactor-document-symbol-interactive-isolation-openspec-validate.log`
 
 ---
 

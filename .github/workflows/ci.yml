@@ -191,6 +191,11 @@ jobs:
           CHANGE_ID: refactor-completion-prepare-lightweight-exact-split
           BSL_V2_REAL_CONF_BIG_REVISION_CHURN_COMPLETION_PERF_REPORT: ${{ github.workspace }}/backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-real-conf-big-revision-churn-completion-perf-live.json
         run: cargo test -p bsl-backend --bin bsl-lsp-server p38_real_conf_big_revision_churn_completion_perf_report_live -- --nocapture
+      - name: Run documentSymbol mixed-load representative gate
+        env:
+          CHANGE_ID: refactor-document-symbol-interactive-isolation
+          BSL_V2_REAL_CONF_BIG_DOCUMENT_SYMBOL_MIXED_LOAD_REPORT: ${{ github.workspace }}/backend/tests/perf/reports/refactor-document-symbol-interactive-isolation-real-conf-big-document-symbol-mixed-load-live.json
+        run: cargo test -p bsl-backend --bin bsl-lsp-server p39_real_conf_big_document_symbol_mixed_load_gate_live -- --nocapture
       - name: Upload perf gate reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -203,3 +208,5 @@ jobs:
             backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-*.md
             backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-*.json
             backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-*.md
+            backend/tests/perf/reports/refactor-document-symbol-interactive-isolation-*.json
+            backend/tests/perf/reports/refactor-document-symbol-interactive-isolation-*.md

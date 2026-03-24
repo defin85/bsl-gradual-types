@@ -11,6 +11,8 @@ PERF_PROFILES="${PERF_PROFILES:-small large churn}"
 if [[ -z "${REAL_MODULE_PROFILES:-}" ]]; then
   if [[ "${CHANGE_ID}" == "refactor-completion-prepare-lightweight-exact-split" ]]; then
     REAL_MODULE_PROFILES="warm churn"
+  elif [[ "${CHANGE_ID}" == "refactor-document-symbol-interactive-isolation" ]]; then
+    REAL_MODULE_PROFILES="outline"
   else
     REAL_MODULE_PROFILES="churn"
   fi
@@ -52,6 +54,13 @@ for profile in ${REAL_MODULE_PROFILES}; do
       report_var="BSL_V2_REAL_CONF_BIG_REVISION_CHURN_COMPLETION_PERF_REPORT"
       report_path="${REPORT_DIR}/${CHANGE_ID}-real-conf-big-revision-churn-completion-perf-live.json"
       summary_path="${REPORT_DIR}/${CHANGE_ID}-real-conf-big-revision-churn-completion-perf-live.md"
+      ;;
+    outline)
+      profile_title="documentSymbol mixed-load isolation"
+      test_name="p39_real_conf_big_document_symbol_mixed_load_gate_live"
+      report_var="BSL_V2_REAL_CONF_BIG_DOCUMENT_SYMBOL_MIXED_LOAD_REPORT"
+      report_path="${REPORT_DIR}/${CHANGE_ID}-real-conf-big-document-symbol-mixed-load-live.json"
+      summary_path="${REPORT_DIR}/${CHANGE_ID}-real-conf-big-document-symbol-mixed-load-live.md"
       ;;
     *)
       echo "Unsupported REAL_MODULE_PROFILES entry: ${profile}" >&2
@@ -198,6 +207,18 @@ for profile in real_module_profiles:
         f"- prepare_timeout delta: `{aggregate['real_module_gates'][profile]['prepare_timeout_delta']}`",
         f"- exact_deadline delta: `{aggregate['real_module_gates'][profile]['exact_deadline_delta']}`",
     ]
+    if "measured_document_symbol_latest_ready_total_delta" in summary:
+        profile_lines.extend(
+            [
+                f"- documentSymbol latest_ready delta: `{summary.get('measured_document_symbol_latest_ready_total_delta', 0)}`",
+                f"- documentSymbol current_ready delta: `{summary.get('measured_document_symbol_current_ready_total_delta', 0)}`",
+                f"- documentSymbol unavailable delta: `{summary.get('measured_document_symbol_unavailable_total_delta', 0)}`",
+                f"- documentSymbol superseded delta: `{summary.get('measured_document_symbol_superseded_total_delta', 0)}`",
+                f"- documentSymbol present responses: `{summary.get('measured_document_symbol_present_responses_total', 0)}`",
+                f"- documentSymbol null responses: `{summary.get('measured_document_symbol_null_responses_total', 0)}`",
+                f"- ingress regression samples: `{summary.get('measured_ingress_regression_samples', 0)}`",
+            ]
+        )
     spec["summary_path"].write_text("\n".join(profile_lines) + "\n", encoding="utf-8")
     print(f"[gate] Real-module summary written to {spec['summary_path']}")
 

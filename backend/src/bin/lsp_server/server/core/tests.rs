@@ -1,4 +1,5 @@
 use super::*;
+use crate::handlers::symbols::build_document_symbols;
 use axum::http::{header, Request as AxumRequest};
 use bsl_agent::jobs::JobManager;
 use bsl_agent::server::types::{
@@ -29,15 +30,15 @@ use tower_lsp::lsp_types::{
     ClientCapabilities, CodeActionContext, CodeActionOrCommand, CodeActionParams,
     CompletionContext, CompletionItemKind, CompletionParams, CompletionResponse,
     CompletionTriggerKind, DidChangeConfigurationParams, DidChangeTextDocumentParams,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams,
-    DocumentRangeFormattingParams, DocumentSymbolParams, DocumentSymbolResponse, FormattingOptions,
-    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents, HoverParams,
-    InitializeParams, InitializedParams, InlayHint, InlayHintLabel, InlayHintParams, Location,
-    MarkedString, PartialResultParams, Position, PrepareRenameResponse, PublishDiagnosticsParams,
-    Range, ReferenceContext, ReferenceParams, RenameParams, SymbolInformation, SymbolKind,
-    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
-    TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
-    WorkspaceEdit, WorkspaceSymbolParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
+    DocumentFormattingParams, DocumentRangeFormattingParams, DocumentSymbolParams,
+    DocumentSymbolResponse, FormattingOptions, GotoDefinitionParams, GotoDefinitionResponse, Hover,
+    HoverContents, HoverParams, InitializeParams, InitializedParams, InlayHint, InlayHintLabel,
+    InlayHintParams, Location, MarkedString, PartialResultParams, Position, PrepareRenameResponse,
+    PublishDiagnosticsParams, Range, ReferenceContext, ReferenceParams, RenameParams,
+    SymbolInformation, SymbolKind, TextDocumentContentChangeEvent, TextDocumentIdentifier,
+    TextDocumentItem, TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier,
+    WorkDoneProgressParams, WorkspaceEdit, WorkspaceSymbolParams,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::LspService;
@@ -514,6 +515,18 @@ async fn live_transport_close_document(harness: &mut LiveLspTransportHarness, ur
         .await;
 }
 
+async fn live_transport_save_document(harness: &mut LiveLspTransportHarness, uri: &Url) {
+    harness
+        .send_notification(
+            "textDocument/didSave",
+            DidSaveTextDocumentParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                text: None,
+            },
+        )
+        .await;
+}
+
 async fn live_transport_completion_labels_with_request(
     harness: &mut LiveLspTransportHarness,
     request_id: i64,
@@ -544,6 +557,50 @@ async fn live_transport_completion_labels_with_request(
         serde_json::from_value(completion_result).expect("parse completion result");
 
     normalize_lsp_member_labels(&completion.expect("completion result present"))
+}
+
+async fn live_transport_write_document_symbol_request(
+    harness: &mut LiveLspTransportHarness,
+    request_id: i64,
+    uri: &Url,
+) {
+    harness
+        .write_message(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "textDocument/documentSymbol",
+            "params": DocumentSymbolParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            },
+        }))
+        .await;
+}
+
+async fn live_transport_write_completion_request(
+    harness: &mut LiveLspTransportHarness,
+    request_id: i64,
+    uri: &Url,
+    position: Position,
+    context: Option<CompletionContext>,
+) {
+    harness
+        .write_message(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "textDocument/completion",
+            "params": CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position,
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context,
+            },
+        }))
+        .await;
 }
 
 async fn live_transport_get_completion_timeline(
@@ -13403,6 +13460,16 @@ where
     serde_json::from_value(result).expect("parse documentSymbol response")
 }
 
+fn document_symbol_response_from_jsonrpc_response(
+    response: &serde_json::Value,
+) -> Option<DocumentSymbolResponse> {
+    let result = response
+        .get("result")
+        .cloned()
+        .expect("documentSymbol result field");
+    serde_json::from_value(result).expect("parse documentSymbol response")
+}
+
 fn document_symbol_names(response: &DocumentSymbolResponse) -> Vec<String> {
     match response {
         DocumentSymbolResponse::Flat(items) => items.iter().map(|item| item.name.clone()).collect(),
@@ -13421,6 +13488,16 @@ fn document_symbol_names(response: &DocumentSymbolResponse) -> Vec<String> {
             out
         }
     }
+}
+
+fn completion_labels_from_jsonrpc_response(response: &serde_json::Value) -> Vec<String> {
+    let completion_result = response
+        .get("result")
+        .cloned()
+        .expect("completion result field");
+    let completion: Option<CompletionResponse> =
+        serde_json::from_value(completion_result).expect("parse completion result");
+    normalize_lsp_member_labels(&completion.expect("completion result present"))
 }
 
 async fn lsp_completion_resolve_item_with_request<S>(
@@ -21656,6 +21733,1004 @@ fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
     live_transport_close_document(&mut harness, &uri).await;
     drop(server);
     harness.shutdown().await;
+    });
+    runtime.shutdown_timeout(std::time::Duration::from_secs(1));
+}
+
+#[test]
+fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("p39 tokio runtime");
+    runtime.block_on(async {
+        init_test_tracing();
+        struct EnvVarGuard {
+            key: &'static str,
+            previous: Option<String>,
+        }
+
+        impl EnvVarGuard {
+            fn set(key: &'static str, value: &str) -> Self {
+                let previous = std::env::var(key).ok();
+                std::env::set_var(key, value);
+                Self { key, previous }
+            }
+        }
+
+        impl Drop for EnvVarGuard {
+            fn drop(&mut self) {
+                if let Some(previous) = &self.previous {
+                    std::env::set_var(self.key, previous);
+                } else {
+                    std::env::remove_var(self.key);
+                }
+            }
+        }
+
+        static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        let _env_lock = ENV_LOCK
+            .get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .expect("env lock");
+        let _parse_delay_guard = EnvVarGuard::set("BSL_TEST_DID_CHANGE_PARSE_DELAY_MS", "1500");
+
+        let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
+        const PROFILE_NAME: &str = "p39_real_conf_big_document_symbol_mixed_load_gate_live";
+        let change_id = std::env::var("CHANGE_ID")
+            .unwrap_or_else(|_| "refactor-document-symbol-interactive-isolation".to_string());
+        const WARMUP_REQUESTS: usize = 1;
+        const MEASURE_REQUESTS: usize = 10;
+        const DOCUMENT_SYMBOL_BURST_REQUESTS: usize = 4;
+        const FIRST_POLL_MAX_FACTOR: u64 = 4;
+        const TRANSPORT_TO_HANDLER_MAX_FACTOR: u64 = 4;
+        let interactive_wait_budget_ms = bsl_runtime::system::global_runtime_config()
+            .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
+            .unwrap_or(120);
+
+        let Some(conf_big_root) = conf_big_root_for_tests() else {
+            if allow_fixture_skip {
+                eprintln!(
+                    "skipping {PROFILE_NAME}: examples/conf_big fixture is missing and BSL_TEST_ALLOW_MISSING_CONF_BIG is set"
+                );
+                return;
+            }
+            panic!(
+                "examples/conf_big fixture is missing; set BSL_TEST_ALLOW_MISSING_CONF_BIG=1 to skip explicitly"
+            );
+        };
+
+        let module_path = conf_big_large_module_path_for_tests(&conf_big_root);
+        if !module_path.exists() {
+            if allow_fixture_skip {
+                eprintln!(
+                    "skipping {PROFILE_NAME}: module fixture is missing and BSL_TEST_ALLOW_MISSING_CONF_BIG is set: {}",
+                    module_path.display()
+                );
+                return;
+            }
+            panic!(
+                "conf_big module fixture is missing: {}; set BSL_TEST_ALLOW_MISSING_CONF_BIG=1 to skip explicitly",
+                module_path.display()
+            );
+        }
+
+        let module_text =
+            std::fs::read_to_string(&module_path).expect("read conf_big module text for p39 report");
+        let workspace_setup = ScaleAwareWorkspaceSetup {
+            platform_docs_archive: syntax_helper_path_for_tests(),
+            configuration_path: conf_big_root.clone(),
+            platform_version: "8.3.25".to_string(),
+        };
+        let coordinator = Arc::new(SystemCoordinator::new());
+        let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator.clone()).await;
+        initialize_live_lsp_transport(&mut harness).await;
+        prime_server_with_workspace_setup(&server, &workspace_setup, "p39_real_conf_big_live_setup")
+            .await;
+
+        let uri = Url::from_file_path(&module_path).expect("real conf_big module uri");
+        server
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "bsl".to_string(),
+                    version: 1,
+                    text: module_text.clone(),
+                },
+            })
+            .await;
+
+        server.sync_v2_globals().await;
+        let file_id = server.get_or_create_file_id_v2(&uri).await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if server
+                    .latest_received_file_versions_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .copied()
+                    == Some(1)
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("didOpen must publish latest received version on live transport");
+        let opened_version = server
+            .latest_received_file_versions_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied()
+            .expect("latest received version for p39 opened file");
+        assert_eq!(
+            opened_version, 1,
+            "real conf_big fixture must open at version 1"
+        );
+        assert!(
+            server
+                .analysis_v2
+                .wait_for_file_version(file_id, opened_version)
+                .await,
+            "analysis runtime must catch up to opened real conf_big file version"
+        );
+
+        let analysis = server.analysis_v2.snapshot().await;
+        let parse_result = analysis
+            .parse_result(file_id)
+            .expect("seed parse_result query")
+            .expect("seed parse_result must be present");
+        let seeded_outline = build_document_symbols(&module_text, parse_result.as_ref())
+            .expect("build seed documentSymbol outline");
+        server
+            .record_document_symbol_ready_v2(file_id, opened_version, seeded_outline)
+            .await;
+        let seeded = harness
+            .send_request(
+                39_100_000,
+                "textDocument/documentSymbol",
+                DocumentSymbolParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                    partial_result_params: PartialResultParams::default(),
+                },
+            )
+            .await;
+        let seeded = document_symbol_response_from_jsonrpc_response(&seeded)
+            .expect("seed documentSymbol response must be present");
+        assert!(
+            !document_symbol_names(&seeded).is_empty(),
+            "seed documentSymbol response must expose non-empty real-module outline"
+        );
+
+        let completion_position = find_utf16_position_after_marker(&module_text, "Объект.");
+        let completion_context = Some(CompletionContext {
+            trigger_kind: CompletionTriggerKind::INVOKED,
+            trigger_character: None,
+        });
+        let mut current_text = module_text.clone();
+        let mut current_version = opened_version;
+
+        let mut warmup_samples = Vec::new();
+        for index in 0..WARMUP_REQUESTS {
+            let request_id = 39_100_100_i64 + index as i64;
+            let started = Instant::now();
+            let labels = live_transport_completion_labels_with_request(
+                &mut harness,
+                request_id,
+                &uri,
+                completion_position,
+                completion_context.clone(),
+            )
+            .await;
+            warmup_samples.push(serde_json::json!({
+                "step": format!("warmup_completion_{}", index + 1),
+                "request_id": request_id,
+                "elapsed_ms": started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+                "label_count": labels.len(),
+                "labels": labels,
+                "version": current_version,
+            }));
+        }
+
+        let metrics_before_measured = coordinator.observability_metrics();
+        let counters_before_measured = metrics_before_measured
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics_before_measured.counters object");
+
+        let mut measured_samples = Vec::new();
+        for index in 0..MEASURE_REQUESTS {
+            let outline_probe_name = format!("DocumentSymbolIsolationProbe{}", index + 1);
+            let appended_outline = format!(
+                "\n#Область {outline_probe_name}\nПроцедура {outline_probe_name}() Экспорт\nКонецПроцедуры\n#КонецОбласти\n"
+            );
+            let next_version = current_version
+                .checked_add(1)
+                .expect("p39 mixed-load version overflow");
+            live_transport_append_text_change(
+                &mut harness,
+                &uri,
+                &current_text,
+                next_version,
+                &appended_outline,
+            )
+            .await;
+            current_text.push_str(&appended_outline);
+            current_version = next_version;
+            live_transport_save_document(&mut harness, &uri).await;
+
+            tokio::time::timeout(Duration::from_millis(800), async {
+                loop {
+                    if super::super::language_server::did_change_inline_parse_delay_active_for_test()
+                        && server
+                            .latest_received_file_versions_v2
+                            .read()
+                            .await
+                            .get(&file_id)
+                            .copied()
+                            == Some(current_version)
+                    {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("test must observe parse-snapshot gap before mixed outline load");
+
+            let document_symbol_request_ids = (0..DOCUMENT_SYMBOL_BURST_REQUESTS)
+                .map(|burst_index| 39_200_000_i64 + (index as i64 * 10) + burst_index as i64)
+                .collect::<Vec<_>>();
+            for request_id in &document_symbol_request_ids {
+                live_transport_write_document_symbol_request(&mut harness, *request_id, &uri).await;
+            }
+
+            let completion_request_id = 39_300_000_i64 + index as i64;
+            let completion_started = Instant::now();
+            live_transport_write_completion_request(
+                &mut harness,
+                completion_request_id,
+                &uri,
+                completion_position,
+                completion_context.clone(),
+            )
+            .await;
+
+            let (completion_response, completion_elapsed_ms, document_symbol_responses) =
+                tokio::time::timeout(Duration::from_secs(10), async {
+                    let mut completion_response = None;
+                    let mut completion_elapsed_ms = None;
+                    let mut document_symbol_responses = Vec::new();
+                    loop {
+                        let response = harness.read_message().await;
+                        let Some(response_id) = response.get("id").and_then(|value| value.as_i64())
+                        else {
+                            continue;
+                        };
+                        if response_id == completion_request_id {
+                            completion_elapsed_ms = Some(
+                                completion_started.elapsed().as_millis().min(u64::MAX as u128)
+                                    as u64,
+                            );
+                            completion_response = Some(response);
+                        } else if document_symbol_request_ids.contains(&response_id) {
+                            document_symbol_responses.push(response);
+                        }
+                        if completion_response.is_some()
+                            && document_symbol_responses.len()
+                                == document_symbol_request_ids.len()
+                        {
+                            break (
+                                completion_response.expect("completion response"),
+                                completion_elapsed_ms.expect("completion elapsed"),
+                                document_symbol_responses,
+                            );
+                        }
+                    }
+                })
+                .await
+                .expect("mixed-load completion and outline responses must arrive");
+
+            let labels = completion_labels_from_jsonrpc_response(&completion_response);
+            let document_symbol_response_summaries = document_symbol_request_ids
+                .iter()
+                .map(|request_id| {
+                    let response = document_symbol_responses
+                        .iter()
+                        .find(|response| {
+                            response.get("id").and_then(|value| value.as_i64()) == Some(*request_id)
+                        })
+                        .expect("documentSymbol response by request id");
+                    let parsed = document_symbol_response_from_jsonrpc_response(response);
+                    let names = parsed
+                        .as_ref()
+                        .map(document_symbol_names)
+                        .unwrap_or_default();
+                    let contains_fresh_outline_name =
+                        names.iter().any(|name| name == &outline_probe_name);
+                    serde_json::json!({
+                        "request_id": request_id,
+                        "result_kind": if parsed.is_some() { "present" } else { "null" },
+                        "symbol_count": names.len(),
+                        "contains_fresh_outline_name": contains_fresh_outline_name,
+                        "sample_names": names.into_iter().take(8).collect::<Vec<_>>(),
+                    })
+                })
+                .collect::<Vec<_>>();
+            let document_symbol_present_responses = document_symbol_response_summaries
+                .iter()
+                .filter(|summary| {
+                    summary
+                        .get("result_kind")
+                        .and_then(|value| value.as_str())
+                        == Some("present")
+                })
+                .count();
+            let document_symbol_fresh_outline_present = document_symbol_response_summaries
+                .iter()
+                .any(|summary| {
+                    summary
+                        .get("contains_fresh_outline_name")
+                        .and_then(|value| value.as_bool())
+                        == Some(true)
+                });
+            assert!(
+                document_symbol_present_responses > 0,
+                "mixed-load sample must keep at least one bounded outline response, summaries={document_symbol_response_summaries:?}"
+            );
+            assert!(
+                !document_symbol_fresh_outline_present,
+                "outline mixed-load sample must not masquerade as current revision while parse gap is active, fresh_outline_name={outline_probe_name}, summaries={document_symbol_response_summaries:?}"
+            );
+
+            measured_samples.push(serde_json::json!({
+                "step": format!("measured_document_symbol_mixed_load_completion_{}", index + 1),
+                "request_id": completion_request_id,
+                "elapsed_ms": completion_elapsed_ms,
+                "label_count": labels.len(),
+                "labels": labels,
+                "version": current_version,
+                "fresh_outline_name": outline_probe_name,
+                "document_symbol_request_ids": document_symbol_request_ids,
+                "document_symbol_response_summaries": document_symbol_response_summaries,
+                "document_symbol_present_responses": document_symbol_present_responses,
+                "did_change_notifications_per_measured_completion": 1,
+                "did_save_after_did_change": true,
+            }));
+        }
+
+        let completion_timeline =
+            live_transport_get_completion_timeline(&mut harness, 39_300_900, 160).await;
+        let observability_metrics =
+            live_transport_get_observability_metrics(&mut harness, 39_300_901).await;
+        let timeline_traces = completion_timeline
+            .get("traces")
+            .and_then(|value| value.as_array())
+            .expect("completion timeline traces array");
+        let filtered_traces: Vec<serde_json::Value> = timeline_traces
+            .iter()
+            .filter(|trace| trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str()))
+            .cloned()
+            .collect();
+        assert!(
+            !filtered_traces.is_empty(),
+            "expected non-empty completion timeline traces for real conf_big module"
+        );
+
+        let histograms = observability_metrics
+            .get("histograms")
+            .and_then(|value| value.as_object())
+            .expect("metrics.histograms object");
+        let counters = observability_metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+
+        let total_sample_count = WARMUP_REQUESTS + MEASURE_REQUESTS;
+        let trace_request_id_present_total = filtered_traces
+            .iter()
+            .filter(|trace| {
+                trace
+                    .get("request_id")
+                    .and_then(|value| value.as_str())
+                    .is_some()
+            })
+            .count();
+        let trace_matching_mode = if trace_request_id_present_total > 0 {
+            "request_id"
+        } else {
+            "ordinal_by_filtered_uri_trace_order"
+        };
+        let fallback_trace_window: Vec<serde_json::Value> =
+            if filtered_traces.len() >= total_sample_count {
+                filtered_traces[filtered_traces.len() - total_sample_count..].to_vec()
+            } else {
+                filtered_traces.clone()
+            };
+
+        let enrich_samples = |samples: Vec<serde_json::Value>,
+                              sample_offset: usize|
+         -> Vec<serde_json::Value> {
+            samples
+                .into_iter()
+                .enumerate()
+                .map(|(sample_index, sample)| {
+                    let request_id_text = sample
+                        .get("request_id")
+                        .and_then(|value| value.as_i64())
+                        .map(|value| value.to_string());
+                    let trace = if trace_request_id_present_total > 0 {
+                        request_id_text.as_ref().and_then(|request_id| {
+                            filtered_traces.iter().find(|trace| {
+                                trace.get("request_id").and_then(|value| value.as_str())
+                                    == Some(request_id)
+                            })
+                        })
+                    } else {
+                        fallback_trace_window.get(sample_offset + sample_index)
+                    };
+                    let trace_summary = trace.map(|trace| {
+                        serde_json::json!({
+                            "trace_id": trace.get("trace_id").and_then(|value| value.as_str()),
+                            "request_id": trace.get("request_id").and_then(|value| value.as_str()),
+                            "trigger_mode": trace.get("trigger_mode").and_then(|value| value.as_str()),
+                            "outcome": trace.get("outcome").and_then(|value| value.as_str()),
+                            "route": completion_timeline_prepare_detail_str(trace, "route"),
+                            "prepare_kind": completion_timeline_prepare_detail_str(trace, "kind"),
+                            "fail_closed_cause": completion_timeline_prepare_detail_str(trace, "fail_closed_cause"),
+                            "total_duration_ms": trace.get("total_duration_ms").and_then(|value| value.as_u64()),
+                            "dominant_stage": trace.get("dominant_stage").and_then(|value| value.as_str()),
+                            "queue_outcome": trace.get("queue_outcome").and_then(|value| value.as_str()),
+                            "turn_wait_outcome": trace.get("turn_wait_outcome").and_then(|value| value.as_str()),
+                            "dispatch_to_request_context_wait_ms": completion_timeline_server_edge_u64(
+                                trace,
+                                "dispatch_to_request_context_wait_ms",
+                            ),
+                            "transport_to_handler_wait_ms": completion_timeline_server_edge_u64(
+                                trace,
+                                "transport_to_handler_wait_ms",
+                            ),
+                            "transport_to_service_future_wait_ms": completion_timeline_server_edge_u64(
+                                trace,
+                                "transport_to_service_future_wait_ms",
+                            ),
+                            "service_future_to_first_poll_wait_ms": completion_timeline_server_edge_u64(
+                                trace,
+                                "service_future_to_first_poll_wait_ms",
+                            ),
+                            "prepare_stateful_ms": completion_timeline_trace_stage_duration_ms(trace, "prepare_stateful"),
+                            "wait_exact_type_index_ms": completion_timeline_trace_stage_duration_ms(trace, "wait_exact_type_index"),
+                            "query_bundle_ms": completion_timeline_trace_stage_duration_ms(trace, "query_bundle"),
+                            "collect_ms": completion_timeline_trace_stage_duration_ms(trace, "collect"),
+                            "response_build_ms": completion_timeline_trace_stage_duration_ms(trace, "response_build"),
+                        })
+                    });
+                    let mut sample_object = sample
+                        .as_object()
+                        .cloned()
+                        .expect("sample must be json object");
+                    sample_object.insert(
+                        "trace".to_string(),
+                        trace_summary.unwrap_or(serde_json::json!(null)),
+                    );
+                    serde_json::Value::Object(sample_object)
+                })
+                .collect::<Vec<_>>()
+        };
+
+        let warmup_samples = enrich_samples(warmup_samples, 0);
+        let measured_samples = enrich_samples(measured_samples, WARMUP_REQUESTS);
+
+        let latest_trace_summaries = filtered_traces
+            .iter()
+            .rev()
+            .take(24)
+            .map(|trace| {
+                serde_json::json!({
+                    "trace_id": trace.get("trace_id").and_then(|value| value.as_str()),
+                    "request_id": trace.get("request_id").and_then(|value| value.as_str()),
+                    "trigger_mode": trace.get("trigger_mode").and_then(|value| value.as_str()),
+                    "outcome": trace.get("outcome").and_then(|value| value.as_str()),
+                    "route": completion_timeline_prepare_detail_str(trace, "route"),
+                    "prepare_kind": completion_timeline_prepare_detail_str(trace, "kind"),
+                    "fail_closed_cause": completion_timeline_prepare_detail_str(trace, "fail_closed_cause"),
+                    "started_at_ms": trace.get("started_at_ms").and_then(|value| value.as_u64()),
+                    "total_duration_ms": trace.get("total_duration_ms").and_then(|value| value.as_u64()),
+                    "dominant_stage": trace.get("dominant_stage").and_then(|value| value.as_str()),
+                    "queue_outcome": trace.get("queue_outcome").and_then(|value| value.as_str()),
+                    "turn_wait_outcome": trace.get("turn_wait_outcome").and_then(|value| value.as_str()),
+                    "transport_to_handler_wait_ms": completion_timeline_server_edge_u64(
+                        trace,
+                        "transport_to_handler_wait_ms",
+                    ),
+                    "transport_to_service_future_wait_ms": completion_timeline_server_edge_u64(
+                        trace,
+                        "transport_to_service_future_wait_ms",
+                    ),
+                    "service_future_to_first_poll_wait_ms": completion_timeline_server_edge_u64(
+                        trace,
+                        "service_future_to_first_poll_wait_ms",
+                    ),
+                    "prepare_stateful_ms": completion_timeline_trace_stage_duration_ms(trace, "prepare_stateful"),
+                    "wait_exact_type_index_ms": completion_timeline_trace_stage_duration_ms(trace, "wait_exact_type_index"),
+                    "query_bundle_ms": completion_timeline_trace_stage_duration_ms(trace, "query_bundle"),
+                    "collect_ms": completion_timeline_trace_stage_duration_ms(trace, "collect"),
+                    "response_build_ms": completion_timeline_trace_stage_duration_ms(trace, "response_build"),
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let counter_delta = |name: &str| -> u64 {
+            read_u64_metric(counters.get(name))
+                .saturating_sub(read_u64_metric(counters_before_measured.get(name)))
+        };
+        let sample_elapsed_histogram = |samples: &[serde_json::Value]| {
+            let values = samples
+                .iter()
+                .filter_map(|sample| sample.get("elapsed_ms").and_then(|value| value.as_u64()))
+                .map(|value| value as f64)
+                .collect::<Vec<_>>();
+            sample_histogram_value(&values)
+        };
+        let sample_trace_histogram = |samples: &[serde_json::Value], field: &str| {
+            let values = samples
+                .iter()
+                .filter_map(|sample| {
+                    sample
+                        .get("trace")
+                        .and_then(|trace| trace.get(field))
+                        .and_then(|value| value.as_u64())
+                })
+                .map(|value| value as f64)
+                .collect::<Vec<_>>();
+            sample_histogram_value(&values)
+        };
+        let sample_trace_server_edge_histogram = |samples: &[serde_json::Value], field: &str| {
+            let values = samples
+                .iter()
+                .filter_map(|sample| {
+                    sample
+                        .get("trace")
+                        .and_then(|trace| trace.get(field))
+                        .and_then(|value| value.as_u64())
+                })
+                .map(|value| value as f64)
+                .collect::<Vec<_>>();
+            sample_histogram_value(&values)
+        };
+
+        let warmup_non_empty_samples = warmup_samples
+            .iter()
+            .filter(|sample| {
+                sample
+                    .get("label_count")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(0)
+                    > 0
+            })
+            .count();
+        let measured_trace_linked_samples = measured_samples
+            .iter()
+            .filter(|sample| sample.get("trace").is_some_and(|trace| !trace.is_null()))
+            .count();
+        let measured_non_empty_samples = measured_samples
+            .iter()
+            .filter(|sample| {
+                sample
+                    .get("label_count")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(0)
+                    > 0
+            })
+            .count();
+        let measured_ok_non_empty_traces = measured_samples
+            .iter()
+            .filter(|sample| {
+                sample
+                    .get("trace")
+                    .and_then(|trace| trace.get("outcome"))
+                    .and_then(|value| value.as_str())
+                    == Some("ok_non_empty")
+            })
+            .count();
+        let measured_fail_closed_traces = measured_samples
+            .iter()
+            .filter(|sample| {
+                sample
+                    .get("trace")
+                    .and_then(|trace| trace.get("outcome"))
+                    .and_then(|value| value.as_str())
+                    == Some("fail_closed")
+            })
+            .count();
+        let measured_head_hit_traces = measured_samples
+            .iter()
+            .filter(|sample| {
+                sample
+                    .get("trace")
+                    .and_then(|trace| trace.get("route"))
+                    .and_then(|value| value.as_str())
+                    == Some("head_hit")
+            })
+            .count();
+        let measured_exact_hit_traces = measured_samples
+            .iter()
+            .filter(|sample| {
+                sample
+                    .get("trace")
+                    .and_then(|trace| trace.get("route"))
+                    .and_then(|value| value.as_str())
+                    == Some("exact_hit")
+            })
+            .count();
+        let measured_document_symbol_present_responses_total = measured_samples
+            .iter()
+            .filter_map(|sample| {
+                sample
+                    .get("document_symbol_present_responses")
+                    .and_then(|value| value.as_u64())
+            })
+            .sum::<u64>();
+        let measured_document_symbol_null_responses_total =
+            (MEASURE_REQUESTS * DOCUMENT_SYMBOL_BURST_REQUESTS) as u64
+                - measured_document_symbol_present_responses_total;
+        let measured_document_symbol_fresh_outline_leak_samples = measured_samples
+            .iter()
+            .filter(|sample| {
+                sample
+                    .get("document_symbol_response_summaries")
+                    .and_then(|value| value.as_array())
+                    .is_some_and(|summaries| {
+                        summaries.iter().any(|summary| {
+                            summary
+                                .get("contains_fresh_outline_name")
+                                .and_then(|value| value.as_bool())
+                                == Some(true)
+                        })
+                    })
+            })
+            .count();
+        let measured_document_symbol_latest_ready_total_delta = counter_delta(
+            "intellisense_v2_document_symbol_outcome_total_outcome_latest_ready",
+        );
+        let measured_document_symbol_current_ready_total_delta = counter_delta(
+            "intellisense_v2_document_symbol_outcome_total_outcome_current_ready",
+        );
+        let measured_document_symbol_unavailable_total_delta = counter_delta(
+            "intellisense_v2_document_symbol_outcome_total_outcome_unavailable",
+        );
+        let measured_document_symbol_superseded_total_delta = counter_delta(
+            "intellisense_v2_document_symbol_outcome_total_outcome_superseded",
+        );
+        let measured_document_symbol_total_outcome_delta =
+            measured_document_symbol_latest_ready_total_delta
+                + measured_document_symbol_current_ready_total_delta
+                + measured_document_symbol_unavailable_total_delta
+                + measured_document_symbol_superseded_total_delta;
+        let warmup_latency_histogram = sample_elapsed_histogram(&warmup_samples);
+        let measured_latency_histogram = sample_elapsed_histogram(&measured_samples);
+        let measured_latency_p95_ms = read_numeric_metric(measured_latency_histogram.get("p95"));
+        let measured_service_future_first_poll_histogram = sample_trace_server_edge_histogram(
+            &measured_samples,
+            "service_future_to_first_poll_wait_ms",
+        );
+        let measured_service_future_first_poll_p95_ms =
+            read_numeric_metric(measured_service_future_first_poll_histogram.get("p95"));
+        let measured_service_future_first_poll_max_ms = measured_samples
+            .iter()
+            .filter_map(|sample| {
+                sample
+                    .get("trace")
+                    .and_then(|trace| trace.get("service_future_to_first_poll_wait_ms"))
+                    .and_then(|value| value.as_u64())
+            })
+            .max()
+            .unwrap_or(0);
+        let measured_transport_to_handler_histogram = sample_trace_server_edge_histogram(
+            &measured_samples,
+            "transport_to_handler_wait_ms",
+        );
+        let measured_transport_to_handler_p95_ms =
+            read_numeric_metric(measured_transport_to_handler_histogram.get("p95"));
+        let measured_transport_to_handler_max_ms = measured_samples
+            .iter()
+            .filter_map(|sample| {
+                sample
+                    .get("trace")
+                    .and_then(|trace| trace.get("transport_to_handler_wait_ms"))
+                    .and_then(|value| value.as_u64())
+            })
+            .max()
+            .unwrap_or(0);
+        let measured_ingress_regression_samples = measured_samples
+            .iter()
+            .filter(|sample| {
+                let service_future_wait = sample
+                    .get("trace")
+                    .and_then(|trace| trace.get("service_future_to_first_poll_wait_ms"))
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(0);
+                let transport_to_handler_wait = sample
+                    .get("trace")
+                    .and_then(|trace| trace.get("transport_to_handler_wait_ms"))
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(0);
+                service_future_wait > interactive_wait_budget_ms
+                    && transport_to_handler_wait > interactive_wait_budget_ms
+            })
+            .count();
+
+        let report = serde_json::json!({
+            "change_id": change_id,
+            "profile": PROFILE_NAME,
+            "schema_version": 1,
+            "configuration_path": conf_big_root,
+            "module_path": module_path,
+            "marker": "Объект.",
+            "request_plan": {
+                "cache_mode": "seeded_outline_then_same_file_mixed_load",
+                "wait_for_current_revision_before_seed": true,
+                "warmup_requests": WARMUP_REQUESTS,
+                "measured_requests": MEASURE_REQUESTS,
+                "completion_trigger_mode": "invoked",
+                "transport_path": "tower_lsp_server_serve_duplex",
+                "mixed_load_profile": "didChange+didSave+documentSymbol_burst+completion",
+                "document_symbol_requests_per_measured_completion": DOCUMENT_SYMBOL_BURST_REQUESTS,
+                "did_change_notifications_per_measured_completion": 1,
+                "did_save_after_did_change": true,
+                "did_change_blocking_parse_delay_ms": 1500,
+            },
+            "warmup_samples": warmup_samples,
+            "measured_samples": measured_samples,
+            "summary": {
+                "trace_count_for_uri": filtered_traces.len(),
+                "trace_matching_mode": trace_matching_mode,
+                "trace_request_id_present_total": trace_request_id_present_total,
+                "warmup_non_empty_samples": warmup_non_empty_samples,
+                "measured_trace_linked_samples": measured_trace_linked_samples,
+                "measured_non_empty_samples": measured_non_empty_samples,
+                "measured_ok_non_empty_traces": measured_ok_non_empty_traces,
+                "measured_fail_closed_traces": measured_fail_closed_traces,
+                "measured_head_hit_traces": measured_head_hit_traces,
+                "measured_exact_hit_traces": measured_exact_hit_traces,
+                "measured_completion_total_delta": counter_delta("completion_total"),
+                "measured_ok_non_empty_total_delta": counter_delta("intellisense_v2_completion_result_total_ok_non_empty"),
+                "measured_fail_closed_total_delta": counter_delta("intellisense_v2_completion_result_total_fail_closed"),
+                "measured_prepare_timeout_total_delta": counter_delta(
+                    "intellisense_v2_completion_fail_closed_cause_total_cause_prepare_timeout"
+                ),
+                "measured_exact_deadline_total_delta": counter_delta(
+                    "intellisense_v2_completion_fail_closed_cause_total_cause_exact_deadline"
+                ),
+                "measured_fallback_unavailable_total_delta": counter_delta("intellisense_v2_completion_fallback_unavailable_total"),
+                "measured_interactive_wait_budget_exhausted_total_delta": counter_delta("intellisense_v2_interactive_wait_budget_exhausted_total"),
+                "measured_document_symbol_requests_total": (MEASURE_REQUESTS * DOCUMENT_SYMBOL_BURST_REQUESTS) as u64,
+                "measured_document_symbol_present_responses_total": measured_document_symbol_present_responses_total,
+                "measured_document_symbol_null_responses_total": measured_document_symbol_null_responses_total,
+                "measured_document_symbol_fresh_outline_leak_samples": measured_document_symbol_fresh_outline_leak_samples,
+                "measured_document_symbol_latest_ready_total_delta": measured_document_symbol_latest_ready_total_delta,
+                "measured_document_symbol_current_ready_total_delta": measured_document_symbol_current_ready_total_delta,
+                "measured_document_symbol_unavailable_total_delta": measured_document_symbol_unavailable_total_delta,
+                "measured_document_symbol_superseded_total_delta": measured_document_symbol_superseded_total_delta,
+                "measured_document_symbol_total_outcome_delta": measured_document_symbol_total_outcome_delta,
+                "measured_ingress_regression_samples": measured_ingress_regression_samples,
+                "interactive_wait_budget_ms": interactive_wait_budget_ms,
+                "warmup_latency_ms": warmup_latency_histogram,
+                "measured_latency_ms": measured_latency_histogram,
+                "measured_service_future_to_first_poll_wait_ms": measured_service_future_first_poll_histogram,
+                "measured_service_future_to_first_poll_wait_max_ms": measured_service_future_first_poll_max_ms,
+                "measured_transport_to_handler_wait_ms": measured_transport_to_handler_histogram,
+                "measured_transport_to_handler_wait_max_ms": measured_transport_to_handler_max_ms,
+                "measured_dispatch_to_request_context_wait_ms": sample_trace_server_edge_histogram(
+                    &measured_samples,
+                    "dispatch_to_request_context_wait_ms"
+                ),
+                "measured_prepare_stateful_ms": sample_trace_histogram(&measured_samples, "prepare_stateful_ms"),
+                "measured_wait_exact_type_index_ms": sample_trace_histogram(&measured_samples, "wait_exact_type_index_ms"),
+                "measured_query_bundle_ms": sample_trace_histogram(&measured_samples, "query_bundle_ms"),
+                "measured_collect_ms": sample_trace_histogram(&measured_samples, "collect_ms"),
+            },
+            "extension_like_key_latencies": {
+                "intellisense_v2_wait_for_file_version_diagnostics": histogram_metric_value_or_zero(
+                    histograms,
+                    "intellisense_v2_wait_for_file_version_diagnostics_ms",
+                    None
+                ),
+                "intellisense_v2_syntax_diagnostics_query": histogram_metric_value_or_zero(
+                    histograms,
+                    "intellisense_v2_syntax_diagnostics_query_ms",
+                    None
+                ),
+                "intellisense_v2_semantic_diagnostics_query": histogram_metric_value_or_zero(
+                    histograms,
+                    "intellisense_v2_semantic_diagnostics_query_ms",
+                    None
+                ),
+                "intellisense_v2_wait_for_file_version_completion": histogram_metric_value_or_zero(
+                    histograms,
+                    "intellisense_v2_wait_for_file_version_completion_ms",
+                    None
+                ),
+                "intellisense_v2_snapshot_completion": histogram_metric_value_or_zero(
+                    histograms,
+                    "intellisense_v2_snapshot_completion_ms",
+                    None
+                ),
+                "intellisense_v2_ir_query_completion": histogram_metric_value_or_zero(
+                    histograms,
+                    "intellisense_v2_ir_query_completion_ms",
+                    None
+                ),
+            },
+            "latest_trace_summaries": latest_trace_summaries,
+            "completion_timeline": {
+                "trace_count": filtered_traces.len(),
+                "selected_traces": filtered_traces,
+                "raw": completion_timeline,
+            },
+            "observability": {
+                "raw": observability_metrics,
+            }
+        });
+
+        let report_path = std::env::var("BSL_V2_REAL_CONF_BIG_DOCUMENT_SYMBOL_MIXED_LOAD_REPORT")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests")
+                    .join("perf")
+                    .join("reports")
+                    .join(format!(
+                        "{change_id}-real-conf-big-document-symbol-mixed-load-live.json"
+                    ))
+            });
+        if let Some(parent) = report_path.parent() {
+            std::fs::create_dir_all(parent)
+                .expect("failed to create directory for p39 real conf_big perf report");
+        }
+        std::fs::write(
+            &report_path,
+            serde_json::to_string_pretty(&report).expect("serialize p39 real conf_big perf report"),
+        )
+        .expect("write p39 real conf_big perf report");
+        println!("{PROFILE_NAME}_path={}", report_path.display());
+
+        assert!(
+            MEASURE_REQUESTS >= 10,
+            "mixed-load representative gate must collect at least 10 measured samples"
+        );
+        assert!(
+            trace_matching_mode == "request_id",
+            "expected request-context parity to expose JSON-RPC request ids in completion timeline, trace_matching_mode={}, trace_request_id_present_total={}, filtered_traces={filtered_traces:?}",
+            trace_matching_mode,
+            trace_request_id_present_total
+        );
+        assert!(
+            warmup_non_empty_samples == WARMUP_REQUESTS,
+            "expected baseline warm-cache samples to be non-empty before outline churn, warmup_non_empty_samples={}, warmup_samples={warmup_samples:?}",
+            warmup_non_empty_samples
+        );
+        assert!(
+            measured_trace_linked_samples == MEASURE_REQUESTS,
+            "expected every measured mixed-load sample to link to a completion timeline trace, measured_trace_linked_samples={}, measured_samples={measured_samples:?}",
+            measured_trace_linked_samples
+        );
+        assert!(
+            counter_delta("completion_total") >= MEASURE_REQUESTS as u64,
+            "expected measured completion_total delta >= mixed-load request samples, completion_total_delta={}, measured_requests={}",
+            counter_delta("completion_total"),
+            MEASURE_REQUESTS
+        );
+        assert!(
+            measured_non_empty_samples == MEASURE_REQUESTS,
+            "expected every measured mixed-load sample to return a first-response candidate list, measured_non_empty_samples={}, measured_samples={measured_samples:?}",
+            measured_non_empty_samples
+        );
+        assert!(
+            measured_ok_non_empty_traces == MEASURE_REQUESTS,
+            "expected every measured mixed-load trace to be ok_non_empty, measured_ok_non_empty_traces={}, measured_samples={measured_samples:?}",
+            measured_ok_non_empty_traces
+        );
+        assert!(
+            measured_fail_closed_traces == 0
+                && counter_delta("intellisense_v2_completion_result_total_fail_closed") == 0,
+            "mixed-load gate must fail on first-response fail_closed regressions, measured_fail_closed_traces={}, fail_closed_total_delta={}, measured_samples={measured_samples:?}",
+            measured_fail_closed_traces,
+            counter_delta("intellisense_v2_completion_result_total_fail_closed")
+        );
+        assert!(
+            counter_delta("intellisense_v2_completion_fallback_unavailable_total") == 0,
+            "mixed-load gate must not degrade to fallback_unavailable, fallback_unavailable_total_delta={}, counters={counters:?}",
+            counter_delta("intellisense_v2_completion_fallback_unavailable_total")
+        );
+        assert!(
+            counter_delta("intellisense_v2_completion_fail_closed_cause_total_cause_prepare_timeout")
+                == 0
+                && counter_delta("intellisense_v2_completion_fail_closed_cause_total_cause_exact_deadline")
+                    == 0,
+            "mixed-load gate must keep first-response fail-closed cause buckets at zero, prepare_timeout_total_delta={}, exact_deadline_total_delta={}, counters={counters:?}",
+            counter_delta("intellisense_v2_completion_fail_closed_cause_total_cause_prepare_timeout"),
+            counter_delta("intellisense_v2_completion_fail_closed_cause_total_cause_exact_deadline")
+        );
+        assert!(
+            measured_head_hit_traces + measured_exact_hit_traces == MEASURE_REQUESTS,
+            "expected every measured mixed-load trace to expose head/exact route attribution, measured_head_hit_traces={}, measured_exact_hit_traces={}, measured_samples={measured_samples:?}",
+            measured_head_hit_traces,
+            measured_exact_hit_traces
+        );
+        assert!(
+            measured_latency_p95_ms <= interactive_wait_budget_ms as f64,
+            "mixed-load latency p95 regression: measured_latency_p95_ms={}ms > {}ms, measured_samples={measured_samples:?}",
+            measured_latency_p95_ms,
+            interactive_wait_budget_ms
+        );
+        assert!(
+            measured_service_future_first_poll_p95_ms <= interactive_wait_budget_ms as f64,
+            "mixed-load pre-poll p95 regression: measured_service_future_to_first_poll_wait_ms p95={}ms > {}ms, measured_samples={measured_samples:?}",
+            measured_service_future_first_poll_p95_ms,
+            interactive_wait_budget_ms
+        );
+        assert!(
+            measured_service_future_first_poll_max_ms
+                <= interactive_wait_budget_ms.saturating_mul(FIRST_POLL_MAX_FACTOR),
+            "mixed-load pre-poll max regression: measured_service_future_to_first_poll_wait_ms max={}ms > {}ms, measured_samples={measured_samples:?}",
+            measured_service_future_first_poll_max_ms,
+            interactive_wait_budget_ms.saturating_mul(FIRST_POLL_MAX_FACTOR)
+        );
+        assert!(
+            measured_transport_to_handler_p95_ms <= interactive_wait_budget_ms as f64,
+            "mixed-load transport-to-handler p95 regression: measured_transport_to_handler_wait_ms p95={}ms > {}ms, measured_samples={measured_samples:?}",
+            measured_transport_to_handler_p95_ms,
+            interactive_wait_budget_ms
+        );
+        assert!(
+            measured_transport_to_handler_max_ms
+                <= interactive_wait_budget_ms.saturating_mul(TRANSPORT_TO_HANDLER_MAX_FACTOR),
+            "mixed-load transport-to-handler max regression: measured_transport_to_handler_wait_ms max={}ms > {}ms, measured_samples={measured_samples:?}",
+            measured_transport_to_handler_max_ms,
+            interactive_wait_budget_ms.saturating_mul(TRANSPORT_TO_HANDLER_MAX_FACTOR)
+        );
+        assert!(
+            measured_ingress_regression_samples == 0,
+            "mixed-load gate must fail on ingress-dominant completion samples under concurrent outline load, ingress_regression_samples={}, measured_samples={measured_samples:?}",
+            measured_ingress_regression_samples
+        );
+        assert!(
+            measured_document_symbol_total_outcome_delta
+                == (MEASURE_REQUESTS * DOCUMENT_SYMBOL_BURST_REQUESTS) as u64,
+            "documentSymbol outcome counters must account for every measured outline request, outcome_delta={}, expected_requests={}, counters={counters:?}",
+            measured_document_symbol_total_outcome_delta,
+            MEASURE_REQUESTS * DOCUMENT_SYMBOL_BURST_REQUESTS
+        );
+        assert!(
+            measured_document_symbol_latest_ready_total_delta > 0,
+            "mixed-load gate must observe latest_ready outline outcomes, counters={counters:?}"
+        );
+        assert!(
+            measured_document_symbol_current_ready_total_delta == 0,
+            "mixed-load gate intentionally samples documentSymbol during parse gap and must not observe current_ready outcomes, counters={counters:?}"
+        );
+        assert!(
+            measured_document_symbol_unavailable_total_delta == 0,
+            "mixed-load gate must keep outline path bounded by latest_ready/superseded, unavailable_total_delta={}, counters={counters:?}",
+            measured_document_symbol_unavailable_total_delta
+        );
+        assert!(
+            measured_document_symbol_fresh_outline_leak_samples == 0,
+            "mixed-load gate must not leak current outline payload while serving latest_ready cache, measured_samples={measured_samples:?}"
+        );
+        assert!(
+            measured_document_symbol_present_responses_total > 0,
+            "mixed-load gate must keep at least one non-null outline response across measured samples, measured_samples={measured_samples:?}"
+        );
+
+        live_transport_close_document(&mut harness, &uri).await;
+        drop(server);
+        harness.shutdown().await;
     });
     runtime.shutdown_timeout(std::time::Duration::from_secs(1));
 }

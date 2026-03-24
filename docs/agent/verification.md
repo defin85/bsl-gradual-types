@@ -82,4 +82,11 @@ cargo test --workspace --locked
 ./scripts/validate-v2-completion-gates.sh
 ```
 
+- Change-specific checked-in evidence bundles:
+
+```bash
+CHANGE_ID=refactor-document-symbol-interactive-isolation ./scripts/validate-v2-completion-gates.sh
+CHANGE_ID=refactor-completion-prepare-lightweight-exact-split ./scripts/validate-v2-completion-gates.sh
+```
+
 Use these only when the task explicitly needs readiness/perf evidence.

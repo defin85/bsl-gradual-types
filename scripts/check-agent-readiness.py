@@ -57,6 +57,7 @@ REQUIRED_SNIPPETS = {
         "cargo run -p bsl-backend --bin bsl-lsp-server -- --help",
         "cargo run -p bsl-agent -- --help",
         "./scripts/run-intellisense-tests.sh smoke",
+        "CHANGE_ID=refactor-document-symbol-interactive-isolation ./scripts/validate-v2-completion-gates.sh",
     ),
     "docs/agent/codex-setup.md": (
         ".mcp.json",

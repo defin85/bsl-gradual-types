@@ -11,6 +11,7 @@ from pathlib import Path
 class IntellisenseReadinessAssetsTest(unittest.TestCase):
     REPO_ROOT = Path(__file__).resolve().parents[1]
     SMOKE_SCRIPT = REPO_ROOT / "scripts" / "run-intellisense-tests.sh"
+    DOCUMENT_SYMBOL_CHANGE_ID = "refactor-document-symbol-interactive-isolation"
     QUALITY_GATES = (
         REPO_ROOT
         / "openspec"
@@ -19,6 +20,22 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         / "2026-03-13-refactor-ir-canonical-semantic-pipeline"
         / "validation"
         / "quality-gates.json"
+    )
+    DOCUMENT_SYMBOL_MIXED_LOAD_DOC = (
+        REPO_ROOT
+        / "openspec"
+        / "changes"
+        / DOCUMENT_SYMBOL_CHANGE_ID
+        / "validation"
+        / "mixed-load-gate.md"
+    )
+    DOCUMENT_SYMBOL_MIXED_LOAD_REPORT = (
+        REPO_ROOT
+        / "backend"
+        / "tests"
+        / "perf"
+        / "reports"
+        / f"{DOCUMENT_SYMBOL_CHANGE_ID}-real-conf-big-document-symbol-mixed-load-live.json"
     )
 
     REQUIRED_SHIPPED_SMOKE_ARTIFACTS = [
@@ -118,6 +135,17 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
                 return gate
         self.fail("shipped_smoke_gate missing from quality-gates.json")
 
+    def document_symbol_mixed_load_summary(self) -> dict:
+        return json.loads(
+            self.DOCUMENT_SYMBOL_MIXED_LOAD_REPORT.read_text(encoding="utf-8")
+        )["summary"]
+
+    @staticmethod
+    def format_metric(value: float | int) -> str:
+        if isinstance(value, int) or float(value).is_integer():
+            return str(int(value))
+        return f"{value:g}"
+
     def test_shipped_smoke_gate_lists_mandatory_selectors(self) -> None:
         artifacts = self.shipped_smoke_gate()["artifacts"]
         missing = [
@@ -187,6 +215,52 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
             (
                 "run-intellisense-tests.sh smoke is missing the completion-timeline "
                 f"drilldown contract slice: {missing}"
+            ),
+        )
+
+    def test_document_symbol_mixed_load_validation_doc_matches_checked_in_report(self) -> None:
+        content = self.DOCUMENT_SYMBOL_MIXED_LOAD_DOC.read_text(encoding="utf-8")
+        summary = self.document_symbol_mixed_load_summary()
+        expected_snippets = [
+            (
+                f"CHANGE_ID={self.DOCUMENT_SYMBOL_CHANGE_ID} "
+                "./scripts/validate-v2-completion-gates.sh"
+            ),
+            f"`{summary['measured_completion_total_delta']}` completion samples",
+            f"`{summary['measured_head_hit_traces']}` `head_hit`",
+            f"`{summary['measured_exact_hit_traces']}` `exact_hit`",
+            f"`{summary['measured_prepare_timeout_total_delta']}` `prepare_timeout`",
+            f"`{summary['measured_exact_deadline_total_delta']}` `exact_deadline`",
+            f"`{summary['measured_ingress_regression_samples']}` ingress-regression samples",
+            f"`{summary['measured_document_symbol_latest_ready_total_delta']}` `latest_ready`",
+            f"`{summary['measured_document_symbol_current_ready_total_delta']}` `current_ready`",
+            f"`{summary['measured_document_symbol_unavailable_total_delta']}` `unavailable`",
+            f"`{summary['measured_document_symbol_superseded_total_delta']}` `superseded`",
+            f"`{summary['measured_document_symbol_present_responses_total']}` non-null responses",
+            f"`{summary['measured_document_symbol_null_responses_total']}` null responses",
+            (
+                "`p95(service_future_to_first_poll_wait_ms)="
+                f"{self.format_metric(summary['measured_service_future_to_first_poll_wait_ms']['p95'])}ms`"
+            ),
+            (
+                "`max(service_future_to_first_poll_wait_ms)="
+                f"{summary['measured_service_future_to_first_poll_wait_max_ms']}ms`"
+            ),
+            (
+                "`p95(transport_to_handler_wait_ms)="
+                f"{self.format_metric(summary['measured_transport_to_handler_wait_ms']['p95'])}ms`"
+            ),
+            (
+                "`max(transport_to_handler_wait_ms)="
+                f"{summary['measured_transport_to_handler_wait_max_ms']}ms`"
+            ),
+        ]
+        missing = [snippet for snippet in expected_snippets if snippet not in content]
+        self.assertFalse(
+            missing,
+            (
+                "documentSymbol mixed-load validation doc drifted from authoritative "
+                f"checked-in report, missing snippets: {missing}"
             ),
         )
 

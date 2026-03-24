@@ -38,6 +38,13 @@ class AgentReadinessValidationTest(unittest.TestCase):
         content = self.VERIFICATION_DOC.read_text(encoding="utf-8")
         self.assertIn("./scripts/run-agent-readiness-checks.sh", content)
 
+    def test_verification_doc_exposes_document_symbol_readiness_override(self) -> None:
+        content = self.VERIFICATION_DOC.read_text(encoding="utf-8")
+        self.assertIn(
+            "CHANGE_ID=refactor-document-symbol-interactive-isolation ./scripts/validate-v2-completion-gates.sh",
+            content,
+        )
+
     def test_wrapper_runs_all_agent_readiness_checks(self) -> None:
         content = self.WRAPPER_SCRIPT.read_text(encoding="utf-8")
         self.assertIn("check-doc-paths.py", content)

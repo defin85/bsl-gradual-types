@@ -9,7 +9,8 @@
 - Default smoke:
   `./scripts/run-intellisense-tests.sh smoke`
 - Workflow: `.github/workflows/ci.yml`
-- Локальный script: `./scripts/validate-v2-completion-gates.sh`
+- Локальный script:
+  `CHANGE_ID=refactor-document-symbol-interactive-isolation ./scripts/validate-v2-completion-gates.sh`
 - Aggregate report:
   `backend/tests/perf/reports/refactor-document-symbol-interactive-isolation-readiness-gate.json`
 - Aggregate summary:
@@ -43,10 +44,10 @@
   same-file `didChange`/`didSave` churn; representative gate больше не зависит от
   ручного outline seeding.
 - Interactive ingress budget сохранён:
-  `p95(service_future_to_first_poll_wait_ms)=22ms`,
-  `max(service_future_to_first_poll_wait_ms)=22ms`,
-  `p95(transport_to_handler_wait_ms)=22ms`,
-  `max(transport_to_handler_wait_ms)=22ms`,
+  `p95(service_future_to_first_poll_wait_ms)=23ms`,
+  `max(service_future_to_first_poll_wait_ms)=23ms`,
+  `p95(transport_to_handler_wait_ms)=23ms`,
+  `max(transport_to_handler_wait_ms)=23ms`,
   runtime budget `intellisense_v2_interactive_wait_budget_ms=120`.
 - Это даёт acceptance evidence, что auxiliary outline refresh больше не превращает completion ingress в starvation point даже под same-file mixed load.
 
